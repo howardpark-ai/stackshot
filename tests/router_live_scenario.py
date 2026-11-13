@@ -103,6 +103,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import anchors as _wt_anchors
@@ -1108,7 +1109,7 @@ real_run = subprocess.run(interp.resilient([DEAD, FAKE, "work-osprey", "stderr p
 check("17: the real fallback child runs with an empty stderr (no uv warning stored as a delivery error)", real_run.returncode == 0 and real_run.stderr == "" and real_run.stdout.strip() == "delivered → work-osprey", (real_run.returncode, real_run.stderr, real_run.stdout))
 
 # ---- 18. the hand-off path (handoff.py): a notice the router passes to a session, which hands the item on; the clock takes it to the builder
-(T / "cli").mkdir(exist_ok=True); server.CLI_SESSIONS = T / "cli"        # the CLI's own registry on this box: nothing in it, so no turn-end rule fires
+(T / "cli").mkdir(exist_ok=True); handoff_svc.CLI_SESSIONS = T / "cli"        # the CLI's own registry on this box: nothing in it, so no turn-end rule fires
 cfg(live=True); fake("good", "[]")
 item(40, "projects/alpha", A, next="work-osprey-docs: look at the quote")
 r18 = server._message("projects/alpha", "the vendor's quote for a40 came in; someone should look at it", "home-beta")
@@ -1121,7 +1122,7 @@ p0 = len(pushes()); server._update("a40", sender="work-osprey-docs", mover="home
 h18 = json.loads((T / "store/a/40.json").read_text())["metadata"].get("handoff") or {}
 check("18 hand-off: that session hands the item on: a hand-off record to home-beta from it, told once and delivered", h18.get("to") == "home-beta" and h18.get("from") == "work-osprey-docs" and isinstance(h18.get("delivered_at"), float)
       and len([x for x in pushes()[p0:] if x[0] in ("home-beta", B) and "a40" in x[1]]) == 1, (h18, pushes()[p0:]))
-p0 = len(pushes()); done18 = server._handoff_tick(now=h18["delivered_at"] + 11 * 60, only=["a40"]); time.sleep(1.0); settle()
+p0 = len(pushes()); done18 = handoff_svc.handoff_tick(now=h18["delivered_at"] + 11 * 60, only=["a40"]); time.sleep(1.0); settle()
 m40 = json.loads((T / "store/a/40.json").read_text())["metadata"]; g18 = m40.get("handoff") or {}
 check("18 hand-off: home-beta does not take it in 10 minutes: it goes to the project's builder, which the router also takes for its stand-in (work-osprey-x), not to the page's other background agent, not back to the sender",
       done18 == ["a40"] and g18.get("to") == "work-osprey-x" and g18.get("via") == "redirect" and g18.get("redirected_from") == "home-beta" and live.builder("projects/alpha") == "work-osprey-x" and live.stand_in("projects/alpha") == "work-osprey-x"

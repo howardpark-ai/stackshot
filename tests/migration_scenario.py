@@ -133,6 +133,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
@@ -285,7 +286,7 @@ cfg(guards=False)
 check("apply: …and the pass does not begin with the guards off (it is judged by them)", "guards" in call("begin").get("error", ""), None)
 cfg(guards=True)
 b = call("begin")
-check("begin: the board-wide pause is held by the server itself, the config's own switch untouched", b.get("held") is True and b.get("pause") is False and wk.holding() and wk.paused() and server._handoff_paused() and not CFG.get("pause"), b)
+check("begin: the board-wide pause is held by the server itself, the config's own switch untouched", b.get("held") is True and b.get("pause") is False and wk.holding() and wk.paused() and handoff_svc.handoff_paused() and not CFG.get("pause"), b)
 def _spied_runner():
     """The server's runner over its own table, every tick's function replaced by a recorder, so the table's board flags and the real hold are what is under test."""
     from stackshot.core import runner as _rn
@@ -852,18 +853,18 @@ check("switchover on: the old wake pass stands down only when the fallback is of
 cfg(switchover_fallback=True)
 item(71, needs=["home-gone"], subject="[home] a mover whose pane is gone, no hand-off record", next="home-gone: the thing", mover="home-gone")
 sess = server._sessions_index()
-env_h = server._handoff_env(time.time())
+env_h = handoff_svc.handoff_env(time.time())
 check("switchover on: the hand-off pass covers an item with no record (cover_all)", env_h.cover_all is True and ho.plan({"g71": {**rd(71), "gid": "g71"}}, env_h) is not None, None)
-dead = ho.Env(now=time.time(), derive=server._ho_derive, pane=lambda who: "no pane" if who == "home-nobody" else "", cover_all=True, background=lambda p: [BACK], label=str)
-off = ho.Env(now=time.time(), derive=server._ho_derive, pane=lambda who: "no pane" if who == "home-nobody" else "", cover_all=False, background=lambda p: [BACK], label=str)
+dead = ho.Env(now=time.time(), derive=handoff_svc.ho_derive, pane=lambda who: "no pane" if who == "home-nobody" else "", cover_all=True, background=lambda p: [BACK], label=str)
+off = ho.Env(now=time.time(), derive=handoff_svc.ho_derive, pane=lambda who: "no pane" if who == "home-nobody" else "", cover_all=False, background=lambda p: [BACK], label=str)
 gone_item = {"gid": "g72", "status": "open", "updated": time.time(), "metadata": {"owner": UF, "needs": ["home-nobody"], "project": "projects/alpha"}}
 steps = ho.plan({"g72": gone_item}, dead)
 check("switchover on: …a gone mover on it goes down section 5: the project's background agent takes it; off, the pass leaves it (the migration's)", len(steps) == 1 and steps[0].kind == "move" and steps[0].to == BACK and ho.plan({"g72": gone_item}, off) == [], steps)
 check("switchover on: there is no idle clock and no waiting ladder", not hasattr(server, "_idle_tick") and not hasattr(server, "_waiting_tick"), None)
 item(73, hold=True, wake=day(5), cap_ok={"wake": day(5), "quote": "park until next week", "by": "x"}, needs=[BACK], subject="[home] an old hold no watcher owns")
-brief = server._handoff_brief()
+brief = handoff_svc.handoff_brief()
 check("switchover on: the brief names the waits no watcher owns (an old hold and wake), and says what ends them", "waits no watcher owns: 1 item" in brief and "old wake pass" in brief, brief)
-cfg(switchover_fallback=False); brief = server._handoff_brief()
+cfg(switchover_fallback=False); brief = handoff_svc.handoff_brief()
 check("switchover on, fallback off: …and says that only its mover's write ends it", "end only when their mover writes" in brief, brief); cfg(switchover_fallback=True)
 cfg(switchover=False)
 # the board speaks of the mover after the switchover, of the owner before it

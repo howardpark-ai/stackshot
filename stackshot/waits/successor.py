@@ -1,7 +1,7 @@
 """successor.py: open items left behind by a session that is gone reach their closest live successor.
 
 When a project's last agent is retired (or any session that moves an open item goes), the item must not sit with a mover nobody can reach. The audit finds those items
-(`orphans`) and hands each one to the closest live agent (`pick`); this module only decides, the server writes (server._orphan_handover, through the hand-off path of the
+(`orphans`) and hands each one to the closest live agent (`pick`); this module only decides, the server writes (service/handoff.py `orphan_handover`, through the hand-off path of the
 minute pass) and the audit run reports (audit_run.orphan_stage). Pure functions of items and the registry: no server import, no clock, no write, so the same call gives the same
 answer twice and a second run finds nothing left to do.
 

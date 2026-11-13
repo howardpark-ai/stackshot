@@ -50,6 +50,7 @@ from stackshot.core import config as _cfg
 from stackshot.model import draft as _draft, model_guards as _mg, step_commands as _sc
 from stackshot.waits import self_wait as _selfwait
 from stackshot.web import server
+from stackshot.service import handoff as handoff_svc
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.tools import update as _wt_update
 if not MAIN: from stackshot.service import gates, telling, writes
@@ -306,7 +307,7 @@ def _watch(front=True, others=("marsh-builder",), watch_reason=""):
         return outcome(lambda: G.gate_sender_watch("a1", item(mover=BACK), FRONT, handed=[BACK], watch_reason=watch_reason))
 def _handoff(writer=OTHER, why="the pane is closed", live=(BACK,), named=True):
     after = item(mover=BACK if named else OWNER); before = item(mover=KEEP)
-    with srv(_handoff_on=lambda: True, _handoff_pane=lambda to: why if to == U["marsh-builder"] or to == BACK else "", _handoff_background=lambda p: list(live)):
+    with patched(handoff_svc, handoff_on=lambda: True, handoff_pane=lambda to: why if to == U["marsh-builder"] or to == BACK else "", handoff_background=lambda p: list(live)):
         return outcome(lambda: G.gate_handoff("a1", before, after, writer))
 def _roles_fail():
     with srv(_role_of=lambda *a, **k: 1 / 0): return G.fix_front_mover("mover", FRONT, OTHER, PROJECT, "", {})
@@ -423,7 +424,7 @@ try:
 finally: gates._hooks_ = saved
 check("4 a gate that needs the hooks and finds none is refused with a message that names the install", all(g[0] == "raised" and "no hooks installed" in g[1] for g in got), got)
 fields = [f.name for f in dataclasses.fields(gates.Hooks)]
-check("4 the table the server installed has every hook of the dataclass", gates._hooks_ is not None and [f for f in fields if not hasattr(gates._hooks_, f)] == [] and len(fields) >= 40, fields)
+check("4 the table the server installed has every hook of the dataclass", gates._hooks_ is not None and [f for f in fields if not hasattr(gates._hooks_, f)] == [] and len(fields) >= 39, fields)
 try: gates.Hooks(**{f: None for f in fields[:-1]}); built = True
 except TypeError: built = False
 check("4 a table with a hook missing cannot be built", not built)
@@ -436,8 +437,7 @@ finally: gates.install(_first)
 check("4 install replaces the table (the last one installed is the one the gates read), and the first can be put back", replaced and gates._hooks_ is _first, replaced)
 with srv(_model_guards_on=lambda: False):
     check("4 a hook that is a function is looked up on the server when the gate runs: a patched _model_guards_on reaches gate_draft", gates._hooks().model_guards_on() is False)
-with srv(_ho_same=lambda a, b: True):
-    check("4 …and _ho_same reaches the gates through ho_same", gates._hooks().ho_same("a", "b") is True)
+check("4 the hand-off functions the gates use are the hand-off module's own, not hooks (a patched one is set on service/handoff.py)", not hasattr(gates._hooks(), "handoff_pane") and not hasattr(gates._hooks(), "ho_same") and gates._handoff is handoff_svc)
 check("4 a value hook is the server's own value (the sentence a refused close ends with, the close rule, the outcomes)", gates._hooks().relaunch == server._RELAUNCH and gates._hooks().close_refusal == _wt_text._CLOSE_REFUSAL and gates._hooks().outcomes == server.OUTCOMES)
 
 # ---------------------------------------------------------------- 5. shape

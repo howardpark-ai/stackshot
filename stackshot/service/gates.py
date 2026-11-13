@@ -44,6 +44,7 @@ from stackshot.model import step_commands as _sc
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
 from stackshot.projects import pages as _pages
+from stackshot.service import handoff as _handoff
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path
@@ -76,14 +77,8 @@ class Hooks:
     front_held: Callable[..., Any]            # audit/front_step.held: the front agent a step opens with when the write check refuses it (service/ imports no audit/)
     front_pair_ok: Callable[..., Any]
     gate_description: Callable[..., Any]            # field_gates._gate_description (web/): the description's own checks, a close's outcome_text goes through them
-    handoff_background: Callable[..., Any]
-    handoff_builder: Callable[..., Any]
-    handoff_on: Callable[..., Any]
-    handoff_pane: Callable[..., Any]
     handoffs_in: Callable[..., Any]
     handover_kind: Callable[..., Any]
-    ho_derive: Callable[..., Any]
-    ho_same: Callable[..., Any]
     hub_sessions: Callable[..., Any]
     item_mover: Callable[..., Any]
     main_agent: Callable[..., Any]
@@ -147,7 +142,7 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
                 return None
         proj = roles[key]["project"]
         hub, _stew, back, _front, _keeper = h.hub_sessions(project) if project else ("", "", [], [], "")
-        builder = (h.handoff_builder(project) if project else []) or back[:1]
+        builder = (_handoff.handoff_builder(project) if project else []) or back[:1]
     except Exception as e:  # noqa: BLE001  — the gate is an extra: a failure in it lets the write through
         print(f"front-mover gate: roles read for {field}={v} failed ({e.__class__.__name__}: {e}); the write passes", file=sys.stderr, flush=True)
         return None
@@ -216,11 +211,11 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
             return
         for text in new:
             roles, key = h.role_of(_steps.opener(text))
-            front = h.front_held(text, mover, lambda _n: bool(key) and roles[key].get("role") == "front" and not roles[key].get("retired"), h.ho_same)
+            front = h.front_held(text, mover, lambda _n: bool(key) and roles[key].get("role") == "front" and not roles[key].get("retired"), _handoff.ho_same)
             if not front:
                 continue
             mv = _session_label(mover) or mover
-            tail = (f"Keep the step with {mv} and message {key} for what only it can give." if h.ho_same(sender, mover)
+            tail = (f"Keep the step with {mv} and message {key} for what only it can give." if _handoff.ho_same(sender, mover)
                     else f"Give the step to {mv} (open it with \"{mv}:\") or send {mv} a message asking for it.")
             raise ToolError(f"Refused: the step \"{_clip_line(_steps.first_line(text), 90)}\" opens with {key}, a user-facing agent of {roles[key]['project']}: it gets no work notice and its own wakes are refused, "
                             f"so nothing would wake it for the step, and {mv} moves {_gh.shown(gid) if gid else 'the item'}. {tail}")
@@ -662,7 +657,7 @@ def gate_owner_step(item: dict[str, Any], gid: str = "", create: bool = False, s
     if create:      # a create has no state or step parameter
         raise ToolError(head + ". Set needs=decision with an ask (a create stores no state or step), or open next with the agent who takes the step." + tail)
     writer = (_nl.writers_of(m, keeper) or [""])[0]
-    if sender and writer and not h.ho_same(writer, sender):      # the first line is another session's, kept at its place by nextlines.write: opening next with an agent cannot move it
+    if sender and writer and not _handoff.ho_same(writer, sender):      # the first line is another session's, kept at its place by nextlines.write: opening next with an agent cannot move it
         raise ToolError(head + f". That line was written by {writer}, not by this write's sender. Drop the step (dropped=[its number]), or pass clear_next=true, or pass step=<his step in one line> if it is truly his step (step='none' releases an item that stands in his step). Mark it done only when {who}'s own words for it are recorded on the item." + tail)
     raise ToolError(head + ". Pass step=<his step in one line>, or needs=decision with an ask; or open next with the agent who takes the step." + tail)
 
@@ -961,7 +956,7 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
         if _after_of({"after": after if isinstance(after, list) else _needs_list(after)}):
             return
         today = dt.datetime.now(_cfg.tz())
-        mine = lambda n: hk.ho_same(n, sender)       # noqa: E731
+        mine = lambda n: _handoff.ho_same(n, sender)       # noqa: E731
         wake_given = ""
         if wake.strip() and not clear_wake:
             try:
@@ -996,7 +991,7 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
             if state.strip():
                 meta["state"] = state.strip()
             mod = _model.derive({**item, "metadata": meta}, after_open=lambda i_: hk.after_open(i_.get("metadata") or {}), anchored=lambda i_: False)
-            if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not hk.ho_same(mod.mover, sender):
+            if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not _handoff.ho_same(mod.mover, sender):
                 return
             stored_wake = str(_wt.wake_value(item.get("metadata") or {}) or "")
             wake_new = bool(wake_given) and wake_given != stored_wake.strip()      # re-sending the stored wake sets nothing
@@ -1077,24 +1072,23 @@ def gate_contact(name: str, project: str, keep: tuple[str, ...] = ()) -> str:
 def gate_handoff(gid: str, before: dict[str, Any] | None, after: dict[str, Any], writer: str) -> None:
     """The send-time guard (design section 3): a hand-off made by a write (needs, mover or then set to a session) is refused when that session has no live pane, with the
     project's background agent named: the message tool's rule since an earlier change. A failure of the check itself lets the write through."""
-    h = _hooks()
-    if not h.handoff_on() or after.get("status") != "open" or not writer or _ho.is_script(writer):
+    if not _handoff.handoff_on() or after.get("status") != "open" or not writer or _ho.is_script(writer):
         return
     try:
-        derive = lambda it: h.ho_derive({**it, "gid": gid})
-        to = _ho.detect(before, {**after, "gid": gid}, _session_label(writer) or writer, writer if _anc.is_id(writer) else "", derive, h.ho_same)
+        derive = lambda it: _handoff.ho_derive({**it, "gid": gid})
+        to = _ho.detect(before, {**after, "gid": gid}, _session_label(writer) or writer, writer if _anc.is_id(writer) else "", derive, _handoff.ho_same)
         if not to or _model.is_owner(to):
             return
         am = after.get("metadata") or {}
         dflt = _telling.fallback_mover(str(am.get("project") or ""))      # D9: a `then` the server defaulted to the project's builder is no hand-off the writer made
-        named = [x for x in (_model.norm_who(am.get("mover")), _model.norm_who(am.get("then")), *_needs_sessions(am)) if x and not (dflt and h.ho_same(x, dflt) and x == _model.norm_who(am.get("then")) and x != _model.norm_who(am.get("mover")))]
-        if not any(h.ho_same(to, x) for x in named):      # a session the write did not name (the project's builder or -main agent, which an item with no mover falls to) is no hand-off the writer made
+        named = [x for x in (_model.norm_who(am.get("mover")), _model.norm_who(am.get("then")), *_needs_sessions(am)) if x and not (dflt and _handoff.ho_same(x, dflt) and x == _model.norm_who(am.get("then")) and x != _model.norm_who(am.get("mover")))]
+        if not any(_handoff.ho_same(to, x) for x in named):      # a session the write did not name (the project's builder or -main agent, which an item with no mover falls to) is no hand-off the writer made
             return
-        why = h.handoff_pane(to)
+        why = _handoff.handoff_pane(to)
         if not why:
             return
         project = str((after.get("metadata") or {}).get("project") or "")
-        live = [n for n in h.handoff_background(project) if not h.ho_same(n, to) and not h.handoff_pane(n)]
+        live = [n for n in _handoff.handoff_background(project) if not _handoff.ho_same(n, to) and not _handoff.handoff_pane(n)]
     except Exception as e:  # noqa: BLE001
         print(f"handoff: {gid} send-time check failed, writing as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return
@@ -1333,7 +1327,7 @@ def gate_step_gap(meta: dict[str, Any], steps_new: list[dict[str, Any]], steps_o
         return
     had = {_steps.key(x["text"]) for x in steps_old if x["status"] == _steps.OPEN}
     proofs = meta.get("step_proof") if isinstance(meta.get("step_proof"), dict) else {}
-    gaps = [g for g in _sp.proof_gaps(steps_new, proofs, _steps.opener, h.ho_same, _steps.key, skip=lambda nm: _model.is_owner(nm) or h.handover_kind(nm) == _hv.OTHER, own=h.own_repo(),
+    gaps = [g for g in _sp.proof_gaps(steps_new, proofs, _steps.opener, _handoff.ho_same, _steps.key, skip=lambda nm: _model.is_owner(nm) or h.handover_kind(nm) == _hv.OTHER, own=h.own_repo(),
                            released={a for r in _cfg.released_repos() for a in _cfg.repo_aliases(r)})
             if _steps.key(steps_new[g[0] - 1]["text"]) not in had]
     if gaps:

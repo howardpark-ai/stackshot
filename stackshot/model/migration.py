@@ -200,8 +200,8 @@ class Env:
         return str(rows[0].get("name")) if rows else w
 
     def background(self, project: str) -> list[str]:
-        """The project's background agents, the builder first (the same ranking as server._handoff_ranked, which the hand-off machinery falls to): those of the page whose hub is the
-        project's; class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest."""
+        """The project's background agents, the builder first (the same ranking as `handoff_ranked` in service/handoff.py, which the hand-off machinery falls to): those of the page the
+        project's agents are grouped under; class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest."""
         try:
             reg = self.ctx.reg()
             roles = self.ctx.roles()

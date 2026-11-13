@@ -625,7 +625,7 @@ def _is_call(r: dict[str, Any] | None, cold_at: float | None) -> bool:
 
 def cold_target(item: dict[str, Any], cold_at: float | None = None) -> dict[str, Any] | None:
     """The record a cold call's outcome is written on: the item's own, or, when the call's own answer closed the item (the close moved the record into the history, `follow`), the history
-    entry of the record that held the call. With `cold_at` (the call's own stamp, as `_handoff_fallback` takes it) a record that is not the one the call was asked about is left alone."""
+    entry of the record that held the call. With `cold_at` (the call's own stamp, as `handoff_fallback` in service/handoff.py takes it) a record that is not the one the call was asked about is left alone."""
     r = record_of(item)
     if r is not None or item.get("status") == "open":
         return r if _is_call(r, cold_at) else None

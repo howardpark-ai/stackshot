@@ -1,4 +1,4 @@
-"""Scenario test for the hand-over of open items left with a session that is gone (successor.py, server._orphan_handover over the hand-off pass's write) — fixture data, no live store, no network, no server socket.
+"""Scenario test for the hand-over of open items left with a session that is gone (successor.py, handoff_svc.orphan_handover over the hand-off pass's write) — fixture data, no live store, no network, no server socket.
 
 A project's last agent is retired, or a mover's pane is gone for good: its open items must reach the closest live agent, found and moved by the audit.
 
@@ -42,6 +42,8 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import sessions as _wt_sessions; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import successor as S; from stackshot.model import model as M; from stackshot.waits import handoff as H; from stackshot.waits import stall as ST; from stackshot.audit import audit_run  # noqa: E402
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -172,9 +174,9 @@ item(115, "projects/solo", state="parked", wake=WAKE, wait_kind="time", post_wak
 for i in range(200, 225):
     item(i, "projects/live", mover="live-main")                                                    # a board of live movers around the few orphans
 for i in (101, 102, 103, 104, 105, 106, 107, 108, 109, 112, 113, 114, 115):
-    check(f"4 fixture: item {i} reads as the fixture meant it", server._ho_derive({**rd(i), "gid": f"a{i}"}).state in (M.ALIVE, M.WAITING, M.DEAD), rd(i))
+    check(f"4 fixture: item {i} reads as the fixture meant it", handoff_svc.ho_derive({**rd(i), "gid": f"a{i}"}).state in (M.ALIVE, M.WAITING, M.DEAD), rd(i))
 before = {i: raw(i) for i in [*range(101, 110), 112, 113, 114, 115]}
-dry = server._orphan_handover(apply=False, now=now0)
+dry = handoff_svc.orphan_handover(apply=False, now=now0)
 ids = lambda rows_: sorted(r["id"] for r in rows_)
 check("4 server: a dry run reads and writes nothing — every file is byte for byte as it was, nobody is told", all(raw(i) == before[i] for i in before) and not TOLD, TOLD)
 check("4 server: …and lists what would move: the six orphans, each with its target, tier and reason; checked, not applied", dry["checked"] and not dry["applied"] and dry["found"] == 6 and dry["read"] == 37
@@ -182,20 +184,20 @@ check("4 server: …and lists what would move: the six orphans, each with its ta
                                                                        B(106): ("gen-main", "scope"), B(108): ("bgp-back", "back")} and dry["left"] == [], dry)
 check("4 server: every listed move carries its reason, naming the gone session and the successor", all(m["from"] in m["why"] and "is gone" in m["why"] and m["to"] in m["why"] for m in dry["moved"]), dry["moved"][:2])
 server._cfg.CFG["audit"]["orphan_handover"] = "report"
-rep = server._orphan_handover(apply=True, now=now0)
+rep = handoff_svc.orphan_handover(apply=True, now=now0)
 check("4 server: [audit] orphan_handover = report lists the same moves and moves nothing even when asked to apply", not rep["applied"] and "nothing was moved" in rep["note"] and "apply" in rep["note"] and ids(rep["moved"]) == ids(dry["moved"]) and all(raw(i) == before[i] for i in before), rep)
 server._cfg.CFG["audit"]["orphan_handover"] = "off"
-off = server._orphan_handover(apply=True, now=now0)
+off = handoff_svc.orphan_handover(apply=True, now=now0)
 check("4 server: [audit] orphan_handover = off checks nothing", not off["checked"] and off["found"] == 0 and "off" in off["note"] and all(raw(i) == before[i] for i in before), off)
 server._cfg.CFG["audit"]["orphan_handover"] = "apply"
 real_idx = server._sessions_index
-server._sessions_index = _wt_sessions._sessions_index = lambda *a, **k: {}
-empty = server._orphan_handover(apply=True, now=now0)
-server._sessions_index = _wt_sessions._sessions_index = real_idx
+server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda *a, **k: {}
+empty = handoff_svc.orphan_handover(apply=True, now=now0)
+server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = real_idx
 check("4 server: an empty heartbeat (every session would look gone) checks nothing and moves nothing", not empty["checked"] and "heartbeat is empty" in empty["note"] and all(raw(i) == before[i] for i in before), empty)
 
 # 5/6: the apply
-got = server._orphan_handover(apply=True, now=now0)
+got = handoff_svc.orphan_handover(apply=True, now=now0)
 check("5 server: the apply reports six moves and no skip", got["applied"] and ids(got["moved"]) == sorted([B(101), B(102), B(103), B(106), B(108), B(112)]) and got["skipped"] == 0, got)
 m_c, m_d, m_e, m_f, m_g = (mt(i) for i in (101, 102, 103, 106, 108))
 check("5 server: the alive item's mover and `then` follow the retired session to its successor, which heads `needs`", m_c["mover"] == "par-main" and m_c["then"] == "par-main" and (m_c["needs"] or [""])[0] == "par-main"
@@ -220,7 +222,7 @@ check("5 server: the background successor is told once, in one message that name
 check("6 server: the owner's item, his wait, a live mover's item, a closed item, a held item, a held wait and a server-labelled mover are as they were, byte for byte", all(raw(i) == before[i] for i in (104, 105, 107, 109, 113, 114, 115)),
       [i for i in (104, 105, 107, 109, 113, 114, 115) if raw(i) != before[i]])
 snap = {i: raw(i) for i in [*range(101, 110), 112, 113, 114, 115]}; TOLD.clear()
-again = server._orphan_handover(apply=True, now=now0 + 60)
+again = handoff_svc.orphan_handover(apply=True, now=now0 + 60)
 check("6 server: a second call finds nothing, moves nothing, writes nothing, tells nobody (idempotent)", again["checked"] and again["found"] == 0 and again["moved"] == [] and again["left"] == [] and again["applied"]
       and all(raw(i) == snap[i] for i in snap) and not TOLD, again)
 
@@ -232,7 +234,7 @@ def plan_then_write(*a, **k):
     item(110, "projects/par/kid", mover="par-main", note="written since")          # somebody took the item between the find and the move
     return out
 server._succ.plan = plan_then_write
-skipped = server._orphan_handover(apply=True, now=now0 + 120)
+skipped = handoff_svc.orphan_handover(apply=True, now=now0 + 120)
 server._succ.plan = orig_plan
 check("6 server: an item written since it was found (its mover changed) is left, counted `skipped`, not moved over the write", skipped["skipped"] == 1 and skipped["moved"] == [] and mt(110)["mover"] == "par-main"
       and not ST.log_of(mt(110)) and mt(110).get("note") == "written since", skipped)
@@ -241,24 +243,24 @@ check("6 server: an item written since it was found (its mover changed) is left,
 item(111, "projects/solo", mover="solo-main")
 heartbeat(GONE_NAMES + ["gen-main", "par-main"])
 snap = rd(111)
-left = server._orphan_handover(apply=True, now=now0 + 180)
+left = handoff_svc.orphan_handover(apply=True, now=now0 + 180)
 check("7 server: an item whose scope's general agent is gone as well has no live successor: it is not touched and is listed under `left` with the reason, nothing is claimed moved",
       (L_a := [m for m in left["left"] if m["id"] == B(111)]) and "no live successor was found" in L_a[0]["why"] and L_a[0]["from"] == "solo-main" and left["moved"] == []
       and rd(111) == snap, left)
 check("7 server: …other items of those two sessions are listed the same way (a mover that was live a minute ago is gone now)", {B(101), B(102), B(106), B(110)} <= {m["id"] for m in left["left"]}, [m["id"] for m in left["left"]])
 heartbeat(GONE_NAMES + ["par-main"])
-last = server._orphan_handover(apply=True, now=now0 + 240)
+last = handoff_svc.orphan_handover(apply=True, now=now0 + 240)
 check("7 server: once an agent is live again the item is handed over at the next call", B(111) in ids(last["moved"]) and mt(111)["mover"] == "gen-main", last)
 
 # 8: the minute pass is unchanged: it follows the stored mover only, writes no stall line, and its record is not an orphan's
 item(120, "projects/par/kid", mover="kid-main", then="kid-main", post_wake_mover="kid-main")
 item(121, "projects/par/kid", mover="kid-main", then="kid-main", post_wake_mover="kid-main")
-done_m = server._handoff_exec([H.Step("move", f"a{120}", "kid-main did not take it", "kid-main", "bgp-back", via="redirect")], now0 + 300, verify=False)
+done_m = handoff_svc.handoff_exec([H.Step("move", f"a{120}", "kid-main did not take it", "kid-main", "bgp-back", via="redirect")], now0 + 300, verify=False)
 m_i = mt(120)
 check("8 minute pass: a move by the minute pass changes the stored mover and `needs` and records the hand-off, and leaves `then` and a post-wake mover as they were, with no stall line (as on main)",
       done_m == [f"a{120}"] and m_i["mover"] == "bgp-back" and m_i["needs"][0] == "bgp-back" and m_i["then"] == "kid-main" and m_i["post_wake_mover"] == "kid-main" and "stall" not in m_i
       and m_i["handoff"]["to"] == "bgp-back" and m_i["handoff"].get("via") == "redirect", m_i)
-done_o = server._handoff_exec([H.Step("move", f"a{121}", "kid-main is gone", "kid-main", "bgp-back", via="orphan")], now0 + 301, verify=False)
+done_o = handoff_svc.handoff_exec([H.Step("move", f"a{121}", "kid-main is gone", "kid-main", "bgp-back", via="orphan")], now0 + 301, verify=False)
 check("8 minute pass: …the same move as the audit's hand-over (via orphan) also follows `then` and the post-wake mover, which is why the keys are limited to it", done_o == [f"a{121}"] and mt(121)["then"] == "bgp-back"
       and mt(121)["post_wake_mover"] == "bgp-back" and ST.log_of(mt(121)), mt(121))
 
@@ -267,11 +269,11 @@ import shutil
 (T / "fleet/b").mkdir()
 (T / "fleet/b/sessions.json").write_text(json.dumps({"00000000-0000-4000-8000-0000000000f1": {"name": "mb-pane", "machine": "b", "gone": DEAD_ISO}}))      # machine b: a session list, no machine.json
 item(130, "projects/solo", mover="mb-pane"); item(131, "projects/solo", mover="ghost-x")
-p1 = server._orphan_handover(apply=False, now=now0 + 400)
+p1 = handoff_svc.orphan_handover(apply=False, now=now0 + 400)
 listed = {m["id"] for m in p1["moved"] + p1["left"]}
 check("9 partial view: a mover whose machine has no readable machine.json is not read as gone, and neither is a name with no row at all while a machine's view is partial", p1["checked"] and B(130) not in listed and B(131) not in listed, p1)
 (T / "fleet/b/machine.json").write_text(json.dumps({"letter": "b", "fleet": "testbox-b", "claude": "1.0.0", "online": {"ok": True, "since": DEAD_ISO}}))
-p2 = server._orphan_handover(apply=False, now=now0 + 401)
+p2 = handoff_svc.orphan_handover(apply=False, now=now0 + 401)
 listed2 = {m["id"] for m in p2["moved"] + p2["left"]}
 check("9 partial view: …with the machine's file readable and its session list whole, both are gone as before (the guard is the missing view, not the names)", {B(130), B(131)} <= listed2, p2)
 shutil.rmtree(T / "fleet/b")
@@ -281,25 +283,25 @@ for i in (130, 131): (T / f"store/a/{i}.json").unlink()
 for i in range(140, 152):
     item(i, "projects/solo", mover="solo-main")
 snapc = {i: raw(i) for i in range(140, 152)}; TOLD.clear()
-c1 = server._orphan_handover(apply=True, now=now0 + 500)
+c1 = handoff_svc.orphan_handover(apply=True, now=now0 + 500)
 check("10 ceiling: more than ORPHAN_CEILING orphans are reported and nothing is moved, even when asked to apply: the answer says ceiling and why, the files and the messages show nothing", c1["ceiling"] and not c1["applied"] and c1["found"] == 12
       and "partial view" in c1["note"] and all(raw(i) == snapc[i] for i in snapc) and not TOLD and len(c1["moved"]) == 12, c1)
 check("10 ceiling: …and the audit run puts it in the summary line", "partial view" in audit_run.orphan_text({**audit_run.orphan_stage(audit_run.Env(roles={}, fallback=lambda p: "", builder=lambda p: "", page_of=lambda p: ("", None), orphans=lambda apply: c1), apply=True)}), c1["note"])
 for i in range(140, 152): (T / f"store/a/{i}.json").unlink()
-server.ORPHAN_CEILING = 1000                       # the absolute number out of the way: the quarter of the board is what trips
+handoff_svc.ORPHAN_CEILING = 1000                       # the absolute number out of the way: the quarter of the board is what trips
 for i in range(200, 225): item(i, "projects/live", status="completed", mover="live-main")       # a small board
 tripped = 0
 for j in range(1, 40):
     item(300 + j, "projects/solo", mover="solo-main")
-    cj = server._orphan_handover(apply=False, now=now0 + 600 + j)            # a dry run: the orphans pile up, the stop is the same
+    cj = handoff_svc.orphan_handover(apply=False, now=now0 + 600 + j)            # a dry run: the orphans pile up, the stop is the same
     if cj.get("ceiling"):
         tripped = j; break
     check(f"10 ceiling: below a quarter of the open items ({cj['found']} of {cj['read']}) the hand-over lists its moves", not cj.get("ceiling") and cj["found"] <= cj["read"] // 4 and len(cj["moved"]) == cj["found"], cj)
 snapq = {300 + j: raw(300 + j) for j in range(1, tripped + 1)}; TOLD.clear()
-cq = server._orphan_handover(apply=True, now=now0 + 700)
+cq = handoff_svc.orphan_handover(apply=True, now=now0 + 700)
 check("10 ceiling: more than a quarter of the open items trips the same stop (nothing moved even when asked to apply, the note says why)", tripped > 1 and cq["ceiling"] and cq["found"] > cq["read"] // 4 and not cq["applied"] and "partial view" in cq["note"]
       and all(raw(k) == snapq[k] for k in snapq) and not TOLD, (tripped, cq))
-server.ORPHAN_CEILING = 10
+handoff_svc.ORPHAN_CEILING = 10
 
 # the audit's own side, at the seam: the HTTP route answers what the function does
 status, ans = server._client_post("a", "orphan-handover", {"apply": False})
