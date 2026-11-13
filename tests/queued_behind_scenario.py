@@ -22,7 +22,7 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
   10 revert-proof: each rule above is mutated (the newest item no longer chosen, the hour ignored, front agents queued, the gate ignored, a reader that no longer asks) and the check that guards it must fail
 
     tests/run-suite queued_behind      -> exit 0 / 1"""
-import datetime, io, json, os, re, sys, pathlib, time, logging
+import contextlib, datetime, io, json, os, re, sys, pathlib, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="queuedbehind-"); T = pathlib.Path(tmp)
@@ -373,13 +373,12 @@ for gate in (False, True):
         check("8 …and the queued item has no stall log entry", not S.log_of(rd(2)["metadata"]) and S.log_of(rd(1)["metadata"]), (S.log_of(rd(2)["metadata"]), S.log_of(rd(1)["metadata"])))
 
 # ================================================================ 9. the items sheet's list word and the server's map
-import contextlib
 @contextlib.contextmanager
 def at_now0():
-    """The clock reads now0 (the suite's data is built at now0, which the midnight guard above may have moved two hours back): the server and every module under it that asks the clock for the time."""
-    real = time.time; CLK.t = now0; time.time = lambda: now0
+    """The server's clock stand-in (CLK) reads now0 while the block runs. The data above is built at now0, which the midnight guard may have moved two hours back, and `server._queue_map()` with no argument asks the server's clock for the time (CLK.t None reads the real one)."""
+    was = CLK.t; CLK.t = now0
     try: yield
-    finally: time.time = real; CLK.t = None
+    finally: CLK.t = was
 base(); on(); server._QUEUE_CACHE.update(at=0.0, map={})
 with at_now0():
     check("9 _item_list: waiting for a queued item, agents for the item in hand and for a mover's only item", server._item_list(dict(rd(2), gid="a2")) == home.WAITING and server._item_list(dict(rd(1), gid="a1")) == home.AGENTS and server._item_list(dict(rd(4), gid="a4")) == home.AGENTS)
