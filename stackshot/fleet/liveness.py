@@ -205,6 +205,26 @@ def pane_row(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> tu
     return best
 
 
+def registered(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> bool:
+    """Does the CLI's registry in `sessions_dir` hold a row of a live process for this session, of ANY kind (a headless `claude -p` of it too)? `pane_row` answers for an interactive pane alone; this is the other half:
+    a session that is registered here but is no pane this server can look into is not a session that is gone (the hourly audit reads the first as unknown, the second as idle)."""
+    names, ids = {n for n in names if n}, {i for i in ids if i}
+    try:
+        files = list(Path(sessions_dir).glob("*.json"))
+    except OSError:
+        return False
+    for f in files:
+        try:
+            r = json.loads(f.read_text(encoding="utf-8"))
+            if not (r.get("sessionId") in ids or r.get("name") in names):
+                continue
+            os.kill(int(r.get("pid")), 0)
+            return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 def status(best: tuple[float, dict[str, Any]] | None) -> tuple[str, float]:
     """(busy | idle | shell | "", the epoch second the status last changed) of a row from `pane_row`; ("", 0.0) for None."""
     return (str(best[1].get("status") or ""), best[0]) if best else ("", 0.0)

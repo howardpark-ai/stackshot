@@ -166,8 +166,17 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     it, meta, after_open, mover = _ac._item_view(items, gid)
     if not _silence.reading(it, mover, after_open, now) or _wt.is_held(it):
         return None      # not on an agent as the board shows it (a hold, a park, a stored wait, the owner's or an outsider's move), or on hold
-    front = (env.is_front if hasattr(env, "is_front") else None)
-    if _ho.awaiting_session(it) and not (front is not None and front(mover, str(meta.get("project") or ""))):
+    raw_front = (env.is_front if hasattr(env, "is_front") else None)
+
+    def front(who: Any, project: str) -> bool:
+        """Is `who` a front agent? None reads none as front. A test that raises reads as front: a front agent's items are never handed on and its busy pane verifies them, so an error leaves the item where it is."""
+        if raw_front is None:
+            return False
+        try:
+            return bool(raw_front(who, project))
+        except Exception:  # noqa: BLE001
+            return True
+    if _ho.awaiting_session(it) and not front(mover, str(meta.get("project") or "")):
         return None      # an untaken hand-off to a back agent is the hand-off audit's (a front agent's is checked, as the silence pass does)
     last = _silence.clock(it, mover)
     if not (last > 0 and now - last >= EVERY):
@@ -191,7 +200,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
                 busy_elsewhere = True
         except Exception:  # noqa: BLE001  (an item that cannot be read is no other item of the mover's)
             continue
-    is_front = bool(front is not None and front(mover, str(meta.get("project") or "")))
+    is_front = front(mover, str(meta.get("project") or ""))
     subs: list[dict[str, Any]] = []
     readable = True
     if subagents is not None:
@@ -200,7 +209,9 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
         except Exception:  # noqa: BLE001  (a read error is no proof that nothing runs)
             readable = False
     anch = anchored or {}
-    tied_here = readable and _tie.tied(subs, _nr.shown(gid), anch.get(gid, ()))
+    cands = {g: (_nr.shown(g), anch.get(g, ())) for g in [gid, *mine]}      # the items a running subagent of the mover may be at work on
+    ties = [_tie.tied_to(s, cands) for s in subs]      # each by its description first, its brief only when the description names none of them
+    tied_here = readable and any(gid in t for t in ties)
     # a busy pane verifies the item when it is the mover's one item on an agent, or the mover is a front agent (the owner's own session: its items are never handed on, and its pane in a turn is the old, honest claim)
     what, recorded = verified(it, meta, mover, now, pane, same, lambda: tied_here, lambda: is_front or not busy_elsewhere)
     if what:
@@ -208,7 +219,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     why = ""
     if not readable:
         why = "the mover's subagents could not be read"
-    elif any(not any(_tie.tied([s], _nr.shown(g), anch.get(g, ())) for g in [gid, *mine]) for s in subs):
+    elif any(not t for t in ties):
         why = "a subagent of the mover is running, not tied to an item"
     if why:      # unknown, not idle: nothing is verified and nothing is stamped, but the item is not marked idle either (audit/hand_idle.py reads `audit_idle` alone), so it is not handed on over a subagent that may be building it
         return {"text": f"{PREFIX}{dt.datetime.fromtimestamp(now, _cfg.tz()).strftime('%H:%M')}: {why}, nothing verified", "verified": [], "recorded": [], "kind": KIND_UNKNOWN}

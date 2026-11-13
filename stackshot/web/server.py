@@ -6094,11 +6094,19 @@ def _silence_pass_tick() -> "dict[str, Any] | None":
 def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
     """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
     the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
-    run give []: nothing is claimed there. A pane in a turn whose transcript this box does not hold, or whose registry row names no session, raises `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle."""
+    run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless session), a registry status this server does not know, a pane in a turn whose transcript this box does not hold, or one
+    whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle."""
     from stackshot.audit import subagent_tie as _tie
     row = _handoff_pane_row(who, idx)
-    if not row or str(row[1].get("status") or "") != "busy":
-        return []
+    if row is None:
+        if _handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
+            raise _tie.Unreadable("the session is registered here but is no interactive pane this server can look into")
+        return []      # no row of a live process at all: the session is gone, or is not on this box, and nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
+    st = str(row[1].get("status") or "")
+    if st in ("idle", "shell"):
+        return []      # a pane that is not in a turn has no subagent running (a subagent keeps its pane busy)
+    if st != "busy":
+        raise _tie.Unreadable(f"the pane's registry status is {st or 'missing'}, not one this server knows")
     sid = str(row[1].get("sessionId") or "")
     if not sid:
         raise _tie.Unreadable("the pane's registry row names no session")
@@ -6109,7 +6117,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
                  subagents: "Callable[[str], list[dict[str, Any]]] | None" = None, anchored: "dict[str, Any] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
     hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
-    `metadata.stall.log`; kind `audit` or `audit_idle`).
+    `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
@@ -6127,10 +6135,15 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     if pane is None:
         pane = lambda who: _handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
     if subagents is None:
-        seen: dict[str, "list[dict[str, Any]]"] = {}      # a mover's subagents are read once a pass, not once an item
+        seen: dict[str, Any] = {}      # a mover's subagents are read once a pass, not once an item: a read that failed is kept too (as the exception), so the transcript lookup is not repeated for every item and again under the item lock
         def subagents(who: str) -> "list[dict[str, Any]]":
             if who not in seen:
-                seen[who] = _mover_subagents(who, idx, now)
+                try:
+                    seen[who] = _mover_subagents(who, idx, now)
+                except Exception as e:  # noqa: BLE001
+                    seen[who] = e
+            if isinstance(seen[who], Exception):
+                raise seen[who]
             return seen[who]
     if anchored is None:
         try:
@@ -8493,6 +8506,15 @@ def _handoff_pane(who: str, idx: dict[str, Any] | None = None) -> str:
     return whys[0] if all(whys) else ""
 
 
+def _handoff_registered(who: str, idx: dict[str, Any] | None = None) -> bool:
+    """Is there a row in the CLI's registry on this box for the session `who`, of any kind and of a live process (`liveness.registered`)? The names and ids are `_handoff_pane_row`'s."""
+    w = str(who or "").strip()
+    idx = _sessions_index() if idx is None else idx
+    names = {x for x in (w, _session_label(w)) if x}
+    ids = {w, _session_id(w)} | {k for k, r in dict.items(idx) if isinstance(r, dict) and r.get("name") in names}
+    return _lv.registered(names, ids, CLI_SESSIONS)
+
+
 def _handoff_pane_row(who: str, idx: dict[str, Any] | None = None) -> tuple[float, dict[str, Any]] | None:
     """(the epoch second its status last changed, the row) of a pane on this box, from the CLI's own registry (~/.claude/sessions/<pid>.json; push.py reads the same): None for a
     session this box does not run. Only an interactive pane's row counts (`kind` == "interactive": a headless `claude -p` of the same session is no pane that holds a notice), its
@@ -10573,7 +10595,7 @@ _STALL_FORM = (
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
     f"and no pause lasts longer than 24 hours. "
-    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`), about every 50 minutes for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
+    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …`, `Audit hh:mm: idle, nothing verified`, or, when the server could not tell and the item is not idle, `Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing verified` or `Audit hh:mm: the mover's subagents could not be read, nothing verified`), about every 50 minutes for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
 )
 
 

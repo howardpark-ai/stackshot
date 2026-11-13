@@ -23,6 +23,10 @@ network, no model call, no message sent.
   15 a torn entry in the log never raises
   16 a verified line is the item's last activity: the row reads its time and words, an idle line leaves the record alone, an older line never replaces a newer real event, the backfill does not undo it
   18 the row never reads "idle over 1 h" between two lines (read through act_parts and band at the worst landing time); the record never goes backwards (a stepped-back clock, a record dated ahead)
+  17 the tie to the ITEM: the reader of a session's transcript (running within 90 minutes, quiet to 6 hours, dropped past the cap, clock skew), what each unreadable thing reads as (unknown), the pure tie, the server's reader on the registry
+  19 a running subagent tied to no item leaves the mover's items unknown, not idle (and not handed on); a front agent's busy pane still verifies
+  20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
+
 
     tests/run-suite audit_hourly       -> exit 0 / 1"""
 import io, json, os, re, sys, pathlib, time, logging
@@ -598,17 +602,30 @@ agent("blocks", "Review", f"Please review {BID(2)}", content="blocks")
 agent("done1", "Old work", f"{BID(3)}", finished=True)
 agent("stale1", "Left behind", f"{BID(4)}", age=int(TIE.RUNNING_S) + 60)
 agent("badmeta", "x", f"{BID(5)}", meta_ok=False)
+agent("capped1", "Long gone", f"{BID(6)}", age=int(TIE.QUIET_CAP_S) + 60)
 got_run = {x["id"]: x for x in TIE.running(SID, [str(T / "transcripts")], now0)}
-check("17 the reader lists the running subagents of a session's transcript: no finished flag and a transcript written within 90 minutes, the description and the brief (a string or text blocks) as its text; a finished one and a stale one are left out, a meta that cannot be read is listed running with no words (it may be running)",
-      sorted(got_run) == ["badmeta", "blocks", "run1"] and got_run["badmeta"] == {"id": "badmeta", "text": "", "at": 0.0, "unreadable": True} and got_run["run1"]["text"] == f"Build the thing\nGoal: {BID(1)} in the worktree" and BID(2) in got_run["blocks"]["text"] and got_run["run1"]["at"] == now0 - 60, got_run)
+check("17 the reader lists the running subagents of a session's transcript: no finished flag and a transcript written within the 6-hour cap, the description, the brief (a string or text blocks) and both as its text; a finished one and one past the cap are left out, a meta that cannot be read is listed running with no words (it may be running)",
+      sorted(got_run) == ["badmeta", "blocks", "run1", "stale1"] and got_run["badmeta"] == {"id": "badmeta", "text": "", "at": 0.0, "unreadable": True} and got_run["run1"]["text"] == f"Build the thing\nGoal: {BID(1)} in the worktree"
+      and got_run["run1"]["description"] == "Build the thing" and got_run["run1"]["brief"] == f"Goal: {BID(1)} in the worktree" and BID(2) in got_run["blocks"]["brief"] and got_run["run1"]["at"] == now0 - 60 and "quiet" not in got_run["run1"], got_run)
+check("17 …one older than 90 minutes and younger than the cap is listed running but quiet (a builder waiting on a long run), a fresh one is not marked", got_run["stale1"].get("quiet") is True and got_run["stale1"]["description"] == "Left behind" and "capped1" not in got_run and "done1" not in got_run, got_run.get("stale1"))
+# the boundaries, with two seconds of room for the file system's time resolution
+agent("b1", "At 90", f"{BID(7)}", age=int(TIE.RUNNING_S) - 2); agent("b2", "Past 90", f"{BID(7)}", age=int(TIE.RUNNING_S) + 2)
+agent("b3", "Inside cap", f"{BID(7)}", age=int(TIE.QUIET_CAP_S) - 2); agent("b4", "Past cap", f"{BID(7)}", age=int(TIE.QUIET_CAP_S) + 2)
+agent("b5", "Ahead by a skew", f"{BID(7)}", age=-int(TIE.SKEW_S) + 2); agent("b6", "Ahead too far", f"{BID(7)}", age=-int(TIE.SKEW_S) - 2)
+got_b = {x["id"]: x for x in TIE.running(SID, [str(T / "transcripts")], now0)}
+check("17 the 90-minute boundary: a transcript written 90 minutes less two seconds ago is running (not quiet), 90 minutes and two seconds ago is quiet; the cap: 6 hours less two seconds is listed (quiet), 6 hours and two seconds is dropped",
+      "quiet" not in got_b["b1"] and got_b["b2"].get("quiet") is True and got_b["b3"].get("quiet") is True and "b4" not in got_b, {k: v.get("quiet") for k, v in got_b.items() if k.startswith("b")})
+check("17 clock skew: a transcript dated up to five minutes ahead of the clock is running (a skew of clocks), one dated further ahead is dropped, never listed as running for good", "b5" in got_b and "quiet" not in got_b["b5"] and "b6" not in got_b, sorted(got_b))
+for n_ in ("b1", "b2", "b3", "b4", "b5", "b6", "capped1"):
+    for ext_ in ("meta.json", "jsonl"): (proj / SID / "subagents" / f"agent-{n_}.{ext_}").unlink()
 def raises(fn, exc):
     try: fn()
     except exc: return True
     except Exception: return False
     return False
-check("17 …a session with no transcript on this box, a name that is no uuid and no roots cannot be read (Unreadable: unknown, not nothing running); a transcript with no subagents folder and a clock three hours on give none",
+check("17 …a session with no transcript on this box, a name that is no uuid and no roots cannot be read (Unreadable: unknown, not nothing running); a transcript with no subagents folder and a clock seven hours on (past the cap) give none",
       raises(lambda: TIE.running(str(_uuid.uuid4()), [str(T / "transcripts")], now0), TIE.Unreadable) and raises(lambda: TIE.running("home-peer", [str(T / "transcripts")], now0), TIE.Unreadable) and raises(lambda: TIE.running(SID, [], now0), TIE.Unreadable)
-      and TIE.running(SID, [str(T / "transcripts")], now0 + 3 * H) == [])
+      and TIE.running(SID, [str(T / "transcripts")], now0 + 7 * H) == [])
 SID2 = str(_uuid.UUID("00000000-0000-4000-8000-0000000000bb")); (proj / f"{SID2}.jsonl").write_text("{}\n")
 check("17 …a transcript that has never had a subagent (no subagents folder) has none running: known, not unknown", TIE.running(SID2, [str(T / "transcripts")], now0) == [])
 # a first line nested past the parser's depth (a RecursionError) and one that is not JSON, a truncated one, a list that is no text: the subagent is still listed, naming nothing
@@ -630,20 +647,29 @@ row_path = sess_dir / f"{os.getpid()}.json"
 def registry(status="busy", sid=SID, kind="interactive"): row_path.write_text(json.dumps({"pid": os.getpid(), "sessionId": sid, "kind": kind, "name": "home-peer", "status": status, "statusUpdatedAt": int(now0 * 1000), "updatedAt": int(now0 * 1000)}))
 try:
     registry()
-    check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in server._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1"], server._mover_subagents("home-peer", {}, now0))
+    check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in server._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1", "stale1"], server._mover_subagents("home-peer", {}, now0))
     registry("idle"); a_ = server._mover_subagents("home-peer", {}, now0)
     registry("shell"); b_ = server._mover_subagents("home-peer", {}, now0)
-    registry("busy", kind="headless"); c_ = server._mover_subagents("home-peer", {}, now0)
+    check("17 …and none when the pane is idle or showing a shell, or the mover has no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built)", a_ == [] and b_ == [] and server._mover_subagents("home-front", {}, now0) == [], (a_, b_))
+    import subprocess as _sp
+    dead_ = _sp.Popen(["true"]); dead_.wait()
+    row_path.write_text(json.dumps({"pid": dead_.pid, "sessionId": SID, "kind": "interactive", "name": "home-peer", "status": "busy"}))
+    check("17 …a row whose process is gone is no row: nothing is claimed, as for a mover with no row", server._mover_subagents("home-peer", {}, now0) == [], server._mover_subagents("home-peer", {}, now0))
+    odd_ = {}
+    registry("busy", kind="headless"); odd_["headless"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry("busy", kind="sdk-cli"); odd_["sdk"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry("working"); odd_["unknown status"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry(""); odd_["no status"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    check("17 …a PRESENT row that is no interactive pane (headless, another kind) or whose status the server does not know (a new word, none) is UNKNOWN (Unreadable), never nothing running: the session is there and cannot be looked into", all(odd_.values()), odd_)
     registry("busy", sid=str(_uuid.uuid4())); d_ = "a pane in a turn with no transcript here"
-    check("17 …and none when the pane is idle or showing a shell, is no interactive pane, or the mover has no pane on this box (known: nothing runs, or nothing can be claimed)", a_ == [] and b_ == [] and c_ == [] and server._mover_subagents("home-front", {}, now0) == [], (a_, b_, c_))
     check("17 …and Unreadable (unknown) for a pane in a turn whose transcript this box does not hold, or whose registry row names no session", raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable) and (registry("busy", sid=""), raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable))[1], d_)
     registry("busy")
     clean_pane(); panes["home-peer"] = "busy"
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     put(1, act=90); put(2, act=90); put(3, act=90)
     tick(subagents=None)
-    check("17 a tick that is given no subagent view reads the transcripts itself: item 1, named in the brief of the one running subagent, is verified; items 2 (named in a brief that is also running) and 3 follow their own briefs (a finished subagent names none)",
-          [lines(i)[0]["kind"] for i in (1, 2, 3)] == ["audit", "audit", "audit_idle"], [lines(i) for i in (1, 2, 3)])
+    check("17 a tick that is given no subagent view reads the transcripts itself: items 1 and 2, named in the briefs of two running subagents, are verified; item 3 is named by none and a quiet subagent (90 minutes to 6 hours old) names an item that is not the mover's, so it may be what item 3 is: unknown, not idle",
+          [lines(i)[0]["kind"] for i in (1, 2, 3)] == ["audit", "audit", "audit_unknown"], [lines(i) for i in (1, 2, 3)])
 finally:
     row_path.unlink(missing_ok=True)
 
@@ -738,5 +764,89 @@ panes["home-front"] = "idle"
 for i in (1, 2, 3): put(i, mover="home-front", act=90)
 tick(now0 + 3 * H)
 check("19 a front agent whose pane is not in a turn reads idle as before (nothing to verify), and still is not handed on", all(lines(i)[-1]["kind"] == "audit_idle" for i in (1, 2, 3)) and not any(g in handed_on(now0 + 3 * H + 60) for g in ("a1", "a2", "a3")), [lines(i) for i in (1, 2, 3)])
+# ================================================================ 20. the tie by description first; the quiet window; an absent row against a present one; a read error kept for the pass; a front test that raises
+check("20 the tie reads the DESCRIPTION first: a description that names an item ties to it alone; a brief that only mentions another item ('a follow-up of item 1') does not tie when the description names one; a description that names none lets the brief decide",
+      TIE.tied_to({"description": f"Build {BID(2)}", "brief": f"A follow-up of {BID(1)}"}, {"a1": (BID(1), ()), "a2": (BID(2), ())}) == {"a2"}
+      and TIE.tied_to({"description": "Build part D", "brief": f"A follow-up of {BID(1)}"}, {"a1": (BID(1), ()), "a2": (BID(2), ())}) == {"a1"}
+      and TIE.tied_to({"description": "Build part D", "brief": "nothing here"}, {"a1": (BID(1), ())}) == set()
+      and TIE.tied_to({"text": f"Build {BID(2)}"}, {"a2": (BID(2), ())}) == {"a2"}, "pure")
+check("20 …and one candidate alone: a description that names it ties, one that names none of the candidates lets the brief decide (the audit offers every item of the mover as a candidate, so a description naming one of them wins over a brief that mentions another)",
+      TIE.tied([{"description": f"Build {BID(1)}", "brief": "x"}], BID(1)) is True and TIE.tied([{"description": "Build part D", "brief": f"a follow-up of {BID(1)}"}], BID(1)) is True and TIE.tied([{"description": "Build part D", "brief": "x"}], BID(1)) is False, "single")
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=90); put(2, act=90)
+SUBS.setdefault("home-peer", []).append({"id": "f1", "description": f"Build {BID(2)}", "brief": f"a follow-up of {BID(1)}", "text": f"Build {BID(2)}\na follow-up of {BID(1)}", "at": now0 - 60})
+tick()
+check("20 through the audit: a subagent whose description names item 2 and whose brief mentions item 1 verifies item 2, and item 1 reads idle (tied to another item), not verified by a mention",
+      lines(2)[0]["kind"] == "audit" and lines(1)[0]["kind"] == "audit_idle", [lines(1), lines(2)])
+
+# the quiet window, end to end through the server's reader: a mover with two items on an agent, the pane busy, the registry row and the transcript folder planted
+sess_dir = T / "home/.claude/sessions"
+row_path = sess_dir / f"{os.getpid()}.json"
+def one_agent(desc, brief, age_s):
+    for f_ in (proj / SID / "subagents").glob("agent-q*"): f_.unlink()
+    agent("q1", desc, brief, age=age_s)
+def kinds20():
+    clean_pane(); panes["home-peer"] = "busy"
+    for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+    put(1, act=90); put(2, act=90)
+    tick(subagents=None)
+    return [lines(i)[0]["kind"] for i in (1, 2)], [lines(i)[0]["text"] for i in (1, 2)]
+try:
+    registry("busy")
+    for f_ in (proj / SID / "subagents").glob("agent-*"): f_.unlink()
+    got20 = {}
+    for label_, age_ in (("89 minutes", 89 * MIN), ("91 minutes", 91 * MIN), ("5 h 59 min", 5 * H + 59 * MIN), ("6 h 1 min", 6 * H + MIN)):
+        one_agent("Build part D", "Goal: build it. Nothing here names an item.", age_); got20[label_] = kinds20()[0]
+    check("20 an unfinished subagent that names no item, on a busy pane: running at 89 minutes and quiet at 91 minutes and at 5 h 59 min, so the mover's items read UNKNOWN; past the cap (6 h 1 min) it is dropped and the items read idle",
+          got20 == {"89 minutes": ["audit_unknown"] * 2, "91 minutes": ["audit_unknown"] * 2, "5 h 59 min": ["audit_unknown"] * 2, "6 h 1 min": ["audit_idle"] * 2}, got20)
+    one_agent("Build part D", f"Goal: {BID(1)}", 91 * MIN); k_, t_ = kinds20()
+    check("20 a quiet subagent (91 minutes) that IS tied (its brief names item 1, its description none) verifies item 1 and leaves item 2 idle, tied to another item", k_ == ["audit", "audit_idle"], (k_, t_))
+    one_agent("Build part D", f"Goal: {BID(1)}", 7 * H); k_, t_ = kinds20()
+    check("20 …and past the cap, tied or not, it is dropped: both read idle", k_ == ["audit_idle", "audit_idle"], (k_, t_))
+    # an ABSENT registry row is idle as before; a PRESENT one that is no interactive pane reads unknown
+    one_agent("Build part D", "nothing", 60)
+    row_path.unlink(missing_ok=True); k_, t_ = kinds20()
+    check("20 a mover with NO registry row on this box (gone, or elsewhere) reads idle as built: nothing is claimed for it, and the orphan and idle hand-overs may act", k_ == ["audit_idle", "audit_idle"], (k_, t_))
+    registry("busy", kind="headless"); k_, t_ = kinds20()
+    check("20 a PRESENT registry row that is no interactive pane (headless) reads UNKNOWN, never idle: not idle-marked, so not handed on", k_ == ["audit_unknown", "audit_unknown"] and all("could not be read" in x for x in t_) and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_, t_))
+    registry("working"); k_, t_ = kinds20()
+    check("20 a PRESENT row with a status the server does not know reads UNKNOWN too", k_ == ["audit_unknown", "audit_unknown"], (k_, t_))
+    # a read error is kept for the pass: one read of a mover's transcripts for all its items, again under the lock for none
+    registry("busy")
+    real_ms, calls20 = server._mover_subagents, []
+    def failing(who, idx=None, now=None): calls20.append(who); raise OSError("transcript folder unreadable")
+    server._mover_subagents = failing
+    try:
+        clean_pane(); panes["home-peer"] = "busy"
+        for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+        for i in (1, 2, 3): put(i, act=90)
+        with _Err(): got20e = tick(subagents=None)
+    finally: server._mover_subagents = real_ms
+    check("20 an unreadable transcript folder is read ONCE for the pass (the exception is cached like a result), however many items the mover has, and every item reads unknown", len(calls20) == 1 and got20e == ["a1", "a2", "a3"] and all(lines(i)[0]["kind"] == "audit_unknown" for i in (1, 2, 3)), (calls20, got20e))
+    calls20.clear()
+    def counting(who, idx=None, now=None): calls20.append(who); return []
+    server._mover_subagents = counting
+    try:
+        for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+        for i in (1, 2, 3): put(i, act=90)
+        tick(subagents=None)
+    finally: server._mover_subagents = real_ms
+    check("20 …and a result that read fine is read once for the pass as well", len(calls20) == 1, calls20)
+finally:
+    row_path.unlink(missing_ok=True)
+    for f_ in (proj / SID / "subagents").glob("agent-*"): f_.unlink()
+
+# a front-agent test that raises reads as front: the busy pane verifies each item and nothing is handed on, never an error out of the audit
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i in (1, 2, 3): put(i, act=90)
+env20 = server._silence_env()
+class RaisingFront:
+    def __getattr__(self, n): return getattr(env20, n)
+    def is_front(self, who, project): raise RuntimeError("keeper lookup failed")
+with _Err() as e20: got20f = tick(env=RaisingFront())
+check("20 a front test that raises reads as front, not as an error out of the pass: three items on a busy pane are each verified by it (the front rule), none idle, and the pass wrote its lines",
+      got20f == ["a1", "a2", "a3"] and all(lines(i)[0]["kind"] == "audit" for i in (1, 2, 3)), (got20f, [lines(i) for i in (1, 2, 3)], e20.text[-300:]))
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

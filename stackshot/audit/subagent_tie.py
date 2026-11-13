@@ -29,6 +29,7 @@ from stackshot.model import merge_tie as _mt
 from stackshot.model import said as _said
 
 RUNNING_S = 90 * 60.0          # a subagent with no `finished` flag counts as running while its transcript was written within this long
+QUIET_CAP_S = 6 * 3600.0       # …and, for a mover whose pane is in a turn, as running but quiet (`"quiet": True`: it may wait on a long CI or suite run) until its transcript is this old; past it, it is dropped (a recycled pane leaves no flag)
 BRIEF_BYTES = 256 * 1024       # of the first line of its transcript (the brief) at most this many bytes are read
 BRIEF_CHARS = 20000            # and at most this many characters of the brief are kept
 SKEW_S = 300.0                 # a transcript dated this far ahead of the clock is a skew of clocks, still running
@@ -53,8 +54,10 @@ def _brief(path: Path) -> str:
 
 
 def running(session: str, roots: Any, now: float) -> list[dict[str, Any]]:
-    """The running subagents of the session (a transcript uuid) as this box holds them: [{"id", "text", "at"}], `text` the description and the brief, `at` the transcript's last write. [] when the session has no
-    subagents folder or none of them is running. Raises `Unreadable` when the transcript of the session is not on this box or its subagents folder cannot be listed: nothing can be said, and the audit reads that as
+    """The running subagents of the session (a transcript uuid) as this box holds them: [{"id", "description", "brief", "text", "at"}], `text` the two together, `at` the transcript's last write. A subagent with no
+    `finished` flag is running when its transcript was written within `RUNNING_S`, and running but quiet (`"quiet": True`) when it is older than that and no older than `QUIET_CAP_S`: a builder waiting on a long CI or suite
+    run writes nothing for a while, and the caller asks only for a pane that is in a turn, so such a subagent is not dropped and the mover's items it is not tied to read unknown, not idle. Past the cap it is dropped.
+    [] when the session has no subagents folder or none of them is running. Raises `Unreadable` when the transcript of the session is not on this box or its subagents folder cannot be listed: nothing can be said, and the audit reads that as
     unknown. A subagent whose files cannot be read (a meta that is not JSON, a transcript that cannot be statted or read) is listed as running with no words (`"unreadable": True`) unless its transcript is known to be
     old: it may be running, so it ties to no item and the audit reads the mover as unknown."""
     path = _said.find_transcript(session, roots)
@@ -70,14 +73,15 @@ def running(session: str, roots: Any, now: float) -> list[dict[str, Any]]:
         try:
             tp = mp.with_name(mp.name[: -len(".meta.json")] + ".jsonl")
             at = tp.stat().st_mtime
-            if not (-SKEW_S <= now - at <= RUNNING_S):
-                continue      # old (a recycled pane leaves no flag) or finished long ago: not running, whatever the meta says
+            if not (-SKEW_S <= now - at <= QUIET_CAP_S):
+                continue      # past the cap (a recycled pane leaves no flag), or dated further ahead than a skew of clocks: not running, whatever the meta says
             meta = json.loads(mp.read_text(encoding="utf-8"))
             if not isinstance(meta, dict):
                 raise ValueError("meta is not an object")
             if meta.get("finished") is True:
                 continue
-            out.append({"id": aid, "text": f"{meta.get('description') or ''}\n{_brief(tp)}", "at": at})
+            desc, brief = str(meta.get("description") or ""), _brief(tp)
+            out.append({"id": aid, "description": desc, "brief": brief, "text": f"{desc}\n{brief}", "at": at, **({"quiet": True} if now - at > RUNNING_S else {})})
         except (Exception, RecursionError):  # noqa: BLE001  — any failure on one subagent's files: it may be running, and nothing can be tied to it
             out.append({"id": aid, "text": "", "at": 0.0, "unreadable": True})
     return out
@@ -92,7 +96,17 @@ def names_item(text: str, shown: str, keys: Iterable[str] = ()) -> bool:
     return any(_mt.names(t, k.lower(), [_mt.repo_of(k.lower())]) for k in keys if k)
 
 
+def tied_to(sub: dict[str, Any], candidates: dict[str, tuple[str, Iterable[str]]]) -> set[str]:
+    """The candidates ({id: (its shown id, its anchored pull requests)}) a running subagent is tied to: those its DESCRIPTION names; only when the description names none, those its brief names. A brief that merely mentions
+    an item ("a follow-up of item X") must not tie the subagent to it when the description already says what it works on. A subagent given with a `text` alone (no `description` key) reads that text as its description."""
+    desc = str(sub.get("description") if "description" in sub else sub.get("text") or "")
+    for words in (desc, str(sub.get("brief") or "")):
+        hit = {g for g, (shown, keys) in candidates.items() if names_item(words, shown, [k for k in keys if k])}
+        if hit:
+            return hit
+    return set()
+
+
 def tied(subagents: Iterable[dict[str, Any]], shown: str, keys: Iterable[str] = ()) -> bool:
-    """Is one of the running `subagents` (from `running`) at work on the item: its description or brief names the item or a pull request anchored to it."""
-    keys = [k for k in keys if k]
-    return any(names_item(str(s.get("text") or ""), shown, keys) for s in subagents or ())
+    """Is one of the running `subagents` (from `running`) at work on the item (by `tied_to` with the item as the only candidate): its description, else its brief, names the item or a pull request anchored to it."""
+    return any(tied_to(s, {"": (shown, keys)}) for s in subagents or ())
