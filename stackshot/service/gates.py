@@ -504,7 +504,7 @@ def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: 
                 ln["after"] = nid        # a line the stored list holds already: kept as it is (its item may have closed since, which the watchers end the line for)
             else:
                 try:
-                    ln["after"] = gate_after([ln["after"]], gid)[0]
+                    ln["after"] = gate_after([ln["after"]], gid, i)[0]
                 except ToolError as e:
                     raise _line_refusal(i, e)
         elif ln["kind"] == "time":
@@ -864,9 +864,10 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
                     f"and an item that keeps being re-dated is how work sits unseen. {ways} A wait_reason does not count (it is not stored). The item model: {h.model_page}")
 
 
-def gate_after(after: Any, gid: str = "") -> list[str]:
+def gate_after(after: Any, gid: str = "", line: int = 0) -> list[str]:
     """after as given (a list of item ids, or a comma-separated string) → the ids stored. Each names an open item of any project
-    (a superseded one is followed to its replacement); the item itself, a closed one, a missing one and a loop are refused."""
+    (a superseded one is followed to its replacement); the item itself, a closed one, a missing one and a loop are refused. `line`: the position of the item line of a list this is for (the loop's refusal then has no
+    `(after)` in it: the written wait is no after link)."""
     h = _hooks()
     if isinstance(after, str):
         after = [x for x in re.split(r"[,\s]+", after) if x.strip()]
@@ -885,7 +886,7 @@ def gate_after(after: Any, gid: str = "") -> list[str]:
             raise ToolError(f"Refused: {g} is already {it.get('status')}" + (f" ({(it.get('metadata') or {}).get('outcome')})" if (it.get("metadata") or {}).get("outcome") else "")
                             + "; after names open items that must close first")
         if gid and h.after_reaches([g], gid):
-            raise ToolError(f"Refused: a loop: {g} itself waits on {gid} (after), so {gid} cannot wait on {g}")
+            raise ToolError(f"Refused: a loop: {g} itself waits on {gid}{'' if line else ' (after)'}, so {gid} cannot wait on {g}" + (f"; take {g} out of waits[{line}] or end its wait on {gid} first" if line else ""))
         if g not in out:
             out.append(g)
     return out

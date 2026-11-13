@@ -242,6 +242,11 @@ def _list_plan(waits: Any, wait_mode: str, *, gid: str, meta: dict[str, Any], pr
     if leaves_list and not _wlw.passed(waits) and wake.strip() and not clear_wake and _wl.valid(meta):      # a new backstop day alone (until=…) on a stored list: a time line later than it could never arrive, as when the list is sent again with it
         gate_dates = [(i, ln["until"]) for i, ln in enumerate(_wl.lines(meta), 1) if ln["kind"] == "time" and not _wl.arrived(ln)]
         _gates.gate_time_lines(gate_dates, str(h.parse_wake(wake)))
+    if _wlw.clearing(waits) and wake.strip() and not clear_wake and _wl.valid(meta):      # waits=[] ends the list: a later day beside it is no backstop of anything, only the date of a wait on that date alone, and a date moved out is a renewal
+        old_, new_ = _uw.date_of(meta), str(h.parse_wake(wake))
+        if old_ and _wlw.time_before(old_, new_):
+            raise ToolError(f"Refused: waits=[] ends the list, and until={new_} beside it would be a later day than the list's backstop day {old_}: moving a date out is not progress. Send waits=[] alone to end the wait "
+                            f"(or until={old_} or earlier to wait on that date alone)")
     if waits is None and not str(wait_mode or "").strip():
         return None
     if _wlw.passed(waits) and not _wlw.clearing(waits):
@@ -571,6 +576,7 @@ def update_unlocked(
             else:
                 list_drop.add("wait_kind")
                 wake, until_wait = date_, True
+                list_plan.lines = [{**list_plan.lines[0], "until": date_}]      # the reply says the day the item waits until (the backstop when the line's own date is later), not the line's
         elif wait_kind in ("relay", "event"):   # a relay or event wait takes its ask-by day alone
             wake = wake.strip()[:10]
             if meta.get("wake") and len(str(meta["wake"])) > 10:

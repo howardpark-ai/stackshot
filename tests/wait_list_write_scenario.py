@@ -682,5 +682,51 @@ item(312, needs=[BACK], wait_kind="list", wait_mode="all", waits=[Tm(w(5)), Re("
 out = bupd(312, description="- Goal: the list ends\n- It lives here\n- And more\n- Done when done")
 check("7b a write that does not move the backstop day is no refusal for a hand-edited list whose backstop is already in front of a time line", "more" in rd(312)["description"] and mt(312)["until"] == w(4), out[-300:])
 
+# ---- 7c the model conflict note on a list written on an item in the doing state
+conflicts_ = lambda g: [l for l in _wt_get.stackshot_get(g).splitlines() if "the wait wins" in l]
+for k_, kw_ in (("list", dict(waits=[Re("a"), Re("b")], until=w(6))), ("relay", dict(wait_kind="relay", wait_event="x", until=w(6))), ("event", dict(wait_kind="event", wait_event="recycle", until=w(6))),
+                ("item", dict(wait_kind="item", after=["a900"], until=w(6)))):
+    item(320, needs=[BACK])
+    bupd(320, **kw_)
+    check(f"7c a {k_} wait written on an item with no stored state is no model conflict (the state it would read as is the wait's own)", conflicts_("a320") == [] and not MODEL.derive({**rd(320), "gid": "a320"}).conflicts, conflicts_("a320"))
+item(320, needs=[BACK])
+bupd(320, wait_kind="anchor", wait_anchor=A1, wait_event="merged", until=w(6))
+check("7c …a single anchor wait on such an item keeps its note, as before", len(conflicts_("a320")) == 1 and "update hold=true (a hold ends" in conflicts_("a320")[0], conflicts_("a320"))
+item(321, needs=[BACK], state="doing")
+bupd(321, waits=[Re("a"), Re("b")], until=w(6))
+check("7c a list written on an item whose state is stored as doing keeps the note, and its advice says where hold=true goes (an update of its own: beside waits it is refused)", len(conflicts_("a321")) == 1 and "update hold=true in an update of its own, not beside waits" in conflicts_("a321")[0], conflicts_("a321"))
+refused("7c …and beside waits hold=true is refused", lambda: bupd(321, waits=[Re("a"), Re("b")], until=w(6), hold=True), "does not go with hold")
+bupd(321, hold=True)
+check("7c …on its own it ends the stored state and the note with it, the list is as it was", conflicts_("a321") == [] and listed(mt(321)) and mt(321).get("state") != "doing", (conflicts_("a321"), mt(321)))
+
+# ---- 7d wording
+# a loop through a list line names the line, and is no `(after)` (the written wait is no after link)
+item(340, needs=[BACK]); item(341, needs=[BACK])
+bupd(341, waits=[It("a340"), Re("lp")], until=w(6))
+try: bupd(340, waits=[It("a341"), Re("lq")], until=w(6)); loop_ = "stored"
+except Exception as e: loop_ = str(e)
+check("7d a loop refusal for a list line names the line and says no (after): the written wait is no after link", "waits[1]: a loop" in loop_ and "(after)" not in loop_ and "out of waits[1]" in loop_, loop_)
+try: bupd(340, after=["a341"], until=w(6)); loop_ = "stored"
+except Exception as e: loop_ = str(e)
+check("7d …the loop through the single `after` keeps its words", "a loop" in loop_ and "(after)" in loop_ and "waits[" not in loop_, loop_)
+# the collapse reply says the day the item waits until
+fresh(342, [Tm(w(5)), Re("a")], until=w(6))
+o_ = bupd(342, waits=[Tm(w(5))], until=w(4))
+check("7d a list collapsed to a date later than the backstop: the reply says the stored day (the backstop), not the line's later one", mt(342)["until"] == w(4) and f"the date {w(4)}" in o_ and f"the date {w(5)}" not in o_, (mt(342), o_[-300:]))
+fresh(343, [Tm(w(5)), Re("a")], until=w(6))
+o_ = bupd(343, waits=[Tm(w(5))], until=w(5))
+check("7d …a date the backstop does not pass is as the line has it", mt(343)["until"] == w(5) and f"the date {w(5)}" in o_, (mt(343), o_[-300:]))
+# waits=[] beside a later until
+for i_, kw_ in ((344, dict(waits=[], until=w(7))), (345, dict(waits="none", until=w(7))), (346, dict(waits="[]", until=w(7)))):
+    fresh(i_, [Tm(w(5)), Re("a")], until=w(6))
+    refused(f"7d waits={kw_['waits']!r} beside an until later than the list's backstop is refused in its own words, not as a pushed-out clock", lambda i_=i_, kw_=kw_: bupd(i_, **kw_), "waits=[] ends the list", f"until={w(7)}", f"backstop day {w(6)}", "waits=[] alone")
+    check(f"7d …nothing changed ({i_})", listed(mt(i_)) and mt(i_)["until"] == w(6), mt(i_))
+fresh(347, [Tm(w(5)), Re("a")], until=w(6))
+bupd(347, waits=[], until=w(6))
+check("7d waits=[] beside the same day ends the list and leaves the date wait (as before)", not mt(347).get("waits") and mt(347)["until"] == w(6) and not mt(347).get("wait_kind"), mt(347))
+fresh(348, [Tm(w(5)), Re("a")], until=w(6))
+bupd(348, waits=[], until=w(3))
+check("7d …and beside an earlier one", not mt(348).get("waits") and mt(348)["until"] == w(3), mt(348))
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": wait list write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
