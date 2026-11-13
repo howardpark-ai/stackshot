@@ -36,7 +36,7 @@ the top of the file apply to every repository, and a table named after the repos
 
 A key the file names that is none of these four (a mistyped `max_suite`) is not used: a `warning: unknown key <name> in <file>` line
 goes to stderr for each, and the exit status is unchanged. A value that is not a number from 0 to 10**12 (a boolean, a string, nan, inf, a
-negative or a huge one), a file that is not UTF-8 text and one nested too deep are config problems, exit 2.
+negative or a huge one), a file that is not UTF-8 text, a pipe in place of a file and one nested too deep are config problems, exit 2.
 
 The defaults are placeholders that never trigger: set the real values from the measured medians. When a value is above its limit the
 report ends with `TRIGGER: <which>` lines (one per threshold, in the order above), the same lines are kept in the state file, and the
@@ -61,6 +61,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -179,7 +180,10 @@ def load_thresholds(path: str, repo: str, explicit: bool) -> dict[str, float]:
     """DEFAULTS, then the file's top-level keys, then its [<repo>] table. A missing default file is no error; a bad value is."""
     t: dict = dict(DEFAULTS)
     try:
-        with open(path, "rb") as f:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)     # non-blocking: a pipe with no writer would otherwise hold the open for ever
+        with os.fdopen(fd, "rb") as f:
+            if stat.S_ISFIFO(os.fstat(f.fileno()).st_mode):
+                raise Fail(f"config file {path} is a pipe, not a file")
             data = tomllib.load(f)
     except FileNotFoundError:
         if explicit:
@@ -207,7 +211,7 @@ def load_thresholds(path: str, repo: str, explicit: bool) -> dict[str, float]:
             if k in DEFAULTS:
                 if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= THRESHOLD_MAX:     # false for nan, inf, a negative, a huge int
                     raise Fail(f"config file {path}: {k} must be a number from 0 to {THRESHOLD_MAX}, got {str(v)[:40]!r}")
-                t[k] = v
+                t[k] = v if v != 0 else type(v)(0)       # -0.0 is zero: it would otherwise print as a limit of -0
     return t
 
 
