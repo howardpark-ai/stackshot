@@ -244,6 +244,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.service import wakes as wakes_svc
 from stackshot.web import middleware as _wmw
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
@@ -458,7 +459,7 @@ check("dropped closes as not planned", issue(6)["state"] == "closed" and issue(6
 # the server's own act: a wake that has come releases the hold. The hold and the wake are not on the issue: nothing is sent
 it = server._load("g3"); it["metadata"]["wake"] = "2020-01-01"; _wr.save("g3", it)
 log0 = len(F.log)
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 G.drain(GH, STORE, say=lambda s: None)
 check("the wake pass released g3 (the hold is stored away); nothing went to GitHub: no job, no comment, no label", woke and rd("g", 3)["metadata"].get("hold") is None
       and qlen() == 0 and len(F.log) == log0 and not comments(3) and issue(3)["labels"] == [], (woke, qlen(), F.log[log0:]))
@@ -473,7 +474,7 @@ def made(subject, **kw):
 # the confirmed pin: an item woken without a `confirmed` field gets one, and nothing goes to GitHub
 g_pin, n_pin = made("[home] held without a confirm"); server._update(g_pin, hold=True, wake="2099-01-01", sender="home-here")
 f_pin = STORE / g_pin[0] / f"{g_pin[1:]}.json"; j = json.loads(f_pin.read_text()); j.pop("confirmed", None); j["metadata"]["until"] = "2020-01-01"; f_pin.write_text(json.dumps(j))
-log0 = len(F.log); server._wake_pass(); G.drain(GH, STORE, say=lambda s: None)
+log0 = len(F.log); wakes_svc.wake_pass(); G.drain(GH, STORE, say=lambda s: None)
 check("a wake that also pins `confirmed` (a re-confirm) is stored and sends nothing", "confirmed" in rd(g_pin[0], int(g_pin[1:])) and rd(g_pin[0], int(g_pin[1:]))["metadata"].get("hold") is None
       and len(F.log) == log0 and not comments(n_pin), (len(F.log) - log0, comments(n_pin)))
 # a release by the last `after` closing, and an item that still waits on another
@@ -489,7 +490,7 @@ g_anc, n_anc = made("[home] waits on an anchor"); server._update(g_anc, hold=Tru
 from stackshot.anchors import anchors as _anc
 ANCHOR = "https://github.com/o/other/pull/9"; ast = _anc.load(); _anc.add(ast, "projects/alpha", [ANCHOR], [g_anc], "home-here"); _anc.save(ast)
 log0 = len(F.log)
-rel = server._anchor_release("projects/alpha", {"kind": "anchor", "anchor": ANCHOR, "to": OWNER, "ruling": "passed", "ruled_at": time.time() + 5, "ts": time.time() + 5, "id": "n-test"}, by="home-here")
+rel = wakes_svc.anchor_release("projects/alpha", {"kind": "anchor", "anchor": ANCHOR, "to": OWNER, "ruling": "passed", "ruled_at": time.time() + 5, "ts": time.time() + 5, "id": "n-test"}, by="home-here")
 G.drain(GH, STORE, say=lambda s: None)
 check("an anchor's notice releases the hold (stored); nothing is sent", rel == [g_anc] and rd(g_anc[0], int(g_anc[1:]))["metadata"].get("hold") is None and len(F.log) == log0 and not comments(n_anc), (rel, F.log[log0:]))
 # a recycle done: one item waiting for it, one whose hold waited only for it
@@ -788,7 +789,7 @@ check("while temporary, /items/board-tmp-boxa-1 serves the item; /items/l1 and t
 # directly: a write here would queue a fourth job)
 told = []; telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 it_l1 = rd("l", 1); it_l1["metadata"] = {**it_l1["metadata"], "needs": ["home-other"], "mover": "home-here"}
-server._wake_notify("l1", it_l1, "woke (wake 2020-01-01)")
+wakes_svc.wake_notify("l1", it_l1, "woke (wake 2020-01-01)")
 _pr, _fs = server._anc.pilot_root, telling.front_keeper
 server._anc.pilot_root = lambda p: p; telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try:
@@ -855,7 +856,7 @@ mk = lambda subject, **kw: G.norm(made(subject, **kw)[0])   # the reply says boa
 g_wk = mk("[home] held until a wake"); server._update(g_wk, hold=True, wake="2099-01-01", sender="home-here")
 f_wk = STORE / g_wk[0] / f"{g_wk[1:]}.json"; j = json.loads(f_wk.read_text())      # the wake come, and a session in needs (the notice with a link)
 j["metadata"].update(until="2020-01-01", needs=["home-other"], mover="home-here"); f_wk.write_text(json.dumps(j))
-told.clear(); server._wake_pass(); G.drain(GH, STORE, say=lambda s: None)
+told.clear(); wakes_svc.wake_pass(); G.drain(GH, STORE, say=lambda s: None)
 check("a wake notice (a time wait ending) names the item board#<n>, links its item page (never the card anchor #task-g-<n>), and keeps g<n> for the stderr tag",
       any(t[0] == g_wk and t[2].startswith(f"[stackshot] board#{num(g_wk)} is yours now: its until 2020-01-01 came. ") and re.search(re.escape(f"→ https://board.example.org/items/{num(g_wk)}") + r"( · notice [0-9a-f]{6})?$", t[2])
           and not re.search(rf"(?<![\w/-]){g_wk}\b", t[2]) for t in told), told)
@@ -1340,7 +1341,7 @@ F.down = False
 write_toml(sync=False, issue_ids=False); server._cfg.reload(); F.log.clear()
 server._update(f"g{n1}", hold=True, wake="2026-12-01", sender="home-here")
 import datetime as _dt
-woke = server._wake_pass(_dt.date(2027, 1, 1))
+woke = wakes_svc.wake_pass(_dt.date(2027, 1, 1))
 check("the issue link: the mirror turned off again, the item's page shows none", not G.enabled() and ghl(ui_render.Board(str(STORE)).item_html(f"g{n1}")) == [],
       ghl(ui_render.Board(str(STORE)).item_html(f"g{n1}")))
 check("with sync off a wake pass releases the item and queues nothing, sends nothing", f"g{n1}" in woke and qlen() == 0 and not F.log, (woke, qlen(), F.log))

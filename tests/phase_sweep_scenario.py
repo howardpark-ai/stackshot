@@ -60,6 +60,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.service import wakes as wakes_svc
 from stackshot.service import runner as runner_svc
 from stackshot.service import telling
 from stackshot.core import store as _core_store
@@ -148,7 +149,7 @@ try:
     d30 = raw(30); d30["status"] = "completed"; d30["metadata"]["outcome"] = "done"
     (T / "store/g/30.json").write_text(json.dumps(d30, ensure_ascii=False, indent=1))
     with frozen(TL):
-        released = server._release_after("g30", "done", "", "")
+        released = wakes_svc.release_after("g30", "done", "", "")
 finally:
     CFGM.update(switchover=False); CFGM.pop("switchover_fallback", None)
 check("2 E4: the item g31 waits after closed; the old release stood down, so g31 still stores waiting/item", released == [] and pair(31) == ("waiting", "item"), (released, pair(31)))
@@ -175,7 +176,7 @@ check("2 E6: …and the sweep that follows finds nothing", sweep(TL) == [], None
 with contextlib.redirect_stderr(buf), frozen(TL):
     server._on_hup()
 check("2 E6: …the reload that puts it back restamps it waiting", pair(50) == ("waiting", "time"), pair(50))
-check("2 the start runs the sweep after the wake pass and before the runner starts", (lambda s: 0 < s.index("_wake_pass()") < s.index("_phase_tick()") < s.index("_runner.start()"))(inspect.getsource(server._start_background)), None)
+check("2 the start runs the sweep after the wake pass and before the runner starts", (lambda s: 0 < s.index("wake_pass()") < s.index("_phase_tick()") < s.index("_runner.start()"))(inspect.getsource(server._start_background)), None)
 
 # ---- 3. no item lock unless something is stamped
 res = {}
@@ -195,7 +196,7 @@ put(60, needs=[BACK], state="doing", hold=True, wake=local_str(TL + 3 * H)); swe
 d = raw(60); d["metadata"]["phase"] = "alive"; d["metadata"].pop("waits_on")
 (T / "store/g/60.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))                     # stale: the fields read waiting
 calls = []
-real = {(m, k): getattr(m, k) for m, k in ((server, "_foryou_on_save"), (server, "_landed_on_save"), (server, "_handoff_on_save"), (telling, "tell_woken"), (telling, "push_noted"), (server, "_wake_tell"))}
+real = {(m, k): getattr(m, k) for m, k in ((server, "_foryou_on_save"), (server, "_landed_on_save"), (server, "_handoff_on_save"), (telling, "tell_woken"), (telling, "push_noted"), (wakes_svc, "wake_tell"))}
 real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name)

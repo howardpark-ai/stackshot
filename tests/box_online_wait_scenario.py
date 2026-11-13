@@ -1,4 +1,4 @@
-"""Scenario test for the event wait `box_online <machine>` (event_waits.py, server._evwait_box_poll) — fixture data, no live store, no network, no server socket.
+"""Scenario test for the event wait `box_online <machine>` (event_waits.py, evwaits_svc.evwait_box_poll) — fixture data, no live store, no network, no server socket.
 
 An item whose mover waits for an offline machine used to park on a dated backstop and sit there after the machine was back. The wait names the machine; the server reads the machine's puller
 check-ins itself (liveness.puller_online) and turns the item to its post-wake mover on the first pass after the machine is online. Covered:
@@ -69,6 +69,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
+from stackshot.service import watching as watching_svc, event_waits as evwaits_svc
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
@@ -147,14 +148,14 @@ _fresh = {"letter": "d", "fleet": "box-b", "first": iso(now0 - 9 * DAY), "puller
 _stale = {"letter": "e", "fleet": "box-b", "first": iso(now0 - 9 * DAY), "puller": iso(now0 - 3 * 3600.0)}
 for order, ms in (("stale first", {"host-b-old": _stale, "host-b": _fresh}), ("fresh first", {"host-b": _fresh, "host-b-old": _stale})):
     state_with(ms)
-    bx = server._evw_boxes()
+    bx = evwaits_svc.evw_boxes()
     check(f"duplicates ({order}): the record with the newest check-in speaks for the fleet name, under the fleet name and under both hostnames", all(bx[k][1] == _fresh for k in ("box-b", "host-b", "host-b-old")), bx.get("box-b"))
     refused(f"duplicates ({order}): so a wait on that machine is refused as online, not accepted on the stale record", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box-b is online now")
 # a clients state that is not a table of records knows no machine and never raises out of the write
 for label, ms in (("a machine record that is not a dict", {"host-b": "garbage", "host-a": 7, "host-x": None}), ("machines that is not a dict", ["host-b"]), ("machines that is a string", "host-b")):
     state_with(ms)
     try:
-        bx = server._evw_boxes(); ok = {f for f, _r in bx.values()} == {"box-a", "box-b", "box-c"} and all(r == {} for _f, r in bx.values())
+        bx = evwaits_svc.evw_boxes(); ok = {f for f, _r in bx.values()} == {"box-a", "box-b", "box-c"} and all(r == {} for _f, r in bx.values())
     except Exception as e:
         bx, ok = f"{e.__class__.__name__}: {e}", False
     check(f"non-dict state ({label}): no machine is known from it, the names table still is, and nothing raises", ok, bx)
@@ -186,13 +187,13 @@ item(20, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_w
 item(21, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for box-b (two)")
 item(22, wait_kind="event", wait_event="box_online box-c", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for box-c, which stays away")
 reset()
-check("wake: while box-b is offline the pass turns nothing, however often it runs", server._evwait_poll(now0) == [] and server._evwait_poll(now0 + 60) == [] and mt(20).get("wait_kind") == "event" and not sent(), (mt(20), sent()))
-server._EVW_LAST[0] = 0.0
-check("wake: ...the runner's tick is the same pass", server._evwait_tick() == [], None)
+check("wake: while box-b is offline the pass turns nothing, however often it runs", evwaits_svc.evwait_poll(now0) == [] and evwaits_svc.evwait_poll(now0 + 60) == [] and mt(20).get("wait_kind") == "event" and not sent(), (mt(20), sent()))
+evwaits_svc.EVW_LAST[0] = 0.0
+check("wake: ...the runner's tick is the same pass", evwaits_svc.evwait_tick() == [], None)
 PULLERS["host-b"] = time.time(); write_state()          # box-b's puller checks in again
 reset()
-server._EVW_LAST[0] = 0.0
-fired = server._evwait_tick()
+evwaits_svc.EVW_LAST[0] = 0.0
+fired = evwaits_svc.evwait_tick()
 check("wake: the first pass after the puller checks in turns every item waiting for that machine to its post-wake mover; another machine's wait stays",
       {"a20", "a21", "a10"} <= set(fired) and "a22" not in fired and mt(20).get("mover") == BACK and mt(21).get("mover") == BACK and "wait_kind" not in mt(20) and mt(22).get("wait_kind") == "event", (fired, mt(20), mt(22)))
 check("wake: ...with what arrived recorded on the item (woke) and the History line the server writes", "box-b is online again" in mt(20)["woke"]["what"]
@@ -200,14 +201,14 @@ check("wake: ...with what arrived recorded on the item (woke) and the History li
 check("wake: ...the mover is told once, in one message that names the items", len([x for x in sent("watch") if x[1] == UB]) == 1 and {"a20", "a21"} <= {g for x in sent("watch") for g in x[0].split(",")}
       and "box-b is online again" in sent("watch")[0][2], sent())
 reset()
-check("wake: ...the next pass does nothing more", server._evwait_poll(time.time() + 200) == [] and not sent(), sent())
+check("wake: ...the next pass does nothing more", evwaits_svc.evwait_poll(time.time() + 200) == [] and not sent(), sent())
 
 # ================================================================ a machine that never returns: the wait stays until its backstop day
-check("never: a machine that stays away leaves its wait open, pass after pass, and the stall pass does not look at it", all(server._evwait_poll(now0 + 300 + 60 * k) == [] for k in range(5)) and mt(22).get("wait_kind") == "event"
+check("never: a machine that stays away leaves its wait open, pass after pass, and the stall pass does not look at it", all(evwaits_svc.evwait_poll(now0 + 300 + 60 * k) == [] for k in range(5)) and mt(22).get("wait_kind") == "event"
       and S.not_due({**rd(22), "gid": "a22"}, now0 + 3 * DAY) != "" and wk.due(rd(22), now0) == "", mt(22))
 item(23, wait_kind="event", wait_event="box_online box-c", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] box-c never came back")
 reset()
-woke = server._watch_pass(now0)
+woke = watching_svc.watch_pass(now0)
 check("backstop: the day passes with the machine still away: the item comes back to its post-wake mover saying the event did not come, naming the machine",
       "a23" in woke and mt(23).get("mover") == BACK and "the event did not come" in mt(23)["woke"]["what"] and "box-c coming online" in mt(23)["woke"]["what"] and "wait_kind" not in mt(23) and "a22" not in woke, (woke, mt(23)))
 
@@ -215,7 +216,7 @@ check("backstop: the day passes with the machine still away: the item comes back
 write_state()
 item(24, wait_kind="event", wait_event="box_online box-a", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] box-a is online")
 reset()
-check("pass: an open wait whose machine is online turns on the next pass (the refusal is at the write only)", server._evwait_poll(time.time()) == ["a24"] and mt(24).get("mover") == BACK, mt(24))
+check("pass: an open wait whose machine is online turns on the next pass (the refusal is at the write only)", evwaits_svc.evwait_poll(time.time()) == ["a24"] and mt(24).get("mover") == BACK, mt(24))
 
 # ================================================================ the tool text
 tools = {t.name: t for t in asyncio.run(server.mcp.list_tools())}

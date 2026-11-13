@@ -28,12 +28,12 @@ An item that waits on a list of waits (stored shape: `docs/item-model.md`) is th
 
 Chases (`metadata.chases`) are not part of a list yet: a list is never chased. With the watchers off (`[model] watchers = false`) nothing marks a line (the `after` release and the held-anchor release never take a list item), but the legacy wake pass still ends a list at its backstop day, by the same path and in the same words as the watchers would, an open `relay` line asking the owner too, except in one combination of the switches (the table); a list that does not hold is the date alone for every reader (`waiting.kind_of`, `until_write.kind_of`) and ends as that. The scheduler's next moment for a list is the earliest of its backstop day and its open `time` lines. A list whose end failed is left alone for ten minutes (`watchers.BACKOFF`) by either pass, and one list that fails never stops the lists after it in the same pass.
 
-**Who ends a list at its backstop day, by the switches** (`watchers.watches`, `server._wake_pass`, `server._old_wait_off`; `[model] pause = true` holds every row of the table and the due ones end in one pass when it turns false). `switchover` counts as on only while `[model] guards` is on too.
+**Who ends a list at its backstop day, by the switches** (`watchers.watches`, `wake_pass` in `stackshot/service/wakes.py`, `server._old_wait_off`; `[model] pause = true` holds every row of the table and the due ones end in one pass when it turns false). `switchover` counts as on only while `[model] guards` is on too.
 
 | `[model] watchers` | `[model] switchover` | `[model] switchover_fallback` | Who ends the list at its backstop day | Its lines |
 |---|---|---|---|---|
-| on (default) | any | any | the watchers (`_watch_pass`, run by the wake pass) | marked as they arrive; the group's mode ends it earlier |
-| off | off (default) | any | the legacy wake pass (`_watch_fire(legacy=True)`), in the watchers' words | never marked, so only the backstop day ends it |
+| on (default) | any | any | the watchers (`watch_pass`, run by the wake pass) | marked as they arrive; the group's mode ends it earlier |
+| off | off (default) | any | the legacy wake pass (`watch_fire(legacy=True)`), in the watchers' words | never marked, so only the backstop day ends it |
 | off | on | on (default) | the legacy wake pass, as in the row above | never marked |
 | off | on | off | nobody: `_old_wait_off()` stands the legacy wake pass down, so the list stays until a watcher is switched on or its mover ends it by hand | never marked |
 

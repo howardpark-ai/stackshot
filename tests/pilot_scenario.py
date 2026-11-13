@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import wakes as wakes_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import brief as _wt_brief
@@ -1175,7 +1176,7 @@ runner_svc.WAKE_EVENT.clear(); e = refusal(lambda: server._update("a3", hold=Tru
 check("hold: hold=true with no wake, after, anchor or recycle is refused, naming the four conditions",
       e.startswith("Refused: a hold names what it waits for; an unconditional or indefinite park is refused.") and all(x in e for x in ("wake=", "after=[\"board#N\"]", "anchors(project, add=[url], items=[\"a3\"])", "recycle=true"))
       and not held_("a3") and not runner_svc.WAKE_EVENT.is_set(), e)
-check("minute loop: no next wake while nothing is on hold", server._next_wake() is None, server._next_wake())
+check("minute loop: no next wake while nothing is on hold", wakes_svc.next_wake() is None, wakes_svc.next_wake())
 # an item waiting on the owner is never held. The refusal
 # names the after form; a hold whose next says it waits on him is noted, never refused (a wake on an item he has answered is fine)
 check("hold (owner wait): the refusal names the after form for a hold that waits on the owner's decision",
@@ -1250,7 +1251,7 @@ for g, w in (("a3", D(-2)), ("a5", D(-1)), ("a8", D(0))):
     it = rd(g); setwk_(it["metadata"], w); it["updated"] = it["state_updated"] = 1000.0
     (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
 led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 a3, a5, a7, a8 = rd("a3"), rd("a5"), rd("a7"), rd("a8")
 check("wake pass: the items due (yesterday's and today's wake) are released, the one not due stays on hold", sorted(woke) == ["a3", "a5", "a8"]
       and all(x["status"] == "open" and "hold" not in x["metadata"] for x in (a3, a5, a8)) and held_("a7") and wk_(a7["metadata"]) == D(5), (woke, a3, a7, a8))
@@ -1265,14 +1266,14 @@ check("wake pass (the turn rule's fourth build): the owner is told once for the 
       len(p) == n0 + 1 and p[n0][0] == B and p[n0][1].startswith("[stackshot] 3 items are yours now, their waits ended:\n")
       and [x.split(" [home]")[0] for x in _w3 if x.startswith("- a")] == [f"- a3: its until {D(-2)} came.", f"- a5: its until {D(-1)} came.", f"- a8: its until {D(0)} came."], p[n0:])
 check("wake pass: it owes no page", json.dumps(server._owed_load(), sort_keys=True) == led0)
-check("wake pass: a second run finds nothing and tells nobody", server._wake_pass() == [] and len(wait_push(0)) == n0 + 1)
+check("wake pass: a second run finds nothing and tells nobody", wakes_svc.wake_pass() == [] and len(wait_push(0)) == n0 + 1)
 # the item (the item before it): an item whose needs names no session wakes the keeper of its page, whatever its needs (an agent prepares the ask):
 # its keeper; on a sub-page that names an agent, that agent. The keeper's own item: the owner's line
 for i, proj, owner, needs in ((41, "projects/alpha", A, ""), (42, "projects/alpha/sub", A, ""), (43, "projects/alpha", A, "external"),
                               (44, "projects/alpha/kept", A, ""), (45, "projects/alpha", S, ""), (46, "projects/alpha", A, "decision")):
     item(i, proj, owner); it = rd(f"a{i}"); it["metadata"].update(hold=True, wake=D(-1), **({"needs": needs} if needs else {})); (T / f"store/a/{i}.json").write_text(json.dumps(it))
 n0 = len(wait_push(0))
-woke = server._wake_pass(); p = wait_push(n0 + 2); new = p[n0:]
+woke = wakes_svc.wake_pass(); p = wait_push(n0 + 2); new = p[n0:]
 to = {ln.split()[1]: m[0] for m in new for ln in m[1].splitlines() if re.match(r"(\[stackshot\]|-) a4\d ", ln)}
 check("wake to agent: every item woke; one message per session (the turn rule's fourth build): the -main agent that moves five of them gets one message, the keeper that moves a45 another (each item goes to its mover alone)",
       sorted(woke) == [f"a{i}" for i in range(41, 47)] and len(new) == 2 and sorted(m[0] for m in new) == sorted([A, S]), (woke, new))
@@ -1299,7 +1300,7 @@ _push = telling.PUSH; telling.PUSH = [sys.executable, str(T / "failpush.py")]
 it = rd("a7"); setwk_(it["metadata"], D(-1)); (T / "store/a/7.json").write_text(json.dumps(it))
 _err = io.StringIO()
 with contextlib.redirect_stderr(_err):
-    woke = server._wake_pass()
+    woke = wakes_svc.wake_pass()
     for _ in range(300):    # a failed push is told on stderr first and recorded on the item after, and the hand-off's one resend is a second thread
                             # that records its own failure: wait for both records, or one lands after the hold update below (which drops them) and stays
         if "notice to" in _err.getvalue() and {x.get("tag") for x in rd("a7")["metadata"].get("undelivered") or []} >= {"watch", "handoff"}: break
@@ -1329,18 +1330,18 @@ for w_, want_ in ((f"{d2}T12:00:30", f"{d2}T12:00"), (f"{d2}T12:00+04:00", f"{d2
     res = server._update("a9", wake=w_, sender="home-beta")
     check(f"timed wake: {w_} is stored as {want_} (the instance time) and the update says it", wk_(rd("a9")["metadata"]) == want_, (wk_(rd("a9")["metadata"]), res))
 server._update("a9", wake=f"{d2}T13:30", sender="home-beta")
-at9 = server._wake_at(f"{d2}T13:30")
+at9 = wakes_svc.wake_at(f"{d2}T13:30")
 check("timed wake: _wake_at reads both forms in the instance zone", at9 == datetime.datetime.fromisoformat(f"{d2}T13:30").replace(tzinfo=tz_)
-      and server._wake_at(d2) == datetime.datetime.fromisoformat(f"{d2}T00:00").replace(tzinfo=tz_) and at9.utcoffset() == datetime.timedelta(hours=4), at9)
-check("minute loop: the next wake is the timed item's minute, ahead of a date-only wake later", server._next_wake() == at9, (server._next_wake(), at9))
-check("timed wake: a pass a minute before the instant leaves it on hold", server._wake_pass(now=at9 - datetime.timedelta(minutes=1)) == [] and held_("a9"))
-woke = server._wake_pass(now=at9)
+      and wakes_svc.wake_at(d2) == datetime.datetime.fromisoformat(f"{d2}T00:00").replace(tzinfo=tz_) and at9.utcoffset() == datetime.timedelta(hours=4), at9)
+check("minute loop: the next wake is the timed item's minute, ahead of a date-only wake later", wakes_svc.next_wake() == at9, (wakes_svc.next_wake(), at9))
+check("timed wake: a pass a minute before the instant leaves it on hold", wakes_svc.wake_pass(now=at9 - datetime.timedelta(minutes=1)) == [] and held_("a9"))
+woke = wakes_svc.wake_pass(now=at9)
 check("timed wake: a pass at the instant releases it and drops the wake; the date-only hold stays", woke == ["a9"] and rd("a9")["status"] == "open" and not held_("a9")
       and "wake" not in rd("a9")["metadata"] and held_("a7"), (woke, rd("a9"), rd("a7")))
 res = server._update("a9", hold=True, wake=D(1), sender="home-beta")
 check("date-only wake: still stored as YYYY-MM-DD", wk_(rd("a9")["metadata"]) == D(1), res)
 check("date-only wake: a pass given a date takes the whole day, as before (not due today, due on its day)",
-      server._wake_pass(now=today) == [] and server._wake_pass(now=today + datetime.timedelta(days=1)) == ["a9"] and not held_("a9"))
+      wakes_svc.wake_pass(now=today) == [] and wakes_svc.wake_pass(now=today + datetime.timedelta(days=1)) == ["a9"] and not held_("a9"))
 p = wait_push(n9 + 2)
 check("timed and date-only wakes: the owner is told each time, the date as stored", sorted(x[1].split(" [home]")[0] for x in p[n9:]) == sorted([   # pushed from threads: either order
       f"[stackshot] a9 is yours now: its until {d2}T13:30 came.",
@@ -1373,7 +1374,7 @@ for i_, w_ in ((91, D(3)), (92, "")):
     (T / f"store/a/{i_}.json").write_text(json.dumps(d_))
 check("legacy: before the migration, _load reads it as open + hold", server._load("a91")["status"] == "open" and server._load("a91")["metadata"].get("hold") is True
       and json.loads((T / "store/a/91.json").read_text())["status"] == "on_hold")
-check("legacy: before the migration, its wake is on the minute loop's list", "a91" in [g for g, *_ in server._wakes()])
+check("legacy: before the migration, its wake is on the minute loop's list", "a91" in [g for g, *_ in wakes_svc.wake_rows()])
 bl_ = ui_render.Board(str(T / "store"))
 check("legacy: before the migration, the board draws it held, never on others", {"a91", "a92"} <= {r["gid"] for r in bl_.held} and not {"a91", "a92"} & {r["gid"] for r in bl_.n_relay})
 check("legacy: before the migration, the brief tool lists it on hold", "a91 [open · on hold]" in _wt_brief.stackshot_brief().partition("\n\nOn hold (")[2])
@@ -1397,7 +1398,7 @@ runner_svc.WAKE_EVENT.clear()
 res = server._update("a30", wake=D(2), next="home-beta: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
 check("wake alone: a wake alone is stored as the wait on that date and is no hold; its own step passes; the reply shows the item waiting",
       wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "home-beta: review the draft" and res.startswith("updated a30.\na30 [open · on hold] ") and f"until: {D(2)}" in res, res)
-check("wake alone: it wakes the minute loop and is on its list", runner_svc.WAKE_EVENT.is_set() and "a30" in [g for g, *_ in server._wakes()])
+check("wake alone: it wakes the minute loop and is on its list", runner_svc.WAKE_EVENT.is_set() and "a30" in [g for g, *_ in wakes_svc.wake_rows()])
 b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
 check("wake alone: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
 _wk30 = re.search(r"<dt>Wake</dt><dd>([^<]*)</dd>", ip_)
@@ -1417,7 +1418,7 @@ for g in ("a30", "a25"):
     it = rd(g); setwk_(it["metadata"], D(-1)); (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
 clk = {g: (rd(g)["state_updated"], rd(g).get("confirmed")) for g in ("a30", "a25")}; nd_b = rd("a25")["metadata"].get("needs")
 led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0))
-woke = server._wake_pass(); r_wk1, r_wk2 = rd("a30"), rd("a25"); p = wait_push(n0 + 2)
+woke = wakes_svc.wake_pass(); r_wk1, r_wk2 = rd("a30"), rd("a25"); p = wait_push(n0 + 2)
 check("wake alone pass: both items are told their date came; the date and kind are gone, next and status as they were",
       sorted(woke) == ["a25", "a30"] and all(x["status"] == "open" and "until" not in x["metadata"] and "wait_kind" not in x["metadata"] and "hold" not in x["metadata"] for x in (r_wk1, r_wk2))
       and r_wk1["metadata"].get("next") == "home-beta: review the draft", (woke, r_wk1, r_wk2))
@@ -1427,7 +1428,7 @@ check("wake alone pass: the mover of a30 is told its one line, and a25's mover (
       and [m[1].split(" [home]")[0] for m in _rem_s] == [f"[stackshot] a25 is yours now: its until {D(-1)} came."], p[n0:])
 pj = json.load(open(T / "store/projects.json")); pj["pages"].pop("projects/zz"); (T / "store/projects.json").write_text(json.dumps(pj))
 check("wake alone pass: it owes no page, and a second pass finds nothing and tells nobody",
-      json.dumps(server._owed_load(), sort_keys=True) == led0 and server._wake_pass() == [] and len(wait_push(0)) == n0 + 2)
+      json.dumps(server._owed_load(), sort_keys=True) == led0 and wakes_svc.wake_pass() == [] and len(wait_push(0)) == n0 + 2)
 b_ = ui_render.Board(str(T / "store"))
 check("wake alone pass: the items stay in their lane, still active", {"a30", "a25"} <= {r["gid"] for r in b_.agent} and not {"a30", "a25"} & {r["gid"] for r in b_.held})
 # hold=true with a wake parks and releases as before; an item stored held with a wake before the change still releases at its wake
@@ -1437,14 +1438,14 @@ check("park: hold=true with a wake is waiting on its date, parked out of the act
       and "a34" in [r["gid"] for r in _b34.held] and "a34" not in [r["gid"] for r in _b34.agent + _b34.n_call + _b34.n_relay], ([r["gid"] for r in _b34.held], [r["gid"] for r in _b34.agent]))
 it = rd("a34"); setwk_(it["metadata"], D(-1)); (T / "store/a/34.json").write_text(json.dumps(it))
 it = rd("a31"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/31.json").write_text(json.dumps(it))   # as a file written before the change holds it
-n0 = len(wait_push(0)); woke = server._wake_pass(); p = wait_push(n0 + 1)
+n0 = len(wait_push(0)); woke = wakes_svc.wake_pass(); p = wait_push(n0 + 1)
 check("park: at the wake both are released, the date gone, both clocks moved, and the owner told for each (one message)",
       sorted(woke) == sorted(["a34", "a31"]) and not held_("a34") and not held_("a31") and all("wake" not in rd(g)["metadata"] and "until" not in rd(g)["metadata"] and rd(g)["updated"] == rd(g)["state_updated"] for g in ("a34", "a31"))
       and len(p) == n0 + 1 and p[n0][1].count("a31 woke (wake") == 1 and f"a34 is yours now: its until {D(-1)} came." in p[n0][1], (woke, p[n0:]))
 # one pass with a parked item released and a backstop due, both for the same owner: still one message for the session, naming both
 it = rd("a36"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/36.json").write_text(json.dumps(it))
 it = rd("a37"); setwk_(it["metadata"], D(-1)); (T / "store/a/37.json").write_text(json.dumps(it))
-n0 = len(wait_push(0)); woke = server._wake_pass(); p = wait_push(n0 + 1)
+n0 = len(wait_push(0)); woke = wakes_svc.wake_pass(); p = wait_push(n0 + 1)
 check("mixed pass: a released hold and a backstop for one owner come in one message, each line saying what it is",
       sorted(woke) == ["a36", "a37"] and len(p) == n0 + 1 and p[n0][0] == B and p[n0][1].splitlines()[0] == "[stackshot] 2 items came due for you (woken, or a backstop came due):"
       and sorted(p[n0][1].splitlines()[1:3]) == sorted([f"- a36 woke (wake {D(-1)}): back in its lane (on agent, by its needs)",
@@ -1873,7 +1874,7 @@ check("create: a background agent may create an item: no refusal; the creator is
 # notices: the wake goes to the session named in needs; a front agent owner hears no move to decision, and its keeper a close
 # and a reopen by another session
 it = rd(gl); it["metadata"].update(hold=True, wake=D(-1)); (T / f"store/{gl[0]}/{gl[1:]}.json").write_text(json.dumps(it))
-time.sleep(0.5); n0 = len(wait_push(0)); server._wake_pass(); time.sleep(0.5); p = wait_push(n0 + 1)
+time.sleep(0.5); n0 = len(wait_push(0)); wakes_svc.wake_pass(); time.sleep(0.5); p = wait_push(n0 + 1)
 wk = [m for m in p[n0:] if f" {gl} woke" in m[1]]
 check("needs: the wake goes to the session named (its mover); the creator and the keeper hear nothing", len(wk) == 1 and wk[0][0] == ya and "keeper of record" not in wk[0][1]
       and not [m for m in p[n0:] if m[0] in (A, S)], p[n0:])
@@ -1933,7 +1934,7 @@ check("pilot_relay sends a front agent no page-owed notice", r_ == "" and not [m
 _rg3["pages"]["projects/alpha"]["agents"].pop("work-osprey-x"); (T / "store/projects.json").write_text(json.dumps(_rg3))
 for i, ow in ((47, "home-beta-main"), (48, "nobody-roleless")):
     item(i, "projects/beta", ow); it = rd(f"a{i}"); it["metadata"].update(hold=True, wake=D(-1)); (T / f"store/a/{i}.json").write_text(json.dumps(it))
-n0 = len(wait_push(0)); woke = server._wake_pass(); pw = wait_push(n0 + 2)[n0:]
+n0 = len(wait_push(0)); woke = wakes_svc.wake_pass(); pw = wait_push(n0 + 2)[n0:]
 check("an item wakes its mover alone, whoever it is (a front agent or a session with no role): each hears its own, short, with no keeper of record named",
       sorted(m[0] for m in pw) == sorted([server._session_id("home-beta-main"), server._session_id("nobody-roleless")]) and all(m[1].startswith("[stackshot] a4") and "keeper of record" not in m[1] for m in pw), pw)
 for i in (47, 48): (T / f"store/a/{i}.json").unlink()
@@ -1965,7 +1966,7 @@ check("…so it is still charged as alpha's keeper", telling.pilot_charge("proje
 n0 = len(wait_push(0)); r_ = telling.pilot_relay("projects/alpha", "a1", rd("a1"), "changed (next)", B, S); pk = wait_push(n0 + 1)
 check("…and gets alpha's page-owed notice, unmarked", "charged to the keeper" in r_ and any(m[0] == S and m[1].startswith("[board] a1 ") for m in pk[n0:]), (r_, pk[n0:]))
 item(49, "projects/alpha", A); it = rd("a49"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/49.json").write_text(json.dumps(it))
-n0 = len(wait_push(0)); server._wake_pass(); pw = [m for m in wait_push(n0 + 1)[n0:] if " a49 " in m[1]]
+n0 = len(wait_push(0)); wakes_svc.wake_pass(); pw = [m for m in wait_push(n0 + 1)[n0:] if " a49 " in m[1]]
 check("…and alpha's wake goes to the item's mover, unmarked", len(pw) == 1 and pw[0][0] == server._session_id("work-osprey-main") and pw[0][1].startswith("[stackshot] a49 woke") and _wt_text._FOR_OWNER not in pw[0][1], pw)
 (T / "store/a/49.json").unlink(); _rg4["pages"]["projects/beta"]["agents"].pop("work-osprey"); (T / "store/projects.json").write_text(json.dumps(_rg4))
 check("needs: the create, update and get descriptions say it; agent=, observers and after are parameters of both tools", _wt_text._NEEDS_FORM in _wt_update._UPDATE_DESC and "agent=\"none\" takes the sessions out" in _wt_text._NEEDS_FORM
@@ -2119,7 +2120,7 @@ check("anchor wait: a notice the keeper passes releases the hold and its wake; t
 check("anchor wait: the owner is told what released it", any(m[0] == B and m[1].startswith(f"[stackshot] {g5} woke: a notice from {TH}, the anchor it waited on, was passed by home-beta") for m in p[n0:]), p[n0:])
 check("anchor wait: the release moves both clocks (so one notice never releases twice)", rd(g5)["state_updated"] >= t0 and rd(g5)["updated"] == rd(g5)["state_updated"], rd(g5))
 server._update(g5, hold=True, wake=wk, sender="home-beta")
-check("anchor wait: a notice older than the park releases nothing", server._anchor_release("projects/beta", next(n for n in routing.read("projects/beta") if n["id"] == n_p)) == [] and held_(g5))
+check("anchor wait: a notice older than the park releases nothing", wakes_svc.anchor_release("projects/beta", next(n for n in routing.read("projects/beta") if n["id"] == n_p)) == [] and held_(g5))
 n_m = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="merged", target="for home-beta", anchor=TH)
 _wt_route._route(n_m, "merged", reason="in the digest", sender="home-beta")
 check("anchor wait: merged releases too", not held_(g5), rd(g5)["metadata"])
@@ -2127,15 +2128,15 @@ n_o = routing.record("projects/beta", kind="anchor", to=B, label="Slack #ops", w
 server._update(g5, hold=True, wake=wk, sender="home-beta"); time.sleep(0.05); _wt_route._route(n_o, "passed", to="home-beta", reason="not this thread", sender="home-beta")
 check("anchor wait: a notice from an anchor not scoped to the item releases nothing", held_(g5), rd(g5)["metadata"])
 _pj = json.loads((T / "store/projects.json").read_text()); _keep_beta = _pj["pages"]["projects/beta"].get("session"); _pj["pages"]["projects/beta"]["session"] = ""; (T / "store/projects.json").write_text(json.dumps(_pj))
-check("anchor wait: with no keeper, a pass before any notice releases nothing", server._anchor_pass() == [] and held_(g5))
+check("anchor wait: with no keeper, a pass before any notice releases nothing", wakes_svc.anchor_pass() == [] and held_(g5))
 routing.record("projects/beta", kind="anchor", to="", label="GitHub #7", who="hub", text="logged, not delivered", target="direct", anchor=TH, reason="direct: log only")
-check("anchor wait: with no keeper, a log-only direct line (no recipient) releases nothing", server._anchor_pass() == [] and held_(g5))
+check("anchor wait: with no keeper, a log-only direct line (no recipient) releases nothing", wakes_svc.anchor_pass() == [] and held_(g5))
 _g5m = rd(g5); _g5m["metadata"]["mover"] = "home-beta"; (T / f"store/{g5[0]}/{g5[1:]}.json").write_text(json.dumps(_g5m))      # a project with no keeper, no builder and no -main agent has no default mover, so the item names its own
 routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="Kim wrote again", target="for home-beta", anchor=TH)
-n0 = len(wait_push(0)); rel = server._anchor_pass(); p = wait_push(n0 + 1)
+n0 = len(wait_push(0)); rel = wakes_svc.anchor_pass(); p = wait_push(n0 + 1)
 check("anchor wait: …and the notice itself does once it arrives, saying the project has no keeper", rel == [g5] and not held_(g5)
       and any(m[1].startswith(f"[stackshot] {g5} woke: a notice from {TH}, the anchor it waited on, arrived (nobody rules this project's notices)") for m in p[n0:]), (rel, p[n0:]))
-check("anchor wait: the pass releases once", server._anchor_pass() == [])
+check("anchor wait: the pass releases once", wakes_svc.anchor_pass() == [])
 _pj["pages"]["projects/beta"]["session"] = _keep_beta; (T / "store/projects.json").write_text(json.dumps(_pj))
 check("anchor wait: the update description says how the hold is released", "releases the hold when the project's router (or the project's builder, else its -main agent) passes or merges a notice from that anchor" in _wt_update._UPDATE_DESC)
 
@@ -2171,7 +2172,7 @@ check("mirror off: update, confirm and complete without a sender go through, wri
 res = mk(); g6 = gid_of(res); res = mk(); g7 = gid_of(res)
 setf(g6, confirmed=5000.0, state_updated=5000.0, metadata={**rd(g6)["metadata"], "hold": True, "wake": D(-1)})
 it7 = rd(g7); it7.pop("confirmed"); it7.update(state_updated=4000.0, updated=4000.0, metadata={**it7["metadata"], "hold": True, "wake": D(-1)}); (T / f"store/{g7[0]}/{g7[1:]}.json").write_text(json.dumps(it7))
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 check("wake pass: confirmed is not moved, so a woken item reads stale until its owner refreshes it", g6 in woke and rd(g6)["confirmed"] == 5000.0 and rd(g6)["state_updated"] > 5000.0
       and render.freshness(rd(g6), time.time())[0] == "stale", rd(g6))
 check("wake pass: an item with no confirmed is pinned at the clock it read as (its old state_updated)", g7 in woke and rd(g7)["confirmed"] == 4000.0 and render.freshness(rd(g7), time.time())[0] == "stale", rd(g7))
@@ -3433,20 +3434,20 @@ for n in routing.read("projects/alpha"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="done with the delivery checks", by="work-osprey")
 check("the held item a54 is still held: the earlier log-only lines came while it was parked at 5.0, so the minute pass releases it now",
       server._is_held(rd("a54")))
-n0 = len(wait_push(0)); rel = server._anchor_pass(); p = wait_push(n0 + 1)
+n0 = len(wait_push(0)); rel = wakes_svc.anchor_pass(); p = wait_push(n0 + 1)
 check("release: the minute pass releases the item held on the PR's anchor, by the log-only line, its hold and wake gone",
       rel == ["a54"] and not server._is_held(rd("a54")) and "wake" not in rd("a54")["metadata"] and rd("a54")["status"] == "open", (rel, rd("a54")["metadata"]))
 check("release: the page's keeper (its -main agent, the page has no builder) is told what released it, naming the automatic ruling", any(m[0] == A and m[1].startswith(f"[stackshot] a54 woke: a notice from {A48}, the anchor it waited on, was logged and ruled merged by stackshot (auto)") for m in p[n0:]), p[n0:])
-check("release: once (the release moves the clocks)", server._anchor_pass() == [])
+check("release: once (the release moves the clocks)", wakes_svc.anchor_pass() == [])
 server._update("a54", hold=True, wake="2099-01-01", sender="work-osprey-main"); time.sleep(0.05)
-check("release: a log-only line older than the park releases nothing", server._anchor_pass() == [] and server._is_held(rd("a54")))
+check("release: a log-only line older than the park releases nothing", wakes_svc.anchor_pass() == [] and server._is_held(rd("a54")))
 got, ln = ev48(A48, "pr_synchronize", "pushed 1 commit"); auto48.append(ln["id"])
 _wt_route._route(ln["id"], "dropped", reason="not what a54 waits on", sender="work-osprey")
-check("release: an automatic ruling the keeper overrules with dropped releases nothing", server._anchor_pass() == [] and server._is_held(rd("a54")))
+check("release: an automatic ruling the keeper overrules with dropped releases nothing", wakes_svc.anchor_pass() == [] and server._is_held(rd("a54")))
 routing.record("projects/alpha", kind="anchor", to="", label="GitHub stackshot#116", who="hub", text="logged, not delivered", target="direct", anchor=A48, reason="direct: log only")
-check("release: a log-only direct anchor's line (no log_only mark, no ruling) still releases nothing", server._anchor_pass() == [] and server._is_held(rd("a54")))
+check("release: a log-only direct anchor's line (no log_only mark, no ruling) still releases nothing", wakes_svc.anchor_pass() == [] and server._is_held(rd("a54")))
 got, ln = ev48(A48, "pr_merged", "merged it"); auto48.append(ln["id"])
-check("release: a log-only merge on the PR the item waits on releases it", got == [] and server._anchor_pass() == ["a54"] and not server._is_held(rd("a54")))
+check("release: a log-only merge on the PR the item waits on releases it", got == [] and wakes_svc.anchor_pass() == ["a54"] and not server._is_held(rd("a54")))
 # the same release through a delivered notice and the keeper's ruling: the notice names the anchor by id (github:…), the store by URL
 server._update("a54", hold=True, wake="2099-01-01", sender="work-osprey-main"); time.sleep(0.05)
 got, ln = ev48(A48, "comment", "a question for the owner", who="kim", kind="github")
@@ -3469,15 +3470,15 @@ for label, own in (("own_repos set", ["example-owner/stackshot", "example-org/*"
     server._cfg.CFG["pilot"]["own_repos"] = own
     got, newlines, newrows = green48(record_only=True)
     check(f"record_only green head, {label}: one line in the event log, nothing delivered, no routing line, nothing held for a follow-up", got == [] and newlines == 0 and newrows == 1 and not hub48.pending, (got, newlines, newrows, hub48.pending))
-    check(f"record_only green head, {label}: the item held on the anchor stays held (no automatic release)", server._anchor_pass() == [] and server._is_held(rd("a54")))
-    check(f"record_only green head, {label}: the stored anchor wait on it does not turn either (no routing-log line for the minute pass to replay)", rd("a59")["metadata"].get("wait_kind") == "anchor" and "woke" not in rd("a59")["metadata"] and server._anchor_pass() == [], rd("a59")["metadata"])
+    check(f"record_only green head, {label}: the item held on the anchor stays held (no automatic release)", wakes_svc.anchor_pass() == [] and server._is_held(rd("a54")))
+    check(f"record_only green head, {label}: the stored anchor wait on it does not turn either (no routing-log line for the minute pass to replay)", rd("a59")["metadata"].get("wait_kind") == "anchor" and "woke" not in rd("a59")["metadata"] and wakes_svc.anchor_pass() == [], rd("a59")["metadata"])
 server._cfg.CFG["pilot"]["own_repos"] = []
 got, newlines, newrows = green48()
 check("the same event without record_only (own_repos empty): delivered with its routing line, as a CI result was before", len(got) == 1 and got[0][0] == S and newlines == 1 and newrows == 1, (got, newlines, newrows))
 for n in routing.read("projects/alpha"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="control for the record_only checks", by="work-osprey")
 server._cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot"]
-got, newlines, newrows = green48(); turned_ = server._anchor_pass()
+got, newlines, newrows = green48(); turned_ = wakes_svc.anchor_pass()
 check("the same green on an own repository without record_only (control): a log-only line, ruled merged automatically, and it turns the stored anchor wait and releases the hold, which is what record_only prevents",
       got == [] and newlines == 1 and "a59" in turned_ and "wait_kind" not in rd("a59")["metadata"], (got, newlines, turned_, rd("a59")["metadata"]))
 server._cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"

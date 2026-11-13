@@ -79,6 +79,7 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as wk
+from stackshot.service import watching as watching_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
@@ -185,7 +186,7 @@ try:
         passes(f"5 watcher: {what} passes the Recommend gate", lambda m=m: server._gate_recommend_stance(m))
         m2 = {**m, "options": None}
         passes(f"5 watcher: {what} without its options is still the watcher's own and passes", lambda m2=m2: server._gate_recommend_stance(m2))
-    ask, opts = server._watch_ask("a1", {}, "its wait ended")
+    ask, opts = watching_svc.watch_ask("a1", {}, "its wait ended")
     passes("5 post-wake: the question the server builds (two options) passes", lambda: server._gate_recommend_stance({"needs": ["decision"], "ask": ask, "options": opts}))
     writes.QUESTION.on = True
     try:

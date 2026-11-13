@@ -9,10 +9,11 @@ The order of the table is the order of the work: (1) the events that end a wait,
 minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass, the dates pass, the wake
 catch-up, the silence tick and the archive tick. `board=True` marks a tick that reads items: it is skipped while the migration's pass holds the board.
 
-What stays in server.py is the tick functions themselves (the wake pass, the anchor pass, the phase sweep, the event waits, the done check, the step proof, the balancer, the hand-off, the answers, the
-registry sync, the clients, the page-debt fallback, the stall pass, the filing, dates, silence and archive passes) and the publish. The table calls each of them through `Hooks`, which server.py fills once
-with `install` (this module cannot import server.py: the surface sits above it). A hook is looked up when its tick runs, so a suite that replaces the function on server.py is the one called; a suite
-that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here.
+The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py and called directly. What stays in server.py is the other
+tick functions (the phase sweep, the done check, the step proof, the balancer, the hand-off, the answers, the registry sync, the clients, the page-debt fallback, the stall pass, the filing, dates, silence and
+archive passes) and the publish. The table calls each of them through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it). A hook is looked
+up when its tick runs, so a suite that replaces the function on server.py is the one called; a suite that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here, and
+one that replaces a wake or event-wait function sets it on the module that holds it.
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
@@ -30,17 +31,16 @@ from stackshot.core.instance import OWNER
 from stackshot.fleet import fleet as _fl
 from stackshot.projects import pages as _pages
 from stackshot.router import routing as _routing
+from stackshot.service import event_waits as _evwaits
 from stackshot.service import telling as _telling
+from stackshot.service import wakes as _wakes
 from stackshot.waits import watchers as _watch
 
 
 @dataclass(frozen=True)
 class Hooks:
     """What the minute set still reaches in server.py: the tick functions and the publish, in the names they have there without the leading underscore. server.py builds one and gives it to `install`."""
-    wake_pass: Callable[[], Any]  # server._minute_wake_pass
-    anchor_pass: Callable[[], Any]  # server._minute_anchor_pass
     phase_tick: Callable[[], Any]  # server._phase_tick
-    evwait_tick: Callable[[], Any]  # server._evwait_tick
     check_tick: Callable[[], Any]  # server._check_tick
     proof_tick: Callable[[], Any]  # server._proof_tick
     balance_tick: Callable[[], Any]  # server._balance_tick
@@ -52,10 +52,8 @@ class Hooks:
     stall_tick: Callable[[], Any]  # server._stall_tick
     filing_tick: Callable[[], Any]  # server._filing_tick
     dates_tick: Callable[[], Any]  # server._dates_tick
-    wake_catchup: Callable[[], Any]  # server._minute_wake_catchup
     silence_tick: Callable[[], Any]  # server._silence_tick
     archive_tick: Callable[[], Any]  # server._archive_tick
-    wake_wait: Callable[[], float]  # server._minute_wake_wait: how long the runner may sleep, until the earliest wake
     publish: Callable[[], Any]  # server._publish
     publish_now: Callable[..., Any]  # server._publish_now
     publish_every: Callable[[], float]  # server._publish_every
@@ -104,10 +102,10 @@ def ticks() -> "list[_minute.Tick]":
     migration's pass holds the board (the registry sync and the clients' tick go on; the two wake passes have their own check)."""
     T = _minute.Tick
     return [
-        T("wake_pass", lambda: _hooks().wake_pass(), "settle", "event"),
-        T("anchor_pass", lambda: _hooks().anchor_pass(), "settle", "event"),
+        T("wake_pass", lambda: _wakes.minute_wake_pass(), "settle", "event"),
+        T("anchor_pass", lambda: _wakes.minute_anchor_pass(), "settle", "event"),
         T("phase_sweep", lambda: _hooks().phase_tick(), "settle", board=True),
-        T("evwait_tick", lambda: _hooks().evwait_tick(), "settle", board=True),
+        T("evwait_tick", lambda: _evwaits.evwait_tick(), "settle", board=True),
         T("check_tick", lambda: _hooks().check_tick(), "settle", board=True),
         T("proof_tick", lambda: _hooks().proof_tick(), "settle", board=True),
         T("balance_tick", lambda: _hooks().balance_tick(), "handoff", board=True),
@@ -121,14 +119,14 @@ def ticks() -> "list[_minute.Tick]":
         T("fleet_publish", lambda: fleet_publish(), "fleet"),
         T("filing_tick", lambda: _hooks().filing_tick(), "tenmin", "tenmin", board=True),
         T("dates_tick", lambda: _hooks().dates_tick(), "tenmin", "tenmin", board=True),
-        T("wake_catchup", lambda: _hooks().wake_catchup(), "tenmin", "tenmin", board=True),
+        T("wake_catchup", lambda: _wakes.minute_wake_catchup(), "tenmin", "tenmin", board=True),
         T("silence_tick", lambda: _hooks().silence_tick(), "tenmin", "tenmin", board=True),
         T("archive_tick", lambda: _hooks().archive_tick(), "tenmin", "tenmin", board=True),
     ]
 
 
 def _new() -> "_minute.Runner":
-    return _minute.Runner(ticks(), holding=lambda: _watch.holding(), wake_wait=_hooks().wake_wait, event=WAKE_EVENT)
+    return _minute.Runner(ticks(), holding=lambda: _watch.holding(), wake_wait=lambda: _wakes.minute_wake_wait(), event=WAKE_EVENT)
 
 
 def make() -> "_minute.Runner":

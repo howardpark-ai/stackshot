@@ -115,6 +115,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import complete as _wt_complete
@@ -482,7 +483,7 @@ tick(1)
 check("6a: the done check's pass reads PR 39 once", len(gets(39)) == 1 and st()["github"]["o/r#39"]["merged"] is False, (F.log, st()))
 server._evwait_preread("event", "pr_merged o/r#39")
 check("6a: the event wait's early read of the same PR inside the pace makes no GET, and its own memory holds the record the check pass kept",
-      len(gets(39)) == 1 and server._EVW_GH.get("o/r#39", {}).get("merged") is False and server._EVW_GH["o/r#39"] == st()["github"]["o/r#39"], (F.log, server._EVW_GH))
+      len(gets(39)) == 1 and evwaits_svc.EVW_GH.get("o/r#39", {}).get("merged") is False and evwaits_svc.EVW_GH["o/r#39"] == st()["github"]["o/r#39"], (F.log, evwaits_svc.EVW_GH))
 proof_gh = {}
 with server._gb.tag("step_proof"):
     got = server._pr_merged("o/r#39", clock[0] + 1, proof_gh)
@@ -490,9 +491,9 @@ check("6a: …nor does the step proof's read (its own dict gets the record all t
 F.closed.add(39); F.merged[39] = False
 tick(5)
 check("6a: at the cadence one GET again, whichever caller asks first", len(gets(39)) == 2, F.log)
-server._EVW_GH.clear()
-got = server._pr_merged("o/r#39", clock[0] + 1, server._EVW_GH)
-check("6a: a closed-unmerged answer reaches the other reader's dict as `dead` without a second GET (the done check failed the wait)", len(gets(39)) == 2 and got == (False, "") and server._EVW_GH["o/r#39"].get("dead", "").endswith("without being merged"), (F.log, server._EVW_GH))
+evwaits_svc.EVW_GH.clear()
+got = server._pr_merged("o/r#39", clock[0] + 1, evwaits_svc.EVW_GH)
+check("6a: a closed-unmerged answer reaches the other reader's dict as `dead` without a second GET (the done check failed the wait)", len(gets(39)) == 2 and got == (False, "") and evwaits_svc.EVW_GH["o/r#39"].get("dead", "").endswith("without being merged"), (F.log, evwaits_svc.EVW_GH))
 item(29, check="pr_merged o/r#404", next="team-back: merge it")
 F.log.clear()
 check("a PR GitHub refuses (404): an error, never a close, logged once", tick(1) == [] and "GitHub refused the read (HTTP 404" in st()["items"]["a29"]["err"] and server._CHECK_LOGGED.get("a29", "").startswith("GitHub refused"), st())

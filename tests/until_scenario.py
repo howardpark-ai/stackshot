@@ -46,6 +46,7 @@ from stackshot.waits import waiting as W, watchers as WK, stall as ST, dated_wai
 from stackshot.model import model as M, states as S
 from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
+from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import gates, telling
@@ -299,10 +300,10 @@ _cfg.CFG.setdefault("model", {})["watchers"] = False
 w1 = sitem(911, hold=True, until=day(-1), needs=[BACK], mover=BACK)
 w2 = sitem(912, until=day(-1), needs=[BACK], mover=BACK)
 w3 = sitem(913, hold=True, until=day(3), needs=[BACK], mover=BACK)
-coll = {g: at_ for g, _p, _it, at_ in server._wakes()}
-check("_wakes collects an item that stores only an until, at the moment of that date", {w1, w2, w3} <= set(coll) and coll[w1] == server._wake_at(day(-1)) and coll[w3] == server._wake_at(day(3)), coll)
-check("_next_wake sees it (the runner sleeps until the earliest)", server._next_wake() is not None and server._next_wake() <= server._wake_at(day(-1)))
-woke = server._wake_pass()
+coll = {g: at_ for g, _p, _it, at_ in wakes_svc.wake_rows()}
+check("_wakes collects an item that stores only an until, at the moment of that date", {w1, w2, w3} <= set(coll) and coll[w1] == wakes_svc.wake_at(day(-1)) and coll[w3] == wakes_svc.wake_at(day(3)), coll)
+check("_next_wake sees it (the runner sleeps until the earliest)", wakes_svc.next_wake() is not None and wakes_svc.next_wake() <= wakes_svc.wake_at(day(-1)))
+woke = wakes_svc.wake_pass()
 check("_wake_pass releases a hold that stood on an until, and drops the until with it", w1 in woke and "hold" not in smt(911) and "until" not in smt(911) and "hold_set" not in smt(911), (woke, smt(911)))
 check("_wake_pass treats an until on an item not on hold as a reminder, and the until goes", w2 in woke and "until" not in smt(912) and srd(912)["status"] == "open", (woke, smt(912)))
 check("_wake_pass leaves an until still ahead alone", w3 not in woke and smt(913).get("until") == day(3) and smt(913).get("hold"), (woke, smt(913)))
@@ -315,17 +316,17 @@ _cfg.CFG["model"]["watchers"] = True
 # the arrival text through the server's own turn
 w5 = sitem(921, until=day(-1), needs=[BACK], mover=BACK)
 out = {}
-fired = server._watch_fire(w5, "time", now, out)
+fired = watching_svc.watch_fire(w5, "time", now, out)
 rows = [r for rs in out.values() for r in rs]
 check("_watch_fire (time): the arrival text says the until, not the wake", fired and rows and all(r[2] == f"its until {day(-1)} came" for r in rows) and "until" not in smt(921), (fired, out, smt(921)))
 w6 = sitem(922, wake=day(-1), wait_kind="time", needs=[BACK], mover=BACK)
 out = {}
-fired = server._watch_fire(w6, "time", now, out)
+fired = watching_svc.watch_fire(w6, "time", now, out)
 rows = [r for rs in out.values() for r in rs]
 check("_watch_fire (time): a legacy wake still says its wake", fired and rows and all(r[2] == f"its wake {day(-1)} came" for r in rows), (fired, out))
 w7 = sitem(923, wait_kind="relay", until=day(-1), wait_event="the vendor", needs=[BACK], mover=BACK)
 out = {}
-fired = server._watch_fire(w7, "relay", now, out)
+fired = watching_svc.watch_fire(w7, "relay", now, out)
 rows = [r for rs in out.values() for r in rs]
 check("_watch_fire (relay): the item turns to the owner and the arrival text names the until day as the ask-by day", fired and f"its ask-by day {day(-1)} came" in json.dumps(srd(923)) and "until" not in smt(923), (fired, smt(923)))
 

@@ -79,6 +79,7 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.service import watching as watching_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
@@ -192,7 +193,7 @@ wm = {"needs": ["decision"], "ask": "Decide: what has arrived? · Options: arriv
 check("4 watcher: a watcher's own ask that happens to open with an interrogative word is read as the watcher's and not refused", server._open_question(wm) != "" and server._watch.asked_of(wm) == "relay", wm)
 passes("4 watcher: …the open-question gate lets it stand with no options", lambda: server._gate_open_question(wm))
 refused("4 watcher: …while the same words with no watcher mark on the item are refused", lambda: server._gate_open_question({k: v for k, v in wm.items() if k != "watch"}), *OQ[:3])
-ask, opts = server._watch_ask("a1", {}, "its wait ended")
+ask, opts = watching_svc.watch_ask("a1", {}, "its wait ended")
 m = {"needs": ["decision"], "ask": ask, "options": opts}
 check("4 post-wake: the question the server builds opens with “what” and lists two options, which name the recommended label", server._open_question(m) != "" and len(opts) == 2, (ask, opts))
 passes("4 post-wake: …and passes the open-question gate and names its recommended label", lambda: (server._gate_open_question(m), server._recommend_missing(m)))

@@ -56,6 +56,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk; from stackshot.web import render
+from stackshot.service import watching as watching_svc
 from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
@@ -168,7 +169,7 @@ check("who line: nobody", strip(bd.wait_who(r_, mk(mover=""))).startswith("nobod
 # a wake the owner picks up keeps the then stored beside him
 item(10, needs=[BACK], hold=True, wake=day(-1), wait_kind="time", mover=OWN, then=HELP, subject="[zed] he picks it up after the wake")
 item(11, needs=[BACK], hold=True, wake=day(-1), wait_kind="time", mover=HELP, subject="[zed] an agent picks it up after the wake")
-SENT.clear(); moved = server._watch_pass()
+SENT.clear(); moved = watching_svc.watch_pass()
 m = mt(10)
 check("watch fire: a time wait the owner picks up turns to him and keeps the then stored beside it", "a10" in moved and m.get("needs") == ["decision"] and m.get("then") == HELP and "mover" not in m and "wait_kind" not in m, m)
 m = mt(11)
@@ -177,7 +178,7 @@ check("watch fire: …one an agent picks up turns alive with him as mover", "a11
 # a relay: the agent stored as its mover picks it up after his answer; "not yet" keeps the wait's picker
 item(20, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), mover=HELP, needs=[], subject="[zed] relay with a mover")
 item(21, wait_kind="relay", wait_event="the quote", ask_by=day(-1), post_wake_mover=HELP, needs=[], subject="[zed] relay with the old name")
-SENT.clear(); moved = server._watch_pass()
+SENT.clear(); moved = watching_svc.watch_pass()
 m = mt(20)
 check("relay fire: the question goes to him with the picker as then; the record of the wait keeps the mover", "a20" in moved and m.get("needs") == ["decision"] and m.get("then") == HELP and m["watch"]["was"].get("mover") == HELP, m)
 m = mt(21)
@@ -190,7 +191,7 @@ SENT.clear(); server._answer("a21", "arrived", "", "answer")
 m = mt(21)
 check("relay arrived: a record of the wait under the old name is still read: the item goes to that agent", m.get("mover") == HELP and m.get("needs") == [HELP] and "ask" not in m, m)
 item(22, wait_kind="relay", wait_event="the contract", ask_by=day(-1), mover=BACK, needs=[], subject="[zed] relay, arrived")
-server._watch_pass(); SENT.clear(); server._answer("a22", "arrived", "", "answer")
+watching_svc.watch_pass(); SENT.clear(); server._answer("a22", "arrived", "", "answer")
 m = mt(22)
 check("relay arrived: …and one stored under mover goes to the mover", m.get("mover") == BACK and m.get("needs") == [BACK], m)
 check("fields: a record of the wait remembers the mover and the then", "mover" in wk.WAS_FIELDS and "then" in wk.WAS_FIELDS and "post_wake_mover" in wk.WAS_FIELDS, wk.WAS_FIELDS)
