@@ -611,11 +611,17 @@ ic(259, {}, drop=("rank",), updated=now0 - 4 * HR)
 ic(259, {"next": ""}, updated=now0 - int(3.5 * HR))
 ic(259, {"outcome": "done"}, status="completed", updated=now0 - 3 * HR, written_by=ESC_BY)
 ic(259, {"answers": [{"ts": now0 - 2 * HR, "kind": "comment", "text": ESC_GH, "via": "github", "url": "https://github.com/o/r/issues/5#issuecomment-8", "comment_id": 8}]}, written_by=ESC_BY, updated=now0 - 2 * HR)
+# 260: a wait on a list of waits (every kind of line, one already arrived), so the list's own words show on a page
+ix(260, "A list of waits", hold=True, wait_kind="list", wait_mode="all", until="2099-01-05", post_wake_mover="alpha-main", next="alpha-main: go on", watch={"set_at": now0 - 2 * HR},
+   waits=[{"kind": "time", "until": "2099-01-03", "arrived": {"at": now0 - HR, "what": "its date came"}}, {"kind": "anchor", "anchor": "https://github.com/o/r/pull/9", "event": "PR merged"}, {"kind": "item", "after": "a201"},
+          {"kind": "relay", "event": "the lease"}, {"kind": "event", "event": "the box restarts"}])
+ix(261, "A list of waits, either", hold=True, wait_kind="list", wait_mode="any", until="2099-01-05", post_wake_mover="alpha-main", next="alpha-main: go on", watch={"set_at": now0 - 2 * HR},
+   waits=[{"kind": "relay", "event": "the lease"}, {"kind": "anchor", "anchor": "https://github.com/o/r/pull/9", "event": "PR merged", "arrived": {"at": now0 - HR, "what": "PR merged"}}])
 ix(251, "A long History", mover="alpha-main", next="alpha-main: x", priority="p2"); git("add", "-A"); git("commit", "-q", "-m", "ipx 251")
 for n_ in range(56): ic(251, {"priority": "p1" if n_ % 2 == 0 else "p3"}, updated=now0 - (100 - n_) * 60)
 (IPX / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": "https://github.com/o/r/pull/9", "items": ["a201"], "added": 1, "by": "t"}], "projects/beta": [{"url": "https://github.com/o/r/pull/10", "items": ["a201"], "added": 1, "by": "t"}]}))
 git("add", "-A"); git("commit", "-q", "-m", "ipx all")
-IPX_IDS = [201, 202, 203, 204, 205, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 253, 254, 255, 256, 257, 258, 259]
+IPX_IDS = [201, 202, 203, 204, 205, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 253, 254, 255, 256, 257, 258, 259, 260, 261]
 IPX_BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 IPX_WATCH = {"action": "/items/a1/watch", "token": "TOKEN", "flag": "", "watched": True, "why": "it is yours"}
 def ipx_pages():
@@ -660,7 +666,7 @@ def _ipx_pat(v):
 IPX_DIRECT = {
               "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.queued", "wait.what.news_from", "wait.what.outside_news",
               "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
-              "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more"}
+              "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more", "wait.what.list", "wait.list.arrived", "wait.list.row_head"}
 check("every name in the direct-call list is a key of the table's item-page areas (a stale name cannot hide in it)", IPX_DIRECT <= set(IPX_NEW), sorted(IPX_DIRECT - set(IPX_NEW)))
 seen = {k for k in IPX_NEW if _ipx_pat(EN[k]).search(IPX_KO_ALL) or _ipx_pat(EN[k]).search(IPX_KO_U)}
 check("every string of the item page's areas shows in the test locale on some fixture page, but the ones the direct calls below cover", set(IPX_NEW) - seen <= IPX_DIRECT, sorted(set(IPX_NEW) - seen - IPX_DIRECT))
@@ -680,6 +686,7 @@ def _ipx_strip(v):
         out.append(v[i]); i += 1
     return "".join(out)
 IPX_ITEM_TEXT = "\n".join(p.read_text(encoding="utf-8") for p in sorted((T / "store/a").glob("*.json"))).replace("\\n", "\n")
+IPX_ITEM_TEXT += "\nthe news"          # the word of a relay line's kind label: watchers.subject_of's own fallback, not routed
 IPX_ITEM_TEXT += "\n" + ASKX + "\n" + "\n".join(json.dumps(o) for o in OPX)
 leaks = {}
 for name, h in ipx_ko.items():
@@ -734,7 +741,7 @@ with i18n.use("ko"):
     W = lambda kind, **k: _mm.Wait(kind=kind, kind_explicit=True, **k)
     d_wait = [ipg.wait_what(W("item", after=("a1", "a2"))), ipg.wait_what(W("item")), ipg.wait_what(W("item", after=("a1",), queued=True)), ipg.wait_what(W("anchor")), ipg.wait_what(W("anchor", event="the review lands")), ipg.wait_what(W("event")),
               ipg.wait_what(W("relay", event="the contract"), party="Acme"), ipg.wait_what(W("relay"), party="Acme"), ipg.wait_what(W("relay")), ipg.wait_what(W("relay", event="the contract from Acme"), party="Acme"),
-              ipg.wait_what(W("time")), ipg.wait_what(W("time"), words="the shop's holiday")]
+              ipg.wait_what(W("time")), ipg.wait_what(W("time"), words="the shop's holiday"), ipg.wait_what(W("list"), mode="all of 3")]
     d_end = [ipg.wait_end_label(W("time")), ipg.wait_end_label(W("relay")), ipg.wait_end_label(W("anchor")), ipg.wait_end_label(W("item", until="2099-01-01"))]
     d_age = [r2.age_words(600), r2.age_words(3 * 3600), r2.age_words(3 * 86400)]
     d_tip = [r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}}), r2.stale_tip({"_age": 3 * 3600, "metadata": {}})]
@@ -745,7 +752,7 @@ with i18n.use("ko"):
         if had_hosts: cl_["mockup_hosts"] = cfg_old
         else: cl_.pop("mockup_hosts", None)
 check("wait_what in the test locale: every kind, with and without its parts", d_wait == [_m("wait.what.close_of", items="a1, a2"), _m("wait.what.close_of", items=_m("wait.what.an_item")), _m("wait.what.queued", items="a1"), _m("wait.what.anchor_event"), "the review lands", _m("wait.what.fleet_event"),
-      _m("wait.what.event_from", event="the contract", party="Acme"), _m("wait.what.news_from", party="Acme"), _m("wait.what.outside_news"), "the contract from Acme", _m("wait.a_date"), "the shop's holiday"], d_wait)
+      _m("wait.what.event_from", event="the contract", party="Acme"), _m("wait.what.news_from", party="Acme"), _m("wait.what.outside_news"), "the contract from Acme", _m("wait.a_date"), "the shop's holiday", _m("wait.what.list", mode="all of 3")], d_wait)
 check("wait_end_label in the test locale", d_end == [_m("wait.end.until"), _m("wait.end.ask_by"), _m("wait.end.backstop"), _m("wait.end.until")], d_end)
 check("age_words and stale_tip in the test locale", d_age == [_m("more.age_min", n=10), _m("more.age_hour", n=3), _m("more.age_day", n=3)]
       and d_tip == [_m("more.stale_tip_call", age=_m("more.age_hour", n=3)), _m("more.stale_tip", age=_m("more.age_hour", n=3))], (d_age, d_tip))

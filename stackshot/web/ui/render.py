@@ -21,6 +21,7 @@ from stackshot.model import queued as _queued   # a mover busy on another item: 
 from stackshot.model import work as _work   # a step's status line, what is in motion on an item (a row's "engineer: migrating", the item page's Next and History)
 from stackshot.model import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
+from stackshot.waits import event_waits as _ew   # a fleet event line of a wait on a list, in words
 from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
 from stackshot.anchors import receiver_health as _rh   # when a receiver's last check is too old to call it healthy (receiver_health.py)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
@@ -2275,6 +2276,10 @@ class Board:
         elif isinstance(ts, datetime.date): t, clock = ts, False
         else: t = datetime.datetime.fromtimestamp(float(ts), self.now.tzinfo)
         return when_words(t, clock)
+    def arrival_when(self, ts):
+        """When a line of a wait on a list arrived, as `when` says it; "" for a time no date can show (the stored shape keeps those out, this keeps a page whole whatever it is handed)."""
+        try: return self.when(ts)
+        except (ValueError, OverflowError, OSError, TypeError): return ""
     def span_words(self, a, b):
         """A span of time for a History line that folds several writes: "Tue Nov 10th 08:31 – 09:39" (the second time alone when it is the same day), the board's zone."""
         ta, tb = (datetime.datetime.fromtimestamp(float(x), self.now.tzinfo) for x in (a, b))
@@ -2786,7 +2791,7 @@ class Board:
         wwords = {} if done else _wt.words_of(m)
         if waiting and w_:
             reason = wbasis or (wwords.get("quote") or "")
-            wtext = _ip.wait_what(w_, shown=shown, party=str(m.get("party") or ""), words=reason)
+            wtext = _ip.wait_what(w_, shown=shown, party=str(m.get("party") or ""), words=reason, mode=_ip.list_mode_words(mod))
             wlab = _ip.wait_end_label(w_) if (w_.until or w_.backstop) else _t("wait.end.until")
             wend = w_.until or w_.backstop or _ip.clean(m.get("wake"))      # a wait the fields end by a date (a relay's ask-by, an event's backstop), else the wake the item carries
         post = w_.mover if (waiting and w_) else ""
@@ -2884,7 +2889,7 @@ class Board:
         pr = str(m.get("priority") or "p2")
         prio = '<span class="tag t-p1">P1</span>' if pr == "p1" else e(pr.upper())      # P1 red; P2 and P3 plain
         wk = wake_of(r)
-        wlabel = {"relay": _t("wait.label.ask_by"), "anchor": _t("wait.label.backstop"), "item": _t("wait.label.backstop")}.get(w_.kind if w_ else "", _t("item.wake")) if (w_ and (w_.until or w_.backstop)) else _t("item.wake")
+        wlabel = {"relay": _t("wait.label.ask_by"), "anchor": _t("wait.label.backstop"), "item": _t("wait.label.backstop"), "list": _t("wait.label.backstop")}.get(w_.kind if w_ else "", _t("item.wake")) if (w_ and (w_.until or w_.backstop)) else _t("item.wake")
         wakev = e(self.when(wk)) if (wk and not done and not waiting) else (e(self.wait_day(wend)) if (waiting and wend) else "")
         gu = issue_url(r["gid"], self.data_dir)       # in the sidebar: the item's GitHub issue, when it has one and the mirror is on
         ghl = (f'<a class="hgh" href="{e(gu)}" target="_blank" rel="noopener" title="{esc_dq(_t("item.github_issue_tip"))}">{_t("item.github_issue")}</a>' if gu else "")
@@ -2949,6 +2954,10 @@ class Board:
         """The wait line and the chases of a waiting item: what it waits on in full (an anchor's link and event, the items it waits after and whether each is
         open, the party a relay waits on, a time's basis or his words), who watches, until when, who takes it after, and every chase logged on it."""
         e = esc; m = r["metadata"]; w = mod.wait; rows = []
+        if w.kind == "list" and mod.waits:      # a wait on a list: each line with its tick, then the one backstop day (no chases: a list is never chased)
+            rows = [(_t("wait.waits_on"), self.wait_list_html(r, mod, page=True)), (_t("wait.label.backstop"), e(_t("wait.list.backstop", day=self.wait_day(w.backstop)))), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')]
+            rows += [(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else []
+            return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
         if w.kind == "anchor":
             what = self.wait_anchor_html(r, w, full=True)      # the stored anchor in full, else the ones scoped to the item
         elif w.kind == "item":
@@ -3317,6 +3326,7 @@ li.iline .imeta .iwork{color:var(--fg);cursor:default}.iwork b{font-weight:600}u
 ul.hist details.said{display:inline-block;vertical-align:baseline;max-width:100%}ul.hist details.said>summary{list-style:none;cursor:pointer;display:inline}ul.hist details.said>summary::-webkit-details-marker{display:none}ul.hist details.said>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:999px}ul.hist details.said[open]>summary .badge{background:color-mix(in srgb,var(--bc) 30%,transparent)}ul.hist details.said .sbody{display:block;margin:4px 0 2px;padding:6px 10px;border-left:3px solid var(--line);background:var(--card);border-radius:0 8px 8px 0;font-size:13px;line-height:1.45;white-space:normal}ul.hist details.said blockquote{margin:0 0 4px;white-space:pre-wrap;color:var(--fg)}ul.hist details.said .smeta{color:var(--mut);font-size:12px}ul.hist details.said:target{background:color-mix(in srgb,var(--acc) 12%,transparent);border-radius:8px}ul.hist li.ev-said::before{border-color:var(--ok)}
 main.itempage .istate{margin:0;font-size:15px;line-height:1.5;min-width:0}.istate .st{display:inline-block;padding:0 10px;border:1px solid transparent;border-radius:999px;font-size:13px;font-weight:600;line-height:1.55;vertical-align:1px}.istate .st-alive{background:var(--live-bg);color:var(--live);border-color:var(--live)}.istate .st-wait{background:transparent;color:var(--mut);border-color:var(--mut)}.istate .st-dead{background:transparent;color:var(--mut);border-color:var(--line);font-weight:500}.istate .iwarn{font-size:13px;margin-left:0}
 main.itempage details.fold[id]>summary~*{margin-left:18px}main.itempage details.fold[id]>summary h2{margin-bottom:6px}
+.wl{display:grid;gap:5px;font-size:13px;min-width:0}.wlh{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.wmode{font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;background:color-mix(in srgb,var(--mut) 16%,var(--card));color:var(--fg);white-space:nowrap}.wll{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;align-items:start}.wbox{width:14px;height:14px;border:1.5px solid var(--mut);border-radius:3px;margin-top:2px;box-sizing:border-box;display:grid;place-items:center;font-size:10px;line-height:1;color:transparent}.wbox.on{background:var(--ok);border-color:var(--ok);color:var(--on-acc)}.wlt{min-width:0;overflow-wrap:anywhere;color:var(--fg)}.wkind{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--mut);margin-right:6px;text-transform:uppercase;letter-spacing:.03em}.warr{color:var(--ok);font-size:12px;margin-left:4px}.wsub{display:block;font-size:12px;color:var(--mut)}
 .iwait{margin:0 0 14px}.iwait h2{margin:0 0 6px}dl.iwl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0;font-size:14px;line-height:1.45}dl.iwl dt{color:var(--mut)}dl.iwl dd{margin:0;min-width:0}ul.ichases{list-style:none;margin:4px 0 0;padding:0;font-size:13px}ul.ichases li{margin:0 0 3px}
 main.itempage details.fold>summary h2{margin-top:18px}.imore{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}.imore>summary h3{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:6px 0}.imore dl.sgrp:first-of-type{border-top:0}
 ul.inext{list-style:none;margin:0 0 4px;padding:0;font-size:14px;line-height:1.5}ul.inext>li{display:flex;align-items:flex-start;gap:9px;margin:0 0 7px;min-width:0}ul.inext .cb{flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:17px;height:17px;margin-top:3px;border:1.5px solid var(--fg);border-radius:4px;font-size:13px;font-weight:700;line-height:1;color:var(--mut)}ul.inext .cl-b{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}ul.inext .cl-b ul{list-style:disc;margin:2px 0 0;padding-left:18px}ul.inext .cl-by{display:block;font-size:12px;line-height:1.4;color:var(--mut)}ul.inext li.cl-done .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-done .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-decided .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-decided .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-dropped{color:var(--mut);opacity:.75}ul.inext li.cl-dropped a{color:inherit;text-decoration:underline}ul.inext li.cl-dropped code{color:inherit}ul.inext li.cl-dropped .cb{border-color:var(--mut);color:var(--mut)}ul.inext li.cl-dropped .cl-t{text-decoration:line-through}ul.inext li.cl-dropped .cl-by b{font-weight:600}ul.inext li.icode{list-style:none;margin:4px 0 4px -14px}ul.inext li.icode .md pre{margin:0}.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}ul.hist li.ev-step::before{border-color:var(--ok)}.istep .istepnext{margin:8px 0 0}.istep .istepnext ol.stepol{margin-top:0}li.hrow .istepnext{margin:6px 0 0}li.hrow .istepnext ol.stepol{margin-top:0}ul.inext .cl-tag{display:block;font-size:12px;line-height:1.4;color:var(--mut)}ul.inext .cl-tag::before{content:"status: "}details.iearlier .sh-hide{display:none}details.iearlier[open] .sh-show{display:none}details.iearlier[open] .sh-hide{display:inline}ul.hist ul.estat{list-style:none;margin:2px 0 0;padding:0}ul.hist ul.estat li{margin:0 0 2px;line-height:1.4}ul.hist li.ev-work::before{border-color:var(--run)}
@@ -3733,6 +3743,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         relays; then the chases when there are any. Who takes it after and who watches it are the who line's (wait_who); the next step follows it on its own line, labeled "after the wait:" (home_row)."""
         w, m, e = mod.wait, r["metadata"], esc
         if w is None: return f'<span class="dim">{esc(_ui.word(_ui.WAITING))}</span>'
+        if w.kind == "list" and mod.waits: return self.wait_list_html(r, mod, page=False)      # a wait on a list: the lines, ticked when they have arrived, and the backstop day (never chased)
         if w.kind == "time":
             quote = (_wt.words_of(m) or {}).get("quote") or ""
             proof = _model.clean(m.get("proof")) if is_verifying(r) else ""      # a verifying item waits on its end date with the proof named
@@ -3751,6 +3762,44 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             text = _t("home.wait.relay", what=e(_watch.subject_of(m)), day=e(self.day_words(w.until)) if w.until else esc(_t("home.wait.no_date_short")))
         n = len(_watch.chases_of(m))
         return text + (f' <span class="dim">{esc(_t("home.wait.chased", n=n))}</span>' if n else "")
+    def item_open(self, g):
+        """Is the item `g` open on this board (a line of a wait on a list that waits on an item says so)? The set of open ids is read once per Board."""
+        if getattr(self, "_open_set", None) is None: self._open_set = {x["gid"] for x in self.rows if x.get("status") != "completed"}
+        return g in self._open_set
+    def wait_list_html(self, r, mod, page):
+        """A wait on a list as HTML (waits/wait_list.py; model.Model.waits): a head with the mode ("all of 2" / "any of 2") and what has arrived, then one line per wait, in the stored order, each with its kind,
+        what it waits on and a box that is ticked, with the time, once it has arrived. The row (page=False) closes the head with "back anyway <backstop day>"; the item page (page=True) says how the mode
+        ends it and gives each line a second line: when and in what words it arrived, else what watches it. The words of every line are free text (an event, an anchor), so each is escaped here, once."""
+        e = esc; gid = r["gid"]; w = mod.wait
+        n = sum(1 for ln in mod.waits if ln.arrived)
+        head = (_t("wait.list.page_all", n=n) if mod.wait_mode == "all" else _t("wait.list.page_any")) if page else _t("wait.list.row_head", n=n, day=e(self.day_words(w.backstop)))
+        out = [f'<span class="wlh"><span class="wmode">{e(_ip.list_mode_words(mod))}</span><span class="dim">{head}</span></span>']
+        for ln in mod.waits:
+            k = ln.kind
+            at = self.arrival_when(ln.arrived_at) if ln.arrived else ""      # "" when it has not arrived, or for a time no date can show
+            arrived_at = _t("wait.list.arrived", when=at) if at else _t("wait.list.box_on")
+            if k == "time": text = e(_t("wait.list.line.time", day=self.day_words(ln.until)))
+            elif k == "item":
+                text = _t("wait.what.close_of", items=f'<a href="{e(id_href(ln.after))}" target="_blank" rel="noopener">{e(shown(ln.after))}</a>')
+            elif k == "anchor":
+                a = ln.anchor
+                link = f'<a href="{e(a)}" target="_blank" rel="noopener">{e(a if page else link_label(a))}</a>' if a.startswith(("http://", "https://")) else e(a)      # the page gives the address in full, the row its short label
+                text = self.mentions(e(ln.event), gid) + ("" if page else f' <span class="dim">({link})</span>')
+            elif k == "event": text = e(_ew.words(ln.event))
+            else: text = self.mentions(e(ln.event), gid)      # relay: the news the owner relays
+            sub = ""
+            if page:
+                watcher = e(_home.watcher_word(_ip._WATCHERS.get(k, "the server")))
+                if ln.arrived:
+                    said = _t("wait.list.arrived_sub", what=ln.arrived_what, when=at) if ln.arrived_what and at else ln.arrived_what or arrived_at      # its words and its time; no words → "arrived <time>" alone (never "arrived · arrived <time>")
+                    sub = (link + " · " if k == "anchor" else "") + e(said)      # an arrived anchor line keeps its address
+                else:
+                    what = (_t("wait.list.sub.relay", who=_model.owner_display()) if k == "relay" else (link if k == "anchor" else ("" if k != "item" else _t("wait.state_open" if self.item_open(ln.after) else "wait.state_closed"))))
+                    sub = _t("wait.list.sub.watched", what=what, who=watcher) if what else _t("home.watched_by", who=watcher)
+            tick = f'<span class="wbox on" title="{e(_t("wait.list.box_on"))}" aria-label="{e(_t("wait.list.box_on"))}">✓</span>' if ln.arrived else f'<span class="wbox" title="{e(_t("wait.list.box_off"))}" aria-label="{e(_t("wait.list.box_off"))}"></span>'
+            arr = f'<span class="warr">{e(arrived_at)}</span>' if (ln.arrived and not page) else ""
+            out.append(f'<span class="wll{" wdone" if ln.arrived else ""}">{tick}<span class="wlt"><span class="wkind">{e(_t("wait.list.kind." + k))}</span>{text}{arr}' + (f'<span class="wsub">{sub}</span>' if sub else "") + '</span></span>')
+        return '<span class="wl">' + "".join(out) + '</span>'
     def wait_end_slot(self, mod, t0):
         """A Waiting row's right-hand slot on line one: the date the wait ends, "until Wed Mar 4th" ("… 09:00" when the stored wake has a time), read by home.end_of, the one reader the Waiting sort uses; "no end date"
         (dimmed) when the wait has none. Plain text, not a live stamp (no data-ts: the page script has no age to keep current here); how long the wait has run is the hover, "waiting since <time>" (the age stamp's tooltip)."""
@@ -3766,7 +3815,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         elif _model.is_owner(w.mover): bits = [_t("home.owner_then", who=self.home_mover(w.mover), then=self.home_mover(mod.then)) if mod.then else _t("home.picks_up", who=self.home_mover(w.mover))]
         else: bits = [_t("home.picks_up", who=self.home_mover(w.mover))]
         noticed = {"time": bool(w.until), "relay": bool(w.until), "item": bool(w.after or w.backstop), "anchor": bool(w.anchor or self.scoped_urls(r["gid"]))}.get(w.kind, True)
-        if noticed: bits.append(_t("home.watched_by", who=esc(_home.watcher_word("the scheduler" if w.kind == "item" and not w.after else _home.watched_by(w.kind)))))      # an item wait with only its backstop date is the scheduler's (watchers.can_end)
+        if w.kind == "list" and mod.waits: bits.append(_t("home.watched_by", who=", ".join(esc(_home.watcher_word(x)) for x in _ip.list_watchers(mod))))      # each kind of line has its own watcher; the arrived lines need none
+        elif noticed: bits.append(_t("home.watched_by", who=esc(_home.watcher_word("the scheduler" if w.kind == "item" and not w.after else _home.watched_by(w.kind)))))      # an item wait with only its backstop date is the scheduler's (watchers.can_end)
         wb = (r["metadata"] or {}).get("wait_basis")
         if w.kind == "time" and w.basis and isinstance(wb, dict): bits.append(_t("home.set_by", who=esc(shown_ref(str(wb.get("by") or "")) or _t("home.unknown"))))
         return " · ".join(bits)

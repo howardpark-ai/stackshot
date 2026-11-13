@@ -121,10 +121,17 @@ def wake_value(m: dict[str, Any]) -> Any:
     return stored_until(m) or m.get("wake")
 
 
+def list_holds(m: dict[str, Any]) -> bool:
+    """Does the item store a list of waits that holds (waits/wait_list.py)? The one check lives there; this module is imported by it, so it is read at the call (an import at the top would be a cycle)."""
+    from stackshot.waits import wait_list as _wl
+    return _wl.valid(m)
+
+
 def kind_of(m: dict[str, Any]) -> str:
-    """The kind of wait an item stores: its wait_kind when it is one of the six; with none, "time" when it stores an `until` (a wait on the date alone); else ""."""
+    """The kind of wait an item stores: its wait_kind when it is one of the six (a stored `list` only while the list holds: one that does not is ignored, as the model ignores it, and the
+    item reads as the date alone); with none, "time" when it stores an `until` (a wait on the date alone); else ""."""
     k = " ".join(str(m.get("wait_kind") or "").split()).lower()
-    if k in _WAIT_KINDS:
+    if k in _WAIT_KINDS and not (k == "list" and not list_holds(m)):
         return k
     return "time" if stored_until(m) else ""
 
