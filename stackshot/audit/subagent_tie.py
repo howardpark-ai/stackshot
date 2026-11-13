@@ -10,7 +10,7 @@ the same sort of claim about the mover, not about an item. The audit therefore a
 neither a flag nor a later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). The caller (server `_mover_subagents`) asks
 only for a pane that is busy now, since a subagent keeps its pane in a turn.
 
-`tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board#N`, whole: `board#12` is not `board#123`) or a pull request
+`tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request
 anchored to the item (`keys`, "owner/repo#n", by its URL or by `PR n` / `#n`, as merge_tie names a pull request for an item that speaks of its repository). A subagent that names neither is on no item the
 audit can tell, and an item nothing is tied to reads idle (and part F, audit/hand_idle.py, hands it on). A session whose transcript this box does not hold (another machine, a cloud session) shows
 no subagent: nothing can be verified, so nothing is claimed.

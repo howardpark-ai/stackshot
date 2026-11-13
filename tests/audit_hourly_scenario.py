@@ -578,7 +578,7 @@ SID = str(_uuid.UUID("00000000-0000-4000-8000-0000000000aa"))
 proj = T / "transcripts/-home-x"; (proj / SID / "subagents").mkdir(parents=True); (proj / f"{SID}.jsonl").write_text("{}\n")
 def agent(aid, desc, brief, finished=None, age=60, content="str", meta_ok=True):
     mp, tp = proj / SID / "subagents" / f"agent-{aid}.meta.json", proj / SID / "subagents" / f"agent-{aid}.jsonl"
-    m = {"agentType": "hp:executor", "description": desc}
+    m = {"agentType": "general-purpose", "description": desc}
     if finished is not None: m["finished"] = finished
     mp.write_text(json.dumps(m) if meta_ok else "{not json")
     body = brief if content == "str" else [{"type": "text", "text": brief}]
