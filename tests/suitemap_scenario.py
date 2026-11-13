@@ -1182,6 +1182,15 @@ if use_strace:
           r.returncode == 0 and "tracing 1 of 4" in r.stderr and m6["suites"].get("b", {}).get("files") == S["b"]["files"]
           and m6["suites"]["b"].get("traced") == S["b"].get("traced") and m6["suites"]["a"].get("traced") != S["a"].get("traced"),
           (r.returncode, r.stderr[-800:], m6["suites"].get("b")))
+    check("measure: a suite's time is kept under the kind of run it had (strace_seconds for the traced a, nostrace_seconds for b) and the other kind is carried from the earlier map",
+          m6["suites"]["a"].get("strace_seconds") == m6["suites"]["a"]["seconds"] and "nostrace_seconds" not in m6["suites"]["a"]
+          and m6["suites"]["b"].get("nostrace_seconds") == m6["suites"]["b"]["seconds"] and m6["suites"]["b"].get("strace_seconds") == S["b"]["strace_seconds"]
+          and all(e.get("strace_seconds") == e["seconds"] for e in S.values()), (m6["suites"]["a"], m6["suites"]["b"], S["b"]))
+    # plan, on the checkout the earlier map did not measure: the one change reaches suite a only, so the run will trace one suite of four, and the plan says so
+    r = tool("plan", "--of", "2", "--map", str(MAP))
+    pl = [x.split("=", 1)[1].split() for x in r.stdout.splitlines() if x.startswith("shard")]
+    check("plan: asks the same question measure does (which suites the change since the map's commit reaches): 1 of 4 traced, and every suite in exactly one shard",
+          r.returncode == 0 and "the run traces 1 of 4 suites" in r.stderr and sorted(x for p in pl for x in p) == ["a", "b", "c", "z"], (r.returncode, r.stdout, r.stderr[-600:]))
     git("checkout", "-q", "main")
 
     # a suite that fails only when measured (the release suite, which timed out at the measuring limit while it passes plainly) is `ok: false`: it keeps its last clean measurement beside the
@@ -1293,8 +1302,37 @@ for label, table in (("as recorded, release and release_queue measured at three 
               max(ld) == 872 and max(ld) > 2 * median(ld) and sum(1 for p in pl if "release" in p) == 1 and ["release"] in pl, ld)
     else:
         check(f"shard balance ({label}): no shard is planned over {BALANCE} times the median shard", max(ld) <= BALANCE * median(ld), ld)
+# The plan against the incident of Fri Nov 13th 2026: main's map of one run had 20 of its 233 suites traced, and the next run traced all 233. Strace makes a suite 1.6 times as slow and a
+# process-heavy one (release, install, setup, handoff) up to 2.7 times, so a plan by the first map's `seconds` put release (93 s then, 184 s traced), install (41, 111) and setup (21, 50) in one shard,
+# which then ran well over the others. The map now keeps both times of a suite; (plain, traced) seconds of the 17 longest suites of those maps, and 209 short ones of 3.3 and 5.3.
+PAIRS = dict(release_queue=(152, 206), release=(93, 184), suitemap=(127, 127), pilot=(97, 126), install=(41, 111), page_currency=(84, 106), clean_text=(81, 81), locale=(78, 78), handoff=(21, 53),
+             page_debt=(39, 52), setup=(21, 50), runners=(47, 49), mq_replay_run=(47, 47), router_live=(23, 44), audit_run=(35, 35), router=(16, 34), tool_text=(14, 29),
+             **{f"short{i}": (3.3, 5.3) for i in range(209)})
+# the map of the run that traced nothing (its `seconds` are the plain times), with the traced times carried from earlier runs
+EARLIER = {"format": sm.FORMAT, "commit": "f" * 40, "strace": True,
+           "suites": {n: {"ok": True, "seconds": p, sm.PLAIN_KEY: p, sm.STRACE_KEY: t} for n, (p, t) in PAIRS.items()}}
+def spread(plan, which):
+    """(longest shard minus the mean, longest minus the shortest) in seconds of the run that traced every suite (which=1) or none (which=0)"""
+    ld = [sum(PAIRS[n][which] for n in p) for p in plan]
+    return max(ld) - sum(ld) / len(ld), max(ld) - min(ld)
+every_name = sorted(PAIRS)
+by_seconds = sm.shard_plan(every_name, sm.SHARDS, EARLIER)                         # before: each suite by `seconds`, whatever run made it
+by_kind = sm.shard_plan(every_name, sm.SHARDS, EARLIER, traced=set(every_name))     # after: by the time of the run the plan is for (every suite traced)
+b0, b1 = spread(by_seconds, 1), spread(by_kind, 1)
+check("shard balance (the map of a run that traced nothing, the run traces everything): every suite in exactly one shard, by either plan",
+      sorted(x for p in by_seconds for x in p) == every_name and sorted(x for p in by_kind for x in p) == every_name and all(by_seconds) and all(by_kind))
+check("shard balance (…): planned by the traced times, the longest shard is within 5 s of the mean and 10 s of the shortest, where `seconds` left it over 50 s over the mean and 100 s over the shortest",
+      b1[0] <= 5 and b1[1] <= 10 and b0[0] > 50 and b0[1] > 100, (b0, b1))
+check("shard balance (…): the plan of a run that traces nothing weighs the plain times (planned by them it is as balanced for a plain run), and is the same twice",
+      spread(sm.shard_plan(every_name, sm.SHARDS, EARLIER, traced=set()), 0)[0] <= 5 and sm.shard_plan(every_name, sm.SHARDS, EARLIER, traced=set()) == sm.shard_plan(every_name, sm.SHARDS, EARLIER, traced=set())
+      and by_kind == sm.shard_plan(every_name, sm.SHARDS, EARLIER, traced=set(every_name)), (spread(sm.shard_plan(every_name, sm.SHARDS, EARLIER, traced=set()), 0),))
+only_plain = {"seconds": 40, sm.PLAIN_KEY: 40}; only_trace = {"seconds": 90, sm.STRACE_KEY: 90}; old_entry = {"seconds": 50, "measured_seconds": 70}
+check("shard plan: a suite's time for the run is its own kind's, the other kind's scaled by TRACE_COST when it has only that, and `seconds` (or the measured time) when it has neither or the run is not known",
+      sm.expected_seconds(only_plain, True) == 40 * sm.TRACE_COST and sm.expected_seconds(only_plain, False) == 40 and sm.expected_seconds(only_trace, False) == 90 / sm.TRACE_COST
+      and sm.expected_seconds(only_trace, True) == 90 and sm.expected_seconds(old_entry, True) == 70 and sm.expected_seconds(old_entry, None) == 70
+      and sm.expected_seconds(EARLIER["suites"]["release"], None) == 93 and sm.expected_seconds(EARLIER["suites"]["release"], True) == 184, None)
 y = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8"))
-pj, mj, uj = y["jobs"]["shards"], y["jobs"]["measure"], y["jobs"]["suites"]
+pj, mj, uj =y["jobs"]["shards"], y["jobs"]["measure"], y["jobs"]["suites"]
 plan_step = next(st for st in pj["steps"] if st.get("id") == "plan")
 measure_step = next(st for st in mj["steps"] if st.get("name") == "run this shard's suites, measured")
 suites_steps = [st.get("name") for st in uj["steps"]]

@@ -31,7 +31,7 @@
 # The suites are every tests/*_scenario.py: a new suite is a new file, not an edit here.
 # THE FULL RUN IN SHARDS. The measured run was one long job on one runner (and every release waited for it) while the
 # other runners sat idle. In a full run the `shards` job makes the plan once (tests/suitemap.py plan --of 6: every suite in exactly one of six lists, balanced by
-# the map's measured times, or by a hash of the name without a map) and hands the six lists on as outputs; the `measure` job is a matrix of 6 jobs on the same labels, each
+# the map's measured times, each suite by its time as the run will have it, traced or plain, or by a hash of the name without a map) and hands the six lists on as outputs; the `measure` job is a matrix of 6 jobs on the same labels, each
 # measuring the list it is given (so a cache miss in one of them cannot change what it runs) and handing its map on as an
 # artifact. The `suites` job then merges them (tests/suitemap.py merge) and keeps, publishes and audits the map (main saves it to the cache, when the run is main's); its step
 # "run every suite, measured" passes only when every shard passed and the merged map holds every suite exactly once. release.sh (main_green) reads

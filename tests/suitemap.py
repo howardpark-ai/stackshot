@@ -39,7 +39,8 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           lines (the format of $GITHUB_OUTPUT) for the N shards (see *Shards*). With
                                                           --only it plans just the suites named (a pull request's selection; none is a
                                                           plan of nothing, never of every suite) and adds the line `large=true|false`:
-                                                          true when they number SHARD_MIN or more (see *Shards*)
+                                                          true when they number SHARD_MIN or more (see *Shards*). Each suite is weighed by the
+                                                          time of the kind of run it will get, traced or plain (see *Shards*)
   tests/suitemap.py shard --of N --index I [--map MAP]   one line of that plan: the suites of shard I (0 to N-1), one per line
   tests/suitemap.py merge --map OUT SHARD…                one map out of the shards' maps (one commit); exit 1 when a suite is
                                                           in two of them or a suite of the checkout is in none (the map is
@@ -266,7 +267,11 @@ and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs
 merged map has every suite exactly once. `shard_plan` puts every suite in exactly one shard: with a map, the longest suites
 first, each into the shard with the least measured time so far (a suite the map does not know counts as the median; ties go by
 name and then the lower shard), so the shards end at about the same time; without a map (or one with no times), a stable hash
-of the name. The plan is made ONCE per run, by the `shards` job (`plan`, with the map from the cache, or none: a cache miss gives the hash
+of the name. A suite's time depends on whether the run puts strace on it (1.6 times as slow, a process-heavy suite up to 2.7: the maps of Nov 13th 2026 held a run that traced
+20 suites of 233 and the next one all 233, and the plan made from the first put `release` at 93 s and `install` at 41 s in one shard, where they took 184 s and 111 s): the map keeps, per suite, the
+time of its last run that traced it (`strace_seconds`) and of its last run that did not (`nostrace_seconds`), and `plan` asks `trace_set`, the function `measure` decides by, which suites the run
+will trace, then weighs each by the time of that kind of run (the other kind scaled by TRACE_COST when the map has only that one; a map from before the two keys, or a plan that cannot tell, by `seconds`
+as before). A pull request's selection runs plainly and is weighed as a run that traces nothing. The plan is made ONCE per run, by the `shards` job (`plan`, with the map from the cache, or none: a cache miss gives the hash
 plan, for all six lists alike), and handed to the `measure` matrix as job outputs; each shard runs the list it is given and
 does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` still finds the suite that
 is in none or in two, and the run fails.
@@ -281,6 +286,8 @@ import argparse, ast, atexit, collections, datetime, difflib, hashlib, json, os,
 
 FORMAT = 1
 TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this often
+STRACE_KEY, PLAIN_KEY = "strace_seconds", "nostrace_seconds"   # a map entry's time of a run that traced the suite, and of one that did not (the shard plan reads both)
+TRACE_COST = 1.6   # strace's cost on a suite the map has only one of the two times of (the median of 48 suites that changed from one to the other between main's measured runs of Nov 13th 2026)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
 INNER = {"scratch": ("rename", "redact", "lead", "migration")}   # outer suite -> the suites it runs itself (rule above)
@@ -1638,6 +1645,25 @@ def carried(prev, name):
     return c if isinstance(c, dict) and all(k in c for k in (*CARRY_KEYS, "at")) else None
 
 
+def trace_set(prev, names, commit, now):
+    """(the suites a measured run of `names` at `commit` traces with strace, whether the earlier map `prev` narrowed it): every suite without an
+    earlier map that has file measurements and whose commit is in the checkout; else the suites the change since that map reaches, and any
+    suite whose files were traced over TRACE_MAX_AGE ago or never. `measure` and `plan` both ask, so the plan weighs a suite by the time it will take"""
+    if not (prev and prev.get("strace") and have(prev["commit"])):
+        return set(names), False
+    reached, _ = selection(prev, prev["commit"], commit)
+    trace = set(names) if reached == "all" else set(reached)
+    for n in names:
+        e = prev["suites"].get(n, {})
+        try:
+            old = now - datetime.datetime.fromisoformat(e["traced"]) > datetime.timedelta(hours=TRACE_MAX_AGE)
+        except (KeyError, ValueError, TypeError):
+            old = True
+        if old or "files" not in e:
+            trace.add(n)
+    return trace, True
+
+
 def measure(args):
     names = args.suites or suites()
     commit = git("rev-parse", "HEAD").strip()
@@ -1651,18 +1677,8 @@ def measure(args):
     # TRACE_MAX_AGE ago; the others keep the file half of their earlier measurement.
     prev = load_map(args.prev) if args.prev else None
     now = datetime.datetime.now(datetime.timezone.utc)
-    trace = set(names) if use_strace else set()
-    if use_strace and prev and prev.get("strace") and have(prev["commit"]):
-        reached, _ = selection(prev, prev["commit"], commit)
-        trace = set(names) if reached == "all" else set(reached)
-        for n in names:
-            e = prev["suites"].get(n, {})
-            try:
-                old = now - datetime.datetime.fromisoformat(e["traced"]) > datetime.timedelta(hours=TRACE_MAX_AGE)
-            except (KeyError, ValueError, TypeError):
-                old = True
-            if old or "files" not in e:
-                trace.add(n)
+    trace, narrowed = trace_set(prev, names, commit, now) if use_strace else (set(), False)
+    if narrowed:
         print(f"suitemap: tracing {len(trace)} of {len(names)} suites (the change since {prev['commit'][:12]} reaches them, or "
               f"their files were traced over {TRACE_MAX_AGE} h ago); the others keep their earlier file measurement", file=sys.stderr)
     # compile the bytecode first: a measured Python then opens a .py only to read it as text
@@ -1691,6 +1707,13 @@ def measure(args):
                 print(f"::warning::{name} failed only when measured; it passes plainly. The map runs it on every PR until a clean measurement.", flush=True)
             entry["seconds"] = round(psecs, 1)
             entry["measured_seconds"] = round(secs, 1)   # what the measured run took (the limit, when it timed out): the shard plan balances by this, not by the plain time
+        # what the suite costs under strace and without it, for the shard plan (strace makes a suite 1.6 times as slow, a process-heavy one 2.7 times): this run's time
+        # under the key of how it ran, the other kept from the earlier map
+        mine, other = (STRACE_KEY, PLAIN_KEY) if name in trace else (PLAIN_KEY, STRACE_KEY)
+        entry[mine] = max(entry["seconds"], entry.get("measured_seconds", 0))
+        pe = ((prev or {}).get("suites") or {}).get(name)
+        if isinstance(pe, dict) and isinstance(pe.get(other), (int, float)) and not isinstance(pe.get(other), bool):
+            entry[other] = pe[other]
         lines, pids = read_coverage(d)
         py = {}
         for rel, ls in sorted(lines.items()):
@@ -1746,15 +1769,33 @@ SHARDS = 6   # main's measured run: the matrix in tests.yml lists 0 .. SHARDS-1 
 SHARD_MIN = 40
 
 
-def shard_plan(names, n, m=None):
-    """names split into n lists, every name in exactly one; balanced by the map's measured seconds when it has any, else by a stable hash"""
+def expected_seconds(e, traced):
+    """what a run of the suite of map entry `e` is expected to take: the larger of its time and its time when measured (a suite that failed only when measured: the plain time is far
+    under what its shard spends on it). With `traced` (True when that run puts strace on the suite, False when it does not; None: not known) the time of the entry's own kind of run,
+    the other kind's scaled by TRACE_COST when the entry has only that. A map from before the two times has neither: its time is taken as it is"""
+    own = max(float(e.get("seconds") or 0), float(e.get("measured_seconds") or 0))
+    if traced is None:
+        return own
+    want, other = (STRACE_KEY, PLAIN_KEY) if traced else (PLAIN_KEY, STRACE_KEY)
+    got = {k: float(e[k]) for k in (want, other) if isinstance(e.get(k), (int, float)) and not isinstance(e.get(k), bool) and e[k] > 0}
+    if want in got:
+        return got[want]
+    if other in got:
+        return got[other] * TRACE_COST if traced else got[other] / TRACE_COST
+    return own
+
+
+def shard_plan(names, n, m=None, traced=None):
+    """names split into n lists, every name in exactly one; balanced by the map's measured seconds when it has any, else by a stable hash.
+    `traced`: the set of suites the run being planned puts strace on (None: not known, each suite is weighed by its recorded time): strace makes a suite
+    slower by 1.6 times and more, and a map made by a run that traced few suites weighs them all cheap for a run that traces them all"""
     if n < 1:
         raise ValueError("a shard plan needs at least one shard")
     names = sorted(set(names))
     secs = {}
     for k, e in ((m or {}).get("suites") or {}).items():
         try:
-            v = max(float(e.get("seconds") or 0), float(e.get("measured_seconds") or 0))   # a suite that failed only when measured: the plain time is far under what its shard spends on it
+            v = expected_seconds(e, None if traced is None else k in traced)
         except (AttributeError, TypeError, ValueError):
             continue
         if v > 0:
@@ -1796,7 +1837,20 @@ def plan(args):
         if unknown:   # a name that is no suite is never planned away: the plan would drop it and the run would pass without it
             print(f"suitemap: not a suite of this checkout: {', '.join(unknown)}", file=sys.stderr)
             return 2
-    for i, names in enumerate(shard_plan(every if only is None else only, args.of, load_map(args.map) if args.map else None)):
+    m = load_map(args.map) if args.map else None
+    planned = every if only is None else only
+    # what the run will trace: a measured run (every suite planned) the suites `measure` will trace; a pull request's selection runs plainly, nothing. When the answer
+    # cannot be had (the earlier map's commit is not to be fetched, the diff fails) the plan weighs each suite by its recorded time, as it did before
+    traced = set()
+    if only is None:
+        try:
+            traced, _ = trace_set(m, planned, git("rev-parse", "HEAD").strip(), datetime.datetime.now(datetime.timezone.utc)) if m else (None, False)
+        except Exception as e:
+            print(f"suitemap: the suites the run will trace are not known ({e}): planning by the recorded times", file=sys.stderr)
+            traced = None
+    if traced is not None and only is None and m:
+        print(f"suitemap: the run traces {len(traced)} of {len(planned)} suites: weighed by the time of that kind of run", file=sys.stderr)
+    for i, names in enumerate(shard_plan(planned, args.of, m, traced)):
         print(f"shard{i}={' '.join(names)}")
     if only is not None:
         print(f"large={'true' if len(only) >= SHARD_MIN else 'false'}")
