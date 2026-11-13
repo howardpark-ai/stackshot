@@ -69,6 +69,7 @@ from stackshot.service import telling
 from stackshot.audit import hourly as HR, hand_idle as HI, silence as SL, busy_tell as BT
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
+from stackshot.model import last_activity as LA
 from stackshot.tools import next_report as NR
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -557,6 +558,19 @@ wipe(); put(1, act=350, log=[(200 + 20 * k, "pane") for k in range(8)])
 r = due_rows()
 check("11 …and a full log (eight lines, the oldest 200 minutes after the activity: earlier ones may have rolled off) counts from the activity: told once, as before the window moved", r is not None and r["since"] == now0 - 350 * MIN and r["lines"] == 8, r)
 
+# …but a full log that still holds a line from before the activity has lost nothing since it: the first new line is held to the gap like any other (the reading is `any`, not `all`, of the lines being at or before the activity)
+wipe(); put(1, act=250, log=[(-180, "pane"), (-130, "pane"), (-80, "pane"), (-30, "pane"), (70, "pane"), (120, "pane"), (170, "pane"), (220, "pane")])
+r8 = due_rows(hrs=2.5)
+check("11 a full log (eight lines) with four lines from before the activity and the first new line 70 minutes after it (more than BT.EXTEND_GAP): it restarts the stretch at that line, so 250 minutes of quiet are a stretch of 180 minutes, four lines: nobody is told at 4 hours, and at 2.5 hours the stretch counts from that line",
+      len(lines(1)) == HL.KEEP == 8 and BT._whole(mt(1), now0 - 250 * MIN) and due_rows() is None and tick(now0) == [] and sent == [] and r8 is not None and r8["since"] == now0 - 180 * MIN and r8["lines"] == 4, (len(lines(1)), r8, sent))
+wipe(); put(1, act=250, log=[(-180, "pane"), (-130, "pane"), (-80, "pane"), (-30, "pane"), (45, "pane"), (95, "pane"), (145, "pane"), (195, "pane")])
+r8b = due_rows()
+check("11 …and the same full log with the first new line 45 minutes after the activity (within the gap) extends the stretch from the activity: told once, 250 minutes, four lines", r8b is not None and r8b["since"] == now0 - 250 * MIN and r8b["lines"] == 4 and tick(now0) == ["a1"] and len(to_main()) == 1, (r8b, sent))
+
+wipe(); put(1, act=375, log=[(0, "pane")] + [(70 + 50 * k, "pane") for k in range(7)])
+r8c = due_rows()
+check("11 …a full log whose oldest line was written at the very second of the activity has lost nothing since it either: the first new line, 70 minutes on, restarts the stretch (it counts from that line, 305 minutes, seven lines)", len(lines(1)) == 8 and r8c is not None and r8c["since"] == now0 - 305 * MIN and r8c["lines"] == 7, (len(lines(1)), r8c))
+
 # ================================================================ 12. the follow-up to the third review: a tell on a fresh line, an event no line has seen, a span the lines can show
 # L1: a stretch is told only while its newest line is within BT.EXTEND_GAP of now (the tell is built from lines about an hour apart up to the tell itself)
 wipe(); put(1, act=400, log=seed([("pane", 50), ("pane", 100), ("pane", 150), ("pane", 200), ("pane", 250), ("pane", 300)]))
@@ -592,6 +606,21 @@ told = run(10, 480, each=ev_before_tell)
 check("12 the timeline: a CI result at 3 h 50 min, after the line at 3 h 20 min and before the tell that was due at 4 h, holds it back; the next line (4 h 10 min) verifies the event and ends the stretch, nobody is told in the next 4 hours", told == [] and sent == [] and any(not l.get("pane_only") for l in lines(1)), (told, [(l["at"] - now0) / 60 for l in lines(1)]))
 told = run(490, 500)
 check("12 …and the stretch that starts at that line is told 4 h later, once", told == ["a1"] and len(sent) == 1 and (first_told() or 0) >= 250 + 240 and mt(1).get("busy_tell", {}).get("since") == at(250), (told, first_told(), mt(1).get("busy_tell")))
+
+# L2b: an event is verified only within the hour before the line that reads it (hourly.HOUR): after a skipped tick (a gap of 61 to 65 minutes) a CI result just after the previous line is an hour and a minute old at the next one,
+# which is still pane-only, stamps the audit over the event record and so lifts the hold, with the stretch unbroken (the one sentence of docs/stall-and-ladder.md)
+wipe(); put(1, act=370, log=[(50 * k, "pane") for k in range(1, 7)], last_activity={"at": now0 - 69 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"}); pane_busy("team-back")
+t_line = now0 - 7 * MIN                                             # 363 minutes after the activity: 63 minutes after the line at 300, 62 minutes after the event at 301
+held = BT.due(NR.load_all(None), "a1", t_line, lambda w, p: False, None, 4.0)
+hourly(t_line)
+new_line = lines(1)[-1]
+after = BT.due(NR.load_all(None), "a1", t_line, lambda w, p: False, None, 4.0)
+check("12 a skipped tick: a CI result 62 minutes before the next line is not verified by it (the line is pane-only), the line stamps the audit over the event record, and the stretch it extends (63 minutes after the line before, within the gap) is told: before the line the event held the tell back",
+      held is None and new_line["at"] == t_line and new_line.get("pane_only") is True and new_line["kind"] == "audit" and LA.read(rd(1))["kind"] == "audit" and LA.read(rd(1))["at"] == t_line
+      and after is not None and after["since"] == now0 - 370 * MIN and after["lines"] == 7, (held, new_line, LA.read(rd(1)), after))
+wipe(); put(1, act=370, log=[(50 * k, "pane") for k in range(1, 7)], last_activity={"at": now0 - 59 * MIN - 7 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"}); pane_busy("team-back")
+hourly(t_line)
+check("12 …and the same event 59 minutes before the line is verified by it (within the hour): the line is not pane-only and ends the stretch", lines(1)[-1].get("pane_only") is not True and "CI failed on PR 5" in lines(1)[-1]["text"] and BT.due(NR.load_all(None), "a1", t_line, lambda w, p: False, None, 4.0) is None, lines(1)[-1])
 
 # L3: a log that has rolled past the activity: the length told is the one the lines show
 wipe(); put(1, act=2000, log=[(1600 + 50 * k, "pane") for k in range(8)])
