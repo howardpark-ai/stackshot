@@ -54,6 +54,7 @@ if len(sys.argv) > 2 and sys.argv[1] == "--standby-child":
     os.environ.update(STACKSHOT_CONFIG=f"{root}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{root}/fleet"); os.environ.pop("STACKSHOT_URL", None)
     sys.path.insert(0, STACK); logging.disable(logging.CRITICAL)
     from stackshot.web import server
+    from stackshot.web.auth import signin as _signin
     from stackshot.web.colorcombos import WEB_LABEL as WL
     from starlette.testclient import TestClient
     server._cfg.CFG["project_agent"] = {"form_senders": [WL], "form_machines": [HOST]}
