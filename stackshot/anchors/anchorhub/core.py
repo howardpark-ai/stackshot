@@ -279,6 +279,7 @@ class Hub:
         self.stopping = threading.Event()      # set when a clean stop begins: the receivers' loops end then, and not before
         self._status_io = threading.Lock()     # one status.json write at a time (its text is made and replaced inside it, so the newest text is the file's)
         self.savers: dict[str, object] = {}    # receiver → fn() returning its read position
+        self.starting: set[str] = set()        # receivers whose start has not settled (being tried or retried): until its saver is registered, persist() writes back the position the receiver loaded
         self.catchups: dict[str, object] = {}  # receiver → fn(since_epoch) returning the number of notices it caught up
         self.inflight = 0                      # deliveries running right now (a clean stop waits for them)
         try: self.saved = json.load(open(CURSORS))
@@ -537,6 +538,8 @@ class Hub:
     def persist(self) -> str:
         """Write every receiver's read position to CURSORS (atomic). Returns the time it was saved."""
         out = {"saved": now_iso()}
+        for name in list(self.starting):      # a receiver still starting (its start is retried while the network is down) has no saver yet: what it loaded stays, or a second restart before it comes up would lose it
+            if name not in self.savers and name != "saved" and isinstance(self.saved, dict) and self.saved.get(name) is not None: out[name] = _jsonable(self.saved[name])
         for name, fn in list(self.savers.items()):
             try: out[name] = _jsonable(fn())
             except Exception as e: log.warning("persist %s: %s", name, str(e)[:120])
@@ -716,9 +719,10 @@ def start_receiver(hub: Hub, name: str, fn, ready, routes=(), backoff=RECEIVER_R
         except Exception as e: return False, (str(e).strip().replace("\n", " ") or type(e).__name__)[:300], transient(e)
         return bool(ready()), None, False
     with hub.lock:
+        hub.starting.add(name)
         for r in routes: hub.retrying[r] = {"receiver": name, "next": time.time(), "step": backoff[0], "refused": 0}
     def settle(ok, err, tries, t0):
-        with hub.lock: refused = sum(hub.retrying.pop(r, {}).get("refused", 0) for r in routes)
+        with hub.lock: hub.starting.discard(name); refused = sum(hub.retrying.pop(r, {}).get("refused", 0) for r in routes)
         _receiver_state(hub, name, ok, None if ok else (err or "did not report ready"))
         if ok and tries == 1: log.info("receiver %s: ready", name)
         elif ok: log.info("receiver %s: ready after %d tries, %.1f s%s", name, tries, time.time() - t0, f"; {refused} hook request(s) answered 503 meanwhile" if refused else "")
