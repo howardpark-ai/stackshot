@@ -11003,7 +11003,7 @@ _STEP_PROOF_FORM = (
 
 _DRAFT_FORM = (
     f" draft: the text exactly as it is to be posted, sent or pasted somewhere else by the person whose step it is (a channel message, an email, a reply), as many lines as it has, stored and shown as written (no bullets, no line limit; at most {_draft.MAX} characters). "
-    "His item page draws it under the step as a block with a Copy button; a close or his Send on the step drops it. "
+    "His item page draws it under the step as a block with a Copy button; a close drops it, and so does his Done or Send note on the step. "
     f"An item whose step is such a post, send or paste carries the text: a write that sets the step or mover of an item so that it is his step, or that sets or clears its draft, with a step that names a text to post, send or paste ({_draft.STEMS}, and the instance's own words of [keywords.draft]; a heuristic, not a complete list), "
     "is refused unless the item has a draft or its step or description links the document that holds the text (an https:// link to a doc, Drive file, Notion page or Slack thread; a GitHub issue, pull request or commit link, or a link to the board, does not count). draft=\"none\" (or update clear_draft=true) removes it; a create can store one before the step exists. "
 )
@@ -16663,9 +16663,9 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
 
 def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
     """his Done (his word that his step is done; an empty Send from a page loaded earlier is the same) checks the open steps of the item's checklist that are his, the lines the Your step block shows
-    (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Send is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
+    (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Done is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
-    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Send finishes all of his open lines."""
+    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines."""
     cl = _steps.view(meta)
     mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and _steps.is_his(x["text"])]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
     if not mine:
@@ -16707,10 +16707,10 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
 
 def _answer(gid: str, choice: str, text: str, act: str) -> str:
     """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
-    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | toolong | nostep | nomover (nothing written). A step form has two buttons and an optional note box.
+    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover (nothing written; `emptynote` is a Send note on a blank box). A step form has two buttons and an optional note box.
     Done (act=done) is his word that the step is finished (`done`: the item goes to its then-mover, recorded as his answer "Done"); a note in the box stays on that record (`text`) and goes with the Done to the then-mover,
-    which is told the step is done and shown the note. Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
-    on an item with no step any more it is a comment, and with no text nothing is written (`empty`). A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
+    which is told the step is done and shown the note (`donenote`: the same, and the notice says the note went along). Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
+    on an item with no step any more it is a comment, and with no text nothing is written (`emptynote`). A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
     """
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
     if len(text) > _ANSWER_TEXT_MAX:
@@ -16737,7 +16737,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             kind, choice, stepped = "decision", "Done", True
         elif act == "note":             # the Send note button of a step form: only with text (an empty box is no Done); his note on the step, handed to the then-mover to judge; an item that has no step any more: a comment
             if not text:
-                return "empty"
+                return "emptynote"
             if meta.get("state") == "your-step" and _states.clean(meta.get("step")):
                 kind, choice, stepped = "step-reply", "", True
             else:
@@ -16856,7 +16856,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             st[gid] = {"ts": now, "owner": _session_id(_holder(item)), "project": str(meta.get("project") or ""),
                        "told": told, "words": _answer_words(rec, 300)}
             _answers_save(st)
-    kind = ("stepreply" if kind == "step-reply" else "done") if stepped else kind
+    kind = ("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
     print(f"answer: {gid} {kind} from the board" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
     _publish()
     return "askedback" if askback else kind
@@ -16950,7 +16950,7 @@ async def item_answer(request: Request):
     if back:      # from the home page's row: back to the page the form was on, with the item named for its notice
         path, frag = back
         q = {"sent": code, "item": _gh.href_id(gid)}      # the code and the id only: the page's own row names the item, so no text of anyone's rides in the address
-        if code in ("done", "stepreply"):                 # and who takes it from here: a session name, which the page shows only when it is one of the fleet's it knows
+        if code in ("done", "donenote", "stepreply"):     # and who takes it from here: a session name, which the page shows only when it is one of the fleet's it knows
             try: q["then"] = _session_label(str(_model.derive(_load(gid)).mover or ""))[:80]
             except Exception: pass
         return RedirectResponse(path + "?" + urlencode(q) + frag, status_code=303, headers={"Cache-Control": "no-store"})

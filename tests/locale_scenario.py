@@ -781,7 +781,7 @@ with i18n.use("ko"):
     bdx.scoped_urls = lambda gid: []; d_wa.append(bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")))
     del bdx.scoped_urls
     d_sent = {k_: bdx.sent_msg(k_) for k_ in bdx._SENT}; d_home = json.loads(html.unescape(re.search(r'data-notes="([^"]*)"', bdx.sent_notes_html()).group(1)))
-    d_sent_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
+    d_sent_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"), bdx.sent_msg("donenote", "alpha-main"))
 _d0, _d3, _d5 = bdx.now.date(), bdx.now.date() - DT(days=3), bdx.now.date() + DT(days=5)
 check("due_badge in the test locale: today, overdue and ahead each read from their own template, the weekday from the table; no date, no badge",
       d_due == [r2.badge(_m("item.due_today", n=0, md=_wd(_d0)), "due"), r2.badge(_m("item.due_overdue", n=3, md=_wd(_d3)), "due"), r2.badge(_m("item.due_in", n=5, md=_wd(_d5)), "due"), ""], d_due)
@@ -800,12 +800,12 @@ check("mockup_link in the test locale: the chip and its tip read from the table"
 check("wait_anchor_html in the test locale: more than three anchors say '+N more' (not when all are listed), none recorded says so",
       _m("wait.more", n=2) in d_wa[0] and _m("wait.more", n=2) not in d_wa[1] and _m("wait.anchor_none") in d_wa[2] and _m("wait.anchor_none") not in d_wa[0], d_wa)
 _S = r2.Board._SENT; _K = {k_: v_[1] for k_, v_ in r2.Board._SENT_KEYS.items()}; _KH = {k_: v_[2] for k_, v_ in r2.Board._SENT_KEYS.items() if len(v_) > 2}
-e_sent = {k_: bdx.sent_msg(k_) for k_ in _S}; e_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
+e_sent = {k_: bdx.sent_msg(k_) for k_ in _S}; e_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"), bdx.sent_msg("donenote", "alpha-main"))
 check("sent_msg in English is _SENT's item-page wording, code by code; who takes it names them; a code that is none is empty",
-      e_sent == {k_: v_[1] for k_, v_ in _S.items()} and e_by == ("Done: alpha-main takes it from here.", "Sent: alpha-main has your note and decides whether the step is done.", ""), (e_sent, e_by))
+      e_sent == {k_: v_[1] for k_, v_ in _S.items()} and e_by == ("Done: alpha-main takes it from here.", "Sent: alpha-main has your note and decides whether the step is done.", "", "Done: alpha-main takes it from here, and your note went along."), (e_sent, e_by))
 check("sent_msg in the test locale: every code reads from its own key, who takes it is named in the table's wording, and every code has a key",
       set(_K) == set(_S) and d_sent == {k_: MARK(EN[_K[k_]]) for k_ in _S}
-      and d_sent_by == (_m("js.sent_done", who="alpha-main"), _m("sent.stepreply_by", who="alpha-main"), ""), (d_sent, d_sent_by))
+      and d_sent_by == (_m("js.sent_done", who="alpha-main"), _m("sent.stepreply_by", who="alpha-main"), "", _m("js.sent_done_note", who="alpha-main")), (d_sent, d_sent_by))
 check("the home page's notices (sent_notes_html) in the test locale: every code with the home page's own key reads from it, the rest from the item page's, each with its class",
       d_home == {k_: [r2.Board._SENT_KEYS[k_][0], MARK(EN[_KH.get(k_, _K[k_])])] for k_ in _S}, d_home)
 # the English wording of eight keys no other test pins, through the real render path with representative fields (the test locale's checks above prove only that each key is read, not what it says)
@@ -891,15 +891,15 @@ check("…and no element the value tried to open is on the page, nor its raw tex
 write_ko(test_locale()); reset_warned()
 
 # ---- the step form's four strings: in the English catalog, and read through the string table (a locale file that overrides them changes the page; the values here are plain ASCII stand-ins, the real Korean lives in the private locale file)
-STEP_KEYS = ("home.step_note", "home.step_note_aria", "home.step_done", "home.step_send_note")
-STEP_OVR = {"home.step_note": "Xnote", "home.step_note_aria": "Xnote-label", "home.step_done": "Xdone", "home.step_send_note": "Xsend-note"}
-check("the step form's four strings are in the English catalog: the optional note box (placeholder and label) and the two buttons", all(k_ in EN for k_ in STEP_KEYS) and [EN[k_] for k_ in STEP_KEYS] == ["Note (optional)", "Note for the next owner (optional)", "Done", "Send note"], [EN.get(k_) for k_ in STEP_KEYS])
+STEP_KEYS = ("home.step_note", "home.step_note_aria", "home.step_done", "home.step_send_note", "home.step_send_note_hint")
+STEP_OVR = {"home.step_note": "Xnote", "home.step_note_aria": "Xnote-label", "home.step_done": "Xdone", "home.step_send_note": "Xsend-note", "home.step_send_note_hint": "Xhint"}
+check("the step form's five strings are in the English catalog: the optional note box (placeholder and label), the two buttons and the hint on a greyed Send note", all(k_ in EN for k_ in STEP_KEYS) and [EN[k_] for k_ in STEP_KEYS] == ["Note (optional)", "Note for the next owner (optional)", "Done", "Send note", "Write a note to send it"], [EN.get(k_) for k_ in STEP_KEYS])
 write_ko(test_locale(**STEP_OVR)); set_dir(LOC); reset_warned()
 with i18n.use("ko"):
     ko_step_pg = r2.Board(f"{tmp}/store").item_html("a240", answer=IPX_BOX)
 check("a locale file's values for them reach the item page of a step item: the note box (placeholder and label), Done (the main button) and Send note, and none of the English labels",
-      'placeholder="Xnote"' in ko_step_pg and ">Xnote-label</label>" in ko_step_pg and 'name="act" value="done">Xdone</button>' in ko_step_pg and 'data-needs-text>Xsend-note</button>' in ko_step_pg
-      and ">Done</button>" not in ko_step_pg and "Send note" not in ko_step_pg and "Note (optional)" not in ko_step_pg, ko_step_pg[ko_step_pg.find('class="iask istep"'):][:900])
+      'placeholder="Xnote"' in ko_step_pg and ">Xnote-label</label>" in ko_step_pg and 'name="act" value="done">Xdone</button>' in ko_step_pg and 'title="Xhint" data-hint="Xhint" data-needs-text>Xsend-note</button>' in ko_step_pg
+      and ">Done</button>" not in ko_step_pg and "Send note" not in ko_step_pg and "Note (optional)" not in ko_step_pg and "Write a note to send it" not in ko_step_pg, ko_step_pg[ko_step_pg.find('class="iask istep"'):][:900])
 write_ko(test_locale()); reset_warned()
 
 set_dir(None)

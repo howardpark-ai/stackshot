@@ -54,6 +54,7 @@ CATALOG: dict[str, str] = {
     "sent.decision": "Sent: your answer is on the item, it has left your queue, and the agent on it has been told.",
     "sent.comment": "Sent: your comment is on the item and the agent on it has been told.",
     "sent.empty": "Nothing sent: write something in the box, or pick an option.",
+    "sent.emptynote": "Nothing sent: write a note to send it.",
     "sent.toolong": "Nothing sent: the text is too long.",
     "sent.stale": "Nothing sent: the item no longer asks this (its options or its needs changed). Read it again below.",
     "sent.stale_home": "Nothing sent: the ask changed before your answer arrived; open the item to read it again.",
@@ -64,6 +65,7 @@ CATALOG: dict[str, str] = {
     "sent.closednote": "Sent as a comment: the item is closed, and your note is on it.",
     "sent.closed": "Nothing sent: the item is closed.",
     "sent.done": "Done: the item goes on to its next mover.",
+    "sent.donenote": "Done: the item goes on to its next mover, and your note went along.",
     "sent.stepreply": "Sent: your note is on the item and its next mover has it. It decides whether the step is done, and hands the item back to you if it was a question.",
     "sent.stepreply_by": "Sent: {who} has your note and decides whether the step is done.",
     "sent.nomover": "Nobody is set to take this item next, so nothing was recorded. Write a comment instead.",
@@ -310,6 +312,7 @@ CATALOG: dict[str, str] = {
     "js.rcv.title": "{raw} · checked {checked} {tz}",
     "js.rcv.stale": "stale {age} ✗",
     "js.sent_done": "Done: {who} takes it from here.",
+    "js.sent_done_note": "Done: {who} takes it from here, and your note went along.",
     "js.sent_note": "Your note is sent: {who} takes it from here and decides whether the step is done.",
 
     # ------------------------------------------------------------------ home page: header, count cards, connection notice
@@ -392,6 +395,7 @@ CATALOG: dict[str, str] = {
     "home.step_note": "Note (optional)",
     "home.step_done": "Done",
     "home.step_send_note": "Send note",
+    "home.step_send_note_hint": "Write a note to send it",
     "home.send": "Send",
     "home.note_optional": "Note (optional)",
     "home.write_answer": "Write your answer",

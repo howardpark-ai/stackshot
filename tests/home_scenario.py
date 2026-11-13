@@ -561,7 +561,7 @@ check("step rows: a step with a command and a link boxes the command only, the l
 check("step rows: a lone-word backtick stays inline, no Copy box", "<code>default</code>" in S[57] and "<pre>" not in S[57] and 'class="b copy"' not in S[57], S[57])
 check("step rows: plain words show as they read with no block", "Call the office and say done" in S[53] and "<pre>" not in S[53], S[53])
 check("step rows: the form has an optional note box and TWO buttons, Done (the main one) and Send note (needs text), both disabled until the token, no comment button, the old one-Send label gone, the token empty and `back` empty, nothing hidden",
-      all(sform(S[n]).count("<button") == 2 and sform(S[n]).count('class="b main" name="act" value="done" disabled>Done</button>') == 1 and sform(S[n]).count('class="b" name="act" value="note" data-needs-text disabled>Send note</button>') == 1
+      all(sform(S[n]).count("<button") == 2 and sform(S[n]).count('class="b main" name="act" value="done" disabled>Done</button>') == 1 and sform(S[n]).count('class="b" name="act" value="note" title="Write a note to send it" data-hint="Write a note to send it" data-needs-text disabled>Send note</button>') == 1
           and 'value="send"' not in sform(S[n]) and 'value="comment"' not in sform(S[n]) and "data-step" in sform(S[n]).split(">", 1)[0]
           and 'placeholder="Note (optional)"' in sform(S[n]) and 'aria-label="Note for the next owner (optional)"' in sform(S[n])
           and "Send with an empty box finishes the step" not in sform(S[n]) and "A note, or nothing to finish the step" not in sform(S[n])
@@ -626,7 +626,7 @@ check("the home page carries the notice of a note sent on a step (stepreply), an
       "stepreply" in _notes and "decides whether the step is done" in _notes["stepreply"][1] and "k==='stepreply'" in _hj and "form.hstep button[name=act]" in _hj and "form.hstep button[value=send]" not in _hj, _notes.get("stepreply"))
 _cj = render._CARDS_JS
 check("the page scripts handle the step form's two buttons: the card script enables a data-needs-text button (Send note) only while the box holds text and leaves Done alone, a step form is watched on typing, and the home script runs it for every form after the token enables the buttons",
-      "form[data-step]" in _cj and "button[data-needs-text]:not([data-spent])" in _cj and "t.value.trim()!==''" in _cj and "form[data-cards] textarea,form[data-step] textarea" in _cj
+      "form[data-step]" in _cj and "button[data-needs-text]:not([data-spent])" in _cj and "t.value.trim()!==''" in _cj and "b.title=b.getAttribute('data-hint')" in _cj and "b.removeAttribute('title')" in _cj and "form[data-cards] textarea,form[data-step] textarea" in _cj
       and "if(window.ssCards)ssCards.sync(f)" in _hj and "hstep')) ssCards" not in _hj and ".hstep')&&" not in _hj.replace(" ", ""), (_cj[:600], _hj[:600]))
 _lj = render._LIVE_JS
 check("in place: a decision box with text in it holds the swap — busy() also tests every form.hanswer textarea and text input for a typed value, not only the focused element",

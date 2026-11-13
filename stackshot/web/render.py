@@ -1440,6 +1440,7 @@ class Board:
     _SENT = {"decision": ("ok", "Sent: your answer is on the item, it has left your queue, and the agent on it has been told."),
              "comment": ("ok", "Sent: your comment is on the item and the agent on it has been told."),
              "empty": ("warn", "Nothing sent: write something in the box, or pick an option."),
+             "emptynote": ("warn", "Nothing sent: write a note to send it."),
              "toolong": ("warn", "Nothing sent: the text is too long."),
              "stale": ("warn", "Nothing sent: the item no longer asks this (its options or its needs changed). Read it again below.",
                        "Nothing sent: the ask changed before your answer arrived; open the item to read it again."),
@@ -1450,6 +1451,7 @@ class Board:
              "closednote": ("ok", "Sent as a comment: the item is closed, and your note is on it."),
              "closed": ("warn", "Nothing sent: the item is closed."),
              "done": ("ok", "Done: the item goes on to its next mover."),
+             "donenote": ("ok", "Done: the item goes on to its next mover, and your note went along."),
              "stepreply": ("ok", "Sent: your note is on the item and its next mover has it. It decides whether the step is done, and hands the item back to you if it was a question."),      # the item page names who: sent_html(taken_by=)
              "nomover": ("warn", "Nobody is set to take this item next, so nothing was recorded. Write a comment instead."),
              "nostep": ("warn", "Nothing sent: the item has no step for you any more. Read it again below.",

@@ -224,3 +224,8 @@ allow = []
 retired = "Send with an empty box finishes the step"
 use = "Done finishes the step (a note in the box goes along to the next owner); Send note keeps it open"
 allow = []
+
+[[term]]
+retired = "his Send on the step"
+use = "`his Done or Send note on the step`: the step form has two buttons, there is no single Send on it"
+allow = []

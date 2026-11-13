@@ -1398,7 +1398,7 @@ form.hanswer[data-cards] .acards{margin-top:0}form.hanswer .acard{padding:8px 10
 """
 _CARDS_JS = r"""<script>(function(){
 function pick(f){return f.querySelector('input[name=choice]:checked')}
-function step(f){var t=f.querySelector('textarea'),ok=!!t&&t.value.trim()!=='';[].forEach.call(f.querySelectorAll('button[data-needs-text]:not([data-spent])'),function(b){b.disabled=!ok})}
+function step(f){var t=f.querySelector('textarea'),ok=!!t&&t.value.trim()!=='';[].forEach.call(f.querySelectorAll('button[data-needs-text]:not([data-spent])'),function(b){b.disabled=!ok;if(b.hasAttribute('data-hint')){if(ok)b.removeAttribute('title');else b.title=b.getAttribute('data-hint')}})}
 function sync(f){if(!f||f.hasAttribute('aria-busy'))return;if(f.hasAttribute('data-step'))return step(f);var b=f.querySelector('button[name=act]'),t=f.querySelector('textarea'),h=f.querySelector('.ahint'),ok=!!pick(f)||(!!t&&t.value.trim()!=='');
 if(b)b.disabled=!ok;if(h)h.hidden=ok}
 function all(){[].forEach.call(document.querySelectorAll('form[data-cards],form[data-step]'),function(f){var p=pick(f);f._was=p?p.value:'';sync(f)})}
@@ -1493,8 +1493,8 @@ b.value=location.pathname;try{sessionStorage.setItem(SK,JSON.stringify({y:Math.r
 var S=null,h0=document.documentElement.scrollHeight,np=null,Y=0;try{S=JSON.parse(sessionStorage.getItem(SK));sessionStorage.removeItem(SK)}catch(e){}
 if(m){var p=document.createElement('p');p.className='isent '+m[0];p.setAttribute('role','status');var id=q.get('item'),nm='',lab='';
 if(id&&/^(?:[a-z]\d+|[1-9]\d*|board-tmp-[a-z0-9-]*[a-z0-9]-[1-9]\d*)$/.test(id)){lab=/^\d+$/.test(id)?(N.getAttribute('data-hash')||'')+id:id;var d=id.match(/^([a-z])(\d+)$/),rw=document.getElementById(d?'task-'+d[1]+'-'+d[2]:/^\d+$/.test(id)?'task-g-'+id:''),g=rw&&rw.querySelector('.hgoal');nm=g?g.textContent:''}
-var th=q.get('then'),ms=m[1];if((k==='done'||k==='stepreply')&&th&&th.length<=80&&[].some.call(document.querySelectorAll('.hwho'),function(x){return x.textContent===th}))ms=SST(k==='done'?'js.sent_done':'js.sent_note',{who:th});
-if((k==='done'||k==='stepreply')&&rw)[].forEach.call(rw.querySelectorAll('form.hstep button[name=act]'),function(b){b.disabled=true;b.setAttribute('data-spent','1')});
+var th=q.get('then'),ms=m[1],sk=k==='done'||k==='donenote'||k==='stepreply';if(sk&&th&&th.length<=80&&[].some.call(document.querySelectorAll('.hwho'),function(x){return x.textContent===th}))ms=SST(k==='done'?'js.sent_done':k==='donenote'?'js.sent_done_note':'js.sent_note',{who:th});
+if(sk&&rw)[].forEach.call(rw.querySelectorAll('form.hstep button[name=act]'),function(b){b.disabled=true;b.setAttribute('data-spent','1')});
 p.textContent=(nm?nm+' ('+lab+')':lab)+(nm||lab?' — ':'')+ms;
 var c=document.querySelector('header.top')||document.getElementById('counts')||N;if(c&&c.parentNode){c.parentNode.insertBefore(p,c.nextSibling);np=p}}
 if(S&&S.y>0&&S.p===location.pathname&&!location.hash&&Date.now()-S.t>=0&&Date.now()-S.t<15000){Y=S.y+(document.documentElement.scrollHeight-h0);window.scrollTo(0,Y);
@@ -2616,6 +2616,7 @@ class Board:
     _SENT_KEYS = {"decision": ("ok", "sent.decision"),      # ?sent=<code> → (the notice's class, its key on the item page, its key on the home page when that differs: it has no "below" and no box to press again in)
                   "comment": ("ok", "sent.comment"),
                   "empty": ("warn", "sent.empty"),
+                  "emptynote": ("warn", "sent.emptynote"),      # Send note on a blank box (a decision form's blank Send is "empty": it asks for a note or an option)
                   "toolong": ("warn", "sent.toolong"),
                   "stale": ("warn", "sent.stale", "sent.stale_home"),
                   "askedback": ("warn", "sent.askedback", "sent.askedback_home"),
@@ -2623,6 +2624,7 @@ class Board:
                   "closednote": ("ok", "sent.closednote"),
                   "closed": ("warn", "sent.closed"),
                   "done": ("ok", "sent.done"),
+                  "donenote": ("ok", "sent.donenote"),      # Done pressed with a note in the box: the note went along
                   "stepreply": ("ok", "sent.stepreply"),      # the item page names who: sent_html(taken_by=)
                   "nomover": ("warn", "sent.nomover"),
                   "nostep": ("warn", "sent.nostep", "sent.nostep_home")}
@@ -2633,6 +2635,7 @@ class Board:
         v = self._SENT_KEYS.get(code)
         if not v: return ""
         if taken_by and code == "done": return _t("js.sent_done", who=taken_by)
+        if taken_by and code == "donenote": return _t("js.sent_done_note", who=taken_by)
         if taken_by and code == "stepreply": return _t("sent.stepreply_by", who=taken_by)
         return _t(v[1])
     def answer_html(self, r, answer, comment_only=False) -> str:
@@ -2859,7 +2862,7 @@ class Board:
                        f'<label for="atext">{_t("home.step_note_aria")}</label>'
                        + _abox(f'<textarea id="atext" name="text" rows="3" maxlength="4000" placeholder="{e(_t("home.step_note"))}"></textarea>', "atext") +
                        f'<div class="abtns"><button type="submit" class="b main" name="act" value="done">{_t("home.step_done")}</button>'
-                       f'<button type="submit" class="b" name="act" value="note" data-needs-text>{_t("home.step_send_note")}</button></div>'
+                       f'<button type="submit" class="b" name="act" value="note" title="{e(_t("home.step_send_note_hint"))}" data-hint="{e(_t("home.step_send_note_hint"))}" data-needs-text>{_t("home.step_send_note")}</button></div>'
                        '<p class="isent warn aerr" role="alert" hidden></p></form>')
         elif his and not asked and _ip.step_block(r):                 # signed out (or no token): the step is still the page's
             sb_html = f'<div class="iask istep"><b>{_t("item.your_step")}</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
@@ -3703,7 +3706,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         form = (f'<form class="hanswer hstep" data-step method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">'
                 + _abox(f'<textarea id="astep-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{esc(_t("home.step_note_aria"))}" placeholder="{esc(_t("home.step_note"))}"></textarea>', f'astep-{esc(r["gid"])}') +
                 f'<div class="abtns"><button type="submit" class="b main" name="act" value="done" disabled>{esc(_t("home.step_done"))}</button>'
-                f'<button type="submit" class="b" name="act" value="note" data-needs-text disabled>{esc(_t("home.step_send_note"))}</button></div></form>')
+                f'<button type="submit" class="b" name="act" value="note" title="{esc(_t("home.step_send_note_hint"))}" data-hint="{esc(_t("home.step_send_note_hint"))}" data-needs-text disabled>{esc(_t("home.step_send_note"))}</button></div></form>')
         return self.your_step_html(r, home=True), form
     def home_ask(self, r):
         """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none. The question is the ask's Decide part (a watcher's
