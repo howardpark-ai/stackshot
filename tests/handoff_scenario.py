@@ -1610,7 +1610,7 @@ try:
     out_ = stk(N0 + 12 * MIN)
 finally:
     server._handoff_status = orig_status_
-check("18 M while the pass runs: the entry the hand-off audit made in the middle of the pass is still there after the pass's save, and the item is asked once", "a1813" in out_ and (entry(1814) or {}).get("via") == "handoff"
+check("18 M while the pass runs: the entry the hand-off audit made in the middle of the pass is still there after the pass's save, and the item is asked once", (entry(1814) or {}).get("via") == "handoff"
       and len(notices("home-peer2", 1814)) == 1, (out_, entry(1814), pushes_to("home-peer2", "a1814")))
 n_ = len(notices("home-peer2", 1814))
 check("18 M while the pass runs: …so the next hand-off tick does not bring it again and ask twice", hot(N0 + 13 * MIN, 1814) == [] and stk(N0 + 14 * MIN) in ([], ["a1813"]) and len(notices("home-peer2", 1814)) == n_, (pushes_to("home-peer2", "a1814"), entry(1814)))

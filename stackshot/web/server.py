@@ -10847,7 +10847,7 @@ _WORK_PARAM = Annotated[dict[str, Any] | str | None, Field(description=(
     "the status says where you are in it; the page keeps one line per step, not one per write). "
     f"text is at most {_work.TEXT_MAX} characters (details go on the project page). state: in progress (the default) | done. state done also ticks the step, as done=[n] does. "
     "With no open step of yours, one is made from the text. {\"remove\": true} clears the status. Keys: text, state, remove. "
-    "A project builder's step with a status in progress (changed within 90 minutes) tells the stall ladder and the idle hand-over that a build subagent is running on the item; a status left in progress stops hiding the item after that, "
+    "A project builder's step with a status in progress (changed within 90 minutes) tells the stall pass and the idle hand-over that a build subagent is running on the item; a status left in progress stops hiding the item after that, "
     "and a status sent again unchanged keeps its old time, so a long job changes the words or marks the step done."))]
 
 _DONE_PARAM = Annotated[list[int | str] | int | str | None, Field(description="Open steps of the checklist you finished: positions (1-based, marked steps count) or the exact first line, e.g. done=[1] or done=[1, \"my-x: open the PR\"]. A step of yours that next leaves out must be in done or dropped.")]
@@ -11395,7 +11395,7 @@ _UPDATE_DESC = (
     "status of your first open step in place, so a night of updates is one line on the step, not one line each. state is in progress (the default) or done; done also ticks the step, as done=[n] does. "
     "With no open step of yours the call makes one from the text; {\"remove\": true} clears the status. Written by the mover or a session named in needs; it changes no needs, owes no page and, "
     "unless it ticks or makes a step, leaves the state clock and the confirm alone. A project builder's step with a status in progress (changed within 90 minutes) "
-    "tells the stall ladder and the idle hand-over that a build subagent is running on the item, so the item is not handed on meanwhile; a status left in progress stops hiding the item after that, "
+    "tells the stall pass and the idle hand-over that a build subagent is running on the item, so the item is not handed on meanwhile; a status left in progress stops hiding the item after that, "
     "and a status sent again unchanged keeps its old time, so a long job changes the words or writes to the item; mark the step done when the subagent ends. "
     + f"A question {OWNER} asks on an item (in his answer or a comment on it) is answered by the mover on the item itself: rewrite the "
     "description, and the options where it is a pick, the description saying it answers his question. His question is never posted with "
