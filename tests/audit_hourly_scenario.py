@@ -30,6 +30,7 @@ network, no model call, no message sent.
   23 a pull request number written alone is the item's own repository's: two items anchored to the same number in two repositories are told apart by the URL or `owner/repo#n`
   24 a mover's own status write with new text is the item's hourly update (kind `update`, the text its words, the row reads it), as the audit's line is: the same text again, a write by anyone but the mover and a cleared status
      are not; the audit's own line still stamps beside it and the newer of the two is the record
+  26 the first line is owed after 45 minutes without activity (`hourly.EVERY`, the same as `FAST_GAP`), so it lands inside the hour: none at 44 minutes, one at 46, the cadence after it and the slow stretch unchanged, the constants pinned by value, the idle hand-over still waits a full hour, a tied pull request's event still verifies within the hour
   20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle, unless the fleet heartbeat holds the session running elsewhere: unknown) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
 
 
@@ -215,14 +216,14 @@ check("2 the next hour verifies the pane: idle_marked reads the newest line, not
 
 # ================================================================ 3. not due
 clean_pane(); panes["home-peer"] = "busy"
-put(1, act=59); put(2, act=61); put(3, act=10); put(4, act=90, hold=False)
+put(1, act=44); put(2, act=46); put(3, act=10); put(4, act=90, hold=False)
 put(5, act=240); d5 = rd(5); d5["state_updated"] = now0 - 20 * MIN; (T / "store/a/5.json").write_text(json.dumps(d5))           # silent four hours, but left a hold twenty minutes ago
 put(6, act=90); d6 = rd(6); d6["confirmed"] = now0 - 1 * MIN; (T / "store/a/6.json").write_text(json.dumps(d6))                      # a bare confirm just now moves nothing: due
 got = tick()
-check("3 under an hour without activity is not due (59 minutes, 10 minutes); 61 and a confirm just now are", got == ["a2", "a4", "a6"], got)
+check("3 under 45 minutes without activity is not due (44 minutes, 10 minutes); 46 and a confirm just now are", got == ["a2", "a4", "a6"], got)
 check("3 an item that left a hold twenty minutes ago counts from then (the quiet-time clock), not from its activity four hours back", lines(5) == [] and SL.clock(rd(5), "home-peer") == now0 - 20 * MIN)
-put(7, act=59.9); check("3 the limit is exact: 59 minutes 54 seconds is not due", tick() == [])
-put(7, act=60); check("3 …an hour is", tick() == ["a7"], tick())
+put(7, act=44.9); check("3 the limit is exact: 44 minutes 54 seconds is not due", tick() == [])
+put(7, act=45); check("3 …45 minutes is", tick() == ["a7"], tick())
 
 # ================================================================ 4. twice in an hour
 clean_pane(); panes["home-peer"] = "busy"
@@ -235,9 +236,9 @@ check("4 45 minutes after the first line (`FAST_GAP`), an item still silent gets
 put(9, act=90); tick(); b1 = tick(now0 + 44 * MIN + 59); b2 = tick(now0 + 45 * MIN)
 check("4 the gap is exact: 44 minutes 59 seconds after the line nothing, 45 minutes the next line", "a9" not in b1 and "a9" in b2 and [e["at"] for e in lines(9)] == [now0, now0 + 45 * MIN], (b1, b2, lines(9)))
 put(2, act=90); tick(); d2 = rd(2); d2["activity"] = now0 + 5 * MIN; (T / "store/a/2.json").write_text(json.dumps(d2))
-r62, r66 = tick(now0 + 62 * MIN), tick(now0 + 66 * MIN)
-check("4 a write by the mover after the line starts the hour again: 57 minutes after it nothing, 61 minutes after it (and 66 after the line) the next line",
-      "a2" not in r62 and "a2" in r66 and len(lines(2)) == 2, (r62, r66, lines(2)))
+r48, r51 = tick(now0 + 48 * MIN), tick(now0 + 51 * MIN)
+check("4 a write by the mover after the line starts the 45 minutes again: 43 minutes after it nothing (48 after the line), 46 minutes after it (and 51 after the line) the next line",
+      "a2" not in r48 and "a2" in r51 and len(lines(2)) == 2, (r48, r51, lines(2)))
 put(3, act=90); tick(now0 + 130 * MIN); tick(now0 + 131 * MIN)
 check("4 two passes close together write one line", len([e for e in lines(3) if e["at"] == now0 + 130 * MIN]) == 1 and not any(e["at"] == now0 + 131 * MIN for e in lines(3)), lines(3))
 # the stale view: a pass whose list was made before another pass wrote the line
@@ -1105,6 +1106,52 @@ try:
     save24(15, T0 + 3 * MIN, status_of(15, "new words", ts=T0 + 3 * MIN)); n_new = len(calls24)
 finally: WR24._is_mover = mv24
 check("24 the mover test (it reads the fleet's sessions) is asked only when a save carries new status text: none for a save with no status change or the same text, one for a new text", (n_plain, n_new) == (0, 1), (n_plain, n_new))
+
+# ================================================================ 26. the first line is owed after 45 minutes without activity, so it lands inside the hour
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+check("26 the constants, by value: the first line waits 2700 seconds (`EVERY`), the gap between two lines is 2700 seconds (`FAST_GAP`), the hour (`HOUR`) is 3600, and the slow stretch is as it was (24 hours, then one every 6 hours less 5 minutes of slack)",
+      HR.EVERY == 2700.0 and HR.FAST_GAP == 2700.0 and HR.HOUR == 3600.0 and HR.LONG_AFTER == 86400.0 and HR.SLOW_EVERY == 21600.0 and HR.SLACK == 300.0, (HR.EVERY, HR.FAST_GAP, HR.HOUR, HR.LONG_AFTER, HR.SLOW_EVERY, HR.SLACK))
+put(1, act=30); put(2, act=44); put(3, act=44.9); put(4, act=46); put(5, act=45)
+put(12, mover="home-peer2", act=46); panes["home-peer2"] = "busy"      # a mover with this one item and a pane in a turn: its first line verifies
+got26 = tick()
+check("26 no line is owed while activity is recent: 30 minutes, 44 minutes and 44 minutes 54 seconds owe nothing; 45 minutes (the limit) and 46 minutes owe their first line", got26 == ["a4", "a5", "a12"] and lines(1) == [] and lines(2) == [] and lines(3) == [], (got26, lines(1), lines(2), lines(3)))
+check("26 …the first line is the audit's own write and a verified one stamps the item's last activity (kind `audit`, at the line's time), as the later lines do",
+      lines(12)[0]["kind"] == "audit" and LA.read(rd(12)) is not None and LA.read(rd(12))["kind"] == "audit" and LA.read(rd(12))["at"] == now0 and SL.clock(rd(12), "home-peer2") == now0 - 46 * MIN, (lines(12), LA.read(rd(12)), SL.clock(rd(12), "home-peer2")))
+check("26 …and the row of that item, read an hour after its last real activity (14 minutes after the line), carries the audit's time and words and is not red: with no first line until then it would read \"idle over 1 h\"",
+      (lambda r: r is not None and 'data-b="bad"' not in r[0] and 'data-b="bad"' not in r[1] and 'data-b="ok"' in r[0] and "audit verified" in r[1])(parts("a12", now0 + 14 * MIN)), parts("a12", now0 + 14 * MIN))
+# the cadence after the first line is the one it was
+put(6, act=46); tick()
+c1, c2, c3 = tick(now0 + 10 * MIN), tick(now0 + 44 * MIN + 59), tick(now0 + 45 * MIN)
+check("26 after the first line the gap is the same 45 minutes: nothing 10 minutes and 44 minutes 59 seconds after it, the next line at 45", "a6" not in c1 and "a6" not in c2 and "a6" in c3 and [e["at"] for e in lines(6)] == [now0, now0 + 45 * MIN], (c1, c2, c3, lines(6)))
+# the slow stretch is as it was: the fast gap until 24 hours of silence, then 5 hours 55 minutes
+put(7, act=23 * 60); tick()
+d1, d2 = tick(now0 + 44 * MIN + 59), tick(now0 + 45 * MIN)          # 23 hours 45 minutes of silence at the second line: still the fast gap
+d3, d4 = tick(now0 + 45 * MIN + 45 * MIN), tick(now0 + 45 * MIN + 5 * H + 54 * MIN + 59)      # past 24 hours: a line only every 6 hours less the slack
+d5 = tick(now0 + 45 * MIN + 5 * H + 55 * MIN)
+check("26 the fast stretch lasts to 24 hours of silence (a first line at 23 hours, the next 45 minutes on) and then the lines thin out: nothing 45 minutes later and 5 hours 54 minutes 59 seconds after the line, the next at 5 hours 55 minutes",
+      "a7" not in d1 and "a7" in d2 and "a7" not in d3 and "a7" not in d4 and "a7" in d5 and [e["at"] for e in lines(7)] == [now0, now0 + 45 * MIN, now0 + 45 * MIN + 5 * H + 55 * MIN], (d1, d2, d3, d4, d5, [e["at"] for e in lines(7)]))
+put(8, act=25 * 60); tick(); e1, e2 = tick(now0 + 5 * H + 54 * MIN + 59), tick(now0 + 5 * H + 55 * MIN)
+check("26 an item silent for 25 hours gets its first line at once and the next after 5 hours 55 minutes, not 45 minutes", "a8" not in e1 and "a8" in e2 and len(lines(8)) == 2, (e1, e2, lines(8)))
+# a tied pull request's event still verifies an item within the hour, so a first line at 46 minutes is not idle
+panes["home-peer"] = ""
+put(9, act=46); pr_event(9, LA.CI_RESULT, "CI passed on PR 4", 46)
+put(10, act=59); pr_event(10, LA.CI_RESULT, "CI passed on PR 5", 59)
+put(11, act=61); pr_event(11, LA.CI_RESULT, "CI passed on PR 6", 61)
+tick()
+check("26 a CI result 46 or 59 minutes old still verifies the item (the event window is the hour, not the 45 minutes); one 61 minutes old does not",
+      lines(9)[0]["kind"] == "audit" and "CI passed on PR 4" in lines(9)[0]["text"] and lines(10)[0]["kind"] == "audit" and lines(11)[0]["kind"] == "audit_idle", (lines(9), lines(10), lines(11)))
+# a log entry dated ahead of the clock is torn only past the hour (`HOUR`), as it was: a clock stepped back 50 minutes only delays the next line
+def meta26(at_): return {"hourly_audit": {"log": [{"at": at_, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}]}}
+check("26 an entry dated 50 minutes ahead of the clock still counts as the newest line (a clock stepped back a little only delays the next line), one dated 61 minutes ahead is torn",
+      HR.last_line(meta26(now0 + 50 * MIN), now0) is not None and HR.last_line(meta26(now0 + 61 * MIN), now0) is None, (HR.last_line(meta26(now0 + 50 * MIN), now0), HR.last_line(meta26(now0 + 61 * MIN), now0)))
+# the idle hand-over still waits for a full hour without activity: an idle first line written at 46 minutes hands nothing on yet
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=46); tick()
+items26 = lambda: {"a1": rd(1)}
+front26 = lambda who, project: telling.front_keeper(who, project)[0]
+h46, h59, h60, h61 = (HI.due_all(items26(), now0 + m * MIN, front26) for m in (0, 13, 14, 15))
+check("26 the idle line written at 46 minutes of silence hands nothing on until the item has been silent a full hour (not at 46 or 59 minutes, handed at 60 and 61)", idle_marked26 := HR.idle_marked(mt(1)) and h46 == [] and h59 == [] and [g for g, _r in h60] == ["a1"] and [g for g, _r in h61] == ["a1"], (h46, h59, h60, h61, lines(1)))
 clean_pane()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

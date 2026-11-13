@@ -1,7 +1,7 @@
-"""hourly.py: the hourly audit line: an item on an agent that has had no write for an hour gets one short line saying what the audit verified.
+"""hourly.py: the hourly audit line: an item on an agent that has had no write for 45 minutes gets one short line saying what the audit verified, so the line lands inside the hour.
 
 Part of the rule that no item an agent moves goes more than an hour without an update. The mover writes the update; when it has nothing new to add, the audit checks that the item is moving and
-writes the line itself, so the owner never sees an item on an agent idle for over an hour. A mover's own status write with new text is that update (kind `update`, model/last_activity.py `update_signals`, stamped by service/writes.py): the line is owed only after an hour without one. This is the audit side; handing an idle item on is audit/hand_idle.py. Together they replace the 45-minute news ask. On by default (`[audit] hourly_line`).
+writes the line itself, so the owner never sees an item on an agent idle for over an hour. A mover's own status write with new text is that update (kind `update`, model/last_activity.py `update_signals`, stamped by service/writes.py): the line is owed only after 45 minutes without one. This is the audit side; handing an idle item on is audit/hand_idle.py. Together they replace the 45-minute news ask. On by default (`[audit] hourly_line`).
 
   enabled()                                    `[audit] hourly_line`, on unless a TOML false
   due(items, gid, now, env, pane, same, subagents, anchored, queue)   the line an item is owed now, None when none: {"text", "verified", "kind"}
@@ -15,11 +15,12 @@ An item is owed a line when all of these hold, using the shared readings of sile
     wait (a dated wake, an item it waits after, a release, a CI run, a relay, an outside party) and an item queued behind its mover's other item (`[model] queued_behind`, model/queued.py) are left alone, exactly as the board shows them;
   - an untaken hand-off to a back agent is left alone (the hand-off audit clocks it); an untaken hand-off to a front agent is not. A front agent's item is otherwise
     treated like any other: the pass sends nobody anything, it writes a History line, so there is no notice to hold back from a front agent;
-  - the item has had no real activity for an hour: `silence.clock`, the item's quiet-time clock (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
+  - the item has had no real activity for 45 minutes (`EVERY`, the same figure as the gap between two lines, so the first line lands inside the hour as the later ones do): `silence.clock`, the item's quiet-time clock (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
     a write by the mover). A bare confirm ("no change") and the audit's own and the ladder's lines do not move it, so a "no change" reply is no update;
-  - no audit line was written on it lately: the next line is owed 45 minutes after the last (`FAST_GAP`) for the first 24 hours of quiet, then one every 6 hours (`SLOW_EVERY`), so a week of quiet is about
+  - no audit line was written on it lately: the next line is owed 45 minutes after the last (`FAST_GAP`, which is also `EVERY`, what the first line waits for) for the first 24 hours of quiet, then one every 6 hours (`SLOW_EVERY`), so a week of quiet is about
     about fifty lines (51), not 168. The ten-minute tick lands it on the first tick from then on, 50 minutes after the last line on an exact grid and at most about 51 minutes with a round up to a minute late (a round that skips its tick altogether pushes it to about an hour), so the row of a
-    verified item, which reads red only strictly past an hour since its last activity (the line's time), never turns red between two lines. The newest line of `metadata.hourly_audit.log` is the clock, so a
+    verified item, which reads red only strictly past an hour since its last activity (the line's time), never turns red between two lines. The first line is owed after the same 45 minutes, so it lands on the fifth tick after the last real activity and the row
+    never turns red before it (the idle hand-over still waits for a full hour: `HOUR`). The newest line of `metadata.hourly_audit.log` is the clock, so a
     second pass in the same 45 minutes writes nothing and a clock that goes backwards only delays the next line.
 
 What the pass verifies, from data the server already holds, and says in the line (`Audit hh:mm: verified …`):
@@ -58,8 +59,9 @@ from stackshot.model import last_activity as _la
 from stackshot.waits import handoff as _ho
 from stackshot.waits import waiting as _wt
 
-EVERY = 3600.0           # an item on an agent is owed a line after this long without activity
+HOUR = 3600.0            # one hour: the On agent row turns red strictly past it; a tied pull request's event verifies an item within it; a log entry dated this far ahead of the clock is torn; the idle hand-over (audit/hand_idle.py) waits this long without activity
 FAST_GAP = 45 * 60.0     # …and the next line this long after the last (not an hour): the ten-minute tick lands it 50 minutes on (at most about 51 with a round up to a minute late), so the On agent row, which reads the line's time as the item's last activity and turns red strictly past an hour, never reads "idle over 1 h" between two lines
+EVERY = FAST_GAP         # the FIRST line is owed after this long without activity, the same 45 minutes as the gap between two lines: the ten-minute tick lands it 45 to 55 minutes after the last activity, so the row (red strictly past an hour) never reads "idle over 1 h" before its first line
 LONG_AFTER = 24 * 3600.0     # …until it has been silent this long; then the lines thin out to one every SLOW_EVERY
 SLOW_EVERY = 6 * 3600.0
 SLACK = 300.0            # in the slow stretch (a line every SLOW_EVERY): the ten-minute tick reads its clock a few seconds later or earlier each time, so the line is owed once this much less than the gap has passed and 6 hours on the tick grid is never missed by seconds and pushed a whole tick on
@@ -76,10 +78,10 @@ def enabled() -> bool:
 
 def last_line(meta: dict[str, Any] | None, now: float | None = None) -> dict[str, Any] | None:
     """The newest audit line on an item, as its `metadata.hourly_audit.log` entry ({"at", "text", "kind"}); None when it has none or the entry is torn. With `now` given, an entry dated more than
-    `EVERY` ahead of it is torn too (a clock set far ahead once, or a bad write): it would otherwise hide every line until real time caught up. A clock stepped back by less than that only delays the next line."""
+    `HOUR` ahead of it is torn too (a clock set far ahead once, or a bad write): it would otherwise hide every line until real time caught up. A clock stepped back by less than that only delays the next line."""
     best = None
     for e in _log.log_of(meta):
-        if e.get("kind") in (KIND_OK, KIND_IDLE, KIND_UNKNOWN) and isinstance(e.get("at"), (int, float)) and not isinstance(e.get("at"), bool) and (now is None or e["at"] <= now + EVERY) and (best is None or e["at"] >= best["at"]):
+        if e.get("kind") in (KIND_OK, KIND_IDLE, KIND_UNKNOWN) and isinstance(e.get("at"), (int, float)) and not isinstance(e.get("at"), bool) and (now is None or e["at"] <= now + HOUR) and (best is None or e["at"] >= best["at"]):
             best = e
     return best
 
@@ -110,7 +112,7 @@ def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float,
     except Exception:  # noqa: BLE001  (a subagent that cannot be read verifies nothing)
         pass
     rec = _la.read(item)
-    if rec and rec["kind"] in PR_KINDS and 0 <= now - rec["at"] <= EVERY:
+    if rec and rec["kind"] in PR_KINDS and 0 <= now - rec["at"] <= HOUR:
         out.append(rec["what"])
         recorded.append(rec["what"])
     return out, recorded
