@@ -893,7 +893,7 @@ write_ko(test_locale()); reset_warned()
 # ---- the step form's four strings: in the English catalog, and read through the string table (a locale file that overrides them changes the page; the values here are plain ASCII stand-ins, the real Korean lives in the private locale file)
 STEP_KEYS = ("home.step_note", "home.step_note_aria", "home.step_done", "home.step_send_note", "home.step_send_note_hint")
 STEP_OVR = {"home.step_note": "Xnote", "home.step_note_aria": "Xnote-label", "home.step_done": "Xdone", "home.step_send_note": "Xsend-note", "home.step_send_note_hint": "Xhint"}
-check("the step form's five strings are in the English catalog: the optional note box (placeholder and label), the two buttons and the hint on a greyed Send note", all(k_ in EN for k_ in STEP_KEYS) and [EN[k_] for k_ in STEP_KEYS] == ["Note (optional)", "Note for the next owner (optional)", "Done", "Send note", "Write a note to send it"], [EN.get(k_) for k_ in STEP_KEYS])
+check("the step form's five strings are in the English catalog: the optional note box (placeholder and label), the two buttons and the hint on a greyed Send note", all(k_ in EN for k_ in STEP_KEYS) and [EN[k_] for k_ in STEP_KEYS] == ["Note (optional)", "Note for the next mover (optional)", "Done", "Send note", "Write a note to send it"], [EN.get(k_) for k_ in STEP_KEYS])
 write_ko(test_locale(**STEP_OVR)); set_dir(LOC); reset_warned()
 with i18n.use("ko"):
     ko_step_pg = r2.Board(f"{tmp}/store").item_html("a240", answer=IPX_BOX)

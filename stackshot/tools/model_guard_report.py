@@ -60,7 +60,7 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="What the model's write guards would refuse on the existing items (read only).")
     ap.add_argument("--line", action="store_true", help="the one line of counts the brief carries")
     ap.add_argument("--json", action="store_true", help="the report as JSON")
-    ap.add_argument("--owner-mover", dest="owner_mover", action="store_true", help="list the open items whose mover is the owner while they are in no state of his (no step, no ask)")
+    ap.add_argument("--owner-mover", dest="owner_mover", action="store_true", help="list the open items whose mover is the board's owner while they are in no state of his (no step, no ask)")
     ap.add_argument("--store", help="read the items from this folder (a copy of the store) instead of [paths] store")
     a = ap.parse_args(argv)
     store = Path(a.store).expanduser() if a.store else None
@@ -82,7 +82,7 @@ def main(argv: list[str]) -> int:
         if a.json:
             print(json.dumps(rows, indent=1, sort_keys=True, ensure_ascii=False))
         else:
-            print(f"{len(rows)} open item(s) with the owner as mover and no step or ask (of {sum(1 for i in items.values() if i.get('status') == 'open')} open; read only)")
+            print(f"{len(rows)} open item(s) with the board's owner as mover and no step or ask (of {sum(1 for i in items.values() if i.get('status') == 'open')} open; read only)")
             for r in rows:
                 print(f"{shown(r['id'])} | {r['subject']} | mover {r['mover']} | state {r['state']} | created by {r['creator']} | {r['gap']}")
         return 0

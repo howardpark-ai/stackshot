@@ -15,7 +15,7 @@ end the pause lifts and what came due fires in one batched pass.
                                                     server keeps one generated text per owner under the pass's id (the rows whose write was made, and not already SENT by an earlier run), and
                                                     the script writes wake.txt, to read, with the rows (written before the end is called) to <run-dir>/<pass id>/.
   tools/migrate_model.py --send-wake <dir> --sender <you> [--note "one line"]   sends the texts the server stored for the pass in <dir>, one message per owner, plus the note; no other text goes. The
-                                                    server marks each owner sent and refuses a second send; an owner already sent is skipped and a failed one is tried again by running it
+                                                    server marks each owner sent and refuses a second send; a recipient already sent is skipped and a failed one is tried again by running it
                                                     again. After a crash the texts are rebuilt from rows.json. The route must be on ([model] migration = true), as for the pass.
 
 Mode, residue and the numbers are described in the report: counts by state transition and by guard (before and after), the residue for hand setting (item, kind, why), the hidden-wait proposals
@@ -450,7 +450,7 @@ def summary_of(plan: Any, after_reading: dict[str, dict[str, str]], residue: lis
     for g, (who, src) in plan.relay_post.items():
         by_src[src] = by_src.get(src, 0) + 1
         proj = M.clean(((items.get(g) or {}).get("metadata") or {}).get("project"))
-        role = "nobody" if not who else M._model.owner_display() if M._model.is_owner(who) else "a front agent" if env.is_front(who, proj) else "a background agent" if env.ctx.background_of(who, proj) else "another session (the owner or a live session)"
+        role = "nobody" if not who else M._model.owner_display() if M._model.is_owner(who) else "a front agent" if env.is_front(who, proj) else "a background agent" if env.ctx.background_of(who, proj) else "another session (the board's owner or a live session)"
         by_role[role] = by_role.get(role, 0) + 1
     return {"open_by_state": dict(sorted(states.items())), "waits_by_kind": dict(sorted(kinds.items())), "backstops_added": [M.shown(r.gid) for r in residue if r.kind == "default_end"],
             "relay_post_by_source": dict(sorted(by_src.items())), "relay_post_by_role": dict(sorted(by_role.items())), "relay_post_owner": by_role.get(M._model.owner_display(), 0), "owner_name": M._model.owner_display(),
@@ -508,7 +508,7 @@ def write_report(rep: dict[str, Any], d: Path, stamp: str, tag: str) -> tuple[Pa
         lines += ["## What still notifies while the pass runs", "", "The pass holds the wake pass, the waits' watchers, the hand-off clock, the idle clock, the checks and the For you ticks. These events "
                   "are not held, since each is a person's or a session's own act, and an item one of them moves is reported `moved` (never overwritten):", "", *[f"- {x}" for x in rep["mid_pass_paths"]], ""]
     if rep.get("wake"):
-        lines += ["## The batched wake: what each owner is told to set by hand", ""]
+        lines += ["## The batched wake: what each recipient is told to set by hand", ""]
         for who, text in sorted(rep["wake"].items()):
             lines += [f"### {who}", "", "```", text, "```", ""]
     if rep.get("wake_preview"):
@@ -523,7 +523,7 @@ def main(argv: list[str]) -> int:
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="the whole pass on a copy of the store (--store); nothing live is touched")
     mode.add_argument("--apply", action="store_true", help="the real pass through the live server (needs --sender); only on the owner's word")
-    mode.add_argument("--send-wake", default="", metavar="DIR", help="send the wake texts the server stored for the real pass whose directory is DIR (after reading wake.txt there); an owner already sent is skipped")
+    mode.add_argument("--send-wake", default="", metavar="DIR", help="send the wake texts the server stored for the real pass whose directory is DIR (after reading wake.txt there); a recipient already sent is skipped")
     ap.add_argument("--note", default="", help="with --send-wake: one line (at most 200 characters) added to each text")
     ap.add_argument("--store", default="", help="with --dry-run: the copy's directory (it holds its own stackshot.toml)")
     ap.add_argument("--sender", default="", help="the session that runs the pass (one of [model] migration_senders); needed with --apply and --send-wake")

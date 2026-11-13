@@ -22,6 +22,7 @@ The config (see tests/retired_terms.toml for the live one, with every allow entr
                                                           # key), a .json file by its string values, anything else as plain text
     exclude = ["tests/*"]                # optional globs left out
     skip_keys = ["name", "type"]         # optional, json only: keys whose values are names, not text (a parameter called owner)
+    skip_terms = ["owner"]               # optional: retired words this scan does not check (a guide that says "the owner" for the instance's person throughout)
     kind    = "python"                   # optional: read the files as python | json | text whatever their suffix (a script with no .py)
 
 Any other file is scanned line by line. A hit inside an allow phrase is excused; there is no other escape, so every new
@@ -180,11 +181,13 @@ def lint(root: Path, config: Path) -> list[Hit]:
     for sc in scans:
         pats, excl = [glob_rx(str(x)) for x in sc.get("files", [])], [glob_rx(str(x)) for x in sc.get("exclude", [])]
         skip_keys = {str(k) for k in sc.get("skip_keys", [])}
+        skip_terms = {str(k).lower() for k in sc.get("skip_terms", [])}
+        scan_terms = [t for t in terms if t.retired.lower() not in skip_terms]
         for f in files:
             if f in seen or not any(p.match(f) for p in pats) or any(x.match(f) for x in excl):
                 continue
             seen.add(f)
-            hits.extend(scan_file(root, f, terms, skip_keys, str(sc.get("kind", ""))))
+            hits.extend(scan_file(root, f, scan_terms, skip_keys, str(sc.get("kind", ""))))
     return sorted(set(hits), key=lambda h: (h.file, h.line, h.term, h.text))
 
 
