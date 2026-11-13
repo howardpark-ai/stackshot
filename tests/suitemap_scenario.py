@@ -14,8 +14,9 @@ import _scratch
 tmp = _scratch.mkdtemp(prefix="suitemaptest-"); T = pathlib.Path(tmp)
 R = T / "repo"
 fails = []; ran = []
+_memo = {}   # what one check's own expression asked twice (its condition and its `got` text both ask), so the second ask is not another process; check() empties it
 def check(name, cond, got=None):
-    ran.append(name)
+    ran.append(name); _memo.clear()
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 def git(*a): return subprocess.run(["git", "-C", str(R), "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True, text=True).stdout
@@ -278,8 +279,21 @@ def traced():
 use_strace = shutil.which("strace") is not None and not traced()
 ENV = {k: v for k, v in os.environ.items() if not k.startswith(("COVERAGE_", "SUITEMAP_", "GITHUB_"))}
 ENV.update(SCENARIO_TESTS=SCR, SUITEMAP_ROOT=str(R), SUITEMAP_STRACE="1" if use_strace else "0")
+def memoized(kind, key, make, *, env, rev):
+    """make() once per check for a question that has the same answer every time it is asked while nothing changes: the same commits (full ids, which name a content), the same map
+    file (its bytes), the same environment and checkout. A question about anything else (a branch name, no map) is asked again each time."""
+    if not all(re.fullmatch(r"[0-9a-f]{40}", x or "") for x in rev): return make()
+    k = (kind, key, str(R), tuple(sorted({**ENV, **(env or {})}.items())))
+    if k not in _memo: _memo[k] = make()
+    return _memo[k]
+def map_bytes(path):
+    try: return pathlib.Path(path).read_bytes()
+    except OSError: return None
 def tool(*a, env=None):
-    return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    def run(): return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    if a and a[0] == "select" and "--to" in a and "--map" in a and map_bytes(a[a.index("--map") + 1]) is not None:
+        return memoized("select", (a, map_bytes(a[a.index("--map") + 1])), run, env=env, rev=(a[a.index("--to") + 1],))
+    return run()
 
 r = tool("list")
 check("list: the four suites, sorted", r.stdout.split() == ["a", "b", "c", "z"], (r.stdout, r.stderr))
@@ -629,8 +643,10 @@ def whole_of(a, b, path, ran=(), env=None):
     code = ("import sys, os, json; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
             "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
             "print(json.dumps(sorted(s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[3])))")
-    r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
-    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+    def run():
+        r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+        return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+    return memoized(code, (a, b, path, tuple(ran), map_bytes(MAP)), run, env=env, rev=(a, b))
 git("checkout", "-q", "-B", f"t{len(ran)}", base)
 write("rp/__init__.py", ""); write("rp/b.py", "T = int\nimport collections\n")
 write("rp/a.py", "from __future__ import annotations\nfrom .b import T\n\ndef g(x: T):\n    return x\n")
@@ -698,8 +714,10 @@ def pc_of(a, b, path, ran=(), env=None):
     code = ("import sys, os, json; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
             "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
             "print(json.dumps([sorted(map(str, x)) for x in s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[:4]]))")
-    r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
-    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+    def run():
+        r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+        return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+    return memoized(code, (a, b, path, tuple(ran), map_bytes(MAP)), run, env=env, rev=(a, b))
 RQ = ("rq/__init__.py", "rq/src.py", "rq/imp.py", "rq/c.py", "rq/d.py")
 git("checkout", "-q", "-B", f"t{len(ran)}", base)
 write("rq/__init__.py", ""); write("rq/src.py", "Tag = int\n")
