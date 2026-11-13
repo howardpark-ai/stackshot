@@ -95,11 +95,11 @@ check("a form with options draws them as cards, not buttons, and holds one Send;
       and '<button type="submit" class="b main" name="act" value="comment"' in pg["a3"])
 def forms(h): return re.findall(r"<form\b.*?</form>", h, re.S)
 mains = [(name, b[1], b[2]) for name, h in ALL.items() for b in buttons(h) if "main" in b[0]]
-check("the main button is the composer's Send and nothing else: every .main button on every page is a Send (act=answer, comment or send)", mains and all(nv in ("act=answer", "act=comment", "act=send") and lab == "Send" for _, nv, lab in mains), mains[:8])
-check("one main button per form: no form on any page holds two, and every Send is a main",
+check("the main button is the composer's Send or a step form's Done and nothing else: every .main button on every page is a Send (act=answer or comment) or a Done (act=done)", mains and all((nv in ("act=answer", "act=comment") and lab == "Send") or (nv == "act=done" and lab == "Done") for _, nv, lab in mains), mains[:8])
+check("one main button per form: no form on any page holds two, and every Send is a main (a step form's Send note is secondary)",
       all(len([b for b in buttons(f) if "main" in b[0]]) <= 1 for h in ALL.values() for f in forms(h))
       and all("main" in b[0] for h in ALL.values() for b in buttons(h) if b[2] == "Send"), None)
-check("every other button (Clear, Clear all, Undo, seen, Copy, Watch, Mute, Default, Reload, the icon buttons) is secondary: no .main", all("main" not in b[0] for h in ALL.values() for b in buttons(h) if b[2] != "Send"), None)
+check("every other button (Clear, Clear all, Undo, seen, Copy, Watch, Mute, Default, Reload, the icon buttons) is secondary: no .main", all("main" not in b[0] for h in ALL.values() for b in buttons(h) if b[2] not in ("Send", "Done")), None)
 
 # ---- 2. the mapping
 c = lambda h, nv: [b[0] for b in buttons(h) if b[1] == nv]
@@ -110,16 +110,16 @@ def cards(h):
 check("answer options: one card each, in the order drawn, the recommended one first with its badge and the others without (item page, stored options)",
       cards(pg["a1"]) == {"Ship": ("Ship", True), "Wait": ("Wait", False)} and list(cards(pg["a1"])) == ["Ship", "Wait"], cards(pg["a1"]))
 check("answer options: Yes (recommended) and No cards when none are stored", cards(pg["a2"]) == {"Yes": ("Yes", True), "No": ("No", False)}, cards(pg["a2"]))
-check("Send is the main .b in every answer box: beside the option cards (item page), the comment box, a step's Send",
-      c(pg["a1"], "act=answer") == [{"b", "main"}] and c(pg["a2"], "act=answer") == [{"b", "main"}] and c(pg["a3"], "act=comment") == [{"b", "main"}] and c(pg["a4"], "act=send") == [{"b", "main"}],
-      (c(pg["a1"], "act=answer"), c(pg["a3"], "act=comment"), c(pg["a4"], "act=send")))
+check("Send is the main .b in every answer box: beside the option cards (item page), the comment box; a step's Done is the main .b and its Send note a plain .b",
+      c(pg["a1"], "act=answer") == [{"b", "main"}] and c(pg["a2"], "act=answer") == [{"b", "main"}] and c(pg["a3"], "act=comment") == [{"b", "main"}] and c(pg["a4"], "act=done") == [{"b", "main"}] and c(pg["a4"], "act=note") == [{"b"}] and not c(pg["a4"], "act=send"),
+      (c(pg["a1"], "act=answer"), c(pg["a3"], "act=comment"), c(pg["a4"], "act=done"), c(pg["a4"], "act=note")))
 comm = bd.answer_html(json.loads((T / "store/a/3.json").read_text()) | {"gid": "a3"}, BOX, comment_only=True)
 check("the comment-only box's Send is the main .b", c(comm, "act=comment") == [{"b", "main"}], comm[-300:])
 hc = cards(home)
-check("the home row's ask form: the option cards with the recommended one badged, Send the main .b (drawn disabled until a token comes); a step's row Send the same",
+check("the home row's ask form: the option cards with the recommended one badged, Send the main .b (drawn disabled until a token comes); a step's row Done the main .b and its Send note a plain .b, both drawn disabled the same way",
       hc.get("Ship") == ("Ship", True) and hc.get("Wait") == ("Wait", False) and not [b for b in buttons(home) if b[1].startswith("choice=")]
-      and c(home, "act=answer") and all(x == {"b", "main"} for x in c(home, "act=answer")) and c(home, "act=send") == [{"b", "main"}],
-      (hc, c(home, "act=answer"), c(home, "act=send")))
+      and c(home, "act=answer") and all(x == {"b", "main"} for x in c(home, "act=answer")) and c(home, "act=done") == [{"b", "main"}] and c(home, "act=note") == [{"b"}] and not c(home, "act=send"),
+      (hc, c(home, "act=answer"), c(home, "act=done"), c(home, "act=note")))
 check("Watch, Mute and Default are plain .b; the pressed one is .on with aria-pressed=true, the others aria-pressed=false",
       c(pw, "mode=watch") == [{"b", "on"}] and c(pw, "mode=mute") == [{"b"}] and c(pw, "mode=default") == [{"b"}]
       and 'class="b on" name="mode" value="watch" aria-pressed="true" disabled' in pw and 'class="b" name="mode" value="mute" aria-pressed="false"' in pw, [b[3] for b in buttons(pw) if b[1].startswith("mode=")])

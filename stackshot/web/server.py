@@ -16365,7 +16365,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     if then:      # a Done: the step he did, then who has the item now and his note
         step = _states.clean(rec.get("step"))
         step = step if len(step) <= 240 else step[:240].rstrip() + " …"
-        note = f" — {_answer_words({'text': rec.get('text')}, 300)}" if rec.get("text") else ""
+        note = f", with his note: “{_answer_words({'text': rec.get('text')}, 300)}”" if rec.get("text") else ""
         line = f"[stackshot] {OWNER} did his step on {_gh.shown(gid)}: {step}. It goes to {_session_label(then)} now{note} → {url}"
     judge = ""
     if then and rec.get("kind") == "step-reply":      # his note on the step, sent with no Done: the session that takes the item judges it (only its own line says so)
@@ -16495,7 +16495,7 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
 
 
 def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
-    """his Send with an empty box (his word that his step is done) checks the open steps of the item's checklist that are his, the lines the Your step block shows
+    """his Done (his word that his step is done; an empty Send from a page loaded earlier is the same) checks the open steps of the item's checklist that are his, the lines the Your step block shows
     (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Send is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
     marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Send finishes all of his open lines."""
@@ -16540,9 +16540,11 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
 
 def _answer(gid: str, choice: str, text: str, act: str) -> str:
     """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
-    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | toolong | nostep | nomover (nothing written). A step form has one button, Send (act=send): with an empty box it is the owner's word that the step is done (`done`: the item goes to
-    its then-mover, recorded as his answer "Done"), with a note it is his note on the step (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step).
-    A page loaded before the release posts act=done (as the empty Send) or act=comment (a comment only, as before: the step stands)."""
+    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | toolong | nostep | nomover (nothing written). A step form has two buttons and an optional note box.
+    Done (act=done) is his word that the step is finished (`done`: the item goes to its then-mover, recorded as his answer "Done"); a note in the box stays on that record (`text`) and goes with the Done to the then-mover,
+    which is told the step is done and shown the note. Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
+    on an item with no step any more it is a comment, and with no text nothing is written (`empty`). A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
+    """
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
     if len(text) > _ANSWER_TEXT_MAX:
         return "toolong"
@@ -16562,11 +16564,18 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
             else:
                 kind = "decision"
-        elif act == "done":             # the button of a your-step row. Only an item that stands in your-step with its step line has one: any other is refused, nothing written
+        elif act == "done":             # the Done button of a step form (his note in the box, if any, stays on the record as `text`). Only an item that stands in your-step with its step line has one: any other is refused, nothing written
             if meta.get("state") != "your-step" or not _states.clean(meta.get("step")):
                 return "nostep"
             kind, choice, stepped = "decision", "Done", True
-        elif act == "send":             # the one button of a step form. Empty box = the step is done; a note = his note on the step, handed to the then-mover to judge. An item that has no step any more: a note is a comment, an empty box nothing
+        elif act == "note":             # the Send note button of a step form: only with text (an empty box is no Done); his note on the step, handed to the then-mover to judge; an item that has no step any more: a comment
+            if not text:
+                return "empty"
+            if meta.get("state") == "your-step" and _states.clean(meta.get("step")):
+                kind, choice, stepped = "step-reply", "", True
+            else:
+                kind = "comment"
+        elif act == "send":             # the one button of a step form before the two-button form (a page loaded earlier posts it). Empty box = the step is done; a note = his note on the step, handed to the then-mover to judge. An item that has no step any more: a note is a comment, an empty box nothing
             if meta.get("state") == "your-step" and _states.clean(meta.get("step")):
                 kind, choice, stepped = ("step-reply", "", True) if text else ("decision", "Done", True)
             elif text:
