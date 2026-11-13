@@ -1,4 +1,4 @@
-"""Scenario test for the temporary probe page GET /probe/sala-link: ui/render.py Board.probe_target, probe_intents and probe_html, the route in server.py. Fixture data, the route through Starlette's
+"""Scenario test for the temporary probe page GET /probe/sala-link: ui/render.py Board.probe_target, probe_intents and probe_html, the route in web/routes/ui_api.py. Fixture data, the route through Starlette's
 test client, no live store, no network.
 
 Covers:
@@ -163,6 +163,6 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     after = {p: p.read_bytes() for p in T.rglob("*") if p.is_file() and "store" in p.parts}
     check("the page writes nothing to the store", before == after)
     check("the probe is marked temporary in the source", "TEMPORARY PROBE (the installed-app session link test)" in pathlib.Path(STACK, "stackshot/web/ui/render.py").read_text(encoding="utf-8")
-          and "TEMPORARY PROBE (the installed-app session link test)" in pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
+          and "TEMPORARY PROBE (the installed-app session link test)" in pathlib.Path(STACK, "stackshot/web/routes/ui_api.py").read_text(encoding="utf-8"))
 
 print(f"ok: sala link probe scenario, {len(ran)} checks" if not fails else f"FAILED: sala link probe scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1 if fails else 0)

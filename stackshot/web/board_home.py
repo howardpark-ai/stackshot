@@ -1,4 +1,4 @@
-"""board_home.py: the kept home of the board's root, as the state the server and the publisher share (its cache and its renders are server.py's): the dict, the lock that numbers its generations, and the drop a publish and a write from a page make.
+"""board_home.py: the kept home of the board's root, as the state the server and the publisher share (its cache and its renders are routes/board_pages.py's): the dict, the lock that numbers its generations, and the drop a publish and a write from a page make.
 
 The root page is drawn per request and kept for a moment; a write (or a publish) drops the kept copy, so the next read draws it again. English has one slot (`_BOARD_HOME`), every other language its own (`_BOARD_HOME_OTHER`,
 made on first use by `_board_home_slot`). A slot is {at, html, gen, drawn, failed}: `gen` is bumped under `_BOARD_GEN_LOCK` by every drop, so a render that started before the drop is not kept."""

@@ -326,6 +326,7 @@ R._get = fake_get
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
@@ -1321,7 +1322,7 @@ try:
                 c.cookies.clear()
                 if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
                 return c.post("/runners/switch", data=data, headers=headers, follow_redirects=False)
-            def tok(box, email=EMAIL): return server._runners_switch_token(email, box)
+            def tok(box, email=EMAIL): return _rt_ui._runners_switch_token(email, box)
             good = lambda box="box-b", act="off": {"box": box, "act": act, "token": tok(box)}
             n0 = ncalls()
             r = post(good(), cookie=None)
@@ -1384,19 +1385,19 @@ try:
                 readonly._reload_for_test(True)
                 n0 = ncalls(); r = post(good())
                 check("a read-only copy (STACKSHOT_READ_ONLY): 503 with the standby sentence, nothing runs", r.status_code == 503 and readonly.REFUSAL in r.text and ncalls() == n0, (r.status_code, r.text))
-                check("…and its page draws no button (no token maker)", server._runners_token_maker(None) is None)
+                check("…and its page draws no button (no token maker)", _rt_ui._runners_token_maker(None) is None)
             finally:
                 readonly._reload_for_test(False)
             CFGR["switch_script"] = ""
             r = post(good())
-            check("no switch_script: the token maker is None (no button on the page); a press from an old page is refused with the sentence, nothing runs", server._runners_token_maker(None) is None and r.status_code == 502 and "not set up" in r.text and ncalls() == n0, (r.status_code, r.text))
+            check("no switch_script: the token maker is None (no button on the page); a press from an old page is refused with the sentence, nothing runs", _rt_ui._runners_token_maker(None) is None and r.status_code == 502 and "not set up" in r.text and ncalls() == n0, (r.status_code, r.text))
             CFGR["switch_script"] = str(FAKE)
         # the board open (auth off, as in the other suites): the switch still needs a real signed-in address, as /answer and /watch do, so an anonymous viewer is refused and no button is drawn
         server._cfg.CFG["auth"]["ui_open"] = True; _signin._auth_mode = lambda: "off"
         with TestClient(server.mcp.http_app(), base_url=BOARD12) as c:
             n0 = ncalls()
-            r = c.post("/runners/switch", data={"box": "box-b", "act": "off", "token": server._runners_switch_token("", "box-b")}, headers=JSONH)
-            r2 = c.post("/runners/switch", data={"box": "box-b", "act": "off", "token": server._runners_switch_token("", "box-b")}, headers={"Origin": "https://evil.example.net"})
+            r = c.post("/runners/switch", data={"box": "box-b", "act": "off", "token": _rt_ui._runners_switch_token("", "box-b")}, headers=JSONH)
+            r2 = c.post("/runners/switch", data={"box": "box-b", "act": "off", "token": _rt_ui._runners_switch_token("", "box-b")}, headers={"Origin": "https://evil.example.net"})
             check("the board open: an anonymous viewer is refused with 403 even with a matching token and the board's own origin, and nothing runs", r.status_code == 403 and r2.status_code == 403 and ncalls() == n0, (r.status_code, r2.status_code))
             SSH_OUT.update({"box-b": wsl("off")}); R.reset()
             h = get_settled(c, "/runners").text

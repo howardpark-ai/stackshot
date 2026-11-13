@@ -90,12 +90,14 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.web.routes import answers as _rt_answers
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
-server._publish = server._fyev._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+from stackshot.web.routes import client_api as _rt_client, ui_api as _rt_ui
+server._publish = server._fyev._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about the notice's shape and
 # who is named in it, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
@@ -107,7 +109,7 @@ slack = []
 REAL_SLACK_POST, REAL_SLACK_ON = server._fyslack._for_you_slack_post, server._fyslack._for_you_slack_on
 server._fyslack._for_you_slack_post = lambda text: slack.append(text) or ""      # the Slack hook is stubbed: nothing leaves this process
 server._fyslack._for_you_slack_on = lambda: True
-pub = [0]; server._publish = server._fyev._publish = lambda: pub.__setitem__(0, pub[0] + 1)
+pub = [0]; server._publish = server._fyev._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)
 NEWD = "- The thing works and is in use"
 def cl(i, sender="osprey-x", reason="PR 14 is live", description=NEWD): return server.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
 def rows(): return fy.rows()
@@ -380,7 +382,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         c.cookies.clear()
         if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path)
-    wtok = lambda g: server._watch_token(EMAIL, g)
+    wtok = lambda g: _rt_answers._watch_token(EMAIL, g)
     atok = lambda g: server._answer_token(EMAIL, g)
     g_in, g_out = page("/items/a51"), page("/items/a51", cookie=None)
     check("the item page, signed in, carries the For you control: Watch, Mute and Default, with this item's token",

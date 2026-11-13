@@ -65,6 +65,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.audit import audit as _audit_mod
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
@@ -395,7 +396,7 @@ check("the items API (the web board and sala read it) carries the mover of a hel
 from starlette.testclient import TestClient
 with TestClient(server.mcp.http_app()) as _tc:
     _r = _tc.get("/audit/status")
-check("the audit status carries no waiting counts: GET /audit/status answers the audit's own status and no `waiting` key", _r.status_code == 200 and "waiting" not in _r.json() and set(_r.json()) == set(server._audit.status()) | {"runner", "phase_sweep", "card"}, (_r.status_code, _r.text[:200]))      # the audit's own keys, the minute set's runner record (runner.py), the phase sweep's counters and the audit shortlist the side panel polls (card); never a waiting one
+check("the audit status carries no waiting counts: GET /audit/status answers the audit's own status and no `waiting` key", _r.status_code == 200 and "waiting" not in _r.json() and set(_r.json()) == set(_audit_mod.status()) | {"runner", "phase_sweep", "card"}, (_r.status_code, _r.text[:200]))      # the audit's own keys, the minute set's runner record (runner.py), the phase sweep's counters and the audit shortlist the side panel polls (card); never a waiting one
 
 # a session mover stored as a transcript id never reaches a page or the board as the id
 _own = U["home-owner"]

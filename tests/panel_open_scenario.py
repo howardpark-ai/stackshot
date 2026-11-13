@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 
 from stackshot.web import search; from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
 from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
@@ -309,7 +310,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
             k = len(reads); reads.append(k)
             if k < len(chunks): return {"type": "http.request", "body": chunks[k], "more_body": k < len(chunks) - 1}
             return {"type": "http.disconnect"}
-        return asyncio.run(server.panel_open_save(Request(scope, receive))), len(reads)
+        return asyncio.run(_rt_ui.panel_open_save(Request(scope, receive))), len(reads)
     resp, nread = raw_post(10_000_000, [b"x" * 100])
     check("save: a Content-Length over 4 KB is refused (413) before any of the body is read", resp.status_code == 413 and nread == 0, (resp.status_code, nread))
     resp, nread = raw_post("12abc", [b"{}"])

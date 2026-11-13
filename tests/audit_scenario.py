@@ -244,20 +244,21 @@ check("…the CLI's cue was logged like any other", n0 == 5 and json.loads((D / 
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.audit import audit as _audit_mod
 from stackshot.web.auth import signin as _signin
 from stackshot.service import writes
 server._publish = lambda: None
 from starlette.testclient import TestClient
 calls = []
-server._audit.cue = lambda reason: (calls.append(reason), (202, "audit cued to falcon-audit"))[1]
+_audit_mod.cue = lambda reason: (calls.append(reason), (202, "audit cued to falcon-audit"))[1]
 with TestClient(server.mcp.http_app()) as c:
     r = c.post("/audit/now")
     check("POST /audit/now: audit.cue('button'), its code and text as text/plain", r.status_code == 202 and r.text == "audit cued to falcon-audit"
           and r.headers["content-type"].startswith("text/plain") and calls == ["button"], (r.status_code, r.text, calls))
     for code, text in ((409, f"an audit is running since 2026-10-05 05:00 {ABBR}"), (404, "the audit is not enabled on this instance ([audit] enabled)"), (503, "the audit agent x is not running: queued → x")):
-        server._audit.cue = lambda reason, c_=code, t_=text: (c_, t_)
+        _audit_mod.cue = lambda reason, c_=code, t_=text: (c_, t_)
         r = c.post("/audit/now"); check(f"POST /audit/now: {code} passed through", r.status_code == code and r.text == text, (r.status_code, r.text))
-    calls.clear(); server._audit.cue = lambda reason: (calls.append(reason), (202, "x"))[1]
+    calls.clear(); _audit_mod.cue = lambda reason: (calls.append(reason), (202, "x"))[1]
     bad = {m: c.request(m, "/audit/now").status_code for m in ("GET", "PUT", "DELETE", "PATCH")}
     check("any other method on /audit/now: 405, nothing cued", all(v == 405 for v in bad.values()) and calls == [], (bad, calls))
     check("…and it says POST is allowed", c.get("/audit/now").headers.get("allow") == "POST")

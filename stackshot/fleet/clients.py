@@ -62,7 +62,8 @@ LAG_FLAG: Path = DIR / "puller-lag"   # `client.py puller-lag`'s lines, rewritte
 # [client] windows and the answers built on them live in liveness.py (one clock, read at use so a config reload is live at once); these names stay for the readers and tests that name them through clients:
 _online = _lv.online_window                                              # a machine is online while its puller checked in within this
 SESSION_LINKS_DEFAULT = ""                                               # [client] session_links unset: no fleet tool's store, no session links
-PRUNE_EVERY = 3600.0                                                     # how often _expire looks for records past the horizon (it reads the items store to do it)
+POLL_MAX = 55.0                                                          # s: the longest a poll is held open (a proxy in front gives up at about a minute)
+PRUNE_EVERY = 3600.0                                                   # how often _expire looks for records past the horizon (it reads the items store to do it)
 _OPEN = ("open", "on_hold")                                              # item statuses that count as open (on_hold: the retired status, until the start-time migration)
 PROVISIONAL = ("auto", "collision", "derived")                           # the CLI's nameSource values for a name it made up itself: "derived" is <cwd basename>-<2 hex> ("cwd-0e", "demo-5a")
 PLACEHOLDER_ANY = re.compile(r"^[a-z0-9._-]+-[0-9a-f]{2}$")              # the CLI's placeholder shape when the reporting machine's OS user is not known

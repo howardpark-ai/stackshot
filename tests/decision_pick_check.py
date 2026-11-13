@@ -54,6 +54,7 @@ git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 import uvicorn; from stackshot.web import server; from stackshot.web import render; from stackshot.web import board_home
+from stackshot.web.routes import board_pages as _rt_board
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 server._publish = lambda: None
@@ -81,8 +82,8 @@ def redraw(bump=None):
     """make the server draw its home again, a second later than the page in the browser (the page's stamp is whole seconds), after `bump()` changed something"""
     time.sleep(1.1)
     if bump: bump()
-    with server._BOARD_HOME_LOCK: board_home._BOARD_HOME["html"] = None; board_home._BOARD_HOME["at"] = 0; board_home._BOARD_HOME["failed"] = 0
-    assert server._board_home()           # drawn now, so the stamp the page polls is the new one
+    with _rt_board._BOARD_HOME_LOCK: board_home._BOARD_HOME["html"] = None; board_home._BOARD_HOME["at"] = 0; board_home._BOARD_HOME["failed"] = 0
+    assert _rt_board._board_home()           # drawn now, so the stamp the page polls is the new one
 ROW = "li#task-a-{} form.hanswer"
 def home(pg, i):
     pg.goto(BASE + "/"); pg.wait_for_selector(ROW.format(i) + "[data-cards]:not([hidden])", timeout=8000); pg.wait_for_timeout(300)
