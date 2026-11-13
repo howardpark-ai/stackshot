@@ -25,7 +25,7 @@ network, no model call, no message sent.
   18 the row never reads "idle over 1 h" between two lines (read through act_parts and band at the worst landing time); the record never goes backwards (a stepped-back clock, a record dated ahead)
   17 the tie to the ITEM: the reader of a session's transcript (running within 90 minutes, quiet to 6 hours, dropped past the cap, clock skew), what each unreadable thing reads as (unknown), the pure tie, the server's reader on the registry
   19 a running subagent tied to no item leaves the mover's items unknown, not idle (and not handed on); a front agent's busy pane still verifies
-  20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
+  20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle, unless the fleet heartbeat holds the session running elsewhere: unknown) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
 
 
     tests/run-suite audit_hourly       -> exit 0 / 1"""
@@ -772,6 +772,9 @@ check("20 the tie reads the DESCRIPTION first: a description that names an item 
       and TIE.tied_to({"text": f"Build {BID(2)}"}, {"a2": (BID(2), ())}) == {"a2"}, "pure")
 check("20 …and one candidate alone: a description that names it ties, one that names none of the candidates lets the brief decide (the audit offers every item of the mover as a candidate, so a description naming one of them wins over a brief that mentions another)",
       TIE.tied([{"description": f"Build {BID(1)}", "brief": "x"}], BID(1)) is True and TIE.tied([{"description": "Build part D", "brief": f"a follow-up of {BID(1)}"}], BID(1)) is True and TIE.tied([{"description": "Build part D", "brief": "x"}], BID(1)) is False, "single")
+check("20 a description that names an item of ANOTHER mover (not a candidate) while the brief names one of this mover's items still ties by the brief: a known limit, pinned (a false verified, never a false idle); a description naming two of the mover's items ties both",
+      TIE.tied_to({"description": f"Build {BID(9)}", "brief": f"a follow-up of {BID(1)}"}, {"a1": (BID(1), ()), "a2": (BID(2), ())}) == {"a1"}
+      and TIE.tied_to({"description": f"Build {BID(1)} and {BID(2)}", "brief": f"{BID(3)}"}, {"a1": (BID(1), ()), "a2": (BID(2), ()), "a3": (BID(3), ())}) == {"a1", "a2"}, "limit")
 clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, act=90); put(2, act=90)
@@ -812,6 +815,30 @@ try:
     check("20 a PRESENT registry row that is no interactive pane (headless) reads UNKNOWN, never idle: not idle-marked, so not handed on", k_ == ["audit_unknown", "audit_unknown"] and all("could not be read" in x for x in t_) and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_, t_))
     registry("working"); k_, t_ = kinds20()
     check("20 a PRESENT row with a status the server does not know reads UNKNOWN too", k_ == ["audit_unknown", "audit_unknown"], (k_, t_))
+    # no row on this box: the fleet's heartbeat decides. A session it holds running is on another machine (unknown); one it marks gone, or holds not at all, is gone (idle)
+    row_path.unlink(missing_ok=True)
+    real_idx = server._sessions_index
+    def hb(**rows): return {u_: {"machine": "b", "name": n_, "seen": "2026-01-01T00:00:00Z", **extra_} for u_, (n_, extra_) in rows.items()}
+    def tick_with_index(idx_):
+        server._sessions_index = idx_ if callable(idx_) else (lambda: idx_)
+        try:
+            with _Err(): out_ = kinds20()
+        finally: server._sessions_index = real_idx
+        return out_
+    live_hb = hb(u1=("home-peer", {})); gone_hb = hb(u1=("home-peer", {"gone": "2026-01-01T00:00:00Z"})); other_hb = hb(u1=("home-stew", {}))
+    r_live = raises(lambda: server._mover_subagents("home-peer", live_hb, now0), TIE.Unreadable)
+    r_gone = server._mover_subagents("home-peer", gone_hb, now0) == []
+    r_none = server._mover_subagents("home-peer", {}, now0) == [] and server._mover_subagents("home-peer", other_hb, now0) == []
+    def no_index(): raise OSError("heartbeat unreadable")
+    server_idx_none = raises(lambda: (setattr(server, "_sessions_index", no_index), server._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
+    server._sessions_index = real_idx
+    check("20 no registry row on this box: the fleet heartbeat holds the session running (on another machine) → Unreadable (unknown); marked gone → none; no row anywhere (or only another session's) → none; the index cannot be read → Unreadable", r_live and r_gone and r_none and server_idx_none, (r_live, r_gone, r_none, server_idx_none))
+    k_live = tick_with_index(live_hb); k_gone = tick_with_index(gone_hb); k_none = tick_with_index({}); k_bad = tick_with_index(no_index)
+    check("20 …through the audit: a mover on another machine (live heartbeat row, no local row) reads UNKNOWN on every item, not idle-marked (so never handed on to a second builder); a gone row, no row anywhere → idle as built; an unreadable index → unknown",
+          k_live[0] == ["audit_unknown"] * 2 and k_gone[0] == ["audit_idle"] * 2 and k_none[0] == ["audit_idle"] * 2 and k_bad[0] == ["audit_unknown"] * 2 and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_live, k_gone, k_none, k_bad))
+    k_live = tick_with_index(live_hb)
+    check("20 …an unknown line of that kind is not handed on", handed_on(now0 + 60) == [], handed_on(now0 + 60))
+    registry("busy")
     # a read error is kept for the pass: one read of a mover's transcripts for all its items, again under the lock for none
     registry("busy")
     real_ms, calls20 = server._mover_subagents, []

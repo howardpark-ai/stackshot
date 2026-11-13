@@ -6095,13 +6095,26 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
     """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
     the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
     run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless session), a registry status this server does not know, a pane in a turn whose transcript this box does not hold, or one
-    whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle."""
+    whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover
+    there must not read idle and be handed on), and a sessions index that cannot be read. Only a session with no row anywhere (the heartbeat marks it gone, or holds none) gives []."""
     from stackshot.audit import subagent_tie as _tie
+    try:
+        idx = _sessions_index() if idx is None else idx
+    except Exception as e:  # noqa: BLE001
+        raise _tie.Unreadable(f"the fleet's sessions index cannot be read ({e.__class__.__name__})") from e
     row = _handoff_pane_row(who, idx)
     if row is None:
         if _handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
             raise _tie.Unreadable("the session is registered here but is no interactive pane this server can look into")
-        return []      # no row of a live process at all: the session is gone, or is not on this box, and nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
+        w = str(who or "").strip()
+        names = {x for x in (w, _session_label(w)) if x}
+        rows = [r for r in dict.values(idx) if isinstance(r, dict) and r.get("name") in names]
+        byid = idx.get(w) if w else None
+        if isinstance(byid, dict) and not any(byid is r for r in rows):
+            rows.append(byid)
+        if any(_lv.running(r) for r in rows):      # no row on this box, but the fleet's heartbeat holds the session running: it is on another machine (or its row here is not yet written), and its subagents cannot be read from here
+            raise _tie.Unreadable("the session runs on another machine, whose subagents this server cannot read")
+        return []      # no row of a live process anywhere (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
     st = str(row[1].get("status") or "")
     if st in ("idle", "shell"):
         return []      # a pane that is not in a turn has no subagent running (a subagent keeps its pane busy)
@@ -6131,7 +6144,12 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     now = time.time() if now is None else now
     items = items if items is not None else _nr.load_all(None)
     env = env if env is not None else _silence_env()
-    idx = _sessions_index() if (pane is None or subagents is None) else {}
+    try:
+        idx = _sessions_index() if (pane is None or subagents is None) else {}
+        idx_ok = True
+    except Exception as e:  # noqa: BLE001  — the pane reads then see this box's registry alone; the subagents read tries the index again and is unknown when it still fails
+        idx, idx_ok = {}, False
+        print(f"audit: sessions index not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if pane is None:
         pane = lambda who: _handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
     if subagents is None:
@@ -6139,7 +6157,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
         def subagents(who: str) -> "list[dict[str, Any]]":
             if who not in seen:
                 try:
-                    seen[who] = _mover_subagents(who, idx, now)
+                    seen[who] = _mover_subagents(who, idx if idx_ok else None, now)
                 except Exception as e:  # noqa: BLE001
                     seen[who] = e
             if isinstance(seen[who], Exception):
