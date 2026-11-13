@@ -56,7 +56,7 @@ GUARDS = ("mover", "wait_input", "post_wake", "snooze", "filler", "no_end", "dec
 LABELS = {"mover": "mover", "wait_input": "wait input", "post_wake": "post-wake mover", "snooze": "snooze", "filler": "filler", "no_end": "wait with no end",
           "decision_hold": "decision with a hold", "mover_state": "agent mover on his state", "owner_mover": f"{_cfg.owner()} as mover with no step or ask", "second_mover": "second mover", "next_unnamed": "next line with no name", "next_wait": "wait in next", "next_windows": "his next line with a command that is not in backticks, does not say where it runs, runs on the wrong machine or is a `! ` line", "alarm": "alarming word", "description": "description not in bullets"}
 CLOSED_NO_OUTCOME = "closed_no_outcome"
-STATE_FIELDS = frozenset({"needs", "hold", "wake", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "cap_ok", "wait_basis"})
+STATE_FIELDS = frozenset({"needs", "hold", "wake", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "cap_ok", "wait_basis", "waits", "wait_mode"})
 FIELD_GUARDS = frozenset({"subject", "goal", "next", "ask", "wait_event", "description"})       # the fields a text guard reads
 _STATE_GUARDS = frozenset({"mover", "wait_input", "post_wake", "snooze", "no_end", "decision_hold", "mover_state", "owner_mover", "second_mover"})
 
@@ -855,7 +855,7 @@ def second_mover_in(needs: list[str], project: str, ctx: Ctx) -> bool:
 
 
 def _wait_text(w: "_model.Wait") -> str:
-    return {"time": "a time", "anchor": "an anchor event", "item": "another item's close", "relay": f"news only {_owner_display()} relays", "event": "a fleet event"}.get(w.kind, w.kind)
+    return {"time": "a time", "anchor": "an anchor event", "item": "another item's close", "relay": f"news only {_owner_display()} relays", "event": "a fleet event", "list": "several things"}.get(w.kind, w.kind)
 
 
 def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str] | None" = None, gid: str = "", after_open: Callable[[dict[str, Any]], Any] | None = None,
@@ -1010,6 +1010,8 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             why_ = _ew.problem(w.event)
             if why_:
                 miss.append(why_ + " (wait_event=<the event>)")
+        elif w.kind == "list":
+            pass            # a list that does not hold is never read as one (model.derive), and one that does carries every input in its lines and its backstop day
         else:
             if not w.event:
                 miss.append(f"a relay wait names the party or event {H} relays: wait_event=<who or what>")
