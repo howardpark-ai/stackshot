@@ -240,7 +240,7 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     su = _wt.stored_until(m)                                   # a stored until is a wait on its own: with no kind, on the date alone
     conflicts: list[str] = []
     waiting = bool(kind_set) or bool(su) or today in WAITING_STATES
-    if kind_set and today in ALIVE_STATES and not (kind_set == "event" and derived):      # an event wait on an item with no stored state is the way to store one (the state it would read as is the wait's own)
+    if kind_set and today in ALIVE_STATES and not (kind_set in ("event", "relay") and derived):      # an event or relay wait on an item with no stored state is the way to store one (the state it would read as is the wait's own, never a stored alive one)
         conflicts.append(f"wait_kind={kind_set} on an item whose state is {today}, which is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true (a hold ends a stored work-in-hand state)")
     if not waiting:
         mv_d, then_d = _defaults(m, today)

@@ -980,8 +980,9 @@ def update_unlocked(
     if item.get("status") != "completed" and (ask or opts):
         asked += h.options_note(meta) + h.actor_note(meta, options=bool(opts), ask=bool(ask))
     hold_note = ""
-    if hold and meta.get("hold") and not state_st and meta.get("state") in _states.STATES and meta["state"] != "parked":     # a hold makes the item read parked: a state of another kind cannot stand beside it
-        hold_note = f"\n(stored state {meta['state']} dropped: a hold ends it; the item reads parked)"
+    if ((hold and meta.get("hold") and meta.get("state") in _states.STATES and meta["state"] != "parked")
+            or (relay_hold and meta.get("state") in _model.ALIVE_STATES)) and not state_st:     # a hold makes the item read parked: a state of another kind cannot stand beside it; a relay or event wait stores no flag, so the hold ends only the alive states the model's conflict line names (a waiting state stands beside the wait and keeps its fields)
+        hold_note = f"\n(stored state {meta['state']} dropped: a hold ends it; the item reads " + ("as its relay or event wait" if relay_hold else "parked") + ")"
         h.state_end(meta)
     state_touched = frozenset(k for k, v in (("needs", needs_set or clear_needs or agent.strip()), ("after", after_set or clear_after),
                                               ("wake", wake or clear_wake), ("hold", hold or clear_hold), ("ask", ask or clear_ask), ("next", next_touch),
