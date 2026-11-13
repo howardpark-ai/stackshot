@@ -746,5 +746,11 @@ refused("7e …through update too, as JSON text", lambda: bupd(10, waits=json.du
 check("7e …8 lines are read as before, and the count never refuses fewer", len(WLW.parse([Re(f"news {i}") for i in range(8)])) == 8 and len(WLW.parse([Re("a"), Re("b")])) == 2 and len(WLW.parse([Re("a")])) == 1, None)
 check("7e event_phrases and judged_as read a list over the limit as one that does not parse, as before (no phrase, and judged as a list)", WLW.event_phrases([Ev("recycle")] * 9) == [] and WLW.judged_as([Tm(w(5))] * 9) == "list", None)
 
+# ---- 7f the waits parameter text names what the refusal names
+for n_ in ("create", "update"):
+    d_ = tools_[n_].parameters["properties"]["waits"]["description"]
+    check(f"7f {n_}: the waits text names every parameter a list does not go with (clear_* for the clears), the stored backstop, and says until is not the only way to give it",
+          all(x in d_ or (x.startswith("clear_") and "clear_*" in d_) for x in WLW.SINGLE if x != "until") and "wait_basis" in d_ and "or the stored one" in d_ and "Needs until" not in d_, d_)
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": wait list write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
