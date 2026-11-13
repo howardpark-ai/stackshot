@@ -317,11 +317,12 @@ def old_rule(head, env): return tool("select", "--map", str(MAP), "--to", head, 
 sm = importlib.util.spec_from_file_location("suitemap_real", os.path.join(SCR, "suitemap.py")); smod = importlib.util.module_from_spec(sm); sm.loader.exec_module(smod)
 
 # ---- run ahead (Fri Nov 13th 2026). This script runs itself in parts, in order, in this one module: the lines below, from each `# [...]` marker line to the next, are a part.
-# A part marked `# [ahead NAME CHILD]` builds nothing any other part reads, and reads nothing but what stands above `# [fork]`: the harness above, the checkout's files
-# (read only), and the throwaway repo, which a child has a copy of. At the `# [fork]` line this process forks one child for each CHILD named; a child has a folder, a copy of the
+# A part marked `# [ahead NAME CHILD]` builds nothing that a part of the parent or of another child reads, and reads nothing but what stands above `# [fork]` (the harness above,
+# the checkout's files read only, the throwaway repo, of which a child has a copy) and what an earlier part of the same CHILD built: the parts of one child run in order, in one module. At the `# [fork]` line this process forks one child for each CHILD named; a child has a folder, a copy of the
 # repo and of its map of its own, a lower priority (the timing checks of the parts that stay here are not slowed), and runs its parts in order while this process runs the others.
-# Where an ahead part stands, this process notes the place; at `# [final]` it takes what each child recorded (its check names, the FAIL lines it printed, an exception it raised)
-# and puts the names and the failures in at their places, so the checks, their count, their order and their failures are those of a run in one process.
+# Where an ahead part stands, this process notes the place; at `# [final]` it takes what each child recorded (its check names, the FAIL lines it printed, its output, an exception it raised)
+# and puts the names and the failures into `ran` and `fails` at those places, so the checks, their count, their order and their failures are those of a run in one process. A child's
+# printed lines (the FAIL lines among them) are written out at `# [final]`, not where the part stands; the verdict line at the end counts them all.
 # SUITEMAP_SCENARIO_SERIAL=1, or a box with fewer than four CPUs, runs every part here, in order, as a script without this would.
 import ctypes as _ct, io as _io, signal as _sg, time as _tm, traceback as _tb
 def _ahead_put(box, name, obj):
@@ -366,13 +367,14 @@ def _ahead_take(child, name):
 def _ahead_collect(slots):
     g = globals(); add_ran = add_fails = 0; errs = []
     for name, child, at_ran, at_fails in slots:
-        res = _ahead_take(child, name)
+        try: res = _ahead_take(child, name)
+        except RuntimeError as e: errs.append(str(e)); continue   # the child's own traceback is already in errs: it ended after the part that raised
         g["ran"][at_ran + add_ran:at_ran + add_ran] = res["ran"]; add_ran += len(res["ran"])
         g["fails"][at_fails + add_fails:at_fails + add_fails] = res["fails"]; add_fails += len(res["fails"])
         sys.stdout.write(res["out"])
         if res["err"]: errs.append(f"the part {name} raised in the run-ahead process:\n{res['err']}")
     sys.stdout.flush()
-    if errs: raise RuntimeError("\n".join(errs))
+    if errs: raise RuntimeError("\n".join(errs))   # every traceback the children recorded, then the parts that never finished
 def _run_parts():
     lines = pathlib.Path(__file__).read_text(encoding="utf-8").split("\n")
     marks = [(i, m.group(1)) for i, l in enumerate(lines) if (m := re.fullmatch(r"# \[(main|fork|final|ahead \w+ \w+)\]", l))]
