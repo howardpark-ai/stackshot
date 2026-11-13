@@ -2,7 +2,7 @@
 and `_who` (the signed-in identity, allow-listed).
 
 The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the auth mode (`signin.py`) and the board's own client check
-(`_ui_is_board_client`, signin.py's). server.py calls `_auth()` where it builds `mcp = FastMCP(..., auth=_auth())`, and every tool asks `oauth._who()` through the module, so a suite that
+(`_ui_is_board_client`, signin.py's). web/app.py calls `_auth()` where it builds `mcp = FastMCP(..., auth=_auth())`, and every tool asks `oauth._who()` through the module, so a suite that
 replaces `_who` sets it here. Nothing in this module calls `_who` or `_env` through a name a suite replaces."""
 from __future__ import annotations
 

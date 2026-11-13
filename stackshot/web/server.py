@@ -1812,7 +1812,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
 def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]") -> str:
     """An update's tail for the ask on its item (the reply's extra lines). Three things, in this order:
       a write that sets an ask → the ask-time check: his comments and notes since the item's last ask are shown, so one that already answers the ask is seen at the write;
-      a write by the ask's author whose ENTIRE new text (every text parameter of the call, _ASK_TEXT_PARAMS; a line the item already held whole is not new) is one plain sentence, "the ask is wrong|moot|stale|...", the closed shape of
+      a write by the ask's author whose ENTIRE new text (every text parameter of the call, _ASK_TEXT_PARAMS in web/tools/update.py; a line the item already held whole is not new) is one plain sentence, "the ask is wrong|moot|stale|...", the closed shape of
         ask_leaves.author_says_wrong → the server takes the ask off his move (_ask_leave);
       a write by the session that wrote the ask, moves the item or created it, while the ask still stands → the one-line reminder to withdraw it if it is wrong or moot, with his notes since the ask; for the
         ask's author it also says which board item the ask waits on was dropped after the ask was written (ask_leaves.dropped_deps), the only thing the server does about a dropped dependency.
