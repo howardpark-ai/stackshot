@@ -105,7 +105,7 @@ def tree_hash(path):
 def run(*args, now="2026-01-05T09:00:00+00:00", env=None, cwd=REPO, home=HOME):
     e = {"PATH": os.environ["PATH"], "HOME": str(home), "TMPDIR": tmp, "LANG": "C.UTF-8"}
     e.update(env or {})
-    r = subprocess.run([sys.executable, TOOL, *(["--now", now] if now else []), *args], capture_output=True, text=True, env=e, cwd=cwd, timeout=120)
+    r = subprocess.run([sys.executable, TOOL, "--no-open", *(["--now", now] if now else []), *args], capture_output=True, text=True, env=e, cwd=cwd, timeout=120)     # --no-open: a trigger here never calls the client (the item step has its own suite, trim_open)
     return r
 
 
