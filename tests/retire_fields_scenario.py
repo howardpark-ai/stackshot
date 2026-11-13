@@ -64,10 +64,11 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.model import retire_fields as RF; from stackshot.tools import retire_fields_report as RR; from stackshot.tools import stamp_phase as SP
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
-server._front_sender = lambda who: False
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
+telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
 CFGM = server._cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)

@@ -109,6 +109,7 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import telling
 OWNER = server.OWNER
 OTHER = "other-owner/other"
 ALL = range(1, 27)
@@ -176,19 +177,19 @@ REAL_PR_MERGED = server._pr_merged
 server._pr_merged = fake_pr_merged
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
-_real_tell = server._tell_woken
+_real_tell = telling.tell_woken
 def _tell(gid, owner, note, tag="wake", result=None):
     th = _real_tell(gid, owner, note, tag, result)
     if th: THREADS.append(th)
     return th
-server._tell_woken = _tell
+telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): drain(); return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_for(gid): return [p for p in pushes() if p[1].startswith(f"[stackshot] {gid}: ")]
-check("home-builder is a front agent, so the notices below go through the front gate", server._front_sender(U["home-builder"]))
+check("home-builder is a front agent, so the notices below go through the front gate", telling.front_sender(U["home-builder"]))
 check("his own step reads as his, a session's does not", server._steps.is_his(f"{OWNER}: release PR #42", unnamed_is_his=False) and not server._steps.is_his("home-builder: release PR #42", unnamed_is_his=False))
 
 # ---- 3. the dry run first: lists what it would do, writes nothing, tells nobody
@@ -385,13 +386,13 @@ fixtures(); GH.update({key(46): ("merged", "")})
 item(27, "home-builder: merge PR #46")                                    # a bare #n on an item with no anchor and no URL: it can never match
 item(28, "home-builder: merge PR #39\nhome-builder: check the pages", owner=OWNER, mover=OWNER)      # nobody to send a notice to
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": url(39), "items": ["a28", "a3", "a16"], "added": 1, "by": "t"}]}))
-_holder0 = server._holder
-server._holder = lambda it, was=None: "" if str(it.get("id")) == "28" else _holder0(it, was)      # an item whose holder cannot be named
+_holder0 = telling.holder
+telling.holder = lambda it, was=None: "" if str(it.get("id")) == "28" else _holder0(it, was)      # an item whose holder cannot be named
 GH_CALLS.clear(); server._PROOF_LOGGED.clear()
 try:
     d = server._sweep_proofs()
 finally:
-    server._holder = _holder0
+    telling.holder = _holder0
 check("a bare pull request number that no step of its item can match makes no event and no GitHub read", key(46) not in GH_CALLS and "a27" not in {x["item"] for x in d["items"]} and raw(27) == json.dumps(json.loads(raw(27))), GH_CALLS)
 a28 = rd(28)
 check("an item with no holder: its step is ticked, the told mark is recorded all the same, nobody is told",

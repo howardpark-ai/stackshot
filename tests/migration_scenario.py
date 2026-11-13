@@ -133,6 +133,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 from stackshot.tools import migrate_model as MM
 OLIVER = model.owner_display()
@@ -143,7 +144,7 @@ FAIL_PUSH = [False]
 def _tell(gid, owner, note, tag="wake", result=None):
     if result is not None: result.update(ok=not FAIL_PUSH[0], why="push said: failed — session gone" if FAIL_PUSH[0] else "")
     if not FAIL_PUSH[0]: SENT.append((gid, owner, note, tag))
-server._tell_woken = _tell
+telling.tell_woken = _tell
 CFG = server._cfg.CFG.setdefault("model", {})
 def cfg(**kw):
     for k, v in kw.items(): CFG[k] = v

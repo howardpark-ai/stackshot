@@ -65,13 +65,14 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._front_sender = lambda who: False
+telling.front_sender = lambda who: False
 BACK = "team-back"
 def bupd(i, **kw): return server._update(f"a{i}", sender=BACK, **kw)
 def stamped(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
@@ -151,8 +152,8 @@ check("1 a declined wake is left alone by the pass: not parked, no finding, no m
 def fput(i, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": "open",
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/alpha", "next": f"{BUILD}: carry on", **meta}}))
-holder = lambda i: server._holder(rd(i))
-server._tell_woken = lambda *a, **k: None
+holder = lambda i: telling.holder(rd(i))
+telling.tell_woken = lambda *a, **k: None
 def refusal(fn):
     try:
         fn(); return ""
@@ -175,7 +176,7 @@ r = server.stackshot_create(subject="[home] handed to the front", description=DE
 new_gid = re.search(r"created (\w+) ", r).group(1)
 new_item = server._load(new_gid)
 new_log = [e["text"] for e in ((new_item["metadata"].get("stall") or {}).get("log") or [])]
-check("2 create: the same fix; the item is made with the builder as mover and the reply says so", r.startswith("created") and server._holder(new_item) == BUILD and f"mover={BUILD}" in r and "no hand-off notice" in r, r[:400])
+check("2 create: the same fix; the item is made with the builder as mover and the reply says so", r.startswith("created") and telling.holder(new_item) == BUILD and f"mover={BUILD}" in r and "no hand-off notice" in r, r[:400])
 check("2 …History has the line on the new item, and the fix is recorded", any(FRONT in x and BUILD in x for x in new_log) and fm_marked(new_item["metadata"]), (new_log, new_item["metadata"]))
 fput(203, mover=FRONT)
 out = server.stackshot_update(item_id="a203", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")

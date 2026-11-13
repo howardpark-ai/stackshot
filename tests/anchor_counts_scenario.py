@@ -90,6 +90,7 @@ check("completion_due: the same anchor on two pages is asked about on each (each
 
 # ---- the readers built on it
 from stackshot.web import server
+from stackshot.service import telling
 server._anc.save({k: v for k, v in store.items()})
 check("the server reads an anchor held by another project's page (_scoped_anchors)", urls(server._scoped_anchors(A, "a1")) == [SOLO, DM] and urls(server._scoped_anchors(A, "b2")) == [DM, PR]
       and server._scoped_anchors(A, "z9") == [], (urls(server._scoped_anchors(A, "a1")), urls(server._scoped_anchors(A, "b2"))))
@@ -216,7 +217,7 @@ check("...and for an anchor scoped to an item of another project alone, it is a 
       len(rf) == 1 and rf[0]["session"] == "keep-gamma" and rf[0]["target"] == "project-wide", rf)
 
 # _completion_anchor_prompt (service/update.py): asks each page's keeper about the anchors it holds, the item's own project's page first; the completing keeper is not notified
-sent = []; server._push_noted = lambda to, note: sent.append((to, note))
+sent = []; telling.push_noted = lambda to, note: sent.append((to, note))
 for g, p in (("20", C), ("21", C)): item2(g, p, status="completed", mover="keep-gamma")
 (T / "store/anchors.json").write_text(json.dumps({A: [{"url": SOLO, "items": ["a20"], "added": 1}], B: [{"url": URL_B, "items": ["a20", "a21"], "added": 2}], C: [{"url": URL_C, "items": ["a20"], "added": 3}]}))
 done = json.loads((T / "store/a/20.json").read_text()); done["gid"] = "a20"

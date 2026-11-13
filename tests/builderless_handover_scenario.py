@@ -48,10 +48,11 @@ def put(i, project="projects/sigma", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": SMAIN, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake", **k: told.append((gid, owner, note, tag))
+telling.tell_woken = lambda gid, owner, note, tag="wake", **k: told.append((gid, owner, note, tag))
 OWNER = server.OWNER
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 STEP = "run the one line in a terminal"
@@ -68,7 +69,7 @@ def refusal(fn):
     except Exception as e:  # noqa: BLE001
         return str(e)
 def held(i):
-    return server._holder(rd(i))
+    return telling.holder(rd(i))
 def put_step(i, project="projects/sigma", next_text=None, post=SMAIN, **meta):
     """the incident: on hold with a wake, post_wake_mover = the general -main agent, waiting on the owner's step"""
     put(i, project=project, state="your-step", step=STEP, hold=True, wake=WAKE, wait_kind="time", post_wake_mover=post,

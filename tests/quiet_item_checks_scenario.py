@@ -344,15 +344,16 @@ try:
 finally:
     SL.silent = SL_silent
 
-# ---- 10. the backstop judges a hand-off by the server's own answer to "who is a front agent" (server._front_keeper), the answer the pass was given; and an idle-pass entry covers an item
+# ---- 10. the backstop judges a hand-off by the server's own answer to "who is a front agent" (telling.front_keeper), the answer the pass was given; and an idle-pass entry covers an item
 from stackshot.web import server as SRV
-real_fk = SRV._front_keeper
+from stackshot.service import telling
+real_fk = telling.front_keeper
 import stackshot.anchors.anchors as ANC
 real_file_roles = ANC.file_roles
 b10 = dict([handed(120, "alpha-main", 130)])                                    # an untaken hand-off to alpha-main, silent 130 minutes
 try:
     # (a) the server calls alpha-main front, the role map does not: the pass checks the hand-off and finds it, so the backstop lists nothing
-    SRV._front_keeper = lambda who, project="": (who == "alpha-main", "")
+    telling.front_keeper = lambda who, project="": (who == "alpha-main", "")
     ANC.file_roles = lambda reg: {"alpha-main": {"role": "background"}}
     found_a = SL.findings(b10, now, SRV._silence_env())[0]
     check("10 the server says alpha-main is front (the role map says back): the pass finds the hand-off", [f["id"] for f in found_a] == [shown(120)], found_a)
@@ -360,7 +361,7 @@ try:
     late_a = SRV._silence_backstop(now=now, items=b10)
     check("10 …so the server's backstop, which uses the same answer, lists nothing and tells no one (a default Env would call the hand-off a back agent's, list it and send a false defect message)", late_a == [] and told10 == [], (late_a, told10))
     # (b) the role map calls alpha-main front, the server does not: the pass leaves the hand-off to the hand-off audit, so the backstop lists it
-    SRV._front_keeper = lambda who, project="": (False, "")
+    telling.front_keeper = lambda who, project="": (False, "")
     ANC.file_roles = lambda reg: {"alpha-main": {"role": "front"}}
     found_b = SL.findings(b10, now, SRV._silence_env())[0]
     check("10 the server says alpha-main is not front (the role map says front): the pass leaves the hand-off to the hand-off audit", found_b == [], found_b)
@@ -379,7 +380,7 @@ try:
     check("10 the backstop passes an env to `uncovered` in every case: the one it is given, else one built the way the pass's is (front = the server's answer)",
           len(seen_env) == 2 and seen_env[0] is own_env and seen_env[1] is not None and seen_env[1].front is not None and seen_env[1].is_front("alpha-main", "") is False, seen_env)
 finally:
-    SRV._front_keeper = real_fk; ANC.file_roles = real_file_roles; SRV._inbox_flag_send = real_flag10 if "real_flag10" in dir() else SRV._inbox_flag_send
+    telling.front_keeper = real_fk; ANC.file_roles = real_file_roles; SRV._inbox_flag_send = real_flag10 if "real_flag10" in dir() else SRV._inbox_flag_send
     SL.uncovered = real_uncovered if "real_uncovered" in dir() else SL.uncovered
     SRV._BACKSTOP_TOLD.clear()
 

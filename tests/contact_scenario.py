@@ -53,11 +53,12 @@ def put(i, status="open", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server
+from stackshot.service import telling
 sh = server._gh.shown
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []                                              # every notice the server would send: recorded, never sent
-server._tell_woken = lambda *a, **k: told.append((a, k))
+telling.tell_woken = lambda *a, **k: told.append((a, k))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 OWNER = server.OWNER
 

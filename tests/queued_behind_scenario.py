@@ -17,7 +17,7 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
   4b the words: board.md and the brief (the head's waiting lines and the cards) say `queued behind <item>` for a queued item, never `waiting on another item's close`; the item page and the home row say it too;
      the wait a session stored as an item wait keeps its words
   4c the front test the board and the passes use: the one the server installed is the one used; a front test that cannot answer counts as front (nothing is queued on a guess), in the queue path only; the
-     server's `_front_keeper` answers False on an unreadable role map by default and True when asked strictly
+     server's `front_keeper` answers False on an unreadable role map by default and True when asked strictly
   4d the readers' edges: an item behind a closed one is not queued, a record dated ahead of now, the 30 s memo, a failed read is swallowed
   10 revert-proof: each rule above is mutated (the newest item no longer chosen, the hour ignored, front agents queued, the gate ignored, a reader that no longer asks) and the check that guards it must fail
 
@@ -61,6 +61,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server, home
+from stackshot.service import telling
 from stackshot.web.ui import render as UI
 from stackshot.web import render as MD
 from stackshot.audit import hourly as HR, silence as SL, audit_run as AR
@@ -69,7 +70,7 @@ from stackshot.model import queued as Q, model as MODEL
 from stackshot.tools import next_report as NR
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._PUSH = [sys.executable, "-c", "pass"]
+telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the passes below: each is given its `now`, and the saves stamp from the server's own clock."""
     t = None
@@ -79,15 +80,15 @@ CLK = _Clock(); server.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"; server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
-server._tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
+telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 REAL = {n: getattr(server, n) for n in ("_handoff_status", "_sessions_index", "_stall_active")}      # the stall pass below reads the real ones
 server._handoff_status = lambda who, idx=None: ("", 0.0)
 server._sessions_index = lambda: {}
 server._stall_active = lambda: set()
 FRONT = {"home-front"}
-REAL_HOOK = Q.front_hook()                                         # what the server installed (`_front_keeper`, strict), before the fixture's own answer replaces it
-Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `_front_keeper` is replaced by the one front agent of the fixture
+REAL_HOOK = Q.front_hook()                                         # what the server installed (`front_keeper`, strict), before the fixture's own answer replaces it
+Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `front_keeper` is replaced by the one front agent of the fixture
 ROLES = {"home-front": {"role": "front"}, "team-back": {"role": "background"}, "home-peer": {"role": "background"}}
 def env(): return AR.Env(roles=ROLES, fallback=lambda p: "home-front", builder=lambda p: "team-back", page_of=lambda p: ("", None), sessions=lambda: None,
                          deliver=lambda to, text, fyi=False: (True, "[200] ok"), push=lambda to, text: (True, "delivered"))
@@ -248,15 +249,15 @@ roles_ok = {"home-peer": {"role": "background", "project": "projects/alpha"}, "h
 anc_roles = server._anc.session_roles
 server._anc.session_roles = lambda *a, **k: roles_ok
 try:
-    ok = (REAL_HOOK("home-peer", "projects/alpha"), REAL_HOOK("home-front", "projects/alpha"), server._front_keeper("home-front", "projects/alpha", True), server._front_keeper("home-peer", "projects/alpha", True))
+    ok = (REAL_HOOK("home-peer", "projects/alpha"), REAL_HOOK("home-front", "projects/alpha"), telling.front_keeper("home-front", "projects/alpha", True), telling.front_keeper("home-peer", "projects/alpha", True))
 finally: server._anc.session_roles = anc_roles
-check("4c the server's installed hook (strict `_front_keeper`) answers from the roles: no for a background agent, yes for a front agent whatever its project", ok[:2] == (False, True) and ok[2] == (True, "") and ok[3] == (False, ""), ok)
+check("4c the server's installed hook (strict `front_keeper`) answers from the roles: no for a background agent, yes for a front agent whatever its project", ok[:2] == (False, True) and ok[2] == (True, "") and ok[3] == (False, ""), ok)
 server._anc.session_roles = boom
-try: bad = (REAL_HOOK("home-peer", "projects/alpha"), server._front_keeper("home-peer", "projects/alpha"), server._front_keeper("home-peer", "projects/alpha", True))
+try: bad = (REAL_HOOK("home-peer", "projects/alpha"), telling.front_keeper("home-peer", "projects/alpha"), telling.front_keeper("home-peer", "projects/alpha", True))
 finally: server._anc.session_roles = anc_roles
-check("4c a role map that cannot be read: the installed hook says front (nothing queued); `_front_keeper` keeps False for every other caller, and says (True, \"\") when asked strictly", bad == (True, (False, ""), (True, "")), bad)
+check("4c a role map that cannot be read: the installed hook says front (nothing queued); `front_keeper` keeps False for every other caller, and says (True, \"\") when asked strictly", bad == (True, (False, ""), (True, "")), bad)
 check("4c …so the whole board queues nothing while the roles are unreadable, and queues as before once they read",
-      (lambda: (server._anc.__setattr__("session_roles", boom), Q.configure(is_front=lambda who, project: server._front_keeper(who, project, True)[0]), two(), on(), home_lists_at())[-1])()[WT] == [], "")
+      (lambda: (server._anc.__setattr__("session_roles", boom), Q.configure(is_front=lambda who, project: telling.front_keeper(who, project, True)[0]), two(), on(), home_lists_at())[-1])()[WT] == [], "")
 server._anc.session_roles = lambda *a, **k: roles_ok; two(); on(); L = home_lists_at()
 check("4c …and once the roles read, the idle item of the background agent is queued again", "a2" in L[WT], L)
 server._anc.session_roles = anc_roles; Q._HOOKS["is_front"] = saved; off()
@@ -340,7 +341,7 @@ def stall_rows():
     return B
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server.CLI_SESSIONS = T / "cli"
 for _n, _f in REAL.items(): setattr(server, _n, _f)
 server._cfg.CFG["model"] = {}; server._cfg.CFG["stall"] = {}

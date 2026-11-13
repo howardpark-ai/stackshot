@@ -244,12 +244,13 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.service import telling
 from stackshot.core import instance as _core_instance
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
-server._tell_woken = lambda *a, **k: None            # no push.py
+telling.tell_woken = lambda *a, **k: None            # no push.py
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
@@ -778,15 +779,15 @@ check("while temporary, /items/board-tmp-boxa-1 serves the item; /items/l1 and t
       and r6.status_code == 404, (r1.status_code, r0.status_code, r0.headers.get("location"), r5.status_code, r6.status_code))
 # a notice pushed to a session names a temporary item as it is shown and links its item page (the builders called
 # directly: a write here would queue a fourth job)
-told = []; server._tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
+told = []; telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 it_l1 = rd("l", 1); it_l1["metadata"] = {**it_l1["metadata"], "needs": ["home-other"], "mover": "home-here"}
 server._wake_notify("l1", it_l1, "woke (wake 2020-01-01)")
-_pr, _fs = server._anc.pilot_root, server._front_keeper
-server._anc.pilot_root = lambda p: p; server._front_keeper = lambda who, project="": (True, "home-keeper")
+_pr, _fs = server._anc.pilot_root, telling.front_keeper
+server._anc.pilot_root = lambda p: p; telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try:
-    server._tell_owner("l1", rd("l", 1), "was completed (done: closed by another session)", "home-other")   # a front agent's item: its keeper hears the close
+    telling.tell_owner("l1", rd("l", 1), "was completed (done: closed by another session)", "home-other")   # a front agent's item: its keeper hears the close
 finally:
-    server._anc.pilot_root, server._front_keeper = _pr, _fs
+    server._anc.pilot_root, telling.front_keeper = _pr, _fs
 TMP_URL = "https://board.example.org/items/board-tmp-boxa-1"
 check("a wake notice for a temporary item names board-tmp-boxa#1 and links /items/board-tmp-boxa-1; the stderr tag keeps l1",
       any(t[0] == "l1" and t[1] == "home-other" and t[2].startswith("[stackshot] board-tmp-boxa#1 woke (wake 2020-01-01), ") and re.search(re.escape(f"→ {TMP_URL}") + r"( · notice [0-9a-f]{6})?$", t[2])
@@ -794,10 +795,10 @@ check("a wake notice for a temporary item names board-tmp-boxa#1 and links /item
 check("an owner notice (a close on a front agent's item, to its keeper) for a temporary item names board-tmp-boxa#1 and links /items/board-tmp-boxa-1",
       any(t[1] == "home-keeper" and t[3] == "owner" and t[2].startswith("[stackshot] board-tmp-boxa#1 (mover home-here, a front agent) was completed (done: closed by another session) by home-other: ")
           and t[2].endswith(f"→ {TMP_URL}") for t in told), told)
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 r = G.drain(GH, STORE, say=lambda s: None)
 check("the queue waits out the outage with the three jobs", r["done"] == 0 and r["left"] == 3 and (STORE / "l/1.json").exists(), r)
-told = []; server._tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
+told = []; telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 F.down = False; F.log.clear()
 r = G.drain(GH, STORE, say=lambda s: None)
 n1, n2 = nxt2, nxt2 + 1
@@ -822,7 +823,7 @@ check("the anchor scoped to l1 now names g<n>", any(e["url"].endswith("/issues/1
 check("the owner was told the new id in one plain line, through the owner-notice path: board-tmp-boxa#1 is now board#<n>, with the new page's link",
       any(t[0] == f"g{n1}" and t[1] == OWNER and t[2].startswith(f"[stackshot] board-tmp-boxa#1 is now board#{n1} (") and "board-tmp-boxa#1 still names it" in t[2]
           and t[2].endswith(f"https://board.example.org/items/{n1}") and t[3] == "owner" for t in told) and len(told) == 2, told)
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 out = server._create(subject="[home] after the outage", description=DESC, project="projects/alpha", owner="home-here", next="x")
 check("with GitHub up a create takes its issue number straight away, no local id", out.startswith(f"created board#{nxt2 + 2} — ")
       and not list((STORE / "l").glob("*.json")) and G.load_map(STORE)["local_last"] == 2, (out[:60], list((STORE / "l").glob("*.json"))))
@@ -840,7 +841,7 @@ check("a stale old file after a cut-short re-key is removed by the next job, the
       and F.next == n_cut + 1 and not comments(n_cut), (r, stale.exists(), F.next))
 
 # ---- 6b. notices pushed to sessions name an issue-numbered item as it is shown, board#<n>; the stderr tag keeps g<n>
-told = []; server._tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
+told = []; telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 num = lambda g: int(g[1:])
 mk = lambda subject, **kw: G.norm(made(subject, **kw)[0])   # the reply says board#<n>; the store id is g<n>
 # a wake: an item on hold whose wake has come
@@ -861,22 +862,22 @@ check("…and the issue has no comment: the server's note of the release is not 
 # an owner notice: another session closes a front agent's item, so its keeper hears it; a close by the keeper itself tells nobody
 # (no item notice wakes a front agent owner used to tell it the keeper's close plainly). A move to decision tells nobody either, neither the owner nor its keeper; a non-front owner still hears it, unmarked
 g_own = mk("[home] closed by its keeper")
-_pr, _fs = server._anc.pilot_root, server._front_keeper
-server._anc.pilot_root = lambda p: p; server._front_keeper = lambda who, project="": (True, "home-keeper")
+_pr, _fs = server._anc.pilot_root, telling.front_keeper
+server._anc.pilot_root = lambda p: p; telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try:
-    told.clear(); server._tell_owner(g_own, server._load(g_own), "was completed (done: closed by another session)", "home-other")
+    told.clear(); telling.tell_owner(g_own, server._load(g_own), "was completed (done: closed by another session)", "home-other")
     told_stew = list(told)
-    told.clear(); quiet = server._tell_owner(g_own, server._load(g_own), "was completed (done: closed by the keeper)", "home-keeper")
+    told.clear(); quiet = telling.tell_owner(g_own, server._load(g_own), "was completed (done: closed by the keeper)", "home-keeper")
     told_close = list(told)
     told.clear(); heard_f: list[str] = []
-    quiet_d = server._tell_owner(g_own, server._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_f)
+    quiet_d = telling.tell_owner(g_own, server._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_f)
     told_dec = list(told)
-    server._front_keeper = lambda who, project="": (False, "")
+    telling.front_keeper = lambda who, project="": (False, "")
     told.clear(); heard_n: list[str] = []
-    said_n = server._tell_owner(g_own, server._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_n)
+    said_n = telling.tell_owner(g_own, server._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_n)
     told_dec_n = list(told)
 finally:
-    server._anc.pilot_root, server._front_keeper = _pr, _fs
+    server._anc.pilot_root, telling.front_keeper = _pr, _fs
 check("an owner notice (a close on a front agent's item, to its keeper) names the item board#<n>",
       any(t[1] == "home-keeper" and t[3] == "owner" and t[2] == f"[stackshot] board#{num(g_own)} (mover home-here, a front agent) was completed (done: closed by another session) by home-other: [home] closed by its keeper → https://board.example.org/items/{num(g_own)}"
           for t in told_stew), told_stew)
@@ -979,10 +980,10 @@ check("a comment the hook could not take is left for the next read (not in seen,
       r1["failed"] == 1 and r1["new"] == 0 and c_r["id"] not in st1["seen"] and G._epoch(st1["since"]) <= G._epoch(c_r["updated_at"])
       and r2["new"] == 1 and len(told) == 1 and all("taken at the second try" in t[2] for t in told) and rd(g_c[0], gn)["metadata"]["answers"][-1]["comment_id"] == c_r["id"], (r1, st1, r2, told))
 # a front agent mover hears it marked for the owner (_FOR_OWNER)
-c_f = F.comment(n_c, "yes, go ahead"); told.clear(); _fs = server._front_keeper
-server._front_keeper = lambda who, project="": (True, "home-keeper")
+c_f = F.comment(n_c, "yes, go ahead"); told.clear(); _fs = telling.front_keeper
+telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try: r = G.poll_comments(GH, STORE, say=lambda s: None)
-finally: server._front_keeper = _fs
+finally: telling.front_keeper = _fs
 NOTE_F = f"[stackshot] the owner commented on board#{gn} on GitHub: yes, go ahead → https://board.example.org/items/{gn}"
 check("a front agent mover hears it marked [for the owner]",
       r["new"] == 1 and sorted(told) == [(g_c, "home-other", f"[for the owner] {NOTE_F}", "comment")], told)
@@ -1346,7 +1347,7 @@ check("with sync off the git-derived History carries his words too: the line of 
 F.comment(n_c, "while the mirror is off"); told.clear(); F.log.clear()
 r = G.poll_comments(GH, STORE, say=lambda s: None)
 check("with sync off a read reads nothing: no GET, nothing told, nothing recorded", r.get("off") and not F.log and not told and len(rd(g_c[0], gn)["metadata"]["answers"]) == n_ans, (r, F.log, told))
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 
 # ---- the shown form on the way in (why did a session write the store's g<n> for an item?): every write
 # that takes text writes a bare g<n> that names an item as board#<n>; code, links, unknown ids and glued tokens stay as written
@@ -1381,13 +1382,13 @@ check("complete: g<n> in the reason and in the outcome text is stored as board#<
       dw["metadata"]["reason"] == f"closed with {nk}" and dw["metadata"]["outcome_text"] == f"- Ended with {nk}\n- It lived here\n- It worked"
       and dw["description"].startswith(f"- Now waits on {nk}") and gk not in json.dumps(dw["metadata"]["outcome_text"]), dw)
 (T / "fakepush_g.py").write_text(f"import json, sys\nopen({str(T / 'push_g.json')!r}, 'w').write(json.dumps(sys.argv[1:]))\nprint('delivered')\n")
-_push, _gf, _hand = server._PUSH, server._gate_front, server._name_on_handover
-server._PUSH = [sys.executable, str(T / "fakepush_g.py")]; server._gate_front = lambda *a, **k: None; server._name_on_handover = lambda *a, **k: ""
+_push, _gf, _hand = telling.PUSH, server._gate_front, server._name_on_handover
+telling.PUSH = [sys.executable, str(T / "fakepush_g.py")]; server._gate_front = lambda *a, **k: None; server._name_on_handover = lambda *a, **k: ""
 try:
     server._message("home-here", f"about {gk}, not `{gk}` nor g999", "home-other")
     env_ = json.loads((T / "push_g.json").read_text())[-1]
 finally:
-    server._PUSH, server._gate_front, server._name_on_handover = _push, _gf, _hand
+    telling.PUSH, server._gate_front, server._name_on_handover = _push, _gf, _hand
 check("message: a bare g<n> in the text is delivered as board#<n>; code and an unknown id stay", f"about {nk}, not `{gk}` nor g999" in env_, env_[:300])
 
 # ---- the rewrite never changes what a message names (the keeper, before merge): the handover's naming reads the text as the sender
@@ -1398,9 +1399,9 @@ _open_g = sorted((f"g{q.stem}" for q in (STORE / "g").glob("*.json") if q.stem.i
 (gb, gc, gd) = _open_g[:3]; nc0 = rd("g", gc[1:])["metadata"].get("needs")
 check("the fixture: three open issue-numbered targets", all(g[0] == "g" and rd(g[0], g[1:])["status"] == "open" for g in (gb, gc, gd)), (gb, gc, gd))
 seen_txt = []
-_push, _gf, _ba, _to, _hand = server._PUSH, server._gate_front, server._back_agent, server._tell_owner, server._name_on_handover
-server._PUSH = [sys.executable, str(T / "fakepush_g.py")]; server._gate_front = lambda *a, **k: None
-server._back_agent = lambda who, idx=None: "ops-alpha-bg" if who == "home-here" else ""; server._tell_owner = lambda *a, **k: ""
+_push, _gf, _ba, _to, _hand = telling.PUSH, server._gate_front, server._back_agent, telling.tell_owner, server._name_on_handover
+telling.PUSH = [sys.executable, str(T / "fakepush_g.py")]; server._gate_front = lambda *a, **k: None
+server._back_agent = lambda who, idx=None: "ops-alpha-bg" if who == "home-here" else ""; telling.tell_owner = lambda *a, **k: ""
 server._name_on_handover = lambda to, text, *a, **k: (seen_txt.append(text), _hand(to, text, *a, **k))[1]
 def _needs(g): return rd(g[0], g[1:])["metadata"].get("needs")
 try:
@@ -1434,7 +1435,7 @@ try:
     check("handover (c): a bare g<n>, a g<n> link and a g<n> beside a group number still name; only the two release forms are skipped",
           server._item_refs(f"take {ge}") == [ge] and server._item_refs(f"[{ge}]({_core_instance.BOARD_URL}/items/{ge[1:]})") == [ge] and server._item_refs(f"group {ge} [{ge}] and {gf}") == [gf], (server._item_refs(f"group {ge} [{ge}] and {gf}"),))
 finally:
-    server._PUSH, server._gate_front, server._back_agent, server._tell_owner, server._name_on_handover = _push, _gf, _ba, _to, _hand
+    telling.PUSH, server._gate_front, server._back_agent, telling.tell_owner, server._name_on_handover = _push, _gf, _ba, _to, _hand
 
 # ---- 8. the board item: one capped queue. The updates of an existing issue are merged over [github] merge_seconds into one
 # PATCH (no comment goes with it any more); a create and a close or reopening go at once; the host's one ledger

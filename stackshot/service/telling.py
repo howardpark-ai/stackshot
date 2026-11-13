@@ -42,7 +42,7 @@ from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model, nextlines as _nl
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _GID, _item_url
-from stackshot.model.needs import _NEEDS_KINDS, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _observers_of
+from stackshot.model.needs import _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_of, _needs_sessions, _observers_of
 from stackshot.model.said import _owner_words
 from stackshot.router import router_live as _router_live, routing as _routing
 from stackshot.service import writes as _writes
@@ -185,7 +185,7 @@ def page_keeper(project: str, reg: dict[str, Any] | None = None) -> str:
         return ""
 
 
-def keeper(project: str, owner: str = "") -> str:
+def project_keeper(project: str, owner: str = "") -> str:
     """Who hears an item's notices when its needs names no session and nothing else names one (the whole board): the keeper of its page (a
     sub-page's `agent:`, unless that is a front agent), else the keeper of its pilot root or of its hub, else the project's builder, else its
     -main agent, else, for a mover that is a front agent, that mover's keeper, else the mover itself (`owner` here is the item's mover, never its creator). → a session name or id, "" when none is named."""
@@ -264,7 +264,7 @@ def holder(item: dict[str, Any], was: dict[str, Any] | None = None) -> str:
     return held_by(item, was)[0]
 
 
-def quiet(item: dict[str, Any], owner: str = "") -> str:
+def quiet_line(item: dict[str, Any], owner: str = "") -> str:
     """The reply line that says a front agent holding the item (its mover, else its `then`) is not told: the board shows it. `owner` = the session when the caller has it."""
     who, word = held_by(item)
     return _FRONT_QUIET.format(word=word, owner=_session_label(owner or who))
@@ -683,14 +683,14 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
     if front and decision:                 # the board shows it; nobody is told
         if heard is not None:
             heard.append(h.session_id(owner))   # its quiet line is this one: _tell_needed leaves the mover out of the same write
-        return quiet(item, owner)
+        return quiet_line(item, owner)
     if front:
         words = tell_close_owner(gid, item, owner, project, writer) if close else ""       # a close with his words on it is the one thing a front agent mover hears
         row_note = f"{OWNER}'s words are on it ({words}), so it is a row on his For you list"     # no "not told;" in it: the mover's part is settled (_owner_reached); the mover itself is told by _tell_owner_close
         if words and h.foryou_key(gid, "closed", item) in _FORYOU_FELL:
             row_note = f"{OWNER}'s words are on it ({words}), but the For you list could not be written, so the old notice marked {_FOR_OWNER} was sent to {_session_label(owner)} instead"
         if not stew or h.session_id(stew) == h.session_id(writer):
-            return f"\n(its {word} {_session_label(owner)} is a front agent: {row_note})" if words else quiet(item, owner)
+            return f"\n(its {word} {_session_label(owner)} is a front agent: {row_note})" if words else quiet_line(item, owner)
         tell_kind("close" if close else "progress", gid, h.session_id(stew), f"[stackshot] {_gh.shown(gid)} ({word} {_session_label(owner)}, a front agent) {what} by {who}: {item.get('subject') or ''} → {notice_link(gid)}", tag="owner")
         res, why = gate_result()      # the gate may have held it, or filed it for his next turn there: the reply says what became of it
         klabel = _session_label(stew)
@@ -846,7 +846,7 @@ def tell_owner_change(gid: str, item: dict[str, Any], before: dict[str, Any], wr
         hk = "" if reopening else (("" if _owner_words(item) or (meta.get("outcome") or "done") != "done" else "closed") if closing else ("" if _asks_of(gid, item, oid) else "changed"))     # a close, or a change to an item it neither moves nor is asked on, asks a background mover nothing
         tell_or_hold(gid, oid, line, hk, tag="owner")
         return f"\n(its {word} {olabel} has been told)"
-    quiet = quiet(item, owner)
+    quiet = quiet_line(item, owner)
     if "decision" in _needs_kinds(meta) and "decision" not in [str(x).lower() for x in _needs_list(before.get("needs"))]:
         return quiet                   # a move to decision is told to nobody, a front agent mover's item in or out of the pilot: the board shows it
     if relayed:
@@ -856,7 +856,7 @@ def tell_owner_change(gid: str, item: dict[str, Any], before: dict[str, Any], wr
         reg = _anc.registry()
         stew = (_anc.notice_name(key, reg) or _anc.name_line(key, reg)) if key in reg else ""
         kept = stand_in_keeper(key, reg) if key in reg else ""
-        keepers = {h.session_id(x) for x in (stew, kept, page_keeper(key, reg), front_keeper(owner, key)[1], keeper(key)) if x}
+        keepers = {h.session_id(x) for x in (stew, kept, page_keeper(key, reg), front_keeper(owner, key)[1], project_keeper(key)) if x}
     except Exception:  # noqa: BLE001
         return ""
     if not (stew or kept) or wid in keepers:
@@ -904,7 +904,7 @@ def tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, h
             continue
         skip.add(sid)
         if owner and sid == h.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
-            quiet = quiet(item, owner); continue
+            quiet = quiet_line(item, owner); continue
         nxt = next_head(meta, writer)[:160]
         thn = then_part(item)
         tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)} now needs you (named in its needs by {who}): {item.get('subject') or ''} ({project}){thn}"
@@ -933,7 +933,7 @@ def tell_decided(gid: str, item: dict[str, Any], sessions: list[str], writer: st
         if not sid or sid in skip or sid in [h.session_id(x) for x in told]:
             continue
         if owner and sid == h.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
-            quiet = quiet(item, owner); continue
+            quiet = quiet_line(item, owner); continue
         tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)}: {OWNER} has decided (decision left its needs, by {_session_label(writer) or 'a session'}), so the move is yours "
                               f"as named in its needs: {item.get('subject') or ''} ({project}){thn}" + (f"; next: {nxt}" if nxt else "")
                               + f". Read its next for his call, do your part and close it or hand it back (sender={_session_label(s)!r}). → {notice_link(gid)}", tag="needs")
@@ -1455,7 +1455,7 @@ def tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip: 
     h = _hooks()
     meta = item.get("metadata") or {}
     project = str(meta.get("project") or "")
-    k = keeper(project)
+    k = project_keeper(project)
     kid = h.session_id(k) if k else ""
     if not kid or kid in (skip or []):
         if not kid:

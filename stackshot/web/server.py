@@ -14245,7 +14245,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _pm = dict(meta); _watch.end_wait(_pm)      # who takes it is read with any leftover wait already ended (a stored wait would make the item read as waiting, with no then)
             then = _model.derive({**item, "metadata": _pm}).then
             if not then or _model.is_owner(then):      # no default mover and no session in needs: a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
-                then = _builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
+                then = _builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
@@ -14341,7 +14341,7 @@ def _answer_tick(now: float | None = None) -> list[str]:
                 continue
             meta = it.get("metadata") or {}
             owner, project = _telling.holder(it), str(e.get("project") or meta.get("project") or "")
-            stew = _telling.page_keeper(project) or _telling.keeper(project)
+            stew = _telling.page_keeper(project) or _telling.project_keeper(project)
             sid = _session_id(stew) if stew else ""
             if not sid or sid == _session_id(owner):
                 print(f"answer: {gid} unacted after {_ANSWER_ESCALATE_S / 60:g} min, but no keeper other than its mover to tell", file=sys.stderr, flush=True)

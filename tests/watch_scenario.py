@@ -64,13 +64,14 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.github import ghsync; from stackshot.model import model
+from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 hrs = lambda n: time.strftime("%Y-%m-%d %H:%M", time.gmtime(now0 + n * 3600 + ZONE_OFFSET))      # an expected_by n hours after the suite started (a time of day)
 FUT = day(5)
@@ -189,8 +190,8 @@ item(13, needs=[BACK])
 upd(13, NOBODY, wake=FUT)
 check("9 unknown: a sender no page lists is allowed (the rule fails open)", wk_(mt(13)) == FUT, mt(13))
 item(14, needs=[BACK])
-check("9 front test: home-front is front, team-back and home-nobody and the owner are not", server._front_sender(FRONT) and not server._front_sender(BACK) and not server._front_sender(NOBODY)
-      and not server._front_sender(model.owner_display()) and not server._front_sender(""), None)
+check("9 front test: home-front is front, team-back and home-nobody and the owner are not", telling.front_sender(FRONT) and not telling.front_sender(BACK) and not telling.front_sender(NOBODY)
+      and not telling.front_sender(model.owner_display()) and not telling.front_sender(""), None)
 
 def _boom(*a, **k): raise RuntimeError("boom")
 _real_others = gates._watch_others
@@ -204,7 +205,7 @@ _real_roles = server._anc.session_roles
 server._anc.session_roles = _boom
 errbuf = io.StringIO()
 with contextlib.redirect_stderr(errbuf):
-    verdict = server._front_sender(FRONT)
+    verdict = telling.front_sender(FRONT)
 server._anc.session_roles = _real_roles
 check("9 fail open: …and a failing front test reads as not front, with a stderr line", verdict is False and errbuf.getvalue().count("watch rule: front test of home-front failed") == 1, errbuf.getvalue())
 

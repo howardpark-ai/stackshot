@@ -57,11 +57,12 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.service import telling
 from stackshot.core import store as _core_store
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
-server._front_sender = lambda who: False
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
+telling.front_sender = lambda who: False
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
 ZONE_OFFSET = 4 * 3600      # the pinned instance timezone, Asia/Dubai: UTC+4, no DST

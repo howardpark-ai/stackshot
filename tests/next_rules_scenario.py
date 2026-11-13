@@ -72,6 +72,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.service import telling
+from stackshot.service import writes
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -83,7 +85,7 @@ for p_ in (T / "store/a").glob("*.json"):       # as a session's write leaves th
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 def refused(name, f, *want, i=None):
     was = rd(i) if i is not None else None
     try:
@@ -302,7 +304,7 @@ check("N7: a create notes it too and still creates", r.startswith("created") and
 check("N7: the note says a step is an action and sends results to the project page", "project page" in server._report_note("home-agent: merged to main") and "never a status" in server._report_note("home-agent: merged to main"), None)
 
 # ---- internal writers are not judged: only the two tools mark a session's write
-check("the flag is off outside the tools", not getattr(server._SESSION_NEXT, "on", False), None)
+check("the flag is off outside the tools", not getattr(writes.SESSION_NEXT, "on", False), None)
 # the older model guard (next_unnamed) judges every write while [model] guards is on, the server's own among them: these checks run with it off so that the rule under test is N1/N3/N6
 _ng = noguards(); _ng.__enter__()
 try:
@@ -332,7 +334,7 @@ try:
 except server.ToolError as e:
     check("internal: server._create with an unnamed line is not refused", False, str(e))
 refused("a refused tool call leaves the flag off again", lambda: mk(next="build it"), "names no one")
-check("…the flag is off after a tool call, refused or not", not getattr(server._SESSION_NEXT, "on", False), None)
+check("…the flag is off after a tool call, refused or not", not getattr(writes.SESSION_NEXT, "on", False), None)
 _ng.__exit__(None, None, None)
 upd(47, needs="decision", ask=ASK, options=OPTS)
 r = server._answer("a47", "Ship", "", "")

@@ -8,7 +8,7 @@ post_wake_mover, is still read, and while it is stored (not yet moved into mover
   * `then`: read beside the owner (alive, or the waiting item he picks up), not beside an agent, not stored-and-ignored into a conflict.
   * model.words: `· mover X`, `· mover <owner> (then Y)`; the derived tail still names post_wake_mover.
   * model.settle: a wait that replaces his state makes the agent in `then` the picker; a stored agent mover on a waiting item is never dropped; with a post_wake_mover stored only his mover goes.
-  * the server readers: `_held_by`, get's mover and then lines, the model-conflict lines.
+  * the server readers: `held_by`, get's mover and then lines, the model-conflict lines.
   * the watchers: a wake the owner picks up keeps the stored `then`; "not yet" keeps the picker (mover) the wait had; a record of the wait written under the old name is still read.
   * the renderer's who line.
 
@@ -56,18 +56,19 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk; from stackshot.web import render
+from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT = []
-server._tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
+telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 (T / "state").mkdir(parents=True, exist_ok=True); (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
 CFG = server._cfg.CFG.setdefault("model", {}); CFG.update(guards=False, watchers=True, pause=False)
 ZONE_HOURS = 4
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOURS * 3600))
 BACK, HELP, FRONT = "zed-back", "zed-helper", "zed-front"
 OWN = model.owner_display()
-FB = server._fallback_mover("projects/zedwork")
+FB = telling.fallback_mover("projects/zedwork")
 assert FB, FB
 D = lambda **m: model.derive({"status": "open", "metadata": {"project": "projects/zedwork", **m}}, now0)
 W_ = lambda mod: model.words(mod)
@@ -138,11 +139,11 @@ item(3, needs=[BACK], hold=True, wake=day(5), wait_kind="time", mover=OWN, then=
 item(4, needs=[BACK], hold=True, wake=day(5), wait_kind="time", mover=HELP, post_wake_mover=BACK, subject="[zed] two pickers")
 item(5, needs=[BACK], mover=HELP, then=BACK, subject="[zed] an agent moves it, with a then")
 L = lambda n: server.stackshot_get(f"a{n}").split("\n")
-check("held_by: the picker holds a waiting item, as its mover when it is stored under that name", server._held_by(server._load("a1")) == (HELP, "mover"), server._held_by(server._load("a1")))
-check("held_by: …under the old name it reads as before, the word then", server._held_by(server._load("a2")) == (HELP, "then"), server._held_by(server._load("a2")))
-check("held_by: …when he picks it up, the then beside him holds it", server._held_by(server._load("a3")) == (HELP, "then"), server._held_by(server._load("a3")))
-check("held_by: …both stored and different, the old name is read first, as the hand-over writers read it", server._held_by(server._load("a4")) == (BACK, "then"), server._held_by(server._load("a4")))
-check("held_by: an alive item an agent moves is held by its mover", server._held_by(server._load("a5")) == (HELP, "mover"), server._held_by(server._load("a5")))
+check("held_by: the picker holds a waiting item, as its mover when it is stored under that name", telling.held_by(server._load("a1")) == (HELP, "mover"), telling.held_by(server._load("a1")))
+check("held_by: …under the old name it reads as before, the word then", telling.held_by(server._load("a2")) == (HELP, "then"), telling.held_by(server._load("a2")))
+check("held_by: …when he picks it up, the then beside him holds it", telling.held_by(server._load("a3")) == (HELP, "then"), telling.held_by(server._load("a3")))
+check("held_by: …both stored and different, the old name is read first, as the hand-over writers read it", telling.held_by(server._load("a4")) == (BACK, "then"), telling.held_by(server._load("a4")))
+check("held_by: an alive item an agent moves is held by its mover", telling.held_by(server._load("a5")) == (HELP, "mover"), telling.held_by(server._load("a5")))
 g1, g3, g4, g5 = L(1), L(3), L(4), L(5)
 check("get: a waiting item shows who picks it up as its mover, and no then line", "mover: zed-helper (picks it up when the wait ends)" in g1 and not any(x.startswith("then:") for x in g1), g1[:6])
 check("get: …with the owner as picker, the then is shown", f"mover: {OWN} (picks it up when the wait ends)" in g3 and "then: zed-helper" in g3, g3[:6])
@@ -150,7 +151,7 @@ check("get: …the model line says so, and no model-conflict line is printed for
 check("get: …two different pickers stored: one conflict line", sum("model conflict" in x for x in g4) == 1, g4)
 check("get: an alive item an agent moves shows no then line and no conflict", "mover: zed-helper" in g5 and not any(x.startswith("then:") for x in g5) and not any("model conflict" in x for x in g5), g5)
 check("roles: a waiting item's picker has the role then; with him as picker, the then beside him", server._then_label_raw({**rd(1), "gid": "a1"}) == HELP and server._then_label_raw({**rd(3), "gid": "a3"}) == HELP and server._then_label_raw({**rd(5), "gid": "a5"}) == "", None)
-check("then label: the notice's then names the picker of a waiting item", server._then_label({**rd(1), "gid": "a1"}) != "" and server._then_label({**rd(5), "gid": "a5"}) == "", None)
+check("then label: the notice's then names the picker of a waiting item", telling.then_label({**rd(1), "gid": "a1"}) != "" and telling.then_label({**rd(5), "gid": "a5"}) == "", None)
 
 # ================================================================ the renderer's who line
 strip = lambda s: re.sub(r"<[^>]+>", "", s)

@@ -70,12 +70,13 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld
 from stackshot.web import server; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.service import telling
 from stackshot.web import board_home as _web_board_home
 from stackshot.web import ui as ui_pkg
 from stackshot.web.ui import render as r2, search as s2, runners as n2
 from starlette.testclient import TestClient
 pub = [0]; server._publish = lambda: pub.__setitem__(0, pub[0] + 1)
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 NEWD = "- The thing works and is in use"

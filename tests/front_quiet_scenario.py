@@ -2,7 +2,7 @@
 and the agent touched the item in its current conversation. Fixture data, no live store, no network, no server socket, no tmux.
 
   1  the hand-off ladder never returns an item to a front agent: the builder first, else the fleet's builder is asked to recover the session, with the mover unchanged; a project without a builder keeps the item and says so
-  2  stackshot's own picks: _auto_mover / _no_front, the cold call is offered background agents only
+  2  stackshot's own picks: auto_mover / no_front, the cold call is offered background agents only
   3  what Oliver or a session set explicitly (a mover that is a front agent) is left as written
   4  presence: no stamp, a stale stamp, a stamp from the future, a stamp inside [presence] minutes, the config key and its default
   5  touched: the item's writer since the pane's startedAt (the file on disk, and the store's git revisions)
@@ -69,19 +69,20 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.router import routing; from stackshot.waits import held; from stackshot.waits import quiet as Q
+from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
-_real_tell = server._tell_woken
+_real_tell = telling.tell_woken
 def _tell(gid, owner, note, tag="wake", result=None):
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
-server._tell_woken = _tell
+telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
@@ -102,9 +103,9 @@ def set_presence(**kw):
 server._cfg.CFG["model"] = {}
 set_presence()
 def tell(gid, who, note, tag="owner", kind=""):
-    """One item notice for `who` through the real _tell_woken (the gate); `kind` is the sender's hint (_tell_kind) -> the pushes it made, the held lines added, the routing-log lines of the project."""
+    """One item notice for `who` through the real tell_woken (the gate); `kind` is the sender's hint (tell_kind) -> the pushes it made, the held lines added, the routing-log lines of the project."""
     p0, h0 = len(pushes()), held.count(U[who])
-    (server._tell_kind(kind, gid, U[who], note, tag=tag) if kind else server._tell_woken(gid, U[who], note, tag=tag)); drain()
+    (telling.tell_kind(kind, gid, U[who], note, tag=tag) if kind else telling.tell_woken(gid, U[who], note, tag=tag)); drain()
     return pushes()[p0:], held.count(U[who]) - h0
 def held_log(gid):
     return [n for n in routing.read("projects/alpha") + routing.read("projects/beta") if n.get("ruling") == "held" and str(n.get("reason", "")).startswith("held: front agent") and gid in str(n.get("label", ""))]
@@ -130,11 +131,11 @@ st = H.next_step(it_b, r_front, "home-peer", "gone", env2, gid="a1", cold_ok=Fal
 check("1 ladder: …with the old test (nobody is front) the return happens: the Env flag is what changes it", st.kind == "move" and st.to == "home-front", st)
 
 # ================================================================ 2. stackshot's own picks
-check("2 pick: a front agent becomes the project's builder", server._no_front("home-front", "projects/alpha") == "team-back", server._no_front("home-front", "projects/alpha"))
-check("2 pick: …a project without a builder: \"\" (the caller keeps the item where it is)", server._no_front("home-beta-front", "projects/beta") == "", server._no_front("home-beta-front", "projects/beta"))
-check("2 pick: …a session that is no front agent is as given", server._no_front("home-send", "projects/alpha") == "home-send" and server._no_front("", "projects/alpha") == "")
+check("2 pick: a front agent becomes the project's builder", telling.no_front("home-front", "projects/alpha") == "team-back", telling.no_front("home-front", "projects/alpha"))
+check("2 pick: …a project without a builder: \"\" (the caller keeps the item where it is)", telling.no_front("home-beta-front", "projects/beta") == "", telling.no_front("home-beta-front", "projects/beta"))
+check("2 pick: …a session that is no front agent is as given", telling.no_front("home-send", "projects/alpha") == "home-send" and telling.no_front("", "projects/alpha") == "")
 check("2 auto mover: front -> builder; builderless keeps its own (the item model's default); non-front as given",
-      server._auto_mover("home-front", "projects/alpha") == "team-back" and server._auto_mover("home-beta-front", "projects/beta") == "home-beta-front" and server._auto_mover("home-send", "projects/alpha") == "home-send")
+      telling.auto_mover("home-front", "projects/alpha") == "team-back" and telling.auto_mover("home-beta-front", "projects/beta") == "home-beta-front" and telling.auto_mover("home-send", "projects/alpha") == "home-send")
 names = [a["name"] for a in server._handoff_agents("projects/alpha")]
 check("2 cold call: the agents it may hand to are the background ones; the front agent is not offered", sorted(names) == ["home-docs", "team-back"], names)
 check("2 cold call: a project with no background agent offers none", server._handoff_agents("projects/beta") == [], server._handoff_agents("projects/beta"))
@@ -145,27 +146,27 @@ check("3 explicit: a front agent set as mover by a session stays the mover (no a
 
 # ================================================================ 4. presence
 cli_row("home-front")
-check("4 presence: no stamp file: not there", server._presence_here("home-front") is False)
+check("4 presence: no stamp file: not there", telling.presence_here("home-front") is False)
 stamp("home-front", 60)
-check("4 presence: a stamp 1 minute old: there", server._presence_here("home-front") is True)
+check("4 presence: a stamp 1 minute old: there", telling.presence_here("home-front") is True)
 stamp("home-front", 29 * 60)
-check("4 presence: 29 minutes: there (the default is 30)", server._presence_here("home-front") is True)
+check("4 presence: 29 minutes: there (the default is 30)", telling.presence_here("home-front") is True)
 stamp("home-front", 31 * 60)
-check("4 presence: 31 minutes (stale): not there", server._presence_here("home-front") is False)
+check("4 presence: 31 minutes (stale): not there", telling.presence_here("home-front") is False)
 set_presence(minutes=60)
-check("4 presence: [presence] minutes = 60 makes the same stamp fresh", server._presence_here("home-front") is True)
+check("4 presence: [presence] minutes = 60 makes the same stamp fresh", telling.presence_here("home-front") is True)
 set_presence(minutes=5); stamp("home-front", 10 * 60)
-check("4 presence: [presence] minutes = 5 makes a 10 minute stamp stale", server._presence_here("home-front") is False)
+check("4 presence: [presence] minutes = 5 makes a 10 minute stamp stale", telling.presence_here("home-front") is False)
 set_presence(); stamp("home-front", 31 * 60)
-check("4 presence: …a missing [presence] section is the default 30", server._presence_here("home-front") is False and server._presence_minutes() == 30.0)
+check("4 presence: …a missing [presence] section is the default 30", telling.presence_here("home-front") is False and telling.presence_minutes() == 30.0)
 set_presence(minutes="soon")
-check("4 presence: …an unreadable value is the default too", server._presence_minutes() == 30.0)
+check("4 presence: …an unreadable value is the default too", telling.presence_minutes() == 30.0)
 set_presence()
-stamp("home-front", text="not a number\n"); a = server._presence_here("home-front")
-stamp("home-front", text=""); b = server._presence_here("home-front")
-stamp("home-front", -600.0); c = server._presence_here("home-front")
+stamp("home-front", text="not a number\n"); a = telling.presence_here("home-front")
+stamp("home-front", text=""); b = telling.presence_here("home-front")
+stamp("home-front", -600.0); c = telling.presence_here("home-front")
 check("4 presence: an unreadable, an empty or a future stamp: not there", (a, b, c) == (False, False, False), (a, b, c))
-unstamp("home-front"); no_pane = server._presence_here("home-send")
+unstamp("home-front"); no_pane = telling.presence_here("home-send")
 check("4 presence: a session this box has no pane for: not there", no_pane is False)
 stamp("home-front", 60)
 example = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
@@ -173,14 +174,14 @@ check("4 presence: the example config documents [presence] minutes = 30", re.sea
 
 # ================================================================ 5. touched: the writer since the pane's start
 item(10, writer="home-front", updated=now0 - 600)
-check("5 touched: the item on disk was last written by the agent after its process started", server._touched("a10", "home-front", STARTED) is True)
+check("5 touched: the item on disk was last written by the agent after its process started", telling.touched("a10", "home-front", STARTED) is True)
 item(11, writer="home-send", updated=now0 - 600)
-check("5 touched: …written by another session: not touched", server._touched("a11", "home-front", STARTED) is False)
+check("5 touched: …written by another session: not touched", telling.touched("a11", "home-front", STARTED) is False)
 item(12, writer="home-front", updated=STARTED - 600)
-check("5 touched: …written by it before this conversation began (a relaunch, a resume, a recycle): not touched", server._touched("a12", "home-front", STARTED) is False)
+check("5 touched: …written by it before this conversation began (a relaunch, a resume, a recycle): not touched", telling.touched("a12", "home-front", STARTED) is False)
 item(13)
-check("5 touched: …a revision with no writer (a server write): not touched", server._touched("a13", "home-front", STARTED) is False)
-check("5 touched: …a notice naming several items: any one counts", server._touched("a11,a10", "home-front", STARTED) is True and server._touched("a11,a13", "home-front", STARTED) is False)
+check("5 touched: …a revision with no writer (a server write): not touched", telling.touched("a13", "home-front", STARTED) is False)
+check("5 touched: …a notice naming several items: any one counts", telling.touched("a11,a10", "home-front", STARTED) is True and telling.touched("a11,a13", "home-front", STARTED) is False)
 # the store's git revisions: the agent wrote it in this conversation, another session wrote it since
 def git(*a, when=None):
     env_ = {**os.environ, **({"GIT_AUTHOR_DATE": f"{int(when)} +0000", "GIT_COMMITTER_DATE": f"{int(when)} +0000"} if when else {})}
@@ -188,10 +189,10 @@ def git(*a, when=None):
 git("init", "-q"); git("config", "commit.gpgsign", "false")
 item(14, writer="home-front", updated=now0 - 1800); git("add", "a/14.json"); git("commit", "-q", "-m", "front writes", when=now0 - 1800)
 item(14, writer="home-send", updated=now0 - 300); git("add", "a/14.json"); git("commit", "-q", "-m", "send writes", when=now0 - 300)
-check("5 touched: …the file's last writer is another session, but the agent wrote an earlier revision in this conversation (store git): touched", server._touched("a14", "home-front", STARTED) is True, server._writers_since("a14", STARTED))
+check("5 touched: …the file's last writer is another session, but the agent wrote an earlier revision in this conversation (store git): touched", telling.touched("a14", "home-front", STARTED) is True, telling.writers_since("a14", STARTED))
 item(15, writer="home-front", updated=STARTED - 900); git("add", "a/15.json"); git("commit", "-q", "-m", "front writes before", when=STARTED - 900)
 item(15, writer="home-send", updated=now0 - 300); git("add", "a/15.json"); git("commit", "-q", "-m", "send writes", when=now0 - 300)
-check("5 touched: …its only revision is from before the pane started: not touched", server._touched("a15", "home-front", STARTED) is False, server._writers_since("a15", STARTED))
+check("5 touched: …its only revision is from before the pane started: not touched", telling.touched("a15", "home-front", STARTED) is False, telling.writers_since("a15", STARTED))
 
 # ================================================================ 6. what the agent hears
 stamp("home-front", 60); held.mark_client(U["home-front"], "home-front")
@@ -312,8 +313,8 @@ check("8 board: a close that is held (Oliver not there) is in the History all th
 p, h = tell("a44", "home-front", NOTE("a44") + " late news")
 check("8 board: …a progress notice about an item already closed adds no line", not quiet_log(44), quiet_log(44))
 # (f) a stuck notice: the stuck mark is the board record, written before the notice and kept whether it is told or held
-real_keeper = server._keeper
-server._keeper = lambda project, owner="": "home-beta-front"       # a project whose keeper is its -main agent (no builder, no steward)
+real_keeper = telling.project_keeper
+telling.project_keeper = lambda project, owner="": "home-beta-front"       # a project whose keeper is its -main agent (no builder, no steward)
 def stuck_case(i, writer):
     item(i, project="projects/beta", mover="home-peer", writer=writer, check=f"item_closed a{i + 75}")
     it = server._load(f"a{i}"); t0 = len(pushes_to("home-beta-front", f"a{i}"))
@@ -330,7 +331,7 @@ try:
     n = stuck_case(52, "home-send")
     check("8 board: …held because the agent did not touch the item: the mark stays", n == 0 and held_log("a52") and (mt(52).get("wait_failed") or {}).get("what"), (n, mt(52)))
 finally:
-    server._keeper = real_keeper
+    telling.project_keeper = real_keeper
 # (g) the pass that tells a front pane is never the only record: for every told case above there is a record on the item
 told_cases = {"fyi": quiet_log(40), "close": rd(43)["status"] == "completed", "stuck": mt(50).get("wait_failed")}
 check("8 board: every case that reached a front pane (fyi, close, stuck) left its board record", all(told_cases.values()), told_cases)
@@ -348,72 +349,72 @@ writes.record_writer(d72, "", None)
 check("9 written_at: …a server write (no writer) leaves the stamp and written_at as the last real writer left them", d72["written_by"] == "home-send" and d72["written_at"] == 123.0, d72)
 item(71, writer="home-front", updated=STARTED - 75); d = rd(71); d["written_at"] = STARTED - 75; (T / "store/a/71.json").write_text(json.dumps(d))
 it71 = server._load("a71"); it71["updated"] = time.time(); writes.save("a71", it71)      # a server save: `updated` moves, the writer stamp does not
-check("9 written_at: …so a server save after the pane started is no touch by the agent whose earlier write predates it", rd(71)["updated"] > STARTED and rd(71)["written_at"] == STARTED - 75 and server._touched("a71", "home-front", STARTED) is False, rd(71))
+check("9 written_at: …so a server save after the pane started is no touch by the agent whose earlier write predates it", rd(71)["updated"] > STARTED and rd(71)["written_at"] == STARTED - 75 and telling.touched("a71", "home-front", STARTED) is False, rd(71))
 # (b) every sender of a close or a stuck notice gives the gate its kind
 src = lambda fn: inspect.getsource(fn)
-for name in ("_tell_owner_close", "_tell_owner_check_closed", "_close_owner_notice", "_tell_close_mentions"):
-    check(f"9 wiring: {name} tells a close as kind close", '_tell_kind("close"' in src(getattr(server, name)) or '_tell_kind("close" if' in src(getattr(server, name)), name)
-check("9 wiring: _tell_wait_failed tells a stuck item as kind stuck", '_tell_kind("stuck"' in src(server._tell_wait_failed))
-# (c) tag coverage: a tag passed to _tell_woken / _tell_kind is in the map (owner and observer are mapped to progress, no exemption by name), so a new tag is a decision
+for name in ("tell_owner_close", "tell_owner_check_closed", "close_owner_notice", "tell_close_mentions"):
+    check(f"9 wiring: {name} tells a close as kind close", 'tell_kind("close"' in src(getattr(telling, name)) or 'tell_kind("close" if' in src(getattr(telling, name)), name)
+check("9 wiring: tell_wait_failed tells a stuck item as kind stuck", 'tell_kind("stuck"' in src(telling.tell_wait_failed))
+# (c) tag coverage: a tag passed to tell_woken / tell_kind is in the map (owner and observer are mapped to progress, no exemption by name), so a new tag is a decision
 sv = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
 tags = set(re.findall(r'tag="([a-z_]+)"', sv))
-missing = sorted(t for t in tags if t not in server._FRONT_TAG_KIND)
-check("9 tags: every tag the server passes to the gate is in _FRONT_TAG_KIND; a new tag names its kind", not missing, missing)
-check("9 tags: …owner and observer are mapped (to progress), not exempted by name", server._FRONT_TAG_KIND.get("owner") == "progress" and server._FRONT_TAG_KIND.get("observer") == "progress", server._FRONT_TAG_KIND)
+missing = sorted(t for t in tags if t not in telling.FRONT_TAG_KIND)
+check("9 tags: every tag the server passes to the gate is in FRONT_TAG_KIND; a new tag names its kind", not missing, missing)
+check("9 tags: …owner and observer are mapped (to progress), not exempted by name", telling.FRONT_TAG_KIND.get("owner") == "progress" and telling.FRONT_TAG_KIND.get("observer") == "progress", telling.FRONT_TAG_KIND)
 # (d) a hand-back "back with you alone" never goes to a front mover: to the project's builder, or to nobody
 def rec_for(oid, project, wid):
     return {"gid": "a73", "oid": U[oid], "olabel": oid, "project": project, "who": "home-send", "wid": U[wid], "subject": "[home] item 73", "line": "[stackshot] a73 is back with you alone (handed back by home-send): [home] item 73 \u2192 https://x/items/a73"}
 item(73, writer="home-send")
-p0 = len(pushes()); server._handback_send(rec_for("home-front", "projects/alpha", "home-send")); drain()
+p0 = len(pushes()); telling.handback_send(rec_for("home-front", "projects/alpha", "home-send")); drain()
 got = pushes()[p0:]
 check("9 hand-back: a front agent mover is not told: its builder is, in words that say so", not [x for x in got if x[0] == U["home-front"]] and len([x for x in got if x[0] in (U["team-back"], "team-back")]) == 1
       and "is back with home-front, a front agent, alone" in got[0][1] and "told to you, not to home-front" in got[0][1], got)
-p0 = len(pushes()); server._handback_send(rec_for("home-front", "projects/alpha", "team-back")); drain()
+p0 = len(pushes()); telling.handback_send(rec_for("home-front", "projects/alpha", "team-back")); drain()
 check("9 hand-back: …the builder that wrote the hand-back itself is told nothing, and the routing log says it was held", pushes()[p0:] == [] and held_log("a73"), (pushes()[p0:], held_log("a73")))
 item(74, project="projects/beta", writer="home-send")
-p0 = len(pushes()); server._handback_send({**rec_for("home-beta-front", "projects/beta", "home-send"), "gid": "a74"}); drain()
+p0 = len(pushes()); telling.handback_send({**rec_for("home-beta-front", "projects/beta", "home-send"), "gid": "a74"}); drain()
 check("9 hand-back: …a project with no builder tells nobody (the item stays with its mover, the board shows it)", pushes()[p0:] == [] and any("no builder" in str(n.get("reason", "")) for n in routing.read("projects/beta") if "a74" in str(n.get("label", ""))), (pushes()[p0:], routing.read("projects/beta")[-2:]))
 
 # ================================================================ 10. the review round
 import inspect as _insp
 from stackshot.core import config as _config
 # (1) the owner-change fallback: progress, so the gate applies
-check("10 fallback: _tell_owner_change's last resort (the notice could not be recorded for the router) is a progress notice, not exempt", '_tell_kind("progress", gid, kept or stew' in _insp.getsource(server._tell_owner_change) and '_tell_kind("exempt"' not in _insp.getsource(server._tell_owner_change))
-_saved = (server._stand_in_keeper, server._anc.pilot_root, server._routing.record)
+check("10 fallback: tell_owner_change's last resort (the notice could not be recorded for the router) is a progress notice, not exempt", 'tell_kind("progress", gid, kept or stew' in _insp.getsource(telling.tell_owner_change) and 'tell_kind("exempt"' not in _insp.getsource(telling.tell_owner_change))
+_saved = (telling.stand_in_keeper, server._anc.pilot_root, server._routing.record)
 try:
-    server._stand_in_keeper = lambda *a, **k: U["home-front"]; server._anc.pilot_root = lambda p, *a, **k: "projects/alpha"; server._routing.record = lambda *a, **k: ""      # the page's stand-in is the front agent home-front; the routing record fails (no nid)
-    unstamp("home-front"); item(75, mover="home-beta-front", writer="home-send", next="home-beta-front: do the thing"); it = server._load("a75"); server._OWNER_HEARD.clear()
+    telling.stand_in_keeper = lambda *a, **k: U["home-front"]; server._anc.pilot_root = lambda p, *a, **k: "projects/alpha"; server._routing.record = lambda *a, **k: ""      # the page's stand-in is the front agent home-front; the routing record fails (no nid)
+    unstamp("home-front"); item(75, mover="home-beta-front", writer="home-send", next="home-beta-front: do the thing"); it = server._load("a75"); telling.OWNER_HEARD.clear()
     p0, h0 = len(pushes()), held.count(U["home-front"])
-    reply = server._tell_owner_change("a75", it, {**it["metadata"], "next": "home-beta-front: the old thing"}, "home-send", False, False); drain()
-    check("10 fallback: …with Oliver away from the keeper's pane it is held (no push), not sent as an exempt notice", pushes()[p0:] == [] and held.count(U["home-front"]) == h0 and server._gate_result()[0] == "held", (reply, pushes()[p0:], server._gate_result()))      # the routing log line is not asserted here: record is patched out
+    reply = telling.tell_owner_change("a75", it, {**it["metadata"], "next": "home-beta-front: the old thing"}, "home-send", False, False); drain()
+    check("10 fallback: …with Oliver away from the keeper's pane it is held (no push), not sent as an exempt notice", pushes()[p0:] == [] and held.count(U["home-front"]) == h0 and telling.gate_result()[0] == "held", (reply, pushes()[p0:], telling.gate_result()))      # the routing log line is not asserted here: record is patched out
 finally:
-    (server._stand_in_keeper, server._anc.pilot_root, server._routing.record) = _saved
+    (telling.stand_in_keeper, server._anc.pilot_root, server._routing.record) = _saved
 
 # (2) a reply never says "told" for a notice the gate held
 unstamp("home-front"); item(16, mover="home-front", writer="home-front"); it = server._load("a16"); hl = []
-r = server._tell_owner_close("a16", it, "home-send", True, hl); drain()
+r = telling.tell_owner_close("a16", it, "home-send", True, hl); drain()
 check("10 reply: a close of a front agent mover's item, Oliver away: the reply says it was not told, and that the close is on the board", "not told that it was closed" in r and "told at once" not in r and "on the board" in r, r)
 stamp("home-front", 60); item(17, mover="home-front", writer="home-front"); it = server._load("a17"); hl = []; p0 = len(pushes())
-r = server._tell_owner_close("a17", it, "home-send", True, hl); drain()
+r = telling.tell_owner_close("a17", it, "home-send", True, hl); drain()
 check("10 reply: …present and touched: it is told at once, and the reply says so", "told at once that it was closed" in r and len(pushes()[p0:]) == 1, (r, pushes()[p0:]))
-_saved2 = (server._front_keeper, server._anc.pilot_root)
+_saved2 = (telling.front_keeper, server._anc.pilot_root)
 try:
     server._anc.pilot_root = lambda p, *a, **k: "projects/alpha"
-    server._front_keeper = lambda who, project="": (True, U["home-front"])      # the mover is a front agent, its project's keeper is home-front
+    telling.front_keeper = lambda who, project="": (True, U["home-front"])      # the mover is a front agent, its project's keeper is home-front
     for i_, is_present, close_, want, label in ((103, False, False, "was not told (", "held, Oliver away"), (104, True, False, "hears of it on his next turn", "fyi, present and touched"),
                                                 (105, True, True, "has been told", "close, present and touched"), (106, False, True, "was not told (", "close held, Oliver away")):
         stamp("home-front", 60) if is_present else unstamp("home-front")
-        item(i_, mover="home-beta-front", writer="home-front"); it = server._load(f"a{i_}"); server._OWNER_HEARD.clear()
-        r = server._tell_owner(f"a{i_}", it, "was completed (done)" if close_ else "changed", "home-send", close=close_); drain()
+        item(i_, mover="home-beta-front", writer="home-front"); it = server._load(f"a{i_}"); telling.OWNER_HEARD.clear()
+        r = telling.tell_owner(f"a{i_}", it, "was completed (done)" if close_ else "changed", "home-send", close=close_); drain()
         check(f"10 reply: a front keeper's line, {label}: the reply says what became of it", want in r and ("has been told" not in r if "not told" in want else True), r)
         held.take(U["home-front"])
 finally:
-    server._front_keeper, server._anc.pilot_root = _saved2
+    telling.front_keeper, server._anc.pilot_root = _saved2
 # a close that names another item: the mover (a front agent) is listed as told only when the gate let it through
 item(19, status="completed", outcome="done"); item(108, mover="home-front", writer="home-front", next="home-front: wait for a19")
-unstamp("home-front"); p0 = len(pushes()); got = server._tell_close_mentions("a19", "done", "", "home-send"); drain()
-check("10 reply: _tell_close_mentions does not list a front mover the gate held (Oliver away) as told", got == [] and pushes()[p0:] == [], (got, pushes()[p0:]))
-stamp("home-front", 60); p0 = len(pushes()); got = server._tell_close_mentions("a19", "done", "", "home-send"); drain()
+unstamp("home-front"); p0 = len(pushes()); got = telling.tell_close_mentions("a19", "done", "", "home-send"); drain()
+check("10 reply: tell_close_mentions does not list a front mover the gate held (Oliver away) as told", got == [] and pushes()[p0:] == [], (got, pushes()[p0:]))
+stamp("home-front", 60); p0 = len(pushes()); got = telling.tell_close_mentions("a19", "done", "", "home-send"); drain()
 check("10 reply: …present and touched: it is listed, and the close was pushed", got == [U["home-front"]] and len(pushes()[p0:]) == 1, (got, pushes()[p0:]))
 
 # (3) the hand-back line to the builder: held path, a close inside the hold drops it, an old record with no writer tells nobody
@@ -422,42 +423,42 @@ def hb_item(i, needs):
 server._cfg.CFG["board"] = {"handback_hold_seconds": 180}
 held.mark_client(U["team-back"], "team-back"); cli_row("team-back")
 it = hb_item(76, [U["home-front"]]); p0, h0 = len(pushes()), held.count(U["team-back"])
-r = server._tell_handback("a76", it, ["team-back", "home-front"], "home-send"); drain()
-rec = server._handback_read().get(f"a76|{U['home-front']}")
+r = telling.tell_handback("a76", it, ["team-back", "home-front"], "home-send"); drain()
+rec = telling.handback_read().get(f"a76|{U['home-front']}")
 check("10 hand-back: a front mover's hand-back is held for 180 s (nothing sent yet), and the reply says when and that a close first cancels it", rec and 175 <= rec["due"] - time.time() <= 181 and pushes()[p0:] == [] and held.count(U["team-back"]) == h0 and "in 3 minutes unless you close" in r and "a note for its next turn" in r, (r, rec))
-n = server._handback_drop("a76", "closed")
-check("10 hand-back: …a close inside the hold drops the line: nothing is left to send, and the tick sends nothing", n == 1 and not server._handback_read() and server._handback_tick(time.time() + 400) == [] and pushes()[p0:] == [] and held.count(U["team-back"]) == h0, (n, server._handback_read()))
-it = hb_item(32, [U["home-front"]]); r = server._tell_handback("a32", it, ["team-back", "home-front"], "home-send"); drain()
-sent = server._handback_tick(time.time() + 400); drain()
-check("10 hand-back: …no close: after the hold the tick passes the line to the builder through the held path (a held line for its next turn, no new turn)", sent == ["a32"] and pushes()[p0:] == [] and held.count(U["team-back"]) == h0 + 1 and not server._handback_read(), (sent, pushes()[p0:], held.count(U["team-back"]), h0))
+n = telling.handback_drop("a76", "closed")
+check("10 hand-back: …a close inside the hold drops the line: nothing is left to send, and the tick sends nothing", n == 1 and not telling.handback_read() and telling.handback_tick(time.time() + 400) == [] and pushes()[p0:] == [] and held.count(U["team-back"]) == h0, (n, telling.handback_read()))
+it = hb_item(32, [U["home-front"]]); r = telling.tell_handback("a32", it, ["team-back", "home-front"], "home-send"); drain()
+sent = telling.handback_tick(time.time() + 400); drain()
+check("10 hand-back: …no close: after the hold the tick passes the line to the builder through the held path (a held line for its next turn, no new turn)", sent == ["a32"] and pushes()[p0:] == [] and held.count(U["team-back"]) == h0 + 1 and not telling.handback_read(), (sent, pushes()[p0:], held.count(U["team-back"]), h0))
 txt = held.take(U["team-back"])
 check("10 hand-back: …the held line says it is back with the front agent, not the builder", "is back with home-front, a front agent, alone" in txt and "told to you, not to home-front" in txt, txt)
-server._handback_write({})
+telling.handback_write({})
 rec_old = {"gid": "a33", "oid": U["home-front"], "olabel": "home-front", "project": "projects/alpha", "who": "team-back", "subject": "[home] item 33", "line": "[stackshot] a33 is back with you alone (handed back by team-back): [home] item 33 → https://x/items/a33"}      # a record held before this release: no wid
 item(33, mover="home-front", writer="team-back"); p0, h0 = len(pushes()), held.count(U["team-back"])
-ok = server._handback_send(rec_old); drain()
+ok = telling.handback_send(rec_old); drain()
 check("10 hand-back: a held record with no writer on file (from before this release) tells nobody, so the builder is not told about its own write; the routing log says why", ok is False and pushes()[p0:] == [] and held.count(U["team-back"]) == h0 and any("not on record" in str(n.get("reason", "")) for n in routing.read("projects/alpha") if "a33" in str(n.get("label", ""))), (ok, routing.read("projects/alpha")[-2:]))
 check("10 hand-back: …the board carries it too (a History line on the item)", quiet_log(33) and "was not told" in quiet_log(33)[-1]["text"], quiet_log(33))
 it = hb_item(34, [U["home-front"]]); server._cfg.CFG["board"] = {"handback_hold_seconds": 0}; p0 = len(pushes())
-r = server._tell_handback("a34", it, ["team-back", "home-front"], "team-back"); drain()
+r = telling.tell_handback("a34", it, ["team-back", "home-front"], "team-back"); drain()
 check("10 hand-back: the builder wrote it itself: nobody is told and the reply says so (no 'is passed a note')", pushes()[p0:] == [] and "nobody is told" in r and "passed a note" not in r, r)
 it = hb_item(77, [U["home-front"]]); h0 = held.count(U["team-back"])
-r = server._tell_handback("a77", it, ["team-back", "home-front"], "home-send"); drain()
+r = telling.tell_handback("a77", it, ["team-back", "home-front"], "home-send"); drain()
 check("10 hand-back: with no hold ([board] handback_hold_seconds = 0) the builder's line is held at once for its next turn, and the reply says it is passed a note", held.count(U["team-back"]) == h0 + 1 and "passed a note" in r and "unless you close" not in r, (r, held.count(U["team-back"])))
 held.take(U["team-back"]); server._cfg.CFG["board"] = {}
 
 # (4) no start time is no touch
 item(35, writer="home-front")
-check("10 touched: no start time (0) is not a touch, though the agent wrote the item", server._touched("a35", "home-front", 0) is False and server._touched("a35", "home-front", -5.0) is False and server._touched("a35", "home-front", STARTED) is True)
+check("10 touched: no start time (0) is not a touch, though the agent wrote the item", telling.touched("a35", "home-front", 0) is False and telling.touched("a35", "home-front", -5.0) is False and telling.touched("a35", "home-front", STARTED) is True)
 stamp("home-front", 60); (T / f"cli/{os.getpid()}-home-front.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U["home-front"], "name": "home-front", "status": "idle"}))      # a registry row with no startedAt
-v = server._front_verdict("a35", "home-front", "progress")
+v = telling.front_verdict("a35", "home-front", "progress")
 check("10 touched: …a pane whose registry row has no startedAt: the verdict is hold (fails closed, like presence), with the reason", v[0] == "hold" and "start time" in v[1], v)
 cli_row("home-front")
 
 # (5) [presence] minutes that is no number above 0 is said at load, and still reads as 30
 for bad in (0, -5, 0.0, "soon", True, [1]):
     nn = _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"keeper_currency": "keepers"}, "presence": {"minutes": bad}}); set_presence(minutes=bad)
-    check(f"10 presence minutes: {bad!r} is named in config.notes() and still reads as 30", len(nn) == 1 and "[presence] minutes" in nn[0] and "30" in nn[0] and server._presence_minutes() == 30.0, (nn, server._presence_minutes()))
+    check(f"10 presence minutes: {bad!r} is named in config.notes() and still reads as 30", len(nn) == 1 and "[presence] minutes" in nn[0] and "30" in nn[0] and telling.presence_minutes() == 30.0, (nn, telling.presence_minutes()))
 for good in (1, 5, 30, 60, 0.5):
     check(f"10 presence minutes: {good!r} says nothing", _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"keeper_currency": "keepers"}, "presence": {"minutes": good}}) == [], good)
 check("10 presence minutes: no [presence] section says nothing", _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"keeper_currency": "keepers"}}) == [])

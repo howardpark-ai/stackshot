@@ -103,7 +103,8 @@ os.environ.update(ANTHROPIC_API_KEY="[masked secret]", ANTHROPIC_AUTH_TOKEN="tok
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import page_debt; from stackshot.projects import pages as _pg
 _ct_changed_since = _pg.ct_changed_since       # the real one: section 9 patches it
 from stackshot.web import server
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]; server._pdebts._page_ts = lambda key: 0.0
+from stackshot.service import telling
+server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]; server._pdebts._page_ts = lambda key: 0.0
 server._cfg.CFG.setdefault("pilot", {})["writer_owes_page"] = True
 ZONE = _cfg.tz()
 DAY = lambda h, m=0, d=16: dt.datetime(2026, 10, d, h, m, tzinfo=ZONE).timestamp()

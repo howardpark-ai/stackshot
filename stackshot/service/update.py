@@ -1118,7 +1118,7 @@ def update_unlocked(
         step = ""
     if step:
         owner_told = True
-        told, named = told.replace(_telling.quiet(item), ""), named.replace(_telling.quiet(item), "")   # the mover was told after all
+        told, named = told.replace(_telling.quiet_line(item), ""), named.replace(_telling.quiet_line(item), "")   # the mover was told after all
         told += step
     if h.session_id(_telling.holder(item)) in heard:
         owner_told = True
@@ -1127,7 +1127,7 @@ def update_unlocked(
     except Exception as e:  # noqa: BLE001  — the write is saved and published; a notice that fails is a stderr line, never a failed write
         print(f"owner: {gid} change not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         chg = ""
-    quiet_ = _telling.quiet(item)
+    quiet_ = _telling.quiet_line(item)
     if "the notice went to" in chg:       # a front agent mover's "not told" line above was true of the mover, not of the write: the notice went to the page
         told, named = told.replace(quiet_, ""), named.replace(quiet_, "")
     elif chg == quiet_ and quiet_ in told + named:

@@ -64,10 +64,11 @@ def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import model_guards as mg
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told: list[tuple[str, str, str, str]] = []           # every notice the server sends: (gid(s), recipient, note, tag)
-server._tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
+telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
 def close_told(since=0): return [t for t in told[since:] if t[3] == "close"]
 def upd(i, **kw): return server._update(f"board#{i}", sender="home-front", **kw)
 OWN = server._model.owner_display()
@@ -252,12 +253,12 @@ n5 = len(told)
 server._update("board#27", status="completed", outcome="done", reason="finished", description=NEW, sender="home-peer")
 check("2 close: …and another mover is told", [t[1] for t in close_told(n5)] == [OTHER], close_told(n5))
 # a failure of the notice never fails the close
-orig = server._tell_close_mentions
-server._tell_close_mentions = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+orig = telling.tell_close_mentions
+telling.tell_close_mentions = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
 item(64, subject="[home] closes though the notice fails")
 out3 = server.stackshot_complete("board#64", outcome="done", reason="finished", description=NEW, sender="home-front")
 check("2 close: a notice that fails never fails the close", rd(64)["status"] == "completed" and "updated board#64" in out3, out3[-200:])
-server._tell_close_mentions = orig
+telling.tell_close_mentions = orig
 
 # the notice stays small: 20 items name it, the message lists 8 and counts the rest, well inside MSG_MAX
 item(29, subject="[home] named by many")

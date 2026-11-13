@@ -245,7 +245,7 @@ import logging
 logging.disable(logging.INFO)
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
 def sitem(i, status="open", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": status, "updated": now - 10 * DAY,
                                                       "state_updated": now - 10 * DAY, "confirmed": now - 10 * DAY, "metadata": {"owner": U["home-owner"], "project": "projects/quill", "next": f"{BACK}: do it", **meta}}))

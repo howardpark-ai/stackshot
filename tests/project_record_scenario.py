@@ -88,6 +88,7 @@ for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
 from stackshot.web import server; from stackshot.model import ids as _model_ids
+from stackshot.service import telling
 from stackshot.projects import project_registry as _projects_registry
 server._publish = lambda: None
 check("start-time backfill: stamps every page with its existing id (none minted afresh), once", server._prj.stamp_registry() is True
@@ -338,7 +339,7 @@ check("anchors: an unknown id is refused as an unknown project is", "names no pa
 pushlog = T / "push.log"
 (T / "fakepush.py").write_text("import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\n"
                                f"open({str(pushlog)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 r7 = server._message(A_ID, "hello alpha, by id", "home-outsider")
 pushes = [json.loads(l) for l in pushlog.read_text().splitlines()] if pushlog.exists() else []
 from stackshot.router import routing

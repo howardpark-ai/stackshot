@@ -55,23 +55,24 @@ ORDER = EXPECT + TEN
 SERVER_FNS = {"wake_pass": "_minute_wake_pass", "anchor_pass": "_minute_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick",
               "balance_tick": "_balance_tick", "handoff_tick": "_handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick",
               "pilot_fallback_tick": "_pilot_fallback_tick", "stall_tick": "_stall_tick",
-              "handback_tick": "_handback_tick", "fleet_publish": "_minute_fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
+              "handback_tick": "handback_tick", "fleet_publish": "_minute_fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
+def own(fn): return telling if fn == "handback_tick" else server       # the owner of a tick function: the hand-back tick is the telling's, the rest are the server's
 clk = Clock()
 log: list[tuple[str, float]] = []
 saved = {}
 boom_in = {"name": None}
 def install():
     for label, fn in SERVER_FNS.items():
-        saved[fn] = getattr(server, fn)
+        saved[fn] = getattr(own(fn), fn)
         def f(label=label):
             log.append((label, clk()))
             if boom_in["name"] == label: raise RuntimeError(f"{label} broke")
             return []
-        setattr(server, fn, f)
+        setattr(own(fn), fn, f)
     saved["_next_wake"] = server._next_wake
     server._next_wake = lambda: None
 def restore():
-    for fn, orig in saved.items(): setattr(server, fn, orig)
+    for fn, orig in saved.items(): setattr(own(fn), fn, orig)
 
 def new_runner(pace=None):
     kw = {} if pace is None else {"pace": pace}

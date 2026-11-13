@@ -65,6 +65,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -73,8 +74,8 @@ from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
-real_tell = server._tell_woken
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
+real_tell = telling.tell_woken
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 def wk(offset):                                     # a wake as a session writes it, minute resolution, in the instance timezone
     return time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + offset + ZONE_OFFSET))
 
@@ -303,7 +304,7 @@ check("through the MCP layer: update takes clear_after (a boolean) and clears th
 # ---- 7. a failed delivery is recorded on the item and counted
 (T / "failpush.py").write_text("import sys\nmode = open(sys.argv[0] + '.mode').read().strip()\nprint('delivered → x' if mode == 'ok' else 'FAILED → ' + sys.argv[-2]); sys.exit(0 if mode == 'ok' else 1)\n")
 (T / "failpush.py.mode").write_text("fail")
-server._PUSH = [sys.executable, str(T / "failpush.py")]
+telling.PUSH = [sys.executable, str(T / "failpush.py")]
 item(90, su=now0 - DAY)
 real_tell("a90", "home-stew", "[stackshot] a test notice", tag="wait").join()
 u = rd(90)["metadata"].get("undelivered") or []
@@ -321,14 +322,14 @@ real_tell("a90,a91", "home-stew", "[stackshot] batch", tag="wait").join()
 check("a batched notice (several ids) is recorded on each item it was about", len(rd(91)["metadata"].get("undelivered") or []) == 1 and len(rd(90)["metadata"]["undelivered"]) == 5, (rd(90)["metadata"]["undelivered"], rd(91)["metadata"]))
 server._update("a90", next="home-owner: moved", sender="home-owner")
 check("a state change drops the record (the item has moved since)", "undelivered" not in rd(90)["metadata"], rd(90)["metadata"])
-server._PUSH = [sys.executable, str(T / "failpush.py")]
+telling.PUSH = [sys.executable, str(T / "failpush.py")]
 
 # ---- 7d. recording a failed delivery is written under the item lock
 for i in range(85, 400): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 import threading
 item(53, su=now0 - DAY)
 with writes.ITEM_LOCK:
-    th = threading.Thread(target=lambda: server._record_undelivered("a53", "home-stew", "wait", "no pane"))
+    th = threading.Thread(target=lambda: telling.record_undelivered("a53", "home-stew", "wait", "no pane"))
     th.start(); time.sleep(0.3)
     held_off = "undelivered" not in rd(53)["metadata"]
     m = rd(53); m["metadata"]["next"] = "changed under the lock holder"; (T / "store/a/53.json").write_text(json.dumps(m))

@@ -366,6 +366,7 @@ except TypeError as e: short = str(e)
 check("10 a hook table with a hook missing cannot be built", short is not None, short)
 for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
 from stackshot.web import server, page_debts
+from stackshot.service import telling
 tbl = update._hooks()
 check("10 no write gate is a hook of the update: the update calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(update.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))
 srv_tree = ast.parse(pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
@@ -489,9 +490,9 @@ try:
 finally: server._update = real_upd
 check("10 the complete reaches the server's `_update` by a late lookup (a suite that replaces it there still reaches the close)", via_update == "<patched update>", via_update)
 check("10 the flags the server keeps are read through the hooks it gives (the thread-local's own value, not a copy)", tbl.session_next() is False and tbl.reformat() is False and tbl.terminal_row() is False, (tbl.session_next(), tbl.reformat(), tbl.terminal_row()))
-server._SESSION_NEXT.on = True
+writes.SESSION_NEXT.on = True
 try: flag_on = tbl.session_next()
-finally: server._SESSION_NEXT.on = False
+finally: writes.SESSION_NEXT.on = False
 check("10 …and a flag set after the install is seen", flag_on is True, flag_on)
 check("10 the zone the confirm reply is told in is the server's own ZONE, looked up when the reply is made", tbl.zone() is server.ZONE, tbl.zone())
 real_zone = server.ZONE
@@ -500,9 +501,9 @@ try: seen_zone = tbl.zone()
 finally: server.ZONE = real_zone
 check("10 …so a later change of it reaches the update", seen_zone == datetime.timezone(datetime.timedelta(hours=-5)), seen_zone)
 tbl.close_was_set({"status": "open"})
-seen_close = getattr(server._CLOSE_WAS, "item", None)
+seen_close = getattr(telling.CLOSE_WAS, "item", None)
 tbl.close_was_set(None)
-check("10 the close flag is written through its hook and cleared by it", seen_close == {"status": "open"} and getattr(server._CLOSE_WAS, "item", 1) is None, seen_close)
+check("10 the close flag is written through its hook and cleared by it", seen_close == {"status": "open"} and getattr(telling.CLOSE_WAS, "item", 1) is None, seen_close)
 
 # ---------------------------------------------------------------- 11. the layers
 src = pathlib.Path(STACK, "stackshot/service/update.py").read_text(encoding="utf-8")

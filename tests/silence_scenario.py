@@ -297,6 +297,7 @@ check("2b the item the ladder let go of is found on the next round, and the four
 # ---- 3. the server's tick
 clear_state()
 from stackshot.web import server
+from stackshot.service import telling
 for k, v in pass_items.items(): (T / f"store/a/{k[1:]}.json").write_text(json.dumps(v))
 msgs = []
 real_msg = server._message
@@ -353,7 +354,7 @@ pe, be = (spy["pass"] or [None])[0], (spy["backstop"] or [None])[0]
 check("3 the tick builds the environment once and hands the very same one to the pass and to its backstop", len(spy["pass"]) == 1 and len(spy["backstop"]) == 1 and pe is not None and pe is be, spy)
 check("3 …it sends through the filing deliver, not the default one", pe is not None and pe.deliver is server._filing_deliver, pe)
 check("3 …and its `front` answers with the server's own judgement: a keeper that is not front for its own project is not front there",
-      pe is not None and pe.front is not None and all(bool(pe.front(w, p)) == bool(server._front_keeper(w, p)[0]) for w, p in (("home-agent", "home"), ("home-main", "home"), ("nobody", "")))
+      pe is not None and pe.front is not None and all(bool(pe.front(w, p)) == bool(telling.front_keeper(w, p)[0]) for w, p in (("home-agent", "home"), ("home-main", "home"), ("nobody", "")))
       , pe)
 msgs.clear(); clear_state()
 

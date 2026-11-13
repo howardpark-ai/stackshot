@@ -71,13 +71,14 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.audit import hourly as HR, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
 from stackshot.model import last_activity as LA, activity as ACT
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._PUSH = [sys.executable, "-c", "pass"]
+telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the pass is given its `now`, and the saves stamp from the server's own clock."""
     t = None
@@ -88,7 +89,7 @@ server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
-server._tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
+telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 panes = {}                                                         # mover -> the pane's registry status; "boom" = unreadable
 def fake_status(who, idx=None):
@@ -269,7 +270,7 @@ check("5 the skipped items are byte for byte as they were", rd(1) == d1)
 clean_pane(); panes["home-front"] = "idle"
 for p in (T / "store/a").glob("*.json"): p.unlink()
 put(1, mover="home-front", act=90)
-check("7 the test's front agent is one for the server's own answer", server._front_keeper("home-front", "projects/alpha")[0] is True and server._front_keeper("team-back", "projects/alpha")[0] is False)
+check("7 the test's front agent is one for the server's own answer", telling.front_keeper("home-front", "projects/alpha")[0] is True and telling.front_keeper("team-back", "projects/alpha")[0] is False)
 got7 = tick()
 check("7 a front agent's item due gets its line like any other (a pane that is not in a turn: idle)", got7 == ["a1"] and lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified", lines(1))
 check("7 …and nothing is sent to it or to anyone: no message, no notice, no ladder entry", sent == [] and server._stall_load().get("a1") is None, (sent, server._stall_load()))
@@ -724,7 +725,7 @@ check("18 a clock stepped back never moves the record to an earlier time: the st
 from stackshot.audit import hand_idle as HI
 def handed_on(now_):
     items_ = {f"a{i}": rd(i) for i in range(1, 12) if (T / f"store/a/{i}.json").exists()}
-    return [g for g, _r in HI.due_all(items_, now_, lambda who, project: server._front_keeper(who, project)[0])]
+    return [g for g, _r in HI.due_all(items_, now_, lambda who, project: telling.front_keeper(who, project)[0])]
 clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 for i in (1, 2, 3): put(i, act=90)
@@ -931,10 +932,10 @@ def two_items_busy():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     put(1, mover="team-back", act=90); put(2, mover="team-back", act=90)
 try:
-    sane = (server._front_keeper("team-back", "projects/alpha"), server._front_keeper("team-back", "projects/alpha", unread_front=True), server._front_keeper("home-front", "projects/alpha", unread_front=True)[0])
+    sane = (telling.front_keeper("team-back", "projects/alpha"), telling.front_keeper("team-back", "projects/alpha", unread_front=True), telling.front_keeper("home-front", "projects/alpha", unread_front=True)[0])
     two_items_busy(); tick(); k_read = [lines(i)[0]["kind"] for i in (1, 2)]
     reg_path.write_text("{torn", encoding="utf-8")
-    torn = (server._front_keeper("team-back", "projects/alpha"), server._front_keeper("team-back", "projects/alpha", unread_front=True))
+    torn = (telling.front_keeper("team-back", "projects/alpha"), telling.front_keeper("team-back", "projects/alpha", unread_front=True))
     env_t = server._silence_env()
     torn_env = (env_t.is_front("team-back", "projects/alpha"), env_t.is_front_or_unread("team-back", "projects/alpha"), AR.Env(roles={}).is_front_or_unread("team-back", "projects/alpha"))
     two_items_busy(); tick(); k_torn = [lines(i)[0]["kind"] for i in (1, 2)]; ids_torn = [HR.idle_marked(mt(i)) for i in (1, 2)]

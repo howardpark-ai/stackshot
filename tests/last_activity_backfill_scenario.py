@@ -71,11 +71,12 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.service import telling
 from stackshot.anchors import event_log as ELOG, merge_log as MLOG
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
-server._front_sender = lambda who: False
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
+telling.front_sender = lambda who: False
 CFGM = server._cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)
 sent = []

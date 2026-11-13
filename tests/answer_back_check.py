@@ -63,9 +63,10 @@ git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 import uvicorn; from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 fails, ran = [], []

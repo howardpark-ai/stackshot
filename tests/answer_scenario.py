@@ -171,6 +171,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -179,7 +180,7 @@ from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 def jobs(): return [json.loads(p.read_text()) for p in G.pending()]
 def refused(name, f, *want):
     try:
@@ -496,12 +497,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Send as my answer: recorded as his decision with his text, decision and the ask cleared",
           r.headers["location"] == "/items/a7?sent=decision" and "needs" not in m7 and "ask" not in m7
           and [(a["kind"], a.get("choice"), a["text"]) for a in m7["answers"]] == [("decision", None, "Neither: do the smaller fix first.")], m7)
-    _fs = server._front_keeper
-    server._front_keeper = lambda who, project="": (True, "home-keeper")
+    _fs = telling.front_keeper
+    telling.front_keeper = lambda who, project="": (True, "home-keeper")
     try:
         told.clear(); post("/items/a6/answer", {"token": tok("a6"), "choice": "Decline"})
     finally:
-        server._front_keeper = _fs
+        telling.front_keeper = _fs
     check("a front-agent owner's line carries [for Oliver] on its first line", [(t[1], t[2]) for t in told] == [(OWNER, f"[for Oliver] [stackshot] Oliver answered a6 on the board: Decline → {BOARD}/items/a6")], told)
 
     # ---- 6. an old id's address answers the item it names now
@@ -549,14 +550,14 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and any(t[1] == STEW and "It's yours now, with his note: “go on”" in t[2] for t in told), (m19, told))
     check("…the answer is pending for the then-mover, and its write settles it", sorted(server._answers_load().get("a19", {}).get("told", [])) == [STEW], server._answers_load().get("a19"))
     check("Done on a step item (mover Oliver, then home-keeper, no needs): needs names the then-mover, and the notice goes to it, not the page's keeper",
-          m19.get("needs") == [STEW] and server._notice_to(m19) == [(STEW, "as a session named in its needs")]
-          and server._model.derive(rd("a", 19)).mover == "home-keeper", (m19, server._notice_to(m19)))
+          m19.get("needs") == [STEW] and telling.notice_to(m19) == [(STEW, "as a session named in its needs")]
+          and server._model.derive(rd("a", 19)).mover == "home-keeper", (m19, telling.notice_to(m19)))
     server._update("a19", next="home-keeper: on it", sender="home-keeper")
     check("…so no pending answer is left for a19, and the keeper is not told after 30 min that its owner has not written", "a19" not in server._answers_load(), server._answers_load())
     # F3: no owner and no session in needs: the project's keeper takes it at once, as mover, and is told
-    told.clear(); _kp = server._keeper; server._keeper = lambda project, owner="": "home-keeper"
+    told.clear(); _kp = telling.project_keeper; telling.project_keeper = lambda project, owner="": "home-keeper"
     try: r_20 = post("/items/a20/answer", {"token": tok("a20"), "act": "done", "text": ""}); m20 = rd("a", 20)["metadata"]
-    finally: server._keeper = _kp
+    finally: telling.project_keeper = _kp
     check("Done on an ownerless step item with no session in needs: the project's keeper is the mover at once and is told (and only it)", m20.get("mover") == "home-keeper" and "state" not in m20
           and [(t[1], t[3]) for t in told] == [(STEW, "answer")] and "It's yours now" in told[0][2] and r_20.status_code == 303, (m20, told))
     # F4: a stale option named Done is no pick; a hold, its wake and decision in needs go with his step
@@ -579,9 +580,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Done on a step item with a leftover wait_kind: the wait fields are gone and the item derives as alive, the then-mover's", server._model.derive(rd("a", 24)).state == "alive" and server._model.derive(rd("a", 24)).mover == "home-agent"
           and not any(k in m24 for k in ("wait_kind", "post_wake_mover", "wake")), m24)
     # no owner, no session in needs and no keeper: refused, nothing written
-    told.clear(); before25 = rd("a", 25); _kp = server._keeper; server._keeper = lambda project, owner="": ""
+    told.clear(); before25 = rd("a", 25); _kp = telling.project_keeper; telling.project_keeper = lambda project, owner="": ""
     try: r_25 = post("/items/a25/answer", {"token": tok("a25"), "act": "done", "text": "x", "back": "/#task-a-25"}); r_25b = post("/items/a25/answer", {"token": tok("a25"), "act": "done", "text": "x"})
-    finally: server._keeper = _kp
+    finally: telling.project_keeper = _kp
     check("Done with nobody to take the item is refused with sent=nomover: nothing written, nobody told, the step still stands",
           r_25.headers["location"] == "/?sent=nomover&item=a25#task-a-25" and r_25b.headers["location"] == "/items/a25?sent=nomover" and rd("a", 25) == before25 and not told, (r_25.headers.get("location"), r_25b.headers.get("location")))
     check("the nomover notice says why and what to do instead", "Nobody is set to take this item next, so nothing was recorded. Write a comment instead." in ui_render.Board(str(STORE)).sent_html({"sent": "nomover"}))
@@ -661,9 +662,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r_s42 = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": ""}); r_s42c = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": "late note"})
     check("an old page's Send on an item with no step: an empty box is refused (nostep), a note is a comment", r_s42.headers["location"] == "/items/a42?sent=nostep" and r_s42c.headers["location"] == "/items/a42?sent=comment"
           and [a["kind"] for a in rd("a", 42)["metadata"]["answers"]] == ["comment"])
-    told.clear(); _kp43 = server._keeper; server._keeper = lambda project, owner="": ""
+    told.clear(); _kp43 = telling.project_keeper; telling.project_keeper = lambda project, owner="": ""
     try: r_s43 = post("/items/a43/answer", {"token": tok("a43"), "act": "send", "text": "a note"}); r_s43b = post("/items/a43/answer", {"token": tok("a43"), "act": "send", "text": ""})
-    finally: server._keeper = _kp43
+    finally: telling.project_keeper = _kp43
     check("an old page's Send with nobody to take the item (note or empty box): sent=nomover, nothing written, nobody told, the step stands",
           r_s43.headers["location"] == "/items/a43?sent=nomover" and r_s43b.headers["location"] == "/items/a43?sent=nomover" and "answers" not in rd("a", 43)["metadata"] and rd("a", 43)["metadata"]["state"] == "your-step" and not told, told)
     # the Send note button (act=note): a note on the step, never a Done; an empty box is refused; with no step left it is a comment

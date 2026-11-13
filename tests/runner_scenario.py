@@ -327,20 +327,21 @@ check("3 board: the clocks that read items are marked to stand still while the m
 
 TICK_FUNCS = {"wake_pass": "_wake_pass", "anchor_pass": "_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick", "balance_tick": "_balance_tick", "handoff_tick": "_handoff_tick",
               "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick", "pilot_fallback_tick": "_pilot_fallback_tick",
-              "stall_tick": "_stall_tick", "handback_tick": "_handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
+              "stall_tick": "_stall_tick", "handback_tick": "handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
+def own(fn): return telling if fn == "handback_tick" else server       # the owner of a tick function: the hand-back tick is the telling's, the rest are the server's
 counts: dict[str, int] = {}
 order_seen: list[str] = []
 saved = {}
 def spy_all():
     for label, fn in TICK_FUNCS.items():
-        saved[fn] = getattr(server, fn)
-        setattr(server, fn, (lambda label=label: (counts.__setitem__(label, counts.get(label, 0) + 1), order_seen.append(label), [])[-1]))
+        saved[fn] = getattr(own(fn), fn)
+        setattr(own(fn), fn, (lambda label=label: (counts.__setitem__(label, counts.get(label, 0) + 1), order_seen.append(label), [])[-1]))
     saved["_next_wake"] = server._next_wake
     server._next_wake = lambda: dt.datetime(2000, 1, 1, tzinfo=server._pages.zone_now().tzinfo)       # a wake is due, so the watchers' pass runs
     saved["_fleet_stamp"] = server._fleet_stamp
     server._fleet_stamp = lambda: 1.0
 def unspy_all():
-    for fn, f in saved.items(): setattr(server, fn, f)
+    for fn, f in saved.items(): setattr(own(fn), fn, f)
     saved.clear(); counts.clear(); order_seen.clear()
 
 spy_all()

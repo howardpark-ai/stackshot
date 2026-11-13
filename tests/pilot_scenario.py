@@ -110,10 +110,10 @@ def setwk_(m, w):
     if "until" in m: m["until"] = w
     else: m["wake"] = w
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends; the held case has its own check (front_quiet_scenario)
-_real_verdict = server._front_verdict
-server._front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
+_real_verdict = telling.front_verdict
+telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 from fastmcp.exceptions import ToolError
 def refused(fn):
@@ -130,7 +130,7 @@ n = next(x for x in routing.read("projects/alpha") if x["id"] == nid); check("a 
 # ---- 4. an agent's board write is the keeper's
 def wait_push(n):
     """The push log once it holds n lines and every push started so far has landed (5 s at most). The server sends each notice
-    from its own daemon thread (server._tell_woken, _pilot_relay), and one write can start two: a close by an agent sends the
+    from its own daemon thread (telling.tell_woken, pilot_relay), and one write can start two: a close by an agent sends the
     keeper the page-owed relay and the "was completed" line, a needs edit by the owner sends the relay and the "has decided"
     line. They land in either order, so a wait on the count alone returns between them under load and the late one shows up in
     the next step's slice. Those threads are the only ones beside the main thread in this process
@@ -1284,7 +1284,7 @@ for i in range(41, 47): (T / f"store/a/{i}.json").unlink()      # out of the fix
 
 # a delivery that fails is a stderr line, never an exception: the item is released all the same
 (T / "failpush.py").write_text("import sys\nprint('boom', file=sys.stderr); sys.exit(4)\n")
-_push = server._PUSH; server._PUSH = [sys.executable, str(T / "failpush.py")]
+_push = telling.PUSH; telling.PUSH = [sys.executable, str(T / "failpush.py")]
 it = rd("a7"); setwk_(it["metadata"], D(-1)); (T / "store/a/7.json").write_text(json.dumps(it))
 _err = io.StringIO()
 with contextlib.redirect_stderr(_err):
@@ -1293,7 +1293,7 @@ with contextlib.redirect_stderr(_err):
                             # that records its own failure: wait for both records, or one lands after the hold update below (which drops them) and stays
         if "notice to" in _err.getvalue() and {x.get("tag") for x in rd("a7")["metadata"].get("undelivered") or []} >= {"watch", "handoff"}: break
         time.sleep(0.1)
-server._PUSH = _push
+telling.PUSH = _push
 check("wake pass: a failed owner notice is logged to stderr, the item released all the same", woke == ["a7"] and not held_("a7")
       and f"watch: a7 notice to {B} not delivered: no result — boom" in _err.getvalue(), _err.getvalue())
 server._update("a7", hold=True, wake=D(5), sender="home-beta")
@@ -1866,7 +1866,7 @@ time.sleep(0.5); n0 = len(wait_push(0)); server._wake_pass(); time.sleep(0.5); p
 wk = [m for m in p[n0:] if f" {gl} woke" in m[1]]
 check("needs: the wake goes to the session named (its mover); the creator and the keeper hear nothing", len(wk) == 1 and wk[0][0] == ya and "keeper of record" not in wk[0][1]
       and not [m for m in p[n0:] if m[0] in (A, S)], p[n0:])
-check("keeper: the page's builder, else the project's own keeper", server._keeper("projects/alpha", A) == "work-osprey-bld" and server._keeper("projects/beta", B) == "home-beta-ops")
+check("keeper: the page's builder, else the project's own keeper", telling.project_keeper("projects/alpha", A) == "work-osprey-bld" and telling.project_keeper("projects/beta", B) == "home-beta-ops")
 # the board item D2: every notice about an item goes to its mover alone; the creator (here A, a front agent) is told nothing of a move to decision, a close or a reopen, and no reply names a keeper of record
 n0 = len(wait_push(0))
 res = server._update(gl, needs="decision", ask=ASKO, options=OPTS, sender="work-osprey-y"); time.sleep(0.7); p = wait_push(0)
@@ -1909,16 +1909,16 @@ check("decided: the create and update descriptions carry the sequencing rule", a
 n0 = len(wait_push(0)); server._update(gl, clear_needs=True, sender="work-osprey-main"); wait_push(n0 + 1)   # its board line lands before the next count, or that count is stale
 # the item rows 3-5: the page-owed notice never goes to a front agent keeper (the writer owes it, the keeper past the grace); an item a
 # front agent owns wakes its keeper when no linked agent takes the wake; a back agent, a keeper or a session with no role is unchanged
-_kr = server._pilot_charge("projects/alpha/kept", B)
+_kr = telling.pilot_charge("projects/alpha/kept", B)
 check("a back or no-role keeper of a sub-page is charged as before", _kr == (server._session_id("work-osprey-x"), "agent"), _kr)
-n0 = len(wait_push(0)); r_ = server._pilot_relay("projects/alpha/kept", "a4", rd("a4"), "changed (next)", B, "work-osprey-x", "agent"); pk = wait_push(n0 + 1)
+n0 = len(wait_push(0)); r_ = telling.pilot_relay("projects/alpha/kept", "a4", rd("a4"), "changed (next)", B, "work-osprey-x", "agent"); pk = wait_push(n0 + 1)
 check("…and told, unmarked", "charged to the agent work-osprey-x" in r_ and any(m[0] == "work-osprey-x" and m[1].startswith("[board] a4 ") for m in pk[n0:]), pk[n0:])
 _rg3 = json.loads((T / "store/projects.json").read_text()); _rg3["pages"]["projects/alpha"]["agents"]["work-osprey-x"] = "front"
 (T / "store/projects.json").write_text(json.dumps(_rg3))
-_kr = server._pilot_charge("projects/alpha/kept", B)
+_kr = telling.pilot_charge("projects/alpha/kept", B)
 check("a front agent keeper is passed by: the charge goes to the keeper's role, so the writer owes it and the keeper gets it past the grace", _kr == (S, "name"), _kr)
-n0 = len(wait_push(0)); r_ = server._pilot_relay("projects/alpha/kept", "a4", rd("a4"), "changed (next)", B, "work-osprey-x", "agent"); time.sleep(0.5)
-check("_pilot_relay sends a front agent no page-owed notice", r_ == "" and not [m for m in wait_push(0)[n0:] if m[0] == "work-osprey-x"], wait_push(0)[n0:])
+n0 = len(wait_push(0)); r_ = telling.pilot_relay("projects/alpha/kept", "a4", rd("a4"), "changed (next)", B, "work-osprey-x", "agent"); time.sleep(0.5)
+check("pilot_relay sends a front agent no page-owed notice", r_ == "" and not [m for m in wait_push(0)[n0:] if m[0] == "work-osprey-x"], wait_push(0)[n0:])
 _rg3["pages"]["projects/alpha"]["agents"].pop("work-osprey-x"); (T / "store/projects.json").write_text(json.dumps(_rg3))
 for i, ow in ((47, "home-beta-main"), (48, "nobody-roleless")):
     item(i, "projects/beta", ow); it = rd(f"a{i}"); it["metadata"].update(hold=True, wake=D(-1)); (T / f"store/a/{i}.json").write_text(json.dumps(it))
@@ -1949,9 +1949,9 @@ else: _rp.write_text(_rp0)
 _rg4 = json.loads((T / "store/projects.json").read_text()); _rg4["pages"]["projects/beta"]["agents"]["work-osprey"] = "front"
 (T / "store/projects.json").write_text(json.dumps(_rg4))
 check("session_roles ranks alpha's keeper front (for beta), yet it is not front for an alpha item", server._anc.session_roles().get("work-osprey", {}).get("role") == "front"
-      and server._front_keeper("work-osprey", "projects/alpha") == (False, "") and server._front_keeper("work-osprey", "projects/beta")[0], server._anc.session_roles().get("work-osprey"))
-check("…so it is still charged as alpha's keeper", server._pilot_charge("projects/alpha", B) == (S, "name"), server._pilot_charge("projects/alpha", B))
-n0 = len(wait_push(0)); r_ = server._pilot_relay("projects/alpha", "a1", rd("a1"), "changed (next)", B, S); pk = wait_push(n0 + 1)
+      and telling.front_keeper("work-osprey", "projects/alpha") == (False, "") and telling.front_keeper("work-osprey", "projects/beta")[0], server._anc.session_roles().get("work-osprey"))
+check("…so it is still charged as alpha's keeper", telling.pilot_charge("projects/alpha", B) == (S, "name"), telling.pilot_charge("projects/alpha", B))
+n0 = len(wait_push(0)); r_ = telling.pilot_relay("projects/alpha", "a1", rd("a1"), "changed (next)", B, S); pk = wait_push(n0 + 1)
 check("…and gets alpha's page-owed notice, unmarked", "charged to the keeper" in r_ and any(m[0] == S and m[1].startswith("[board] a1 ") for m in pk[n0:]), (r_, pk[n0:]))
 item(49, "projects/alpha", A); it = rd("a49"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/49.json").write_text(json.dumps(it))
 n0 = len(wait_push(0)); server._wake_pass(); pw = [m for m in wait_push(n0 + 1)[n0:] if " a49 " in m[1]]
@@ -2150,7 +2150,7 @@ check("confirm: a bad id is refused", refusal(lambda: server.stackshot_confirm("
 # with the GitHub mirror off (the default here), a tool write without a sender is still the owner's, as before
 _save_, saved = writes.save, []
 writes.save = lambda gid, item, writer="", note="", **kw: (saved.append((gid, writer)), _save_(gid, item, writer=writer, note=note, **kw))[1]
-res = mk(); g_ns = gid_of(res); own_ns = server._session_id(server._holder(rd(g_ns))); saved.clear()
+res = mk(); g_ns = gid_of(res); own_ns = server._session_id(telling.holder(rd(g_ns))); saved.clear()
 server.stackshot_confirm(g_ns); server.stackshot_update(g_ns, next="home-beta: take the owner's step")
 server.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- Goal: The test item's work is in place")
 writes.save = _save_
@@ -3768,23 +3768,23 @@ check("tell owner: a non-owner's change to next tells the owner once, in the not
       and "(its mover home-beta has been told)" in res, (t1, res[-200:]))
 n1 = len(wait_push(0)); res = server._update("a78", next="Rolled back at 09:40\nsecond line", sender=Xn); time.sleep(0.5)
 check("tell owner: a second change inside ten minutes sends no second notice, and the reply says nothing of it", len(told_owner(B, "a78")) == 1 and len(wait_push(0)) == n1 and "has been told" not in res, (told_owner(B, "a78"), res[-200:]))
-server._OWNER_HEARD[("a78", B)] -= 601; n1 = len(wait_push(0))
+telling.OWNER_HEARD[("a78", B)] -= 601; n1 = len(wait_push(0))
 res = server._update("a78", next="Rolled back at 09:50\nsecond line", sender=Xn); wait_push(n1 + 1); time.sleep(0.3)
 t3 = told_owner(B, "a78")
 check("tell owner: after the ten minutes the next change is told again, naming only the first line of next", len(t3) == 2 and "set next: Rolled back at 09:50 →" in t3[1][1] and "second line" not in t3[1][1], t3)
-server._OWNER_HEARD[("a78", B)] -= 601; n1 = len(wait_push(0))
+telling.OWNER_HEARD[("a78", B)] -= 601; n1 = len(wait_push(0))
 res = server._update("a78", priority="p1", sender=Xn); time.sleep(0.5)
 res2 = server._update("a78", description="- Goal: A thing\n- It lives here, now live\n- Done when it is on the board", sender=Xn); time.sleep(0.5)
 check("tell owner: a filing edit (priority) and a rewritten description send nothing", len(told_owner(B, "a78")) == 2 and len(wait_push(0)) == n1, (told_owner(B, "a78"), wait_push(0)[n1:]))
 n1 = len(wait_push(0)); res = server._update("a78", needs=["external"], sender=Xn); wait_push(n1 + 1); time.sleep(0.3)
 t5 = told_owner(B, "a78")
 check("tell owner: a change of needs is told (the window had expired), as 'changed needs: …'", len(t5) == 3 and "work-osprey-x changed needs: external →" in t5[2][1], t5)
-server._OWNER_HEARD[("a78", B)] -= 601; n1 = len(wait_push(0))
+telling.OWNER_HEARD[("a78", B)] -= 601; n1 = len(wait_push(0))
 res = server._update("a78", next="its own step", sender="home-beta"); time.sleep(0.5)
 check("tell owner: the owner's own update sends nothing", len(told_owner(B, "a78")) == 3 and len(wait_push(0)) == n1 and "has been told" not in res, (told_owner(B, "a78"), res[-200:]))
 n1 = len(wait_push(0)); res = server.stackshot_complete("a78", sender=Xn, outcome="done", reason="it is live", description="- Goal: The thing is live"); wait_push(n1 + 1); time.sleep(0.3)
 t6 = [m for m in wait_push(0) if m[0] == B and m[1].startswith("[stackshot] a78 was completed")]
-check("tell owner: a non-owner's close tells the owner at once even inside the window, though the item is closed, with the outcome and the reason (every page is a router page: the close notice of _tell_owner, once, and no second '[board]' line)",
+check("tell owner: a non-owner's close tells the owner at once even inside the window, though the item is closed, with the outcome and the reason (every page is a router page: the close notice of tell_owner, once, and no second '[board]' line)",
       len(told_owner(B, "a78")) == 3 and len(t6) == 1 and t6[0][1] == "[stackshot] a78 was completed (done: it is live) by work-osprey-x: [home] item 78 → https://stackshot.example.com/items/a78" and rd("a78")["status"] == "completed", (t6, told_owner(B, "a78")))
 n1 = len(wait_push(0)); res = server.stackshot_complete("a79", sender=Xn, outcome="dropped", reason="not needed", description="- Goal: Dropped"); wait_push(n1 + 1); time.sleep(0.3)
 t7 = [m for m in wait_push(0) if m[0] == B and m[1].startswith("[stackshot] a79 was completed")]
@@ -3821,7 +3821,7 @@ check("tell owner: the project's keeper changing a front agent owner's next send
 n1 = len(wait_push(0)); res = server.stackshot_complete("a16", sender="work-osprey", outcome="done", reason="the keeper closes", description="- Goal: Done"); time.sleep(0.7)
 check("tell owner: the keeper closing a front agent owner's item sends nothing to the page key, the quiet line standing", not to_page(n1) and "went to projects/alpha" not in res, (wait_push(0)[n1:], res[-200:]))
 n1 = len(wait_push(0)); res = server.stackshot_complete("a17", sender="plain-y", outcome="done", reason="plain closes", description="- Goal: Done"); time.sleep(0.7)
-check("tell owner: a close by another session on a front agent's item that is also its project's keeper (no builder) reaches the owner in its one marked line (_tell_owner_close) and sends nothing to the page key",
+check("tell owner: a close by another session on a front agent's item that is also its project's keeper (no builder) reaches the owner in its one marked line (tell_owner_close) and sends nothing to the page key",
       not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[for the owner] [stackshot] a17 [home] item 17: closed by plain-y: done (plain closes) → https://stackshot.example.com/items/a17"], (wait_push(0)[n1:], res[-200:]))
 # a front agent owner whose write no relay carried (outside the pilot): the page key, through its keeper or stand-in, once
 _NOTE = lambda g, n, what: f"[board] {g} [home] item {n[1:]}: plain-y {what} (mover work-osprey-main may need to act) → https://stackshot.example.com/items/{g}"

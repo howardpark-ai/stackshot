@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, asked at the last rung
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
@@ -72,7 +73,7 @@ HOLD = [False]                                           # True: the send is hel
 def _tw(gid, owner, note, tag="wake"):
     told.append((tag, gid, owner, note))
     return None if HOLD[0] else object()
-server._tell_woken = _tw
+telling.tell_woken = _tw
 clock = [now0]
 # ---- 2b. a raise stored before the last rung existed: his button answers still apply (the item page's form posts them through server._answer)
 # The server raises no question any more, so the stored raises of items 3, 6 and 7 are set up by hand, in the shape the old pass wrote them.

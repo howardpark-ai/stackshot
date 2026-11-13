@@ -42,10 +42,11 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import successor as S; from stackshot.model import model as M; from stackshot.waits import handoff as H; from stackshot.waits import stall as ST; from stackshot.audit import audit_run  # noqa: E402
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 TOLD = []
-server._tell_woken = lambda gid, owner, note, tag="wake": TOLD.append((gid, owner, note)) and None      # no push leaves this suite: what would be told is recorded
+telling.tell_woken = lambda gid, owner, note, tag="wake": TOLD.append((gid, owner, note)) and None      # no push leaves this suite: what would be told is recorded
 
 # ---------------------------------------------------------------- 1-3. pure: successor.py on a fake registry
 def page(front=(), back=(), **kw):
