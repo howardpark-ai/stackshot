@@ -735,6 +735,9 @@ with block("retry review"):
     check("spacing: 60 s after its try it is tried again: GET_TRIES tries in all, then given up on, and the other mail is delivered", pg.attempts["m2-0"] == gw.GET_TRIES and sv["retry"] == [] and heardids(got) == ["m1-0", "m3-0"], (pg.attempts, sv, got))
     got, pg, sv, _m = ticking(60, fail=1, polls=2)
     check("spacing: a get that fails once and is tried again after the spacing is delivered, once", pg.attempts["m2-0"] == 2 and heardids(got) == ids(3) and sv["retry"] == [], (pg.attempts, got, sv))
+    got, pg, sv, _m = ticking(1, saved={"hist": "3", "retry": [["m2-0", "t2-0", 1, 900.0]]}, polls=4)
+    check("spacing: a second failed try is timed too (a due entry that fails again waits for its next try: one try in 4 polls a second apart, then saved with tries 2 and its time)",
+          pg.attempts == {"m2-0": 1} and sv["retry"] == [["m2-0", "t2-0", 2, 1001.0]] and "m2-0" not in sv["sent"], (pg.attempts, sv))
     got, pg, sv, _m = ticking(1, saved={"hist": "3", "retry": [["m2-0", "t2-0", 1]]}, polls=1, fail=0)
     check("spacing: a saved entry with no time (saved by an earlier version) is tried at once", heardids(got) == ["m2-0"] and pg.attempts == {"m2-0": 1} and sv["retry"] == [], (got, pg.attempts, sv))
     got, pg, sv, _m = ticking(1, saved={"hist": "3", "retry": [["m2-0", "t2-0", 1, 9e9]]}, polls=1, fail=0)
