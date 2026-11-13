@@ -16632,7 +16632,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                     rec["applied"] = f"The server read the note as a later time and put the item on hold until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
                 else:
                     _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_owner_want(meta), writer=NAME, add=False)
-                    if said["done"]:        # "ran it": his step is ticked as an empty Send ticks it (every open line of his), the then-mover is told
+                    if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
                         _check_his_step(meta, rec["step"], now)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
             _state_end(meta, "your-step")
