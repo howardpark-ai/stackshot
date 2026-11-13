@@ -215,6 +215,10 @@ with TestClient(server.mcp.http_app()) as c:
     LOG.unlink()
     # the paces' last-run words: the clock for today, the date and clock for another day; a time no date can hold is a dash and the page still renders
     real_runner = runner_svc.status
+    # a last run 5 seconds ago reads as a clock only while the page renders on the same local day as that second: a local midnight inside those few seconds
+    # would print a date (the zone of this test is Asia/Dubai, UTC+4), so within 30 seconds of one the check waits it out (a minute at most)
+    _into_day = (time.time() + 4 * 3600) % 86400
+    if _into_day < 30 or _into_day > 86400 - 30: time.sleep(30 - _into_day if _into_day < 30 else 86400 - _into_day + 30)
     try:
         runner_svc.status = lambda: {"ticks": [{"name": "filing_tick", "last_run": time.time() - 5}]}
         today = text_of(c.get("/audits").text)

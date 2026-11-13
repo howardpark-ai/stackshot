@@ -58,7 +58,10 @@ for d in ("store/a", "fleet/a", "state", "brain/projects", "transcripts/-home-x"
 NAMES = ("home-front", "team-back", "home-peer", "home-peer2", "home-stew")
 U = {n: f"00000000-0000-4000-8000-0000000000{i:02d}" for i, n in enumerate(NAMES, 1)}
 now0 = float(int(time.time()))
-if min((now0 + 4 * 3600) % 86400, 86400 - (now0 + 4 * 3600) % 86400) < 4000: now0 -= 7200      # not near a local midnight: the times in the lines stay on one day
+# Not near a local midnight: a row's words carry a date once its time is on another day than the clock it is read at, and check 16 reads an event 80 minutes before
+# `now0` (and the row 2 minutes after it). The distance is 100 minutes either side and a hit moves the clock back four hours, which lands 140 to 240 minutes before a
+# midnight (a smaller step, or a distance of 4000 seconds, left a clock at 01:07 local with that event on the day before).
+if min((now0 + 4 * 3600) % 86400, 86400 - (now0 + 4 * 3600) % 86400) < 6000: now0 -= 4 * 3600
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": "2026-01-01T00:00:00Z"}}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a"} for n, u in U.items()}))
 ALPHA = {"home-front": "the front", "team-back": "builds, merges and releases the code"}
