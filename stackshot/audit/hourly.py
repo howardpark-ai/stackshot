@@ -18,7 +18,7 @@ An item is owed a line when all of these hold, using the silence pass's own scop
   - the item has had no real activity for an hour: `silence.clock`, the clock the silence pass reads (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
     a write by the mover). A bare confirm ("no change") and the audit's own and the ladder's lines do not move it, so a "no change" reply is no update;
   - no audit line was written on it lately: the next line is owed 45 minutes after the last (`FAST_GAP`) for the first 24 hours of silence, then one every 6 hours (`SLOW_EVERY`), so a week of silence is about
-    sixty lines, not 168. The ten-minute tick lands it on the first tick from then on, 50 minutes after the last line on an exact grid and at most about 56 minutes with a late round and jitter, so the row of a
+    about fifty lines (51), not 168. The ten-minute tick lands it on the first tick from then on, 50 minutes after the last line on an exact grid and at most about 51 minutes with a round up to a minute late (a round that skips its tick altogether pushes it to about an hour), so the row of a
     verified item, which reads red only strictly past an hour since its last activity (the line's time), never turns red between two lines. The newest line of `metadata.hourly_audit.log` is the clock, so a
     second pass in the same 45 minutes writes nothing and a clock that goes backwards only delays the next line.
 
@@ -59,7 +59,7 @@ from stackshot.waits import handoff as _ho
 from stackshot.waits import waiting as _wt
 
 EVERY = 3600.0           # an item on an agent is owed a line after this long without activity
-FAST_GAP = 45 * 60.0     # …and the next line this long after the last (not an hour): the ten-minute tick lands it 50 minutes on (at most about 56 with a late round and jitter), so the On agent row, which reads the line's time as the item's last activity and turns red strictly past an hour, never reads "idle over 1 h" between two lines
+FAST_GAP = 45 * 60.0     # …and the next line this long after the last (not an hour): the ten-minute tick lands it 50 minutes on (at most about 51 with a round up to a minute late), so the On agent row, which reads the line's time as the item's last activity and turns red strictly past an hour, never reads "idle over 1 h" between two lines
 LONG_AFTER = 24 * 3600.0     # …until it has been silent this long; then the lines thin out to one every SLOW_EVERY
 SLOW_EVERY = 6 * 3600.0
 SLACK = 300.0            # in the slow stretch (a line every SLOW_EVERY): the ten-minute tick reads its clock a few seconds later or earlier each time, so the line is owed once this much less than the gap has passed and 6 hours on the tick grid is never missed by seconds and pushed a whole tick on
