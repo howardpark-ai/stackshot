@@ -3950,30 +3950,40 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     return handed
 
 
+_BALANCE_LOGGED: dict[tuple[str, str], float] = {}   # (item, reason) -> when the balancer last logged it: a stay that lasts is one stderr line an hour, not one a minute
+BALANCE_LOG_EVERY = 3600.0
+
+
+def _balance_log_once(gid: str, key: str, now: float, line: str) -> None:
+    """One stderr line for an item the balancer leaves where it is, at most once per `BALANCE_LOG_EVERY` per item and reason (the pass looks at the item every minute for as long as it waits)."""
+    last = _BALANCE_LOGGED.get((gid, key))
+    if last is not None and 0 <= now - last < BALANCE_LOG_EVERY:
+        return
+    if len(_BALANCE_LOGGED) > 2000:
+        _BALANCE_LOGGED.clear()
+    _BALANCE_LOGGED[(gid, key)] = now
+    print(line, file=sys.stderr, flush=True)
+
+
 def _balance_builders(project: str) -> list[str]:
-    """The sessions the balancer may move an item of `project` to, best first: BUILDERS only, the project's own first (the mandate says build, maintain, merge or engineer: `_handoff_ranked` classes them 0 and 1), then those of any other
-    project whose mandate says `build`, as the idle hand-over's fallback reads them (`_hand_idle_builders`). A reviewer or any other background agent is no candidate."""
-    out = [n for c, _o, n in _handoff_ranked(project) if c < 2]
-    try:
-        out += [n for n in _balance_builder_names(True) if not any(_ho_same(n, o) for o in out)]
-    except Exception:  # noqa: BLE001  — with no view of the other projects the item's own project's builders are all there is
-        pass
-    return out
+    """The sessions the balancer may move an item of `project` to, best first: the project's own BUILDERS only (the mandate says build, maintain, merge or engineer: `_handoff_ranked` classes them 0 and 1). Never another
+    project's builder: a project's code is built, reviewed and released by its own builder, and a builder of an unrelated project has a different mandate. With no other builder here the item stays where it is. A reviewer or any
+    other background agent is no candidate."""
+    return [n for c, _o, n in _handoff_ranked(project) if c < 2]
 
 
-def _balance_builder_names(narrow: bool = False) -> list[str]:
+def _balance_builder_names() -> list[str]:
     """Every background agent, of any project, whose mandate says build, maintain, merge or engineer and that is not retired (raises when the registry cannot be read): who counts as a builder whose item may be balanced.
-    With `narrow` only the mandates that say `build` (the idle hand-over's fallback, as `_hand_idle_builders` reads other projects): who qualifies as a target from ANOTHER project."""
+    Only the item's mover is judged by this; where an item may go is `_balance_builders` (its own project's builders)."""
     reg = _anc.registry()
-    rx = re.compile(r"\bbuild", re.I) if narrow else _router._BUILDER
     return [n for n, r in _anc.session_roles(reg).items()
-            if r.get("role") == "back" and not r.get("retired") and rx.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
+            if r.get("role") == "back" and not r.get("retired") and _router._BUILDER.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
 
 
 def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                   dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
     """The balancer (audit/hand_idle.py, `[audit] balance`, on by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
-    untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder with the fewest open
+    untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder of its own project with the fewest open
     items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
     why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
     subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
@@ -4047,7 +4057,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                 continue
             to = _hi.pick_least(builders[project], load, status, dead, _ho_same, row["mover"], row["tried"], front, project)
             if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
-                print(f"balance: {gid} stays with {row['mover']}: no builder has few enough open items", file=sys.stderr, flush=True)      # silent otherwise: a spread that is as good as it can be is no news
+                _balance_log_once(gid, "load", now, f"balance: {gid} stays with {row['mover']}: no builder has few enough open items")      # silent otherwise: a spread that is as good as it can be is no news
             elif to:
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
                     cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
@@ -4068,7 +4078,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                 gone.append((row["mover"], gid, to))
                 print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
             elif not _hi.balance_others(builders[project], row["mover"], row["tried"], _ho_same, front, project):
-                print(f"balance: {gid} stays with {row['mover']}: no other builder to move it to", file=sys.stderr, flush=True)      # a mover that is the only builder has nobody to lose: no note, no message
+                _balance_log_once(gid, "alone", now, f"balance: {gid} stays with {row['mover']}: no other builder to move it to")      # a mover that is the only builder has nobody to lose: no note, no message
             else:
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
@@ -8577,7 +8587,7 @@ _WAIT_BASIS_PARAM = Annotated[str, Field(description=f"The reason a time wait's 
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what you expect at the anchor, which the post-wake mover checks, since any new notice there that reaches the server and passes the project's keeper wakes the item; a wait_event naming a merge, close, landing or completion is not woken by a routine push or CI line on the fleet's own PR (only by one that says merged or closed). A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for a machine the fleet does not know; an item waiting on a date for an offline machine says wait_event=\"box_online <machine>\" with that date as ask_by instead). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _CLEAR_RANK_PARAM = Annotated[bool, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
-_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give.")]
+_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give. On an update that sets no needs, the session needs names for the mover it replaces is swapped for the new one.")]
 _THEN_PARAM = Annotated[str, Field(description=f"Who takes the item after {OWNER}'s answer or step (it becomes the mover then): a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets then=<front agent> gets the project's builder instead, as for mover.")]
 _POST_WAKE_PARAM = Annotated[str, Field(description=f"Who moves the item when its wait ends (it becomes the mover then): {OWNER}, a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets post_wake_mover=<front agent> gets the project's builder instead, as for mover.")]
 _CONTACT_PARAM = Annotated[str, Field(description=f"The item's contact: the front agent (a user-facing agent) that {OWNER} talks to about it, by its name. Leave it out and the contact is the creator when that is a front agent, else the project's -main agent. "

@@ -42,7 +42,7 @@ from stackshot.model import steps as _steps
 from stackshot.model import work as _work
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _bare_id_ok, _norm_id
-from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
+from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import gates as _gates
 from stackshot.service import telling as _telling
@@ -886,6 +886,16 @@ def update_unlocked(
         nm_mv = _anc.names()
         if stored_mv and named_now and not _model.is_owner(stored_mv) and not any(x == stored_mv or _anc.canonical(x, nm_mv) == _anc.canonical(stored_mv, nm_mv) or h.render_same_ref(x, stored_mv) for x in named_now):
             meta.pop("mover", None)
+    needs_replaced: list[str] = []      # the session this write put into `needs` in place of the mover it came from: it hears the hand-off notice, not a second "now needs you"
+    if "mover" in model_set and not (needs_set or agent.strip() or clear_needs):      # a hand-over by `mover=` alone: the session `needs` names for the mover it came from is replaced by the new one, so a hand-back leaves no stale entry (a write that sets `needs` itself is taken as given)
+        prev_mv, new_mv = _model.norm_who(meta.get("mover")), _model.norm_who(model_set.get("mover"))
+        nm_now = _anc.names()
+        if prev_mv and new_mv and not _model.is_owner(prev_mv) and not _model.is_owner(new_mv) and _anc.canonical(prev_mv, nm_now) != _anc.canonical(new_mv, nm_now):
+            is_prev = lambda x: x.lower() not in _NEEDS_KINDS and _anc.canonical(x, nm_now) == _anc.canonical(prev_mv, nm_now)      # noqa: E731
+            held = _needs_of(meta)
+            if any(is_prev(x) for x in held):
+                _needs_store(meta, _canon_needs([new_mv if is_prev(x) else x for x in held], nm_now))
+                needs_replaced.append(new_mv)
     h.model_apply(meta, str(item.get("status") or ""), model_set, model_drop)   # goal, mover, then and the wait's fields: a filing edit
     if "wait_kind" in model_drop:
         h.wait_end_sent_back(meta, (_we.PR, _we.BOX, _we.URL, _we.STORED))      # clear_wait on a wait the server set from the line's words
@@ -1124,7 +1134,7 @@ def update_unlocked(
                 told += _telling.tell_handback(gid, item, was_needs, debtor, heard)   # a front agent mover hears an item handed back to it alone; nothing else wakes it
             except Exception as e:  # noqa: BLE001  — the write is saved and published; a notice that fails is a stderr line, never a failed write
                 print(f"owner: {gid} hand-back not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        new_s = [s for s in _needs_sessions(meta) if h.session_id(s) not in {h.session_id(x) for x in was_needs}]
+        new_s = [s for s in _needs_sessions(meta) if h.session_id(s) not in {h.session_id(x) for x in [*was_needs, *needs_replaced]}]
         told += _telling.tell_needed(gid, item, new_s, debtor, heard)
         if "decision" in [str(x).lower() for x in was_needs] and "decision" not in _needs_kinds(meta):   # he has decided; the sessions still named move now
             told += _telling.tell_decided(gid, item, [s for s in _needs_sessions(meta) if s not in new_s], debtor, heard)
