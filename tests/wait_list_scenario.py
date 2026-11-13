@@ -642,11 +642,13 @@ try:
     woke = server._wake_pass()
     first_calls = list(calls_); calls_.clear()
     woke2 = server._wake_pass()
+    next_231 = [at for g, *_, at in server._wakes() if g == "a231"]
 finally:
     server._watch_fire = orig_fire; server._WATCH_BACKOFF.pop("a231", None)
 check("legacy (watchers off): a list whose end raises is skipped and noted, and the lists after it (and before it) are still ended", "a231" not in woke and all(g in woke for g in ("a230", "a232", "a233"))
       and all(mt(i_).get("mover") == BACK and "wait_kind" not in mt(i_) for i_ in (230, 232, 233)) and mt(231).get("wait_kind") == "list", (woke, first_calls))
 check("legacy (watchers off): …the failed one is backed off (noted on the item, as the watchers' pass notes it) and is not tried again by the next pass", mt(231).get("watch", {}).get("failed_at", 0) > 0 and "a231" in first_calls and "a231" not in calls_ and woke2 == [], (first_calls, calls_, mt(231).get("watch")))
+check("legacy (watchers off): …and the scheduler looks at it again after the back-off, not at once (so the runner does not spin on it)", len(next_231) == 1 and next_231[0].timestamp() >= time.time() + wk.BACKOFF - 60, next_231)
 cfg(watchers=True)
 # `_watch_fire(legacy=True)` ends a list that is open and nothing else: a closed item that still stores a list is left alone
 lst(234, [Tm(day(9)), It("a206")], mode="all", until=day(-1)); d_ = rd(234); d_["status"] = "completed"; put(234, d_)
@@ -663,6 +665,16 @@ for _ in range(5): ok_ = WL.valid(big_) and bool(WL.lines(big_)) and bool(WL.sum
 spent_ = time.perf_counter() - t0_
 cl_ = WL.lines(big_)
 check("hostile: eight lines of a megabyte each are read in no time (5 rounds of valid, lines, summary and kind_of in under half a second; it took seconds when the whole text was normalised first)", ok_ and spent_ < 0.5, spent_)
+def spent(f, n=20):
+    t_ = time.perf_counter()
+    for _ in range(n): r_ = f()
+    return r_, time.perf_counter() - t_
+SLOW = {"a megabyte wait_kind": lambda: WL.stored({"wait_kind": HUGE}), "a megabyte wait_mode": lambda: WL.mode({"wait_mode": HUGE}), "a megabyte backstop day": lambda: WL.backstop({"until": HUGE}),
+        "a megabyte line kind": lambda: WL.problem({**GOOD, "waits": [{"kind": HUGE, "event": "x"}, It("a1")]}), "a megabyte date of a time line": lambda: WL.problem({**GOOD, "waits": [Tm(HUGE), It("a1")]}),
+        "a megabyte mode in the refusal": lambda: WL.problem({**GOOD, "wait_mode": HUGE})}
+for what_, f_ in SLOW.items():
+    r_, took_ = spent(f_)
+    check(f"hostile: {what_} is read in no time (20 reads in under a tenth of a second: it is clipped before it is normalised) and is no kind, mode or day", took_ < 0.1 and (r_ is False or r_ == "" or (isinstance(r_, str) and len(r_) <= WL.WORD_MAX + 100)), (took_, str(r_)[:60]))
 check("hostile: …what is kept is the first LINE_MAX characters of the normalised text, as before", cl_[0]["anchor"] == " ".join(HUGE.split())[:300] and cl_[0]["event"] == " ".join(HUGE.split())[:300] and cl_[0]["arrived_what"] == " ".join(HUGE.split())[:300]
       and cl_[3]["after"] == " ".join(HUGE.split())[:300], [len(cl_[0]["anchor"]), len(cl_[3]["after"])])
 for text_ in ("a" + " " * 5000 + "b" * 400, " " * 4000, "x" * 700, " ".join(["\t\n word"] * 400), "é" * 301 + "\u00a0" * 900 + "tail"):

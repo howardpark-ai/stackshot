@@ -2130,9 +2130,7 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 continue
             meta = it.get("metadata") or {}
             if _wl.valid(meta):                # a list with the watchers off: its backstop day has come, so it ends as the watchers would end it there (the same words, an open relay line asks the owner)
-                if _WATCH_BACKOFF.get(gid, 0.0) > epoch:      # a turn that failed is not looked at again before its back-off ends (as _watch_pass)
-                    continue
-                try:
+                try:                           # a list whose turn failed is not due again before its back-off ends (_wakes moves its moment, as it does for a watched wait)
                     cause = _watch.due(it, epoch)       # the backstop day, or (a list edited by hand so that every line has arrived) the kind of the line that completed the group
                     if cause and _watch_fire(gid, cause, epoch, wout, recheck=True, legacy=True):
                         woke.append(gid)
