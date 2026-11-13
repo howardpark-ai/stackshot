@@ -6,9 +6,9 @@ reads the item, runs the gates, applies the fields, the checklist, the wait, the
 write names the mover itself, QUIET when it only files or re-bullets), charges the page debt, tells the sessions the write concerns, publishes, and builds the reply. The order of those steps is part of what an update means and
 is kept as it was in server.py. `confirm_item` only sets the `confirmed` clock (a QUIET save).
 
-The gates and notices an update runs are still server.py's, because the create tool, the close and the telling run the same ones; they are reached through `Hooks`, which server.py fills once with `install` (this module cannot import
-server.py: the surface sits above it), and each of them leaves `Hooks` when its area moves under service/ (the gates, then the telling). A hook is looked up on server.py when an update runs, so a suite that replaces a gate there
-still reaches the update. The per-write flags of server.py that an update reads or sets stay thread-locals there until the areas that share them move, and are reached through `Hooks` too: `session_next` (the create or update tool's
+The write gates an update runs are service/gates.py's (`_gates.gate_*`, called in the order they ran in server.py). The field and decision checks and the notices an update runs are still server.py's, because the create tool, the close
+and the telling run the same ones; they are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves `Hooks` when its area moves
+under service/ (the telling next). A hook is looked up on server.py when an update runs, so a suite that replaces one there still reaches the update; a suite that replaces a gate patches it on service/gates.py. The per-write flags of server.py that an update reads or sets stay thread-locals there until the areas that share them move, and are reached through `Hooks` too: `session_next` (the create or update tool's
 own call), `reformat` (the re-bullet route), `terminal_row` (the terminal prompt's and the job-gap routes' row), `close_was_set` (the item as it stood before the close, for the telling) and `wake_event_set` (the minute loop).
 
 Imports point down only: this module imports the domain and core and the store's readers beside it (service/store.py), never web/."""
@@ -44,6 +44,7 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
+from stackshot.service import gates as _gates
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _shown_ids
 from stackshot.waits import handoff as _ho
@@ -68,7 +69,7 @@ _FILING_ONLY = frozenset({"project", "subject", "priority", "owner_name", "obser
 
 @dataclass(frozen=True)
 class Hooks:
-    """What an update still reaches in server.py (the gates and notices it shares with the create tool, the close and the telling, the per-write flags and a few constants), in the names they have there without the leading underscore;
+    """What an update still reaches in server.py (the field and decision checks and notices it shares with the create tool, the close and the telling, the per-write flags and a few constants), in the names they have there without the leading underscore;
     server.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads (or, `close_was_set`, writes) the thread-local."""
     actor_note: Callable[..., Any]
     after_open: Callable[..., Any]
@@ -93,45 +94,20 @@ class Hooks:
     fmt: Callable[..., Any]
     form_notes: Callable[..., Any]
     front_sender: Callable[..., Any]
-    gate_after: Callable[..., Any]
     gate_alternatives: Callable[..., Any]
     gate_ask: Callable[..., Any]
-    gate_ask_on_wait: Callable[..., Any]
     gate_bare_urls: Callable[..., Any]
-    gate_cap: Callable[..., Any]
-    gate_clock_renewal: Callable[..., Any]
-    gate_close: Callable[..., Any]
-    gate_contact: Callable[..., Any]
-    gate_decision_again: Callable[..., Any]
     gate_description: Callable[..., Any]
-    gate_draft: Callable[..., Any]
-    gate_draft_args: Callable[..., Any]
-    gate_front_step: Callable[..., Any]
     gate_goal: Callable[..., Any]
-    gate_handoff: Callable[..., Any]
     gate_metadata: Callable[..., Any]
     gate_mockup: Callable[..., Any]
-    gate_model: Callable[..., Any]
-    gate_model_args: Callable[..., Any]
-    gate_needs: Callable[..., Any]
-    gate_needs_session: Callable[..., Any]
     gate_next: Callable[..., Any]
-    gate_observers: Callable[..., Any]
     gate_one_decision: Callable[..., Any]
     gate_open_question: Callable[..., Any]
     gate_options: Callable[..., Any]
     gate_own_action: Callable[..., Any]
-    gate_owner_step: Callable[..., Any]
     gate_recommend_stance: Callable[..., Any]
-    gate_repark: Callable[..., Any]
-    gate_said: Callable[..., Any]
-    gate_sender_watch: Callable[..., Any]
-    gate_state_args: Callable[..., Any]
-    gate_step: Callable[..., Any]
-    gate_step_gap: Callable[..., Any]
     gate_subject: Callable[..., Any]
-    gate_wait_basis: Callable[..., Any]
-    gate_work_writer: Callable[..., Any]
     handoff_notify: Callable[..., Any]
     handoffs_in: Callable[..., Any]
     handover: Callable[..., Any]
@@ -406,7 +382,7 @@ def _fix_loose_reason(item: dict[str, Any], meta: dict[str, Any], next_after: An
         day = h.wake_at(wk).date().isoformat()
         words = " ".join(_steps.strip_opener(line).split())
         basis = f"{words[:240]} (wake {day})" if day not in words else words[:260]
-        h.gate_wait_basis({**item, "metadata": {**meta, "wake": wk}}, basis, wk, held=True)
+        _gates.gate_wait_basis({**item, "metadata": {**meta, "wake": wk}}, basis, wk, held=True)
         note = (f"\n(fixed: this hold had a wake and no wait reason, and your {where} says what it waits for (\"{_clip_line(words, 90)}\"), so that line is the wait_basis. "
                 "Send wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\" to use other words: the server then leaves the field alone)")
         return basis, (note, wk, f"wait reason: the hold had a wake and no reason; the {where} line \"{_clip_line(words, 80)}\" is its wait_basis. A wait_basis sent in a later write replaces it")
@@ -548,25 +524,25 @@ def update_unlocked(
     if contact.strip():                    # the contact: a front agent of the project the item will be filed under; refused before anything is written
         if (status or item.get("status")) == "completed":
             raise ToolError(f"Refused: {_gh.shown(gid)} is completed and keeps the contact it had as its record; reopen it (status=open with a next) before changing the contact")
-        contact_new = h.gate_contact(contact, proj_for, (str(meta.get("owner") or ""), str(meta.get("contact") or "")))
+        contact_new = _gates.gate_contact(contact, proj_for, (str(meta.get("owner") or ""), str(meta.get("contact") or "")))
     if needs_set:
-        _needs_store(meta, h.gate_needs(needs, proj_for, own_for, _model.norm_who(meta.get("then"))))
+        _needs_store(meta, _gates.gate_needs(needs, proj_for, own_for, _model.norm_who(meta.get("then"))))
     if agent.strip():                                  # the older form: that session becomes the one named in needs; "none" takes the sessions out
         kinds = _needs_kinds(meta)
         if agent.strip().lower() in h.ask_none:
             _needs_store(meta, _canon_needs(kinds))
         else:
-            _needs_store(meta, _canon_needs([*kinds, h.gate_needs_session(agent, proj_for, own_for, _model.norm_who(meta.get("then")))], _anc.names()))
-    state_st, state_given, step_withdrawn = h.gate_state_args({"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies})   # a bad value is refused before anything is written
-    draft_set, clear_draft = h.gate_draft_args(draft, clear_draft)   # a bad draft is refused before anything is written
-    model_set, model_drop = h.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
+            _needs_store(meta, _canon_needs([*kinds, _gates.gate_needs_session(agent, proj_for, own_for, _model.norm_who(meta.get("then")))], _anc.names()))
+    state_st, state_given, step_withdrawn = _gates.gate_state_args({"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies})   # a bad value is refused before anything is written
+    draft_set, clear_draft = _gates.gate_draft_args(draft, clear_draft)   # a bad draft is refused before anything is written
+    model_set, model_drop = _gates.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                               "ask_by": ask_by, "post_wake_mover": post_wake_mover},
                                              {"goal": clear_goal, "mover": clear_mover, "then": clear_then, "wait": clear_wait})   # a bad value is refused before anything is written
     clear_obs = observers is not None and (observers == [] or (isinstance(observers, str) and observers.strip().lower() in h.ask_none))
     if clear_obs:
         meta.pop("observers", None)
     elif observers is not None and (observers if isinstance(observers, list) else observers.strip()):
-        meta["observers"] = h.gate_observers(observers)
+        meta["observers"] = _gates.gate_observers(observers)
     # after=[] and after="none" clear it, and so does clear_after=true: a client (claude.ai's connector, found once) drops
     # an empty list before it reaches the server, so the flag is the form that survives it, like clear_needs and clear_due
     clear_after = clear_after or (after is not None and (after == [] or (isinstance(after, str) and after.strip().lower() in h.ask_none)))
@@ -579,7 +555,7 @@ def update_unlocked(
             meta.pop("wait_kind", None)                  # the wait on the item ended with its link; the date it carried stays as a wait on the date alone
         h.wait_end_sent_back(meta, (_we.ITEM,))          # a wait the server set from the line's words, sent back: the server leaves that line alone
     elif after_set:
-        meta["after"] = h.gate_after(after, gid)
+        meta["after"] = _gates.gate_after(after, gid)
     nm = _anc.names() if owner else {}                 # the fleet's names, read once for the owner and its name
     raw, owner = owner.strip(), (_anc.canonical(owner, nm) if owner else "")   # = _session_id: a pane name → its transcript id
     if owner and not owner_name and owner != _anc.canonical(str(meta.get("owner") or ""), nm):
@@ -612,7 +588,7 @@ def update_unlocked(
             raise ToolError(f"Refused: {e}")
         work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
         work_writer = _session_label(h.session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
-        h.gate_work_writer(gid, work_writer, h.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
+        _gates.gate_work_writer(gid, work_writer, h.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
         if work_spec.get("agent"):
             work_spec["agent"] = _session_label(h.session_id(work_spec["agent"]))
         work_who = work_spec.get("agent") or work_writer
@@ -638,7 +614,7 @@ def update_unlocked(
                 kept_own = _nl.text_of(meta, next_writer, keeper_was, h.ho_same)                     # the sender's lines stay: next replaces them as a whole
                 next = (next.rstrip() + "\n" if next.strip() else (kept_own.rstrip() + "\n" if kept_own.strip() else "")) + work_made
                 next_touch = True
-    said_l = h.gate_said(said, sender.strip() or own_for, debtor)   # the trailers: his words checked against the transcript; a failed check refuses the write here
+    said_l = _gates.gate_said(said, sender.strip() or own_for, debtor)   # the trailers: his words checked against the transcript; a failed check refuses the write here
     reformat = bool(description) and bool(h.reformat())   # a re-bullet changes the form of the description, never what it says: the state clock and the confirm stay, no page is owed
     rewording = _steps.reword_given(reword)      # reword={position: new text}: an open step's words change; an empty mapping ({} or "{}") is not given
     marks = h.marks_given(done) or h.marks_given(dropped) or rewording or work_tick >= 0      # a step checked, dropped or reworded is a change of next; so is the step a status done ticks
@@ -657,7 +633,7 @@ def update_unlocked(
         else:
             outcome_text, description = description.strip(), ""
     if closing:                   # a close says how the item ended
-        superseded_by = h.gate_close(gid, item, outcome, reason, superseded_by, outcome_text)
+        superseded_by = _gates.gate_close(gid, item, outcome, reason, superseded_by, outcome_text)
     elif outcome or reason or superseded_by or outcome_text:
         raise ToolError(f"Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool)"
                         + (f"; {gid} is already completed: to correct its close, reopen it (status=open with a next) and close it again"
@@ -779,12 +755,12 @@ def update_unlocked(
             raise ToolError("Refused: clear_wait_basis drops the basis; it does not go with a new one")
         if clear_wake or clear_hold:
             raise ToolError("Refused: wait_basis goes with a wake; this call drops the wake")
-        basis_ok = h.gate_wait_basis({**item, "status": status or item.get("status")}, basis_txt, h.parse_wake(wake) if wake else str(meta.get("wake") or ""), held=h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold)
+        basis_ok = _gates.gate_wait_basis({**item, "status": status or item.get("status")}, basis_txt, h.parse_wake(wake) if wake else str(meta.get("wake") or ""), held=h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold)
     if wake:                      # a moment to come
         stored = h.parse_wake(wake)
         if h.wake_at(stored) <= _pages.zone_now():      # for a date-only wake the same as "after today"
             raise ToolError(f"Refused: wake must be in the future ({_cfg.tz_abbr()})")
-        words = h.gate_cap(item, said_l, "wake", stored, h.wake_at(stored).timestamp(), basis_ok)    # The owner's one rule: no wait runs past the cap without his words
+        words = _gates.gate_cap(item, said_l, "wake", stored, h.wake_at(stored).timestamp(), basis_ok)    # The owner's one rule: no wait runs past the cap without his words
         meta["wake"] = stored
         if words and words != h.basis_words:   # recorded for this wake: the cap is lifted for it, with his sentence (the reason a time wait carries)
             _, q_text, q_src = h.owner_quote_on(item, said_l, _wt.cap_days())
@@ -938,7 +914,7 @@ def update_unlocked(
             meta["hold"] = True                                 # a wait on a time stands as a hold with its wake
         until_wait = True
         wait_note += fb_note
-    h.gate_ask_on_wait(gid, item, meta, was_needs, closing)           # a decision asked of the owner on an item that still waits: the clear_wait hint
+    _gates.gate_ask_on_wait(gid, item, meta, was_needs, closing)           # a decision asked of the owner on an item that still waits: the clear_wait hint
     watch_note = h.watch_on_write(gid, item_was, meta, model_set, model_drop, debtor, sender.strip())   # the wait's record, the arrival that was shown
     h.gate_metadata(meta, creating=False)
     lifted = "" if (ask or clear_ask or item.get("status") == "completed") else h.lift_ask(meta, refresh=bool(next), writer=next_writer, keeper=keeper_was)   # a client without the ask parameter
@@ -990,7 +966,7 @@ def update_unlocked(
         elif steps_new is not None:
             steps_note += h.step_proof_prune(meta, steps_new)
         if steps_new is not None:
-            h.gate_step_gap(meta, steps_new, steps_old)         # a step that delivers a pull request, followed by another session's step, needs its proof
+            _gates.gate_step_gap(meta, steps_new, steps_old)         # a step that delivers a pull request, followed by another session's step, needs its proof
     elif step_proof is not None:
         raise ToolError(f"Refused: {_gh.shown(gid)} is closed and its checklist is the record of what was done; reopen it (status=open with a next) before giving a step a proof")
     asked = lifted + ("" if item.get("status") == "completed" else h.ask_owed(meta))   # a needs=decision item left without an ask (a completion never needs one)
@@ -1031,15 +1007,15 @@ def update_unlocked(
         if not (filing_only or h.reformat()):
             mover_note += h.owner_then_default(item_was, meta, str(item.get("status") or ""), sender.strip(), "then" in model_set or "then" in model_drop, mover.strip())      # D9: then defaults to the agent doing the work, not to the front agent that relayed the ask
         wake_changed = bool(wake) and meta.get("wake") != (item_was.get("metadata") or {}).get("wake")      # re-sending the wake the item carries sets nothing
-        watch_ok = h.gate_sender_watch(gid, item_now, sender.strip(), handed=handed, watch_reason=watch_reason) if wake_changed else ""   # a front agent's own wake or until date on an alive item another session moves
+        watch_ok = _gates.gate_sender_watch(gid, item_now, sender.strip(), handed=handed, watch_reason=watch_reason) if wake_changed else ""   # a front agent's own wake or until date on an alive item another session moves
         if watch_ok:
             meta["watch_reason"] = watch_ok[:300]
         elif wake_changed or not meta.get("wake"):
             meta.pop("watch_reason", None)      # a reason belongs to the wake it was given for: another wake without one, or no wake, drops it
-        h.gate_decision_again(item_was, meta, was_needs, ask_was, gid)
+        _gates.gate_decision_again(item_was, meta, was_needs, ask_was, gid)
         if h.session_next() and h.model_guards_on() and not (reopening or h.reformat()) and item_was.get("status") == "open":
-            h.gate_clock_renewal(item_was, meta, gid, steps_old, steps_new, description, said_l, sender)      # no clock renewal without progress: a session's write only
-        h.gate_repark(item_was, item_now, meta, gid, said_l)
+            _gates.gate_clock_renewal(item_was, meta, gid, steps_old, steps_new, description, said_l, sender)      # no clock renewal without progress: a session's write only
+        _gates.gate_repark(item_was, item_now, meta, gid, said_l)
         _mark_next_stale(item_was, item_now, meta, debtor, naming_added, next_touch)
         touched_m = {k for k, v in (("next", next_touch), ("ask", ask), ("subject", subject), ("description", description.strip()),("needs", needs_set or clear_needs or agent.strip()), ("hold", hold or clear_hold),
                                     ("wake", wake or clear_wake), ("after", after_set or clear_after), ("state", state_st), ("wait_basis", basis_txt or clear_wait_basis)) if v}
@@ -1047,21 +1023,21 @@ def update_unlocked(
         if wake:
             touched_m.add("cap_ok")                             # a wake records his words for it
         full_judgement = reopening or (h.switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
-        desc_note = h.gate_model(item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
+        desc_note = _gates.gate_model(item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
                                next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "",
                                until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold))   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
         desc_note += mover_note
         h.anchor_wait_gate(item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first
             if not h.terminal_row():      # the terminal prompt's repair path (a script's own row, orphan case) is exempt as on create
-                h.gate_owner_step(item_now, gid, sender=next_writer, keeper=keeper_was)
+                _gates.gate_owner_step(item_now, gid, sender=next_writer, keeper=keeper_was)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft:      # the draft guard reads a write that sets the state, the step, the mover or the draft, never an unrelated one
-            h.gate_draft(item_now, gid)
+            _gates.gate_draft(item_now, gid)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft or description.strip():      # the step guards read the same writes, and a new description
-            h.gate_step(item_now, gid, item_was.get("description") if description.strip() and _sc.owner_facing(item_was) else None, step_set=bool(state_given.get("step")))      # only an item already his to move (mover the owner, your-step, your-call) keeps the old lines out of the judgement
-        h.gate_handoff(gid, item_was, item_now, debtor)     # step 2: a hand-off to a session with no pane is refused, the background agent named
+            _gates.gate_step(item_now, gid, item_was.get("description") if description.strip() and _sc.owner_facing(item_was) else None, step_set=bool(state_given.get("step")))      # only an item already his to move (mover the owner, your-step, your-call) keeps the old lines out of the judgement
+        _gates.gate_handoff(gid, item_was, item_now, debtor)     # step 2: a hand-off to a session with no pane is refused, the background agent named
         if h.session_next() and h.model_guards_on() and steps_new is not None and not (filing_only or h.reformat() or sender.strip().startswith("a script on ")):
-            h.gate_front_step(gid, item_now, steps_before, steps_new, sender.strip() or debtor)     # a new or reworded step that opens with a front agent on an item another session moves: nothing could wake it for the step
+            _gates.gate_front_step(gid, item_now, steps_before, steps_new, sender.strip() or debtor)     # a new or reworded step that opens with a front agent on an item another session moves: nothing could wake it for the step
     kept_legacy_wake = False
     backstop = False                       # a bare date beside a hand-off, kept as the wake it was (below)
     if item.get("status") == "open" and (was_until or wake or hold or ask_by.strip() or until_wait):

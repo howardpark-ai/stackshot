@@ -73,6 +73,7 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr; from stackshot.anchors import anchors as A; from stackshot.fleet import inbox; from stackshot.fleet import push
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
+from stackshot.service import gates
 from stackshot.web import server
 from stackshot.service import writes
 from stackshot.projects import project_registry as _projects_registry
@@ -423,9 +424,9 @@ put_registry()
 root = T / "transcripts" / "proj"; root.mkdir(parents=True)
 MSG = "11111111-1111-4111-8111-111111111111"
 (root / f"{Tr['main_b']}.jsonl").write_text(json.dumps({"type": "user", "uuid": MSG, "origin": {"kind": "human"}, "message": {"role": "user", "content": "yes please do the thing"}, "timestamp": "2026-10-22T07:00:00Z"}) + "\n", encoding="utf-8")
-server._said_roots = lambda: (str(T / "transcripts"),)
+gates._said_roots = lambda: (str(T / "transcripts"),)
 def said(quote, sess):
-    try: return server._gate_said([{"tag": "Acked-by", "quote": quote, "msg": MSG}], sess, "tester"), ""
+    try: return gates.gate_said([{"tag": "Acked-by", "quote": quote, "msg": MSG}], sess, "tester"), ""
     except Exception as e: return None, str(e)
 for how, sess in (("the transcript id", Tr["main_b"]), ("the pane name", "home-sparrow-main"), ("the sala id", S["main"]), ("an old transcript id of the session", Tr["main_a"])):
     bad_, why = said("NOT IN THE MESSAGE", sess)

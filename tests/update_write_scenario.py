@@ -1,6 +1,6 @@
 """Scenario test for the update, complete and confirm writes (stackshot/service/update.py: `update_item`, `update_unlocked`, `complete_item`, `confirm_item` with their `Hooks`) — a scratch store, fake hooks, no server, no port, no network.
 
-The update runs the gates and notices that are still server.py's through `Hooks`, saves through the write path (`service/writes.py`) and tells the sessions the write concerns, in an order that is part of what an
+The update runs the write gates (service/gates.py: this suite replaces each there with a recorder) and the checks and notices that are still server.py's through `Hooks`, saves through the write path (`service/writes.py`) and tells the sessions the write concerns, in an order that is part of what an
 update means. This suite installs hooks that record each call and return what a gate that lets the write through returns, wraps the save in a recorder (which calls the real one) and holds:
 
   1  order          the whole sequence of a plain update, from the pre-lock read of an event wait to the publish; the save comes before the publish, the gates before the save
@@ -37,7 +37,7 @@ def check(name, cond, got=None):
 
 from fastmcp.exceptions import ToolError
 from stackshot.core import store as cstore
-from stackshot.service import update, writes
+from stackshot.service import gates, update, writes
 cstore.STORE = T / "store"
 
 LOG = []                                                     # every hook and the save, in the order they were called: (name, args, kwargs)
@@ -76,6 +76,9 @@ def flag(name):
         LOG.append((name, (), {}))
         return FLAGS[name]
     return run
+# the write gates are service/gates.py's, not hooks: the update calls them on that module, so this suite replaces each there (the recorder above) and puts the real ones back before it imports the server
+REAL_GATES = {n: getattr(gates, n) for n in dir(gates) if n.startswith("gate_") and callable(getattr(gates, n))}
+for _n in REAL_GATES: setattr(gates, _n, hook(_n))
 def make_hooks(**over):
     kw = {}
     for f in dataclasses.fields(update.Hooks):
@@ -361,8 +364,10 @@ check("10 …a confirm too", bare2 is not None and "no hooks installed" in bare2
 try: update.Hooks(**{f.name: None for f in dataclasses.fields(update.Hooks)[:-1]}); short = None
 except TypeError as e: short = str(e)
 check("10 a hook table with a hook missing cannot be built", short is not None, short)
+for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
 from stackshot.web import server, page_debts
 tbl = update._hooks()
+check("10 no write gate is a hook of the update: the update calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(update.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))
 srv_tree = ast.parse(pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
 LATE = {}                                                    # the names the server's two tables look up late: table -> [name, ...]
 for node in ast.walk(srv_tree):
@@ -414,8 +419,12 @@ def _refuse(item, basis, wake, held=False): raise ToolError("Refused: the basis 
 def loose(base, new, next_after="", description="", wake_in="", gate=_pass):
     """The item as it stood (`base`) and the metadata the write leaves (`base` + `new`); the basis gate (its own 365-day reach moves with the clock) is a stub that passes or refuses."""
     GATED.clear()
-    with patched(_gate_wait_basis=gate):
+    real_basis = gates.gate_wait_basis
+    gates.gate_wait_basis = gate                           # a gate is replaced on its owner, service/gates.py
+    try:
         got = H._fix_loose_reason({"status": "open", "metadata": dict(base)}, {**base, **new}, next_after, description, wake_in)
+    finally:
+        gates.gate_wait_basis = real_basis
     return got, list(GATED)
 
 CASES = [

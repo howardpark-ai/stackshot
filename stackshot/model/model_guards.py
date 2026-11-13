@@ -1,7 +1,7 @@
 """model_guards.py — the write guards of the item model (the design: docs/design, sections 1, 3, 4 and 6, layer 1).
 
 model.py gave an item its model fields and a pure reading of them. This module judges a write by that reading: `check` says what a create or update would leave
-wrong on an item, and the server refuses the write with those sentences (server.py `_gate_model`); `report` runs the same judgement over the items already in the store and
+wrong on an item, and the server refuses the write with those sentences (service/gates.py `gate_model`); `report` runs the same judgement over the items already in the store and
 only counts, so the owner and the audit can see what the guards would refuse on today's board before the migration moves it. Pure of the server (it reads model.py, states.py and
 waiting.py, and the session registry, the fleet heartbeats and the project registry through the same modules the server uses), so the server, tools/model_guard_report.py and
 the tests share one copy.

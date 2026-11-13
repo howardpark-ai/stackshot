@@ -132,7 +132,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 (cp4 / "store/github.json").write_text(json.dumps({"repo": "o/r", "issues": {f"g{n}": n for n in (2, 3, 4, 5, 6)}, "aliases": {}}))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import gates; from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
 from stackshot.web.ui import render as ui_render
 from stackshot.tools import migrate_model as MM
 OLIVER = model.owner_display()
@@ -376,7 +376,7 @@ check("wake: …and an `end` with no residue sends none", (SENT.clear(), call("b
 check("unrecorded: the pass wrote it on the closed items the record says nothing about", mt(24).get("outcome") == "unrecorded" and mt(27).get("outcome") == "unrecorded" and rd(24)["status"] == "completed", (mt(24), mt(27)))
 item(90, needs=[BACK], subject="[home] a new close tries unrecorded")
 refused("unrecorded: the guard of a new close refuses it (update with status=completed)", lambda: server._update("g90", sender=BACK, status="completed", outcome="unrecorded", reason="r", description="It ended. It ended here. Done when done."), "only the migration writes it")
-refused("unrecorded: …and the gate itself", lambda: server._gate_close("g90", rd(90), "unrecorded", "r", "", "new text"), "unrecorded")
+refused("unrecorded: …and the gate itself", lambda: gates.gate_close("g90", rd(90), "unrecorded", "r", "", "new text"), "unrecorded")
 check("unrecorded: …the item is still open", rd(90)["status"] == "open", None)
 check("unrecorded: GitHub's close for it is plain `completed` (a change to nothing); dropped and superseded stay `not_planned`",
       server._gh.state_of(rd(24)) == ("closed", "completed") and server._gh.state_of(rd(21)) == ("closed", "not_planned") and server._gh.state_of(rd(22)) == ("closed", "not_planned"), None)
@@ -521,7 +521,7 @@ _chk = server._mg.check
 server._mg.check = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the guard broke"))
 try:
     r_ = call("apply", writes=[{"item": "board#85", "set": {"mover": BACK}, "expect": E(85), "expect_sig": S(85)}])["results"][0]
-    quiet = server._gate_model({"status": "open", "metadata": {"mover": BACK}}, {"mover"}, "g85")
+    quiet = gates.gate_model({"status": "open", "metadata": {"mover": BACK}}, {"mover"}, "g85")
 finally:
     server._mg.check = _chk
 check("strict: a guard that fails to judge refuses the write in the migration (it writes as before everywhere else)", r_["action"] == "refused" and "could not judge" in r_["why"] and "mover" not in mt(85) and quiet == "", r_)

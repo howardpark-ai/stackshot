@@ -318,7 +318,7 @@ def _gate_metadata(meta: dict[str, Any], *, creating: bool) -> None:
             raise ToolError(f"Refused: metadata.{key} is required")
         if val in (None, "", []):
             continue
-        if key == "needs":                   # a list of the enum's kinds and session names, gated by _gate_needs
+        if key == "needs":                   # a list of the enum's kinds and session names, gated by gates.gate_needs
             if not isinstance(val, list):
                 raise ToolError("Refused: metadata.needs is a list")
             continue
