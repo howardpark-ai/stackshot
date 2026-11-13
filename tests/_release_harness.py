@@ -7,10 +7,11 @@ small readers the sections of both suites use. A suite imports it whole:
 
     from _release_harness import *
 
-and ends with `finish()`. The lists `fails`, `ran`, `dirs` and `POLLS` are this module's own, one set per suite process. Nothing here runs a check by itself.
+`scenario()` starts the scenarios that are coming on a few threads while the suite reads the one it is at (tests/_runahead.py; RELEASE_SUITE_PAR=1 runs them one at a time, as before),
+the checks and their order unchanged. A suite ends with `finish()`. The lists `fails`, `ran`, `dirs` and `POLLS` are this module's own, one set per suite process. Nothing here runs a check by itself.
 """
 import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threading, time
-import _scratch
+import _scratch, _runahead
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 fails = []; ran = []; dirs = []
 # The environment release.sh and its stubs run in: this process's, without the coverage variables of a measured run (suitemap.py measure sets COVERAGE_PROCESS_START).
@@ -389,7 +390,7 @@ SYSTEMD_RUN = ('#!/bin/sh\nn=$(echo "$*" | sed -E \'s/.*--unit stackshot-release
                '[ "$n" != "${RT_START_FAIL:-}" ] || { echo "Failed to start transient service unit: Unit stackshot-release-$n.service was already loaded" >&2; exit 1; }\n'
                'echo "$n" >> "$RT_DIR/started"\necho "start:$n" >> "$RT_DIR/order.log"\necho "$*" >> "$RT_DIR/started-args"\n')   # started-args: what each unit was asked to run (a group's PRs follow --run-group)
 
-def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs=None, pr="23", reuse=None, pending=None, kill_at=False, raw=None, units=None, files=None, lockhook=None, side=None, **env):
+def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs=None, pr="23", reuse=None, pending=None, kill_at=False, raw=None, units=None, files=None, lockhook=None, side=None, **env):
     """hold: a number of seconds, True (until the run ends) or "until-waiting" (until the release logs that it waits for the lock, then 0.3 s more)
     the lock file is held by this process, as another release's deploy would.
     grab: the lock is taken by this process when main's run is about to read green (after the merge let it go), and held to the end.
@@ -485,6 +486,13 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
             "side_rc": side_res["r"].returncode if side_res.get("r") else None, "side_log": rd(f"releases/pr-{side}.log") if side else "", "paused_at_rollback": rd("paused_at_rollback").strip(),
             "mq": rd("mq.log").splitlines(), "started": rd("started").split(), "queue": rd("releases/queue").split(), "started_marks": rd("releases/queue.started").split(), "paused": rd("releases/queue.paused"), "qlog": rd("releases/queue.log")}
 
+_ra = []   # [the run-ahead of this process, or None]: made when the first scenario is asked for (tests/_runahead.py; RELEASE_SUITE_PAR=1 turns it off)
+def scenario(name, *pos, **kw):
+    """one run of release.sh in a folder of its own (see _scenario for the arguments). The suites' scenarios that are coming are started on a few threads while the suite
+    reads this one's result (tests/_runahead.py): the same call, the same result, in the order the suite asks for them."""
+    if not _ra: _ra.append(_runahead.make(_scenario))
+    return _ra[0].call(name, pos, kw) if _ra[0] else _scenario(name, *pos, **kw)
+
 def lock_free(s):   # nothing the release left behind holds the lock, and no report child got fd 9
     if s["lockfile"].exists():
         lk = open(s["lockfile"], "a")
@@ -540,6 +548,7 @@ def at(log, *parts):   # the parts appear in the log in this order
 def polls_over(): return [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 
 def finish():   # the end of a suite: its scratch folders go, the count is printed, the exit status says whether a check failed
+    if _ra and _ra[0]: _ra[0].close()   # runs started ahead and never asked for end before their folders go
     for d in dirs: shutil.rmtree(d, ignore_errors=True)
     print(f"{len(ran) - len(fails)}/{len(ran)} passed" + (f" — FAILED: {', '.join(fails)}" if fails else ""))
     sys.exit(1 if fails else 0)
