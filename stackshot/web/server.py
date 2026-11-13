@@ -10546,7 +10546,7 @@ _STALL_FORM = (
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
     f"and no pause lasts longer than 24 hours. "
-    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`), once an hour for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
+    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`), about every 50 minutes for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
 )
 
 
