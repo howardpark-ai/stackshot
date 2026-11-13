@@ -27,7 +27,7 @@ from stackshot.model import last_activity as _la
 from stackshot.model import model as _model
 
 WINDOW_S = 3600.0       # an item has "no activity" past this many seconds; the item in hand must have had some within it
-_HOOKS: dict[str, Any] = {"is_front": None}      # the server's answer to who is a front agent (server._front_keeper), for the readers that have no pass environment (the board's own rendering)
+_HOOKS: dict[str, Any] = {"is_front": None}      # the answer to who is a front agent (service/telling.py's front_keeper), for the readers that have no pass environment (the board's own rendering)
 
 
 def enabled() -> bool:

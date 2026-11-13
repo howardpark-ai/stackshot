@@ -1059,7 +1059,7 @@ def update_unlocked(
     if wake or clear_wake or hold or clear_hold or item.get("status") != was or now_parked != was_parked:
         h.wake_event_set()         # the minute loop recomputes its next wake now, so a wake set a minute ahead still fires on time
     told = ""
-    relayed = False               # this write already went to the project's keeper or router (_pilot_relay): one event makes one inbound there
+    relayed = False               # this write already went to the project's keeper or router (pilot_relay): one event makes one inbound there
     if state_change and not _writes.terminal_row():     # a terminal-prompt row owes the page nothing: no debt for the script or the keeper, no notice to the router
         stew, role = _telling.pilot_charge(meta.get("project", ""), debtor)
         moved = bool(stew) and role == "name" and h.writer_owes()     # the writer owes it; the keeper only past the grace
@@ -1083,7 +1083,7 @@ def update_unlocked(
     hint = ("\nstill on hold: pass clear_hold=true to release it"
             if status == "open" and was_held and now_held and not (hold or wake) else "")   # a session with the old rulebook in context learns the new form
     heard: list[str] = []         # the mover, when a notice below reached it as mover: its "now needs you" line would double it
-    owner_told = _telling.owner_reached(named, relayed)   # _tell_owner (the server's naming of the writer above, or a notice below) already told the mover this write: _tell_owner_change then adds nothing
+    owner_told = _telling.owner_reached(named, relayed)   # tell_owner (the server's naming of the writer above, or a notice below) already told the mover this write: tell_owner_change then adds nothing
     _telling.CLOSE_WAS.item = item_was if closing else None      # a close is told to the mover, which the close dropped from the item
     if closing:                   # the item's mover hears what another session did that it must know
         what_ = f"was completed ({outcome}{' by ' + _gh.shown(superseded_by) if superseded_by else ''}{': ' + reason if reason else ''})"

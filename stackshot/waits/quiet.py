@@ -1,6 +1,6 @@
 """quiet.py — what a front agent hears about an item, and the board record that always goes with it.
 
-The pure half: no server import, no clock read, no file. server._front_gate decides and acts; this module writes the line the board keeps.
+The pure half: no server import, no clock read, no file. telling.front_gate decides and acts; this module writes the line the board keeps.
 
 The board always reaches the owner, and a front agent's turn is only ever extra. So whenever a notice about an item is, or is not, passed to a front agent, the same news is
 written onto the item in the same pass, never instead of it: an ordinary progress notice is a History line (`metadata.front_quiet.log`, one line each, "stackshot: …"); a close is the item's own close in

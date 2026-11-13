@@ -104,7 +104,7 @@ DIGEST_SHOWN = 25                   # a digest lists this many notices, one line
 DIGEST_TRIES = 3                    # pushes of one digest in a day; then its notices wait for the next day's
 _LOCK = threading.Lock()
 
-# What the server wires in (configure): the front-agent test (server.py _front_keeper), the push, and the call made after a ruling
+# What the server wires in (configure): the front-agent test (telling.front_keeper), the push, and the call made after a ruling
 # (the release of a hold that waited on the notice's anchor, the board's republish). The defaults stand alone, for the tests and the CLI.
 _HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None}
 
@@ -162,7 +162,7 @@ def agent_root(root: str, reg: dict[str, dict[str, Any]]) -> str:
 def holds(project: str, session: str, stand_in_too: bool = False) -> bool:
     """Is this notice, which would go to `session` for `project`, the router's to rule? True when `session` is the name the project's
     notices are addressed to (anchors.notice_name: the page's name line, else the session its notices fall to). With `stand_in_too` it is also true when `session` is the
-    project's stand-in (stand_in): the board and page-debt relays resolve their keeper through `_keeper`, which answers the stand-in
+    project's stand-in (stand_in): the board and page-debt relays resolve their keeper through `project_keeper`, which answers the stand-in
     for a live project, and must reach the router, not the builder. Every other recipient is delivered to as before (a wake for a
     builder named in an item's needs is its own work)."""
     try:
@@ -200,7 +200,7 @@ def builder(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
 def stand_in(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
     """The project's STAND-IN, the agent the router's passes go to for it: its builder (builder()), else its -main agent (its own page's, else
     its hub's, else the scope's general one: anchors.fallback_main). "" for a key that names no page, and when no session can be named. The
-    page's name line decides nothing here; a one-session page's items keep their keeper (server._keeper), not this agent."""
+    page's name line decides nothing here; a one-session page's items keep their keeper (telling.project_keeper), not this agent."""
     try:
         reg = _anc.registry() if reg is None else reg
         if not is_live(project):

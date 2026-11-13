@@ -123,7 +123,7 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
     """The case the front-mover rule judges: (the front agent's key, its project, the project's builder list, the project's hub) when a create or update sets mover, then (which becomes the mover after
     the owner's answer) or post_wake_mover (the mover once a wait ends) to a front agent, sent by another session; None otherwise. A front agent gets no hand-off notice, so the item would sit handed
     and not taken until the owner noticed. Not a case: a front agent naming itself, the owner, a background agent, a session no page lists, a value that clears the field, and the value the item
-    already stores in `current` (nothing changes hands). A failing roles read is no case, with one stderr line, as _front_sender does."""
+    already stores in `current` (nothing changes hands). A failing roles read is no case, with one stderr line, as front_sender does."""
     h = _hooks()
     v = _model.clean(value)
     if not v or v.lower() in h.ask_none or _model.is_owner(v):
@@ -135,7 +135,7 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
         if same(cur, v):
             return None
         roles, key = h.role_of(v, nm)
-        if not key or roles[key].get("role") != "front":      # a one-session project's single name-line session is not front here either, as in the needs gate and _front_sender
+        if not key or roles[key].get("role") != "front":      # a one-session project's single name-line session is not front here either, as in the needs gate and front_sender
             return None
         s = str(sender or "").strip()
         if s:
@@ -186,7 +186,7 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
         return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
-        if field == "mover" and h.front_pair_ok(sender, key, project):      # a front-only project (anchors.front_only): one of its front agents may hand an item to another; the target is told by a notice (_handoff_notify)
+        if field == "mover" and h.front_pair_ok(sender, key, project):      # a front-only project (anchors.front_only): one of its front agents may hand an item to another; the target is told by a notice (handoff_notify)
             return value, f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is told it is handed the item)", []
         raise _front_mover_refusal(field, case, project)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
@@ -755,7 +755,7 @@ def gate_after(after: Any, gid: str = "") -> list[str]:
 
 # A front agent does not watch handed-off work itself: stackshot
 # refuses a sender's wake or check on a handed-off item, and its text stops teaching it. The result lands through stackshot when the mover closes the
-# item or hands it back to the front agent (_tell_owner_close, _tell_handback); a front agent that sets its own wake or until date on an alive item another
+# item or hands it back to the front agent (tell_owner_close, tell_handback); a front agent that sets its own wake or until date on an alive item another
 # session moves is polling work it handed away. Narrowed in review: only a date with no hold on an ALIVE item is refused. A hold with a
 # wake on a waiting or parked item is the park's own timer, fired by the server, and a done `check` is the server-run push the rule itself names,
 # so neither is gated; ask_by stays anyone's too. Only a front agent is refused (a background agent, the owner and a sender the roles do

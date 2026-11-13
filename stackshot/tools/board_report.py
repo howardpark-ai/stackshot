@@ -96,7 +96,7 @@ def _last_write(item: dict[str, Any]) -> float:
 
 
 def fallback_mover(project: str) -> str:
-    """The session that moves an item nothing else names a mover for: the project's builder, else its -main agent, read from the project registry as server._fallback_mover does, without that
+    """The session that moves an item nothing else names a mover for: the project's builder, else its -main agent, read from the project registry as telling.fallback_mover does, without that
     function's last step, the page keeper (server.py is not importable here). "" when the project names neither."""
     try:
         from stackshot.anchors import anchors as _anc  # noqa: PLC0415
