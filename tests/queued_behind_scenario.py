@@ -10,7 +10,7 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
      counts follow; gate off, nothing differs; a held, a parked, a waiting and an owner's item are untouched and never count as the item in hand
   5  it ends by itself: the mover moves a queued item (it has the newest activity: it is in hand and the other returns to agent once its own hour has passed), the item it waits behind closes, or its activity
      goes idle, or the mover is left with one item
-  6  the silence pass (silence.findings, silence.uncovered) leaves a queued item alone as it does a waiting one and still finds the item in hand; the gate off finds both
+  6  the shared reading (silence.reading, which the hourly line, the idle hand-over and the stall pass use) leaves a queued item off the agents as it does a waiting one and still reads the item in hand on agent; the gate off reads both
   7  the hourly audit line (hourly.due, hourly.pass_, server._hourly_tick) writes no line on a queued item and one on the item in hand
   8  the stall pass (server._stall_tick) takes no step on a queued item and still takes it on the item in hand
   9  the items sheet's list word (server._item_list) says waiting for a queued item
@@ -63,7 +63,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server, home
 from stackshot.web.ui import render as UI
 from stackshot.web import render as MD
-from stackshot.audit import hourly as HR, silence as SL, audit_run as AR
+from stackshot.audit import hourly as HR, silence as SL, audit_run as AR, audit_checks as AC
 from stackshot.audit import hourly_log as HL
 from stackshot.model import queued as Q, model as MODEL
 from stackshot.tools import next_report as NR
@@ -81,10 +81,9 @@ sent = []                                                          # every messa
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
 server._tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
-REAL = {n: getattr(server, n) for n in ("_handoff_status", "_sessions_index", "_stall_active")}      # the stall pass below reads the real ones
+REAL = {n: getattr(server, n) for n in ("_handoff_status", "_sessions_index")}      # the stall pass below reads the real ones
 server._handoff_status = lambda who, idx=None: ("", 0.0)
 server._sessions_index = lambda: {}
-server._stall_active = lambda: set()
 FRONT = {"home-front"}
 REAL_HOOK = Q.front_hook()                                         # what the server installed (`_front_keeper`, strict), before the fixture's own answer replaces it
 Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `_front_keeper` is replaced by the one front agent of the fixture
@@ -242,7 +241,7 @@ check("4c …an answer it can read is kept: no for a background agent, yes for a
       and AR.Env(front_strict=lambda w, p: False, front=lambda w, p: True).is_front_safe("x") is False)
 check("4c …no roles given and no registry to read: it counts as front (the isolated HOME has none)", AR.Env().is_front_safe("home-peer") in (True, False))
 base(); on()
-check("4c the silence pass's queue asks the safe test: nothing is queued when the front test cannot answer (Env.front_strict raises), the item is queued when it says no",
+check("4c the passes' queue asks the safe test: nothing is queued when the front test cannot answer (Env.front_strict raises), the item is queued when it says no",
       SL.queued(items(), now0, AR.Env(roles=ROLES, front_strict=boom)) == {} and SL.queued(items(), now0, AR.Env(roles=ROLES, front_strict=lambda w, p: False)) == {"a2": "a1", "a6": "a5"}, SL.queued(items(), now0, AR.Env(roles=ROLES, front_strict=lambda w, p: False)))
 roles_ok = {"home-peer": {"role": "background", "project": "projects/alpha"}, "home-front": {"role": "front", "project": "projects/alpha"}}
 anc_roles = server._anc.session_roles
@@ -299,22 +298,27 @@ L = home_lists_at()
 check("5 the item it waits behind closes: a2 returns to agent (one item left for its mover)", "a2" in L[AG] and not L[WT], L)
 put(1, act=180, last=90); put(2, act=180, last=120)
 L = home_lists_at()
-check("5 the item in hand goes idle (no activity for an hour): nothing is queued, both are on agent, for the silence pass to find", {"a1", "a2"} <= set(L[AG]) and not L[WT], L)
+check("5 the item in hand goes idle (no activity for an hour): nothing is queued, both are on agent, for the hourly line to reach", {"a1", "a2"} <= set(L[AG]) and not L[WT], L)
 put(1, act=180, last=10); put(2, act=180, last=120, mover="home-peer2")
 check("5 a2 is handed to another mover: it is on agent again (and alone for its new mover)", "a2" in home_lists_at()[AG])
 off(); put(1, act=180, last=10); put(2, act=180, last=120)
 check("5 the gate off: nothing is queued whatever the activity", "a2" in home_lists_at()[AG])
 
-# ================================================================ 6. the silence pass
+# ================================================================ 6. the shared reading
 base()
-def found(at=None): fs, _ps = SL.findings(items(), now0 if at is None else at, env()); return sorted(f["id"] for f in fs)
+def found(at=None):
+    """The ids of the open items that read on agent (`silence.reading`, with the queue the passes read once per round)."""
+    at = now0 if at is None else at; its = items(); line = SL.queued(its, at, env()); out = []
+    for g in sorted(its, key=AC._num):
+        if its[g].get("status") != "open": continue
+        it, _m, ao, mv = AC._item_view(its, g)
+        if SL.reading(it, mv, ao, at, line.get(g, "")) == "agent": out.append(bid(int(g[1:])))
+    return out
 off(); g0 = found()
 on(); g1 = found()
-check("6 the gate off: every silent on-agent item is found (a1 a2 a3 a4 a5 a6); the held one is not", g0 == [bid(i) for i in (1, 2, 3, 4, 5, 6)], g0)
-check("6 the gate on: the queued item (a2) is not found; the item in hand, the one active in the hour, the one-item mover and the front agent's two are", g1 == [bid(i) for i in (1, 3, 4, 5, 6)], g1)
-on(); fs2, _ps2 = SL.findings(items(), now0, env(), skip=None)
-check("6 the backstop (uncovered) asks the same queue: it lists no queued item, and no item the pass found", bid(2) not in [x["id"] for x in SL.uncovered(items(), now0, env(), skip=None)], [x["id"] for x in SL.uncovered(items(), now0, env(), skip=None)])
-check("6 reading: a queued item is not on agent for silence.reading / on_agent, an unqueued one is", SL.reading({"metadata": {"state": "doing", "needs": ["x"], "mover": "x"}, "status": "open"}, "x", lambda i: [], now0, "a1") == "" and SL.reading({"metadata": {"state": "doing", "needs": ["x"], "mover": "x"}, "status": "open"}, "x", lambda i: [], now0) == "agent")
+check("6 the gate off: every on-agent item reads on agent (a1 a2 a3 a4 a5 a6); the held one does not", g0 == [bid(i) for i in (1, 2, 3, 4, 5, 6)], g0)
+check("6 the gate on: the queued item (a2) does not read on agent; the item in hand, the one active in the hour, the one-item mover and the front agent's two do", g1 == [bid(i) for i in (1, 3, 4, 5, 6)], g1)
+check("6 reading: a queued item is not on agent for silence.reading, an unqueued one is", SL.reading({"metadata": {"state": "doing", "needs": ["x"], "mover": "x"}, "status": "open"}, "x", lambda i: [], now0, "a1") == "" and SL.reading({"metadata": {"state": "doing", "needs": ["x"], "mover": "x"}, "status": "open"}, "x", lambda i: [], now0) == "agent")
 
 # ================================================================ 7. the hourly audit line
 def lines(i): return HL.log_of(rd(i)["metadata"])
@@ -380,14 +384,14 @@ def observe():
     out["idle_hand"] = q(c("a1", ago=90), c("a2", ago=200))
     out["tie"] = q(c("a9", ago=10), c("a2", ago=10), c("a4", ago=200))
     on(); base()
-    out["silence"] = found()
+    out["reading"] = found()
     out["hourly"] = [g for g, _l in HR.pass_(items(), now0, env(), None, None)]
     off()
     out["gate_off"] = found()
     return out
 GOOD = observe()
 EXPECT = {"q": {"a2": "a1", "a4": "a1"}, "one": {}, "front": {}, "idle_hand": {}, "tie": {"a4": "a2"},
-          "silence": [bid(i) for i in (1, 3, 4, 5, 6)], "hourly": ["a1", "a3", "a4", "a5", "a6"], "gate_off": [bid(i) for i in (1, 2, 3, 4, 5, 6)]}
+          "reading": [bid(i) for i in (1, 3, 4, 5, 6)], "hourly": ["a1", "a3", "a4", "a5", "a6"], "gate_off": [bid(i) for i in (1, 2, 3, 4, 5, 6)]}
 check("10 the unmutated rule gives every promised observation", GOOD == EXPECT, GOOD)
 real_queue = Q.queue
 def wrong_newest(cands, now, is_front=None):                       # the OLDEST item is chosen as the one in hand
@@ -407,12 +411,12 @@ def never(cands, now, is_front=None): return {}
 for name, fn, key in (("the oldest item chosen as the item in hand", wrong_newest, "q"), ("the hour ignored", ignore_hour, "q"), ("front agents queued", queue_front, "front"),
                       ("an idle item in hand still queues the others", no_idle_hand, "idle_hand"), ("nothing ever queued", never, "q")):
     with mutate(Q, "queue", fn): bad = observe()
-    check(f"10 mutation `{name}` is caught by the check on `{key}`" + ("" if name != "nothing ever queued" else " and the passes"), bad[key] != EXPECT[key] and (name != "nothing ever queued" or (bad["silence"] != EXPECT["silence"] and bad["hourly"] != EXPECT["hourly"])), (key, bad[key]))
+    check(f"10 mutation `{name}` is caught by the check on `{key}`" + ("" if name != "nothing ever queued" else " and the passes"), bad[key] != EXPECT[key] and (name != "nothing ever queued" or (bad["reading"] != EXPECT["reading"] and bad["hourly"] != EXPECT["hourly"])), (key, bad[key]))
 with mutate(Q, "enabled", lambda: True): bad = observe()
 check("10 mutation `the gate ignored (always on)` is caught: the gate-off observation changes", bad["gate_off"] != EXPECT["gate_off"], bad["gate_off"])
 real_reading = SL.reading
 with mutate(SL, "reading", lambda item, mover, after_open, now, behind="": real_reading(item, mover, after_open, now)): bad = observe()
-check("10 mutation `the silence reading no longer asks the queue` is caught by the silence and hourly observations", bad["silence"] != EXPECT["silence"] and bad["hourly"] != EXPECT["hourly"], (bad["silence"], bad["hourly"]))
+check("10 mutation `the reading no longer asks the queue` is caught by the reading and hourly observations", bad["reading"] != EXPECT["reading"] and bad["hourly"] != EXPECT["hourly"], (bad["reading"], bad["hourly"]))
 with mutate(Q, "overlay", lambda mod, behind: mod):
     on(); b = board(); L = {w: ids for w, ids in lists_of(b).items() if w in (AG, WT)}; off()
 check("10 mutation `the board no longer applies the reading` is caught: a2 stays on agent", "a2" in L[AG], L)

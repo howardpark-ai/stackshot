@@ -4,7 +4,7 @@ These read item fields only (no model call, no message, no write). They were par
 the filing pass (every ten minutes, in the server) share one copy of the rules.
 
   field_findings(items, anchors, now, env)    the checks the daily run makes in code: ask-missing, next rules (the ten-minute passes make stuck-elsewhere, arbitrary-hold, mislabeled-state and the date half of
-                                              stale; the silence of an item with no date of its own is the silence pass's, silence.py); → (findings, idle-pass entries, open items read); `env` supplies role_map().
+                                              stale; an item with no date of its own is given the hourly audit line and the idle hand-over, audit/hourly.py, audit/hand_idle.py); → (findings, idle-pass entries, open items read); `env` supplies role_map().
                                               `ten_minute=True` adds the filing and dates passes' checks back, which is how the scenarios compare the passes with what the daily run used to find
   check_stale / check_ask_missing / check_stuck_elsewhere / idle_pass    the per-item rules behind it
   filing_findings(items, anchors, now, env)   the filing rules (is the item filed in the right state?): stuck-elsewhere, arbitrary-hold, mislabeled-state, reads-as-wait, step-handover, ask-options (check_ask_options), and why-not-now for a wake that is the
@@ -143,7 +143,7 @@ def _item_view(items: dict[str, dict[str, Any]], gid: str):
 
 def check_stale(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: Callable[[dict[str, Any]], Any], now: float, last: float) -> str:
     """Why the item is stale ("" when it is not): past its own wake with no write since. A wake still ahead means not stale; a hold is raised only after its wake; an item on the owner, on an outside
-    party, behind an open item or in a state that is a wait is left alone. An item with no date of its own carries no expected time: its silence is the ten-minute silence pass's (silence.py)."""
+    party, behind an open item or in a state that is a wait is left alone. An item with no date of its own carries no expected time: its quiet time is the hourly audit line's and the idle hand-over's (audit/hourly.py, audit/hand_idle.py)."""
     if _no_session(mover) or after_open(item):
         return ""
     if _states.of(item, after_open)[0] != "doing":
@@ -529,7 +529,7 @@ def dates_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], no
     wait too, a hold's wake included); no expected-by time is derived. The rule is the date half of `check_stale`, with its exemptions: agent work in progress with no wake has no date to pass; a wake
     still ahead, a hold with no wake, an item on the owner or an outside party, behind an open item or in a state that is itself a wait (parked, outside, blocked, your-call, your-step, verifying)
     are left alone. A finding has the daily run's shape, its category (`stale`) and its evidence ("past its wake (...) with no write since"), as the daily run's had before the pass took it over (the run no longer
-    finds it). As in the daily run, an item the server's idle pass poked is an idle-pass entry, no finding. The silence of an item with no date of its own is the silence pass's (silence.py)."""
+    finds it). As in the daily run, an item the server's idle pass poked is an idle-pass entry, no finding. The quiet time of an item with no date of its own is the hourly audit line's and the idle hand-over's."""
     from stackshot.tools import board_report as _br  # noqa: PLC0415
     from stackshot.tools import next_report as _nr  # noqa: PLC0415
     findings: list[dict[str, Any]] = []
@@ -633,7 +633,7 @@ def _proof_item(gid: str, items: dict[str, dict[str, Any]], now: float) -> tuple
     mod = _model.derive(it, now, after_open)
     wait = mod.wait if mod.state == _model.WAITING else None
     if wait is None and not _wt.is_held(it):
-        return "", None                         # alive work: its silence is the silence pass's
+        return "", None                         # alive work: its quiet time is the hourly audit line's
     stage_event = ""
     if wait is not None and wait.kind == "event":
         try:

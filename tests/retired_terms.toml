@@ -252,3 +252,16 @@ allow = []
 retired = "his Send on the step"
 use = "`his Done or Send note on the step`: the step form has two buttons, there is no single Send on it"
 allow = []
+
+# ---- the silence check (the ten-minute silence pass, the 45-minute news ask): retired. An item on an agent with no activity for an hour gets the hourly audit line, and one
+# the audit marked idle is handed on by the idle hand-over; nothing asks the mover for news at 45 minutes any more. The quiet ladder (`via` = "silence" in a stored ladder entry,
+# the dates pass's entry) keeps its own wording: "asked for news" and "is still yours: nothing written for" are not these terms.
+[[term]]
+retired = "silence check"
+use = "the hourly audit line (audit/hourly.py) and the idle hand-over (audit/hand_idle.py): nothing asks the mover for news after 45 minutes any more"
+allow = []
+
+[[term]]
+retired = "silence pass"
+use = "the hourly audit line (audit/hourly.py) and the idle hand-over (audit/hand_idle.py): the ten-minute silence pass is gone"
+allow = []

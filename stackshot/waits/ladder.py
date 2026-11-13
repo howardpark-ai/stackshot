@@ -20,14 +20,14 @@ Two orders, two records (`metadata.handoff` and the stall pass's entry), and an 
                      item stays with its mover and is not put to the owner
 
 What brings an item to the ladder is still two audits, and they stay apart: the hand-off audit (an untaken hand-off past `handoff_minutes`, a turn that ended with no write, a gone pane, two failed
-pushes) enters it with `via` = "handoff", and the silence audit (a pane with no turn running for `[stall] minutes`) with `via` = "stall". An untaken hand-off to a session is the hand-off audit's
-alone: the silence audit does not start it, so one item never climbs two ladders at once; and the hand-off audit leaves an item already on the ladder. The sender rung is gone: an untaken hand-off no
+pushes) enters it with `via` = "handoff", and the stall pass (a pane with no turn running for `[stall] minutes`) with `via` = "stall". An untaken hand-off to a session is the hand-off audit's
+alone: the stall pass does not start it, so one item never climbs two ladders at once; and the hand-off audit leaves an item already on the ladder. The sender rung is gone: an untaken hand-off no
 longer goes back to the session that handed it over.
 
-With `[ladder] silence = true` as well, there is a third way in and the pane stops being one: the silence pass (an item on an agent with no activity for 45 minutes) and the dates pass (a wake passed with no write since) send their
+The dates pass is a third way in, and the pane stops being one: the dates pass (a wake passed with no write since) sends its
 message to the mover, and that message is the ask: `enter_quiet` writes the item's entry with `via` = "silence", on the look, its clock started when the message went. The entry is for that silence alone (`act`, the item's activity clock then):
-it ends with activity on the item or a new mover (`quiet_over`), and neither a write that is no activity nor the mover's bare confirm restarts it. The stall pass no longer starts a ladder from a pane with no turn running; it takes the rungs of
-the entries the two audits made.
+it ends with activity on the item or a new mover (`quiet_over`), and neither a write that is no activity nor the mover's bare confirm restarts it. The stall pass does not start a ladder from a pane with no turn running; it takes the rungs of
+the entries the hand-off audit and the dates pass made.
 
 The episode, its restarts and its bounds are stall.py's (`episode`, `expired`, `spent`, `not_due`, `due_at`): any write to the item, a new mover, or the mover's own confirm (at most
 `stall.RESTARTS` times) starts a new episode. On this ladder (`episode` here) an item the hand-off audit brought stays on it through such a restart, for the same mover and a hand-off still
@@ -55,12 +55,12 @@ def via_of(rec: dict[str, Any] | None) -> str:
 
 
 def quiet(rec: dict[str, Any] | None) -> bool:
-    """Did the silence audit (or the dates pass) bring the item? Its entry starts after the ask, which the audit's own message was."""
+    """Did the dates pass bring the item? Its entry starts after the ask, which the audit's own message was."""
     return via_of(rec) == "silence"
 
 
 def enter_quiet(old: dict[str, Any] | None, mover: str, ver: list[float], confirmed: float, clock: float, now: float) -> dict[str, Any]:
-    """The entry for an item the silence audit (or the dates pass) brings to the ladder, once its message to the mover has gone (that message is the ask): a new episode (keeping what outlives
+    """The entry for an item the dates pass brings to the ladder, once its message to the mover has gone (that message is the ask): a new episode (keeping what outlives
     one), marked `via` = "silence", on the look with its clock started at `now`. `clock` is the item's activity clock then (`silence.clock`): the entry is for that silence alone and ends when the item
     has activity (`quiet_over`), not when someone writes the item or the mover confirms it (neither is activity, so neither restarts a silence)."""
     rec = _stall.fresh(mover, ver, old, confirmed)

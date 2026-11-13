@@ -4982,8 +4982,8 @@ def _minute_fleet_publish() -> None:
 
 
 def _minute_ticks() -> "list[_minute.Tick]":
-    """The minute set in its order: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the balancer (off by default; an item not started or queued for ten minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass,
-    the dates pass, the wake catch-up, the silence pass. Each lambda names its function
+    """The minute set in its order: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the balancer (on by default; an item not started or queued for ten minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass,
+    the dates pass, the wake catch-up, the audit tick (the hourly line and the idle hand-over). Each lambda names its function
     when it runs, so a replaced function is the one called. `board=True`: skipped while the migration's pass holds the board (the registry sync and the
     clients' tick go on; the two wake passes have their own check)."""
     T = _minute.Tick
@@ -5077,7 +5077,7 @@ def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, no
         steps_old[i] = {**steps_old[i], "text": new_text}
         meta["steps"] = _steps.stored(_steps.apply(steps_old, str(meta.get("next") or ""), [], [], NAME, now, strict=False, reworded={i: new_text}))
         meta.pop(_fs.CLOCK, None)
-        meta[_fs.LANDED] = {"step": _fs.step_hash(new_text), "mover": mover, "at": now}       # the silence pass chases the mover from here, wake or none
+        meta[_fs.LANDED] = {"step": _fs.step_hash(new_text), "mover": mover, "at": now}       # the hourly audit line counts the mover's quiet time from here, wake or none
         meta[_fs.MOVED] = [*[x for x in (meta.get(_fs.MOVED) if isinstance(meta.get(_fs.MOVED), list) else []) if x != h], h][-_fs.MOVED_KEEP:]
         shown = f"{(now - at) / 3600:.1f}".rstrip("0").rstrip(".")
         _stall.note(meta, now, f"step moved from {_session_label(opener) or opener} to {name} after {shown} hours open with the stuck-elsewhere finding unanswered (reword it back to undo): "
@@ -5111,7 +5111,7 @@ def _dates_expected_tick() -> "dict[str, Any] | None":
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     from stackshot.audit import audit_run as _ar
-    return _ar.dates_pass(env=_ar.Env(deliver=_filing_deliver), entered=_ladder_enter_quiet if _ladder_silence_on() else None)
+    return _ar.dates_pass(env=_ar.Env(deliver=_filing_deliver), entered=_ladder_enter_quiet if _ladder_on() else None)
 
 
 def _dates_tick() -> "list[str]":
@@ -5142,30 +5142,9 @@ def _archive_tick() -> "list[tuple[str, str]]":
     return _archive.sweep(_page_io(), today, _prj.with_made(_registry("projects")), _prj._pending_all())
 
 
-def _silence_skip() -> "Callable[[str, dict[str, Any], str], bool]":
-    """The silence pass's view of what is already on an item (`silence.findings(skip=)`): True leaves a silent item alone when the stall ladder is already on it (`_stall_active`: that ladder is
-    chasing the mover), or when its mover is its project's builder (`_handoff_builder`) and a build subagent is running on it by the item's own step status (`silence.subagent_running`: a line in
-    progress, changed within 90 minutes). The mover's pane is NOT read: silence is judged per item (the item's own activity clock, an event on its anchored pull request included), so a busy pane, a
-    background agent's `shell` pane or a pane this box does not show says nothing about one item, and a builder directing subagents (a pane that is nearly always busy) no longer hides its silent
-    items; only a subagent the item itself shows counts as taken. The rungs that need a pane with no turn running (the ladder's look, cold call and builder steps of a front agent or a session no page lists as a background agent) stay in the stall pass and ladder.py; a background agent's rungs go by the step status alone.
-    The ladder's items are read once per pass, and so is each project's builder."""
-    from stackshot.audit import silence as _silence
-    active = _stall_active()
-    builders: dict[str, list[str]] = {}
-
-    def skip(gid: str, item: dict[str, Any], mover: str) -> bool:
-        if gid in active:
-            return True
-        project = str((item.get("metadata") or {}).get("project") or "")
-        if project not in builders:
-            builders[project] = _handoff_builder(project) if project else []
-        return any(_ho_same(mover, b) for b in builders[project]) and _silence.subagent_running(item, time.time())
-    return skip
-
-
 def _silence_env() -> Any:
-    """The silence pass's environment, built in one place for the pass and its backstop: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`_front_keeper`), which is stricter than the
-    role map (a project's keeper is not front for its own project; a transcript id resolves). The backstop must judge a hand-off by the very answer the pass did, or it lists what the pass found and hides what it did not."""
+    """The audit passes' environment, built in one place for the hourly line, the idle hand-over, the balancer and the queue reading: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`_front_keeper`), which is stricter than the
+    role map (a project's keeper is not front for its own project; a transcript id resolves). Every pass judges a hand-off by the very answer the others do."""
     from stackshot.audit import audit_run as _ar
     return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0], front_strict=lambda who, project: _front_keeper(who, project, True)[0],
                     front_or_unread=lambda who, project: _front_keeper(who, project, unread_front=True)[0])
@@ -5197,42 +5176,19 @@ def _queue_map(now: "float | None" = None, items: "dict[str, dict[str, Any]] | N
 
 
 def _silence_tick() -> "dict[str, Any] | None":
-    """The ten-minute silence tick: the silence pass with its backstop (`_silence_pass_tick`), and, whatever that did (even a ladder view that could not be built), the hourly audit line (`_hourly_tick`, off by
-    default) and then the hand-over of the items it found idle (`_hand_idle_tick`, off by default). Stands still when the audit is off or runs in agent mode."""
+    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`). Each is switched by
+    its own `[audit]` key and stands still when off. Stands still when the audit is off or runs in agent mode. One that raises never stops the other; the first error is printed."""
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     try:
-        return _silence_pass_tick()
-    finally:
-        try:
-            _hourly_tick()
-        except Exception as e:  # noqa: BLE001  — the hourly line is an extra (off by default): the silence pass above has run
-            print(f"audit: hourly line not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        try:
-            _hand_idle_tick()
-        except Exception as e:  # noqa: BLE001  — handing an idle item on is an extra (off by default): the lines above have run
-            print(f"audit: idle items not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _silence_pass_tick() -> "dict[str, Any] | None":
-    """The ten-minute silence pass (silence.silence_pass): an open item on an agent with no real activity for 45 minutes goes to its mover once per silence episode, in the daily audit's `stale`
-    wording, whatever the mover's pane is doing (a busy pane hides nothing), unless the stall ladder is already on the item (`_silence_skip`). Stands still when the audit is off or runs in agent
-    mode (the rollback), like the filing and dates passes. A ladder view that cannot be built sends nothing."""
-    if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
-        return None
-    from stackshot.audit import silence as _silence
+        _hourly_tick()
+    except Exception as e:  # noqa: BLE001  — the idle hand-over below still runs
+        print(f"audit: hourly line not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
-        skip = _silence_skip()
-    except Exception as e:  # noqa: BLE001  — fail open: with no view of the panes nothing is sent
-        print(f"silence: ladder view not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return None
-    env = _silence_env()
-    res = _silence.silence_pass(env=env, skip=skip, entered=_ladder_enter_quiet if _ladder_silence_on() else None)
-    try:
-        _silence_backstop(skip=skip, env=env)
-    except Exception as e:  # noqa: BLE001  — the backstop is an extra: the pass above has run
-        print(f"silence: backstop not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return res
+        _hand_idle_tick()
+    except Exception as e:  # noqa: BLE001  — handing an idle item on is its own pass: the line above has run
+        print(f"audit: idle items not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return None
 
 
 def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
@@ -5276,7 +5232,7 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
 
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,
                  subagents: "Callable[[str], list[dict[str, Any]]] | None" = None, anchored: "dict[str, Any] | None" = None) -> list[str]:
-    """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
+    """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, on by default), run from the ten-minute audit tick: an open item on an agent with no activity for an hour, and no audit line in the last
     hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
@@ -5353,7 +5309,7 @@ def _hand_idle_builders(project: str) -> list[str]:
 
 def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                     dead: "Callable[[str], str] | None" = None) -> list[str]:
-    """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, off by default), run from the ten-minute silence tick right after the hourly line: an open item on an agent whose newest audit line is
+    """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, on by default), run from the ten-minute audit tick right after the hourly line: an open item on an agent whose newest audit line is
     `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its project, else of any project whose mandate builds; one whose pane is in no turn on this box and
     that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff_exec` → `_handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
     from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
@@ -5454,7 +5410,7 @@ def _balance_builder_names(narrow: bool = False) -> list[str]:
 
 def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                   dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
-    """The balancer (audit/hand_idle.py, `[audit] balance`, off by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
+    """The balancer (audit/hand_idle.py, `[audit] balance`, on by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
     untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder with the fewest open
     items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
     why. The mover it left is told ONCE, by `_tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
@@ -5588,48 +5544,6 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         except Exception as e:  # noqa: BLE001
             print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return moved
-
-
-_BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
-_BACKSTOP_LAST = [0.0]
-_BACKSTOP_TOLD: "set[str]" = set()      # the items the builder has been told of while they stay uncovered; one that has a finding again, or is gone, drops out. Kept in `<state>/audit/silence-backstop.json` and read once per process, so a restart does not tell them again
-_BACKSTOP_LOADED = [False]
-_BACKSTOP_LINES = 10          # at most this many items in one message, then "+N more"
-
-
-def _silence_backstop(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, skip: Any = None, env: Any = None) -> "list[dict[str, Any]]":
-    """The silence pass's backstop, looked at once an hour from the ten-minute silence tick: an open item the board shows on an agent that has had no activity for 2 hours (`silence.BACKSTOP_S`) and that the
-    pass has no finding for (`silence.uncovered`) is a defect of the pass, whatever exemption hid it. Each such item is told ONCE to the builder (the audit's builder, the way the runner's watchdog tells it) in one
-    stderr line and one message that asks nothing of the owner and makes no board item; it is told again only after it has had a finding (or left the board) and is then missed again, and a restart does not tell it again (the told ids are kept on disk). `now`, `items`, `skip`, `env` are for tests
-    and the tick (the tick passes the pass's own `env`; with none it is built the same way, `_silence_env`). → the uncovered items, told or not."""
-    now = time.time() if now is None else now
-    if now - _BACKSTOP_LAST[0] < _BACKSTOP_EVERY:
-        return []
-    _BACKSTOP_LAST[0] = now
-    from stackshot.audit import silence as _silence
-    from stackshot.tools import next_report as _nr
-    if not _BACKSTOP_LOADED[0]:      # the first look of this process: whom the builder was told of before a restart stays told
-        _BACKSTOP_LOADED[0] = True
-        _BACKSTOP_TOLD.update(_silence.read_backstop())
-    late = _silence.uncovered(items if items is not None else _nr.load_all(None), now, env if env is not None else _silence_env(), skip)
-    told_before = set(_BACKSTOP_TOLD)
-    _BACKSTOP_TOLD.intersection_update({x["id"] for x in late})
-    fresh = [x for x in late if x["id"] not in _BACKSTOP_TOLD]
-    if not fresh:
-        if _BACKSTOP_TOLD != told_before:
-            _silence.write_backstop(_BACKSTOP_TOLD)
-        return late
-    _BACKSTOP_TOLD.update(x["id"] for x in fresh)
-    _silence.write_backstop(_BACKSTOP_TOLD)      # before the send: a restart in between loses one message at worst, never repeats one
-    lines = [f"{x['id']} · {x['mover'] or 'no mover'} · no activity for {_silence.minutes(x['silent'])}" for x in fresh]
-    print(f"silence: backstop: {len(fresh)} item(s) on an agent silent for over {_silence.minutes(_silence.BACKSTOP_S)} with no silence finding: {', '.join(x['id'] for x in fresh)}", file=sys.stderr, flush=True)
-    to = _cfg.audit_builder()
-    if to:
-        _inbox_flag_send(to, f"[stackshot] The silence pass has no finding for {len(fresh)} item(s) the board shows on an agent that have had no activity for over {_silence.minutes(_silence.BACKSTOP_S)} "
-                             f"(it should have found each after {_silence.minutes(_silence.LIMIT)}; some exemption in silence.py hides it, or the hand-off audit that holds it has not acted: a defect of the passes, not of the item). id · mover · silent for:\n"
-                             + "\n".join(lines[:_BACKSTOP_LINES]) + (f"\n+{len(lines) - _BACKSTOP_LINES} more" if len(lines) > _BACKSTOP_LINES else "")
-                             + f"\nSent once for each item; nothing here is for {OWNER} and no reply is owed.")
-    return late
 
 
 def _make_runner() -> "_minute.Runner":
@@ -8834,15 +8748,6 @@ def _stall_background(who: str) -> bool:
         return False
 
 
-def _stall_active() -> set[str]:
-    """The items whose stall ladder has taken a step within two of its waits (and a minute). A ladder that stops moving (the pane is busy
-    again, or no longer shows) lets go of the item after that."""
-    now, win = time.time(), 2 * _stall_minutes() * 60.0 + 60.0
-    if _ladder_on():
-        win = max(win, (_ladder_look() + _stall_minutes()) * 60.0 + 60.0)      # the one ladder waits its look time after the ask: it holds the item through that wait too
-    return {g for g, r in _stall_load().items() if int(r.get("step") or 0) >= 1 and now - float(r.get("last") or 0) < win} if _stall_on() else set()
-
-
 def _stall_mover(gid: str, item: dict[str, Any]) -> str:
     return _mover_state.mover({**item, "gid": gid}, _ho_derive)
 
@@ -8987,16 +8892,10 @@ def _ladder_main_hours() -> float:
         return _ladder.MAIN_EVERY / 3600.0
 
 
-def _ladder_silence_on() -> bool:
-    """`[ladder] silence` (default false) with `[ladder] enabled`: the silence audit and the dates pass bring an item to the one ladder, and a pane with no turn running no longer does. Only a TOML true.
-    Read at use, so a reload turns it on or off."""
-    return _ladder_on() and _cfg.get("ladder", "silence", default=False) is True
-
-
 def _ladder_enter_quiet(gid: str, who: str, now: float, detail: str = "") -> bool:
-    """The silence audit (or the dates pass) has sent its message to the mover, which is the ask: the item goes on the ladder at its next rung, the look (`[ladder] look_minutes` from now). The entry
-    is for this silence alone (`act`, the item's activity clock now): activity ends it. → whether an entry was written (False: the item is not open, not the mover's, not due, or already on the ladder
-    for this silence). A History line says it; nothing is sent here."""
+    """The dates pass has sent its message to the mover, which is the ask: the item goes on the ladder at its next rung, the look (`[ladder] look_minutes` from now). The entry
+    is for this quiet stretch alone (`act`, the item's activity clock now): activity ends it. → whether an entry was written (False: the item is not open, not the mover's, not due, or already on the ladder
+    for this stretch). A History line says it; nothing is sent here."""
     from stackshot.audit import silence as _silence
     with _writes.ITEM_LOCK:
         item = _load(gid)
@@ -9018,7 +8917,7 @@ def _ladder_enter_quiet(gid: str, who: str, now: float, detail: str = "") -> boo
 
 
 def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
-    """The look of an item the silence audit brought: the item still has no activity, so the mover is told once more (a front agent gets the History line alone: no item notice wakes one). The pane is
+    """The look of an item the dates pass brought: the item still has no activity, so the mover is told once more (a front agent gets the History line alone: no item notice wakes one). The pane is
     not described: a background agent's is busy or showing a background shell nearly always, so the notice says what the item shows (nothing written for N minutes, N from its last write) and no more.
     → whether the rung was taken."""
     from stackshot.audit import silence as _silence
@@ -9061,8 +8960,8 @@ def _ladder_no_main(gid: str, who: str) -> str:
 
 def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list[tuple[str, str, str]] | None" = None, info: "dict[str, dict[str, str]] | None" = None) -> str:
     """The rung a live background mover's silence climbs to after the look (ladder.MAIN): a notice to the project's -main agent, which asks it to decide whether the item needs a nudge or a
-    different mover, because the cold call and the builder replace a mover that cannot answer and this one can, so without it the item would sit unseen. A History line on the item says it. Not taken
-    ("" so it is tried again at the next tick) when the item has had activity since the entry's silence began; taken with a History line alone when the project has no -main agent to tell.
+    different mover, because the cold call and the builder replace a mover that cannot answer and this one can, so without it the item would sit unseen. A History line on the item says it. Taken
+    with a History line alone when the project has no -main agent to tell.
     With `rows` (the stall tick gives it) the notice is not sent here: the item's (-main agent, gid, line) is added to `rows` and the tick sends ONE notice per -main agent for all its items due in the pass
     (`_ladder_main_tell`, as the resend path batches with `_ho.batch`), `info` keeping what a lone item's wording needs; without it the notice for this one item goes at once. → the rung taken."""
     from stackshot.audit import silence as _silence
@@ -9071,8 +8970,6 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return ""
         last = _silence.clock(item, who)
-        if last > 0 and now - last < _silence.LIMIT:
-            return ""            # the item is not silent now (activity since the entry was made): nothing to hand up
         meta = item.setdefault("metadata", {})
         to = _ladder_main_to(gid, who)
         span = _silence.minutes(now - last) if last > 0 else "a long time"
@@ -9281,8 +9178,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
     _STALL_LAST[0] = now
     minutes = _stall_minutes()
     ladder_on, look = _ladder_on(), _ladder_look()
-    silence_on = ladder_on and _ladder_silence_on()      # the silence audit brings the items: a pane with no turn running starts nothing
-    from stackshot.audit import silence as _silence      # the clocks of the silence audit, and `subagent_running`, the step status a background mover's ladder is held by
+    from stackshot.audit import silence as _silence      # the activity clock, and `subagent_running`, the step status a background mover's ladder is held by
     from stackshot.tools import next_report as _nrep
     since = _stall_since(now)          # no clock starts before the pass first ran (a deploy must not step every long-idle pane at once)
     cap = max(1, int(_stall_num("max_per_tick", _stall.MAX_PER_TICK)))
@@ -9319,14 +9215,14 @@ def _stall_tick(now: float | None = None) -> list[str]:
             if isinstance(r and r.get("cold"), dict) and r["cold"].get("state") == "running" and now - float(r["cold"].get("at") or 0) < _ho.COLD_STALE:
                 continue                 # a cold call is out
             front = _front_keeper(who, str(meta.get("project") or ""))[0]
-            quiet = bool(silence_on and old and _ladder.quiet(old))      # the silence audit's entry: it ends with activity on the item, a new mover, not with a write or a confirm that is no activity
+            quiet = bool(ladder_on and old and _ladder.quiet(old))      # the dates pass's entry: it ends with activity on the item, a new mover, not with a write or a confirm that is no activity
             if quiet and _ladder.quiet_over(old, who, _ho_same, _silence.clock(it, who)):
                 keep.pop(gid, None)
                 if old.get("cold_at"):
                     keep[gid] = _stall.fresh(who, _stall_ver(it), old, 0.0)      # what outlives an episode (the cold call's 24-hour bound) stays
                 continue
             if not front and _ho.awaiting_session(it, who, _ho_same) and not (ladder_on and old and _ho_same(old.get("mover"), who) and _ladder.on_ladder(old, now, float((r or {}).get("at") or 0))):
-                continue                 # an untaken hand-off is the hand-off audit's alone (silence does not start it); once that audit has brought it to the one ladder, the ladder takes its rungs here
+                continue                 # an untaken hand-off is the hand-off audit's alone (the dates pass does not start it); once that audit has brought it to the one ladder, the ladder takes its rungs here
             # review: the registry row shows background work in its status. A pane whose turn is over but which has a run_in_background Bash task running (a CI watch, a release) shows
             # `shell`, not `idle`, and stall.action counts `shell` as idle; a pane with a background subagent running shows `busy` and is left alone. A background agent's `shell` pane is
             # working on that job, so it is not quiet (with `[ladder] enabled` the pane is not read for a background agent at all: its item's own step status decides, below). A front agent does no background work of its own (it hands that to the builder), so its `shell` pane counts as idle. A doing item
@@ -9345,8 +9241,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
                    _ladder.episode(old, who, _stall_ver(it), _ho_same, mine, float(r.get("at") or 0) if r and _ho_same(r.get("to"), who) and not r.get("taken_at") else None) if ladder_on
                    else _stall.episode(old, who, _stall_ver(it), _ho_same, mine))
             keep[gid] = rec
-            if silence_on and not quiet and _ladder.via_of(rec) != "handoff":
-                continue                 # a pane with no turn running starts no ladder here: the silence audit (an item with no activity) and the dates pass (a wake passed) do, and the hand-off audit its own
+            if ladder_on and not quiet and _ladder.via_of(rec) != "handoff":
+                continue                 # a pane with no turn running starts no ladder here: the dates pass (a wake passed) does, and the hand-off audit its own
             if _stall.spent(rec, now):
                 continue
             floor = max(float(it.get("state_updated") or it.get("updated") or 0), 0.0 if rec.get("capped") else float(rec.get("conf") or 0))      # the mover's own last confirm, kept in the entry (another session's later confirm does not erase it): the minutes count from it, up to stall.RESTARTS times
@@ -9354,7 +9250,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 floor = max(floor, float(r.get("at") or 0))
             floor = max(floor, _stall.due_at(it, now))    # an item whose wake has just passed has its minutes first
             if quiet:
-                floor = 0.0              # the silence entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
+                floor = 0.0              # the quiet entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
             live = bool(back and (status or not idx or not _handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live
             act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live, main_every=main_hours * 3600.0) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
             if act == "cold" and not _cold_call_on():
@@ -10096,7 +9992,7 @@ _WORK_PARAM = Annotated[dict[str, Any] | str | None, Field(description=(
     "the status says where you are in it; the page keeps one line per step, not one per write). "
     f"text is at most {_work.TEXT_MAX} characters (details go on the project page). state: in progress (the default) | done. state done also ticks the step, as done=[n] does. "
     "With no open step of yours, one is made from the text. {\"remove\": true} clears the status. Keys: text, state, remove. "
-    "A project builder's step with a status in progress (changed within 90 minutes) tells the silence check a build subagent is running on the item; a status left in progress stops hiding the item after that, "
+    "A project builder's step with a status in progress (changed within 90 minutes) tells the stall pass and the balancer that a build subagent is running on the item; a status left in progress stops hiding the item after that, "
     "and a status sent again unchanged keeps its old time, so a long job changes the words or marks the step done."))]
 
 _DONE_PARAM = Annotated[list[int | str] | int | str | None, Field(description="Open steps of the checklist you finished: positions (1-based, marked steps count) or the exact first line, e.g. done=[1] or done=[1, \"my-x: open the PR\"]. A step of yours that next leaves out must be in done or dropped.")]
@@ -10531,7 +10427,7 @@ _UPDATE_DESC = (
     "status of your first open step in place, so a night of updates is one line on the step, not one line each. state is in progress (the default) or done; done also ticks the step, as done=[n] does. "
     "With no open step of yours the call makes one from the text; {\"remove\": true} clears the status. Written by the mover or a session named in needs; it changes no needs, owes no page and, "
     "unless it ticks or makes a step, leaves the state clock and the confirm alone. A project builder's step with a status in progress (changed within 90 minutes) "
-    "tells the silence check a build subagent is running on the item, so the item is not found silent meanwhile; a status left in progress stops hiding the item after that, "
+    "tells the stall pass and the balancer that a build subagent is running on the item, so the item is not handed on meanwhile; a status left in progress stops hiding the item after that, "
     "and a status sent again unchanged keeps its old time, so a long job changes the words or writes to the item; mark the step done when the subagent ends. "
     + f"A question {OWNER} asks on an item (in his answer or a comment on it) is answered by the mover on the item itself: rewrite the "
     "description, and the options where it is a pick, the description saying it answers his question. His question is never posted with "

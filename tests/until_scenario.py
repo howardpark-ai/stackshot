@@ -9,7 +9,7 @@ holds that every reader takes it, and that an item without one reads as it alway
      check_fields judges a given `until`; the wait fields that must clear when a wait ends list `until`
   3  watchers: stored_kind, time_epoch, backstop_epoch, can_end, next_moment, due and watches for an until-only item and for the kinds anchor, item, relay and event with an `until` backstop;
      the backoff after a failed turn; end_wait / turn_alive clear `until` with the kind group; a relay's "not yet" puts the new date back where the old one stood
-  4  states, stall, silence, audit (check_stale, dates_findings), dated_wait: each reads the stored `until` where it read a wake
+  4  states, stall, silence (the shared readings), audit (check_stale, dates_findings), dated_wait: each reads the stored `until` where it read a wake
   5  the board: home.end_of, itempage.wait_end_label, both renderers' wake_of, and get's `until:` line; the wait basis and the owner's words are read for the very `until` they were given for
 
     tests/run-suite until        -> exit 0 / 1"""
@@ -193,11 +193,11 @@ check("stall.not_due (watchers off): the board's reading is the same, a bare wak
       and ST.due_at(base(until=day(-1))) == ep(day(-1)) and ST.due_at(base(wake=day(-1))) == ep(day(-1)) and ST.due_at(base(wake=day(2)), now) == 0.0)
 _cfg.CFG["model"]["watchers"] = True
 check("stall.due_at: no date is 0", ST.due_at(base()) == 0.0)
-# silence: an item that waits is no silent item, whatever its last write; the same item with no date is
+# silence.reading: an item that waits is not on an agent, whatever its last write; the same item with no date is
 sil = base(until=day(2)); sil["updated"] = sil["state_updated"] = now - 30 * H
 quiet = base(); quiet["updated"] = quiet["state_updated"] = now - 30 * H
-check("silence: an until item is not found silent; the same item with no date is", SI.silent(sil, sil["metadata"], BACK, lambda i: [], now) == "" and "no date of its own" in SI.silent(quiet, quiet["metadata"], BACK, lambda i: [], now),
-      SI.silent(quiet, quiet["metadata"], BACK, lambda i: [], now))
+check("silence.reading: an until item is not on an agent; the same item with no date is", SI.reading(sil, BACK, [], now) == "" and SI.reading(quiet, BACK, [], now) == "agent",
+      (SI.reading(sil, BACK, [], now), SI.reading(quiet, BACK, [], now)))
 # audit: past its until with no write since
 stale_until = base(until=at(0, "00:00")); stale_wake = base(wake=at(0, "00:00"))
 last = now - 40 * H

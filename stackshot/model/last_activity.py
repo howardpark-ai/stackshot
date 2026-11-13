@@ -11,7 +11,7 @@ The one definition of activity. Something visible happened to the item when:
   a pull request tied to the item had an event: a CI result (failed, or a new head passing), a comment by a person, a review, a merge, a new head commit (anchors/event_log.py, tied by merge_tie).
 
 What is not activity: a status line (`work`), a reply or a "no change" answer, a note, a message, a bare confirm, a new or reworded step, a description edit; and the server's own
-writes about the item, which are not in progress either: a History line (the ladder's, the silence pass's, a merge pass's reason), the ask itself, the step a session or the server
+writes about the item, which are not in progress either: a History line (the ladder's, an audit pass's, a merge pass's reason), the ask itself, the step a session or the server
 makes for the owner. Those move the `activity` clock (activity.py), which this does not touch, and not this record.
 
 Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit` (stamped today: the

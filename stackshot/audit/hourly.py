@@ -1,23 +1,23 @@
 """hourly.py: the hourly audit line: an item on an agent that has had no write for an hour gets one short line saying what the audit verified.
 
 Part of the rule that no item an agent moves goes more than an hour without an update. The mover writes the update; when it has nothing new to add, the audit checks that the item is moving and
-writes the line itself, so the owner never sees an item on an agent idle for over an hour. This is the audit side; handing an idle item on is audit/hand_idle.py. Off by default (`[audit] hourly_line`).
+writes the line itself, so the owner never sees an item on an agent idle for over an hour. This is the audit side; handing an idle item on is audit/hand_idle.py. Together they replace the 45-minute news ask. On by default (`[audit] hourly_line`).
 
-  enabled()                                    `[audit] hourly_line`, only a TOML true
+  enabled()                                    `[audit] hourly_line`, on unless a TOML false
   due(items, gid, now, env, pane, same, subagents, anchored, queue)   the line an item is owed now, None when none: {"text", "verified", "kind"}
   pass_(items, now, env, pane, same, subagents, anchored)      [(gid, line)] of every open item that is owed one; reads only
   last_line(meta)                              the newest audit line on an item (its log entry), None when it has none
   stamp_signal(line, now)                      the `audit` signal a line that verified something stamps as the item's last_activity, None for one that did not
 
-An item is owed a line when all of these hold, using the silence pass's own scope (`silence.reading`, `silence.clock`):
+An item is owed a line when all of these hold, using the shared readings of silence.py (`silence.reading`, `silence.clock`):
 
   - it is open and on an agent as the board shows it: a session is its mover, its state is not the owner's move, and the board does not show it waiting. A hold, a parked item and any stored
-    wait (a dated wake, an item it waits after, a release, a CI run, a relay, an outside party) and an item queued behind its mover's other item (`[model] queued_behind`, model/queued.py) are left alone, exactly as the silence pass leaves them;
-  - an untaken hand-off to a back agent is left alone (the hand-off audit clocks it); an untaken hand-off to a front agent is not, as in the silence pass. A front agent's item is otherwise
+    wait (a dated wake, an item it waits after, a release, a CI run, a relay, an outside party) and an item queued behind its mover's other item (`[model] queued_behind`, model/queued.py) are left alone, exactly as the board shows them;
+  - an untaken hand-off to a back agent is left alone (the hand-off audit clocks it); an untaken hand-off to a front agent is not. A front agent's item is otherwise
     treated like any other: the pass sends nobody anything, it writes a History line, so there is no notice to hold back from a front agent;
-  - the item has had no real activity for an hour: `silence.clock`, the clock the silence pass reads (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
+  - the item has had no real activity for an hour: `silence.clock`, the item's quiet-time clock (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
     a write by the mover). A bare confirm ("no change") and the audit's own and the ladder's lines do not move it, so a "no change" reply is no update;
-  - no audit line was written on it lately: the next line is owed 45 minutes after the last (`FAST_GAP`) for the first 24 hours of silence, then one every 6 hours (`SLOW_EVERY`), so a week of silence is about
+  - no audit line was written on it lately: the next line is owed 45 minutes after the last (`FAST_GAP`) for the first 24 hours of quiet, then one every 6 hours (`SLOW_EVERY`), so a week of quiet is about
     about fifty lines (51), not 168. The ten-minute tick lands it on the first tick from then on, 50 minutes after the last line on an exact grid and at most about 51 minutes with a round up to a minute late (a round that skips its tick altogether pushes it to about an hour), so the row of a
     verified item, which reads red only strictly past an hour since its last activity (the line's time), never turns red between two lines. The newest line of `metadata.hourly_audit.log` is the clock, so a
     second pass in the same 45 minutes writes nothing and a clock that goes backwards only delays the next line.
@@ -70,7 +70,7 @@ PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED})   
 
 
 def enabled() -> bool:
-    """`[audit] hourly_line` (default false): only a TOML true switches the pass on. Read at use, so a reload turns it on or off."""
+    """`[audit] hourly_line` (default true): a TOML false (or any value that is not a TOML true) switches the pass off. Read at use, so a reload turns it on or off."""
     return _cfg.audit_hourly_line()
 
 
@@ -179,7 +179,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
         except Exception:  # noqa: BLE001
             return True
     if _ho.awaiting_session(it) and not front(mover, str(meta.get("project") or "")):
-        return None      # an untaken hand-off to a back agent is the hand-off audit's (a front agent's is checked, as the silence pass does)
+        return None      # an untaken hand-off to a back agent is the hand-off audit's (a front agent's is checked)
     last = _silence.clock(it, mover)
     if not (last > 0 and now - last >= EVERY):
         return None

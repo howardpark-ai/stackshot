@@ -31,7 +31,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 - [Doing, waiting and the clock](waiting-and-doing.md): What doing means, a doing item that only waits for a later day, the goal an item opens with, no clock renewal without progress, on agent versus park, and the blocker a self-set wait must name.
 - [Hand-offs, the done check and front agents](handoffs.md): What a front agent may watch, the done check that closes an item when its proof is met, the shared PR-state reader, and when a front agent hears of its item.
 - [The minute runner and the filing passes](server-passes.md): The minute set runner, the filing and dates pass, the front-step rule and its write check, the four facts the server files itself, and the wait-end rule.
-- [The silence pass, the stall pass and the ladder](stall-and-ladder.md): The silence pass, the stall pass, the one ladder of nudges, and how the hand-off record follows the mover.
+- [The audit lines, the stall pass and the ladder](stall-and-ladder.md): The readings the audit passes share, the hourly audit line and the idle hand-over, the stall pass, the one ladder of nudges, and how the hand-off record follows the mover.
 
 ## Hooks and the audit
 
