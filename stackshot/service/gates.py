@@ -786,7 +786,6 @@ def gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed
     differs from the one the item carried. `item_now` = the item as this call leaves it (so a hand-off made in the same call counts: the old mover is no
     longer the mover); `handed` = the sessions its next hands the work to. → the reason to record on the item ("" when none was needed); raises ToolError
     otherwise. A failure of the check itself passes the write (one stderr line)."""
-    h = _hooks()
     if not _telling.front_sender(sender):
         return ""
     try:

@@ -1494,7 +1494,7 @@ def _page_debt_forget(key: str, moved: dict[str, dict[str, Any]], keeper: str = 
 def _page_agent(key: str) -> str:
     """The agent that keeps the page `key` as its own working document: the registry's entry for the page, when its frontmatter names an
     `agent:` (pages.keeper_of: role "agent", the entry's `session`; anchors.registry), and that session is live (a heartbeat in the fleet's
-    sessions index, by name or id, not marked gone; _keeper reads the same entry for the item notices). A hub page names a `display-name:` and
+    sessions index, by name or id, not marked gone; project_keeper reads the same entry for the item notices). A hub page names a `display-name:` and
     a sub-page that names nobody belongs to its keeper, so neither has one → "" ."""
     try:
         e = _anc.registry().get(str(key or "").strip().strip("/")) or {}
@@ -9110,7 +9110,7 @@ def _rebullet_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     the search), under the item lock, as the author `rebullet`. The body: item, sender, old (the description the rewrite was made from) and description
     (the rewrite). This is the only writer of the pass: the caller's token must be a machine in [model] rebullet_machines (default: the server box); the item must be open and its
     description still the `old` the rewrite was made from (a session's edit since then wins and the rewrite is dropped); and rebullet.verdict judges the rewrite here too,
-    so a lossy one (a link, a number, a date or a quote gone) is refused whoever sends it. The write is a filing edit (_REFORMAT): the item's state clock and its confirm stay (its `updated` time does move), no page
+    so a lossy one (a link, a number, a date or a quote gone) is refused whoever sends it. The write is a filing edit (REFORMAT): the item's state clock and its confirm stay (its `updated` time does move), no page
     is owed and no one is told. `sender` must not name a session. → {"item", "action": set | already, "result"}; refusals raise ToolError."""
     allowed = _cfg.get("model", "rebullet_machines", default=[])
     allowed = [allowed] if isinstance(allowed, str) else [str(x) for x in allowed] if isinstance(allowed, list) else []
@@ -13147,7 +13147,7 @@ def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str,
     question in its terminal" (a create sets no step). A second open for a session that has an open item changes that item's next line and creates nothing; the same question
     again writes nothing. clear: closes the session's open item (outcome done, reason "the pane stopped waiting"); with none open it does nothing and answers 200. The session is
     matched through the registry, so an id, an old name and the current name reach one item. The writes are a script's (like _question's): the guard on alarming words does not judge
-    a pane's own question (_QUESTION) and the script owes no page. -> (status, {item, session, project, repeat} | {session, cleared: [ids]})."""
+    a pane's own question (QUESTION) and the script owes no page. -> (status, {item, session, project, repeat} | {session, cleared: [ids]})."""
     action = str(body.get("action") or "").strip()
     session, sender = (str(body.get(k) or "").strip() for k in ("session", "sender"))
     question = body.get("question") if isinstance(body.get("question"), str) else ""

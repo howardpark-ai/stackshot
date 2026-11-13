@@ -109,7 +109,7 @@ _FRONT_QUIET = "\n(its {word} {owner} is a front agent: not told; the board show
 
 
 def tell_comment(gid: str, item: dict[str, Any], text: str) -> list[str]:
-    """the owner's comment on GitHub, one line to the item's mover (_holder) and to every session named in its needs, each
+    """the owner's comment on GitHub, one line to the item's mover (holder) and to every session named in its needs, each
     once. A front agent mover hears it marked for the owner (_FOR_OWNER): the mark is what reaches its Claude. The text is clipped
     to one line; the whole comment is on the item and its issue. → the session ids told."""
     h = _hooks()
@@ -160,7 +160,7 @@ def pilot_charge(project: str, writer: str) -> tuple[str, str]:
 
 
 # Vocabulary of this file (the router rules every project, and the role the project sessions once had is
-# gone): the KEEPER of a project is the session its notices fall to (_stand_in_keeper: its builder, else its -main agent; for a page with
+# gone): the KEEPER of a project is the session its notices fall to (stand_in_keeper: its builder, else its -main agent; for a page with
 # no agent of its own its hub's, else the scope's general -main agent), and a notice that would have gone to the page's `display-name:`
 # session is held for the router (router_live.holds). Text a session or the owner reads says keeper, builder or router.
 def stand_in_keeper(project: str, reg: dict[str, Any] | None = None) -> str:
@@ -260,7 +260,7 @@ def held_by(item: dict[str, Any], was: dict[str, Any] | None = None) -> tuple[st
 
 
 def holder(item: dict[str, Any], was: dict[str, Any] | None = None) -> str:
-    """The session an item's notices go to (_held_by): "" when none can be named."""
+    """The session an item's notices go to (held_by): "" when none can be named."""
     return held_by(item, was)[0]
 
 
@@ -306,7 +306,7 @@ def keeper_words(project: str, keeper: str) -> str:
 
 def notice_to(meta: dict[str, Any]) -> list[tuple[str, str]]:
     """The sessions an item's notices go to → [(session id, why)]: the sessions named in its needs, else its mover or its `then` or, with neither, the project's builder, else its
-    -main agent (_holder: never the creator). `why` is the words for the notice: "as a session named in its needs" | "as its mover" | "as its then"."""
+    -main agent (holder: never the creator). `why` is the words for the notice: "as a session named in its needs" | "as its mover" | "as its then"."""
     h = _hooks()
     out: list[tuple[str, str]] = []
     for s in _needs_sessions(meta):
@@ -341,7 +341,7 @@ def front_keeper(who: str, project: str = "", strict: bool = False, unread_front
         if own and h.session_id(own) == h.session_id(who):     # the keeper of this item's project is its keeper here, front elsewhere or not
             return False, ""
         for p in (project, roles[name]["project"]):
-            stew = (page_keeper(p) or _anc.name_line(p)) if p else ""     # the page's keeper (_page_keeper: the stand-in of a page that lists agents, a one-session page's own session), not the retired name-line session
+            stew = (page_keeper(p) or _anc.name_line(p)) if p else ""     # the page's keeper (page_keeper: the stand-in of a page that lists agents, a one-session page's own session), not the retired name-line session
             if stew and h.session_id(stew) == h.session_id(who):
                 return True, ""        # the stand-in is this front agent itself: it tells nobody about its own
             if stew:
@@ -383,12 +383,12 @@ FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt"
                    "owner": "progress", "observer": "progress"}      # news about the item: progress (named here so a new, unmapped tag is a decision the tag-coverage test catches)
 
 
-FRONT_HINT = threading.local()      # the kind the sender gives the gate for the one notice it is telling (see _tell_kind)
+FRONT_HINT = threading.local()      # the kind the sender gives the gate for the one notice it is telling (see tell_kind)
 
 
 def tell_kind(kind: str, *args: Any, **kw: Any) -> "threading.Thread | None":
-    """_tell_woken for a sender that knows what kind of notice it tells a front agent (progress | close | stuck | exempt); the hint lasts for this call only, so
-    _tell_woken keeps its signature (the tests replace it)."""
+    """tell_woken for a sender that knows what kind of notice it tells a front agent (progress | close | stuck | exempt); the hint lasts for this call only, so
+    tell_woken keeps its signature (the tests replace it)."""
     old = getattr(FRONT_HINT, "kind", "")
     FRONT_HINT.kind = kind
     FRONT_HINT.result = ("", "")
@@ -399,8 +399,8 @@ def tell_kind(kind: str, *args: Any, **kw: Any) -> "threading.Thread | None":
 
 
 def gate_result() -> tuple[str, str]:
-    """what the gate did with the last notice _tell_kind told on this thread: ("", "") sent as ever (or a recipient that is no front agent), ("fyi", "") filed to ride his next
-    turn, ("held", why) nobody is told. A sender words its reply line from it, so a line never says "told" of a notice the gate held. (_tell_woken returns None for a held notice, but a
+    """what the gate did with the last notice tell_kind told on this thread: ("", "") sent as ever (or a recipient that is no front agent), ("fyi", "") filed to ride his next
+    turn, ("held", why) nobody is told. A sender words its reply line from it, so a line never says "told" of a notice the gate held. (tell_woken returns None for a held notice, but a
     test's stand-in returns None too, so the verdict is read here.)"""
     return getattr(FRONT_HINT, "result", ("", ""))
 
@@ -572,7 +572,7 @@ def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str) -> 
 
 
 def front_gate(gid: str, owner: str, note: str, tag: str, kind: str) -> bool:
-    """the one gate every item notice passes in _tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
+    """the one gate every item notice passes in tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
     Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act). The [for <owner>]
     mark does not exempt a notice: a close or a stuck notice stackshot itself sends carries it, and takes a turn of its own only under presence plus touched. A message a session sends
     on purpose goes through the message tool, which does not pass here.
@@ -615,7 +615,7 @@ def tell_close_owner(gid: str, item: dict[str, Any], owner: str, project: str, w
     agent, which cost that agent a turn and him a place in a chat. The row is made when the close is saved (_foryou_on_save, which
     also holds the muted and unwatched rules), so nothing is delivered here; this only says whether the row exists, for the writer's
     reply line. The front agent mover is told of any close by another session all the same, in its own
-    message (_tell_owner_close), so it need not set a far wake and wait; the row for his words is unchanged. The router's `close-words` rule stays for a notice recorded before this change (it rules it merged). → what shows his
+    message (tell_owner_close), so it need not set a far wake and wait; the row for his words is unchanged. The router's `close-words` rule stays for a notice recorded before this change (it rules it merged). → what shows his
     words ("" = no row: no words on the item, or the item is muted)."""
     h = _hooks()
     signal = _owner_words(item)
@@ -666,9 +666,9 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
     when the mover itself was told (not its keeper instead), and when a front agent mover is passed by on a move to decision,
     so a "now needs you" or quiet line in the same write does not double it. → the writer's reply line, or "" (no mover, or the
     mover wrote it). A close (`close`) with his own words on the item (_owner_words) was the one thing
-    a front agent mover was told; it is a row on his For you list instead (_tell_close_owner says so in the
+    a front agent mover was told; it is a row on his For you list instead (tell_close_owner says so in the
     reply line); its keeper is told as before. This function still tells a front agent mover nothing itself;
-    the mover's own line for a close by another session (with his words or not) is _tell_owner_close's."""
+    the mover's own line for a close by another session (with his words or not) is tell_owner_close's."""
     h = _hooks()
     if getattr(_writes.TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
         return ""
@@ -682,11 +682,11 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
     front, stew = front_keeper(owner, project)
     if front and decision:                 # the board shows it; nobody is told
         if heard is not None:
-            heard.append(h.session_id(owner))   # its quiet line is this one: _tell_needed leaves the mover out of the same write
+            heard.append(h.session_id(owner))   # its quiet line is this one: tell_needed leaves the mover out of the same write
         return quiet_line(item, owner)
     if front:
         words = tell_close_owner(gid, item, owner, project, writer) if close else ""       # a close with his words on it is the one thing a front agent mover hears
-        row_note = f"{OWNER}'s words are on it ({words}), so it is a row on his For you list"     # no "not told;" in it: the mover's part is settled (_owner_reached); the mover itself is told by _tell_owner_close
+        row_note = f"{OWNER}'s words are on it ({words}), so it is a row on his For you list"     # no "not told;" in it: the mover's part is settled (owner_reached); the mover itself is told by tell_owner_close
         if words and h.foryou_key(gid, "closed", item) in _FORYOU_FELL:
             row_note = f"{OWNER}'s words are on it ({words}), but the For you list could not be written, so the old notice marked {_FOR_OWNER} was sent to {_session_label(owner)} instead"
         if not stew or h.session_id(stew) == h.session_id(writer):
@@ -706,7 +706,7 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
 
 def tell_observers(gid: str, item: dict[str, Any], what: str, writer: str) -> str:
     """an item's observers hear a close or a reopen, one line each, unmarked; a front agent observer hears it through its
-    project's keeper. Neither the writer nor the item's mover (told by _tell_owner) is told here. → the writer's reply line, or ""."""
+    project's keeper. Neither the writer nor the item's mover (told by tell_owner) is told here. → the writer's reply line, or ""."""
     h = _hooks()
     if getattr(_writes.TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
         return ""
@@ -775,22 +775,22 @@ def _owner_is_session(owner: str) -> bool:
 
 
 def owner_reached(text: str, relayed: bool) -> bool:
-    """Did a reply line of _tell_owner (or of _auto_name, which carries it) say the mover was reached this write? Its "not told; the board
-    shows it" line for a front agent mover counts only when the write also went to the project's keeper or router (`relayed`: _pilot_relay),
-    where the mover's part is ruled; otherwise nobody got it and _tell_owner_change hands it to the page key."""
+    """Did a reply line of tell_owner (or of _auto_name, which carries it) say the mover was reached this write? Its "not told; the board
+    shows it" line for a front agent mover counts only when the write also went to the project's keeper or router (`relayed`: pilot_relay),
+    where the mover's part is ruled; otherwise nobody got it and tell_owner_change hands it to the page key."""
     return bool(_HELD_LINE.search(text)) and ("not told;" not in text or relayed)
 
 
 def tell_owner_change(gid: str, item: dict[str, Any], before: dict[str, Any], writer: str, closing: bool, handled: bool, relayed: bool = False, reopening: bool = False) -> str:
     """The mover hears one short line when another session closes its item or changes its next, needs, check or after (a filing edit
-    sends nothing). A session mover is pushed to through _tell_woken like the other board notices. A front agent mover
+    sends nothing). A session mover is pushed to through tell_woken like the other board notices. A front agent mover
     is not messaged itself (the mark is for what the owner has to do) and the router rules a project's notices, so the line goes to the item's project
     page key as a message, where the router rules it like any inbound (the stand-in), saying the mover may need to act. One event makes one inbound there: nothing goes to the page key when the
-    write already reached the project's keeper or router (`relayed`, _pilot_relay), when the writer is itself the project's keeper,
+    write already reached the project's keeper or router (`relayed`, pilot_relay), when the writer is itself the project's keeper,
     keeper or stand-in, when the project has none of them (quietly), or when the routing record cannot be written (logged); the page
     key's delivery is built here, not through _message, which would name the stand-in builder in the item's needs. Not when the mover
-    is the owner or not a session, when the writer is the mover, or when `handled` (_tell_owner, the server's naming of the writer, or a
-    needs notice already told it this write, or _tell_owner_close, which tells a front agent mover of a close by another session, the owner).
+    is the owner or not a session, when the writer is the mover, or when `handled` (tell_owner, the server's naming of the writer, or a
+    needs notice already told it this write, or tell_owner_close, which tells a front agent mover of a close by another session, the owner).
     Otherwise a front agent is never pushed to by this notice: when the page key's target is a front agent (the
     stand-in of a project is its -main agent) or the mover itself, and when the write moves a front agent
     mover's item to needs=decision (the board shows it), nothing is pushed and the reply says so. At most one
@@ -850,7 +850,7 @@ def tell_owner_change(gid: str, item: dict[str, Any], before: dict[str, Any], wr
     if "decision" in _needs_kinds(meta) and "decision" not in [str(x).lower() for x in _needs_list(before.get("needs"))]:
         return quiet                   # a move to decision is told to nobody, a front agent mover's item in or out of the pilot: the board shows it
     if relayed:
-        return ""                      # the keeper or the router already has this write (_pilot_relay) and rules it: one event, one inbound
+        return ""                      # the keeper or the router already has this write (pilot_relay) and rules it: one event, one inbound
     key = project.strip().rstrip("/")
     try:
         reg = _anc.registry()
@@ -888,7 +888,7 @@ def next_head(meta: dict[str, Any], writer: str = "") -> str:
 
 
 def tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, heard: list[str] | None = None) -> str:
-    """a session newly named in an item's needs gets one notice, never the writer. The item's mover (_holder) named by another session is told
+    """a session newly named in an item's needs gets one notice, never the writer. The item's mover (holder) named by another session is told
     like any other, unless `heard` shows this same write already told it as mover (a move to decision, a reopen) or passed a front agent mover by on a move
     to decision, so it hears the write once and the reply says so once. → the reply line, or ""."""
     hk = _hooks()
@@ -912,7 +912,7 @@ def tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, h
                               f"Your turn-end board check asks about it until then. → {notice_link(gid)}", tag="needs")
         told.append(_session_label(s))
         if heard is not None and owner and sid == hk.session_id(owner):
-            heard.append(sid)     # the mover has heard this write: a later notice in it (_tell_decided) leaves it out
+            heard.append(sid)     # the mover has heard this write: a later notice in it (tell_decided) leaves it out
     return (f"\n({', '.join(told)} {'has' if len(told) == 1 else 'have'} been told the item needs {'it' if len(told) == 1 else 'them'})" if told else "") + quiet
 
 
@@ -939,13 +939,13 @@ def tell_decided(gid: str, item: dict[str, Any], sessions: list[str], writer: st
                               + f". Read its next for his call, do your part and close it or hand it back (sender={_session_label(s)!r}). → {notice_link(gid)}", tag="needs")
         told.append(s)
         if heard is not None and owner and sid == hk.session_id(owner):
-            heard.append(sid)     # the mover has heard this write, as _tell_needed records it: _tell_owner_change leaves it out
+            heard.append(sid)     # the mover has heard this write, as tell_needed records it: tell_owner_change leaves it out
     return (f"\n({', '.join(_session_label(s) for s in told)} {'has' if len(told) == 1 else 'have'} been told the move is {'its' if len(told) == 1 else 'theirs'} now that the decision is in)" if told else "") + quiet
 
 
 def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: str, heard: list[str] | None = None) -> str:
     """A front agent mover is not woken by most item notices, so an item a builder hands back
-    sat with it until its next turn. This is the first exception (a close by another session, _tell_owner_close,
+    sat with it until its next turn. This is the first exception (a close by another session, tell_owner_close,
     skips a mover this function told; this is the one line a front agent
     mover hears of an open item's needs, only when back with it): a write by a session other than the mover that leaves the
     item's needs naming the mover alone (the sessions in it; `decision` still in it is his, not a hand-back, and `external` is ignored),
@@ -953,8 +953,8 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
     silence), tells that front agent mover one short line, with the first line of `next`. Not on a close or a reopen, not when the mover
     wrote it, not when [board] tell_owner is off. A project the router is live for records it for the router, whose hand-back rule
     passes it straight to the mover (router.py), marked as every delivery to a front agent is; any other project delivers it at once with
-    the mark (_FOR_OWNER), as _tell_close_owner does. The mover is added to `heard` and to _OWNER_HEARD, so the write's other notices
-    (_tell_needed, _tell_decided, _tell_owner_change) leave it out: it hears the write once. There is no pilot gate, on purpose: a project outside the pilot gets the marked push. → the writer's reply line, or ""."""
+    the mark (_FOR_OWNER), as tell_close_owner does. The mover is added to `heard` and to OWNER_HEARD, so the write's other notices
+    (tell_needed, tell_decided, tell_owner_change) leave it out: it hears the write once. There is no pilot gate, on purpose: a project outside the pilot gets the marked push. → the writer's reply line, or ""."""
     h = _hooks()
     meta = item.get("metadata") or {}
     owner, project = holder(item), str(meta.get("project") or "")
@@ -977,7 +977,7 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
         told = "nobody is told: a front agent is not handed an item on stackshot's own motion, so the board shows it (your own write; the project's builder is you)"
         dest = ""
     elif dest and dest != oid:
-        if _held.can_fetch(dest):      # the builder's hook fetches held lines: the line rides its next turn (_tell_or_hold); else it is pushed as a message
+        if _held.can_fetch(dest):      # the builder's hook fetches held lines: the line rides its next turn (tell_or_hold); else it is pushed as a message
             told = f"its builder {_session_label(dest)} is passed a note that it is back with them alone, not them (a note for its next turn, not a wake-up): a front agent is not handed an item on stackshot's own motion"
         else:
             told = f"its builder {_session_label(dest)} is told it is back with them alone, not them: a front agent is not handed an item on stackshot's own motion"
@@ -1006,7 +1006,7 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
 
 # A builder that hands an item back to its front agent keeper and then closes the same
 # item soon after woke the keeper twice. The hand-back line is now held for [board] handback_hold_seconds (default 180; 0 = sent at once, as before). A close of the item
-# inside the window (any close: `writes.save` sees it) drops the held line, so the keeper hears only "closed by …" (_tell_owner_close); a second hand-back
+# inside the window (any close: `writes.save` sees it) drops the held line, so the keeper hears only "closed by …" (tell_owner_close); a second hand-back
 # of the same item inside the window replaces the first (one line, the latest `next`, the original due time). When the window ends the line is sent
 # if the item is still open and its needs still name the keeper alone; if the item moved on, it is dropped. The held lines are kept in
 # <state>/handback-held.json, so a restart loses none: the runner's fleet tick (every 60 s) sends what is due.
@@ -1085,7 +1085,7 @@ def handback_drop(gid: str, why: str = "") -> int:
 
 def handback_send(rec: dict[str, Any]) -> bool:
     """Deliver one hand-back line: recorded for the router when the project's is live (its hand-back rule passes it, marked), else pushed at once with the mark; a record that cannot be written is pushed (never lost).
-    for a front agent mover the line goes to the project's builder instead (_tell_or_hold: it asks the builder nothing, so it rides the builder's next turn), or to nobody. → True when
+    for a front agent mover the line goes to the project's builder instead (tell_or_hold: it asks the builder nothing, so it rides the builder's next turn), or to nobody. → True when
     a line was passed to someone, False when nobody was told (the board and the routing log hold it)."""
     h = _hooks()
     gid, oid, project, who, olabel = rec["gid"], rec["oid"], rec["project"], rec["who"], rec["olabel"]
@@ -1161,7 +1161,7 @@ def _closed_by(item: dict[str, Any], who: str) -> str:
 
 def tell_owner_check_closed(gid: str, item: dict[str, Any], told: list[str]) -> bool:
     """The server's own close on a done check (a merged pull request) tells
-    a front agent mover at once too, in the line _tell_owner_close sends for a close by a session, with "stackshot's done check" as the
+    a front agent mover at once too, in the line tell_owner_close sends for a close by a session, with "stackshot's done check" as the
     closer. The same rules: not when [board] tell_owner is off, the mover is not a session or not a front agent, the item is muted on his
     For you list, the mover is already among `told` (it keeps the page, so the keeper's line reached it), or its For you row failed and
     the old notice went to it (_FORYOU_FELL). → True when sent."""
@@ -1184,14 +1184,14 @@ def tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool,
     """A session other than the mover closes the item, and the front agent that
     moves it is told at once, by one marked line (any close, not only one with his words on it: that close is also a row on his For you
     list, which stays as it is, _foryou_on_save). It is delivered at once with the mark (_FOR_OWNER), router live or not, as
-    _close_owner_notice does: the server's own delivery to the mover is what reaches a front agent (the message tool refuses an unmarked
-    message to one, and a marked one that says nothing is needed from him). There is no pilot gate, as for _tell_handback. Not when the
+    close_owner_notice does: the server's own delivery to the mover is what reaches a front agent (the message tool refuses an unmarked
+    message to one, and a marked one that says nothing is needed from him). There is no pilot gate, as for tell_handback. Not when the
     mover wrote it or is the owner or not a session, not when [board] tell_owner is off, not when the item is muted on his For you list, not
-    when the mover is not a front agent (it already hears a close through _tell_owner), not when this write already told the mover
+    when the mover is not a front agent (it already hears a close through tell_owner), not when this write already told the mover
     (`heard`), not when the close's For you row failed and was told the old way (_FORYOU_FELL). This function once also told the mover of a builder's step, when a session the
     item's needs named took itself out of needs or finished its last step by a status done. That line is gone: a front agent mover hears of an
-    item only when it is closed (here) or back with it alone (_tell_handback); a builder's step stays on the item's History (one line a change)
-    and, for a state-changing write, the page debt it leaves (_owed_mark). The mover is added to `heard` and to _OWNER_HEARD so the write's other notices leave it out.
+    item only when it is closed (here) or back with it alone (tell_handback); a builder's step stays on the item's History (one line a change)
+    and, for a state-changing write, the page debt it leaves (_owed_mark). The mover is added to `heard` and to OWNER_HEARD so the write's other notices leave it out.
     → the writer's reply line, or "" (nobody told)."""
     hk = _hooks()
     if getattr(_writes.TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
@@ -1228,7 +1228,7 @@ def live_pass(project: str, nid: str, to: str) -> None:
 def pilot_relay(project: str, gid: str, item: dict[str, Any], what: str, writer: str, keeper: str, role: str = "name", tail: str = "") -> str:
     """Tell the page's keeper what another session changed on the board (one routing-log line, one notice). → a line for the writer's reply.
     tail replaces "the page update is yours" (the fallback after the writer left it undone, or a close told for its anchors)."""
-    if front_keeper(keeper, project)[0] and not _router_live.holds(project, keeper):      # a front agent gets no page-owed notice; the charge already passed it by (_pilot_charge); one that is only the address of a nameless page's notices is the router's
+    if front_keeper(keeper, project)[0] and not _router_live.holds(project, keeper):      # a front agent gets no page-owed notice; the charge already passed it by (pilot_charge); one that is only the address of a nameless page's notices is the router's
         return ""
     who = _session_label(writer) or "a session"
     subject = str(item.get("subject") or "")
@@ -1301,7 +1301,7 @@ def writer_charge(project: str, gid: str, writer: str, keeper: str, what: str, l
 def pilot_relay_many(keeper: str, rows: list[tuple[str, str, dict[str, Any], str, str]], head: str = "") -> list[str]:
     """Several debts moved to one keeper in one tick (the turn rule's fourth build: each relay cost the
     keeper a turn): one message listing them, rows = [(project, gid, item, what, writer)]. Each debt still gets its own
-    routing-log line, as _pilot_relay writes it, the lines sharing one `batch` id so a count of the turns notices cost counts
+    routing-log line, as pilot_relay writes it, the lines sharing one `batch` id so a count of the turns notices cost counts
     the message once. `head` = another first line (the page-debt call's fallback to the -main agent, _page_debt_fallback)."""
     h = _hooks()
     batch = os.urandom(3).hex(); nids: list[str] = []
@@ -1348,7 +1348,7 @@ def _mentions_ref(gid: str) -> "re.Pattern[str]":
 _MENTION_LINES_MAX = 8          # the items a close notice lists (the rest as a count): a very long list once overran MSG_MAX
 
 
-MENTIONED = threading.local()      # what the last close of this thread told (_tell_close_mentions): ([item ids that named it], [the movers told]); the close's reply says it once
+MENTIONED = threading.local()      # what the last close of this thread told (tell_close_mentions): ([item ids that named it], [the movers told]); the close's reply says it once
 
 
 def mentions_reply(gid: str) -> str:
@@ -1366,7 +1366,7 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
     """(a next that says "after Sam's review" with no `after` can be left asleep after the item it named closed):
     a close tells the mover of every other open item whose next or description names the closed item, one batched notice per mover, naming the closed item, how it ended and why, and the
     items that named it. Left out: the closer itself (the session that wrote the close), the closed item, and the items in `skip` (the ones with the closed item in `after`: the wake they get
-    is their notice). The mover is the item's mover as the model reads it; when that is the owner, or no session, the sessions its notices go to (_notice_to) hear it instead. A superseded
+    is their notice). The mover is the item's mover as the model reads it; when that is the owner, or no session, the sessions its notices go to (notice_to) hear it instead. A superseded
     item names its replacement. → the session ids told."""
     h = _hooks()
     try:
@@ -1448,7 +1448,7 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
 
 def tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip: list[str] | None = None) -> str:
     """A wait that can no longer end (a check whose pull request was closed unmerged) is told at once to the keeper of the item's
-    page (_keeper: its builder or -main agent): the item stays open, and the keeper
+    page (project_keeper: its builder or -main agent): the item stays open, and the keeper
     decides what it waits on now. (An `after` item that is dropped or closed undone is not one: the item is released with the wake
     notice, which says so.) `skip` = session ids already
     told of the same event. → the session id told, "" when nobody."""
@@ -1555,7 +1555,7 @@ def _asks_of(gid: str, item: dict[str, Any], sid: str) -> bool:
 
 def tell_or_hold(gid: str, owner: str, note: str, hold: str, tag: str = "wake") -> "threading.Thread | None":
     """The notice senders' one entry for a notice of a kind that asks nothing (`hold` is a held.KINDS kind): held for a background agent's next turn
-    when _hold_notice says so (before anything is recorded as told, so a hand-off notice is not suppressed by it), else _tell_woken as ever. → the sending thread, None when held."""
+    when hold_notice says so (before anything is recorded as told, so a hand-off notice is not suppressed by it), else tell_woken as ever. → the sending thread, None when held."""
     if hold and hold_notice(owner, note, hold, gid=gid):
         return None
     return tell_woken(gid, owner, note, tag=tag)
@@ -1563,11 +1563,11 @@ def tell_or_hold(gid: str, owner: str, note: str, hold: str, tag: str = "wake") 
 
 def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict[str, Any] | None" = None) -> "threading.Thread | None":
     """The wake pass's one line to the item's mover, through push.py in the background (as the keeper relay sends). A
-    failure is a stderr line and, since the owner's one rule, a record on the item (_record_undelivered), never an exception: the
+    failure is a stderr line and, since the owner's one rule, a record on the item (record_undelivered), never an exception: the
     pass has already saved the item. `gid` may name several items (a batched notice, comma-separated). `tag` names the sender in
     those lines (the recycle pass sends through here too). `result`, when given, is filled in by the thread: {"ok": bool, "why": str} (the migration's send_wake waits for it).
-    a notice for a front agent first passes _front_gate (its kind: progress | close | stuck | exempt, from _tell_kind's hint, else from the tag); a held one returns None like "no owner".
-    A notice that asks nothing of a background agent goes through _tell_or_hold instead. → the sending thread (a test joins it), None with no owner."""
+    a notice for a front agent first passes front_gate (its kind: progress | close | stuck | exempt, from tell_kind's hint, else from the tag); a held one returns None like "no owner".
+    A notice that asks nothing of a background agent goes through tell_or_hold instead. → the sending thread (a test joins it), None with no owner."""
     h = _hooks()
     if not owner:
         print(f"{tag}: {gid} has no owner to tell", file=sys.stderr, flush=True)
@@ -1605,8 +1605,8 @@ def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict
 
 
 def tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
-    """The server closed `gid` itself on its done check: its mover is told in one line (_holder, the mover as it stood before the close; a close is told to the mover alone,
-    never to its `then` or its creator). A front agent mover hears it as a close by another session does, marked (_tell_owner_check_closed). A close with the owner's own words on the item
+    """The server closed `gid` itself on its done check: its mover is told in one line (holder, the mover as it stood before the close; a close is told to the mover alone,
+    never to its `then` or its creator). A front agent mover hears it as a close by another session does, marked (tell_owner_check_closed). A close with the owner's own words on the item
     is also a row on his For you list, made when the close is saved (_foryou_on_save). → the session ids told."""
     h = _hooks()
     meta = item.get("metadata") or {}
@@ -1636,7 +1636,7 @@ HO_STATE = threading.local()      # per write: the hand-offs it has just recorde
 
 def handoff_notify(gid: str, item: dict[str, Any]) -> str:
     """At the tail of a create or update: the hand-off this write just recorded is told to its new mover when no notice of the write has told it already (a change of `mover` or
-    `then` names no one in needs, so _tell_needed said nothing). Not the owner, not a front agent (an item notice wakes none of them). → the reply line, or ""."""
+    `then` names no one in needs, so tell_needed said nothing). Not the owner, not a front agent (an item notice wakes none of them). → the reply line, or ""."""
     h = _hooks()
     try:
         to, at = (getattr(HO_STATE, "fresh", None) or {}).pop(gid, ("", None))

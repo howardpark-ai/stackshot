@@ -8,7 +8,7 @@ The rules of the Next design this module serves (N1, N3, N6 and N7; N2, N4 and N
   N6  an open item has an open step: a session write that leaves no open step on an item that stays open is refused (his server-made step counts; a close is exempt)
   N7  a step is an action, never a status: results, commit hashes, test counts and "at work since" stamps are noted, never refused (server._report_note carries the matcher)
 
-Pure text functions, no server import. Only a session's write through the create and update tools is judged (server._SESSION_NEXT); a script's, the router's and the server's own writes are not,
+Pure text functions, no server import. Only a session's write through the create and update tools is judged (`SESSION_NEXT` of `service/writes.py`); a script's, the router's and the server's own writes are not,
 and a line already stored is read as it is (a line naming no one still counts as his in steps.is_his): no data is changed here."""
 from __future__ import annotations
 

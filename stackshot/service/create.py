@@ -10,7 +10,7 @@ The request map (`requests.json`: a request id and the item it filed) is this mo
 The write gates a create runs are service/gates.py's (`_gates.gate_*`, in the order they ran in server.py). The field and decision checks and the notices a create runs are still server.py's, because the update tool,
 the close and the telling run the same ones; they are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves
 `Hooks` when its area moves under service/. A hook is looked up on server.py when a create runs, so a suite that replaces one there still reaches the create; a suite that replaces a gate patches it on service/gates.py. Three thread-local flags of server.py are read by a create and also by the gates, the update tool and the telling, so they
-stay thread-locals there until those areas move and a create reads them through `Hooks`: `session_next` (the create or update tool's own call, set by `_session_write`), `question` (a script's
+stay thread-locals there until those areas move and a create reads them through `Hooks`: `session_next` (the create or update tool's own call, set by `session_write`), `question` (a script's
 question: set by the question, terminal-prompt and watcher routes around their create) and `terminal_row` (the terminal prompt's and the job-gap routes' row).
 
 Imports point down only: this module imports the domain and core and the store's readers beside it (service/store.py), never web/."""
