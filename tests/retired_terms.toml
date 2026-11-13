@@ -212,3 +212,15 @@ allow = []
 retired = "stuck_to"
 use = "`[fleet] operator_session` names the fleet's builder (`server._fleet_builder`); there is no `[idle] stuck_to` key"
 allow = []
+
+# ---- the step form's one Send: a note box that read "A note, or nothing to finish the step" with one Send button (an empty box finished the step, a note was a step-reply).
+# Retired: the box is "Note (optional)" and the form has two buttons, Done (finishes the step, a written note goes along) and Send note (the step stays open).
+[[term]]
+retired = "A note, or nothing to finish the step"
+use = "`Note (optional)`: the step form's note box is optional, with two buttons, Done and Send note"
+allow = []
+
+[[term]]
+retired = "Send with an empty box finishes the step"
+use = "Done finishes the step (a note in the box goes along to the next owner); Send note keeps it open"
+allow = []

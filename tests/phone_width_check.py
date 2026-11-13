@@ -554,10 +554,10 @@ with sync_playwright() as p:
             check(f"{tag}: the ask forms are in the page's markup visible from the first paint (none hidden), every button of theirs disabled until a token comes, no token in the markup",
                   len(_fm) >= 5 and not any(" hidden" in x for x in _fm) and all(re.search(r"<button[^>]*>", b) and "disabled" in b for f in re.findall(r"<form class=\"hanswer.*?</form>", _src, re.S) for b in re.findall(r"<button[^>]*>", f))
                   and all('name="token" value=""' in f for f in re.findall(r"<form class=\"hanswer.*?</form>", _src, re.S)), len(_fm))
-            check(f"{tag}: the three step rows show the step, a note box and ONE Send (no Done), inside the screen",
+            check(f"{tag}: the three step rows show the step, a note box and two buttons (Done and Send note), inside the screen",
                   pg.evaluate("""() => { const vw = document.documentElement.clientWidth, o = []; for (const n of [65, 66, 67]) { const li = document.getElementById('task-a-' + n); if (!li) { o.push(n + ' missing'); continue }
                     const f = li.querySelector('form.hstep'); if (!f) { o.push(n + ' no step form'); continue }
-                    f.hidden = false; const bs = [...f.querySelectorAll('button')]; if (bs.map(b => b.textContent).join() !== 'Send') o.push(n + ' buttons ' + bs.map(b => b.textContent));
+                    f.hidden = false; const bs = [...f.querySelectorAll('button')]; if (bs.map(b => b.textContent).join() !== 'Done,Send note') o.push(n + ' buttons ' + bs.map(b => b.textContent));
                     for (const e of [...bs, f.querySelector('textarea'), ...li.querySelectorAll('.cmd pre')]) { const b = e.getBoundingClientRect(); if (b.width === 0 || b.left < -0.5 || b.right > vw + 0.5) o.push(n + ' ' + e.tagName + ' not inside ' + Math.round(b.left) + '..' + Math.round(b.right)); }
                     for (const b of bs) if (b.getBoundingClientRect().height < 30) o.push(n + ' a button is too short'); }
                     return o }""") == [], pg.evaluate("document.getElementById('task-a-65') && document.getElementById('task-a-65').innerText.slice(0, 200)"))
@@ -767,10 +767,10 @@ with sync_playwright() as p:
     pg.keyboard.press("Meta+Enter")
     check("ctrl+enter home: Cmd+Enter does the same", pg.evaluate(SUBS) == ["ask:answer", "ask:answer"], pg.evaluate(SUBS))
     pg.locator(STEP).first.click(); pg.keyboard.press("Control+Enter")
-    check("ctrl+enter home: Ctrl+Enter in a step's box presses its one Send", pg.evaluate(SUBS)[-1] == "step:send" and len(pg.evaluate(SUBS)) == 3, pg.evaluate(SUBS))
-    pg.evaluate("document.querySelector('form.hanswer.hstep button[value=send]').disabled = true"); pg.keyboard.press("Control+Enter")
+    check("ctrl+enter home: Ctrl+Enter in a step's box presses its Done (the main button)", pg.evaluate(SUBS)[-1] == "step:done" and len(pg.evaluate(SUBS)) == 3, pg.evaluate(SUBS))
+    pg.evaluate("document.querySelector('form.hanswer.hstep button[value=done]').disabled = true"); pg.keyboard.press("Control+Enter")
     check("ctrl+enter home: a disabled main button is left alone: nothing is sent", len(pg.evaluate(SUBS)) == 3, pg.evaluate(SUBS))
-    tt = pg.evaluate("[document.querySelector('form.hanswer:not(.hstep) button[value=answer]').title, document.querySelector('form.hanswer.hstep button[value=send]').title]")
+    tt = pg.evaluate("[document.querySelector('form.hanswer:not(.hstep) button[value=answer]').title, document.querySelector('form.hanswer.hstep button[value=done]').title]")
     check("ctrl+enter home: the main buttons carry the key as their hover title", all(x in ("Ctrl+Enter", "\u2318+Enter") for x in tt), tt)
     ctx.close()
 
@@ -1174,7 +1174,7 @@ with sync_playwright() as p:
     # a row that gets no token (an empty answer, an error, a redirect) hides its form (the row's title still links its item page); a step form's buttons are enabled with its token, an answer form's Send waits for a pick or a note. The token request is held by the test and answered after the first paint is measured ----
     gids = sorted(set(re.findall(r'data-gid="([^"]+)"', h1)))
     FM = """() => [...document.querySelectorAll('form.hanswer')].map(f => ({v: f.getBoundingClientRect().height > 0 && getComputedStyle(f).display !== 'none', d: [...f.querySelectorAll('button')].every(b => b.disabled),
-        e: [...f.querySelectorAll('button')].every(b => !b.disabled), step: f.classList.contains('hstep'), t: f.querySelector('input[name=token]').value, k: !!f.nextElementSibling && getComputedStyle(f.nextElementSibling).display !== 'none'}))"""
+        e: [...f.querySelectorAll('button')].every(b => b.hasAttribute('data-needs-text') ? b.disabled : !b.disabled), step: f.classList.contains('hstep'), t: f.querySelector('input[name=token]').value, k: !!f.nextElementSibling && getComputedStyle(f.nextElementSibling).display !== 'none'}))"""
     for w in (360, 1440):
         for mode in ("tokens", "empty", "error", "redirect"):
             tag = f"answer forms {w} {mode}"
@@ -1199,10 +1199,10 @@ with sync_playwright() as p:
             pg.wait_for_timeout(500)
             later = pg.evaluate(FM)
             if mode == "tokens":
-                check(f"{tag}: once the tokens arrive every form carries its token and stays visible; a step form's buttons are enabled, an answer form's Send stays disabled until a pick or a note", all(x["v"] and x["t"].startswith("TOK-") and (x["e"] if x["step"] else x["d"]) for x in later), later[:2])
+                check(f"{tag}: once the tokens arrive every form carries its token and stays visible; a step form's Done is enabled (its Send note waits for text), an answer form's Send stays disabled until a pick or a note", all(x["v"] and x["t"].startswith("TOK-") and (x["e"] if x["step"] else x["d"]) for x in later), later[:2])
                 clicked = pg.evaluate("""() => { const f = document.querySelector('#task-a-65 form.hstep'); let sent = null; f.addEventListener('submit', e => { e.preventDefault(); sent = Object.fromEntries(new FormData(f, e.submitter)) });
-                    f.querySelector('button[value=send]').click(); return sent }""")
-                check(f"{tag}: Send on a step row posts act=send with its token and back to the page's own path (no row fragment)", clicked and clicked.get("act") == "send" and clicked.get("token") == "TOK-a65" and clicked.get("back") == "/", clicked)
+                    f.querySelector('button[value=done]').click(); return sent }""")
+                check(f"{tag}: Done on a step row posts act=done with its token and back to the page's own path (no row fragment)", clicked and clicked.get("act") == "done" and clicked.get("token") == "TOK-a65" and clicked.get("back") == "/", clicked)
                 pg.evaluate("document.dispatchEvent(new Event('stackshot:swapped'))"); pg.wait_for_timeout(100)
                 check(f"{tag}: after an in-place swap the forms still carry their tokens, the step forms enabled", all(x["v"] and x["t"].startswith("TOK-") and (x["e"] or not x["step"]) for x in pg.evaluate(FM)))
             else:
@@ -1226,7 +1226,7 @@ with sync_playwright() as p:
             note = pg.evaluate("document.querySelector('p.isent') && document.querySelector('p.isent').textContent")
             if then_q is None: check(f"{tag}: the notice names who takes it", note and note.endswith(f"Done: {nm} takes it from here."), (nm, note))
             else: check(f"{tag}: the generic line is shown, the unknown name never", note and "Mallory" not in note and note.endswith("Done: the item goes on to its next mover."), note)
-            st = pg.evaluate("(() => { const li = document.getElementById('task-a-65'); const d = li.querySelector('button[value=send]'); return {d: d.disabled, o: [...document.querySelectorAll('#task-a-66 form.hstep button')].every(b => !b.disabled)} })()")
+            st = pg.evaluate("(() => { const li = document.getElementById('task-a-65'); const d = [...li.querySelectorAll('form.hstep button')].every(b => b.disabled); return {d: d, o: document.querySelector('#task-a-66 form.hstep button[value=done]').disabled === false} })()")
             check(f"{tag}: the stale row's Send stays disabled after the token arrives, nothing else on the page is held back", st["d"] and st["o"], st)
             ctx.close()
     ctx = br.new_context(viewport={"width": 360, "height": 900}, java_script_enabled=False); pg = ctx.new_page(); pg.goto(PAGES["board"].as_uri())
@@ -1580,7 +1580,7 @@ with sync_playwright() as p:
             for w, touch in ((390, True), (1280, False)):
                 ctx = (br.new_context(viewport={"width": w, "height": 844}, color_scheme=scheme, has_touch=True, is_mobile=True, device_scale_factor=2) if touch
                        else br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme))
-                pg = ctx.new_page(); pg.goto(f.as_uri()); pg.evaluate(OPEN); pg.wait_for_timeout(120)
+                pg = ctx.new_page(); pg.goto(f.as_uri()); pg.evaluate(OPEN); pg.wait_for_timeout(400)      # the page script greys a button at load and the .b colour transition takes .12 s: measure after it, never in it
                 for step in (0, 1):
                     if step and pg.query_selector("#panel-open"): pg.click("#panel-open"); pg.mouse.move(w // 2, 400); pg.wait_for_timeout(450)
                     d = pg.evaluate(BTNS); st = "open" if d["pOpen"] else "closed"; tag = f"buttons {nm} {w} {scheme} panel {st}"

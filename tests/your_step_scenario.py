@@ -159,7 +159,7 @@ check("4 home: the row of the same item is a Your move row", bool(h1) and 'id="y
 check("4 home: ...it draws the same numbered block as the item page: the same list, byte for byte (fails when the row's block is not found)", bool(sn) and bool(b1) and sn.group(0) == b1, (h1[:1500], b1[:600]))
 check("4 home: ...no summary line, no \"Draft\", the command once in one box, the agent's step absent",
       "create an admin key" not in h1 and "Draft" not in h1 and h1.count('<div class="cmd">') == 1 and h1.count(ec(CMD)) == 1 and "check the spend card" not in h1, h1)
-check("4 home: ...then the note box with its Send, as the item page has it", h1.index('<div class="istepnext">') < h1.index('<form class="hanswer hstep"') and 'name="act" value="send"' in h1, h1[-700:])
+check("4 home: ...then the note box with its Done and Send note, as the item page has it", h1.index('<div class="istepnext">') < h1.index('<form class="hanswer hstep"') and 'name="act" value="done"' in h1 and 'name="act" value="note"' in h1 and 'value="send"' not in h1, h1[-700:])
 h4 = row(4)
 check("4 home: a message is inside its step, collapsed under the same label with Copy in the summary",
       '<summary><span class="dlab">Message to paste</span><button type="button" class="b copy" aria-label="Copy the message to paste">Copy</button></summary>' in h4 and h4.index("paste the message") < h4.index('class="draft hdraft"') < h4.index("say done here")

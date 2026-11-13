@@ -545,7 +545,7 @@ _r41 = next(r for r in b.rows if r["gid"] == "a41")
 _nw = re.sub(r"<[^>]+>", "", b.wait_who(_r41, model.Model(model.WAITING, wait=model.Wait(kind="time", kind_explicit=True, until=day(2), mover=""))))
 check("Waiting: a wait with nobody to pick it up reads 'nobody set to pick it up', never 'no mover'; the rows of the fixture, which all have one, say neither", "nobody set to pick it up" in _nw and "no mover" not in _nw + _wl_all, (_nw, _wl_all[:300]))
 # the board item: the row's form says which page it is on and the page shows the answer's notice when the server brings it back
-# ---- the step rows: the step itself in place of the first next line, a note box with ONE Send (no Done button), only on a your-step item
+# ---- the step rows: the step itself in place of the first next line, an optional note box with TWO buttons (Done, Send note), only on a your-step item
 S = {n: row_of(YM, n) for n in (50, 51, 52, 53, 55, 56, 57)}
 sform = lambda r: (re.search(r'<form class="hanswer hstep".*?</form>', r, re.S) or [""])[0]
 check("step rows: a your-step item with no ask is on Your move, and its row shows the step on line two, never the first next line ('check it' is the agent's)",
@@ -560,9 +560,11 @@ check("step rows: a step with a command and a link boxes the command only, the l
       and _links(S[56].split('<div class="cmd">')[0]) == ["https://example.com/p/aaa"] and "the command below" in S[56], S[56])
 check("step rows: a lone-word backtick stays inline, no Copy box", "<code>default</code>" in S[57] and "<pre>" not in S[57] and 'class="b copy"' not in S[57], S[57])
 check("step rows: plain words show as they read with no block", "Call the office and say done" in S[53] and "<pre>" not in S[53], S[53])
-check("step rows: the form has a note box and ONE button, Send (disabled until the token), no Done, the label says an empty Send finishes the step, the token empty and `back` empty, nothing hidden",
-      all(sform(S[n]).count("<button") == 1 and sform(S[n]).count('name="act" value="send" disabled>Send</button>') == 1 and 'value="done"' not in sform(S[n]) and "Done" not in sform(S[n]) and 'value="comment"' not in sform(S[n])
-          and "Send with an empty box finishes the step" in sform(S[n])
+check("step rows: the form has an optional note box and TWO buttons, Done (the main one) and Send note (needs text), both disabled until the token, no comment button, the old one-Send label gone, the token empty and `back` empty, nothing hidden",
+      all(sform(S[n]).count("<button") == 2 and sform(S[n]).count('class="b main" name="act" value="done" disabled>Done</button>') == 1 and sform(S[n]).count('class="b" name="act" value="note" data-needs-text disabled>Send note</button>') == 1
+          and 'value="send"' not in sform(S[n]) and 'value="comment"' not in sform(S[n]) and "data-step" in sform(S[n]).split(">", 1)[0]
+          and 'placeholder="Note (optional)"' in sform(S[n]) and 'aria-label="Note for the next owner (optional)"' in sform(S[n])
+          and "Send with an empty box finishes the step" not in sform(S[n]) and "A note, or nothing to finish the step" not in sform(S[n])
           and ('<div class="abox"><textarea id="astep-a%d" name="text"' % n) in sform(S[n]) and 'aria-controls="astep-a%d"' % n in sform(S[n]) and 'name="token" value=""' in sform(S[n]) and 'name="back" value=""' in sform(S[n]) and 'action="/items/a%d/answer"' % n in sform(S[n])
           and " hidden" not in sform(S[n]).split(">", 1)[0] for n in S), sform(S[50]))
 check("step rows: the item page is linked by the row's title for the viewer who gets no form", all(f'<a class="ir-link" href="/items/a{n}"' in S[n] for n in S))
@@ -620,8 +622,12 @@ check("home answer: the page carries the item page's own notices (one text per ?
       and "p.className='isent '+m[0]" in _hj and "textContent" in _hj and "history.replaceState(null,'',location.pathname+location.hash)" in _hj and "innerHTML" not in _hj, _notes.keys())
 check("the home page's notices say the agent on it has been told, never its owner",
       "the agent on it has been told" in _notes["decision"][1] and "the agent on it has been told" in _notes["comment"][1] and all("owner" not in v[1] for v in _notes.values()), _notes)
-check("the home page carries the notice of a note sent on a step (stepreply), and the script names who takes it and spends the row's one Send after a Done or a note",
-      "stepreply" in _notes and "decides whether the step is done" in _notes["stepreply"][1] and "k==='stepreply'" in _hj and "form.hstep button[value=send]" in _hj and "form.hstep button[value=done]" not in _hj, _notes.get("stepreply"))
+check("the home page carries the notice of a note sent on a step (stepreply), and the script names who takes it and spends both of the row's buttons after a Done or a note",
+      "stepreply" in _notes and "decides whether the step is done" in _notes["stepreply"][1] and "k==='stepreply'" in _hj and "form.hstep button[name=act]" in _hj and "form.hstep button[value=send]" not in _hj, _notes.get("stepreply"))
+_cj = render._CARDS_JS
+check("the page scripts handle the step form's two buttons: the card script enables a data-needs-text button (Send note) only while the box holds text and leaves Done alone, a step form is watched on typing, and the home script runs it for every form after the token enables the buttons",
+      "form[data-step]" in _cj and "button[data-needs-text]:not([data-spent])" in _cj and "t.value.trim()!==''" in _cj and "form[data-cards] textarea,form[data-step] textarea" in _cj
+      and "if(window.ssCards)ssCards.sync(f)" in _hj and "hstep')) ssCards" not in _hj and ".hstep')&&" not in _hj.replace(" ", ""), (_cj[:600], _hj[:600]))
 _lj = render._LIVE_JS
 check("in place: a decision box with text in it holds the swap — busy() also tests every form.hanswer textarea and text input for a typed value, not only the focused element",
       "form.hanswer textarea" in _lj and "form.hanswer input[type=text]" in _lj and "if(l[i].value)return true" in _lj and "||s||typed())" in _lj, _lj[_lj.find("function typed"):][:400])
