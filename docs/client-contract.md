@@ -1,6 +1,6 @@
 # The client contract
 
-What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, and a gap in a scheduled job. Back to the [README](../README.md).
+What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, a gap in a scheduled job, and an item a script opens for a background agent. Back to the [README](../README.md).
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
@@ -195,3 +195,24 @@ write, `POST /client/job-gap`, `Authorization: Bearer <machine token>`, body `{"
   proof), so no config change is needed for sala's label `unit-gaps`. The item records `<label> via a script on <machine>`.
 - **The row owes no page.** It sets `_TERMINAL_ROW` as the terminal prompt does (no page debt for the script, the builder or the keeper, no router notice, a close told to no one) and the guard on alarming words does not judge the
   watcher's text; the builder's notice at the create is the one thing sent. `tool-text`: a client call only, no MCP tool changes.
+
+## An item a script opens for a background agent
+
+A timer's script that finds work for a project's background agent (a weekly size report that went past a threshold, for one) asks for one board item of that work. The route is narrow on purpose, so it is not a general way to file items:
+
+```
+stackshot/fleet/client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]   # prints the item id, exit 0
+```
+
+Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is one authenticated write, `POST /client/item-open`, `Authorization: Bearer <machine token>`, body `{"marker", "project", "subject", "description": [lines], "step", "mover", "sender"?}` (200 `{item, marker, project, mover, owner, repeat}`;
+400 a check or a refusal, with the tool's own text; 404 no such project; 409 no front agent to file under; 503 the project record cannot be read). A key outside those seven is a 400 that names it: there is no way to set needs, owner, priority, an ask or a date.
+
+- **The marker** is `<kind>:<what>` (`test_trim:stackshot`): a lower-case kind of at most 40 characters, a colon, then at most 80 characters of letters, digits and `_ . - /`, no spaces. The item is marked `metadata.item_open` = the marker.
+- **One open item per marker, read from the store.** While an item with the marker is open, a repeat call answers it (`repeat: true`) and files nothing; once it is closed, the next call files a new item. The caller keeps no state.
+- **The mover must be listed.** It has to be a background agent under `background:` on the project's own page; a front agent, the owner, another project's agent or a made-up name is a 400 that names the agents the page lists. It is named in needs and told once, at the create.
+- **The step** is one line that starts with the mover's name and a colon, and says what the mover does. It is the item's one `next` line.
+- **The subject** is the action and its object. The server puts the project scope's prefix before it (the scope's prefix, else `[subject] fallback_prefix`, else the first prefix); a prefix the caller wrote is replaced. A subject over `[subject] max_length` is refused by the create tool's gate, not cut.
+- **The description** is bullets, a list of lines (or one text of lines). At most `[description] max_lines` less one lines, each at most `[description] line_max` characters as a bullet; too many or too long is a 400 and nothing is cut. The server adds the last bullet, `Opened by <sender> (a script on a client machine)`, so no host name reaches the item or its GitHub issue. An `@name` in a line is broken with a zero-width space, so the mirror pings no one.
+- **The sender** is the script's own label: one word of letters, digits and `_ . -`, at most 80 characters, never the owner's name; none given is `client.py`. There is no allow-list of labels (the machine token is the proof).
+- **Filed like any item.** The create goes through `create_item`, the create tool's own code, so every gate applies; the project's `-main` agent is the creator (a front agent is not woken), and the row owes no page (it sets `_TERMINAL_ROW`, as the other script routes do).
+  `tool-text`: a client call only, no MCP tool changes.

@@ -221,6 +221,16 @@ runs on every box.
                                 "<label> via a script on <machine>". The row owes no page. The server runs the create tool's own checks (subject prefix, description and next gates,
                                 project page, GitHub mirror), except the guard on alarming words. Exit 0 · 1 and the reason on stderr when refused (400 a check, 409 no front agent
                                 to file under), not reached ([0]) or misused (usage).
+  client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
+                                for a timer's script that finds work for a project's background agent: open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
+                                test_trim:stackshot), the item's mark: while an item with that marker is open a repeat call prints the same id and files nothing; once it is closed a call files a new item. --mover must be a
+                                background agent under `background:` on the project's page (refused otherwise, the refusal names the listed ones); it is named in needs and told once, at the create. --step is one line that starts
+                                with the mover's name and a colon. --subject is the action and its object with no prefix: the server puts the project scope's prefix before it. Each --line is one fact, a "- " bullet of the
+                                description (repeat it; at most [description] max_lines less one, each at most [description] line_max characters as a bullet; too many or too long is refused, never cut); the last bullet is
+                                "- Opened by <label> (a script on a client machine)", so no host name reaches the item or its GitHub issue. --sender is the script's own label (default client.py): one word, never the owner's
+                                name. The project's -main agent is the item's creator. The server runs the create tool's own checks (subject, description and next gates, project page, GitHub mirror) and the row owes no page.
+                                Exit 0 · 1 and the reason on stderr when refused (400 a check, 404 no such project, 409 no front agent to file under), not reached ([0]), misused (usage) or when the project record cannot be
+                                read right now (503, nothing filed).
   client.py message <to> <text> --sender <label>
                                 for a script: send a message the way a session's `message` tool does. <to> = a session's
                                 name or id, or a page key (projects/<slug>), which reaches that project (its router rules
@@ -894,6 +904,32 @@ def job_gap(argv: list[str], timeout: float = 60.0) -> int:
     return 0
 
 
+ITEM_OPEN_USAGE = ('usage: client.py post item-open <kind>:<what> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" '
+                   '--line "<fact>" [--line "<fact>" ...] [--sender <label>]')
+
+
+def item_open(argv: list[str], timeout: float = 60.0) -> int:
+    """`post item-open <marker> --project P --subject S --mover M --step "M: ..." --line L [--line L ...] [--sender L]`: a script asks for one board item for a background agent of a project
+    (one open item per marker; a repeat answers the same item) -> exit 0 and the item's id on stdout; 1 and the reason on stderr when refused, not reached or misused."""
+    if not argv or argv[0].startswith("--"): print(ITEM_OPEN_USAGE, file=sys.stderr); return 1
+    marker, a, opt, lines = argv[0].strip(), list(argv[1:]), {}, []
+    for k in ("project", "subject", "mover", "step", "line", "sender"):
+        while "--" + k in a:
+            i = a.index("--" + k)
+            if i + 1 >= len(a): print(f"--{k} needs a value\n{ITEM_OPEN_USAGE}", file=sys.stderr); return 1
+            if k == "line": lines.append(a[i + 1])
+            else: opt[k] = a[i + 1]
+            del a[i:i + 2]
+    if a or not marker or not all(opt.get(k, "").strip() for k in ("project", "subject", "mover", "step")) or not lines:
+        print(ITEM_OPEN_USAGE, file=sys.stderr); return 1
+    body = {"marker": marker, "project": opt["project"], "subject": opt["subject"], "mover": opt["mover"], "step": opt["step"], "description": lines}
+    if opt.get("sender", "").strip(): body["sender"] = opt["sender"].strip()
+    status, d = post("item-open", body, timeout)
+    if status != 200 or not isinstance(d, dict) or not d.get("item"):
+        print(f"stackshot: item not opened [{status}] {d.get('error') if isinstance(d, dict) else d}"[:1200], file=sys.stderr); return 1
+    print(d["item"]); return 0
+
+
 def answer(item: str, timeout: float = 20.0) -> int:
     """The owner's latest board answer on an item, as the server's one line (<option label> TAB <text>) -> exit 0 (nothing printed while
     he has not answered), 1 when the item is not found, the server is not reached or the id is misused."""
@@ -1053,6 +1089,9 @@ def main(argv: list[str]) -> int:
     if cmd == "post" and len(argv) > 2 and argv[2] == "job-gap":
         try: return job_gap(argv[3:])
         except Exception as e: print(f"stackshot: job gap not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "post" and len(argv) > 2 and argv[2] == "item-open":
+        try: return item_open(argv[3:])
+        except Exception as e: print(f"stackshot: item not opened ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "get" and len(argv) > 2 and argv[2] == "answer":
         try: return answer(argv[3] if len(argv) > 3 else "")
         except Exception as e: print(f"stackshot: no answer read ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
