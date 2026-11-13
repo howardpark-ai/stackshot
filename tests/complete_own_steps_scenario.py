@@ -16,6 +16,7 @@ import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="ownsteps-"); T = pathlib.Path(tmp)      # removed (and flock-held while the suite runs) by _scratch, pass or fail
 toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
+toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Robin"', toml, count=1); assert n == 1      # a named owner, so `<owner> to …` is a form the model reads (with no [instance] owner the name is not one of the owner's names)
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
@@ -130,13 +131,15 @@ check("a step the closer wrote for another session is the closer's own (writer s
 from stackshot.core import config as _cfg
 ALIASES = _cfg.owner_aliases()
 check("the instance has a Latin and a non-Latin alias for the owner (the forms below are read from it, never typed here)", len(ALIASES) >= 2 and ALIASES[0].isascii() and not ALIASES[1].isascii(), ALIASES)
-for k, owner_line in enumerate((f"{ALIASES[0]}: approve the deploy", f"{ALIASES[1]}: approve the deploy", "you: approve the deploy", f"{OWNER} to run: the deploy script", f"{ALIASES[0]} to review: the deploy"), start=40):
+check("the fixture names its owner, so the `<owner> to …` case below reads a real name", OWNER == "Robin" and OWNER in _cfg.owner_names(), (OWNER, _cfg.owner_names()))
+for k, owner_line in enumerate((f"{ALIASES[0]}: approve the deploy", f"{ALIASES[1]}: approve the deploy", "you: approve the deploy", f"{OWNER} to run: the deploy script", f"{ALIASES[0]} to review: the deploy",
+                                f"{ALIASES[0].lower()}: approve the deploy", f"{ALIASES[0]} (decision): approve the deploy", f"{OWNER.upper()} (decision): approve the deploy"), start=40):
     item(k, lines=(MINE, owner_line), writers=[U["home-front"], U["team-back"]])
     complete(k)
     check(f"an owner's step opened as `{owner_line.split(':')[0]}:` by another session is the owner's, not another session's: the close goes through and ticks it", rd(k)["status"] == "completed" and kinds(k) == ["done", "done"], (owner_line, sts(k)))
-item(46, lines=(MINE, "you: approve the deploy", THEIRS), writers=[U["home-front"], U["team-back"], U["team-back"]])
-msg46 = refused("control: an owner's step and another session's step: the close is refused for the other session's step alone", lambda: complete(46), "owed by team-back", "verify the deploy")
-check("…and the owner's step is not named in the refusal", "approve the deploy" not in msg46 and "owed by you" not in msg46, msg46)
+item(60, lines=(MINE, "you: approve the deploy", THEIRS), writers=[U["home-front"], U["team-back"], U["team-back"]])
+msg60 = refused("control: an owner's step and another session's step: the close is refused for the other session's step alone", lambda: complete(60), "owed by team-back", "verify the deploy")
+check("…and the owner's step is not named in the refusal", "approve the deploy" not in msg60 and "owed by you" not in msg60, msg60)
 
 # ================================================================ 2. what closes
 item(10, lines=(MINE, "home-front: test it"))

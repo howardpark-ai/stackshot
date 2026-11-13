@@ -161,8 +161,8 @@ def others_open(steps: list[dict[str, Any]], own: Callable[[str], bool], marked:
         if s["status"] != OPEN or i in marked or own(str(s.get("writer") or "")):
             continue
         nm = opener(s["text"])
-        if not nm or _model.is_owner(nm) or _cfg.owner_opener_rx().match(first_line(s["text"]).strip()) or (names is not None and names(nm)):
-            continue      # no name, the owner's (his display name, an alias, `you:`, `<owner> to …`: config.owner_opener_rx), or the sender's own
+        if not nm or _model.is_owner(nm) or nm.casefold() in _mg.owner_names_cf() or _cfg.owner_opener_rx().match(first_line(s["text"]).strip()) or (names is not None and names(nm)):
+            continue      # no name, the owner's (his display name or an alias in any case, with or without a role in parentheses (`opener` drops it), `you:`, `<owner> to …`: config.owner_opener_rx), or the sender's own
         out.append(i)
     return out
 

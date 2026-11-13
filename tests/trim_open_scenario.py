@@ -183,10 +183,12 @@ check("--no-open: what would be sent is printed (marker, project, mover, subject
       and "mover:   example-builder" in r.stdout and "subject: Deep-scan the fakerepo test suites" in r.stdout and "step:    example-builder: " in r.stdout
       and "line:    max_suites: 10 suites > 5" in r.stdout and "item: item-" not in r.stdout, r.stdout)
 check("--no-open: the state is written as usual", (T / "st4" / "fakerepo.json").exists())
+check("--no-open in a trigger week: the run's own triggers are recorded as owed, so a later run still opens the item",
+      [t["key"] for t in json.loads((T / "st4" / "fakerepo.json").read_text()).get("open_pending", [])] == ["max_suites"], (T / "st4" / "fakerepo.json").read_text()[:300])
 r = run("--state-dir", str(T / "st4d"), "--dry-run")
 check("--dry-run: nothing is sent either, the item is shown, and no state is written", r.returncode == 0 and calls() == [] and "item: not sent" in r.stdout and not (T / "st4d" / "fakerepo.json").exists(), (r.stdout, r.stderr))
 CONF.write_text("")
-r = run("--state-dir", str(T / "st4"), "--no-open")
+r = run("--state-dir", str(T / "st4n"), "--no-open")
 check("--no-open with no trigger: nothing printed about an item", r.returncode == 0 and "item" not in r.stdout.replace("test-trim report", "") and calls() == [], r.stdout)
 CONF.write_text(ITEMS + OVER)
 r = run("--state-dir", str(T / "st4"), "--no-open", "--json")
@@ -303,13 +305,22 @@ try:
     check("a threshold owed and over again: ONE line for it, with this run's numbers (+40), not the old ones", r.returncode == 0 and len(calls()) == 2 and sum("max_test_line_growth" in x for x in d["lines"]) == 1
           and any("+40 test lines" in x for x in d["lines"]) and not any("+30 test lines" in x for x in d["lines"]), (r.returncode, d["lines"]))
     # a damaged debt in the state is ignored
-    S5d = T / "st5d"; reset(); CONF.write_text(ITEMS + OVER); G.unlink()
+    S5d = T / "st5d"; reset(); CONF.write_text(ITEMS + OVER); G.unlink(missing_ok=True)
     run("--state-dir", str(S5d), "--no-open", now="2026-06-01T09:00:00+00:00")
     rec = json.loads((S5d / "fakerepo.json").read_text()); rec["open_pending"] = ["x", {"key": "bogus", "line": "TRIGGER: bogus"}, {"key": "max_suites", "line": 5}, 7]
     (S5d / "fakerepo.json").write_text(json.dumps(rec))
     CONF.write_text(ITEMS)
     r = run("--state-dir", str(S5d), now="2026-06-08T09:00:00+00:00")
     check("a damaged open_pending in the state is ignored: no trigger, no call, status 0", r.returncode == 0 and calls() == [], (r.returncode, r.stdout, r.stderr, calls()))
+    # an open_pending damaged in its type (not a list, or entries of the wrong shape: a list or map as a key, a non-map entry) is no debt either, does not crash the run, and the state is rewritten without it
+    for n, bad in enumerate((7, "x", {"key": "max_suites"}, True, 1.5, [{"key": ["max_suites"], "line": "TRIGGER: max_suites"}], [{"key": {"max_suites": 1}, "line": "TRIGGER: max_suites"}], [["max_suites"], None, 3])):
+        S5f = T / f"st5f{n}"; reset(); CONF.write_text(ITEMS + OVER); G.unlink(missing_ok=True)
+        run("--state-dir", str(S5f), "--no-open", now="2026-06-01T09:00:00+00:00")
+        rec = json.loads((S5f / "fakerepo.json").read_text()); rec["open_pending"] = bad
+        (S5f / "fakerepo.json").write_text(json.dumps(rec))
+        CONF.write_text(ITEMS)
+        r = run("--state-dir", str(S5f), now="2026-06-08T09:00:00+00:00")
+        check(f"open_pending damaged to {bad!r}: treated as no debt, no call, status 0, no traceback, and the state is rewritten without it", r.returncode == 0 and calls() == [] and "Traceback" not in r.stderr and "open_pending" not in (S5f / "fakerepo.json").read_text(), (r.returncode, r.stdout, r.stderr, calls()))
 finally:
     G.unlink(missing_ok=True)
 CONF.write_text(ITEMS + OVER)
