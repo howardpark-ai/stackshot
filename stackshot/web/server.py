@@ -3917,7 +3917,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 if cur is None or not _ho_same(cur["mover"], mover):
                     continue
                 meta = item.setdefault("metadata", {})
-                span = _bt.span(cur["since"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back
+                span = _bt.span(cur["shown"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back; a background mover's stretch is measured only as far back as its audit lines show (`shown`)
                 _bt.mark(meta, now, to, kind, cur["since"])
                 _stall.note(meta, now, f"{_session_label(mover)}'s item has had {'no write but the hourly audit lines' if kind == _bt.KIND_FRONT else 'only a busy pane for its hourly audit lines'} for about {span}: {_session_label(to)} was told")
                 _writes.save(gid, item, note="audit: busy stretch told")

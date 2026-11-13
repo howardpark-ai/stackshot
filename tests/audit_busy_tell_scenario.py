@@ -14,8 +14,9 @@ store, no network, no model call, no message really sent. The timelines run the 
   8  what is read: lines ahead of now, a stale newest line, torn entries; a hold, a wait, a closed item, the owner's item and an item with no lines are left alone
   9  the tick: `_silence_tick` runs it after the hourly line and the idle hand-over, a failure in it stops nothing; the hourly log marks a pane-only line and no other
   10 a recorded commit, how long it says, a future record, the lines no other check pinned
-  11 a stretch is only built from lines about an hour apart (`BT.EXTEND_GAP`): the slow cadence tells nobody, a longer gap restarts the stretch at that line, two pane-only lines at least; the wording of both History lines, the freshness margin,
-     one unreadable item among others, a queued item
+  11 a stretch is only built from lines about an hour apart (`BT.EXTEND_GAP`): the slow cadence tells nobody, a longer gap restarts the stretch at that line, two pane-only lines at least; the wording of both History lines, the freshness margin
+     (a background mover's: the same gap, up to the tell itself; a front agent's: the wide one), one unreadable item among others, a queued item
+  12 the follow-up: a tell only on a fresh line, a recorded event no line has seen holds it back (the audit's own stamp does not), a log that rolled past the activity is told with the length its lines show
 
     tests/run-suite audit_busy_tell       -> exit 0 / 1"""
 import io, json, os, re, sys, pathlib, time, logging
@@ -275,7 +276,7 @@ try:
     with _Err() as err2: tick(now0 + 10 * MIN)
     check("6 …the line is logged once an hour per item, not at every tick", err2.text == "", err2.text)
 finally: server._main_agent = real_main
-check("6 …and when a -main agent appears the item is told of then (nothing was marked)", tick(now0 + 20 * MIN) == ["a1"] and len(to_main()) == 1)
+check("6 …and when a -main agent appears the item is told of then, while its newest line is still fresh (nothing was marked)", tick(now0 + 12 * MIN) == ["a1"] and len(to_main()) == 1)
 wipe(); put(1, act=400, log=SEVEN)
 server._main_agent = lambda p: "Oliver"
 try: got = tick(now0)
@@ -485,7 +486,7 @@ for gap, label, told_ in ((LIMIT, "exactly the limit (65 minutes: the hour plus 
     check(f"11 a gap of {label} inside a stretch {'does not restart it: told, the stretch counts from the last activity' if told_ else 'restarts it at the line after the gap: 3 h 50 min of lines since, nobody told'}",
           (r is not None and r["since"] == now0 - (newest + 5) * MIN and r["lines"] == 7) if told_ else (r is None and tick(now0) == [] and sent == []), (gap, r, newest))
 lg, newest = gap_log(LIMIT + 1); wipe(); put(1, act=newest + 5, log=lg)
-check("11 …and the restart is counted from that line: 2 hours later (the stretch 4 h old) it is told, from the line after the gap", (lambda r: r is not None and r["since"] == now0 - (newest + 5) * MIN + (150 + LIMIT + 1) * MIN and r["lines"] == 4)(BT.due(NR.load_all(None), "a1", now0 + 130 * MIN, lambda w, p: False, None, 2.0)))
+check("11 …and the restart is counted from that line: at a two-hour threshold the stretch (2 h 35 min since the line after the gap) is told, from that line", (lambda r: r is not None and r["since"] == now0 - (newest + 5) * MIN + (150 + LIMIT + 1) * MIN and r["lines"] == 4)(BT.due(NR.load_all(None), "a1", now0, lambda w, p: False, None, 2.0)))
 wipe(); put(1, act=500, log=[(400, "pane"), (450, "pane")])
 check("11 the first line after the last real activity is held to the same limit: one 400 minutes after it starts the stretch at its own time (100 min of stretch, not told), the next line extends it", due_rows() is None and tick(now0) == [] and sent == [], sent)
 wipe(); put(1, act=170, log=[(100, "pane"), (150, "pane")])
@@ -495,8 +496,12 @@ check("11 a line after a long gap counts as the first line of the new stretch (t
 # two pane-only lines at least
 wipe(); put(1, act=300, log=[(60, "pane")])
 check("11 ONE pane-only line is not a stretch of 4 hours: 5 h after the last activity with a single line (an hour after it) nobody is told", due_rows() is None and tick(now0) == [] and sent == [], sent)
-wipe(); put(1, act=300, log=[(50, "pane"), (100, "pane")])
-check("11 …and two are (the same 5 h, the second line 200 minutes ago)", (lambda r: r is not None and r["lines"] == 2 and r["since"] == now0 - 300 * MIN)(due_rows()) and tick(now0) == ["a1"], sent)
+wipe(); put(1, act=300, log=[(50, "pane"), (100, "pane"), (150, "pane"), (200, "pane"), (250, "pane"), (295, "pane")])
+check("11 …and a run of them is (the same 5 h, a line every 50 minutes, the newest 5 minutes ago)", (lambda r: r is not None and r["lines"] == 6 and r["since"] == now0 - 300 * MIN)(due_rows()) and tick(now0) == ["a1"], sent)
+wipe(); put(1, act=125, log=[(60, "pane")])
+check("11 …and at the shortest threshold (one hour) a single line that is itself fresh is still not a stretch (2 h of quiet, one pane-only line 65 minutes old: MIN_LINES holds)", due_rows(hrs=1.0) is None and BT.due(NR.load_all(None), "a1", now0, lambda w, p: False, None, 1.0) is None, sent)
+wipe(); put(1, act=125, log=[(60, "pane"), (100, "pane")])
+check("11 …and two lines at that threshold are", (lambda r: r is not None and r["lines"] == 2)(due_rows(hrs=1.0)))
 wipe(); put(1, mover="beta-main", act=300, log=[(60, "pane")])
 check("11 the front agent's rule is unchanged: one line since its last activity, and 5 h of quiet, tell that front agent itself", tick(now0) == ["a1"] and S0()[1] == U["beta-main"] and "no write on it but the hourly audit lines" in S0()[2] and "pull request" not in S0()[2], sent)
 for who, proj in (("team-back", "projects/alpha"), ("beta-main", "projects/alpha")):
@@ -514,15 +519,18 @@ wipe(); put(1, mover="beta-main", act=400, log=SEVEN); tick(now0)
 check("11 the History line of a front agent's item, word for word", history(1) == ["beta-main's item has had no write but the hourly audit lines for about 6 hours: beta-main was told"], history(1))
 check("11 …and its message says no write but the hourly audit lines, and asks for a line or what blocks it, and claims no pull request event", "no write on it but the hourly audit lines for about 6 hours. If you are at work on it, write a line on it; if you are not, say what blocks it or hand it on." in S0()[2] and "pull request" not in S0()[2], S0()[2])
 
-FRESH_MIN = 375                                                    # FRESH = the slow cadence's 6 h plus 15 minutes
-check("11 BT.FRESH is the slow cadence's 6 h plus a quarter of an hour", BT.FRESH == HR.SLOW_EVERY + 900.0 and BT.FRESH == FRESH_MIN * MIN, BT.FRESH)
-for ago, told_, label in ((FRESH_MIN, True, "6 h 15 min old still counts as a fresh line"), (FRESH_MIN + 15, False, "6 h 30 min old is no news")):
-    wipe(); put(1, act=110 + ago, log=[(60, "pane"), (110, "pane")])
-    check(f"11 the freshness margin: a stretch whose newest line is {label}: {'told' if told_ else 'nobody told'}", (tick(now0) == ["a1"]) if told_ else (tick(now0) == [] and sent == []), (ago, sent))
+FRESH_MIN = 375                                                    # FRESH = the slow cadence's 6 h plus 15 minutes: a FRONT agent's margin
+check("11 BT.FRESH is the slow cadence's 6 h plus a quarter of an hour, and a background mover's margin is the stretch's own gap (BT.EXTEND_GAP, 65 minutes)", BT.FRESH == HR.SLOW_EVERY + 900.0 and BT.FRESH == FRESH_MIN * MIN and BT.EXTEND_GAP == LIMIT * MIN, (BT.FRESH, BT.EXTEND_GAP))
+for ago, told_, label in ((LIMIT, True, "65 minutes old (exactly the gap that joins two lines) still counts as a fresh line"), (LIMIT + 1, False, "66 minutes old is no news"), (FRESH_MIN, False, "6 h 15 min old (the old margin) is no news")):
+    wipe(); put(1, act=350 + ago, log=[(50 * k, "pane") for k in range(1, 8)])
+    check(f"11 the freshness margin of a background mover's item: a stretch of 4 h and more whose newest line is {label}: {'told' if told_ else 'nobody told, nothing written'}",
+          (tick(now0) == ["a1"] and len(to_main()) == 1) if told_ else (tick(now0) == [] and sent == [] and "busy_tell" not in mt(1) and BT.due(NR.load_all(None), "a1", now0, lambda w, p: False, None, 4.0) is None), (ago, sent))
 wipe(); put(1, mover="beta-main", act=110 + FRESH_MIN + 15, log=[(60, "pane"), (110, "pane")])
-check("11 …and the front agent's item has the same margin (6 h 30 min since its newest line: nobody told)", tick(now0) == [] and sent == [])
+check("11 the front agent's item keeps the wide margin (6 h 30 min since its newest line: nobody told)", tick(now0) == [] and sent == [])
 wipe(); put(1, mover="beta-main", act=110 + FRESH_MIN, log=[(60, "pane"), (110, "pane")])
 check("11 …and 6 h 15 min is fresh for it", tick(now0) == ["a1"])
+wipe(); put(1, mover="beta-main", act=110 + FRESH_MIN, log=[(60, "pane"), (110, "pane")]); put(2, act=110 + FRESH_MIN, log=[(60, "pane"), (110, "pane")])
+check("11 …the same 6 h 15 min old lines of a background mover are not told, the front agent's are", tick(now0) == ["a1"] and S0()[1] == U["beta-main"] and "busy_tell" not in mt(2), sent)
 
 class _BadQueue(dict):
     def get(self, k, d=None):
@@ -534,7 +542,7 @@ check("11 BT.due_all: an item whose reading raises is left out and the others ar
 
 server._cfg.CFG.setdefault("model", {})["queued_behind"] = True
 try:
-    wipe(); put(1, act=400, log=SEVEN); put(2, act=400, log=SEVEN, last_activity={"at": now0 - 10 * MIN, "kind": "commit", "what": "commit on PR 5"})      # a2 is the item in hand (activity within the hour), a1 waits behind it
+    wipe(); put(1, act=400, log=SEVEN); put(2, act=400, log=SEVEN, last_activity={"at": now0 - 10 * MIN, "kind": "audit", "what": "audit verified the mover's pane is in a turn"})      # a2 is the item in hand (activity within the hour: an audit stamp, which holds no tell back), a1 waits behind it
     qm = SL.queued(NR.load_all(None), now0, server._silence_env())
     told_ = tick(now0)
     check("11 a queued item is not told: of two items of one mover, the one the board queues behind the item in hand is left out, and the item in hand is told", qm == {"a1": "a2"} and told_ == ["a2"] and len(to_main()) == 1 and "busy_tell" not in mt(1) and "busy_tell" in mt(2), (qm, told_, sent))
@@ -548,6 +556,60 @@ check("11 a log that holds every line since the activity (seven of eight kept) a
 wipe(); put(1, act=350, log=[(200 + 20 * k, "pane") for k in range(8)])
 r = due_rows()
 check("11 …and a full log (eight lines, the oldest 200 minutes after the activity: earlier ones may have rolled off) counts from the activity: told once, as before the window moved", r is not None and r["since"] == now0 - 350 * MIN and r["lines"] == 8, r)
+
+# ================================================================ 12. the follow-up to the third review: a tell on a fresh line, an event no line has seen, a span the lines can show
+# L1: a stretch is told only while its newest line is within BT.EXTEND_GAP of now (the tell is built from lines about an hour apart up to the tell itself)
+wipe(); put(1, act=400, log=seed([("pane", 50), ("pane", 100), ("pane", 150), ("pane", 200), ("pane", 250), ("pane", 300)]))
+check("12 a stretch of 6 h whose lines are an hour apart but whose newest is 100 minutes old (the hourly pass stopped, or the item was off the agent) is not told: nothing is written, nobody is sent anything",
+      due_rows() is None and tick(now0) == [] and sent == [] and "busy_tell" not in mt(1) and history(1) == [], (sent, mt(1).get("busy_tell")))
+wipe(); put(1, act=400, log=seed([("pane", 50), ("pane", 100), ("pane", 150), ("pane", 200), ("pane", 250), ("pane", 300)]))
+check("12 …the same lines are told while the newest is within its 65-minute margin, and not a minute after (100 minutes old now: 35 minutes earlier it was 65)",
+      BT.due(NR.load_all(None), "a1", now0 - 35 * MIN, lambda w, p: False, None, 4.0) is not None and BT.due(NR.load_all(None), "a1", now0 - 34 * MIN, lambda w, p: False, None, 4.0) is None)
+wipe(); put(1, mover="beta-main", act=400, log=seed([("pane", 50), ("pane", 100), ("pane", 150), ("pane", 200), ("pane", 250), ("pane", 300)]))
+check("12 …and the front agent's item with the same lines is told (its rule is unchanged: the wide margin, the last real activity as the start)", tick(now0) == ["a1"] and S0()[1] == U["beta-main"], sent)
+
+# L2: a recorded event after the stretch began that no line has seen holds the tell back
+EVENTS = (("ci_result", "CI failed on PR 5"), ("review", "review on PR 5"), ("comment", "comment on #5"), ("commit", "commit on PR 5"), ("pr_merged", "PR 5 merged"), ("update", "a status update"), ("step_done", "a step done"), ("state_change", "state change"))
+for kind_, what_ in EVENTS:
+    wipe(); put(1, act=400, log=SEVEN, last_activity={"at": now0 - 10 * MIN, "kind": kind_, "what": what_})
+    check(f"12 a recorded {kind_} event 10 minutes ago (after the stretch began, after the newest line) holds the tell back: nobody is told, nothing is written", due_rows() is None and tick(now0) == [] and sent == [] and "busy_tell" not in mt(1) and history(1) == [], (kind_, sent))
+wipe(); put(1, act=400, log=SEVEN, last_activity={"at": now0 - 10 * MIN, "kind": "audit", "what": "audit verified the mover's pane is in a turn"})
+check("12 …an audit's own stamp (every pane-only line stamps one) is no event: told", tick(now0) == ["a1"] and len(to_main()) == 1, sent)
+wipe(); put(1, act=400, log=SEVEN, last_activity={"at": now0 - 400 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"})
+check("12 …an event at the very start of the stretch (the last real activity) is not after it: told", tick(now0) == ["a1"], sent)
+wipe(); put(1, act=400, log=SEVEN, last_activity={"at": now0 - 400 * MIN + 1, "kind": "ci_result", "what": "CI failed on PR 5"})
+check("12 …one second after the start is after it: not told", tick(now0) == [] and sent == [], sent)
+for label, rec_ in (("a record dated more than an hour ahead (no record)", {"at": now0 + 2 * H, "kind": "ci_result", "what": "CI failed on PR 5"}), ("a torn record (a time that is text)", {"at": "soon", "kind": "ci_result", "what": "CI failed on PR 5"}),
+                    ("a kind nobody knows", {"at": now0 - 10 * MIN, "kind": "nothing", "what": "x"})):
+    wipe(); put(1, act=400, log=SEVEN, last_activity=rec_)
+    check(f"12 …{label} holds nothing back: told", tick(now0) == ["a1"], (label, sent))
+wipe(); put(1, mover="beta-main", act=400, log=SEVEN, last_activity={"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"})
+check("12 …and the front agent's item is told whatever the event (its message claims no pull request event, only that nothing was written)", tick(now0) == ["a1"] and "pull request" not in S0()[2], sent)
+wipe(); put(1, act=0); pane_busy("team-back")
+def ev_before_tell(m):
+    if m == 230: d = rd(1); d["metadata"]["last_activity"] = {"at": at(m), "kind": "ci_result", "what": "CI failed on PR 5"}; wr(1, d)      # between the line at 200 and the tell that was due at 240
+told = run(10, 480, each=ev_before_tell)
+check("12 the timeline: a CI result at 3 h 50 min, after the line at 3 h 20 min and before the tell that was due at 4 h, holds it back; the next line (4 h 10 min) verifies the event and ends the stretch, nobody is told in the next 4 hours", told == [] and sent == [] and any(not l.get("pane_only") for l in lines(1)), (told, [(l["at"] - now0) / 60 for l in lines(1)]))
+told = run(490, 500)
+check("12 …and the stretch that starts at that line is told 4 h later, once", told == ["a1"] and len(sent) == 1 and (first_told() or 0) >= 250 + 240 and mt(1).get("busy_tell", {}).get("since") == at(250), (told, first_told(), mt(1).get("busy_tell")))
+
+# L3: a log that has rolled past the activity: the length told is the one the lines show
+wipe(); put(1, act=2000, log=[(1600 + 50 * k, "pane") for k in range(8)])
+r = due_rows()
+check("12 a log that has rolled past the activity (eight lines, the oldest 6 h 40 min old, the activity 33 h back): the stretch still counts from the activity for the once, but its length is the one the lines show", r is not None and r["since"] == now0 - 2000 * MIN and r["shown"] == now0 - 400 * MIN and r["lines"] == 8, r)
+tick(now0)
+check("12 …the message and the History line say about 6 hours, never about 33", S0()[0] == "a1" and "about 6 hours" in S0()[2] and "33 hours" not in S0()[2] and history(1) == ["team-back's item has had only a busy pane for its hourly audit lines for about 6 hours: home-main was told"]
+      and mt(1).get("busy_tell", {}).get("since") == now0 - 2000 * MIN, (S0()[2], history(1), mt(1).get("busy_tell")))
+check("12 …and it is told once: the window moving on reads no new stretch", tick(now0 + 5 * MIN) == [] and len(sent) == 1)
+wipe(); put(1, act=400, log=SEVEN)
+r = due_rows()
+check("12 a log that still holds every line since the activity: what the lines show is the stretch itself (shown is since)", r is not None and r["shown"] == r["since"] == now0 - 400 * MIN, r)
+wipe(); put(1, act=900, log=[(500, "idle")] + [(550 + 50 * k, "pane") for k in range(7)])
+r = due_rows()
+check("12 a rolled log whose stretch was restarted by a line that verified something else: it counts from that line, which is itself shown", r is not None and r["since"] == r["shown"] == now0 - 900 * MIN + 500 * MIN and r["lines"] == 7, r)
+wipe(); put(1, mover="beta-main", act=2000, log=[(1600 + 50 * k, "pane") for k in range(8)])
+r = BT.due(NR.load_all(None), "a1", now0, lambda w, p: True, None, 4.0)
+check("12 a front agent's item keeps counting from its last real activity (its length is the activity's, the lines are not the measure)", r is not None and r["kind"] == "front" and r["shown"] == r["since"] == now0 - 2000 * MIN, r)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
