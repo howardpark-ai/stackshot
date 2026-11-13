@@ -1,4 +1,4 @@
-"""tools/board_report.py — the board checks the audit makes: arbitrary on-hold descriptions and mis-labeled status. (Silence, an item on an agent not moving, is the ten-minute silence pass's: silence.py.)
+"""tools/board_report.py — the board checks the audit makes: arbitrary on-hold descriptions and mis-labeled status. (An item on an agent not moving is the hourly audit line's and the idle hand-over's: audit/hourly.py, audit/hand_idle.py.)
 
 Reads the open items in the store and lists, per item, what the audit is to challenge, each finding naming the item and its mover (so the audit sends it to that mover). Read only: it changes no item, refuses nothing and
 needs no server. Stdlib plus the repo's modules, Python 3.11+. Beside tools/next_report.py, which it is modeled on and shares its reader with.

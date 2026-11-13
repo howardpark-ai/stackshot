@@ -4,7 +4,7 @@ The pure half: no server import, no clock read, no file. service/writes.py's sav
 beside `updated` and `confirmed`); a pass that wants "how long has this item been quiet" reads `at`.
 
 Why a clock of its own. `updated` moves for every save, the server's own nudges included, and `confirmed` moves for a bare confirm, so neither can say whether anyone
-did anything: a silence check that read them would be reset by its own nudge, and a "still on it" confirm would keep an item fresh without moving it. `activity` moves only
+did anything: a quiet-time check that read them would be reset by its own nudge, and a "still on it" confirm would keep an item fresh without moving it. `activity` moves only
 for a write that is about the work:
 
   counts   a session's write to the item (create, update, a step done or added, a state change, a new next step or description), the owner's answer or comment, a

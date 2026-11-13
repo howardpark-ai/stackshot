@@ -14,7 +14,6 @@ which the pass reaches through two members of audit_run.Env, so a run without th
   still_holds(gid, item, load, mover, now)   the server's recheck under its lock: the same opener, the same mover and the finding still holding
   fix_text(mover, due_at)           the finding's fix line for such a step: what will happen and when
   landed_at(meta, step, mover)      when the step was moved to `mover`, while it is still the item's first open step and still the mover's; None otherwise
-  overdue(meta, step, mover, today) a step already overdue that names no date of its own (it was moved, or found stuck): a wake ahead does not cover it
   held(text, mover, is_front, same)  the front agent a step opens with when the write check refuses it: the item's mover is another session (server._gate_front_step; the same test counts the open ones in month_count)
   month_count(items, roles, now)    the monthly number: front-held steps closed in the last 30 days, how many by someone else, and how many open ones the write check would refuse now
 
@@ -22,7 +21,7 @@ The clock is `metadata.stuck_since = {"step": <hash>, "mover": <the item's mover
 step is done, dropped, reworded, the opener changed) drops it, a new mover gets a clock of its own (the old one reads as none), and a write to the item by anyone does not touch it. `metadata.stuck_moved` lists the hashes of the steps already moved (the last five), so a step
 the owner or a session worded back to the front agent is not moved a second time. Both are the server's bookkeeping: they are no write by a session and move no clock of the item.
 `metadata.stuck_landed = {"step": <hash of the reworded step>, "mover": <the mover>, "at": <epoch of the move>}` is what the move leaves: the step is now the mover's and is chased again if the mover does not act (see
-landed_at and overdue, which the silence pass reads: a wake no longer silences a step that is already overdue and carries no date of its own).
+landed_at, which the quiet-time clock reads, `silence.clock`: the mover is given its time from the move).
 Stdlib plus the repo's modules."""
 from __future__ import annotations
 
@@ -33,7 +32,6 @@ from typing import Any, Callable
 
 from stackshot.audit import audit_checks as _ac
 from stackshot.core import config as _cfg
-from stackshot.waits import dated_wait as _dw
 from stackshot.model import model as _model
 from stackshot.model import steps as _steps
 
@@ -174,14 +172,6 @@ def landed_at(meta: dict[str, Any], step: Any, mover: str, acted: float = 0.0) -
         return None
     at = rec.get("at")
     return float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) and at > 0 and not acted > at else None
-
-
-def overdue(meta: dict[str, Any], step: Any, mover: str, today: dt.date, acted: float = 0.0) -> bool:
-    """Is `step`, the first open step, one that is already overdue and carries no date of its own? Overdue is what the rule's records say: it was moved to `mover` and has not been acted on since (landed_at, `acted` as there), or
-    its clock is running under `mover` (the finding was seen for it). A step that names a date (dated_wait.step_wait_day) is the wake's business, however long it has stood."""
-    if not step or _dw.step_wait_day(_steps.first_line(step), today) is not None:
-        return False
-    return landed_at(meta, step, mover, acted) is not None or clock(meta, step_hash(step), mover) is not None
 
 
 def held(text: Any, mover: str, is_front: Callable[[str], bool], same: Callable[[str, str], bool]) -> str:

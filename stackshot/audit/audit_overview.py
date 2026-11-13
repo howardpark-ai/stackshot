@@ -38,7 +38,8 @@ RECENT_RUNS = 8              # ... and this many runs
 # (name, pace, mode key). A mode key names a switch in the configuration (see _mode); None is an audit that is always on.
 GROUPS: tuple[dict[str, Any], ...] = (
     {"key": "silence", "name": "Silence", "desc": "an item or its mover not moving", "log": True, "audits": (
-        ("answer tick", EVERY_MIN, None), ("hand-off tick", EVERY_MIN, None), ("stall tick", EVERY_MIN, None), ("silence pass", EVERY_TEN, None),
+        ("answer tick", EVERY_MIN, None), ("hand-off tick", EVERY_MIN, None), ("stall tick", EVERY_MIN, None),
+        ("hourly audit line", EVERY_TEN, "hourly_line"), ("idle hand-over", EVERY_TEN, "hand_idle"), ("balancer", EVERY_MIN, "balance"),
         ("the one ladder", "with the passes", "ladder"), ("unmoved digest", EACH_RUN, None), ("threshold message", EACH_RUN, None))},
     {"key": "filing", "name": "Filing", "desc": "an item's state is wrong", "log": True, "audits": (
         ("filing pass", EVERY_TEN, None), ("stuck-elsewhere", EVERY_TEN, None), ("arbitrary-hold", EVERY_TEN, None), ("mislabeled-state", EVERY_TEN, None),
@@ -62,8 +63,8 @@ GROUPS: tuple[dict[str, Any], ...] = (
         ("tool-text touched check", "every PR", None), ("clean-text", "every PR", None))},
 )
 
-# the findings log's kinds (audit_checks.pattern_kind: the category, and for `next rules` and `board checks` the rule or kind after a colon) by group. `stale` is two audits' (the silence pass's and the dates pass's):
-# the row's source, the pass that appended it, tells them apart.
+# the findings log's kinds (audit_checks.pattern_kind: the category, and for `next rules` and `board checks` the rule or kind after a colon) by group. `stale` is the dates pass's, and, in a log written before the 45-minute news ask was retired, the silence pass's:
+# the row's source, the pass that appended it, tells them apart (an old row keeps its "silence" source and group).
 # `wait-end` (a next line waits in words for something nothing tells the item has happened) and `event-missing` (the same rule found a wait that no event type reports) are the filing pass's waits, beside reads-as-wait.
 _FILING = {"stuck-elsewhere", "board checks", "reads-as-wait", "wait-end", "event-missing", "step-handover", "ask-options", "why-not-now", "wrong-needs", "obsolete-wait"}
 _WORDING = {"ask-missing", "next rules", "next-done", "goal-unclear", "unneeded-escalation"}
@@ -94,6 +95,12 @@ def _mode(key: str | None) -> str:
             return _cfg.audit_pattern_review() if _cfg.audit_pattern_review() != "off" else "off"
         if key == "wait_end":
             return {"fix": "on", "ask": "ask only", "off": "off"}.get(_cfg.audit_wait_end(), "on")
+        if key == "hourly_line":
+            return "on" if _cfg.audit_hourly_line() else "off"
+        if key == "hand_idle":
+            return "on" if _cfg.audit_hand_idle() else "off"
+        if key == "balance":
+            return "on" if _cfg.audit_balance() else "off"
         if key == "ladder":
             return "on" if _cfg.get("ladder", "enabled", default=False) is True else "off"
         if key == "orphans":
