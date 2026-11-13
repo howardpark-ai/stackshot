@@ -5,7 +5,7 @@ Part of the same rule as the hourly line and the idle hand-over (audit/hand_idle
 the server writes and sends (`server._busy_tell_tick`, run from the ten-minute audit tick after the idle hand-over). On by default (`[audit] busy_tell`), after 4 hours (`[audit] busy_tell_hours`).
 
   enabled() / hours()                      `[audit] busy_tell` (on unless a TOML false) and `[audit] busy_tell_hours` (default 4, never under 1), both read at use
-  stretch_start(it, meta, mover, now)      where the busy stretch of a background mover's item counts from, None when it has none
+  stretch_start(meta, clock, now)           (where the busy stretch of a background mover's item counts from, the pane-only lines in it), None when it has none (or fewer than MIN_LINES)
   due(items, gid, now, front, queue, hrs)   {"mover", "project", "kind", "since", "lines"} when the item is to be told of now, else None
   due_all(...)                             [(gid, row)] of every such item, in id order; reads only
   told_since(meta, since, now) / mark(meta, now, to, kind, since)   the record `metadata.busy_tell` ({"at", "to", "kind", "since"}) that keeps the once
@@ -14,16 +14,18 @@ the server writes and sends (`server._busy_tell_tick`, run from the ten-minute a
 Two cases, told apart by who moves the item (the server's own test of a front agent, as the hourly line uses it):
 
   - A BACKGROUND mover. The item's audit lines since its last real activity (`silence.clock`: a step done or added, a state change, the owner's answer, a message, an event on an anchor, a write by the mover; the audit's own lines are none of these) are read,
-    oldest first. A line that verified ONLY that the mover's pane is in a turn (`hourly.pane_only`: the log entry carries `pane_only`) belongs to the stretch; a line that verified anything else (a subagent, a pull request event), nothing (idle) or could
-    not tell (unknown) ends it, and the stretch counts from that line. The stretch is the time since its start, the last real activity or the last line that was not pane-only, whichever is later; the item must have at least one pane-only line in it and
-    its newest line must be one. At `hours()` the project's -main agent is told ONCE that the mover has looked busy that long with no other sign of progress on the item, and asked to look. An item whose newest line is idle is no case of this rule: it is the idle
+    oldest first. A line that verified ONLY that the mover's pane is in a turn (`hourly.pane_only`: the log entry carries `pane_only`) belongs to the stretch, but only when it follows the line before it (or the last real activity) within `EXTEND_GAP`, the
+    fast cadence's own gap plus the tick's slack (`hourly.HOUR + hourly.SLACK`): a pane-only line after a longer gap (the slow cadence of a mover silent for over a day, or a stalled server) cannot vouch for the time between, so it STARTS a new stretch at
+    its own time instead, and a stretch of 4 hours is only ever built from lines about an hour apart. A line that verified anything else (a subagent, a pull request event), nothing (idle) or could not tell (unknown) ends it, and the stretch counts
+    from that line. The stretch is the time since its start, the last real activity, the last line that was not pane-only or the last restart, whichever is later; the item must have at least `MIN_LINES` (two) pane-only lines in it (one sample is not "busy for
+    4 hours") and its newest line must be one. At `hours()` the project's -main agent is told ONCE that the mover has looked busy that long with no other sign of progress on the item, and asked to look. An item whose newest line is idle is no case of this rule: it is the idle
     hand-over's.
   - A FRONT mover (a session the owner talks to). Its items are never handed on and its busy pane verifies them, so a long run of hourly lines is all there is to see. With no real activity for `hours()` and an audit line written since, the front agent ITSELF is told once,
     whatever the lines said. The -main agent is not told of an item a front agent holds, and the owner never is.
 
 The once: `metadata.busy_tell.at` is the time the agent was told; the item is told of again only when a NEW stretch starts after it (its start is later than `at`: any real activity moves the clock, a line that verified something else moves the start). It is written in the
 save before anything is sent (at most once: a crash between the save and the send loses the message), so it survives a restart, and an audit line is no activity, so the pass's own lines never reset it. A line dated ahead of `now` is not read, a record dated ahead of it by more than an hour (`hourly.HOUR`, the audit's own tolerance) is no record (it would hide the stretch until the clock caught up), and neither is
-a stretch whose newest line is older than `hand_idle.FRESH`'s span (the hourly pass is off or the item was off the agent since). The audit log keeps its last eight lines (`hourly_log.KEEP`); a stretch is judged by the lines it has.
+a stretch whose newest line is older than `hand_idle.FRESH`'s span (the hourly pass is off or the item was off the agent since). The audit log keeps its last eight lines (`hourly_log.KEEP`); a stretch is judged by the lines it has. Once it has rolled past the last real activity the oldest line left is counted from the activity (`_whole`: the gap before it is unknown), so a told stretch never reads as a new one when the window moves on.
 
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -40,6 +42,8 @@ from stackshot.waits import waiting as _wt
 
 KEY = "busy_tell"
 KIND_MAIN, KIND_FRONT = "main", "front"      # who is told: the project's -main agent (a background mover's item), or the front agent that holds the item
+EXTEND_GAP = _hourly.HOUR + _hourly.SLACK      # a pane-only line extends a stretch only when it follows the line before it (or the last real activity) within this: the fast cadence's gap (45 minutes, an hour at the most when a tick is skipped) plus the tick's slack; a longer gap (the slow cadence, a stalled server) starts a new stretch at that line's own time
+MIN_LINES = 2      # the pane-only lines a stretch needs before a background mover is told: one sample is not "busy for 4 hours"
 FRESH = _hourly.SLOW_EVERY + 900.0      # the newest line of a stretch older than this is no news (as in audit/hand_idle.py): the hourly pass is off, or the item was off the agent since
 
 
@@ -88,15 +92,29 @@ def _lines(meta: dict[str, Any], clock: float, now: float) -> list[dict[str, Any
     return sorted(out, key=lambda e: e["at"])
 
 
+def _whole(meta: dict[str, Any], clock: float) -> bool:
+    """Does the log still hold every line written since the last real activity? The log keeps its last eight lines (`hourly_log.KEEP`): while it has fewer, or still holds a line from before the activity, none was dropped. A log that has rolled past the activity
+    has lost the lines that came first, so the gap between the activity and the oldest line left says nothing (a stretch told of once must not read as a new one every time the window moves on)."""
+    log = _log.log_of(meta)
+    return len(log) < _log.KEEP or any(e["at"] <= clock for e in log)
+
+
 def stretch_start(meta: dict[str, Any], clock: float, now: float) -> tuple[float, int] | None:
-    """(where the busy stretch counts from, the pane-only lines in it) of a background mover's item, None when it has none: no pane-only line since the last real activity, or the newest line is not a pane-only one."""
+    """(where the busy stretch counts from, the pane-only lines in it) of a background mover's item, None when it has none: fewer than `MIN_LINES` pane-only lines in the stretch, or the newest line is not a pane-only one.
+    A pane-only line extends the stretch only when it follows the line before it (the last real activity for the first, when the log still holds every line since it: `_whole`) within `EXTEND_GAP`; after a longer gap it starts a new stretch at its own time
+    (one line), since it cannot vouch for the time between (an event of the pull request in that time is not in the lines, which verify only the last hour: `hourly.verified`). Any other line starts one at its own time with none."""
     since, run = clock, 0
+    prev: float | None = clock if _whole(meta, clock) else None
     for e in _lines(meta, clock, now):
         if e.get("kind") == _hourly.KIND_OK and e.get("pane_only") is True:
-            run += 1
+            if prev is None or e["at"] - prev <= EXTEND_GAP:
+                run += 1
+            else:
+                since, run = e["at"], 1
         else:
             since, run = e["at"], 0
-    return (since, run) if run else None
+        prev = e["at"]
+    return (since, run) if run >= MIN_LINES else None
 
 
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[[Any, str], bool] | None = None,

@@ -448,10 +448,14 @@ check("9 an item whose log holds an entry dated 400 days ahead gets its line now
 # every tied pull request kind verifies, a merge and a comment included
 clean_pane(); panes["home-peer"] = "idle"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
-kinds9 = {1: ("pr_merged", "PR 4 merged"), 2: ("comment", "comment on PR 4"), 3: ("ci_result", "CI passed on PR 4"), 4: ("review", "review on PR 4")}
+kinds9 = {1: ("pr_merged", "PR 4 merged"), 2: ("comment", "comment on PR 4"), 3: ("ci_result", "CI passed on PR 4"), 4: ("review", "review on PR 4"), 5: ("commit", "commit on PR 4")}
 for i_, (k_, w_) in kinds9.items(): put(i_, act=90, last_activity={"at": now0 - 5 * MIN, "kind": k_, "what": w_})
+put(6, act=90, last_activity={"at": now0 - 61 * MIN, "kind": "commit", "what": "commit on PR 4"})      # a new head commit an hour and a minute old: past the hour, nothing verified
+put(7, act=90, last_activity={"at": now0 - 59 * MIN, "kind": "commit", "what": "commit on PR 4"})      # …and one 59 minutes old still verifies
 tick()
-check("9 a tied pull request's merge, comment, CI result and review each verify, in the record's words", all(lines(i_)[0]["text"] == f"Audit {hm(now0)}: verified {w_}" for i_, (k_, w_) in kinds9.items()), [lines(i_) for i_ in kinds9])
+check("9 a tied pull request's merge, comment, CI result, review and new head commit each verify, in the record's words", all(lines(i_)[0]["text"] == f"Audit {hm(now0)}: verified {w_}" for i_, (k_, w_) in kinds9.items()), [lines(i_) for i_ in kinds9])
+check("9 a recorded commit under an hour old verifies (recorded, so the line is no live-only one) and one older than an hour verifies nothing (idle)", lines(7)[0]["text"] == f"Audit {hm(now0)}: verified commit on PR 4" and lines(7)[0]["kind"] == "audit"
+      and lines(6)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(6)[0]["kind"] == "audit_idle" and HR.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit"}), [lines(6), lines(7)])
 # an item with no timestamp at all
 nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "progress", "updated", "state_updated", "created", "confirmed", "written_at")]
 try: wt = HR.due({"a1": nots}, "a1", now0, server._silence_env(), lambda w: "busy", server._ho_same)
