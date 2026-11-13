@@ -1,7 +1,7 @@
 """hourly.py: the hourly audit line: an item on an agent that has had no write for an hour gets one short line saying what the audit verified.
 
 Part of the rule that no item an agent moves goes more than an hour without an update. The mover writes the update; when it has nothing new to add, the audit checks that the item is moving and
-writes the line itself, so the owner never sees an item on an agent idle for over an hour. This is the audit side; handing an idle item on is a later part. Off by default (`[audit] hourly_line`).
+writes the line itself, so the owner never sees an item on an agent idle for over an hour. This is the audit side; handing an idle item on is audit/hand_idle.py. Off by default (`[audit] hourly_line`).
 
   enabled()                                    `[audit] hourly_line`, only a TOML true
   due(items, gid, now, env, pane, same)        the line an item is owed now, None when none: {"text", "verified", "kind"}
@@ -30,7 +30,7 @@ The first two are live states; the third is a recorded event, one the activity r
 that is recorded is in the record already.
 
 No pull request is read from GitHub here: the audit uses recorded data only. A commit or push to a tied pull request is not recorded by anything, so it is not a signal yet. When nothing is
-verified the line reads `Audit hh:mm: idle, nothing verified` and its log entry carries kind `audit_idle`, which a later part reads to hand the item on.
+verified the line reads `Audit hh:mm: idle, nothing verified` and its log entry carries kind `audit_idle`, which audit/hand_idle.py reads to hand the item on.
 
 Pure: no server import, no file, no clock read but the zone for the hour and minute in the line. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -72,7 +72,7 @@ def last_line(meta: dict[str, Any] | None, now: float | None = None) -> dict[str
 
 
 def idle_marked(meta: dict[str, Any] | None, now: float | None = None) -> bool:
-    """Is the newest audit line on the item one that verified nothing? What a later part reads to find the items to hand on (given `now`, an entry dated far ahead of it is not read, as in `last_line`)."""
+    """Is the newest audit line on the item one that verified nothing? What audit/hand_idle.py reads to find the items to hand on (given `now`, an entry dated far ahead of it is not read, as in `last_line`)."""
     e = last_line(meta, now)
     return bool(e) and e.get("kind") == KIND_IDLE
 

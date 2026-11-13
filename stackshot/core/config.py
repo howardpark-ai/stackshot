@@ -325,6 +325,11 @@ def audit_hourly_line() -> bool:
     return get("audit", "hourly_line", default=False) is True
 
 
+def audit_hand_idle() -> bool:
+    """[audit] hand_idle: an item the hourly audit marked idle (nothing verified) goes to a free builder and the project's -main agent is told (audit/hand_idle.py). Default false; only a TOML true switches it on."""
+    return get("audit", "hand_idle", default=False) is True
+
+
 def audit_orphan_handover() -> str:
     """[audit] orphan_handover: what the audit does with an open item whose mover is gone (successor.py): "report" (the default for the first week of use) only lists it, "apply" hands it to the closest live agent, "off" makes no check.
     A value that is none of these reads as the default."""
