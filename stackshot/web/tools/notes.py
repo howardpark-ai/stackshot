@@ -14,7 +14,7 @@ from stackshot.github import ghsync as _gh
 from stackshot.model.ids import _norm_id
 from stackshot.projects import projects as _prj
 from stackshot.service.store import _load
-from stackshot.web.tools.text import _MODEL_PAGE
+from stackshot.web.tools.text import _MODEL_PAGE, _T
 
 _main_agent = None      # set by register: the server's own, looked up at each call
 
@@ -54,10 +54,6 @@ def _off_map_note(sender: str, project: str) -> str:
             + (f"Its -main agent is {main}: ask it to list you or to take this work.)" if main else "The project names no -main agent.)"))
 
 
-_OFF_MAP_NOTE = " A sender off the project's agents map gets a note naming its -main agent"
-_OFF_MAP = _OFF_MAP_NOTE + ": ask it to list you."
-
-
 _OWNER_PARAM_UNTIL = "2099-03-03"
 
 
@@ -85,11 +81,7 @@ def _owner_param(tool: str, owner: str) -> str:
             + f"Say who moves the item with mover=, and who takes it after {OWNER}'s answer or step with then=. To name the front agent the item page leads with, use contact=<a front agent of the project>. The item model: {_MODEL_PAGE}.)")
 
 
-# With the GitHub mirror on, a write through the update, confirm or complete tool names its
-# sender; without one it is refused, not credited to the item's creator (the rule dates from when a change became an issue comment
-# headed by its author; since an earlier change no comment is posted, the rule stays until the owner drops it). Checked at the tool entry only: the server's own writes (a wake, a release, a recycle done, a migration)
-# and the client API (recycle-due, which names its script) never go through it. With the mirror off nothing changes.
-_SENDER_MIRROR = "While the GitHub mirror is on, sender is required on every update, confirm and complete, the mover's own included. "
+_SENDER_MIRROR = _T.piece("SENDER_MIRROR")      # the sender rule's wording, read by the complete tool's text and a test
 
 
 def _sender_required(sender: str) -> None:

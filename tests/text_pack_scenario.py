@@ -97,6 +97,15 @@ check("a changed output helper reaches every tool that lists it (an absent one i
 user = pack(H_SNAP)
 check("the text is the head's: a PR that edits the snapshot is read against its own edit, and the pack says so", "Make an x; c is new." in user and "Make an x. a: the thing" not in user and "also changed tests/tool_text.snapshot.json" in user, user[:600])
 
+# a tool's text file (web/tools/text/<module>.md): its change reaches the tools of its module, the shared file's every tool, and its hunks lead the diff
+g("checkout", "-q", "-b", "textfile", BASE); W(f"{tt.TEXT_DIR}/x.md", "## description x\nMake an x.\n"); g("add", "-A"); g("commit", "-qm", "textfile")
+H_TEXT = g("rev-parse", "HEAD")
+user = pack(H_TEXT)
+check("a new text file reaches the tool of its name, and its lines are in the diff", "Tools the change reaches: x\n" in user and f"{tt.TEXT_DIR}/x.md:text" in user and "+Make an x." in user, user[:700])
+check("a text file reaches the tools its module registers when the module is given (update.md: update and confirm)", tc.affected_tools([f"{tt.TEXT_DIR}/update.md:text"], "", "", {"update": {"update", "confirm"}}) == ["confirm", "update"], tc.affected_tools([f"{tt.TEXT_DIR}/update.md:text"], "", "", {"update": {"update", "confirm"}}))
+check("the shared text file reaches every tool", set(tc.affected_tools([f"{tt.TEXT_SHARED}:text"], "", "")) >= set(tt.HELPERS), tc.affected_tools([f"{tt.TEXT_SHARED}:text"], "", ""))
+check("a text file that names no tool and no module reaches none", tc.affected_tools([f"{tt.TEXT_DIR}/nothing.md:text"], "", "") == [])
+
 # ================================================================= 3. size caps and the order hunks are kept in
 BIG = SERVER.replace("def _other(a):\n    return a", "def _other(a):\n    return a\n" + "".join(f"def _filler{i}(a):\n    return {i} * a  # {'padding ' * 20}\n" for i in range(400)))
 BIG = BIG.replace("def stackshot_x(a, b=1):", "def stackshot_x(a, b=2, c=None):")

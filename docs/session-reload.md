@@ -46,7 +46,7 @@ Everything a running agent session reads from this repository falls in one of fo
 What this repository does not contain, and so what no pick here can reach: skills, plugin files and plugin hooks (a plugin is its own repository; its
 hooks run `stackshot/projects/pages.py` of this checkout as a new process at each event, so they fall under kind 2, and its SessionStart entry runs `stackshot/projects/pages.py keeper`,
 kind 1), a rule file a session loads through its CLAUDE.md (the rulebook the `rules` tool serves is a file outside the checkout, read at each call;
-`_rules_text` in `stackshot/web/server.py`, `stackshot_rules` in `stackshot/web/tools/rules.py`), a status line, and a settings file (`stackshot client install` writes the hook registration into
+`_rules_text` in `stackshot/web/server.py`, `stackshot_rules` in `stackshot/web/tools/rules.py`, whose description is in `stackshot/web/tools/text/rules.md`), a status line, and a settings file (`stackshot client install` writes the hook registration into
 `~/.claude/settings.json` of a box; see below).
 
 ## How the hooks are registered
@@ -79,7 +79,7 @@ it: release such a change with `--recycle` once the boxes are reinstalled.
 | `stackshot/projects/pages.py` | The page gate: `nag`, `touch` and `check` run per event by the hooks. Its `keeper` verb is SessionStart output (kind 1); a changed keeper text reaches each session at its next start, which is no reason to restart one. | nothing | `cmd_nag`, `cmd_touch`, `cmd_check`, `cmd_keeper`, `inject_text` in `stackshot/projects/pages.py` |
 | `stackshot` | The setup CLI, run by hand. It writes the hook registration, which a session reads at its start, but a release does not run it (see *How the hooks are registered*). | nothing | `hook_entries`, `merge_hooks`, `cmd_client_install` |
 | `reboot-hooks/*` | Run by the fleet tool at each step of a reboot. | nothing | the header of `reboot-hooks/stackshot-hook` |
-| `stackshot/web/server.py` and every other server module, `units/*`, `install.sh`, `icons/*`, `fonts/*`, `*.lock` | Server-side, kind 4. Sessions reach it through the connector or the client API at each call; `deploy.sh` restarts what loads it. | nothing | the restart map in `deploy.sh` |
+| `stackshot/web/server.py` and every other server module, `units/*`, `install.sh`, `icons/*`, `fonts/*`, `*.lock`, `stackshot/web/tools/text/*.md` | Server-side, kind 4. Sessions reach it through the connector or the client API at each call; `deploy.sh` restarts what loads it. | nothing | the restart map in `deploy.sh` |
 | `*.md`, `docs/*` | Docs. | nothing | |
 | `tests/*` (other than the snapshot above) | Tests. | nothing | |
 

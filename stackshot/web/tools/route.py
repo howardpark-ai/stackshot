@@ -5,14 +5,15 @@ import time
 
 from fastmcp.exceptions import ToolError
 
-from stackshot.core.instance import OWNER
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.router import routing as _routing
 from stackshot.service.store import _load
 from stackshot.web.auth import oauth as _oauth
 from stackshot.web.page_debts import _session_id
 from stackshot.web.publish import _publish
-from stackshot.web.tools.text import _lead
+from stackshot.web.tools.text import _lead, load_text
+
+_T = load_text("route")
 
 _anchor_release = None      # set by register: the server's own, looked up at each call
 _watch_label = None      # set by register: the server's own, looked up at each call
@@ -60,4 +61,4 @@ def register(mcp, *, anchor_release, watch_label) -> None:
     global _anchor_release, _watch_label
     _anchor_release = anchor_release
     _watch_label = watch_label
-    mcp.tool(name="route", description=_lead(f"A ruling on a notice delivered for a project. The router rules every notice of every project by itself (rules in code, then one thin call), so call this to overrule a ruling that was wrong. `notice` = the id at the end of the notice (\"notice a1b2c3\"); `ruling` = passed (handed to an agent: name it in `to`) | merged (folded into a digest) | held (kept for later) | dropped (not worth anyone's attention); `reason` = one line {OWNER} can skim; `sender` = your own session. Right call: route(notice=\"a1b2c3\", ruling=\"passed\", to=\"my-x\", reason=\"belongs to the export work\", sender=\"my-x\"). Call it once per notice, after acting on it; call it again to overrule an earlier ruling. The project's routing page (behind its number in the board's anchors column) lists every notice with its ruling and reason, and the board flags notices left without a ruling for over an hour."))(stackshot_route)
+    mcp.tool(name="route", description=_lead(_T.description("route")))(stackshot_route)
