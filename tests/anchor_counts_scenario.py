@@ -215,12 +215,12 @@ rf = ANC.routes(fstore, items, REG["pages"]).get(ANC.anchor_id(URL_C)) or []
 check("...and for an anchor scoped to an item of another project alone, it is a project-wide notice to the keeper (as before), not 'for' that project's mover",
       len(rf) == 1 and rf[0]["session"] == "keep-gamma" and rf[0]["target"] == "project-wide", rf)
 
-# _completion_anchor_prompt: asks each page's keeper about the anchors it holds, the item's own project's page first; the completing keeper is not notified
+# _completion_anchor_prompt (service/update.py): asks each page's keeper about the anchors it holds, the item's own project's page first; the completing keeper is not notified
 sent = []; server._push_noted = lambda to, note: sent.append((to, note))
 for g, p in (("20", C), ("21", C)): item2(g, p, status="completed", mover="keep-gamma")
 (T / "store/anchors.json").write_text(json.dumps({A: [{"url": SOLO, "items": ["a20"], "added": 1}], B: [{"url": URL_B, "items": ["a20", "a21"], "added": 2}], C: [{"url": URL_C, "items": ["a20"], "added": 3}]}))
 done = json.loads((T / "store/a/20.json").read_text()); done["gid"] = "a20"
-txt = server._completion_anchor_prompt("a20", done)
+txt = __import__("stackshot.service.update", fromlist=["x"])._completion_anchor_prompt("a20", done)
 deadline = time.time() + 5
 while len(sent) < 2 and time.time() < deadline: time.sleep(0.05)
 pos = {p: txt.find(f"these {p} anchors") for p in (A, B, C)}

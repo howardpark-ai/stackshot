@@ -124,8 +124,9 @@ GONE = RI.RETIRED
 for tool in (server.stackshot_update, server.stackshot_create):
     params = inspect.signature(fn(tool)).parameters
     check(f"gone: {fn(tool).__name__} takes none of the retired inputs", not [k for k in GONE if k in params], [k for k in GONE if k in params])
-params = inspect.signature(server._update_unlocked).parameters
-check("gone: the server's own _update_unlocked takes none", not [k for k in GONE if k in params], [k for k in GONE if k in params])
+from stackshot.service import update as _upd_svc
+params = inspect.signature(_upd_svc.update_unlocked).parameters
+check("gone: the update's own update_unlocked (service/update.py) takes none", not [k for k in GONE if k in params], [k for k in GONE if k in params])
 check("gone: supplies and step stay", "supplies" in inspect.signature(fn(server.stackshot_update)).parameters and "step" in inspect.signature(fn(server.stackshot_update)).parameters, None)
 async def schemas():
     async with Client(server.mcp) as c:

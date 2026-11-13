@@ -167,8 +167,14 @@ wait_end = "fix"                                    # the ten-minute filing pass
 wait_end_settle_minutes = 60                        # the pass fixes nothing on an item written less than this many minutes ago; 0 = no wait
 hourly_line = false                                 # the ten-minute silence tick (mode "script"): an item on an agent with no activity for an hour gets ONE History line, `Audit hh:mm: verified …` (the mover's pane is in a
                                                     # turn, a subagent is running, a tied pull request had a CI result, review, comment or merge in the last hour: recorded data only, nothing is read from GitHub) or `Audit hh:mm: idle, nothing
-                                                    # verified`; again an hour after the last line for the first 24 hours of silence, then every 6 hours. A line that rests on a busy pane or a subagent alone says so. No line counts as the
-                                                    # item's last activity. Nobody is messaged. false (the default): no line. Only a TOML true turns it on. See docs/stall-and-ladder.md
+                                                    # verified`; the next line is owed 45 minutes after the last for the first 24 hours of silence (it lands on the ten-minute tick, about every 50 minutes), then every 6 hours. A line that rests on a busy
+                                                    # pane or a subagent alone says so. A line that verified something counts as the item's last activity (the On agent row shows its time and words); an idle line does not.
+                                                    # Nobody is messaged. false (the default): no line. Only a TOML true turns it on. See docs/stall-and-ladder.md
+hand_idle = false                                   # the ten-minute silence tick (mode "script"), right after the hourly line (needs hourly_line): an item on an agent whose newest audit line is `idle, nothing verified` and
+                                                    # that nothing has moved since goes to a free builder (a background agent of its project, else of any project whose mandate builds; not one whose pane is in a turn or that
+                                                    # moves an open item on an agent), with one History line that says why and names the mover it left; the project's -main agent gets one message that asks nothing,
+                                                    # and with no builder free it is told that once per item per day. At most 3 items per pass and one per item per 24 hours. The owner is never told. false (the default):
+                                                    # nothing is handed on. Only a TOML true turns it on. See docs/stall-and-ladder.md
 orphan_handover = "report"                          # mode "script": an open item whose mover (or post-wake mover) is a session that is gone, a project's last retired agent included, is handed to the closest
                                                     # live agent (the project's own, then its parent's -main, its hub's, the scope's general one: stackshot/waits/successor.py), with a History line giving the reason; an item
                                                     # an owner moves is never moved, and one with no live successor stays and is reported. "report" (the default) = the run only lists them (`stackshot/audit/audit.py orphans`), "apply" = it also moves them (set this to switch on), "off" = no check
@@ -619,6 +625,10 @@ one_mover = true                                    # false: needs may name more
 description_guard = "note"                           # a thick description (a paragraph over 300 characters, or over 400 with no `- ` bullet; fenced code and `>` quotes do not count) draws guidance
                                                     # Note = the write goes through and the
                                                     # reply carries the guidance (this release); refuse = the write is refused with it (a later release). Live
+queued_behind = false                               # true: a session that moves several open items is working on the one with its newest visible activity (metadata.last_activity); each of its other items on an agent with no
+                                                    # activity for an hour reads WAITING, "queued behind <item>" (an item wait), and the silence pass, the hourly audit line and the stall ladder leave it alone as they do a waiting item.
+                                                    # Derived when the board is read, never stored: it ends when the mover moves the item, the item it waits behind closes or goes quiet for an hour, or the mover has one item left.
+                                                    # A front agent's items are never queued. Off by default. Live (read at use)
 rebullet_machines = []                              # the machines whose token may write through /client/rebullet, e.g. ["myhost"]; [] = none, the call is refused (stackshot/tools/rebullet_descriptions.py --apply: an open item's description
                                                     # rewritten as bullets, as the author `rebullet`, with nothing lost; the state clock and confirm stay). The server box only. Live
                                                     #

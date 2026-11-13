@@ -97,10 +97,11 @@ HELPERS: dict[str, list[tuple[str, str]]] = {
     "brief": [("stackshot/web/server.py", "stackshot_brief"), ("stackshot/web/server.py", "_model_report_line"), ("stackshot/web/server.py", "_world_waits_text"),
               ("stackshot/web/server.py", "_handoff_brief"), ("stackshot/web/whatschanged.py", "lines"), ("stackshot/model/model_guards.py", "brief_line"), ("stackshot/waits/handoff.py", "brief_lines")] + _ITEM_LINES,
     "create": [("stackshot/web/server.py", "stackshot_create"), ("stackshot/web/server.py", "_create"), ("stackshot/service/create.py", "create_item"), ("stackshot/web/similar.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
-    "update": [("stackshot/web/server.py", "stackshot_update"), ("stackshot/web/server.py", "_update_locked"), ("stackshot/web/server.py", "_update_unlocked"), ("stackshot/web/server.py", "_report_note"),
+    "update": [("stackshot/web/server.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_report_note"),
                ("stackshot/web/server.py", "_command_note"), ("stackshot/web/server.py", "_watch_on_write"), ("stackshot/web/server.py", "_mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
     "message": [("stackshot/web/server.py", "stackshot_message"), ("stackshot/web/server.py", "_message")],
-    "complete": [("stackshot/web/server.py", "stackshot_complete"), ("stackshot/web/server.py", "_completion_anchor_prompt"), ("stackshot/web/server.py", "_update_locked"), ("stackshot/web/server.py", "_update_unlocked"), ("stackshot/web/server.py", "_mentions_reply")]
+    "confirm": [("stackshot/web/server.py", "stackshot_confirm"), ("stackshot/service/update.py", "confirm_item")],      # not labelled in the snapshot (its reply has no label), but watched: the gate sees a changed body
+    "complete": [("stackshot/web/server.py", "stackshot_complete"), ("stackshot/service/update.py", "complete_item"), ("stackshot/service/update.py", "_completion_anchor_prompt"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_mentions_reply")]
                 + _WRITE_NOTES + _ITEM_LINES,
 }
 ALL_HELPERS = sorted({h for hs in HELPERS.values() for h in hs})

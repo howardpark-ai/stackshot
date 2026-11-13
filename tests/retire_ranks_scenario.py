@@ -105,7 +105,7 @@ refused("update: …also next to arguments that would be fine alone", lambda: se
 check("update: …none of the refusals wrote anything", rd(4) == before[4] and (T / "store/a/4.json").read_bytes() == orig_bytes[4], rd(4))
 import inspect
 check("update: create takes no rank, and the server's own _update takes none", "rank" not in inspect.signature(server.stackshot_create.fn if hasattr(server.stackshot_create, "fn") else server.stackshot_create).parameters
-      and "rank" not in inspect.signature(server._update_unlocked).parameters, None)
+      and "rank" not in inspect.signature(__import__("stackshot.service.update", fromlist=["update_unlocked"]).update_unlocked).parameters, None)
 
 async def mcp_checks():
     from fastmcp import Client

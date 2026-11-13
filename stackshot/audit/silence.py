@@ -19,6 +19,8 @@ clock: an item whose mover is its project's builder and which has a step with a 
 counts as taken, however long since its last write (the server's `skip` decides it, `server._silence_skip`). A builder's item with no such line and no event in 45 minutes is silent whatever its pane shows. Whether a session is idle is the stall pass's job and only the
 rungs that need an idle pane (the ladder's look, cold call and builder steps of a front agent or a session no page lists as a background agent) wait for one; a background agent's rungs go by this step status alone (`server._stall_tick`). The pass asks one view before it sends: an item the stall ladder is already on is left alone (`skip`, given by the server).
 
+An item whose mover is busy on another of its items (`[model] queued_behind`, model/queued.py) is queued behind that item, which the board lists under Waiting: it is not on an agent here either (`queued` reads the queue once per pass and `reading` takes each item's answer).
+
 A finding is the daily run's `stale` finding in the daily run's wording (the same category, evidence line and fix, the time given in minutes), so the two see one finding by `audit_run.finding_key`.
 It goes to the recipient the daily run's finding goes to (`deliver_findings`: the mover, else the project's -main agent), once per silence episode: an episode ends when the item has activity again, and the
 pass's send stamp (kept in its record, also for an item whose finding went away without any activity) is compared with the item's activity, not with its last write. With `[ladder] enabled` and `[ladder] silence` the server hands the pass `entered`: a fresh finding that reached someone also puts the item on the one ladder (ladder.py), its message being the ask. Nothing is sent or written while a
@@ -41,6 +43,7 @@ from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.audit import front_step as _fs  # noqa: E402
 from stackshot.waits import handoff as _ho  # noqa: E402
 from stackshot.model import model as _model  # noqa: E402
+from stackshot.model import queued as _queued  # noqa: E402
 from stackshot.model import states as _states  # noqa: E402
 from stackshot.model import work as _work  # noqa: E402
 from stackshot.waits import waiting as _wt  # noqa: E402
@@ -126,29 +129,47 @@ def _overdue(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float)
     return _fs.overdue(meta, step, mover, dt.datetime.fromtimestamp(now, _cfg.tz()).date(), _act.at(item))
 
 
-def reading(item: dict[str, Any], mover: str, after_open: Any, now: float) -> str:
+def reading(item: dict[str, Any], mover: str, after_open: Any, now: float, behind: str = "") -> str:
     """How the board stands toward the open item: "agent" (it shows the item on an agent), "unreadable" (the board's model raises on the item, and `home.classify` puts such an item on an agent rather than drop it),
-    or "" (not on an agent: the mover is no session, the state is the owner's move, or the board shows it waiting)."""
+    or "" (not on an agent: the mover is no session, the state is the owner's move, or the board shows it waiting). `behind` is the item this one is queued behind when its mover is busy on that one (`queued`,
+    model/queued.py): the board lists it under Waiting, so it is not on an agent here either."""
     try:
         if _ac._no_session(mover) or _states.of(item, after_open)[0] in _model.OWNER_STATES:
             return ""
-        return "" if _model.shown_waiting(item, now, after_open) else "agent"
+        return "" if behind or _model.shown_waiting(item, now, after_open) else "agent"
     except Exception:  # noqa: BLE001
         return "" if _ac._no_session(mover) else "unreadable"
 
 
-def on_agent(item: dict[str, Any], mover: str, after_open: Any, now: float) -> bool:
+def on_agent(item: dict[str, Any], mover: str, after_open: Any, now: float, behind: str = "") -> bool:
     """Is the open item on an agent as the board shows it? Its mover is a session, its state is not the owner's move, and the board does not show it waiting (`model.shown_waiting`, the board's own phase): a wake
     kept as a hand-off's backstop leaves an item on agent, while a stored until (a date alone too), a wake with a wait_basis, a hold with a dated wake, an open `after` link and a stored wait (a release, a CI run, an event, a relay, an outside party) are
     waits. The scope of the silence rule and of the backstop (`uncovered`) alike. An item the model cannot read is on an agent here too, as the board lists it (`reading`)."""
-    return bool(reading(item, mover, after_open, now))
+    return bool(reading(item, mover, after_open, now, behind))
 
 
-def silent(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: Any, now: float, front: Any = None) -> str:
+def queued(items: dict[str, dict[str, Any]], now: float, env: Any = None) -> dict[str, str]:
+    """{item: the item it is queued behind} over the open items (model/queued.py), {} when `[model] queued_behind` is off. The candidates are the items the board shows on an agent (`reading`); `env.is_front` says who
+    is a front agent (as in `findings`). The passes read it once per round and hand each item's answer to `reading`, `silent` and `on_agent`; reads only."""
+    if not _queued.enabled():
+        return {}
+    e = env if hasattr(env, "is_front") else _ar.Env()
+    front = getattr(e, "is_front_safe", e.is_front)      # a front test that cannot answer counts as front: nothing is queued on a guess
+    cands = []
+    for gid in sorted(items, key=_ac._num):
+        if items[gid].get("status") != "open":
+            continue
+        it, _meta, after_open, mover = _ac._item_view(items, gid)
+        if reading(it, mover, after_open, now) == "agent":
+            cands.append(_queued.candidate(gid, it, mover, now))
+    return _queued.queue(cands, now, front)
+
+
+def silent(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: Any, now: float, front: Any = None, behind: str = "") -> str:
     """Why the item is silent ("" when it is not): "no write for N minutes and no date of its own", the daily run's stale wording with the time in minutes. An item that is not on an agent as the board shows it
     (`on_agent`) is left alone, and so is an untaken hand-off to a back agent (the hand-off audit clocks it). A hand-off to a front agent is checked here: that audit never clocks one (`front(mover, project)` → True
     for a front agent; None reads none as front)."""
-    state = reading(item, mover, after_open, now)
+    state = reading(item, mover, after_open, now, behind)
     if not state:
         return ""
     if _ho.awaiting_session(item) and not (front is not None and front(mover, str(meta.get("project") or ""))):
@@ -189,11 +210,12 @@ def findings(items: dict[str, dict[str, Any]], now: float, env: Any = None, skip
     passes: list[dict[str, Any]] = []
     _br.install_fallback()
     front = (env if hasattr(env, "is_front") else _ar.Env()).is_front
+    line = queued(items, now, env)
     for gid in sorted(items, key=_ac._num):
         if items[gid].get("status") != "open":
             continue
         it, meta, after_open, mover = _ac._item_view(items, gid)
-        s = silent(it, meta, mover, after_open, now, front)
+        s = silent(it, meta, mover, after_open, now, front, behind=line[gid]) if gid in line else silent(it, meta, mover, after_open, now, front)      # the queue is passed only for an item in it: a caller that replaces `silent` keeps its old arguments
         if not s:
             continue
         if skip is not None:
@@ -219,11 +241,12 @@ def uncovered(items: dict[str, dict[str, Any]], now: float, env: Any = None, ski
     found, passes = findings(items, now, env, skip)
     covered = {f["id"] for f in found} | {p["id"] for p in passes}
     out: list[dict[str, Any]] = []
+    line = queued(items, now, env)
     for gid in sorted(items, key=_ac._num):
         if items[gid].get("status") != "open":
             continue
         it, meta, after_open, mover = _ac._item_view(items, gid)
-        if not on_agent(it, mover, after_open, now):
+        if not on_agent(it, mover, after_open, now, line.get(gid, "")):
             continue
         last = clock(it, mover)
         if not (last > 0 and now - last > BACKSTOP_S) or _nr.shown(gid) in covered:

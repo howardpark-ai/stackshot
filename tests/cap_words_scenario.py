@@ -354,8 +354,9 @@ check("API: an agent's entry is a 400", st == 400 and "own words" in d["error"],
 
 # the only writers of metadata.answers are the board's answer form and the GitHub reader: not create, update or said
 import inspect
-for fn in ("stackshot_create", "stackshot_update", "stackshot_complete", "_create", "_update", "_update_unlocked"):
-    ps = inspect.signature(getattr(server, fn)).parameters
+from stackshot.service import update as _upd_svc
+for fn in ("stackshot_create", "stackshot_update", "stackshot_complete", "_create", "_update", "update_unlocked"):
+    ps = inspect.signature(getattr(_upd_svc if fn == "update_unlocked" else server, fn)).parameters
     check(f"writers: {fn} has no parameter that writes answers", "answers" not in ps and not any(x.kind is inspect.Parameter.VAR_KEYWORD for x in ps.values()), list(ps))
 item(38, hold=True, wake=day(30), answers=[park])
 ans0 = rd(38)["metadata"]["answers"]

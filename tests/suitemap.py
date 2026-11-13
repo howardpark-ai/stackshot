@@ -40,6 +40,12 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
   tests/suitemap.py merge --map OUT SHARD…                one map out of the shards' maps (one commit); exit 1 when a suite is
                                                           in two of them or a suite of the checkout is in none (the map is
                                                           still written: a suite it lacks has no clean measurement, so it runs)
+  tests/suitemap.py stamp --map MAP --sha SHA [--tree T] [--out OUT]
+                                                          accept a merge-queue run's map as the proof of SHA (main's push, see the
+                                                          `proof` job of tests.yml): exit 0 and write the map for SHA to OUT when the
+                                                          map is of SHA or of a commit with the same tree (T: that commit's tree, for a
+                                                          checkout that lacks it), holds exactly the suites of SHA and marks none failed;
+                                                          else exit 1 with the reason (nothing is guessed: a refusal means the whole run follows)
   tests/suitemap.py select --map MAP [--to REV]           print `all`, or the suites to run separated by spaces (empty: none);
                                                           the reason for each changed file goes to stderr, and to
                                                           $GITHUB_STEP_SUMMARY when set. The change is git diff <map's commit> <REV>
@@ -1808,6 +1814,55 @@ def merge(args):
     return rc
 
 
+def tree_of(commit):
+    """the tree id of a commit of the checkout, or None when the checkout does not have it"""
+    out = git("rev-parse", "--verify", "--quiet", f"{commit}^{{tree}}")
+    return out.strip() if out and out.strip() else None
+
+
+def stamp(args):
+    """accept a merge-queue run's map as the proof of --sha: exit 0 and write the map for --sha to --out, or exit 1 with the reason.
+    No GitHub call here: the workflow finds the run and downloads its map, and passes the tree of the map's commit when the checkout
+    has not got that commit (--tree). Every check must hold; anything doubtful is a refusal, and a refusal only means the whole run follows."""
+    def refuse(why):
+        print(f"suitemap stamp: refused: {why}", file=sys.stderr)
+        summary(["### Merge-queue proof", f"**Not proven:** {why}"])
+        return 1
+    if not re.fullmatch(r"[0-9a-f]{40}", args.sha or ""):
+        return refuse(f"{args.sha!r} is not a full commit id")
+    m = load_map(args.map)
+    if m is None:
+        return refuse(f"{args.map} is not a map of this format")
+    mc = m["commit"]
+    if not isinstance(mc, str) or not re.fullmatch(r"[0-9a-f]{40}", mc):
+        return refuse("the map names no full commit id")
+    how = "the same commit"
+    if mc != args.sha:
+        theirs, ours = args.tree or tree_of(mc), tree_of(args.sha)
+        if not theirs or not ours:
+            return refuse(f"the map is of {mc[:12]}, and the tree of {'it' if not theirs else args.sha[:12]} is not known")
+        if theirs != ours:
+            return refuse(f"the map is of {mc[:12]}, whose tree differs from the tree of {args.sha[:12]}")
+        how = f"{mc[:12]}, a commit with the same tree"
+    want = suites_at(args.sha)
+    if not want:
+        return refuse(f"{args.sha[:12]} has no suite")
+    have_ = set(m["suites"])
+    if have_ != set(want):
+        return refuse(f"the map's suites differ from the commit's (missing: {', '.join(sorted(set(want) - have_)) or 'none'}; unknown: {', '.join(sorted(have_ - set(want))) or 'none'})")
+    bad = sorted(k for k, e in m["suites"].items() if not isinstance(e, dict) or e.get("failed"))
+    if bad:
+        return refuse(f"a suite failed in that run: {', '.join(bad)}")
+    out = dict(m, commit=args.sha)   # the commit `select` fetches and diffs against later: main's, which the checkout has
+    if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        with open(args.out, "w") as f:
+            json.dump(out, f, separators=(",", ":"))
+    print(f"suitemap stamp: accepted: the map holds all {len(want)} suites of {args.sha[:12]}, none failed ({how})", file=sys.stderr)
+    summary(["### Merge-queue proof", f"**Proven:** the merge queue ran all {len(want)} suites on {how}; none failed."])
+    return 0
+
+
 # ---------------------------------------------------------------- select
 def load_map(path):
     try:
@@ -2405,6 +2460,7 @@ def main():
     p = sub.add_parser("plan"); p.add_argument("--of", type=int, required=True); p.add_argument("--map")
     p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
     p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
+    p = sub.add_parser("stamp"); p.add_argument("--map", required=True); p.add_argument("--sha", required=True); p.add_argument("--tree"); p.add_argument("--out")
     p = sub.add_parser("select"); p.add_argument("--map", required=True); p.add_argument("--to", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
@@ -2417,7 +2473,7 @@ def main():
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
-    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "select": select, "audit": audit}[args.cmd](args)
+    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "stamp": stamp, "select": select, "audit": audit}[args.cmd](args)
 
 
 if __name__ == "__main__":

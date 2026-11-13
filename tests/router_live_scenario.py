@@ -705,7 +705,7 @@ check("a front agent that owns an item on a one-session page (beta, name line ho
 check("…a reminder for an item it moves goes to the mover itself (no keeper stands in for a front agent)", server._reminder_to({"mover": "home-eta-main", "project": "projects/beta"})[:1] == [(server._session_id("home-eta-main"), "as its mover")], server._reminder_to({"mover": "home-eta-main", "project": "projects/beta"}))
 _an = json.loads((T / "store/anchors.json").read_text()); _an["projects/beta"].append({"url": "https://x.slack.com/archives/C0000000009", "items": ["a40"], "added": 1, "by": "t"}); (T / "store/anchors.json").write_text(json.dumps(_an))
 item(40, "projects/beta", "home-other", status="completed")
-p_n = len(pushes()); txt_ = server._completion_anchor_prompt("a40", server._load("a40")); settle()
+p_n = len(pushes()); txt_ = __import__("stackshot.service.update", fromlist=["x"])._completion_anchor_prompt("a40", server._load("a40")); settle()
 check("completion anchor on a one-session page: the keeper told is the page's own session (home-beta), not the general -main agent", "(keeper home-beta notified)" in txt_ and [x[0] for x in pushes()[p_n:]] == ["home-beta"], (txt_, pushes()[p_n:]))
 (T / "store/anchors.json").write_text(json.dumps({**_an, "projects/beta": _an["projects/beta"][:-1]}))
 (T / "store/projects.json").write_text(_pj_save)

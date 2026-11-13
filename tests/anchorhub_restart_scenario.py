@@ -319,4 +319,25 @@ got13 = [(e[0], e[1], e[3]) for e in events[n_ev:] if e[0] == aid(n12) and e[1] 
 check("restart over a saved pending marker: the first finished result is reported once (a green: passing on), the marker is gone, and the passes after add none",
       got13 == [(aid(n12), "ci_passed", "passing on " + f"{n12:040x}"[:7] + " (1 checks)")] and "pending" not in hub14.gh_state["ci"][aid(n12)] and isinstance(hub14.gh_state["ci"][aid(n12)]["key"], tuple), (got13, hub14.gh_state["ci"].get(aid(n12))))
 
+# ---- 14. a save while a receiver's start is being retried keeps the position that receiver loaded (a second restart before it comes up must not lose it)
+import threading, socket, urllib.error
+DNS = urllib.error.URLError(socket.gaierror(-3, "Temporary failure in name resolution"))      # a network error: its start is retried
+def misconfigured(h): raise KeyError("SLACK_USER_TOKEN")                                  # a missing credential: waiting cannot fix it
+TINY = (0.02, 0.08)                                                                       # s: the backoff
+EV15 = threading.Event(); up15 = threading.Event()
+def comes_up(h):
+    if not up15.is_set(): raise DNS                         # the network is down until the test says it is back
+    h.savers["google"] = lambda: {"a@x.test": {"hist": "9"}}; h.hooks["/hook/g15"] = lambda hd, body: (200, "ok"); h.status["g15"] = {"since": "x"}
+h15 = core.Hub(); h15.status["receivers"] = {}
+LOADED = {"a@x.test": {"hist": "7", "sent": ["m1"], "retry": [["m2", "t2", 1]]}}
+h15.saved = {"google": LOADED, "nope": {"n": 1}, "gone": {"n": 2}, "saved": "then"}
+th15 = core.start_receiver(h15, "google", comes_up, lambda: bool(h15.status.get("g15")), routes=("/hook/g15",), backoff=(0.02, 0.05), stop=EV15)
+core.start_receiver(h15, "nope", misconfigured, lambda: True, backoff=TINY)         
+h15.persist(); doc15 = json.load(open(core.CURSORS))
+check("save: while a receiver's start is being retried, the position it loaded is written back as it was", th15 is not None and doc15.get("google") == LOADED, doc15)
+check("save: the section of a receiver whose start failed for good, and of one nobody starts, is not written", "nope" not in doc15 and "gone" not in doc15, doc15)
+up15.set(); th15.join(10); h15.persist(); doc15 = json.load(open(core.CURSORS))
+check("save: once the receiver is up its own saver gives the position, and the loaded section is not kept beside it", not th15.is_alive() and doc15.get("google") == {"a@x.test": {"hist": "9"}}, doc15)
+EV15.set()
+
 print(("ok" if not fails else "FAILED") + f": anchor-hub restart scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

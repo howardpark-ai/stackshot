@@ -11,6 +11,7 @@ a create means. This suite installs hooks that record each call and return what 
   5  request map    a retry with the same request id returns the item the first call made and runs no gate; an entry whose item is gone files anew; the map is written whole and leaves no temporary file
   6  github ids     with the issue-number ids on, the id is the issue's; a GitHub that does not answer is a refusal without the queue and a temporary id with it (budget or outage), told in the reply
   7  hooks          a create without hooks installed is refused, and a hook table with a hook missing cannot be built
+  8  the table      the table the server builds holds every hook, and looks each up when it is called: a patch of the owner (the nag's page_debts, a gate on the server) after the install reaches the create
 
     tests/run-suite create        -> exit 0 / 1"""
 import dataclasses, json, os, pathlib, re, sys, threading
@@ -215,6 +216,20 @@ far = (dt.date.today() + dt.timedelta(days=3)).isoformat()
 gid_u, _ = mk(until=far, wait_kind="")
 check("3 an until in the future is passed to the model's arguments as given and judged against the cap", called("gate_cap") and called("gate_model_args")[0][0][0]["until"] == far, (called("gate_cap"), called("gate_model_args")))
 create.install(make_hooks())
+# the writer is `by or owner`, and the writer charge is made without `loose` (the page debt of a create is the strict one)
+RET["pilot_charge"] = ("stew-session", "name"); RET["writer_owes"] = True; RET["writer_charge"] = "\n(charged)"
+RET["gate_model_args"] = ({"mover": "wr3-back"}, {})
+gid_lw, _ = mk()
+wc = called("writer_charge")
+check("3 a session's create charges its page debt with loose=False, to the creator, naming the item and the keeper", len(wc) == 1 and wc[0][1].get("loose") is False and wc[0][0] == ("projects/alpha", gid_lw, OWNER, "stew-session", "created"), wc)
+gh_o = called("gate_handoff")
+check("3 …and a hand-off at creation is gated for the creator as the writer when no script filed it", len(gh_o) == 1 and gh_o[0][0][3] == OWNER, gh_o)
+RET["writer_owes"] = False; RET["pilot_charge"] = ("stew-session", "name")
+gid_sw, _ = mk(by="a script (a script on box-a)")
+gh_s = called("gate_handoff")
+check("3 a script's create gates the hand-off for the script, not for the creator (by or owner)", len(gh_s) == 1 and gh_s[0][0][3] == "a script (a script on box-a)", gh_s)
+check("3 …and its save and its pilot charge name the script too, and no writer charge is made for a script", called("save")[0][1]["writer"] == "a script (a script on box-a)" and called("pilot_charge")[0][0][1] == "a script (a script on box-a)" and not called("writer_charge"), (called("save"), called("pilot_charge")))
+RET.pop("pilot_charge"); RET.pop("writer_owes"); RET.pop("writer_charge"); RET.pop("gate_model_args")
 
 # ---------------------------------------------------------------- 4. refusals
 before_files = files()
@@ -310,6 +325,22 @@ try: create.Hooks(**{f.name: None for f in dataclasses.fields(create.Hooks)[:-1]
 except TypeError as e: short = str(e)
 check("7 a hook table with a hook missing cannot be built", short is not None, short)
 check("7 the table holds the three flags and the two constants, and no name that service must not import", {"session_next", "question", "terminal_row", "ask_none", "subject_tagged"} <= {f.name for f in dataclasses.fields(create.Hooks)}, None)
+
+# ---------------------------------------------------------------- 8. the table the server builds
+# The server's own table, not this suite's: a hook is looked up when it is called, so a suite that replaces the owner's function after the install still reaches the create.
+from stackshot.web import server, page_debts
+tbl = create._hooks()
+check("8 the server's table has every hook the create names", {f.name for f in dataclasses.fields(create.Hooks)} == {f.name for f in dataclasses.fields(tbl)}, None)
+real_nag = page_debts._nag
+page_debts._nag = lambda owner="": f"<nag for {owner!r}>"
+try: via_table = tbl.nag("wr3-owner")
+finally: page_debts._nag = real_nag
+check("8 the nag is page_debts' own function looked up at each call (a patch of its owner after the install reaches the create)", via_table == "<nag for 'wr3-owner'>", via_table)
+real_gate = server._gate_subject
+server._gate_subject = lambda *a, **k: "<patched gate>"
+try: via_gate = tbl.gate_subject("x")
+finally: server._gate_subject = real_gate
+check("8 …and a gate that stays on the server is looked up late too (a suite's patch of the server's name reaches the create)", via_gate == "<patched gate>", via_gate)
 
 writes.save = real_save
 print(f"create scenario: {len(ran) - len(fails)}/{len(ran)} checks")
