@@ -102,7 +102,7 @@ def check(name, cond, got=None):
 def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
-from stackshot.web import server; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
+from stackshot.service import gates; from stackshot.web import server; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -354,9 +354,9 @@ r = upd("a61", priority="p2", description=DW("The ask is wrong."))
 check("the same description re-sent with a later write does not take the NEW ask off", stood(61) and "took the ask off" not in r, r)
 # a write with no sender is nobody's own word: it takes nothing off (the update tool refuses an empty sender; the tail itself is checked here)
 item(50, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-r = server._ask_after_write(server._ask_pre("a50"), "", "", False, ["the ask is wrong"])
+r = server._ask_after_write(gates.ask_pre("a50"), "", "", False, ["the ask is wrong"])
 check("a sender-less write never takes the ask off, though its text says the ask is wrong, and gets no reminder", stood(50) and r == "", r)
-check("the same words from the ask's author do", "took the ask off" in server._ask_after_write(server._ask_pre("a50"), "home-agent", "", False, ["the ask is wrong"]) and not stood(50))
+check("the same words from the ask's author do", "took the ask off" in server._ask_after_write(gates.ask_pre("a50"), "home-agent", "", False, ["the ask is wrong"]) and not stood(50))
 
 # the real shape: the owner is the stored mover while a decision stands, and a `then` is stored; the item goes back to the ask's author
 item(51, mover="Oliver", then="home-agent", needs=["decision"], ask=ASK, state="your-call", ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
@@ -519,7 +519,7 @@ check("a close seen as superseded or as done leaves asks alone too (the close pa
 
 # the author's word, on the write's new text: the plain sentence counts, anything around it stands (every stand-case of the pure reader, through the server's own tail)
 item(500, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-tail = lambda texts, k=500: server._ask_after_write(server._ask_pre(f"a{k}"), "home-agent", "", False, texts)
+tail = lambda texts, k=500: server._ask_after_write(gates.ask_pre(f"a{k}"), "home-agent", "", False, texts)
 STAND_W = [[t] for t in NOT_WORD] + [w for t in ("The ask is wrong.", "- My question is moot.", "This ask is no longer needed.") for e in EXTRAS for w in around(t, e)]
 bad = [t for t in STAND_W if "took the ask off" in tail(t) or not stood(500)]
 check("the author's word on a write (%d inputs): a hedge, a clause, a question, a label, a quote, a name and a colon, another sentence or line before or after, a disagreement, Korean, 'Pat to decide', a second text: the ask stands" % len(STAND_W), not bad, bad[:5])
@@ -528,7 +528,7 @@ for k, t in zip((501, 502, 503, 504, 505), ("The ask is wrong.", "My question is
     r = tail([t], k)
     check(f"the author's word on a write: {t!r} alone takes the ask off", not stood(k) and "took the ask off" in r, r)
 item(506, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-r = server._ask_after_write(server._ask_pre("a506"), "home-other", "", False, ["The ask is wrong."])
+r = server._ask_after_write(gates.ask_pre("a506"), "home-other", "", False, ["The ask is wrong."])
 check("the same plain sentence from a session that is not the ask's author takes nothing off", stood(506) and "took the ask off" not in r, r)
 
 # (round 11, M1) through the update tool: a hedge inside a longer old line rides along with the sentence and the ask stands; a hedge held as a whole old line is not new, so the sentence alone removes the ask
@@ -607,7 +607,7 @@ check("... wait_anchor, post_wake_mover and then, which store a free string as w
 # (round 12, L1) from the records of lines only the `text` is held: status words ("open", "done", "dropped") are not the item's text
 item(980, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK}, wait_basis={"text": "waiting for the vendor", "wake": "2026-11-20", "by": "home-agent", "at": now},
      steps=[{"text": "home-agent: the next step", "status": "open"}, {"text": "home-agent: an old step", "status": "done", "by": "home-agent", "at": now - 100}, {"text": "home-agent: a dropped step", "status": "dropped", "by": "home-agent", "at": now - 90}])
-held = server._ask_pre("a980")["old"].split("\n")
+held = gates.ask_pre("a980")["old"].split("\n")
 check("the lines an item holds: the text of each step and of the wait basis, and not its status, its marker's name or its time",
       "home-agent: the next step" in held and "home-agent: an old step" in held and "waiting for the vendor" in held and not [x for x in held if x.strip().lower() in ("open", "done", "dropped", "2026-11-20", "home-agent")], held)
 bad_s = []
@@ -628,7 +628,7 @@ for k in (990, 991, 992):
         r = upd(f"a{k}", priority="p2"); res_c.append((k, rd(k)["metadata"].get("priority") == "p2"))
     except Exception as e:  # noqa: BLE001
         res_c.append((k, f"raised {e.__class__.__name__}: {str(e)[:100]}"))
-check("a corrupt ask_rec.at or ask_left.at never fails the write: the update is saved (three damaged shapes)", all(ok is True for _, ok in res_c) and server._ask_pre("a990") == {}, res_c)
+check("a corrupt ask_rec.at or ask_left.at never fails the write: the update is saved (three damaged shapes)", all(ok is True for _, ok in res_c) and gates.ask_pre("a990") == {}, res_c)
 
 # (round 12, L4) the writer's label is read only when a save changes the ask
 labels = []

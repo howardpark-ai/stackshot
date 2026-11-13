@@ -76,7 +76,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.service import gates; from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -650,7 +650,7 @@ refused_nw("10 re-park: …so the third, whose only other change is next and the
            "re-parked 2 times in a row with nothing else changed", "third move of its wake")
 upd(91, post_wake_mover=OTHER, wake=day(5), wait_basis=basis())
 check("10 re-park: a change of a structured field (the post-wake mover) is a real change: allowed, and the count starts again", "repark" not in mt(91) and wk_(mt(91)) == day(5), mt(91))
-check("10 re-park: the compared fields are the structured ones", "wait_kind" in server._REPARK_FIELDS and "needs" in server._REPARK_FIELDS and "next" not in server._REPARK_FIELDS and "description" not in server._substance({"metadata": {}}), server._REPARK_FIELDS)
+check("10 re-park: the compared fields are the structured ones", "wait_kind" in gates._REPARK_FIELDS and "needs" in gates._REPARK_FIELDS and "next" not in gates._REPARK_FIELDS and "description" not in gates._substance({"metadata": {}}), gates._REPARK_FIELDS)
 
 # ================================================================ 11. an alarming word
 item(92, needs=[BACK])

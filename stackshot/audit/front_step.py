@@ -15,7 +15,7 @@ which the pass reaches through two members of audit_run.Env, so a run without th
   fix_text(mover, due_at)           the finding's fix line for such a step: what will happen and when
   landed_at(meta, step, mover)      when the step was moved to `mover`, while it is still the item's first open step and still the mover's; None otherwise
   overdue(meta, step, mover, today) a step already overdue that names no date of its own (it was moved, or found stuck): a wake ahead does not cover it
-  held(text, mover, is_front, same)  the front agent a step opens with when the write check refuses it: the item's mover is another session (server._gate_front_step; the same test counts the open ones in month_count)
+  held(text, mover, is_front, same)  the front agent a step opens with when the write check refuses it: the item's mover is another session (service/gates.py gate_front_step; the same test counts the open ones in month_count)
   month_count(items, roles, now)    the monthly number: front-held steps closed in the last 30 days, how many by someone else, and how many open ones the write check would refuse now
 
 The clock is `metadata.stuck_since = {"step": <hash>, "mover": <the item's mover>, "at": <epoch>}`: the first pass that sees the finding for a step stores it, a pass that no longer sees the finding for it (the

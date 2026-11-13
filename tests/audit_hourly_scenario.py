@@ -66,6 +66,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:400]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
+from stackshot.service import gates
 from stackshot.web import server
 from stackshot.audit import hourly as HR, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
@@ -370,7 +371,7 @@ for label, mod in (("the board's renderer", board_render), ("the signed-in UI's 
     got11 = [x for x in evs if x[1] == "stall" and "Audit " in x[2]]
     check(f"11 {label} shows the audit lines in the History, one each, said by stackshot", len(got11) == 3 and all(x[2].startswith("stackshot: Audit ") for x in got11) and not any("ladder step" in x[2] for x in evs if "Audit" in x[2]), evs)
 # an update that rewrites other metadata keeps the log (the key is the server's, like the ladder's)
-check("11 the key is a re-park-quiet bookkeeping key like the ladder's and the front agent's", "hourly_audit" in server._REPARK_QUIET)
+check("11 the key is a re-park-quiet bookkeeping key like the ladder's and the front agent's", "hourly_audit" in gates._REPARK_QUIET)
 
 # ================================================================ 12. a record dated ahead is no event; an absent key is off
 clean_pane(); panes["home-peer"] = "idle"

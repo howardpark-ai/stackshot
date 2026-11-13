@@ -8,7 +8,7 @@ item, never writes an ask, and never changes an item the owner moves (needs deci
 The fixes (each a key of FIXES):
   wake_park     a wake that is the whole of the mover's wait is parked: hold=true with a wait_basis made from the step's own words (the write: server `_date_only_wait`; the ten-minute filing
                 pass: server `_wake_park`, through audit_run.Env.wake_park)
-  front_mover   mover, then or post_wake_mover set to a front agent by another session is set to the project's builder instead (server `_fix_front_mover`); with no builder the write is refused as before
+  front_mover   mover, then or post_wake_mover set to a front agent by another session is set to the project's builder instead (service/gates.py `fix_front_mover`); with no builder the write is refused as before
   wait_reason   a hold with a wake and no reason, whose own next or description already says what the item waits for on the wake's day, takes that line as its wait_basis (`_fix_loose_reason` in service/update.py)
   wait_end      a next line that waits in words for another item, a pull request, a machine coming online or a link, with nothing telling the item when that happens, gets the wait the line names
                 (after, an event wait, an anchor wait, or a step proof), with a backstop day; the ten-minute filing pass only (server `_wait_end_fix`, wait_end.py, through audit_run.Env.wait_end)

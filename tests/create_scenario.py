@@ -1,6 +1,6 @@
 """Scenario test for creating an item (stackshot/service/create.py, `create_item` with its `Hooks`, and the request map) — a scratch store, fake hooks, no server, no port, no network.
 
-The create runs the gates and notices that are still server.py's through `Hooks`, takes the item's id, saves it through the write path and tells the sessions it names, in an order that is part of what
+The create runs the write gates (service/gates.py: this suite replaces each there with a recorder) and the checks and notices that are still server.py's through `Hooks`, takes the item's id, saves it through the write path and tells the sessions it names, in an order that is part of what
 a create means. This suite installs hooks that record each call and return what a gate that lets the write through returns, wraps the save in a recorder (which calls the real one) and holds:
 
   1  order          the whole sequence of a session's create, from the subject gate to the reply's last note; a create from a script (`by`) leaves out the checks of a session's own write
@@ -35,7 +35,7 @@ def check(name, cond, got=None):
 from fastmcp.exceptions import ToolError
 from stackshot.core import store as cstore
 from stackshot.github import ghsync as gh
-from stackshot.service import create, writes
+from stackshot.service import create, gates, writes
 cstore.STORE = T / "store"
 check("0 the module's request map sits in the instance's state folder", str(create.REQUESTS) == f"{tmp}/state/requests.json", create.REQUESTS)
 
@@ -65,6 +65,9 @@ def flag(name):
         LOG.append((name, (), {}))
         return FLAGS[name]
     return run
+# the write gates are service/gates.py's, not hooks: the create calls them on that module, so this suite replaces each there (the recorder above) and puts the real ones back before it imports the server
+REAL_GATES = {n: getattr(gates, n) for n in dir(gates) if n.startswith("gate_") and callable(getattr(gates, n))}
+for _n in REAL_GATES: setattr(gates, _n, hook(_n))
 def make_hooks(**over):
     kw = {}
     for f in dataclasses.fields(create.Hooks):
@@ -328,8 +331,10 @@ check("7 the table holds the three flags and the two constants, and no name that
 
 # ---------------------------------------------------------------- 8. the table the server builds
 # The server's own table, not this suite's: a hook is looked up when it is called, so a suite that replaces the owner's function after the install still reaches the create.
+for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
 from stackshot.web import server, page_debts
 tbl = create._hooks()
+check("8 no write gate is a hook of the create: the create calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(create.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))
 check("8 the server's table has every hook the create names", {f.name for f in dataclasses.fields(create.Hooks)} == {f.name for f in dataclasses.fields(tbl)}, None)
 real_nag = page_debts._nag
 page_debts._nag = lambda owner="": f"<nag for {owner!r}>"

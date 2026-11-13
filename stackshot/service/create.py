@@ -7,9 +7,9 @@ sessions the item names, publishes, and builds the reply. The order of those ste
 
 The request map (`requests.json`: a request id and the item it filed) is this module's: a retry with the same request id returns the item the first call made (`_requests`, `_remember_request`).
 
-Most gates and notices a create runs are still server.py's, because the update tool, the close and the telling run the same ones; they are reached through `Hooks`, which server.py fills once
-with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves `Hooks` when its area moves under service/. A hook is looked up on server.py when a create
-runs, so a suite that replaces a gate there still reaches the create. Three thread-local flags of server.py are read by a create and also by the gates, the update tool and the telling, so they
+The write gates a create runs are service/gates.py's (`_gates.gate_*`, in the order they ran in server.py). The field and decision checks and the notices a create runs are still server.py's, because the update tool,
+the close and the telling run the same ones; they are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves
+`Hooks` when its area moves under service/. A hook is looked up on server.py when a create runs, so a suite that replaces one there still reaches the create; a suite that replaces a gate patches it on service/gates.py. Three thread-local flags of server.py are read by a create and also by the gates, the update tool and the telling, so they
 stay thread-locals there until those areas move and a create reads them through `Hooks`: `session_next` (the create or update tool's own call, set by `_session_write`), `question` (a script's
 question: set by the question, terminal-prompt and watcher routes around their create) and `terminal_row` (the terminal prompt's and the job-gap routes' row).
 
@@ -39,6 +39,7 @@ from stackshot.model import next_rules as _nr
 from stackshot.model import steps as _steps
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_sessions
 from stackshot.projects import pages as _pages
+from stackshot.service import gates as _gates
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path, _shown_ids
 from stackshot.waits import until_write as _uw
@@ -75,7 +76,7 @@ def _remember_request(rid: str, gid: str) -> None:
 
 @dataclass(frozen=True)
 class Hooks:
-    """What a create still reaches in server.py (the gates and notices it shares with the update tool, the close and the telling, the three thread-local flags, two constants), in the names
+    """What a create still reaches in server.py (the field and decision checks and notices it shares with the update tool, the close and the telling, the three thread-local flags, two constants), in the names
     they have there without the leading underscore; server.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads the thread-local."""
     actor_note: Callable[..., Any]
     after_open: Callable[..., Any]
@@ -86,34 +87,20 @@ class Hooks:
     fallback_wait_date: Callable[..., Any]
     fmt: Callable[..., Any]
     form_notes: Callable[..., Any]
-    gate_after: Callable[..., Any]
     gate_alternatives: Callable[..., Any]
     gate_ask: Callable[..., Any]
     gate_bare_urls: Callable[..., Any]
-    gate_cap: Callable[..., Any]
-    gate_contact: Callable[..., Any]
     gate_description: Callable[..., Any]
-    gate_draft_args: Callable[..., Any]
-    gate_front_step: Callable[..., Any]
     gate_goal: Callable[..., Any]
-    gate_handoff: Callable[..., Any]
     gate_metadata: Callable[..., Any]
     gate_mockup: Callable[..., Any]
-    gate_model: Callable[..., Any]
-    gate_model_args: Callable[..., Any]
-    gate_needs: Callable[..., Any]
-    gate_needs_session: Callable[..., Any]
     gate_next: Callable[..., Any]
-    gate_observers: Callable[..., Any]
     gate_one_decision: Callable[..., Any]
     gate_open_question: Callable[..., Any]
     gate_options: Callable[..., Any]
     gate_own_action: Callable[..., Any]
-    gate_owner_step: Callable[..., Any]
     gate_recommend_stance: Callable[..., Any]
     gate_recycle_item: Callable[..., Any]
-    gate_said: Callable[..., Any]
-    gate_step_gap: Callable[..., Any]
     gate_subject: Callable[..., Any]
     handoff_notify: Callable[..., Any]
     lift_ask: Callable[..., Any]
@@ -231,13 +218,13 @@ def create_item(
         ask = h.gate_ask(ask)
     h.gate_bare_urls({"description": description, "next": next, "ask": ask})
     opts = h.gate_options(options)
-    needs_l = h.gate_needs(needs, project, owner) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in h.ask_none else []
+    needs_l = _gates.gate_needs(needs, project, owner) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in h.ask_none else []
     if agent.strip() and agent.strip().lower() not in h.ask_none:    # the older form writes the session into needs
-        needs_l = _canon_needs([*_needs_kinds({"needs": needs_l}), h.gate_needs_session(agent, project, owner)], _anc.names())
-    obs = h.gate_observers(observers) if (observers if isinstance(observers, list) else observers.strip()) and str(observers).strip().lower() not in h.ask_none else []
-    aft = h.gate_after(after) if (after if isinstance(after, list) else after.strip()) and str(after).strip().lower() not in h.ask_none else []
+        needs_l = _canon_needs([*_needs_kinds({"needs": needs_l}), _gates.gate_needs_session(agent, project, owner)], _anc.names())
+    obs = _gates.gate_observers(observers) if (observers if isinstance(observers, list) else observers.strip()) and str(observers).strip().lower() not in h.ask_none else []
+    aft = _gates.gate_after(after) if (after if isinstance(after, list) else after.strip()) and str(after).strip().lower() not in h.ask_none else []
     owner = h.session_id(owner)                                 # a pane name becomes its transcript id when the heartbeat knows it
-    said_l = h.gate_said(said, owner, owner)                    # the trailers: his words checked against the transcript; a failed check refuses the create
+    said_l = _gates.gate_said(said, owner, owner)                    # the trailers: his words checked against the transcript; a failed check refuses the create
     chk = h.parse_check(check) if check.strip() and check.strip().lower() not in h.ask_none else ""   # the done check: gated on its form; a create is never refused for a hand-off
     meta: dict[str, Any] = {"owner": owner, "project": project, **(extra or {})}     # extra = a script route's own marks (the terminal prompt's), written with the item
     until_v = _model.clean(until)
@@ -253,14 +240,14 @@ def create_item(
         if until_at <= _pages.zone_now():
             raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
         if _uw.slot_of(_model.clean(wait_kind).lower()) != "ask_by":      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
-            h.gate_cap({}, said_l, "until", h.parse_wake(until_v), until_at.timestamp())
+            _gates.gate_cap({}, said_l, "until", h.parse_wake(until_v), until_at.timestamp())
     elif alias_used:
         until_v = _model.clean(ask_by)          # ask_by is the old name of the date (an until beside it wins)
-    model_set, _ = h.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
+    model_set, _ = _gates.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                      "until": until_v, "post_wake_mover": post_wake_mover}, {})   # a "none" on a create is nothing to clear
     if owner_name:
         meta["owner_name"] = owner_name
-    contact_v = h.gate_contact(contact, project, (owner,)) if contact.strip() else h.contact_default(owner, project)     # a named contact is checked against the project's front agents; else the creator when it is one, else the project's -main
+    contact_v = _gates.gate_contact(contact, project, (owner,)) if contact.strip() else h.contact_default(owner, project)     # a named contact is checked against the project's front agents; else the creator when it is one, else the project's -main
     if contact_v:
         meta["contact"] = contact_v
     for k, v in (("needs", needs_l), ("ask", ask), ("priority", priority), ("due", due), ("options", opts), ("observers", obs), ("after", aft), ("said", said_l), ("check", chk)):
@@ -269,7 +256,7 @@ def create_item(
     if next:
         h.next_put(meta, next, owner, owner)     # the writer of a create's lines is its creator (a script's filing included: its label is no session)
     proof_note = h.step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
-    h.gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
+    _gates.gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
     meta.update(model_set)
     wait_note = _uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else ""
     if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
@@ -280,7 +267,7 @@ def create_item(
         meta["wait_kind"] = "item"         # a date beside an after link is that wait's backstop (as ask_by was): the wait stays on the item
     evw_note = h.evwait_gate({}, meta, creating=True)            # an event wait: its phrase in the canonical form, and refused when the event already happened
     then_note = h.owner_then_default(None, meta, "open", _session_label(owner) or owner, "then" in model_set, mover.strip())      # D9: an item created for his call has the agent doing the work as its then (a builder that files its own decision item is its own then), not the front agent that relayed it
-    draft_txt, _ = h.gate_draft_args(draft, False)             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
+    draft_txt, _ = _gates.gate_draft_args(draft, False)             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
     if draft_txt:
         meta["draft"] = draft_txt
     if anchors:
@@ -296,17 +283,17 @@ def create_item(
     h.gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
     h.gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
     asked += h.options_note(meta) + h.actor_note(meta)
-    desc_note = h.gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v))    # the write guards of the item model, every field judged on a create
+    desc_note = _gates.gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v))    # the write guards of the item model, every field judged on a create
     h.anchor_wait_gate({}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
     if h.session_next() and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
             and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: h.after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)
         raise ToolError(f"Refused: the new item has no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
     if not h.terminal_row():      # the terminal prompt's row files "<owner>: open … and answer" and sets its state your-step in the next call (_terminal_state; a create sets no step): its own script, not a session hiding a step
-        h.gate_owner_step({"status": "open", "subject": subject, "description": description, "metadata": meta}, create=True)     # The owner's step under an agent's state is refused, as on an update
+        _gates.gate_owner_step({"status": "open", "subject": subject, "description": description, "metadata": meta}, create=True)     # The owner's step under an agent's state is refused, as on an update
     if h.session_next() and not by and h.model_guards_on():
-        h.gate_front_step("", {"status": "open", "subject": subject, "metadata": meta}, [], _steps.view(meta, keeper=owner), owner)     # a step that opens with a front agent on an item another session moves: nothing could wake it for the step
+        _gates.gate_front_step("", {"status": "open", "subject": subject, "metadata": meta}, [], _steps.view(meta, keeper=owner), owner)     # a step that opens with a front agent on an item another session moves: nothing could wake it for the step
     if meta.get("mover") or meta.get("then") or _needs_sessions(meta):     # step 2: a hand-off at creation to a session with no pane is refused: an item created with no mover is nobody's hand-off, the project's builder or -main agent takes it (D1)
-        h.gate_handoff("", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
+        _gates.gate_handoff("", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
     if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
         h.refuse_if_owing(owner)
     h.record_fixes(meta, fixes)             # what the server fixed in this create (server_fixes.py): the mark and a History line
