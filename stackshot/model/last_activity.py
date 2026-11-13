@@ -15,9 +15,9 @@ writes about the item, which are not in progress either: a History line (the lad
 makes for the owner. Those move the `activity` clock (activity.py), which this does not touch, and not this record.
 
 Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit` (stamped today: the
-progress signals of a save and the events of a tied pull request), and two that are defined and tested here but not stamped by anything yet: `update` (a mover's status write whose text differs
-from the previous status text, `update_signal`) and `audit` (a line the audit writes saying what it verified: a pane in a turn, a subagent running, a commit, a review or CI on the pull
-request). For those two the `what` is the short text itself. A later part stamps them; this one only knows them, so the record is extended by adding a signal, not by changing the record.
+progress signals of a save and the events of a tied pull request), and `audit` (stamped by the hourly audit line, audit/hourly.py `stamp_signal`, when the line verified something: a pane in a turn, a subagent running; its `what` is "audit verified …"; a line that verified nothing stamps nothing),
+and one that is defined and tested here but not stamped by anything yet: `update` (a mover's status write whose text differs from the previous status text, `update_signal`; its `what` is the short text itself). A later part stamps
+`update`; this one only knows it, so the record is extended by adding a signal, not by changing the record.
 A reply that says nothing changed is no `update` (same text as before), and the ladder's and the server's own lines are none of these kinds.
 
 Newest wins: a candidate replaces the stored record only when it is strictly later; a record never goes back. A candidate that is torn (no time, no words, a time that is not a number or is past MAX_AT, a kind that is none of KINDS)
@@ -49,11 +49,11 @@ BAND_BAD_S = 60 * 60    # the age past which it reads "idle over 1 h" (red): str
 SKEW_S = 3600.0         # how far ahead of the reader's clock a stored time may stand and still read as just now (anchors/event_log.py AHEAD_S, the window a hub event's own time is allowed); further ahead it is no record
 OK, WARN, BAD = "ok", "warn", "bad"
 
-# The named kinds of signal. STAMPED ones are what the server stamps today; the last two are defined here for the parts that come later.
+# The named kinds of signal. STAMPED ones are what the server stamps today; `update` is defined here for a part that comes later.
 STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit"
 UPDATE, AUDIT = "update", "audit"
-STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT)
-KINDS = frozenset(STAMPED) | {UPDATE, AUDIT}
+STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT, AUDIT)
+KINDS = frozenset(STAMPED) | {UPDATE}
 
 # The kinds of a tied pull request's events as anchors/event_log.py files them, the signal each is, and the words each is given.
 PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT}
@@ -144,8 +144,8 @@ def update_signal(previous: Any, text: Any, at: Any) -> dict[str, Any] | None:
 
 
 def audit_signal(verified: Any, at: Any) -> dict[str, Any] | None:
-    """The `audit` signal for a line the audit wrote saying what it verified (a pane in a turn, a subagent running, a commit, a review or CI on the pull request); the words are that short text. Nothing
-    stamps it yet. A line that verified nothing is no signal."""
+    """The `audit` signal for a line the audit wrote saying what it verified (a pane in a turn, a subagent running, a commit, a review or CI on the pull request); the words are that short text. The hourly
+    line stamps it (audit/hourly.py `stamp_signal`). A line that verified nothing is no signal."""
     return signal(AUDIT, at, verified)
 
 

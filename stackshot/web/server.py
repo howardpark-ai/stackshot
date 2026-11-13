@@ -6121,10 +6121,11 @@ def _silence_pass_tick() -> "dict[str, Any] | None":
 
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
-    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one an hour for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
+    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit` or `audit_idle`).
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a step status in progress (a subagent), and a tied pull
-    request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so; none is stamped as the item's last-activity record (a busy pane would keep every silent item looking fresh, and a recorded event is in the record already). The save is
+    request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
+    newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
     passes in one hour write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
     from stackshot.audit import hourly as _hourly
@@ -6147,6 +6148,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
                 if line is None:
                     continue
                 _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
+                _hourly.stamp(item, line, now)      # a line that verified something is the hourly update: it is the item's last activity too, newest wins and never backwards (an idle line stamps nothing)
                 _writes.save(gid, item, note="audit: hourly line")
             written.append(gid)
             print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
@@ -10574,7 +10576,7 @@ _STALL_FORM = (
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
     f"and no pause lasts longer than 24 hours. "
-    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`), once an hour for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
+    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`), about every 50 minutes for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
 )
 
 
