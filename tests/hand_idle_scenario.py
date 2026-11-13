@@ -10,7 +10,8 @@ Every rule is a probe that returns whether the rule held on a fixture, run twice
   3  what is read: the newest line must be idle (a verified one is not), not old (a line older than 6 hours 15 minutes is no news), and nothing may have moved the item since it
   4  what is left alone: a hold, a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off, a front agent's item
   5  which builder is free: not one whose pane is in a turn, not one that moves an open item on an agent (an untaken hand-off to it counts), one that moves a held item is free; the project's own
-     background agents first, then a builder of another project; the item's own mover is never picked; a name with no pane or an unreadable pane is not free
+     background agents only, never a builder of another project, however idle; a project with no background agent of its own, or none free, keeps the item and -main is told; the item's own mover is never picked;
+     a name with no pane or an unreadable pane is not free
   6  no free builder: nothing moves, -main is told it once per item per 24 hours, one History line says so; a project with no -main agent gets the History line alone
   7  the limits: an item is handed on once in 24 hours and may be handed again after that; at most 3 items per pass; two builders never get one item each of the same pass twice over
   8  a torn audit entry or a torn record of this pass does not raise and is no signal
@@ -36,7 +37,7 @@ toml, n = re.subn(r'(?m)^(\[audit\][^\n]*\n)enabled = false', r'\g<1>enabled = t
 (T / "home/.claude/sessions").mkdir(parents=True)                                              # an isolated HOME: never the host's pane registry
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", HOME=str(T / "home"), STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 for d in ("store/a", "fleet/a", "state", "brain/projects", "transcripts/-home-x", "cli"): (T / d).mkdir(parents=True)
-NAMES = ("home-main", "team-back", "team-aux", "other-back", "beta-main", "home-peer", "home-peer2", "home-stew", "lone-back", "lone-main")
+NAMES = ("home-main", "team-back", "team-aux", "other-back", "beta-main", "home-peer", "home-peer2", "home-stew", "lone-back", "lone-main", "gamma-main", "delta-main", "delta-one", "delta-two")
 U = {n: f"00000000-0000-4000-8000-0000000000{i:02d}" for i, n in enumerate(NAMES, 1)}
 now0 = float(int(time.time()))
 if min((now0 + 4 * 3600) % 86400, 86400 - (now0 + 4 * 3600) % 86400) < 4000: now0 -= 7200      # not near a local midnight: the times in the lines stay on one day
@@ -45,7 +46,9 @@ if min((now0 + 4 * 3600) % 86400, 86400 - (now0 + 4 * 3600) % 86400) < 4000: now
 ALPHA = {"home-main": "the front", "team-back": "builds, merges and releases the code", "team-aux": "reviews the notes"}
 BETA = {"beta-main": "the front", "other-back": "builds the beta code"}
 LONE = {"lone-main": "the front", "lone-back": "reviews the notes"}
-pages = {"projects/alpha": ("home-stew", ALPHA), "projects/beta": ("beta-main", BETA)}
+GAMMA = {"gamma-main": "the front"}                                      # a project with no background agent at all
+DELTA = {"delta-main": "the front", "delta-one": "builds the code", "delta-two": "builds and releases the code"}      # a project with two builders
+pages = {"projects/alpha": ("home-stew", ALPHA), "projects/beta": ("beta-main", BETA), "projects/gamma": ("gamma-main", GAMMA), "projects/delta": ("delta-main", DELTA)}
 (T / "store/projects.json").write_text(json.dumps({"pages": {k: {"title": "x", "name": "x", "org": "home", "tags": [], "type": "project", "session": s, "status": "active", "board": [], "board_open": 0,
                                                                   "agents": ag, "back_agents": {n: m for n, m in ag.items() if not n.endswith("-main")}} for k, (s, ag) in pages.items()}}))
 for k, (s, ag) in pages.items():
@@ -316,14 +319,52 @@ def probe_held_builder_free():
     got, mv = first_pick(panes={"team-back": "idle"}, extra=lambda: put(2, mover="team-back", act=10, idle_line=False, hold=True))
     return got == ["a1"] and mv == "team-back"
 rule("5 a builder that moves only a held item is free", probe_held_builder_free, [(HI, "busy_movers", lambda items, now: [it.get("metadata", {}).get("mover") for it in items.values() if it.get("status") == "open"])])
+def old_builders(project):      # the reverted rule: the project's own background agents, then every other project's agent whose mandate says build
+    out = list(server._handoff_background(project))
+    reg = server._anc.registry()
+    return out + [n for n, r in server._anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
+                  and re.search(r"\bbuild", str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""), re.I)]
 def probe_other_project():
-    got, mv = first_pick(panes={"team-back": "busy", "team-aux": "busy", "other-back": "idle"})
-    return got == ["a1"] and mv == "other-back"
-rule("5 with none of the project's own free, a builder of another project whose mandate builds takes it", probe_other_project, [(server, "_hand_idle_builders", lambda project: server._handoff_background(project))])
-def probe_other_not_builder():
-    got, mv = first_pick(panes={"team-back": "busy", "team-aux": "busy", "other-back": "busy", "lone-back": "idle"})
-    return got == [] and mv == "home-peer"
-check("5 …a background agent of another project whose mandate does not say build (a reviewer) is not offered", probe_other_not_builder() is True)
+    got, mv = first_pick(panes={"team-back": "busy", "team-aux": "busy", "other-back": "idle", "delta-one": "idle"})
+    return got == [] and mv == "home-peer" and to_builder("other-back") == [] and to_builder("delta-one") == [] and len(to_main()) == 1
+rule("5 with none of the project's own free, a builder of another project is not offered, however idle: the item stays and -main is told", probe_other_project, [(server, "_hand_idle_builders", old_builders)])
+def probe_own_project_pick():
+    wipe(); on(); put(1, act=90); put(2, act=90, project="projects/beta")
+    for n in ("team-back", "team-aux", "other-back", "delta-one", "delta-two"): panes[n] = "idle"
+    got = tick()
+    return got == ["a1", "a2"] and mover_of(1) == "team-back" and mover_of(2) == "other-back"
+rule("5 an item goes to a builder of its own project: an item of alpha to alpha's, an item of beta to beta's", probe_own_project_pick, [(server, "_hand_idle_builders", lambda project: ["other-back", "team-back"] if project == "projects/alpha" else ["team-back", "other-back"])])
+def probe_beta_never_alpha():
+    wipe(); on(); put(1, act=90, project="projects/beta"); panes["other-back"] = "busy"
+    for n in ("team-back", "team-aux", "delta-one"): panes[n] = "idle"
+    got = tick()
+    return got == [] and mover_of(1) == "home-peer" and to_builder("team-back") == [] and to_builder("team-aux") == [] and to_builder("delta-one") == []
+rule("5 an item of beta whose own builder is in a turn is not handed to alpha's or delta's idle builder", probe_beta_never_alpha, [(server, "_hand_idle_builders", old_builders)])
+def probe_no_background_agent():
+    wipe(); on(); put(1, act=90, project="projects/gamma")
+    for n in ("team-back", "team-aux", "other-back", "delta-one", "delta-two", "lone-back"): panes[n] = "idle"
+    with _Err() as e: got = tick()
+    tm = [x for x in sent if x[1] == U["gamma-main"]]
+    return (got == [] and mover_of(1) == "home-peer" and len(sent) == 1 and len(tm) == 1 and tm[0][3] == "stall" and "no builder was free" in tm[0][2] and "stays with home-peer" in tm[0][2]
+            and len(history(1)) == 1 and "no builder was free to take it: gamma-main was told" in history(1)[0] and mt(1)["hand_idle"] == {"none_at": now0}
+            and "idle, no builder free" in e.text)
+rule("5 a project with no background agent of its own keeps the item, however many builders other projects have idle: the History line and -main say so", probe_no_background_agent, [(server, "_hand_idle_builders", old_builders)])
+def probe_no_background_agent_once():
+    wipe(); on(); put(1, act=90, project="projects/gamma"); panes["team-back"] = "idle"
+    tick(); tick(now0 + 10 * MIN); tick(now0 + 23 * H)
+    return len([x for x in sent if x[1] == U["gamma-main"]]) == 1 and len(history(1)) == 1 and to_builder("team-back") == []
+check("5 …and that is told once per item per 24 hours, as for any item with no builder free", probe_no_background_agent_once() is True)
+def probe_two_builders():
+    wipe(); on(); put(1, act=90, project="projects/delta"); put(2, act=90, project="projects/delta"); put(3, mover="delta-one", act=10, idle_line=False, project="projects/delta")
+    for n in ("delta-one", "delta-two", "team-back", "other-back"): panes[n] = "idle"
+    got = tick()
+    return got == ["a1"] and mover_of(1) == "delta-two" and mover_of(2) == "home-peer" and to_builder("team-back") == [] and to_builder("other-back") == []
+rule("5 a project with two builders: the one that moves an open item is not free, the other takes the first item, the second item stays (no builder of another project takes it)", probe_two_builders, [(server, "_hand_idle_builders", old_builders), (HI, "busy_movers", lambda items, now: [])])
+def probe_two_builders_first():
+    wipe(); on(); put(1, act=90, project="projects/delta")
+    for n in ("delta-one", "delta-two", "team-back"): panes[n] = "idle"
+    return tick() == ["a1"] and mover_of(1) == "delta-one"
+check("5 …with both free, the first of the page's order takes it", probe_two_builders_first() is True)
 def probe_dead():
     got, mv = first_pick(panes={"team-back": "idle", "team-aux": "idle"}, dead={"team-back": "a retired session, its pane gone"})
     return got == ["a1"] and mv == "team-aux"

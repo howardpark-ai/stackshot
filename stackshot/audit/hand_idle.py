@@ -24,7 +24,7 @@ An item is handed on when all of these hold:
 
 A builder is free when it is not the mover of any open item that is on an agent (an item it is to take counts: an untaken hand-off names it as mover) and its pane is not in a turn on this box
 (`status(who) != "busy"`; a pane this box does not run reads as not busy). A name that is known to have no pane (`dead`) or whose status cannot be read is not free. The candidates are the item's project's
-background agents, best first; when none of them is free, the background agents of any project whose mandate says build. With none free nothing is handed on and -main is told that none was, once per
+background agents, best first, and no other project's (a project's work is built, reviewed and released by its own builder, so a builder of an unrelated project is never a candidate, however idle). With none free, a project with no background agent of its own included, nothing is handed on and -main is told that none was, once per
 item per 24 hours. At most `MAX_PER_TICK` items are handed on in one pass.
 
 THE BALANCER (`[audit] balance`, on by default; `server._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
