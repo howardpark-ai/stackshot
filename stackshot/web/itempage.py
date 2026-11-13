@@ -98,6 +98,8 @@ def wait_what(w: "_model.Wait", *, shown: Callable[[str], str] = str, party: str
     party's news. `party` names who the relay waits on, `words` is the time wait's reason (the basis, or his recorded words)."""
     if w.kind == "time":
         return clean(words) or _t("wait.a_date")
+    if w.kind == "item" and w.queued:
+        return _t("wait.what.queued", items=", ".join(shown(x) for x in w.after) or _t("wait.what.an_item"))
     if w.kind == "item":
         return _t("wait.what.close_of", items=", ".join(shown(x) for x in w.after) or _t("wait.what.an_item"))
     if w.kind == "anchor":

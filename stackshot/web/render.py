@@ -27,6 +27,7 @@ from stackshot.web import itempage as _ip  # the item page's words on the item m
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
+from stackshot.model import queued as _queued   # a mover busy on another item: its other items on an agent read waiting, queued behind it (queued.py)
 from stackshot.web import home as _home   # the home page's three lists on that model: Your move, On agent, Waiting (home.py); board.md and the brief count from them
 from stackshot.audit import hourly_log as _hlog   # the hourly audit lines written on an item (History lines)
 from stackshot.waits import stall as _stall   # the steps of the stall pass written on an item (History lines)
@@ -1463,11 +1464,24 @@ class Board:
         if "full" in modes: out["full"] = self.markdown()
         return out
 
+    def base_mod(self, r):
+        """The item as the model reads it before the queue rule (model.derive, then model.view: a doing item whose wake is far out with every step dated reads as waiting), once per row."""
+        m = r.get("_base")
+        if m is None:
+            m = r["_base"] = _model.view(r, _model.derive(r, self.now.timestamp(), after_open=after_open, anchored=lambda it: str(it["gid"]) in self.scoped_urls()), self.now.timestamp(), after_open)
+        return m
+
+    def queue_map(self):
+        """{item: the item it is queued behind} over the board's open rows (queued.board_queue: a mover busy on another item, `[model] queued_behind`), {} while the rule is off; read once per Board."""
+        if getattr(self, "_queue", None) is None:
+            self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp())
+        return self._queue
+
     def mod_of(self, r):
-        """The item as the model reads it (model.derive, then model.view: a doing item whose wake is far out with every step dated reads as waiting), once per row: the reading the home page's lists, the item page and board.md share."""
+        """The item as the board shows it (base_mod, then the queue rule: an item behind its mover's other item reads waiting, queued behind it), once per row: the reading the home page's lists, the item page and board.md share."""
         m = r.get("_mod")
         if m is None:
-            m = r["_mod"] = _model.view(r, _model.derive(r, self.now.timestamp(), after_open=after_open, anchored=lambda it: str(it["gid"]) in self.scoped_urls()), self.now.timestamp(), after_open)
+            m = r["_mod"] = _queued.overlay(self.base_mod(r), self.queue_map().get(str(r.get("gid") or ""), ""))
         return m
 
     def scoped_urls(self, gid=None):
