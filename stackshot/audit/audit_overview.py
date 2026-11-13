@@ -98,7 +98,7 @@ def _mode(key: str | None) -> str:
         if key == "hourly_line":
             return "on" if _cfg.audit_hourly_line() else "off"
         if key == "hand_idle":
-            return "on" if _cfg.audit_hand_idle() else "off"
+            return "on" if _cfg.audit_hand_idle() and _cfg.audit_hourly_line() else "off"      # the hand-over works from the hourly line's idle lines: with no line written there is nothing to hand on
         if key == "balance":
             return "on" if _cfg.audit_balance() else "off"
         if key == "ladder":

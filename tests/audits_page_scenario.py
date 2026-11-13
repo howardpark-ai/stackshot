@@ -61,6 +61,19 @@ KINDS = set(audit_checks.FIX) | set(audit_checks.CHECKS_CODE) | set(audit_checks
 check("every finding category the audits can write (the FIX table and the CHECKS_* tables, plus proof-wait) maps to a group, whichever pass wrote it",
       len(KINDS) >= 14 and all(ov.group_of(src, k) is not None for k in KINDS for src in ("run", "silence", "filing", "dates")), sorted(k for k in KINDS if ov.group_of("run", k) is None))
 check("a category with a sub-kind (`next rules:N3`, `board checks:why-not-now`) keeps its group", all(ov.group_of("run", f"{k}:x") == ov.group_of("run", k) for k in KINDS if k != "stale"))
+def _modes():
+    return {k: ov._mode(k) for k in ("hourly_line", "hand_idle", "balance")}
+_saved = dict(config.CFG.get("audit", {}))
+try:
+    config.CFG["audit"].pop("hourly_line", None); config.CFG["audit"].pop("hand_idle", None); config.CFG["audit"].pop("balance", None)
+    m_default = _modes()
+    config.CFG["audit"]["hourly_line"] = False; m_noline = _modes()
+    config.CFG["audit"]["hourly_line"] = True; config.CFG["audit"]["hand_idle"] = False; m_nohand = _modes()
+finally:
+    config.CFG["audit"].clear(); config.CFG["audit"].update(_saved)
+check("the audit modes: all three are on by default; the idle hand-over reads off without the hourly line it works from (the line off leaves the balancer on), and off when its own switch is off",
+      m_default == {"hourly_line": "on", "hand_idle": "on", "balance": "on"} and m_noline == {"hourly_line": "off", "hand_idle": "off", "balance": "on"}
+      and m_nohand == {"hourly_line": "on", "hand_idle": "off", "balance": "on"}, (m_default, m_noline, m_nohand))
 check("item_path: a numbered id is /items/<n>, a temporary id keeps its prefix, any other shape is no link", ov.item_path(f"board#{12}") == "12" and ov.item_path(f"board-tmp-x#{7}") == "board-tmp-x-7"
       and ov.item_path(f"board-tmp-X#{7}") is None and ov.item_path("elsewhere#3") is None and ov.item_path("12") is None)
 
