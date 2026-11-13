@@ -97,16 +97,20 @@ def put(i, mover="home-peer", status="open", act=90, **meta):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def lines(i): return HL.log_of(mt(i))
+SUBS = {}; ANCH = {}                                                  # mover -> its running subagents ([{"text": description and brief}]); item id -> the pull requests anchored to it
+def BID(n): return "board" + "#" + str(n)                              # an item id as a brief names it, built from pieces
+def run_on(mover, *words): SUBS.setdefault(mover, []).append({"id": f"s{len(SUBS.get(mover, []))}", "text": "\n".join(words), "at": now0 - 60})
 def tick(at=None, **kw):
-    """One pass of the hourly line at `at` (default now0), the server's clock set to it → the ids written."""
+    """One pass of the hourly line at `at` (default now0), the server's clock set to it → the ids written. The mover's running subagents and the anchored pull requests are the dicts above."""
     at = now0 if at is None else at
     CLK.t = at
+    kw.setdefault("subagents", lambda who: SUBS.get(who, [])); kw.setdefault("anchored", ANCH)
     try: return server._hourly_tick(now=at, **kw)
     finally: CLK.t = None
 def on(): server._cfg.CFG["audit"]["hourly_line"] = True
 def off(): server._cfg.CFG["audit"].pop("hourly_line", None)
 def hm(at): return time.strftime("%H:%M", time.gmtime(at + 4 * 3600))      # the instance zone is Asia/Dubai, UTC+4
-def clean_pane(): panes.clear()
+def clean_pane(): panes.clear(); SUBS.clear(); ANCH.clear()
 class _Err:
     def __enter__(self): self.old, self.buf = sys.stderr, io.StringIO(); sys.stderr = self.buf; return self
     def __exit__(self, *a): sys.stderr = self.old
@@ -130,34 +134,35 @@ check("6 a read-only standby copy writes nothing", tick() == [] and lines(1) == 
 server._ro.is_read_only = ro
 
 # ================================================================ 1. due and verified
-clean_pane(); put(1, act=90); put(2, act=90); put(3, act=90); put(4, act=90); put(5, act=90); put(6, act=90, work=work("in progress", 30))
-panes["home-peer"] = "busy"                                                                       # items 1 and 4 and 5 are home-peer's; 2 is home-peer2's (an idle pane); 3, 6 below
+clean_pane(); put(1, mover="team-back", act=90); put(2, act=90); put(3, act=90); put(4, act=90); put(5, act=90); put(6, act=90, work=work("in progress", 30))
+panes["home-peer"] = "busy"; panes["team-back"] = "busy"                                          # item 1 is team-back's only item (a busy pane); 4 and 6 are home-peer's; 2, 3 and 5 are home-peer2's (an idle pane)
 put(2, mover="home-peer2", act=90); panes["home-peer2"] = "idle"
-put(3, mover="home-peer2", act=90, work=work("in progress", 30, agent="home-peer2"))               # a subagent running on its own status line, the pane idle
+put(3, mover="home-peer2", act=90, work=work("in progress", 30, agent="home-peer2"))               # a status in progress on the mover's own step, which proves nothing; a subagent of the mover's whose brief names this item does
+run_on("home-peer2", f"Build {BID(3)}: the thing")
 put(4, act=90, last_activity={"at": now0 - 20 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"})
 put(5, mover="home-peer2", act=90, last_activity={"at": now0 - 20 * MIN, "kind": "review", "what": "review on PR 9"})
 put(6, act=90, work=work("in progress", 30), last_activity={"at": now0 - 20 * MIN, "kind": "ci_result", "what": "CI passing again on PR 7"})
+run_on("home-peer", f"Fix {BID(6)}")
 before = {i: rd(i) for i in range(1, 7)}
 with _Err() as err: got = tick()
 check("1 a pass over the six writes a line on the items with something verified and the idle ones too: items 1 to 6 are all due", got == ["a1", "a2", "a3", "a4", "a5", "a6"], got)
 L = {i: lines(i) for i in range(1, 7)}
-check("1 a busy pane: `Audit hh:mm: verified the mover's pane is in a turn (live state only, …)`, the time in the instance's zone, kind audit", len(L[1]) == 1 and L[1][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn" + HR.LIVE_ONLY and "live state only, nothing recorded on the item" in L[1][0]["text"] and L[1][0]["kind"] == "audit" and L[1][0]["at"] == now0, L[1])
+check("1 a busy pane of a mover with no other item on an agent: `Audit hh:mm: verified the mover's pane is in a turn (live state only, …)`, the time in the instance's zone, kind audit", len(L[1]) == 1 and L[1][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn" + HR.LIVE_ONLY and "live state only, nothing recorded on the item" in L[1][0]["text"] and L[1][0]["kind"] == "audit" and L[1][0]["at"] == now0, L[1])
 check("1 an idle pane verifies nothing: the line says idle", len(L[2]) == 1 and L[2][0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and L[2][0]["kind"] == "audit_idle", L[2])
-check("1 a status line in progress on the mover's own step is a subagent running, the pane idle", len(L[3]) == 1 and L[3][0]["text"] == f"Audit {hm(now0)}: verified a subagent is running on it" + HR.LIVE_ONLY, L[3])
-check("1 a CI result of a tied pull request in the last hour (metadata.last_activity) is verified, in the record's words, and a line that rests on a recorded event carries no live-state note", L[4][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn, CI failed on PR 5", L[4])
+check("1 a running subagent of the mover's whose brief names this item is verified (the pane idle), a status line in progress is not read", len(L[3]) == 1 and L[3][0]["text"] == f"Audit {hm(now0)}: verified a subagent is running on it" + HR.LIVE_ONLY, L[3])
+check("1 a CI result of a tied pull request in the last hour (metadata.last_activity) is verified, in the record's words, and a line that rests on a recorded event carries no live-state note (the mover's busy pane says nothing of this item: it has another)", L[4][0]["text"] == f"Audit {hm(now0)}: verified CI failed on PR 5", L[4])
 check("1 …a review likewise", L[5][0]["text"] == f"Audit {hm(now0)}: verified review on PR 9", L[5])
-check("1 …several signals are joined in one line", L[6][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn, a subagent is running on it, CI passing again on PR 7", L[6])
-W1 = {1: "audit verified the mover's pane is in a turn", 3: "audit verified a subagent is running on it", 4: "audit verified the mover's pane is in a turn, CI failed on PR 5",
-      6: "audit verified the mover's pane is in a turn, a subagent is running on it"}      # item 6's recorded phrase (CI passing again on PR 7) does not fit in the 80 characters of one line with the other two, so it is left out whole
+check("1 …several signals are joined in one line", L[6][0]["text"] == f"Audit {hm(now0)}: verified a subagent is running on it, CI passing again on PR 7", L[6])
+W1 = {1: "audit verified the mover's pane is in a turn", 3: "audit verified a subagent is running on it", 6: "audit verified a subagent is running on it, CI passing again on PR 7"}
 check("1 a line that verified something is stamped as the item's last-activity record (kind audit, the line's phrases), one that verified nothing (item 2) is not, and one that rests on a recorded event alone (item 5) leaves that event as it was, at its own time and kind",
-      all(mt(i).get("last_activity") == {"at": now0, "kind": "audit", "what": W1[i]} for i in (1, 3, 4, 6))
-      and "last_activity" not in mt(2) and mt(5)["last_activity"] == before[5]["metadata"]["last_activity"] == {"at": now0 - 20 * MIN, "kind": "review", "what": "review on PR 9"}, [mt(i).get("last_activity") for i in range(1, 7)])
+      all(mt(i).get("last_activity") == {"at": now0, "kind": "audit", "what": W1[i]} for i in (1, 3, 6))
+      and "last_activity" not in mt(2) and mt(4)["last_activity"] == before[4]["metadata"]["last_activity"] and mt(5)["last_activity"] == before[5]["metadata"]["last_activity"] == {"at": now0 - 20 * MIN, "kind": "review", "what": "review on PR 9"}, [mt(i).get("last_activity") for i in range(1, 7)])
 check("1 the save is the server's own bookkeeping: the activity clock, the progress clock, `updated`, the confirm and the writer are exactly as they were",
       all(all(rd(i)[k] == before[i][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) for i in range(1, 7)))
 ch = lambda i: {k for k in mt(i) if mt(i)[k] != before[i]["metadata"].get(k)}
 check("1 …the History shows it: the revision's new entries of the item's own log are the line (hourly_log.new_entries), and nothing else changed in the metadata but the log and the phase stamp every save adds",
       [e["text"] for e in HL.new_entries(before[1]["metadata"], before[1]["metadata"])] == [] and [e["text"] for e in HL.new_entries(before[2]["metadata"], rd(2)["metadata"])] == [L[2][0]["text"]]
-      and ch(2) == {"hourly_audit", "phase"} and ch(4) == {"hourly_audit", "phase", "last_activity"}, (ch(2), ch(4)))
+      and ch(2) == {"hourly_audit", "phase"} and ch(4) == {"hourly_audit", "phase"} and ch(6) == {"hourly_audit", "phase", "last_activity"}, (ch(2), ch(4), ch(6)))
 check("1 nothing is sent to anyone: no message, no notice, no flag", sent == [], sent)
 check("1 the server logs each line on stderr", err.text.count("hourly line: Audit") == 6, err.text)
 # what verifies nothing
@@ -178,10 +183,12 @@ check("1 …(another agent's status line, a done one, one older than 90 minutes,
       all(lines(i) == [] for i in range(1, 8)) and all(mt(i).get("stall") is None and mt(i).get("hourly_audit") is None for i in range(1, 8)))
 panes["home-peer"] = "busy"
 tick()
-check("1 …they say idle, and with the pane busy only the pane is verified", [e["text"] for i in range(1, 8) for e in lines(i)] == [f"Audit {hm(now0)}: verified the mover's pane is in a turn" + HR.LIVE_ONLY] * 7, [lines(i) for i in range(1, 8)])
+check("1 …they say idle, and with the pane busy they still do: the mover has seven items on an agent, so its busy pane says nothing of any one", [e["text"] for i in range(1, 8) for e in lines(i)] == [f"Audit {hm(now0)}: idle, nothing verified"] * 7, [lines(i) for i in range(1, 8)])
 
 # ================================================================ 2. due and nothing verified
-clean_pane(); put(1, act=90)
+clean_pane()
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=90)
 check("2 nothing verified: the line says idle, kind audit_idle, `idle_marked` reads it, the last-activity record is untouched",
       tick() == ["a1"] and lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(1)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(1)) and "last_activity" not in mt(1))
 panes["home-peer"] = "busy"
@@ -221,7 +228,7 @@ tick()
 with _Err():
     real_pass = HR.pass_
     put(8, act=90, status="completed", outcome="done")
-    HR.pass_ = lambda items, now, env=None, pane=None, same=None: [("a4", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"}), ("a8", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"})]      # the list a slower pass made before the line was written, and an item that closed since
+    HR.pass_ = lambda items, now, env=None, pane=None, same=None, *a, **k: [("a4", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"}), ("a8", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"})]      # the list a slower pass made before the line was written, and an item that closed since
     try: stale = server._hourly_tick(now=now0 + 5 * MIN, items=stale_items)
     finally: HR.pass_ = real_pass
 check("4 an item read again under the lock that is no longer due (a line written since, or closed since) is left alone", stale == [] and len(lines(4)) == 1 and lines(8) == [], (stale, lines(4), lines(8)))
@@ -459,13 +466,13 @@ def board16(at):
     return ui_render16.Board(str(T / "store"), now=datetime.datetime.fromtimestamp(at, tz))
 def parts(gid, at): b = board16(at); return b.act_parts(b.item(gid))
 def last_words(html): m = re.search(r'<span class="ir-lwhat">([^<]*)</span>', html or ""); return __import__("html").unescape(m.group(1)) if m else None
-clean_pane(); panes["home-peer"] = "busy"; panes["home-peer2"] = "idle"
+clean_pane(); panes["team-back"] = "busy"; panes["home-front"] = "busy"; panes["home-peer2"] = "idle"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 OLD = {"at": now0 - 80 * MIN, "kind": "step_done", "what": "step 1 done"}
-put(1, act=90, last_activity=OLD)                                         # silent 90 minutes, its last event 80 minutes ago: the row reads "idle over 1 h"
+put(1, mover="team-back", act=90, last_activity=OLD)                       # silent 90 minutes, its last event 80 minutes ago: the row reads "idle over 1 h"; the mover's one item, its pane busy
 put(2, mover="home-peer2", act=90, last_activity=OLD)                       # the same, but the mover's pane is idle: nothing is verified
 put(3, mover="home-peer2", act=90)                                         # idle pane, no record at all
-put(4, act=90, last_activity={"at": now0, "kind": "ci_result", "what": "CI failed on PR 5"})      # a real event at the very time of the line (a pane that is busy besides)
+put(4, mover="home-front", act=90, last_activity={"at": now0, "kind": "ci_result", "what": "CI failed on PR 5"})      # a real event at the very time of the line (a pane that is busy besides)
 a1, a2 = parts("a1", now0), parts("a2", now0)
 check("16 before the line: the row of an item whose last event was 80 minutes ago reads idle over 1 h and that event", a1 is not None and 'data-b="bad"' in a1[0] and "idle over 1 h" in a1[1] and last_words(a1[1]) == f"Last: step 1 done at {hm(now0 - 80 * MIN)}", a1)
 snap16 = {i: rd(i) for i in (1, 2, 3, 4)}
@@ -476,7 +483,7 @@ check("16 verified (a busy pane): the item's last activity is the audit at the l
 b1 = parts("a1", now0 + 2 * MIN)
 check("16 …on the home row: the pill is active (green), the words and the clock are the audit's", b1 is not None and 'data-b="ok"' in b1[1] and ">active<" in b1[1] and last_words(b1[1]) == f"Last: audit verified the mover's pane is in a turn at {hm(now0)}", b1)
 check("16 …and the item's own clocks are as they were: the audit's write moves neither `activity` nor `progress` (the silence clock reads the same as before the line), `updated` and the writer too",
-      all(rd(1)[k] == snap16[1][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) and SL.clock(rd(1), "home-peer") == SL.clock(snap16[1], "home-peer") == now0 - 90 * MIN)
+      all(rd(1)[k] == snap16[1][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) and SL.clock(rd(1), "team-back") == SL.clock(snap16[1], "team-back") == now0 - 90 * MIN)
 check("16 idle (nothing verified): the record is untouched and the row still reads idle over 1 h and the older event; an item with no record gets none",
       mt(2)["last_activity"] == OLD and mt(2)["last_activity"] == snap16[2]["metadata"]["last_activity"] and lines(2)[0]["kind"] == "audit_idle" and "last_activity" not in mt(3) and lines(3)[0]["kind"] == "audit_idle"
       and "idle over 1 h" in parts("a2", now0 + 2 * MIN)[1] and last_words(parts("a2", now0 + 2 * MIN)[1]) == f"Last: step 1 done at {hm(now0 - 80 * MIN)}" and parts("a3", now0) is None, (mt(2).get("last_activity"), lines(2), parts("a2", now0)))
@@ -500,6 +507,118 @@ check("16 stamp_signal: a verified line gives the audit signal at its time, a li
       and sg({"kind": "audit_idle", "verified": [], "recorded": []}, 50.0) is None and sg({"kind": "audit", "verified": [], "recorded": []}, 50.0) is None
       and sg({"kind": "audit", "verified": ["CI failed on PR 5"], "recorded": ["CI failed on PR 5"]}, 50.0) is None and sg(None, 50.0) is None and sg({}, 50.0) is None
       and len(sg({"kind": "audit", "verified": ["x" * 200], "recorded": []}, 50.0)["what"]) == LA.MAX_WHAT and sg({"kind": "audit", "verified": ["x"], "recorded": []}, "soon") is None)
+
+
+# ================================================================ 17. a running subagent is tied to the item, not to the mover
+from stackshot.audit import subagent_tie as TIE
+WI = "https://github.com/acme/widgets"
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+same_status = work("in progress", 20)                                           # the very same status text on three items of one mover
+for i in (1, 2, 3): put(i, act=90, work=same_status)
+run_on("home-peer", f"Build the thing for {BID(1)}", "Work only in the worktree; open one pull request.")
+got17 = tick()
+check("17 one mover with three items, each with a status in progress, one subagent running whose brief names the first: all three are owed a line", got17 == ["a1", "a2", "a3"], got17)
+check("17 only the item the subagent is tied to reads verified (a subagent is running on it), and it is stamped as the item's last activity",
+      lines(1)[0]["text"] == f"Audit {hm(now0)}: verified a subagent is running on it" + HR.LIVE_ONLY and lines(1)[0]["kind"] == "audit" and mt(1)["last_activity"]["what"] == "audit verified a subagent is running on it", (lines(1), mt(1).get("last_activity")))
+check("17 …the other two read idle, nothing verified, though they carry the same status in progress and the mover's pane is busy: marked idle (kind audit_idle, so part F hands them on) and not stamped",
+      all(lines(i)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(i)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(i)) and "last_activity" not in mt(i) for i in (2, 3)), [lines(i) for i in (2, 3)])
+# what ties, and what does not
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+clean_pane(); panes["home-peer"] = "busy"
+for i in (1, 2, 3, 4, 5, 6, 7): put(i, act=90)
+ANCH.update({"a2": {"acme/widgets#160"}, "a3": {"acme/widgets#161"}, "a4": {"acme/widgets#160", "acme/widgets#7"}})
+run_on("home-peer", "Move the update writes", f"Goal: PR 160 in {WI} (branch moves-the-writes). Run the suites and push.")
+run_on("home-peer", "Fix the row", f"see {BID(12)} and {BID(15)}, and {WI}/pull/161 for the row")
+got17b = tick()
+tied17 = {i: lines(i)[0]["text"].endswith("a subagent is running on it" + HR.LIVE_ONLY) for i in range(1, 8)}
+check("17 a subagent names a pull request anchored to the item (`PR 160`, in the item's own repository): items 2 and 4 are tied; the pull request's URL (161) ties item 3; item 1, which no brief names, and the items no anchor reaches are idle",
+      tied17 == {1: False, 2: True, 3: True, 4: True, 5: False, 6: False, 7: False} and all(lines(i)[0]["kind"] == "audit_idle" for i in (1, 5, 6, 7)), (tied17, [lines(i)[0]["text"] for i in range(1, 8)]))
+clean_pane(); panes["home-peer"] = "busy"; panes["home-peer2"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i in (1, 12, 13): put(i, act=90)
+put(8, mover="home-peer2", act=90); put(9, mover="home-peer2", act=90)
+ANCH.update({"a1": {"acme/widgets#40"}, "a12": {"other/repo#40"}})
+run_on("home-peer", f"Fix {BID(12)}", f"{BID(123)} is the follow-up; PR 400 in {WI} is another one, #4 and PR 4 are not it")
+run_on("home-peer2", f"Fix {BID(1)}")
+tick()
+tied17b = {i: lines(i)[0]["text"].endswith("a subagent is running on it" + HR.LIVE_ONLY) for i in (1, 12, 13, 8, 9)}
+check("17 an id is named whole (board 12 is not 1, 13 or 123), another mover's subagent ties nothing of this mover's (home-peer2's brief names item 1, which is home-peer's), a pull request number alone is not a bare `#4` or another number, and a pull request of another repository with the same number ties nothing",
+      tied17b == {1: False, 12: True, 13: False, 8: False, 9: False}, (tied17b, [lines(i)[0]["text"] for i in (1, 12, 13, 8, 9)]))
+# the description alone, a subagent that cannot be read, and no view of subagents at all
+clean_pane(); panes["home-peer2"] = "idle"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, mover="home-peer2", act=90); put(2, mover="home-peer2", act=90); put(3, mover="home-peer2", act=90); put(4, mover="home-peer2", act=90)
+run_on("home-peer2", f"{BID(1)}")                                                    # its description is the item's id and nothing else
+tick()
+check("17 a subagent whose description is the item's id and nothing else is tied to it", lines(1)[0]["kind"] == "audit" and all(lines(i)[0]["kind"] == "audit_idle" for i in (2, 3, 4)), [lines(i) for i in (1, 2, 3, 4)])
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, mover="home-peer2", act=90); put(2, mover="home-peer2", act=90)
+def boom_subs(who): raise OSError("transcript unreadable")
+with _Err() as e17: got17c = tick(subagents=boom_subs)
+check("17 a subagent view that cannot be read verifies nothing and stops no line", got17c == ["a1", "a2"] and all(lines(i)[0]["kind"] == "audit_idle" for i in (1, 2)), (got17c, [lines(i) for i in (1, 2)]))
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, mover="home-peer2", act=90, work=work("in progress", 20, agent="home-peer2"))
+tick(subagents=lambda who: [])
+check("17 no subagent running, only a status in progress on the item: idle (the status is the mover's claim, not read)", lines(1)[0]["kind"] == "audit_idle", lines(1))
+
+# the busy pane counts only for a mover's one item on an agent
+clean_pane(); panes["home-peer"] = "busy"; panes["home-peer2"] = "busy"; panes["team-back"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=90); put(2, act=90)                                                       # home-peer: two items on an agent
+put(3, mover="home-peer2", act=90); put(4, mover="home-peer2", act=90, hold=True, wake=time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 9 * H + 4 * H)))     # home-peer2: one on an agent, one held
+put(5, mover="team-back", act=90); put(6, mover="team-back", act=90, status="completed", outcome="done")      # team-back: one on an agent, one closed
+tick()
+check("17 a busy pane verifies an item only when it is the mover's one item on an agent: a mover with two says nothing of either, one whose other item is held or closed has its one item verified",
+      [lines(i)[0]["kind"] if lines(i) else None for i in (1, 2, 3, 5)] == ["audit_idle", "audit_idle", "audit", "audit"] and lines(4) == [] and lines(6) == [], [lines(i) for i in range(1, 7)])
+
+# the reader: the transcript Claude Code keeps beside a session's, read through a pane's registry row
+import uuid as _uuid
+SID = str(_uuid.UUID("00000000-0000-4000-8000-0000000000aa"))
+proj = T / "transcripts/-home-x"; (proj / SID / "subagents").mkdir(parents=True); (proj / f"{SID}.jsonl").write_text("{}\n")
+def agent(aid, desc, brief, finished=None, age=60, content="str", meta_ok=True):
+    mp, tp = proj / SID / "subagents" / f"agent-{aid}.meta.json", proj / SID / "subagents" / f"agent-{aid}.jsonl"
+    m = {"agentType": "hp:executor", "description": desc}
+    if finished is not None: m["finished"] = finished
+    mp.write_text(json.dumps(m) if meta_ok else "{not json")
+    body = brief if content == "str" else [{"type": "text", "text": brief}]
+    tp.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": body}}) + "\n" + json.dumps({"type": "assistant"}) + "\n")
+    os.utime(tp, (now0 - age, now0 - age))
+agent("run1", "Build the thing", f"Goal: {BID(1)} in the worktree")
+agent("blocks", "Review", f"Please review {BID(2)}", content="blocks")
+agent("done1", "Old work", f"{BID(3)}", finished=True)
+agent("stale1", "Left behind", f"{BID(4)}", age=int(TIE.RUNNING_S) + 60)
+agent("badmeta", "x", f"{BID(5)}", meta_ok=False)
+got_run = {x["id"]: x for x in TIE.running(SID, [str(T / "transcripts")], now0)}
+check("17 the reader lists the running subagents of a session's transcript: no finished flag and a transcript written within 90 minutes, the description and the brief (a string or text blocks) as its text; a finished one, a stale one and a meta that cannot be read are left out",
+      sorted(got_run) == ["blocks", "run1"] and got_run["run1"]["text"] == f"Build the thing\nGoal: {BID(1)} in the worktree" and BID(2) in got_run["blocks"]["text"] and got_run["run1"]["at"] == now0 - 60, got_run)
+check("17 …a session with no transcript here, no subagents folder, a name that is no uuid and no roots give none", TIE.running(str(_uuid.uuid4()), [str(T / "transcripts")], now0) == [] and TIE.running("home-peer", [str(T / "transcripts")], now0) == [] and TIE.running(SID, [], now0) == []
+      and TIE.running(SID, [str(T / "transcripts")], now0 + 3 * H) == [])
+check("17 the pure tie: the id whole, a pull request by its URL or `PR n`/`#n` for the repository it is anchored in, never another number, another repository or a longer id; no text and no keys tie nothing",
+      TIE.names_item(f"x {BID(1)}.", BID(1)) and TIE.names_item(f"X {BID(1).upper()}", BID(1)) and not TIE.names_item(BID(12), BID(1)) and not TIE.names_item("x" + BID(1), BID(1)) and not TIE.names_item("x" + BID(1), BID(1))
+      and TIE.names_item("see PR 160", BID(9), ["acme/widgets#160"]) and TIE.names_item("see #160", BID(9), ["acme/widgets#160"]) and TIE.names_item(f"{WI}/pull/160", BID(9), ["Acme/Widgets#160"]) and not TIE.names_item("see PR 1600", BID(9), ["acme/widgets#160"])
+      and not TIE.names_item("https://github.com/other/repo/pull/160", BID(9), ["acme/widgets#160"]) and not TIE.names_item("", BID(1), ["acme/widgets#160"]) and not TIE.names_item("PR 160", "", []) and TIE.tied([{"text": f"a {BID(1)}"}], BID(1)) and not TIE.tied([], BID(1)) and not TIE.tied(None, BID(1)))
+# end to end: the server's own reader, through a pane's registry row (the isolated HOME), with no subagent view injected
+sess_dir = T / "home/.claude/sessions"
+row_path = sess_dir / f"{os.getpid()}.json"
+def registry(status="busy", sid=SID, kind="interactive"): row_path.write_text(json.dumps({"pid": os.getpid(), "sessionId": sid, "kind": kind, "name": "home-peer", "status": status, "statusUpdatedAt": int(now0 * 1000), "updatedAt": int(now0 * 1000)}))
+try:
+    registry()
+    check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in server._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1"], server._mover_subagents("home-peer", {}, now0))
+    registry("idle"); a_ = server._mover_subagents("home-peer", {}, now0)
+    registry("shell"); b_ = server._mover_subagents("home-peer", {}, now0)
+    registry("busy", kind="headless"); c_ = server._mover_subagents("home-peer", {}, now0)
+    registry("busy", sid=str(_uuid.uuid4())); d_ = server._mover_subagents("home-peer", {}, now0)
+    check("17 …and none when the pane is idle or showing a shell, is no interactive pane, has no transcript here, or the mover has no pane on this box", a_ == [] and b_ == [] and c_ == [] and d_ == [] and server._mover_subagents("home-front", {}, now0) == [], (a_, b_, c_, d_))
+    registry("busy")
+    clean_pane(); panes["home-peer"] = "busy"
+    for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+    put(1, act=90); put(2, act=90); put(3, act=90)
+    tick(subagents=None)
+    check("17 a tick that is given no subagent view reads the transcripts itself: item 1, named in the brief of the one running subagent, is verified; items 2 (named in a brief that is also running) and 3 follow their own briefs (a finished subagent names none)",
+          [lines(i)[0]["kind"] for i in (1, 2, 3)] == ["audit", "audit", "audit_idle"], [lines(i) for i in (1, 2, 3)])
+finally:
+    row_path.unlink(missing_ok=True)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
