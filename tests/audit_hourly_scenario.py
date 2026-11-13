@@ -75,6 +75,8 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -91,7 +93,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
@@ -103,8 +105,8 @@ def fake_status(who, idx=None):
     st = panes.get(who, "")
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
-server._handoff_status = fake_status
-server._sessions_index = _wt_sessions._sessions_index = lambda: {}
+handoff_svc.handoff_status = fake_status
+server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0 (a bare confirm and the server's saves are recent)."""
@@ -432,9 +434,9 @@ m9b = {}
 for k in range(10): HL.note(m9b, float(k), f"line {k}", "audit")
 check("9 the log keeps eight entries", len(HL.log_of(m9b)) == 8 and HL.log_of(m9b)[0]["text"] == "line 2" and "stall" not in m9b)
 check("9 the line's words: verified a, b / idle, nothing verified, hh:mm in the instance zone", HR.text(now0, ["a", "b"], ["b"]) == f"Audit {hm(now0)}: verified a, b" and HR.text(now0, ["a"], []) == f"Audit {hm(now0)}: verified a" + HR.LIVE_ONLY and HR.text(now0, []) == f"Audit {hm(now0)}: idle, nothing verified")
-check("9 the pass reads only: pass_ over the items writes nothing and gives the same list twice", (lambda items: HR.pass_(items, now0, server._silence_env(), lambda w: "busy", server._ho_same) == HR.pass_(items, now0, server._silence_env(), lambda w: "busy", server._ho_same))({"a1": rd(1), "a2": rd(2)}))
-check("9 an item the pass cannot read is left out, and a pane callable that raises verifies nothing", HR.pass_({"a1": {"status": "open", "metadata": "torn"}, "a2": rd(2)}, now0, server._silence_env(), lambda w: (_ for _ in ()).throw(OSError("x")), server._ho_same)[0][1]["kind"] == "audit_idle")
-check("9 a pane callable of None verifies nothing", HR.verified(rd(2), rd(2)["metadata"], "home-peer", now0, None, server._ho_same) == ([], []))
+check("9 the pass reads only: pass_ over the items writes nothing and gives the same list twice", (lambda items: HR.pass_(items, now0, server._silence_env(), lambda w: "busy", handoff_svc.ho_same) == HR.pass_(items, now0, server._silence_env(), lambda w: "busy", handoff_svc.ho_same))({"a1": rd(1), "a2": rd(2)}))
+check("9 an item the pass cannot read is left out, and a pane callable that raises verifies nothing", HR.pass_({"a1": {"status": "open", "metadata": "torn"}, "a2": rd(2)}, now0, server._silence_env(), lambda w: (_ for _ in ()).throw(OSError("x")), handoff_svc.ho_same)[0][1]["kind"] == "audit_idle")
+check("9 a pane callable of None verifies nothing", HR.verified(rd(2), rd(2)["metadata"], "home-peer", now0, None, handoff_svc.ho_same) == ([], []))
 
 # a log entry dated far ahead hides no later line
 far = {"hourly_audit": {"log": [{"at": now0 + 400 * 86400.0, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}]}}
@@ -458,7 +460,7 @@ check("9 a recorded commit under an hour old verifies (recorded, so the line is 
       and lines(6)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(6)[0]["kind"] == "audit_idle" and HR.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit"}), [lines(6), lines(7)])
 # an item with no timestamp at all
 nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "progress", "updated", "state_updated", "created", "confirmed", "written_at")]
-try: wt = HR.due({"a1": nots}, "a1", now0, server._silence_env(), lambda w: "busy", server._ho_same)
+try: wt = HR.due({"a1": nots}, "a1", now0, server._silence_env(), lambda w: "busy", handoff_svc.ho_same)
 except Exception as e_: wt = e_
 check("9 an item with no timestamp at all is read without an error, and a line for it is written or not at all (never a crash)", wt is None or isinstance(wt, dict), wt)
 # new_entries: a later revision does not re-emit an older line
@@ -813,9 +815,9 @@ try:
     check("20 …and past the cap, tied or not, it is dropped: both read idle", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     # an ABSENT registry row is idle as before; a PRESENT one that is no interactive pane reads unknown
     one_agent("Build part D", "nothing", 60)
-    row_path.unlink(missing_ok=True); real_idx0 = server._sessions_index; server._sessions_index = _wt_sessions._sessions_index = lambda: OTHER_ROW      # a whole fleet index that holds no row of the mover
+    row_path.unlink(missing_ok=True); real_idx0 = server._sessions_index; server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda: OTHER_ROW      # a whole fleet index that holds no row of the mover
     try: k_, t_ = kinds20()
-    finally: server._sessions_index = _wt_sessions._sessions_index = real_idx0
+    finally: server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = real_idx0
     check("20 a mover with NO registry row on this box (gone, or elsewhere), in a fleet index that was read whole, reads idle as built: nothing is claimed for it, and the orphan and idle hand-overs may act", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     registry("busy", kind="headless"); k_, t_ = kinds20()
     check("20 a PRESENT registry row that is no interactive pane (headless) reads UNKNOWN, never idle: not idle-marked, so not handed on", k_ == ["audit_unknown", "audit_unknown"] and all("could not be read" in x for x in t_) and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_, t_))
@@ -826,10 +828,10 @@ try:
     real_idx = server._sessions_index
     def hb(**rows): return {u_: {"machine": "b", "name": n_, "seen": "2026-01-01T00:00:00Z", **extra_} for u_, (n_, extra_) in rows.items()}
     def tick_with_index(idx_):
-        server._sessions_index = _wt_sessions._sessions_index = idx_ if callable(idx_) else (lambda: idx_)
+        server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = idx_ if callable(idx_) else (lambda: idx_)
         try:
             with _Err(): out_ = kinds20()
-        finally: server._sessions_index = _wt_sessions._sessions_index = real_idx
+        finally: server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = real_idx
         return out_
     live_hb = hb(u1=("home-peer", {})); gone_hb = hb(u1=("home-peer", {"gone": "2026-01-01T00:00:00Z"})); other_hb = hb(u1=("home-stew", {}))
     r_live = raises(lambda: server._mover_subagents("home-peer", live_hb, now0), TIE.Unreadable)
@@ -837,7 +839,7 @@ try:
     r_none = server._mover_subagents("home-peer", OTHER_ROW, now0) == [] and server._mover_subagents("home-peer", other_hb, now0) == []
     def no_index(): raise OSError("heartbeat unreadable")
     server_idx_none = raises(lambda: (setattr(server, "_sessions_index", no_index), server._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
-    server._sessions_index = _wt_sessions._sessions_index = real_idx
+    server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = real_idx
     check("20 no registry row on this box: the fleet heartbeat holds the session running (on another machine) → Unreadable (unknown); marked gone → none; no row anywhere (or only another session's) → none; the index cannot be read → Unreadable", r_live and r_gone and r_none and server_idx_none, (r_live, r_gone, r_none, server_idx_none))
     k_live = tick_with_index(live_hb); k_gone = tick_with_index(gone_hb); k_none = tick_with_index(OTHER_ROW); k_bad = tick_with_index(no_index)
     check("20 …through the audit: a mover on another machine (live heartbeat row, no local row) reads UNKNOWN on every item, not idle-marked (so never handed on to a second builder); a gone row, no row anywhere → idle as built; an unreadable index → unknown",
@@ -869,13 +871,13 @@ try:
     (T / "fleet/b").rmdir()
     check("21 the fleet index lists the machines whose sessions.json is torn, absent or not an object (`.unreadable`), and none when every machine's file reads", got_torn == (["b"], ["b"]) and got_absent == ["b"] and got_list == ["b"] and got_ok == ([], []), (got_torn, got_absent, got_list, got_ok))
     # 3 lookup by a session ID beside the name lookups: the mover is named by an id (a transcript id, a heartbeat id), not by its name
-    registry("busy", name="home-other"); by_tid = server._handoff_pane_row(SID, OTHER_ROW)
-    by_name_miss = server._handoff_pane_row("home-peer", OTHER_ROW)
+    registry("busy", name="home-other"); by_tid = handoff_svc.handoff_pane_row(SID, OTHER_ROW)
+    by_name_miss = handoff_svc.handoff_pane_row("home-peer", OTHER_ROW)
     got_id = [x["id"] for x in server._mover_subagents(SID, OTHER_ROW, now0)]
     check("21 a pane's registry row is found by its session id when the mover is named by it (the row's own name is another), and not by a name that is none of its names", by_tid is not None and by_tid[1]["sessionId"] == SID and by_name_miss is None and len(got_id) > 0, (by_tid, by_name_miss, got_id))
     registry("busy", sid="sess-a1", name="home-other")
-    by_fixture_id = server._handoff_pane_row("sess-a1", OTHER_ROW); other_id = server._handoff_pane_row("sess-a2", OTHER_ROW)
-    check("21 …a neutral id (sess-a1) matches the row that carries it as its session id, another id (sess-a2) matches nothing", by_fixture_id is not None and by_fixture_id[1]["sessionId"] == "sess-a1" and other_id is None and server._handoff_registered("sess-a1", OTHER_ROW) and not server._handoff_registered("sess-a2", OTHER_ROW), (by_fixture_id, other_id))
+    by_fixture_id = handoff_svc.handoff_pane_row("sess-a1", OTHER_ROW); other_id = handoff_svc.handoff_pane_row("sess-a2", OTHER_ROW)
+    check("21 …a neutral id (sess-a1) matches the row that carries it as its session id, another id (sess-a2) matches nothing", by_fixture_id is not None and by_fixture_id[1]["sessionId"] == "sess-a1" and other_id is None and handoff_svc.handoff_registered("sess-a1", OTHER_ROW) and not handoff_svc.handoff_registered("sess-a2", OTHER_ROW), (by_fixture_id, other_id))
     row_path.unlink(missing_ok=True)
     hb_by_id = lambda **extra: {"sess-a1": {"machine": "b", "name": "home-other", "seen": "2026-01-01T00:00:00Z", **extra}, **OTHER_ROW}
     r_id_live = raises(lambda: server._mover_subagents("sess-a1", hb_by_id(), now0), TIE.Unreadable)

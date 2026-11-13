@@ -62,17 +62,17 @@ class Hooks:
     debt_mover: Callable[..., Any]  # server._debt_mover
     foryou_failed: Callable[[], Any]  # server._FORYOU_FAILED
     foryou_key: Callable[..., Any]  # server._foryou_key
-    front_handed_by_peer: Callable[..., Any]  # server._front_handed_by_peer
+    front_handed_by_peer: Callable[..., Any]  # service/handoff.py: front_handed_by_peer
     fy_flag: Callable[..., Any]  # server._fy.flag
     fy_has_key: Callable[..., Any]  # server._fy.has_key
     grace_min: Callable[..., Any]  # server._grace_min
-    handoff_builder: Callable[..., Any]  # server._handoff_builder
-    handoff_on: Callable[..., Any]  # server._handoff_on
-    handoff_pane_row: Callable[..., Any]  # server._handoff_pane_row
-    handoff_pushed: Callable[..., Any]  # server._handoff_pushed
-    handoff_text: Callable[..., Any]  # server._handoff_text
-    handoff_told_text: Callable[..., Any]  # server._handoff_told_text
-    ho_same: Callable[..., Any]  # server._ho_same
+    handoff_builder: Callable[..., Any]  # service/handoff.py: handoff_builder
+    handoff_on: Callable[..., Any]  # service/handoff.py: handoff_on
+    handoff_pane_row: Callable[..., Any]  # service/handoff.py: handoff_pane_row
+    handoff_pushed: Callable[..., Any]  # service/handoff.py: handoff_pushed
+    handoff_text: Callable[..., Any]  # service/handoff.py: handoff_text
+    handoff_told_text: Callable[..., Any]  # service/handoff.py: handoff_told_text
+    ho_same: Callable[..., Any]  # service/handoff.py: ho_same
     main_agent: Callable[..., Any]  # server._main_agent
     model_of: Callable[..., Any]  # server._model_of
     owed_mark: Callable[..., Any]  # server._owed_mark
@@ -406,7 +406,7 @@ def gate_result() -> tuple[str, str]:
 
 
 def no_front(who: str, project: str) -> str:
-    """`who` unless it is a front agent, then the project's builder (_handoff_builder: a list of one, or none), "" when the project has none."""
+    """`who` unless it is a front agent, then the project's builder (service/handoff.py `handoff_builder`: a list of one, or none), "" when the project has none."""
     h = _hooks()
     if not who or not front_sender(who):
         return who
@@ -431,7 +431,7 @@ def presence_minutes() -> float:
 
 def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None = None) -> bool:
     """is the owner there for this pane: the stamp file <state>/prompts/<session id> (written by the prompt hook of the config repo; stackshot only reads it) holds epoch seconds
-    within [presence] minutes. The pane's session id comes from the CLI registry (_handoff_pane_row: ~/.claude/sessions/<pid>.json). A pane this box does not run, a missing, empty or
+    within [presence] minutes. The pane's session id comes from the CLI registry (service/handoff.py `handoff_pane_row`: ~/.claude/sessions/<pid>.json). A pane this box does not run, a missing, empty or
     unreadable file, a stamp from the future or an old one: not there."""
     h = _hooks()
     try:
@@ -1267,7 +1267,7 @@ def _ho_told(gid: str, who: str) -> None:
 
 def push_noted(to: str, note: str) -> None:
     """One notice to a session through push.py, on a thread of its own, for a notice path that names items in its text (the keeper's page-owed batch, the anchors prompt): the outcome is
-    recorded on the open hand-off of any item the text names to that session (_handoff_told_text). A failure is a stderr line, as these senders always had it. Never raises."""
+    recorded on the open hand-off of any item the text names to that session (service/handoff.py `handoff_told_text`). A failure is a stderr line, as these senders always had it. Never raises."""
     h = _hooks()
     try:
         r = subprocess.run([*_interp.resilient(PUSH), "--from", NAME, to, note], capture_output=True, text=True, timeout=110, env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})

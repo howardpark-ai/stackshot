@@ -64,6 +64,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.service import handoff as handoff_svc
 from stackshot.service import watching as watching_svc, event_waits as evwaits_svc
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
@@ -201,7 +202,7 @@ check("release: …a wait for the merge of the same PR is over too (a release is
 check("release: …a release again does nothing more", evwaits_svc.evwait_report(EW.event("pr_released", PR(13))) == [] and len(sent("watch")) == 2, sent())
 from stackshot.waits import handoff as HO
 check("release: …and the event wake records the hand-off to the post-wake mover, from the server (the record follows the mover: none open names anyone else)",
-      (mt(20).get("handoff") or {}).get("to") == BACK and (mt(20).get("handoff") or {}).get("from") == "stackshot" and not HO.stale(rd(20), BACK, server._ho_same), mt(20))
+      (mt(20).get("handoff") or {}).get("to") == BACK and (mt(20).get("handoff") or {}).get("from") == "stackshot" and not HO.stale(rd(20), BACK, handoff_svc.ho_same), mt(20))
 
 # ================================================================ the wake: the catch-up poll
 reset()

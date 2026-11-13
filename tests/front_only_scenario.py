@@ -130,6 +130,7 @@ check("5 a damaged page registry file reads as no pages: front-only", A.front_on
 
 # ---------------------------------------------------------------- 6. agreement with the older tests, and the two server rules
 from stackshot.web import server  # noqa: E402
+from stackshot.service import handoff as handoff_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 SMAIN, SDESK, DMAIN, DDESK, DBUILD = ("home-sigma-main", "home-sigma-desk", "home-delta-main", "home-delta-desk", "home-delta-builder")
@@ -145,7 +146,7 @@ SHAPES = {
     "projects/lone": page(title="Lone", name="Lone"),
 }
 (T / "store/projects.json").write_text(json.dumps({"pages": SHAPES}))
-old_no_builder = lambda p: not (server._handoff_builder(p) or server._hub_sessions(p)[2][:1])      # what server._project_builders was
+old_no_builder = lambda p: not (handoff_svc.handoff_builder(p) or server._hub_sessions(p)[2][:1])      # what server._project_builders was
 rows = {p: (A.front_only(p), old_no_builder(p)) for p in SHAPES}
 check("6 on every fixture project front_only agrees with the older hand-off builder / first background agent test", all(a == b for a, b in rows.values()), rows)
 check("6 the fixture holds both kinds of project", {a for a, _ in rows.values()} == {True, False}, rows)

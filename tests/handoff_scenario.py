@@ -85,6 +85,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.service import handoff as handoff_svc, handoff_cold as hcold_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -96,8 +97,8 @@ def _save_inv(gid, item, *a, **kw):
     out = _real_save(gid, item, *a, **kw)
     try:
         INV_SAVES[0] += 1
-        mv = H.mover_of(item, lambda it: server._ho_derive({**it, "gid": gid}))
-        if H.stale(item, mv, server._ho_same) and gid not in (f'a{34}', f'a{171}'): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), mv, kw.get("note") or (a[1] if len(a) > 1 else "")))
+        mv = H.mover_of(item, lambda it: handoff_svc.ho_derive({**it, "gid": gid}))
+        if H.stale(item, mv, handoff_svc.ho_same) and gid not in (f'a{34}', f'a{171}'): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), mv, kw.get("note") or (a[1] if len(a) > 1 else "")))
     except Exception as e:
         INV_BAD.append((gid, "checker failed", repr(e)))
     return out
@@ -122,7 +123,7 @@ def _tell(gid, owner, note, tag="wake"):
 telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
-    while server._HO_COLD_THREADS: server._HO_COLD_THREADS.pop(0).join(30)
+    while hcold_svc.HO_COLD_THREADS: hcold_svc.HO_COLD_THREADS.pop(0).join(30)
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
@@ -139,19 +140,19 @@ set_cfg()
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the last rung of the ladder asks it, once, to recover a session nobody could hand the item to
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
 def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
-server._COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
+hcold_svc.COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
 COLD_MSGS = []
 def cold(answer, status="ok"):
     def run(msg):
         COLD_MSGS.append(msg)
         return {"status": status, "text": json.dumps(answer) if isinstance(answer, dict) else str(answer), "duration_s": 0.1, "usage": {}, "note": "stub"}
-    server._COLD_RUNNER = run
+    hcold_svc.COLD_RUNNER = run
 def cli_row(who, status, at, name=None, started=None, kind="interactive", pid=None, file=None, sid=None):
     """The CLI's own registry row of a pane on this box: status busy | idle and when it changed (ms); `started` (epoch s) is when its process started (startedAt, ms): a new process is a relaunch.
     `kind` is the row's kind (interactive: a pane; anything else is no pane), `pid` its process (default: this one, which is alive), `file` a second row's file name, `sid` a session id other than the pane's."""
     (T / f"cli/{file or f'{os.getpid()}-{who}.json'}").write_text(json.dumps({"pid": pid or os.getpid(), "sessionId": sid or U[who], "name": name or who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000),
                                                                               "kind": kind, **({"startedAt": int(started * 1000)} if started is not None else {})}))
-server.CLI_SESSIONS = T / "cli"
+handoff_svc.CLI_SESSIONS = T / "cli"
 OWN = model.owner_display()
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
@@ -160,7 +161,7 @@ ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay �
 def upd(i, sender, **kw): return server._update(f"a{i}", sender=sender, **kw)
 def tick(at, *ids):
     """One pass of the hand-off clock at `at` (None: now) over the named items only (none named: the whole board)."""
-    return server._handoff_tick(now=at, only=[f"a{i}" for i in ids] or None)
+    return handoff_svc.handoff_tick(now=at, only=[f"a{i}" for i in ids] or None)
 def hand(i, to, sender="home-send", **kw):
     """sender hands item a<i> to `to`: mover=<to> (needs names only a background agent or the owner), and the next line names it."""
     return upd(i, sender, mover=to, next=f"{to}: do the thing", **({} if telling.front_sender(sender) else {"check": CHK}), **kw)       # a next line naming another session needs a check or a wake (the done-check rule); a front agent's hand-off asks for neither and may not set them
@@ -208,7 +209,7 @@ check("2 delivered: a push that waits in the inbox is neither delivered nor fail
 check("2 delivered: …it is queued (queued_at), with no delivered_at", isinstance(ho(10).get("queued_at"), float) and len(pushes_to("home-peer", "a10")) == 1, (ho(10), pushes()))
 # the puller's ack, seen by the server in the /inbox/ack route, is the delivery
 from stackshot.fleet import inbox as IB
-iid = IB.put(U["home-peer"], server._handoff_text("a10", rd(10), ho(10)), "msg", sender="home-send")
+iid = IB.put(U["home-peer"], handoff_svc.handoff_text("a10", rd(10), ho(10)), "msg", sender="home-send")
 st_, body_ = server._client_post("a", "ack", {"delivered": [iid]})
 check("2 ack: the puller's ack of the hand-off notice (read from the inbox file before it goes) makes the hand-off delivered, at the ack's time", st_ == 200 and abs((ho(10).get("delivered_at") or 0) - time.time()) < 30
       and "queued_at" not in ho(10) and "queued" not in ho(10) and not IB.exists(iid), (st_, body_, ho(10)))
@@ -455,7 +456,7 @@ check("5 ladder write: …the write was tried exactly twice, and both refusals a
       LADDER_WRITES == ["a38", "a38"] and "a38 the cold call's close refused (attempt 1 of 2): Refused: the item is in state doing" in journal.getvalue()
       and "attempt 2 of 2" in journal.getvalue(), (LADDER_WRITES, journal.getvalue()[-600:]))
 check("5 ladder write: …the fleet's builder got exactly one recovery message with the refusal, the brief lists no stuck line, get says the builder was asked, and the History has the line",
-      len(recovery_pushes("a38")) == 1 and "refused twice" in recovery_pushes("a38")[0][1] and "nobody can take" not in server._handoff_brief()
+      len(recovery_pushes("a38")) == 1 and "refused twice" in recovery_pushes("a38")[0][1] and "nobody can take" not in handoff_svc.handoff_brief()
       and "the fleet's builder was asked" in _wt_get.stackshot_get("a38") and any("was asked to recover it" in (e.get("text") or "") for e in ((mt(38).get("stall") or {}).get("log") or [])), (recovery_pushes("a38"), _wt_get.stackshot_get("a38")[-600:], (mt(38).get("stall") or {}).get("log")))
 # a refusal that does not come again (a write that lost a race) is tried once more and lands: no recovery asked, nothing returned
 item(39, project="projects/gamma", owner=U["home-gamma-front"], needs=[])
@@ -526,7 +527,7 @@ upd(44, "home-peer", next="home-peer: back at it")
 check("5 recovery: …its mover's note ends the request (the session is alive) but does not take the item: no work started", not ho(44).get("recovery_at") and not ho(44).get("taken_at"), ho(44))
 start(44, "home-peer")
 check("5 recovery: …its mover starting work takes it: taken_at is set and the request is cleared, so a later episode may ask again", ho(44).get("taken_at") and not ho(44).get("recovery_at") and not ho(44).get("recovery_reason")
-      and "a44" not in server._handoff_brief(), ho(44))
+      and "a44" not in handoff_svc.handoff_brief(), ho(44))
 # 5c: never the owner, a script or the server as the sender; cold off and no agent: the fleet's builder is asked
 set_cfg(cold_call=False)
 item(45, project="projects/beta", owner=U["home-beta-front"], needs=[])
@@ -554,7 +555,7 @@ check("5 gone: …a project with no builder: the cold call (it asks Oliver)", "d
 check("5 gone: …an item last written 40 days ago is left for the migration", ho(52).get("to") == "home-dead" and mt(52)["needs"] == ["home-dead"] and "a52" not in done, mt(52))
 check("5 gone: …an item with NO hand-off record (from before the machinery) is not moved, whatever its mover's pane", "handoff" not in mt(55) and mt(55)["needs"] == ["home-dead"] and "a55" not in done, mt(55))
 check("5 gone: …an item that still stores a rank is moved like any other when its builder's pane is gone", ho(56).get("to") == "team-back" and "a56" in done, (done, ho(56)))
-check("5 gone: …the brief counts the items with no record, as `mover gone: n`, and moves none", re.search(r"mover gone: \d+ item", server._handoff_brief()) and "a55" not in server._handoff_brief(), server._handoff_brief())
+check("5 gone: …the brief counts the items with no record, as `mover gone: n`, and moves none", re.search(r"mover gone: \d+ item", handoff_svc.handoff_brief()) and "a55" not in handoff_svc.handoff_brief(), handoff_svc.handoff_brief())
 set_cfg(cold_call=False)
 item(53, project="projects/beta", owner=U["home-beta-front"], needs=["home-dead"], next="home-dead: do the thing", handoff=rec("home-dead"))
 tick(None, 53); drain()
@@ -582,7 +583,7 @@ d6 = max(ho(i)["delivered_at"] for i in (60, 61, 62))
 item(54, needs=["home-dead"], next="home-dead: do the thing", handoff=rec("home-dead"))
 set_cfg(pause=True)
 check("6 pause: while the switch is on, the clock and the gone-mover pass do nothing, though three hand-offs and a gone mover are due", tick(d6 + 20 * MIN, 54, 60, 61, 62) == [] and ho(60).get("to") == "home-peer" and ho(62).get("to") == "home-peer2" and ho(54).get("to") == "home-dead", pushes())
-check("6 pause: …and the brief says how many it holds", "paused" in server._handoff_brief() and "would fire" in server._handoff_brief(), server._handoff_brief())
+check("6 pause: …and the brief says how many it holds", "paused" in handoff_svc.handoff_brief() and "would fire" in handoff_svc.handoff_brief(), handoff_svc.handoff_brief())
 set_cfg(pause=False)
 done = tick(d6 + 20 * MIN, 54, 60, 61, 62); drain()
 check("6 pause: turned off, the items that would have fired fire in one pass", set(done) == {"a54", "a60", "a61", "a62"} and ho(54).get("to") == "team-back" and ho(60).get("to") == "team-back" and ho(61).get("to") == "team-back" and ho(62).get("to") == "team-back", (done, ho(60), ho(62)))
@@ -628,24 +629,24 @@ check("8 display: …and returned to the sender when the agent did not take it e
 set_cfg()
 b = _wt_brief.stackshot_brief()
 check("8 display: the brief shows the not-yet-taken ones in one short line, not the owner's and not stuck ones", re.search(r"handed over, not yet taken: .*a80", b) is None and "handed over, not yet taken:" in b and "a1 → home-peer" in b, b[:1500])
-check("8 display: …in the instance's timezone, never UTC", "UTC" not in server._handoff_brief(), server._handoff_brief())
+check("8 display: …in the instance's timezone, never UTC", "UTC" not in handoff_svc.handoff_brief(), handoff_svc.handoff_brief())
 
 # ================================================================ 9. the switch
 set_cfg(handoff=False)
 item(90); hand(90, "home-peer"); drain()
 check("9 switch: [model] handoff = false: no record is written", "handoff" not in mt(90), mt(90))
-check("9 switch: …no clock runs, no gone mover is looked for", server._handoff_tick(now=time.time() + 86400) == [], None)
-check("9 switch: …and get and the brief say nothing of hand-offs", "handoff:" not in got(80) and server._handoff_brief() == "", got(80))
+check("9 switch: …no clock runs, no gone mover is looked for", handoff_svc.handoff_tick(now=time.time() + 86400) == [], None)
+check("9 switch: …and get and the brief say nothing of hand-offs", "handoff:" not in got(80) and handoff_svc.handoff_brief() == "", got(80))
 set_cfg(handoff=False, guards=False); item(91); hand(91, "home-idle"); check("9 switch: …and no hand-off is refused for its pane", mt(91).get("mover") == "home-idle" and "handoff" not in mt(91), mt(91))
 set_cfg()
 
 # ================================================================ 10. the router's side of the path
 server._cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 check("10 router: the background agent a hand-off falls to is the router's builder for the project (alpha: team-back, whose mandate says builds), and the order has it first",
-      router_live.builder("projects/alpha") == "team-back" and server._handoff_background("projects/alpha")[0] == "team-back" and server._handoff_background("projects/alpha")[1:] == ["home-docs", "home-idle"], server._handoff_background("projects/alpha"))
-check("10 router: …a project with no background agent has none (beta)", server._handoff_background("projects/beta") == [], None)
+      router_live.builder("projects/alpha") == "team-back" and handoff_svc.handoff_background("projects/alpha")[0] == "team-back" and handoff_svc.handoff_background("projects/alpha")[1:] == ["home-docs", "home-idle"], handoff_svc.handoff_background("projects/alpha"))
+check("10 router: …a project with no background agent has none (beta)", handoff_svc.handoff_background("projects/beta") == [], None)
 check("10 router: …the fallback is the builder alone, not every background agent on the page (alpha: team-back only; gamma: its builder, whose pane is gone; beta: none)",
-      server._handoff_builder("projects/alpha") == ["team-back"] and server._handoff_builder("projects/gamma") == ["home-gamma-bg"] and server._handoff_builder("projects/beta") == [], None)
+      handoff_svc.handoff_builder("projects/alpha") == ["team-back"] and handoff_svc.handoff_builder("projects/gamma") == ["home-gamma-bg"] and handoff_svc.handoff_builder("projects/beta") == [], None)
 # pure: a plan is a function of the items and the env
 env = H.Env(now=700.0, derive=lambda it: model.derive(it, 700.0), minutes=10.0, background=lambda p: ["b"], pane=lambda w: "", exempt=lambda it, w: False)
 pitem = {"status": "open", "metadata": {"owner": "o", "needs": ["x"], "project": "p", "handoff": {"to": "x", "from": "s", "at": 100.0, "delivered_at": 200.0, "taken_at": None}}}
@@ -659,7 +660,7 @@ def cold_during(answer, during):
     def run(msg):
         COLD_MSGS.append(msg); during()
         return {"status": "ok", "text": json.dumps(answer), "duration_s": 0.1, "usage": {}, "note": "stub"}
-    server._COLD_RUNNER = run
+    hcold_svc.COLD_RUNNER = run
 def gamma(i): item(i, project="projects/gamma", owner=U["home-gamma-front"], needs=[]); hand(i, "home-peer"); drain(); return ho(i)["delivered_at"]
 d_e = gamma(100)
 cold_during(ANS, lambda: start(100, "home-peer"))
@@ -689,7 +690,7 @@ def blocking(msg):
     COLD_MSGS.append(msg); gate.wait(30)
     return {"status": "ok", "text": json.dumps({"action": "ask_owner", "ask": ASK, "options": [{"label": "ship", "line": "Ship it now.", "recommended": True}, {"label": "wait", "line": "Hold it.", "recommended": False}]}),
             "duration_s": 0.1, "usage": {}, "note": "stub"}
-server._COLD_RUNNER = blocking
+hcold_svc.COLD_RUNNER = blocking
 dd = max(gamma(i) for i in (110, 111, 112)); n0 = len(COLD_MSGS)
 done = tick(dd + 11 * MIN, 110, 111, 112)
 for _ in range(100):
@@ -699,18 +700,18 @@ check("11 cold: a pass with three due starts one cold call, the other two wait f
 done2 = tick(dd + 11 * MIN, 110, 111, 112); time.sleep(0.3)
 check("11 cold: …none is started while one runs", done2 == [] and len(COLD_MSGS) == n0 + 1, (done2, len(COLD_MSGS) - n0))
 gate.set()
-first_calls = list(server._HO_COLD_THREADS)
+first_calls = list(hcold_svc.HO_COLD_THREADS)
 for t in first_calls: t.join(30)
 done3 = tick(dd + 11 * MIN, 110, 111, 112)
 for _ in range(100):
     if len(COLD_MSGS) > n0 + 1: break
     time.sleep(0.05)
-for t in list(server._HO_COLD_THREADS): t.join(30)      # the second call (a stub that returns at once) is over too, so the list is read at rest, not while it runs
+for t in list(hcold_svc.HO_COLD_THREADS): t.join(30)      # the second call (a stub that returns at once) is over too, so the list is read at rest, not while it runs
 check("11 cold: …the next tick starts the next one, and the finished thread is pruned from the list (the first call's thread is gone, one in it, not two)",
-      len(done3) == 1 and len(COLD_MSGS) == n0 + 2 and len(server._HO_COLD_THREADS) == 1 and not any(t in server._HO_COLD_THREADS for t in first_calls), (done3, len(server._HO_COLD_THREADS)))
+      len(done3) == 1 and len(COLD_MSGS) == n0 + 2 and len(hcold_svc.HO_COLD_THREADS) == 1 and not any(t in hcold_svc.HO_COLD_THREADS for t in first_calls), (done3, len(hcold_svc.HO_COLD_THREADS)))
 drain(); tick(dd + 11 * MIN, 110, 111, 112); drain()
 check("11 cold: …and the third after it: all three were asked, one per tick", len(COLD_MSGS) == n0 + 3 and all("decision" in mt(i).get("needs", []) for i in (110, 111, 112)), [mt(i).get("needs") for i in (110, 111, 112)])
-server._COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
+hcold_svc.COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
 
 # 11.3 nobody is told twice in one write
 item(64, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); clear_pushes()   # the record follows the mover: an item with a record to home-peer has home-peer as its mover
@@ -770,7 +771,7 @@ check("12 his hand-off: a later write of the agent's, with the item still his to
 check("12 his hand-off: …and his board answer ends it, with the mover back on the agent", server._answer("a26", "Yes", "", "answer") == "decision" and isinstance(ho(26).get("taken_at"), float)
       and mt(26)["mover"] == "team-back" and "then" not in mt(26), (mt(26), ho(26)))
 g_aa = _wt_get.stackshot_get("a26")
-check("12 his hand-off: …get no longer says not yet taken and the brief does not list it", "not yet taken" not in g_aa and f"handoff: handed to {OWN}, taken" in g_aa and "a26" not in "\n".join(server._handoff_brief()), g_aa)
+check("12 his hand-off: …get no longer says not yet taken and the brief does not list it", "not yet taken" not in g_aa and f"handoff: handed to {OWN}, taken" in g_aa and "a26" not in "\n".join(handoff_svc.handoff_brief()), g_aa)
 to_him(161)
 upd(161, "team-back", needs=["team-back"], clear_hold=True)
 check("12 his hand-off: a session relaying his answer (needs without decision) ends it, and the mover is the agent again, with a note in the reply", isinstance(ho(161).get("taken_at"), float)
@@ -813,7 +814,7 @@ to_him(65)
 upd(65, "team-back", status="completed", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done")
 check("12 his hand-off: a close drops the mover and then, settles nothing and leaves the closed item's record alone", "mover" not in mt(65) and "then" not in mt(65) and not ho(65).get("taken_at") and "handoff:" not in _wt_get.stackshot_get("a65"), (mt(65), ho(65)))
 # what a close and a confirm do to an item that stands in his state with then=<agent> and a hand-off to him not yet taken. The close path: writes.save reaches
-# _settle_mover_on_save and _handoff_his_over with a closed item; model.settle returns None for status != open and handoff.pending_his is None for a closed record, so neither hook acts.
+# _settle_mover_on_save and handoff_svc.handoff_his_over with a closed item; model.settle returns None for status != open and handoff.pending_his is None for a closed record, so neither hook acts.
 # The mover and then go because of model.DROP_ON_CLOSE, which update_unlocked (service/update.py) applies, not because of settle.
 to_him(35)
 pre_as = (mt(35)["mover"], mt(35)["then"], dict(ho(35)))
@@ -826,8 +827,8 @@ check("12 close: a close through update (status=completed, the step marked in th
 shut = json.loads(json.dumps(rd(35))); shut["metadata"].update(mover="team-back", needs=["decision"], ask=ASK, handoff=dict(pre_as[2]))
 check("12 close: the hooks themselves leave a closed item alone: _settle_mover_on_save on a closed item with a stored agent mover beside his state changes nothing",
       server._settle_mover_on_save(shut, rd(35)) is False and shut["metadata"]["mover"] == "team-back", shut["metadata"])
-check("12 close: …and _handoff_his_over on a closed item with a not-taken record to him ends nothing (pending_his is None for a closed item)",
-      server._handoff_his_over("a35", shut) is False and not shut["metadata"]["handoff"].get("taken_at"), shut["metadata"]["handoff"])
+check("12 close: …and handoff_svc.handoff_his_over on a closed item with a not-taken record to him ends nothing (pending_his is None for a closed item)",
+      handoff_svc.handoff_his_over("a35", shut) is False and not shut["metadata"]["handoff"].get("taken_at"), shut["metadata"]["handoff"])
 to_him(36)
 pre_item = (json.dumps(rd(36), sort_keys=True), mt(36)["mover"], mt(36)["then"], dict(ho(36)))
 _wt_complete.stackshot_confirm("a36", sender="team-back")
@@ -879,7 +880,7 @@ check("14 relaunch: …nor one whose notice is still waiting in the inbox (it wa
 (T / f"cli/{os.getpid()}-home-peer.json").unlink(missing_ok=True)
 # a pane this box does not run has no registry row: no relaunch is seen, the hand-off goes on as it did
 item(78); hand(78, "home-peer"); drain(); d_u = ho(78)["delivered_at"]
-check("14 relaunch: a mover with no registry row on this box (a remote pane) is never re-sent (no signal: the hand-off goes on as before)", H.relaunched(ho(78), server._handoff_env(d_u + MIN), "home-peer") == "" and tick(d_u + MIN, 78) == [], ho(78))
+check("14 relaunch: a mover with no registry row on this box (a remote pane) is never re-sent (no signal: the hand-off goes on as before)", H.relaunched(ho(78), handoff_svc.handoff_env(d_u + MIN), "home-peer") == "" and tick(d_u + MIN, 78) == [], ho(78))
 # the re-send's push result is lost (the server restarts between the save and the push's report): the record is marked queued now, so its clock starts at the inbox grace and the hand-off still times out
 item(57); hand(57, "home-peer"); drain(); d_w = ho(57)["delivered_at"]
 cli_row("home-peer", "busy", d_w + 31, started=d_w + 30)
@@ -888,7 +889,7 @@ try:
     done = tick(d_w + MIN, 57)
 finally:
     telling.tell_woken = _tell_kept
-r = ho(57); env_z = server._handoff_env(d_w)
+r = ho(57); env_z = handoff_svc.handoff_env(d_w)
 check("14 relaunch: a re-send saved with no push result is marked queued now (queued = resent, queued_at = the re-send), so the record has a clock", done == ["a57"] and r.get("resent_at") == d_w + MIN and r.get("delivered_at") is None
       and r.get("queued") == "resent" and r.get("queued_at") == d_w + MIN and H.clock_start(r, env_z) == d_w + MIN + env_z.inbox_grace * 60, r)
 t_ay = d_w + MIN + (env_z.inbox_grace + env_z.minutes) * 60
@@ -907,29 +908,29 @@ finally:
 p_ar = pushes_to("home-peer", "a58")
 check("14 relaunch: a re-send whose push fails is tried once more with the same words: all three pushes to the pane after the first say the notice is sent again, the first does not",
       len(p_ar) == 3 and "sent again" not in p_ar[0][1] and "sent again" in p_ar[1][1] and "sent again" in p_ar[2][1], p_ar)
-# the row a pane is read from, shared by _handoff_status and _handoff_started: alive, interactive, the most recently updated one
+# the row a pane is read from, shared by handoff_svc.handoff_status and handoff_svc.handoff_started: alive, interactive, the most recently updated one
 def cli_clear():
     for f in (T / "cli").glob("*.json"): f.unlink()
 def same_row(who, want_at, want_started, want_status):
-    s, at = server._handoff_status(who); st = server._handoff_started(who)
+    s, at = handoff_svc.handoff_status(who); st = handoff_svc.handoff_started(who)
     return s == want_status and abs(at - want_at) < 0.01 and abs(st - want_started) < 0.01
 cli_clear(); t14 = time.time(); _p = subprocess.Popen([sys.executable, "-c", "pass"]); _p.wait(); DEAD = _p.pid
 cli_row("home-peer", "idle", t14 + 10, started=t14 + 9, pid=DEAD)
-check("14 started: a row of a process that is gone says nothing (no start, no status)", server._handoff_started("home-peer") == 0.0 and server._handoff_status("home-peer") == ("", 0.0), (server._handoff_started("home-peer"), server._handoff_status("home-peer")))
+check("14 started: a row of a process that is gone says nothing (no start, no status)", handoff_svc.handoff_started("home-peer") == 0.0 and handoff_svc.handoff_status("home-peer") == ("", 0.0), (handoff_svc.handoff_started("home-peer"), handoff_svc.handoff_status("home-peer")))
 cli_clear()
 cli_row("home-peer", "idle", t14 + 100, started=t14 + 90, file="old.json")
 cli_row("home-peer", "busy", t14 + 200, started=t14 + 5, file="new.json")
-check("14 started: two live rows of one session: the most recently updated one is the pane, for the start as for the status (the later start of the older row is not taken)", same_row("home-peer", t14 + 200, t14 + 5, "busy"), (server._handoff_started("home-peer"), server._handoff_status("home-peer")))
+check("14 started: two live rows of one session: the most recently updated one is the pane, for the start as for the status (the later start of the older row is not taken)", same_row("home-peer", t14 + 200, t14 + 5, "busy"), (handoff_svc.handoff_started("home-peer"), handoff_svc.handoff_status("home-peer")))
 cli_row("home-peer", "idle", t14 + 300, started=t14 + 4, pid=DEAD, file="dead.json")
-check("14 started: …a newer row of a dead process does not count either", same_row("home-peer", t14 + 200, t14 + 5, "busy"), (server._handoff_started("home-peer"), server._handoff_status("home-peer")))
+check("14 started: …a newer row of a dead process does not count either", same_row("home-peer", t14 + 200, t14 + 5, "busy"), (handoff_svc.handoff_started("home-peer"), handoff_svc.handoff_status("home-peer")))
 cli_clear()
 cli_row("home-peer", "idle", t14 + 50, started=t14 + 40, sid="a-session-id-this-box-does-not-know")
-check("14 started: a row that matches by name alone (its session id is another) is the pane", same_row("home-peer", t14 + 50, t14 + 40, "idle"), (server._handoff_started("home-peer"), server._handoff_status("home-peer")))
+check("14 started: a row that matches by name alone (its session id is another) is the pane", same_row("home-peer", t14 + 50, t14 + 40, "idle"), (handoff_svc.handoff_started("home-peer"), handoff_svc.handoff_status("home-peer")))
 cli_clear()
 cli_row("home-peer", "busy", t14 + 500, started=t14 + 400, kind="headless", file="bg.json")
-check("14 started: a row that is no interactive pane (a headless process of the session) says nothing: no start, no status", server._handoff_started("home-peer") == 0.0 and server._handoff_status("home-peer") == ("", 0.0), (server._handoff_started("home-peer"), server._handoff_status("home-peer")))
+check("14 started: a row that is no interactive pane (a headless process of the session) says nothing: no start, no status", handoff_svc.handoff_started("home-peer") == 0.0 and handoff_svc.handoff_status("home-peer") == ("", 0.0), (handoff_svc.handoff_started("home-peer"), handoff_svc.handoff_status("home-peer")))
 cli_row("home-peer", "idle", t14 + 100, started=t14 + 90, file="pane.json")
-check("14 started: …and beside the pane's own row it does not win by being newer", same_row("home-peer", t14 + 100, t14 + 90, "idle"), (server._handoff_started("home-peer"), server._handoff_status("home-peer")))
+check("14 started: …and beside the pane's own row it does not win by being newer", same_row("home-peer", t14 + 100, t14 + 90, "idle"), (handoff_svc.handoff_started("home-peer"), handoff_svc.handoff_status("home-peer")))
 cli_clear()
 item(63); hand(63, "home-peer"); drain(); d_y = ho(63)["delivered_at"]
 cli_row("home-peer", "busy", d_y + 5, started=d_y - 600, file="pane.json")
@@ -937,14 +938,14 @@ cli_row("home-peer", "busy", d_y + 40, started=d_y + 30, kind="headless", file="
 check("14 relaunch: a headless process of the session starting after the delivery is no relaunch of its pane: nothing is re-sent", tick(d_y + MIN, 63) == [] and "resent_at" not in ho(63) and len(pushes_to("home-peer", "a63")) == 1, (ho(63), pushes_to("home-peer", "a63")))
 cli_clear()
 # pure: the plan alone
-env14 =H.Env(now=100.0, derive=server._ho_derive, started=lambda who: 90.0)
+env14 =H.Env(now=100.0, derive=handoff_svc.ho_derive, started=lambda who: 90.0)
 check("14 relaunch: pure, relaunched() needs a delivery, a start after it, and no earlier re-send",
       H.relaunched({"delivered_at": 80.0}, env14, "x") != "" and H.relaunched({"delivered_at": 95.0}, env14, "x") == "" and H.relaunched({"delivered_at": None}, env14, "x") == ""
-      and H.relaunched({"delivered_at": 80.0, "resent_at": 85.0}, env14, "x") == "" and H.relaunched({"delivered_at": 80.0}, H.Env(now=100.0, derive=server._ho_derive), "x") == "")
+      and H.relaunched({"delivered_at": 80.0, "resent_at": 85.0}, env14, "x") == "" and H.relaunched({"delivered_at": 80.0}, H.Env(now=100.0, derive=handoff_svc.ho_derive), "x") == "")
 
 # ================================================================ 15. the record follows the mover
 def stale_now(i):
-    it = rd(i); return H.stale(it, H.mover_of(it, lambda x: server._ho_derive({**x, "gid": f"a{i}"})), server._ho_same)
+    it = rd(i); return H.stale(it, H.mover_of(it, lambda x: handoff_svc.ho_derive({**x, "gid": f"a{i}"})), handoff_svc.ho_same)
 def hist(i): return [h.get("to") for h in (mt(i).get("handoff_history") or [])]
 # 15.1 a session's hand-off, then a hand-on by another session
 item(90); hand(90, "home-peer"); drain()
@@ -1112,13 +1113,13 @@ item(100, handoff=rec("home-peer", recovery_at=now0 - 100, recovery_reason="nobo
 it_ad = rd(100); it_ad["metadata"].pop("mover"); it_ad["metadata"]["needs"] = ["decision"]; it_ad["metadata"]["ask"] = ASK; writes.save(f"a{100}", it_ad)
 check("15 recovery: a record with the recovery request stays while the item is open (the item goes to the owner's state)", bool(ho(100).get("recovery_at")) and not stale_now(100), ho(100))
 # 15.9 delivery on the other notice paths
-item(102, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); server._handoff_told_text("home-peer", f"[board] a{102} needs a look", "delivered → x")
+item(102, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); handoff_svc.handoff_told_text("home-peer", f"[board] a{102} needs a look", "delivered → x")
 check("15 told: a push to the mover whose text names the item marks its open record delivered", isinstance(ho(102).get("delivered_at"), float), ho(102))
-item(103, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); server._handoff_told_text("home-peer", f"a{103} again", "inbox → x")
+item(103, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); handoff_svc.handoff_told_text("home-peer", f"a{103} again", "inbox → x")
 check("15 told: …a push that waits in the inbox marks it queued, not delivered", not ho(103).get("delivered_at") and str(ho(103).get("queued", "")).startswith("inbox"), ho(103))
-item(104, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); server._handoff_told_text("home-peer", f"a{104} again", "failed: not live")
+item(104, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); handoff_svc.handoff_told_text("home-peer", f"a{104} again", "failed: not live")
 check("15 told: …a failed one marks nothing (the notice senders retry)", not ho(104).get("delivered_at") and not ho(104).get("queued"), ho(104))
-item(105, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); server._handoff_told_text("home-peer2", f"a{105}", "delivered → x")
+item(105, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); handoff_svc.handoff_told_text("home-peer2", f"a{105}", "delivered → x")
 check("15 told: …to someone else marks nothing", not ho(105).get("delivered_at"), ho(105))
 item(106, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); got_ab = server._router_delivered("home-peer", f"a{106} was ruled → {telling.notice_link(f'a{106}')}", "delivered → x")
 check("15 told: the router's delivery hook marks the record and returns the outcome unchanged", got_ab == "delivered → x" and isinstance(ho(106).get("delivered_at"), float), (got_ab, ho(106)))
@@ -1133,14 +1134,14 @@ item(113, status="completed", handoff=rec("home-peer"))                       # 
 item(114, handoff=rec("home-peer"), wait_kind="time", hold=True, wake=dayp(3), post_wake_mover="team-back", needs=[])   # waiting: no mover
 before = {i: json.dumps(rd(i), sort_keys=True) for i in (110, 111, 112, 113, 114)}
 mine = lambda rows: sorted(r["gid"] for r in rows if r["gid"] in (f"a{110}", f"a{111}", f"a{112}", f"a{113}", f"a{114}"))      # (section 12 leaves two stored states of the older code on the board: the repair sees them too)
-rows = server._handoff_repair()
+rows = handoff_svc.handoff_repair()
 check("15 repair: the dry run lists the open records that name someone but the mover (110, a waiting item's 114, a closed item's 113) and no other (not 111: its mover; not 112: taken)", mine(rows) == [f"a{110}", f"a{113}", f"a{114}"], rows)
 check("15 repair: …and writes nothing", all(json.dumps(rd(i), sort_keys=True) == before[i] for i in before), None)
-clear_pushes(); rows2 = server._handoff_repair(apply=True)
+clear_pushes(); rows2 = handoff_svc.handoff_repair(apply=True)
 check("15 repair: --apply ends exactly those: the record to the history (a closed item's as \"the item closed\"), the item kept as it was otherwise",
       "handoff" not in mt(110) and hist(110)[-1] == "home-peer" and "handoff" not in mt(114) and "handoff" not in mt(113) and (mt(113)["handoff_history"][-1].get("ended")) == "the item closed" and mt(110).get("mover") == "team-back"
       and ho(111).get("to") == "home-peer" and json.dumps(rd(112), sort_keys=True) == before[112] and mine(rows2) == [f"a{110}", f"a{113}", f"a{114}"], (mt(110), mt(113), mt(114)))
-check("15 repair: …and a second run finds none", server._handoff_repair() == [], server._handoff_repair())
+check("15 repair: …and a second run finds none", handoff_svc.handoff_repair() == [], handoff_svc.handoff_repair())
 check("15 repair: nobody is told and no record is made new", not pushes() and "handoff" not in mt(110), pushes())
 
 # 15.11 review fixes: a server-made record runs no take clock, and a taken record to the same name does not stand in for the wake's new hand-off
@@ -1174,7 +1175,7 @@ it_af = rd(121); it_af["metadata"]["mover"] = "team-back"; writes.save(f"a{121}"
 clear_pushes(); telling.tell_woken(f"a{121}", "home-docs", f"[stackshot] a{121} changed → {telling.notice_link(f'a{121}')}"); drain()
 check("15 undelivered: a server save that moves the item on records the hand-off to the new mover, no_clock, and a notice that goes to a session in needs other than that mover marks nothing",
       ho(121).get("to") == "team-back" and ho(121).get("from") == "stackshot" and ho(121).get("no_clock") is True and not ho(121).get("delivered_at") and [x for x in pushes() if x[0] == "home-docs"] and not pushes_to("team-back", f"a{121}"), (mt(121), pushes()))
-server._handoff_told_text("team-back", f"[stackshot] a{121} woke → {telling.notice_link(f'a{121}')}", "delivered → x", link_only=True)
+handoff_svc.handoff_told_text("team-back", f"[stackshot] a{121} woke → {telling.notice_link(f'a{121}')}", "delivered → x", link_only=True)
 check("15 undelivered: …and a notice that does reach the mover marks it delivered", isinstance(ho(121).get("delivered_at"), float), ho(121))
 
 # 15.13 the router push and the keeper batch mark an item delivered only on its own notice link; the message path takes a citation
@@ -1186,10 +1187,10 @@ check("15 told: a batch notice citing another item in a subject does not mark th
 item(124, mover="home-peer", handoff=rec("home-peer", delivered_at=None))
 telling.push_noted("home-peer", f"- a{122} page owed → {telling.notice_link(f'a{122}')} (follows a{124})")
 check("15 told: …and on the keeper batch (push_noted) too", not ho(124).get("delivered_at"), ho(124))
-server._handoff_told_text("home-peer", batch_text, "delivered → x")
+handoff_svc.handoff_told_text("home-peer", batch_text, "delivered → x")
 check("15 told: the message path stays as it was: a citation of the item is enough there", isinstance(ho(123).get("delivered_at"), float), ho(123))
 item(140, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); item(1400, mover="home-peer", handoff=rec("home-peer", delivered_at=None))
-server._handoff_told_text("home-peer", f"a{140} is cited; the notice is for a{1400} → {telling.notice_link(f'a{1400}')}", "delivered → x", link_only=True)
+handoff_svc.handoff_told_text("home-peer", f"a{140} is cited; the notice is for a{1400} → {telling.notice_link(f'a{1400}')}", "delivered → x", link_only=True)
 check("15 told: the link of one item is no link of an item whose id it begins (the id ends at a non-word character)", isinstance(ho(1400).get("delivered_at"), float) and not ho(140).get("delivered_at"), (ho(1400), ho(140)))
 
 # 15.14 the stored copy of an item from before an earlier change is read the way the loaded one is
@@ -1201,38 +1202,38 @@ check("15 legacy: a server save of an item stored in an older form makes no hand
 
 # 15.15 the cold call's outcome is written only on the record that call was asked about
 item(126, mover="home-peer", handoff=rec("home-peer", cold={"at": 4242.0, "state": "running"}))
-server._handoff_cold_end(f"a{126}", "failed", "from a call that was asked about an earlier record", 1.0)
+hcold_svc.handoff_cold_end(f"a{126}", "failed", "from a call that was asked about an earlier record", 1.0)
 check("15 cold end: an outcome with another call's stamp is not written on the record", (ho(126).get("cold") or {}).get("state") == "running" and not ho(126).get("events"), ho(126))
-server._handoff_cold_end(f"a{126}", "failed", "the call failed", 4242.0)
+hcold_svc.handoff_cold_end(f"a{126}", "failed", "the call failed", 4242.0)
 check("15 cold end: …the stamp of the call asked about is", (ho(126).get("cold") or {}).get("state") == "failed", ho(126))
 item(127, mover="home-peer", handoff=rec("home-peer", cold={"at": 77.0, "state": "running"}))
-server._handoff_cold_end(f"a{127}", "done", "no stamp: as before")
+hcold_svc.handoff_cold_end(f"a{127}", "done", "no stamp: as before")
 check("15 cold end: a call with no stamp writes as before", (ho(127).get("cold") or {}).get("state") == "done", ho(127))
 
 # 15.16 the repair: one item that fails does not stop it; the start-time pass applies it, once, with one count line
 item(128, mover="team-back", handoff=rec("home-peer")); item(129, mover="team-back", handoff=rec("home-peer"))
-_real_one = server._handoff_repair_one
+_real_one = handoff_svc.handoff_repair_one
 def _one(gid, p, apply, now):
     if gid == f"a{128}": raise RuntimeError("unreadable on purpose")
     return _real_one(gid, p, apply, now)
-server._handoff_repair_one = _one
+handoff_svc.handoff_repair_one = _one
 jr = io.StringIO()
 with contextlib.redirect_stderr(jr):
-    rows_av = server._handoff_repair()
-server._handoff_repair_one = _real_one
+    rows_av = handoff_svc.handoff_repair()
+handoff_svc.handoff_repair_one = _real_one
 check("15 repair: an item whose repair fails is logged and the others go on", f"a{129}" in [r["gid"] for r in rows_av] and f"a{128}" not in [r["gid"] for r in rows_av] and f"a{128} record not repaired: RuntimeError" in jr.getvalue(), (rows_av, jr.getvalue()))
 jr = io.StringIO()
 with contextlib.redirect_stderr(jr):
-    n_pass = server._handoff_repair_pass()
+    n_pass = handoff_svc.handoff_repair_pass()
 check("15 repair: the start-time pass ends the stale records (here two or more), logs one count line, and a second run finds none (idempotent)",
-      n_pass >= 2 and jr.getvalue().count("migrate: hand-off records:") == 1 and "handoff" not in mt(128) and "handoff" not in mt(129) and server._handoff_repair_pass() == 0, (n_pass, jr.getvalue(), mt(128)))
+      n_pass >= 2 and jr.getvalue().count("migrate: hand-off records:") == 1 and "handoff" not in mt(128) and "handoff" not in mt(129) and handoff_svc.handoff_repair_pass() == 0, (n_pass, jr.getvalue(), mt(128)))
 import inspect
 src_start = inspect.getsource(server._start_background)
 check("15 repair: the pass runs at start, after the mover migrations and before the wake pass and the threads",
-      src_start.index("_migrate_owner_mover()") < src_start.index("_mover_backfill_pass()") < src_start.index("_handoff_repair_pass()") < src_start.index("wake_pass()") < src_start.index("threading.Thread"), None)
-set_cfg(handoff=False); item(130, mover="team-back", handoff=rec("home-peer")); n_off = server._handoff_repair_pass(); set_cfg()
+      src_start.index("_migrate_owner_mover()") < src_start.index("_mover_backfill_pass()") < src_start.index("_handoff.handoff_repair_pass()") < src_start.index("wake_pass()") < src_start.index("threading.Thread"), None)
+set_cfg(handoff=False); item(130, mover="team-back", handoff=rec("home-peer")); n_off = handoff_svc.handoff_repair_pass(); set_cfg()
 check("15 repair: …and not while [model] handoff is false", n_off == 0 and ho(130).get("to") == "home-peer", ho(130))
-server._handoff_repair_pass()
+handoff_svc.handoff_repair_pass()
 
 # 15.17 the tool: --live --apply is refused while the server runs; --live alone (the dry run) is not
 import importlib.util
@@ -1256,20 +1257,20 @@ check("15 tool: …and --live --apply runs when the service is stopped", rc == 0
 
 # 15.18 a failed mover reading is not "no mover": the open record is kept, and a line says so
 item(150, mover="team-back", handoff=rec("home-peer"))                                  # stale: an open record to someone but the mover
-_real_derive = server._ho_derive
+_real_derive = handoff_svc.ho_derive
 def _raising_derive(it): raise RuntimeError("the model could not read this one")
-server._ho_derive = _raising_derive
+handoff_svc.ho_derive = _raising_derive
 jr = io.StringIO()
 with contextlib.redirect_stderr(jr):
-    rows_aw = server._handoff_repair(apply=True)
+    rows_aw = handoff_svc.handoff_repair(apply=True)
     it_aj = rd(150); it_aj["metadata"]["next"] = "team-back: carry on"; _real_save(f"a{150}", it_aj)          # the server's own save, the reading failing
-server._ho_derive = _real_derive
+handoff_svc.ho_derive = _real_derive
 check("15 strict: a repair whose mover reading raises ends nothing, keeps the open record and logs one line per item", f"a{150}" not in [r["gid"] for r in rows_aw] and ho(150).get("to") == "home-peer"
       and "handoff" in mt(150) and not mt(150).get("handoff_history") and f"a{150} record kept: its mover could not be read" in jr.getvalue(), (rows_aw, mt(150), jr.getvalue()[-300:]))
 check("15 strict: …and so does the follow step of a save (the record is kept, one line)", f"a{150} record left as it is" in jr.getvalue() and ho(150).get("to") == "home-peer", jr.getvalue()[-300:])
 check("15 strict: …handoff.mover_of(strict=True) is None for a failing reading, \"\" for a closed item, and the plain call still says \"\"",
       H.mover_of(rd(150), _raising_derive, strict=True) is None and H.mover_of(rd(150), _raising_derive) == "" and H.mover_of({"status": "completed"}, _raising_derive, strict=True) == "", None)
-rows_axb = server._handoff_repair(apply=True)
+rows_axb = handoff_svc.handoff_repair(apply=True)
 check("15 strict: …once it reads again the repair ends it as before", f"a{150}" in [r["gid"] for r in rows_axb] and "handoff" not in mt(150), (rows_axb, mt(150)))
 
 # 15.19 a record with the recovery request stays while the item stays with its mover or goes to the owner; a server save that moves it on to another session ends it and records the new mover
@@ -1344,7 +1345,7 @@ fr = tick(D16 + 11 * MIN, 1505, 1506); drain()
 check("16 exempt: a front agent is never reminded or moved on, and a no_clock record has no clock", fr == [] and not pushes_to("home-front", "a1505") and not pushes_to("team-back", "a1506") and "reminded_at" not in ho(1505) and "reminded_at" not in ho(1506), (fr, pushes()))
 # fail closed: only a live session the role map lists as background (and not retired) is reminded; anything else gets no push, and the ladder is what it was
 roles16 = server._anc.session_roles()
-tgt = lambda w, roles=roles16: server._handoff_reminder_target(w, roles)
+tgt = lambda w, roles=roles16: handoff_svc.handoff_reminder_target(w, roles)
 check("16 closed: the target is the background session's id; a front agent, the page's name-line session, an unknown name, the user's own entry, a keeper entry, a retired entry, no role map and an empty name get nothing",
       tgt("team-back") == U["team-back"] and not tgt("home-front") and not tgt("home-stew") and not tgt("nobody-here") and not tgt(model.owner_display()) and not tgt("") and not tgt("team-back", None) and not tgt("team-back", {})
       and not tgt("team-back", {"team-back": {"role": "keeper"}}) and not tgt("team-back", {"team-back": {"role": "back", "retired": True}}) and tgt("team-back", {"team-back": {"role": "back"}}) == U["team-back"],
@@ -1393,8 +1394,8 @@ p16 = pushes_to("team-back", "a1516")
 check("16 retry: a reminder whose push is tried once more is worded as a reminder both times, not as a notice sent again after a restart", len(p16) == 2 and all("reminder" in p[1] and "sent again" not in p[1] for p in p16), p16)
 failing()
 it_ = {"subject": "x", "metadata": {"project": "projects/alpha"}}
-check("16 retry: …the later of the two decides: a resend after a reminder is worded as a resend", "reminder" in server._handoff_text("a1", it_, {"reminded_at": 9, "resent_at": 5}, again=True)
-      and "sent again" in server._handoff_text("a1", it_, {"reminded_at": 5, "resent_at": 9}, again=True) and "reminder" not in server._handoff_text("a1", it_, {"reminded_at": 5, "resent_at": 9}, again=True), None)
+check("16 retry: …the later of the two decides: a resend after a reminder is worded as a resend", "reminder" in handoff_svc.handoff_text("a1", it_, {"reminded_at": 9, "resent_at": 5}, again=True)
+      and "sent again" in handoff_svc.handoff_text("a1", it_, {"reminded_at": 5, "resent_at": 9}, again=True) and "reminder" not in handoff_svc.handoff_text("a1", it_, {"reminded_at": 5, "resent_at": 9}, again=True), None)
 # a reminder's push failing is sent once more and then the ladder goes on (the clock restarts only from a delivery); one that waits in the inbox starts it after the inbox grace
 item(1509, mover="team-back", handoff=rec("team-back", delivered_at=D16))
 failing("team-back")
@@ -1523,7 +1524,7 @@ close_(1803); set_cfg()
 # E. two failed pushes: the ask cannot reach the mover, the ladder starts at the cold call
 COLD_MSGS.clear()
 item(1804, mover="home-peer", handoff=rec("home-peer", delivered_at=None, attempts=2, queued_at=None)); cli_row("home-peer", "idle", IDLE17)
-r_ = server._handoff_fallback("a1804", "a push to home-peer failed twice"); drain()
+r_ = handoff_svc.handoff_fallback("a1804", "a push to home-peer failed twice"); drain()
 check("18 E: a push that failed twice starts the ladder at the cold call, with no ask", len(COLD_MSGS) == 1 and not notices("home-peer", 1804) and mt(1804)["mover"] == "team-back", (COLD_MSGS, mt(1804)))
 close_(1804)
 
@@ -1602,16 +1603,16 @@ close_(1812)
 COLD_MSGS.clear()
 item(1813, mover="home-peer"); cli_row("home-peer", "idle", IDLE17)
 item(1814, mover="home-peer2", handoff=rec("home-peer2")); cli_row("home-peer2", "idle", IDLE17)
-orig_status_ = server._handoff_status
+orig_status_ = handoff_svc.handoff_status
 def inter_(who, idx):
-    server._handoff_status = orig_status_
+    handoff_svc.handoff_status = orig_status_
     tick(N0 + 12 * MIN, 1814)                      # the hand-off audit brings item 1814 to the ladder in the middle of the pass (as the push-failure fallback thread does)
     return orig_status_(who, idx)
-server._handoff_status = inter_
+handoff_svc.handoff_status = inter_
 try:
     out_ = stk(N0 + 12 * MIN)
 finally:
-    server._handoff_status = orig_status_
+    handoff_svc.handoff_status = orig_status_
 check("18 M while the pass runs: the entry the hand-off audit made in the middle of the pass is still there after the pass's save, and the item is asked once", (entry(1814) or {}).get("via") == "handoff"
       and len(notices("home-peer2", 1814)) == 1, (out_, entry(1814), pushes_to("home-peer2", "a1814")))
 n_ = len(notices("home-peer2", 1814))

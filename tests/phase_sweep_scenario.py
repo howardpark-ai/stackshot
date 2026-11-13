@@ -60,6 +60,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import runner as runner_svc
 from stackshot.service import telling
@@ -196,7 +197,7 @@ put(60, needs=[BACK], state="doing", hold=True, wake=local_str(TL + 3 * H)); swe
 d = raw(60); d["metadata"]["phase"] = "alive"; d["metadata"].pop("waits_on")
 (T / "store/g/60.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))                     # stale: the fields read waiting
 calls = []
-real = {(m, k): getattr(m, k) for m, k in ((server, "_foryou_on_save"), (server, "_landed_on_save"), (server, "_handoff_on_save"), (telling, "tell_woken"), (telling, "push_noted"), (wakes_svc, "wake_tell"))}
+real = {(m, k): getattr(m, k) for m, k in ((server, "_foryou_on_save"), (server, "_landed_on_save"), (handoff_svc, "handoff_on_save"), (telling, "tell_woken"), (telling, "push_noted"), (wakes_svc, "wake_tell"))}
 real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name)

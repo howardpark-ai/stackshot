@@ -1,6 +1,6 @@
 """Scenario test for the stall pass (stall.py, server.py _stall_tick) — fixture data, no live store, no network, no server socket.
 
-When the session that moves a live item has no turn running for 10 minutes, stackshot moves the item on itself. The signal is the CLI's registry (server._handoff_status: a live pane's
+When the session that moves a live item has no turn running for 10 minutes, stackshot moves the item on itself. The signal is the CLI's registry (handoff_svc.handoff_status: a live pane's
 status busy | idle and when it changed); the clocks are given to the pass as `now`, the panes' rows are files in a temp folder.
 
   1  the ladder: the notice again at 10 minutes of no turn, the cold call 10 minutes after that, then the project's builder (a cold call that gave nothing falls to it at once)
@@ -89,6 +89,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
@@ -97,7 +99,7 @@ INV_BAD = []; INV_SAVES = [0]
 def _save_inv(gid, item, *a, **kw):
     out = _real_save(gid, item, *a, **kw)
     INV_SAVES[0] += 1
-    if H.stale(item, H.mover_of(item, lambda it: server._ho_derive({**it, "gid": gid})), server._ho_same): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), kw.get("note", "")))
+    if H.stale(item, H.mover_of(item, lambda it: handoff_svc.ho_derive({**it, "gid": gid})), handoff_svc.ho_same): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), kw.get("note", "")))
     return out
 writes.save = _save_inv
 server._refuse_if_owing = lambda debtor: None
@@ -113,7 +115,7 @@ def _tell(gid, owner, note, tag="wake"):
 telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
-    while server._HO_COLD_THREADS: server._HO_COLD_THREADS.pop(0).join(30)
+    while hcold_svc.HO_COLD_THREADS: hcold_svc.HO_COLD_THREADS.pop(0).join(30)
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
@@ -134,14 +136,14 @@ def cold(answer, status="ok"):
     def run(msg):
         COLD_MSGS.append(msg)
         return {"status": status, "text": json.dumps(answer) if isinstance(answer, dict) else str(answer), "duration_s": 0.1, "usage": {}, "note": "stub"}
-    server._COLD_RUNNER = run
-server._COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
+    hcold_svc.COLD_RUNNER = run
+hcold_svc.COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
 cold("no json at all here")            # a cold call that gives nothing
 def cli_row(who, status, at):
     """The CLI's own registry row of a pane on this box: an interactive pane, status busy | idle and when it changed (ms)."""
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
-server.CLI_SESSIONS = T / "cli"
+handoff_svc.CLI_SESSIONS = T / "cli"
 OWN = server.OWNER
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
 ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
@@ -208,7 +210,7 @@ X3 = T3 + 3 * 3600
 walked = stk(X3) + stk(X3 + 11 * MIN) + stk(X3 + 22 * MIN) + stk(X3 + 33 * MIN)
 check("3 recovery: …and the request is once per record, not per pass: with the pass's own entry wiped the ladder walks again and still sends no second message", len(main_recovery_pushes("a3")) == 1 and bool(ho(3).get("recovery_at"))
       and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 1, (walked, main_recovery_pushes("a3"), log_of(3)))
-check("3 recovery: …the journal-side brief and the board list no stuck line for it", "stuck" not in server._handoff_brief().lower() and all("stuck" not in ln for ln in H.brief_lines({"a3": rd(3)}, time.time())), server._handoff_brief()[-300:])
+check("3 recovery: …the journal-side brief and the board list no stuck line for it", "stuck" not in handoff_svc.handoff_brief().lower() and all("stuck" not in ln for ln in H.brief_lines({"a3": rd(3)}, time.time())), handoff_svc.handoff_brief()[-300:])
 # the mover writing to the item ends the episode: the ladder starts over, and a later episode may ask again (one message for each)
 server._update("a3", sender="home-peer3", next="home-peer3: back at it")
 floor3 = rd(3)["updated"]
@@ -284,7 +286,7 @@ check("4b no ask: …and a later pass raises nothing and asks nobody again", "de
 close(94)
 # the ordinary hand-off cold call is unchanged: ask_owner still asks him
 item(95, mover="home-peer2", handoff={**H.new_record("home-peer2", U["home-peer2"], "home-send", B + 30, delivered_at=B + 40), "cold": {"at": T1, "state": "running"}})
-cold(ASK_ANS); server._handoff_cold("a95", T1)
+cold(ASK_ANS); hcold_svc.handoff_cold("a95", T1)
 check("4b no ask: …the ordinary (non-stall) hand-off cold call answering ask_owner still asks Oliver: a decision with its ask and options, written as the cold call",
       "decision" in (mt(95).get("needs") or []) and mt(95).get("ask") == ASK and len(mt(95).get("options") or []) == 2 and rd(95).get("written_by") == "cold-call", (mt(95), ho(95)))
 close(95); cold("no json at all here")
@@ -1001,7 +1003,7 @@ close(83)
 item(86, mover="home-peer", handoff=H.new_record("home-peer", U["home-peer"], "home-send", IDLE0 + 5 * MIN, delivered_at=IDLE0 + 5 * MIN + 10)); cli_row("home-peer", "idle", IDLE0)
 check("22 D: a hand-off that nobody took yet is left alone by the stall pass, however quiet its pane (no notice, no entry)", "a86" not in stk(T1 + 60 * MIN) and not pushes_to("home-peer", "a86") and "a86" not in server._stall_load(), (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
 check("22 D: …until the hand-off audit brings it (its entry says so), and then the ladder takes the later rungs here, once, in its order",
-      server._handoff_tick(now=T1 + 61 * MIN, only=["a86"]) == ["a86"] and (server._stall_load().get("a86") or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a86")) == 1
+      handoff_svc.handoff_tick(now=T1 + 61 * MIN, only=["a86"]) == ["a86"] and (server._stall_load().get("a86") or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a86")) == 1
       and "a86" not in stk(T1 + 62 * MIN) and len(pushes_to("home-peer", "a86")) == 1 and "a86" in stk(T1 + 92 * MIN) and len(pushes_to("home-peer", "a86")) == 2, (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
 close(86)
 

@@ -69,6 +69,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.router import routing; from stackshot.waits import held; from stackshot.waits import quiet as Q
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -87,7 +89,7 @@ def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
-server.CLI_SESSIONS = T / "cli"
+handoff_svc.CLI_SESSIONS = T / "cli"
 def cli_row(who, started=STARTED, status="idle"):
     """The CLI's own registry row of a pane on this box: an interactive pane with its sessionId and when its process started (ms)."""
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "startedAt": int(started * 1000),
@@ -113,7 +115,7 @@ def quiet_log(i): return Q.log_of(mt(i))
 NOTE = lambda g: f"[stackshot] {g} \"[home] item\" (projects/alpha): a session wrote the item → https://x/items/{g}"
 
 # ================================================================ 1. the hand-off ladder never returns to a front agent
-env = server._handoff_env(now0)
+env = handoff_svc.handoff_env(now0)
 r_front = {"from": "home-front", "origin": "home-front", "to": "home-peer"}
 it_a = {"metadata": {"project": "projects/alpha"}}; it_b = {"metadata": {"project": "projects/beta"}}
 st = H.next_step(it_a, r_front, "home-peer", "its pane is gone", env, gid="a1", cold_ok=False)
@@ -136,13 +138,13 @@ check("2 pick: …a project without a builder: \"\" (the caller keeps the item w
 check("2 pick: …a session that is no front agent is as given", telling.no_front("home-send", "projects/alpha") == "home-send" and telling.no_front("", "projects/alpha") == "")
 check("2 auto mover: front -> builder; builderless keeps its own (the item model's default); non-front as given",
       telling.auto_mover("home-front", "projects/alpha") == "team-back" and telling.auto_mover("home-beta-front", "projects/beta") == "home-beta-front" and telling.auto_mover("home-send", "projects/alpha") == "home-send")
-names = [a["name"] for a in server._handoff_agents("projects/alpha")]
+names = [a["name"] for a in hcold_svc.handoff_agents("projects/alpha")]
 check("2 cold call: the agents it may hand to are the background ones; the front agent is not offered", sorted(names) == ["home-docs", "team-back"], names)
-check("2 cold call: a project with no background agent offers none", server._handoff_agents("projects/beta") == [], server._handoff_agents("projects/beta"))
+check("2 cold call: a project with no background agent offers none", hcold_svc.handoff_agents("projects/beta") == [], hcold_svc.handoff_agents("projects/beta"))
 
 # ================================================================ 3. an explicit front mover is left as written
 item(60, mover="home-front", writer="home-send")
-check("3 explicit: a front agent set as mover by a session stays the mover (no automatic move)", mt(60)["mover"] == "home-front" and H.plan({"a60": rd(60)}, server._handoff_env(now0)) == [], H.plan({"a60": rd(60)}, server._handoff_env(now0)))
+check("3 explicit: a front agent set as mover by a session stays the mover (no automatic move)", mt(60)["mover"] == "home-front" and H.plan({"a60": rd(60)}, handoff_svc.handoff_env(now0)) == [], H.plan({"a60": rd(60)}, handoff_svc.handoff_env(now0)))
 
 # ================================================================ 4. presence
 cli_row("home-front")
