@@ -113,7 +113,7 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
 
 def release_differs(meta: dict[str, Any], is_owner: Any) -> str:
     """Words for a hold with a wake that the old wake pass released one way and the watchers release another, "" when they agree. Only a hold with a dated wake (the old wake pass's), and only the two shapes that
-    differ: `needs` names the owner (the old release put the item back in the owner's lane with no new ask; the watchers give it an owner step and an ask), and a `post_wake_mover` that is not the one
+    differ: `needs` names the owner (the old release put the item back in the owner's lane with no new ask; the watchers give it a step for him and an ask), and a `post_wake_mover` that is not the one
     session in `needs` (the old release and its message went to `needs`; the watchers hand it to the post_wake_mover and rewrite `needs` as [it]). Past or future wake alike. `is_owner(name)`: the instance's
     owner name test (the model's)."""
     if not meta.get("hold") or not _dated(meta.get("wake")):

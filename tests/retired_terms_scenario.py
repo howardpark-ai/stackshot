@@ -39,8 +39,13 @@ files = ["hooks/*"]
 [[scan]]
 files = ["tool"]
 kind = "python"
+[[scan]]
+files = ["pkg/*.py"]
+[[scan]]
+files = ["docs/*.md"]
+skip_terms = ["owner"]
 ''')
-(T / "hooks").mkdir(); (T / "sub").mkdir()
+(T / "hooks").mkdir(); (T / "sub").mkdir(); (T / "pkg").mkdir(); (T / "docs").mkdir()
 (T / "a.py").write_text('''"""The owner of a module docstring is not text a session reads."""
 import sys
 x = "stored: " + "owner"                                # a lone identifier is a key
@@ -60,12 +65,15 @@ h = "a whole owner here"                                # line 15: ... and not t
 (T / "data.json").write_text(json.dumps({"tools": {"get": {"description": "reads the item and its owner"}, "params": [{"name": "owner", "description": "ok"}]}}, indent=2) + "\n")
 (T / "hooks" / "h.sh").write_text("echo hello\necho the steward says hi\n")
 (T / "sub" / "deep.py").write_text('q = "owner out of the glob"\n')
+(T / "pkg" / "m.py").write_text('p = "the owner and then an owner step"\nq = "a steward"\n')   # the package scan carries no skip_terms: the second owner and the steward are hits
+(T / "docs" / "g.md").write_text("The owner answers.\nThe steward does not.\n")             # the docs scan skips owner only: the steward is a hit
 (T / "tool").write_text('print("steward in a script with no suffix"); r = "a steward"\n')
 hits = rt.lint(T, CONF)
 key = lambda h: (h.file, h.line, h.term)
 got = sorted(key(h) for h in hits)
 want = sorted([("a.py", 4, "steward"), ("a.py", 5, "owner"), ("a.py", 6, "owner"), ("a.py", 7, "owner"), ("a.py", 13, "owner"), ("a.py", 13, "owner"), ("a.py", 15, "owner"),
-               ("data.json", 4, "owner"), ("hooks/h.sh", 2, "steward"), ("tool", 1, "steward"), ("tool", 1, "steward")])
+               ("data.json", 4, "owner"), ("hooks/h.sh", 2, "steward"), ("tool", 1, "steward"), ("tool", 1, "steward"),
+               ("pkg/m.py", 1, "owner"), ("pkg/m.py", 2, "steward"), ("docs/g.md", 2, "steward")])
 check("the lint finds exactly the hits that are retired words in text, with their lines", got == want, (got, want))
 check("a hit carries what to say instead", all(h.use for h in hits) and {h.term: h.use for h in hits} == {"owner": "mover or keeper of record", "steward": "the router"}, [h.use for h in hits])
 check("matching is case-insensitive (OWNER) and whole-word (owner_name and ownership are not hits)", ("a.py", 5, "owner") in got and sum(1 for h in hits if h.line == 6) == 1, got)
@@ -75,6 +83,8 @@ check("a comment, a docstring, a string statement, a stderr print and a lone ide
 check("a parameter called owner (skip_keys: name) is not a hit, its description would be", not any("params" in h.text for h in hits) and any("tools.get.description" in h.text for h in hits), [h.text for h in hits if h.file == "data.json"])
 check("`*` stays in one directory: sub/deep.py is not scanned", not any(h.file.startswith("sub/") for h in hits), got)
 check("a script with no suffix is read as python by `kind`: both its strings are hits (a print to stdout is text a session reads)", sum(1 for h in hits if h.file == "tool") == 2, got)
+check("skip_terms is the docs scan's alone: owner is skipped in docs/g.md (steward is not), and is still a hit in the package scan (pkg/m.py) and in the code scans (a.py)",
+      not any(h.file == "docs/g.md" and h.term == "owner" for h in hits) and ("pkg/m.py", 1, "owner") in got and ("a.py", 5, "owner") in got, got)
 out = io.StringIO(); err = io.StringIO()
 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
     rc = rt.main(["--config", str(CONF), "--root", str(T)])
@@ -109,7 +119,7 @@ check("the live list, run on a tree that plants a retired word in pages.py, clie
 
 # the paths the REAL repository keeps its text in: a fixture that plants into a path the repository lacks passes while the real scan has a gap, so every planted
 # file here is a path that exists in the repository (asserted), and the live list must reach it
-REAL = ("stackshot/web/server.py", "stackshot/web/ui/render.py", "stackshot/tools/migrate_model.py", "docs/item-model.md", "docs/router.md")
+REAL = ("stackshot/cli.py", "stackshot/web/server.py", "stackshot/web/ui/render.py", "stackshot/tools/migrate_model.py", "docs/item-model.md", "docs/router.md")
 check("the files the scenario plants into are files of the real repository", all((pathlib.Path(STACK) / f).is_file() for f in REAL), [f for f in REAL if not (pathlib.Path(STACK) / f).is_file()])
 PHRASES = ("steward", "Send with an empty box finishes the step.", "the stuck state")
 for rel in REAL:
@@ -118,6 +128,12 @@ for rel in REAL:
         (real_plant / rel).write_text(f'LINE = "a line that says {phrase} here"\nOK = "a stuck item is a failed wait"\n' if rel.endswith(".py") else f"A line that says {phrase} in a guide.\nA stuck item is a failed wait.\n")
         got = rt.lint(real_plant, pathlib.Path(SCR, "retired_terms.toml"))
         check(f"the live list finds \"{phrase}\" planted in {rel} (the real path), and only that", len(got) == 1 and got[0].file == rel and got[0].line == 1, [str(h) for h in got])
+# `owner` is skipped in docs/*.md only: the same retired sense planted in a code path of the real repository is a hit (a skip_terms leaking to a code scan, or onto the package scan, would pass it)
+for rel in ("stackshot/web/server.py", "stackshot/cli.py", "stackshot/tools/migrate_model.py"):
+    own = T / ("owner-" + rel.replace("/", "_")); (own / rel).parent.mkdir(parents=True)
+    (own / rel).write_text('LINE = "the item waits on an owner step here"\nOK = "a stuck item is a failed wait"\n')
+    got = rt.lint(own, pathlib.Path(SCR, "retired_terms.toml"))
+    check(f"the live list reports `owner` in its retired sense planted in {rel} (the real path): it is skipped in docs only", len(got) == 1 and got[0].file == rel and got[0].term == "owner" and got[0].line == 1, [str(h) for h in got])
 doc_owner = T / "doc-owner"; (doc_owner / "docs").mkdir(parents=True)
 (doc_owner / "docs" / "g.md").write_text("The owner answers the ask.\nThe steward does not.\n")
 got = rt.lint(doc_owner, pathlib.Path(SCR, "retired_terms.toml"))
