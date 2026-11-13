@@ -47,6 +47,16 @@ def wait_words(mod: "_model.Model") -> str:
     return _model.KIND_WORDS.get(mod.wait.kind, "").format(owner=_model.owner_display())
 
 
+def wait_phrase(mod: "_model.Model", prefix: str, shown: Callable[[str], str] = str) -> str:
+    """The wait as board.md and the brief say it: `<prefix> <wait_words>` ("on another item's close"), and for an item queued behind its mover's other item (`Wait.queued`, model/queued.py) `queued behind <item>`, the item as `shown` writes
+    it, with no prefix. "" for an item that is not waiting."""
+    w = mod.wait
+    if mod.state == _model.WAITING and w is not None and w.kind == "item" and w.queued:
+        return "queued behind " + (", ".join(shown(x) for x in w.after) or "an item")
+    words = wait_words(mod)
+    return f"{prefix} {words}" if words else ""
+
+
 def is_mover_name(name: str, known: tuple = ()) -> bool:
     """Is the text before a next line's colon a mover (so the row drops it) and not part of the step ("Check the result: it works", "follow-up: call her", "Step 1: ...")? The owner,
     or a name the caller knows: the item's mover, owner and post-wake mover as stored and as the board names them, and the fleet's session names. No shape rule: a hyphenated
@@ -132,12 +142,12 @@ def end_epoch(mod: "_model.Model") -> float:
 
 
 def front_test() -> Callable[[str, str], bool]:
-    """Who is a front agent, for the board's queue rule (model/queued.py): the server's answer when it installed one, else the role map's (audit_run.Env.is_front)."""
+    """Who is a front agent, for the board's queue rule (model/queued.py): the server's answer when it installed one, else the role map's (audit_run.Env.is_front_safe: an unreadable map counts as front)."""
     fn = _queued.front_hook()
     if fn is not None:
         return fn
     from stackshot.audit import audit_run as _ar  # noqa: PLC0415
-    return _ar.Env().is_front
+    return _ar.Env().is_front_safe
 
 
 def classify(rows: list[dict[str, Any]], derive: Callable[[dict[str, Any]], "_model.Model"]) -> dict[str, list[tuple[dict[str, Any], "_model.Model"]]]:

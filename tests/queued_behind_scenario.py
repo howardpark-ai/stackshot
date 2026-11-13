@@ -14,6 +14,11 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
   7  the hourly audit line (hourly.due, hourly.pass_, server._hourly_tick) writes no line on a queued item and one on the item in hand
   8  the stall pass (server._stall_tick) takes no step on a queued item and still takes it on the item in hand
   9  the items sheet's list word (server._item_list) says waiting for a queued item
+  4b the words: board.md and the brief (the head's waiting lines and the cards) say `queued behind <item>` for a queued item, never `waiting on another item's close`; the item page and the home row say it too;
+     the wait a session stored as an item wait keeps its words
+  4c the front test the board and the passes use: the one the server installed is the one used; a front test that cannot answer counts as front (nothing is queued on a guess), in the queue path only; the
+     server's `_front_keeper` answers False on an unreadable role map by default and True when asked strictly
+  4d the readers' edges: an item behind a closed one is not queued, a record dated ahead of now, the 30 s memo, a failed read is swallowed
   10 revert-proof: each rule above is mutated (the newest item no longer chosen, the hour ignored, front agents queued, the gate ignored, a reader that no longer asks) and the check that guards it must fail
 
     tests/run-suite queued_behind      -> exit 0 / 1"""
@@ -81,6 +86,7 @@ server._handoff_status = lambda who, idx=None: ("", 0.0)
 server._sessions_index = lambda: {}
 server._stall_active = lambda: set()
 FRONT = {"home-front"}
+REAL_HOOK = Q.front_hook()                                         # what the server installed (`_front_keeper`, strict), before the fixture's own answer replaces it
 Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `_front_keeper` is replaced by the one front agent of the fixture
 ROLES = {"home-front": {"role": "front"}, "team-back": {"role": "background"}, "home-peer": {"role": "background"}}
 def env(): return AR.Env(roles=ROLES, fallback=lambda p: "home-front", builder=lambda p: "team-back", page_of=lambda p: ("", None), sessions=lambda: None,
@@ -182,8 +188,105 @@ check("4 a queued item's state kind is Waiting (the state pill of its row and pa
 check("4 the item in hand never reads waiting, even when the newest of two movers' items is another mover's", pairs["a1"].state == MODEL.ALIVE and pairs["a9"].state == MODEL.ALIVE)
 check("4 nothing is stored: the files of the items are as the fixture wrote them (no phase, no wait, no mover change)", all(set(rd(i)["metadata"]) - {"last_activity", "state", "needs", "next", "owner", "project", "mover", "hold", "wake", "wait_basis", "cap_ok", "ask"} == set() for i in range(1, 13)), rd(2)["metadata"])
 
-# ================================================================ 5. it ends by itself
+# ================================================================ 4b. the words
 def home_lists_at(at=None, md=False): return {w: ids for w, ids in lists_of(board(at, md)).items() if w in (AG, WT)}
+def base():
+    wipe()
+    put(1, act=180, last=10); put(2, act=180, last=120); put(3, act=180, last=30); put(4, mover="home-peer2", act=180, last=300)
+    put(5, mover="home-front", act=180, last=5); put(6, mover="home-front", act=180, last=400)
+    put(7, act=180, last=1, hold=True, wake=time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 30 * H + 4 * H)), wait_basis={"text": "the vendor ships", "wake": time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 30 * H + 4 * H)), "by": "home-peer", "at": now0})
+class mutate:
+    def __init__(self, mod, name, fn): self.mod, self.name, self.fn = mod, name, fn
+    def __enter__(self): self.old = getattr(self.mod, self.name); setattr(self.mod, self.name, self.fn)
+    def __exit__(self, *a): setattr(self.mod, self.name, self.old)
+def two():
+    wipe(); put(1, act=180, last=10); put(2, act=180, last=120)
+two(); on()
+for label, md in (("the home page's Board", False), ("board.md's Board", True)):
+    b = board(md=md); out = b.render(("brief", "full")); brief, full = out["brief"], out["full"]; sf = (MD if md else UI).shown_full      # an item as that board writes it
+    wl = [x for x in brief.splitlines() if x.lstrip().startswith("waiting:")]
+    check(f"4b {label}: the brief's waiting line says `queued behind <item>` and names the item in hand", len(wl) == 1 and wl[0].rstrip().endswith(f"· queued behind {sf('a1')}") and "another item's close" not in wl[0], wl)
+    meta = [x for x in full.splitlines() if x.startswith("- p2") and "queued" in x]
+    check(f"4b {label}: board.md's card for the queued item says `queued behind <item>` in its meta line, and no card says `waiting on another item's close`", len(meta) == 1 and meta[0].startswith(f"- p2 · queued behind {sf('a1')}") and "waiting on another item's close" not in full, meta)
+    check(f"4b {label}: the item in hand has no such words (only the queued item's card carries one)", len(meta) == 1 and full.count("queued behind") == 1 and brief.count("queued behind") == 1, (full.count("queued behind"), brief.count("queued behind")))
+    off(); out0 = board(md=md).render(("brief", "full")); on()
+    check(f"4b {label}: the gate off, neither text says queued (the item is on agent)", "queued behind" not in out0["brief"] and "queued behind" not in out0["full"])
+b = board(); pairs = {r["gid"]: m for ps in b.home_pairs().values() for r, m in ps}; rows = {r["gid"]: r for ps in b.home_pairs().values() for r, m in ps}
+check("4b the home row says `Queued behind` (once, with the link) and the item page says why", b.home_row(rows["a2"], pairs["a2"], WT, named=True).count("Queued behind") == 1 and "its mover is working on that item first" in b.item_html("a2"))
+stored = MODEL.derive({"status": "open", "metadata": {"state": "blocked", "after": ["a1"], "wait_kind": "item", "mover": "home-peer"}}, now0)
+check("4b wait_phrase: a queued reading says `queued behind <item>`, whatever the prefix; the item as `shown` writes it", home.wait_phrase(pairs["a2"], "on", lambda g: "x" + g[1:]) == "queued behind x1" and home.wait_phrase(pairs["a2"], "waiting on") == "queued behind a1", home.wait_phrase(pairs["a2"], "waiting on"))
+check("4b …a wait a session stored as an item wait keeps its words, with the prefix; an alive reading has none", home.wait_phrase(stored, "on") == "on " + home.wait_words(stored) and home.wait_words(stored) and "queued" not in home.wait_phrase(stored, "on") and home.wait_phrase(pairs["a1"], "on") == "")
+check("4b …a queued reading with no item to name still reads queued", home.wait_phrase(MODEL.Model(MODEL.WAITING, "", False, "", False, "", False, "", MODEL.Wait(kind="item", kind_explicit=False, after=(), mover="m", mover_explicit=False, due=False, queued=True), ()), "on") == "queued behind an item")
+off()
+
+# ================================================================ 4c. the front test
+check("4c the board asks the front test the server installed (home.front_test is the installed one); with none installed it is the role map's, which counts an unreadable map as front",
+      home.front_test() is Q.front_hook() and Q.front_hook() is not None, home.front_test())
+saved = Q._HOOKS["is_front"]
+Q.configure(is_front=lambda who, project: True); on(); two()
+check("4c …an installed `everyone is front` answer is used by the board: nothing is queued", "a2" in home_lists_at()[AG] and not home_lists_at()[WT])
+Q.configure(is_front=lambda who, project: False); two()
+check("4c …and `no one is front`: the idle item is queued", "a2" in home_lists_at()[WT])
+Q.configure(is_front=lambda who, project: 1 / 0); two()
+check("4c …a hook that raises queues nothing", "a2" in home_lists_at()[AG] and not home_lists_at()[WT])
+Q._HOOKS["is_front"] = None
+fn = home.front_test()
+check("4c with no hook installed the role map's front test (is_front_safe) is used", getattr(fn, "__name__", "") == "is_front_safe", fn)
+Q._HOOKS["is_front"] = saved; off()
+class Boom(Exception): pass
+def boom(*a, **k): raise Boom("roles unreadable")
+check("4c Env.is_front_safe: an unreadable role map counts as front; a front test that raises counts as front; Env.is_front (every other caller) keeps False for a test that raises",
+      AR.Env(front=boom).is_front_safe("home-peer", "projects/alpha") is True and AR.Env(front_strict=boom).is_front_safe("home-peer") is True and AR.Env(front=boom).is_front("home-peer", "projects/alpha") is False)
+check("4c …an answer it can read is kept: no for a background agent, yes for a front agent (the role map, the server's test, the strict test)",
+      AR.Env(roles=ROLES).is_front_safe("home-peer") is False and AR.Env(roles=ROLES).is_front_safe("Home-Front") is True and AR.Env(front=lambda w, p: w == "x").is_front_safe("x") is True
+      and AR.Env(front_strict=lambda w, p: False, front=lambda w, p: True).is_front_safe("x") is False)
+check("4c …no roles given and no registry to read: it counts as front (the isolated HOME has none)", AR.Env().is_front_safe("home-peer") in (True, False))
+base(); on()
+check("4c the silence pass's queue asks the safe test: nothing is queued when the front test cannot answer (Env.front_strict raises), the item is queued when it says no",
+      SL.queued(items(), now0, AR.Env(roles=ROLES, front_strict=boom)) == {} and SL.queued(items(), now0, AR.Env(roles=ROLES, front_strict=lambda w, p: False)) == {"a2": "a1", "a6": "a5"}, SL.queued(items(), now0, AR.Env(roles=ROLES, front_strict=lambda w, p: False)))
+roles_ok = {"home-peer": {"role": "background", "project": "projects/alpha"}, "home-front": {"role": "front", "project": "projects/alpha"}}
+anc_roles = server._anc.session_roles
+server._anc.session_roles = lambda *a, **k: roles_ok
+try:
+    ok = (REAL_HOOK("home-peer", "projects/alpha"), REAL_HOOK("home-front", "projects/alpha"), server._front_keeper("home-front", "projects/alpha", True), server._front_keeper("home-peer", "projects/alpha", True))
+finally: server._anc.session_roles = anc_roles
+check("4c the server's installed hook (strict `_front_keeper`) answers from the roles: no for a background agent, yes for a front agent whatever its project", ok[:2] == (False, True) and ok[2] == (True, "") and ok[3] == (False, ""), ok)
+server._anc.session_roles = boom
+try: bad = (REAL_HOOK("home-peer", "projects/alpha"), server._front_keeper("home-peer", "projects/alpha"), server._front_keeper("home-peer", "projects/alpha", True))
+finally: server._anc.session_roles = anc_roles
+check("4c a role map that cannot be read: the installed hook says front (nothing queued); `_front_keeper` keeps False for every other caller, and says (True, \"\") when asked strictly", bad == (True, (False, ""), (True, "")), bad)
+check("4c …so the whole board queues nothing while the roles are unreadable, and queues as before once they read",
+      (lambda: (server._anc.__setattr__("session_roles", boom), Q.configure(is_front=lambda who, project: server._front_keeper(who, project, True)[0]), two(), on(), home_lists_at())[-1])()[WT] == [], "")
+server._anc.session_roles = lambda *a, **k: roles_ok; two(); on(); L = home_lists_at()
+check("4c …and once the roles read, the idle item of the background agent is queued again", "a2" in L[WT], L)
+server._anc.session_roles = anc_roles; Q._HOOKS["is_front"] = saved; off()
+
+# ================================================================ 4d. the readers' edges
+wipe(); put(1, act=180, last=5, status="completed"); put(2, act=180, last=30); put(3, act=180, last=200)
+on(); qm = SL.queued(items(), now0, env())
+check("4d silence.queued: a closed item is no item in hand and none queues behind it (a3 behind a2, never behind the closed a1)", qm == {"a3": "a2"}, qm)
+wipe(); put(1, act=180, last=5, status="completed"); put(2, act=180, last=200)
+check("4d …a mover left with one open item queues nothing", SL.queued(items(), now0, env()) == {})
+off()
+far = {"metadata": {"last_activity": {"at": now0 + 10 * H, "kind": "step_done", "what": "x"}}}; near = {"metadata": {"last_activity": {"at": now0 + 10 * MIN, "kind": "step_done", "what": "x"}}}
+check("4d candidate: a record dated more than the skew ahead is no record (0); one a little ahead reads as now", Q.candidate("a1", far, "m", now0)[3] == 0.0 and Q.candidate("a1", near, "m", now0)[3] == now0, (Q.candidate("a1", far, "m", now0), Q.candidate("a1", near, "m", now0)))
+check("4d …so a far-future record never holds an item in hand over a real one", q(("a1", "m", "p", Q.candidate("a1", far, "m", now0)[3]), c("a2", ago=5), c("a3", ago=200)) == {"a1": "a2", "a3": "a2"})
+base(); on(); server._QUEUE_CACHE.update(at=0.0, map={})
+m1 = server._queue_map(now0); put(3, act=180, last=1); put(2, act=180, last=300)
+m2 = server._queue_map(now0 + 20); m3 = server._queue_map(now0 + 40)
+check("4d _queue_map: the answer is kept for 30 seconds (the same map within it, the store read again after it)", m1 == {"a2": "a1"} and m2 is m1 and m3 != m1, (m1, m2, m3))
+real_queued = SL.queued
+def failing(*a, **k): raise OSError("store unreadable")
+err = io.StringIO()
+with mutate(SL, "queued", failing):
+    server._QUEUE_CACHE.update(at=0.0, map={"a9": "a8"})
+    old_err, sys.stderr = sys.stderr, err
+    try: swallowed = server._queue_map(now0 + 100)
+    finally: sys.stderr = old_err
+check("4d a read that fails is swallowed: {} and a line on stderr, never an error to the caller; and it is not kept (the next call reads again)", swallowed == {} and "queued: not read" in err.getvalue() and server._QUEUE_CACHE["map"] == {"a9": "a8"}, (swallowed, err.getvalue()))
+off(); check("4d …and with the gate off the map is {} without reading anything", server._queue_map(now0 + 200) == {})
+
+# ================================================================ 5. it ends by itself
 wipe(); put(1, act=180, last=10); put(2, act=180, last=120)
 on(); check("5 setup: a2 is queued behind a1", "a2" in home_lists_at()[WT])
 put(2, act=180, last=0)                                                           # the mover moves it: now it has the newest activity
@@ -203,11 +306,6 @@ off(); put(1, act=180, last=10); put(2, act=180, last=120)
 check("5 the gate off: nothing is queued whatever the activity", "a2" in home_lists_at()[AG])
 
 # ================================================================ 6. the silence pass
-def base():
-    wipe()
-    put(1, act=180, last=10); put(2, act=180, last=120); put(3, act=180, last=30); put(4, mover="home-peer2", act=180, last=300)
-    put(5, mover="home-front", act=180, last=5); put(6, mover="home-front", act=180, last=400)
-    put(7, act=180, last=1, hold=True, wake=time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 30 * H + 4 * H)), wait_basis={"text": "the vendor ships", "wake": time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 30 * H + 4 * H)), "by": "home-peer", "at": now0})
 base()
 def found(at=None): fs, _ps = SL.findings(items(), now0 if at is None else at, env()); return sorted(f["id"] for f in fs)
 off(); g0 = found()
@@ -291,10 +389,6 @@ GOOD = observe()
 EXPECT = {"q": {"a2": "a1", "a4": "a1"}, "one": {}, "front": {}, "idle_hand": {}, "tie": {"a4": "a2"},
           "silence": [bid(i) for i in (1, 3, 4, 5, 6)], "hourly": ["a1", "a3", "a4", "a5", "a6"], "gate_off": [bid(i) for i in (1, 2, 3, 4, 5, 6)]}
 check("10 the unmutated rule gives every promised observation", GOOD == EXPECT, GOOD)
-class mutate:
-    def __init__(self, mod, name, fn): self.mod, self.name, self.fn = mod, name, fn
-    def __enter__(self): self.old = getattr(self.mod, self.name); setattr(self.mod, self.name, self.fn)
-    def __exit__(self, *a): setattr(self.mod, self.name, self.old)
 real_queue = Q.queue
 def wrong_newest(cands, now, is_front=None):                       # the OLDEST item is chosen as the one in hand
     rows = [(g, m, a) for g, m, _p, a in cands]

@@ -153,7 +153,8 @@ def queued(items: dict[str, dict[str, Any]], now: float, env: Any = None) -> dic
     is a front agent (as in `findings`). The passes read it once per round and hand each item's answer to `reading`, `silent` and `on_agent`; reads only."""
     if not _queued.enabled():
         return {}
-    front = (env if hasattr(env, "is_front") else _ar.Env()).is_front
+    e = env if hasattr(env, "is_front") else _ar.Env()
+    front = getattr(e, "is_front_safe", e.is_front)      # a front test that cannot answer counts as front: nothing is queued on a guess
     cands = []
     for gid in sorted(items, key=_ac._num):
         if items[gid].get("status") != "open":

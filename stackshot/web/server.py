@@ -2199,16 +2199,18 @@ def project_ref(x: str) -> dict[str, Any] | None:
     return _prj.ref(x, _registry("projects"))
 
 
-def _front_keeper(who: str, project: str = "") -> tuple[bool, str]:
+def _front_keeper(who: str, project: str = "", strict: bool = False) -> tuple[bool, str]:
     """is `who` (a name or a transcript id) a front agent, by anchors.session_roles() (which roles.json builds on)? → (True, the
     keeper of `project`, else of the project it is front in: notice_name or keeper, as _gate_front finds it; "" when none),
     or (False, "") for a back agent, a keeper or a session with no role, and for the keeper of `project` itself even when
-    session_roles ranks it front for another page."""
+    session_roles ranks it front for another page. `strict` (the queue rule's: model/queued.py) answers (True, "") for any session whose role is front, the keeper of `project` included, and when the roles cannot be read, where the default answers False."""
     try:
         roles = _anc.session_roles()
         name = _role_name(roles, who)
         if not name or roles[name]["role"] != "front":
             return False, ""
+        if strict:
+            return True, ""        # the queue rule asks only whether the session is a front agent: the keeper of the project is one too
         root = _anc.pilot_root(project) if project else ""
         own = (_anc.name_line(root) if root else _anc.name_line(project)) if project else ""      # the page's name line only (a sub-page's own `session:` is its agent: keeper, never the project's keeper): the fallback -main agent a nameless page's notices go to is no keeper, and it is front
         if own and _session_id(own) == _session_id(who):     # the keeper of this item's project is its keeper here, front elsewhere or not
@@ -2221,7 +2223,7 @@ def _front_keeper(who: str, project: str = "") -> tuple[bool, str]:
                 return True, stew
         return True, ""
     except Exception:
-        return False, ""
+        return (True, "") if strict else (False, "")
 
 
 # A front agent does not watch handed-off work itself: stackshot
@@ -6050,10 +6052,10 @@ def _silence_env() -> Any:
     """The silence pass's environment, built in one place for the pass and its backstop: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`_front_keeper`), which is stricter than the
     role map (a project's keeper is not front for its own project; a transcript id resolves). The backstop must judge a hand-off by the very answer the pass did, or it lists what the pass found and hides what it did not."""
     from stackshot.audit import audit_run as _ar
-    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0])
+    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0], front_strict=lambda who, project: _front_keeper(who, project, True)[0])
 
 
-_queued.configure(is_front=lambda who, project: _front_keeper(who, project)[0])      # the board's rendering asks the same question the passes' environment answers
+_queued.configure(is_front=lambda who, project: _front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
 _QUEUE_CACHE: "dict[str, Any]" = {"at": 0.0, "map": {}}
 _QUEUE_TTL = 30.0
 
@@ -9784,7 +9786,7 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
 _PROGRESS_UP = "progress_up_at"      # metadata: when the item was last handed up to its -main agent (either way in); the server's own key, no session writes it
 
 
-def _queued_behind(gid: str, who: str, now: float, limit: int = 5) -> str:
+def _hand_up_others(gid: str, who: str, now: float, limit: int = 5) -> str:
     """What the item is queued behind, in words for the -main agent: the mover's other open items that are alive (not waiting, not the owner's move), by priority and then by age (the older id
     first), at most `limit` of them. "no other item of its mover" when there is none, "unknown" when the store cannot be read. Read only for an item that is being handed up."""
     try:
@@ -9815,7 +9817,7 @@ def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, st
     alone when the project has no -main agent to tell. → "main" when the item was handed up (or the History line written), else ""."""
     from stackshot.audit import silence as _silence
     hours = _ladder_main_hours()
-    behind = _queued_behind(gid, who, now)
+    behind = _hand_up_others(gid, who, now)
     with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = item.setdefault("metadata", {})

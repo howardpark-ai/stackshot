@@ -1517,7 +1517,7 @@ class Board:
                  + (f" · {len(self.undelivered)} with an undelivered notice" if self.undelivered else "") + "."]
         lines += _wc.lines()                      # step 4b: what changed in the tools in the last 7 days (whatschanged.py)
         lines += [f"  your move: {rid_full(r)} {r['subject']} [{self.lab(r)}]" for r, _m in pairs[_home.YOUR_MOVE][:5]]
-        lines += [f"  waiting: {rid_full(r)} {r['subject']} [{self.lab(r)}]{' · on ' + _home.wait_words(m_) if _home.wait_words(m_) else ''}" for r, m_ in pairs[_home.WAITING][:5]]
+        lines += [f"  waiting: {rid_full(r)} {r['subject']} [{self.lab(r)}]{' · ' + _home.wait_phrase(m_, 'on', shown_full) if _home.wait_phrase(m_, 'on', shown_full) else ''}" for r, m_ in pairs[_home.WAITING][:5]]
         nh = new_holds(self.held, self.now)       # the holds set in the last 24 hours, with their reason
         lines += [f"  new hold (24 h): {rid_full(r)} {r['subject']} [{self.lab(r)}] · {self.new_hold_words(r)}" for r in nh[:8]]
         if len(nh) > 8: lines.append(f"  … and {len(nh) - 8} more new holds")
@@ -1550,7 +1550,7 @@ class Board:
             m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {r['subject']}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
             k = "" if is_parked(r) else needs_kind(r)   # parked: its needs field waits with it
             meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({due_of(r):%m-%d %a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
-            if _home.wait_words(self.mod_of(r)): meta.append("waiting on " + _home.wait_words(self.mod_of(r)))      # the kind of its wait, in the model's words
+            if _home.wait_phrase(self.mod_of(r), "waiting on", shown_full): meta.append(_home.wait_phrase(self.mod_of(r), "waiting on", shown_full))      # the kind of its wait, in the model's words
             if r.get("_fresh") == "stale": meta.append("stale")                       # before the ask, whose own " · " would swallow it
             if k == "call" and open_ask(r): meta.append("ask: " + open_ask(r))
             out.append("- " + " · ".join(meta))
