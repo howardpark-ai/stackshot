@@ -163,8 +163,8 @@ Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is on
   The guard on alarming words does not judge it (the route sets what `post question` sets).
 - **A second `open` for a session** that has an open item changes its next line and files nothing (`repeat: true`, the same id); the same question again writes nothing. After a `clear`, an `open` files a new item.
 - **`clear`** closes the session's open item: outcome `done`, reason `the pane stopped waiting`, the end state in `outcome_text`, the description unchanged. None open is a no-op (200, `cleared: []`).
-- **The row owes no page and tells no session.** It is a notification that opens and closes with the pane: the writes set `_TERMINAL_ROW` (`stackshot/web/server.py`), so no page debt is charged to the script, the mover or the page's keeper, the router
-  gets no notice of it, and the close is told to no one (the `_tell_*` notices return nothing). Otherwise it is the normal write path: `create_item`, then `_update` for the state, and `_update` to close, with every gate.
+- **The row owes no page and tells no session.** It is a notification that opens and closes with the pane: the writes set `TERMINAL_ROW` (`stackshot/service/writes.py`), so no page debt is charged to the script, the mover or the page's keeper, the router
+  gets no notice of it, and the close is told to no one (the `tell_*` notices return nothing). Otherwise it is the normal write path: `create_item`, then `_update` for the state, and `_update` to close, with every gate.
   The create sets no step, so the state is a second write; if it is refused, the item is closed again as dropped, never left half made.
 - A deploy restarts `stackshot.service` (`stackshot/web/server.py` changed) and `stackshot-puller.service` (`stackshot/fleet/client.py` changed); a session runs `stackshot/fleet/client.py` fresh at each call, so no recycle is needed for it ([docs/session-reload.md](session-reload.md)).
 
@@ -193,5 +193,5 @@ write, `POST /client/job-gap`, `Authorization: Bearer <machine token>`, body `{"
 - **`clear`** closes the open item: outcome `done`, a one-line reason within `[close] reason_max`, the end state in `outcome_text`, the description unchanged. None open is a no-op (200, `cleared: []`, a note that says so).
 - **The sender** is the script's own label, under the terminal prompt's gate: at most 80 characters on one line and never the owner's name (400); none given is `stackshot/fleet/client.py`. There is no allow-list of labels (the machine token is the
   proof), so no config change is needed for sala's label `unit-gaps`. The item records `<label> via a script on <machine>`.
-- **The row owes no page.** It sets `_TERMINAL_ROW` as the terminal prompt does (no page debt for the script, the builder or the keeper, no router notice, a close told to no one) and the guard on alarming words does not judge the
+- **The row owes no page.** It sets `TERMINAL_ROW` as the terminal prompt does (no page debt for the script, the builder or the keeper, no router notice, a close told to no one) and the guard on alarming words does not judge the
   watcher's text; the builder's notice at the create is the one thing sent. `tool-text`: a client call only, no MCP tool changes.
