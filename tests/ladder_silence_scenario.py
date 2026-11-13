@@ -498,6 +498,17 @@ finally:
     server._main_agent = real_main
 check("11f no -main agent: nothing is sent, a History line says so, and the rung is taken once (the next pass does nothing)", "a77" in done and "a77" not in done2 and len(pushes()) == n_push and any("no -main agent to tell" in x["text"] for x in log_of(77)) and entry(77).get("main_at"), (done, done2, log_of(77)))
 close(77)
+# 11h. an untaken hand-off whose mover is a live background session: a write by someone else (the owner's comment, 20 minutes before the notice is due) does not delay the notice to -main:
+# it is due ten minutes after the look, whatever the item's activity (a pin: no "recent activity" wait stands between the look and -main)
+clear_records()
+put(80, act=60, mover="home-docs", handoff=H_.new_record("home-docs", U["home-docs"], "home-send", now0 - 40 * MIN, delivered_at=now0 - 40 * MIN + 10)); cli_row("home-docs", "busy", now0 - 20 * MIN)
+check("11h (setup) the hand-off audit brings the untaken hand-off to the ladder (via handoff), the ask is sent",
+      server._handoff_tick(now=now0, only=["a80"]) == ["a80"] and (drain() or True) and (entry(80) or {}).get("via") == "handoff" and entry(80).get("step") == 1, (entry(80), pushes_to("home-docs", "a80")))
+d_ = rd(80); d_["activity"] = now0 + 21 * MIN; d_["updated"] = now0 + 21 * MIN; d_["written_by"] = "home-front"; (T / "store/a/80.json").write_text(json.dumps(d_))      # the owner's comment, 20 minutes before the notice is due
+stk(now0 + 31 * MIN)
+done = stk(now0 + 41 * MIN + 1)
+check("11h the notice to -main goes at once, ten minutes after the look, although the owner wrote to the item 20 minutes before", "a80" in done and len(main_notices(80)) == 1 and entry(80).get("main_at") == now0 + 41 * MIN + 1, (done, entry(80), pushes_to("home-front", "a80")))
+close(80)
 # 11g. pure: ladder.action / advance for the rung
 live_rec = {**ent2, "step": 2, "last": 3000.0}
 check("11g action: a live background mover on the cold call's rung is due 'main' `minutes` after the look and not before, whatever its pane shows",
