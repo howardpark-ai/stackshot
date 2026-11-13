@@ -5,7 +5,7 @@ refusal text, the same flags read, the same order. The expected values of the ca
 `GATES_MAIN=1 tests/run-suite gates`, which prints what each case gives there), never from this code. This suite holds the new code to them, and checks the shape of the move.
 
   1  refusals       every gate's refusal text and what it returns when it lets a write through (the cases the table CASES lists, one gate after another)
-  2  flags          the per-write flags the gates read through the hooks: a script's question, the terminal prompt's row, the re-bullet route, a session's own write (and each is read when the gate runs)
+  2  flags          the per-write flags the gates read on service/writes.py (the server held them on main): a script's question, the terminal prompt's row, the re-bullet route, a session's own write (and each is read when the gate runs)
   3  order          the gates an update and a close call, in the order they run, with each gate replaced by a recorder that calls the real one; and the gates a gate calls
   4  hooks          a gate with no hooks installed is refused; the server's table holds every hook, and a hook that is a function is looked up on the server when the gate runs
   5  shape          gates.py imports no web/ or audit/ module and has no late import; server.py defines none of the moved bodies and re-exports none of the old names; the create and update services
@@ -50,7 +50,7 @@ from stackshot.core import config as _cfg
 from stackshot.model import draft as _draft, model_guards as _mg, step_commands as _sc
 from stackshot.waits import self_wait as _selfwait
 from stackshot.web import server
-if not MAIN: from stackshot.service import gates
+if not MAIN: from stackshot.service import gates, telling, writes
 
 # the gate under test by its name here: gates.gate_x in this code, server._gate_x on main (a function that was public in service/gates.py has its old underscore name there)
 PUBLIC = ("fix_front_mover", "until_in", "ask_pre")
@@ -73,10 +73,13 @@ def patched(owner, **kv):
     finally:
         for k, v in old.items(): setattr(mod, name(k), v)
 def srv(**kv): return patched(server, **kv)                    # what the hooks look up on the server when a gate runs
+FLAGMOD = server if MAIN else writes           # where the per-write flags live: the server on main (`_QUESTION`), service/writes.py here (`QUESTION`)
+def flagname(n): return ("_" + n) if MAIN else n
+def tel(**kv): return patched(server if MAIN else telling, **{("_" + k) if MAIN else k: v for k, v in kv.items()})      # the telling's functions: `_tell_woken` on the server on main, `tell_woken` on service/telling.py here
 @contextlib.contextmanager
 def flags(**on):
-    """The per-write thread-local flags (`question`, `reformat`, `terminal_row`, `session_next`), on for a case."""
-    objs = {"question": server._QUESTION, "reformat": server._REFORMAT, "terminal_row": server._TERMINAL_ROW, "session_next": server._SESSION_NEXT}
+    """The per-write thread-local flags (`question`, `reformat`, `terminal_row`, `session_next`: service/writes.py), on for a case."""
+    objs = {k: getattr(FLAGMOD, flagname(k.upper())) for k in ("question", "reformat", "terminal_row", "session_next")}
     old = {k: getattr(o, "on", False) for k, o in objs.items()}
     for k, o in objs.items(): o.on = bool(on.get(k, False))
     try: yield
@@ -297,7 +300,7 @@ def _clock(old=None, new=None, hold=False, needs=None, description="", steps_new
     with srv(_eff_state=lambda it: "parked" if hold else "doing"):
         return outcome(lambda: G.gate_clock_renewal(was, meta, "a1", steps, steps_new if steps_new is not None else steps, description or "- A thing", [], BACK)), sorted(k for k in meta if k.startswith("clock"))
 def _watch(front=True, others=("marsh-builder",), watch_reason=""):
-    with srv(_front_sender=lambda s: front), patched(G, _watch_others=lambda it, s, handed: list(others)):
+    with tel(front_sender=lambda s: front), patched(G, _watch_others=lambda it, s, handed: list(others)):
         return outcome(lambda: G.gate_sender_watch("a1", item(mover=BACK), FRONT, handed=[BACK], watch_reason=watch_reason))
 def _handoff(writer=OTHER, why="the pane is closed", live=(BACK,), named=True):
     after = item(mover=BACK if named else OWNER); before = item(mover=KEEP)
@@ -337,7 +340,7 @@ UPDATES = (("an update that asks the owner while the item waits", dict(sender=BA
            ("an update that closes the item", dict(sender=BACK, status="completed", outcome="done", reason="the end state", outcome_text="- the result"), "6"))
 def update_order(kw, n):
     put(int(n), mover=BACK)
-    with srv(_tell_woken=lambda *a, **k: None, _publish=lambda *a, **k: None):
+    with srv(_publish=lambda *a, **k: None), tel(tell_woken=lambda *a, **k: None):
         return recording(lambda: server.stackshot_update(f"a{n}", **kw))
 # the label -> the gates in the order main ran them (GATES_MAIN=1 prints each ORDER line)
 ORDER_WANT = {
@@ -392,15 +395,15 @@ class Spy:
     @on.setter
     def on(self, v): self._on = v
 spy = Spy()
-with patched(server, _SESSION_NEXT=spy):
+with patched(FLAGMOD, **{flagname("SESSION_NEXT"): spy}):
     _gap()
-check("2 …and reads the flag on the server when the gate runs, not when the hooks were installed", spy.reads >= 1, spy.reads)
-real_q = server._QUESTION
+check("2 …and reads the flag on its module when the gate runs, not when the module was imported", spy.reads >= 1, spy.reads)
+real_q = getattr(FLAGMOD, flagname("QUESTION"))
 with patched(_mg, check=lambda *a, **k: PROBS("alarm", "mover")):
-    server._QUESTION = type("F", (), {"on": True})()
+    setattr(FLAGMOD, flagname("QUESTION"), type("F", (), {"on": True})())
     try: got = outcome(lambda: G.gate_model(item(), None, "a1"))
-    finally: server._QUESTION = real_q
-check("2 a flag object the server swaps out is the one the gate reads (the hook looks the name up when it runs)", got == ("refused", "Refused: the mover guard says no"), got)
+    finally: setattr(FLAGMOD, flagname("QUESTION"), real_q)
+check("2 a flag object swapped out on its module is the one the gate reads (the name is looked up when it runs)", got == ("refused", "Refused: the mover guard says no"), got)
 
 # ---------------------------------------------------------------- 3. order
 # a gate that calls another gate calls it on its own module (the order inside a gate)

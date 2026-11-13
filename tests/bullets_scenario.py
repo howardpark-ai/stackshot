@@ -41,6 +41,8 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.model import ids as _model_ids
+from stackshot.service import telling
+from stackshot.service import writes
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 server._publish = lambda: None
 
@@ -169,9 +171,9 @@ passes("…and that text passes the gate as it is", lambda: server._gate_descrip
 d2, _ = server._question_text("x" * 300, "box", "q-script")
 check("a line over the limit is clipped to it, with an ellipsis", d2.splitlines()[0].endswith(" …") and len(d2.splitlines()[0]) <= 120, d2)
 passes("…and the clipped text passes the gate", lambda: server._gate_description(d2))
-server._QUESTION.on = True
+writes.QUESTION.on = True
 refused("the gate has no question-route exemption any more: prose is refused while the flag is set", lambda: server._gate_description("Plain prose."), "not a `- ` bullet")
-server._QUESTION.on = False
+writes.QUESTION.on = False
 
 # ---- 6b. the bullet marker, and the forms of a link
 passes("a dash followed by two spaces is a bullet", lambda: create("-  two spaces"))
@@ -453,7 +455,7 @@ long_subject_item(65, "[home] done check")
 d65 = json.loads((T / "store/a/65.json").read_text()); d65["metadata"]["check"] = "item_closed a67"; (T / "store/a/65.json").write_text(json.dumps(d65))
 was_label = server._check_label; server._check_label = lambda c: "label " * 60
 try:
-    it65 = server._load("a65"); server._tell_check_closed = lambda *a, **k: None; server._release_after = lambda *a, **k: None
+    it65 = server._load("a65"); telling.tell_check_closed = lambda *a, **k: None; server._release_after = lambda *a, **k: None
     server._check_close("a65", it65, "item_closed a67", time.time())
 finally:
     server._check_label = was_label

@@ -69,6 +69,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.service import telling
 server._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
 _real_save = writes.save
@@ -84,14 +85,14 @@ writes.save = _save_inv
 server._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
-_real_tell = server._tell_woken
+_real_tell = telling.tell_woken
 def _tell(gid, owner, note, tag="wake"):
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
-server._tell_woken = _tell
+telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
     while server._HO_COLD_THREADS: server._HO_COLD_THREADS.pop(0).join(30)

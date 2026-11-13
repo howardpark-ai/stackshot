@@ -7,7 +7,7 @@ whose second says ["decision"] showed a move that never happened: "created as â€
 Covers: the made-up owner "Pat Example" (legacy name `pat`); an item with the list form and one with the string form of the old value: History equals what a store written in the neutral name from
 the start shows (one created line saying "Your move", no whose-move line), in the board's renderer; a control with the owner unnamed shows the false move (so the check bites, and the name
 comes from the config); the helper itself (the first word, the placeholder names no one, list and string forms, a duplicate beside `decision`, other entries kept, the same object when
-nothing changes, the version given is not changed); the other readers of historical versions read no needs: server._writers_since (written_by) and waiting.prior_state_ts (wake, state_updated)
+nothing changes, the version given is not changed); the other readers of historical versions read no needs: telling.writers_since (written_by) and waiting.prior_state_ts (wake, state_updated)
 give the same answers on the old commits.
 
     tests/run-suite history_legacy_needs        â†’ exit 0 / 1"""
@@ -118,8 +118,9 @@ try:
 
     # ---- the other readers of historical versions read no needs
     from stackshot.web import server; from stackshot.waits import waiting as _wt
-    ws = server._writers_since("a1", T0 - 10)
-    check("server._writers_since (written_by) gives both writers of the old commits", ("home-x", "") in ws and ("home-y", "") in ws, ws)
+    from stackshot.service import telling
+    ws = telling.writers_since("a1", T0 - 10)
+    check("telling.writers_since (written_by) gives both writers of the old commits", ("home-x", "") in ws and ("home-y", "") in ws, ws)
     prior = _wt.prior_state_ts("a3", W1)
     check("waiting.prior_state_ts (wake, state_updated) gives the state clock before the wake of the old commits", prior is not None and abs(float(prior) - T0) < 1.0, prior)
 except Exception:

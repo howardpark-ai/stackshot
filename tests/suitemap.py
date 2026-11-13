@@ -34,8 +34,12 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           passes on a plain rerun: a warning, and the map marks it `ok: false`, keeping the
                                                           earlier clean measurement beside it as `carry` for a reader of the map; release.sh no longer reads it)
   tests/suitemap.py run [-T secs] suite…                  run the suites plainly; exit 1 when one fails
-  tests/suitemap.py plan --of N [--map MAP]               the whole plan of main's measured run, made once: `shard0=a b c`, `shard1=…`
-                                                          lines (the format of $GITHUB_OUTPUT) for the N shards (see *Shards*)
+  tests/suitemap.py plan --of N [--map MAP] [--only [suite…]]
+                                                          the whole plan of main's measured run, made once: `shard0=a b c`, `shard1=…`
+                                                          lines (the format of $GITHUB_OUTPUT) for the N shards (see *Shards*). With
+                                                          --only it plans just the suites named (a pull request's selection; none is a
+                                                          plan of nothing, never of every suite) and adds the line `large=true|false`:
+                                                          true when they number SHARD_MIN or more (see *Shards*)
   tests/suitemap.py shard --of N --index I [--map MAP]   one line of that plan: the suites of shard I (0 to N-1), one per line
   tests/suitemap.py merge --map OUT SHARD…                one map out of the shards' maps (one commit); exit 1 when a suite is
                                                           in two of them or a suite of the checkout is in none (the map is
@@ -266,6 +270,12 @@ of the name. The plan is made ONCE per run, by the `shards` job (`plan`, with th
 plan, for all six lists alike), and handed to the `measure` matrix as job outputs; each shard runs the list it is given and
 does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` still finds the suite that
 is in none or in two, and the run fails.
+
+A large pull request selection (Fri Nov 13th 2026). A pull request's selection of about 200 suites ran serially in the one `suites` job for 22.6 minutes, where a merge-queue entry runs the same suites in six shards in about 12. Now the
+`shards` job of tests.yml makes the selection itself on a pull request (`select`), hands it to `plan --of SHARDS --only <the suites>` and reads the line `large=` it prints: true when the selection holds SHARD_MIN suites or more. Then the
+`measure` matrix runs the lists plainly (`run`: nothing is measured, no map is made or kept) and the `suites` job passes only when the plan and every shard passed; a smaller selection (and one that is empty) runs in the `suites` job as before, from
+the same selection, which the plan job hands on, so the two jobs cannot disagree about it. When the plan job fails, the `suites` job selects for itself and runs serially, as before this change. A selection that fails is every suite, as ever, and
+then a large selection. The merge-queue entry and main's run are unchanged.
 """
 import argparse, ast, atexit, collections, datetime, difflib, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, time, tomllib
 
@@ -1730,6 +1740,10 @@ def run(args):
 
 # ---------------------------------------------------------------- shards
 SHARDS = 6   # main's measured run: the matrix in tests.yml lists 0 .. SHARDS-1 and passes --of SHARDS (suitemap_scenario.py checks both)
+# A pull request whose selection holds SHARD_MIN suites or more runs it in the same six shards (plainly, nothing measured); a smaller one stays in the one `suites` job. One serial job spends about 0.1 to 0.3 minutes a suite
+# (a 27-suite selection took 7.2 minutes, a 200-suite one 22.6), and the sharded way costs about 4 minutes before the suites (the plan job, a shard's checkout and environment, the verdict job) plus a sixth of the serial time, so the two meet
+# near 5 minutes of serial work: 18 to 44 suites by those rates. 40 is the upper end: below it the serial run is within a minute or two of the sharded one, and it takes one runner, not six.
+SHARD_MIN = 40
 
 
 def shard_plan(names, n, m=None):
@@ -1775,8 +1789,17 @@ def plan(args):
     if args.of < 1:
         print("suitemap: --of must be at least 1", file=sys.stderr)
         return 2
-    for i, names in enumerate(shard_plan(suites(), args.of, load_map(args.map) if args.map else None)):
+    every = suites()
+    only = None if args.only is None else sorted(set(args.only))
+    if only is not None:
+        unknown = sorted(set(only) - set(every))
+        if unknown:   # a name that is no suite is never planned away: the plan would drop it and the run would pass without it
+            print(f"suitemap: not a suite of this checkout: {', '.join(unknown)}", file=sys.stderr)
+            return 2
+    for i, names in enumerate(shard_plan(every if only is None else only, args.of, load_map(args.map) if args.map else None)):
         print(f"shard{i}={' '.join(names)}")
+    if only is not None:
+        print(f"large={'true' if len(only) >= SHARD_MIN else 'false'}")
     return 0
 
 
@@ -2457,7 +2480,7 @@ def main():
     sub.add_parser("list")
     p = sub.add_parser("measure"); p.add_argument("--map", required=True); p.add_argument("--prev"); p.add_argument("-T", "--timeout", type=int, default=900); p.add_argument("suites", nargs="*")
     p = sub.add_parser("run"); p.add_argument("-T", "--timeout", type=int, default=600); p.add_argument("suites", nargs="*")
-    p = sub.add_parser("plan"); p.add_argument("--of", type=int, required=True); p.add_argument("--map")
+    p = sub.add_parser("plan"); p.add_argument("--of", type=int, required=True); p.add_argument("--map"); p.add_argument("--only", nargs="*")
     p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
     p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
     p = sub.add_parser("stamp"); p.add_argument("--map", required=True); p.add_argument("--sha", required=True); p.add_argument("--tree"); p.add_argument("--out")

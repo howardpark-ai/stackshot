@@ -43,6 +43,8 @@ from stackshot.model import step_commands as _sc
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
 from stackshot.projects import pages as _pages
+from stackshot.service import telling as _telling
+from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path
 from stackshot.waits import handoff as _ho
 from stackshot.waits import handover as _hv
@@ -67,11 +69,9 @@ class Hooks:
     contact_fronts: Callable[..., Any]
     contact_same: Callable[..., Any]
     eff_state: Callable[..., Any]
-    fallback_mover: Callable[..., Any]
     follow_superseded: Callable[..., Any]
     front_held: Callable[..., Any]            # audit/front_step.held: the front agent a step opens with when the write check refuses it (service/ imports no audit/)
     front_pair_ok: Callable[..., Any]
-    front_sender: Callable[..., Any]
     gate_description: Callable[..., Any]            # field_gates._gate_description (web/): the description's own checks, a close's outcome_text goes through them
     handoff_background: Callable[..., Any]
     handoff_builder: Callable[..., Any]
@@ -91,18 +91,14 @@ class Hooks:
     own_repo: Callable[..., Any]
     owner_words_on: Callable[..., Any]
     parse_wake: Callable[..., Any]
-    question: Callable[..., Any]            # a script's question (server._QUESTION): its wording is never judged
-    reformat: Callable[..., Any]            # the re-bullet route's update (server._REFORMAT)
     relaunch: Any            # the sentence a refused close ends with (server._RELAUNCH)
     role_of: Callable[..., Any]
     same_sess: Callable[..., Any]            # page_debts._same_sess (web/)
     scoped_anchors: Callable[..., Any]
     session_id: Callable[..., Any]            # page_debts._session_id (web/)
-    session_next: Callable[..., Any]            # the create or update tool's own call (field_gates._SESSION_NEXT): only a session's write is judged by the write checks of Next
     session_roster: Callable[..., Any]
     shown_ref: Callable[..., Any]            # page_debts._shown_ref (web/)
     store_ref: Callable[..., Any]            # page_debts._store_ref (web/)
-    terminal_row: Callable[..., Any]            # the terminal prompt's and the job-gap routes' row (server._TERMINAL_ROW)
     wake_at: Callable[..., Any]
     when_words: Callable[..., Any]            # web/render.when_words: a time in words
     zone: Callable[..., Any]            # the board's time zone as server.py holds it (ZONE, read when a refusal says a time)
@@ -127,7 +123,7 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
     """The case the front-mover rule judges: (the front agent's key, its project, the project's builder list, the project's hub) when a create or update sets mover, then (which becomes the mover after
     the owner's answer) or post_wake_mover (the mover once a wait ends) to a front agent, sent by another session; None otherwise. A front agent gets no hand-off notice, so the item would sit handed
     and not taken until the owner noticed. Not a case: a front agent naming itself, the owner, a background agent, a session no page lists, a value that clears the field, and the value the item
-    already stores in `current` (nothing changes hands). A failing roles read is no case, with one stderr line, as _front_sender does."""
+    already stores in `current` (nothing changes hands). A failing roles read is no case, with one stderr line, as front_sender does."""
     h = _hooks()
     v = _model.clean(value)
     if not v or v.lower() in h.ask_none or _model.is_owner(v):
@@ -139,7 +135,7 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
         if same(cur, v):
             return None
         roles, key = h.role_of(v, nm)
-        if not key or roles[key].get("role") != "front":      # a one-session project's single name-line session is not front here either, as in the needs gate and _front_sender
+        if not key or roles[key].get("role") != "front":      # a one-session project's single name-line session is not front here either, as in the needs gate and front_sender
             return None
         s = str(sender or "").strip()
         if s:
@@ -190,7 +186,7 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
         return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
-        if field == "mover" and h.front_pair_ok(sender, key, project):      # a front-only project (anchors.front_only): one of its front agents may hand an item to another; the target is told by a notice (_handoff_notify)
+        if field == "mover" and h.front_pair_ok(sender, key, project):      # a front-only project (anchors.front_only): one of its front agents may hand an item to another; the target is told by a notice (handoff_notify)
             return value, f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is told it is handed the item)", []
         raise _front_mover_refusal(field, case, project)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
@@ -473,11 +469,11 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
         return ""
     if not desc_set:
         probs = [p for p in probs if p.key != "description"]
-    if h.question():
+    if _writes.question():
         probs = [p for p in probs if p.key not in ("alarm", "description", "next_defers")]
-    if h.terminal_row():
+    if _writes.terminal_row():
         probs = [p for p in probs if p.key != "next_defers"]      # a script's own row is never stranded on the words of its line
-    if h.reformat() or h.terminal_row():
+    if _writes.reformat() or _writes.terminal_row():
         probs = [p for p in probs if p.key != "owner_mover"]      # a re-bullet writes no mover and no state: an item already in the owner-as-mover shape is not refused for the form of its description; the terminal-prompt route creates its row with the owner as mover and sets state your-step with its step in the write that follows (a create sets no state), and that second write is judged
     notes = [p for p in probs if p.key == "description"] if _description_guard_mode() == "note" else []
     probs = [p for p in probs if p not in notes]
@@ -759,7 +755,7 @@ def gate_after(after: Any, gid: str = "") -> list[str]:
 
 # A front agent does not watch handed-off work itself: stackshot
 # refuses a sender's wake or check on a handed-off item, and its text stops teaching it. The result lands through stackshot when the mover closes the
-# item or hands it back to the front agent (_tell_owner_close, _tell_handback); a front agent that sets its own wake or until date on an alive item another
+# item or hands it back to the front agent (tell_owner_close, tell_handback); a front agent that sets its own wake or until date on an alive item another
 # session moves is polling work it handed away. Narrowed in review: only a date with no hold on an ALIVE item is refused. A hold with a
 # wake on a waiting or parked item is the park's own timer, fired by the server, and a done `check` is the server-run push the rule itself names,
 # so neither is gated; ask_by stays anyone's too. Only a front agent is refused (a background agent, the owner and a sender the roles do
@@ -790,8 +786,7 @@ def gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed
     differs from the one the item carried. `item_now` = the item as this call leaves it (so a hand-off made in the same call counts: the old mover is no
     longer the mover); `handed` = the sessions its next hands the work to. → the reason to record on the item ("" when none was needed); raises ToolError
     otherwise. A failure of the check itself passes the write (one stderr line)."""
-    h = _hooks()
-    if not h.front_sender(sender):
+    if not _telling.front_sender(sender):
         return ""
     try:
         others = _watch_others(item_now, sender, list(handed or []))
@@ -961,7 +956,7 @@ def gate_handoff(gid: str, before: dict[str, Any] | None, after: dict[str, Any],
         if not to or _model.is_owner(to):
             return
         am = after.get("metadata") or {}
-        dflt = h.fallback_mover(str(am.get("project") or ""))      # D9: a `then` the server defaulted to the project's builder is no hand-off the writer made
+        dflt = _telling.fallback_mover(str(am.get("project") or ""))      # D9: a `then` the server defaulted to the project's builder is no hand-off the writer made
         named = [x for x in (_model.norm_who(am.get("mover")), _model.norm_who(am.get("then")), *_needs_sessions(am)) if x and not (dflt and h.ho_same(x, dflt) and x == _model.norm_who(am.get("then")) and x != _model.norm_who(am.get("mover")))]
         if not any(h.ho_same(to, x) for x in named):      # a session the write did not name (the project's builder or -main agent, which an item with no mover falls to) is no hand-off the writer made
             return
@@ -1179,7 +1174,7 @@ def gate_step_gap(meta: dict[str, Any], steps_new: list[dict[str, Any]], steps_o
     unless it carries a proof (step_proof, or words that are all the release or merge phrase), because without one its event ticks nothing and the next session is never handed the item. A proof needs a pull
     request, which exists only once it is opened, so a step that names none is not judged. The refusal says in one line what to pass. `steps_new` is the checklist as the write leaves it, `steps_old` as it was."""
     h = _hooks()
-    if not h.session_next():
+    if not _writes.session_next():
         return
     had = {_steps.key(x["text"]) for x in steps_old if x["status"] == _steps.OPEN}
     proofs = meta.get("step_proof") if isinstance(meta.get("step_proof"), dict) else {}

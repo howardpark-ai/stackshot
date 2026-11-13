@@ -62,13 +62,14 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.audit import hand_idle as HI, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.model import queued as Q, last_activity as LA
 from stackshot.tools import next_report as NR
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._PUSH = [sys.executable, "-c", "pass"]
+telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the pass is given its `now`, and the saves stamp from the server's own clock."""
     t = None
@@ -79,7 +80,7 @@ server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
 def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
-server._tell_woken = fake_tell
+telling.tell_woken = fake_tell
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", "", "", "flag"))
 panes = {}; dead = {}                                              # a name -> its pane's registry status; a name -> why it has no pane
@@ -199,14 +200,14 @@ h1 = history(1)
 check("2 ONE History line says why and names the mover it left", h1 == ["handed to team-aux: not started in 10 min, so it goes to the builder with the fewest open items (it was with home-peer)"], h1)
 check("2 the new builder is told (the hand-off notice) and told once", len(to_builder("team-aux")) == 1 and to_builder("team-aux")[0][3] == "handoff" and "not started in 10 min" in to_builder("team-aux")[0][2], to_builder("team-aux"))
 check("2 the mover it left is told ONCE, to disregard the item, in the wording of the notice", [x[2] for x in told("balance")] == [disregard(1, "team-aux")] and told("balance")[0][1] == U["home-peer"], told("balance"))
-check("2 …through the notice path (_tell_woken), not the message tool: nothing was sent as a message and the former mover is not back in `needs`", not told("message") and "home-peer" not in [str(x) for x in m["needs"]] and "home-peer" not in str(m.get("mover")), (sent, m.get("needs")))
+check("2 …through the notice path (tell_woken), not the message tool: nothing was sent as a message and the former mover is not back in `needs`", not told("message") and "home-peer" not in [str(x) for x in m["needs"]] and "home-peer" not in str(m.get("mover")), (sent, m.get("needs")))
 check("2 -main is told nothing of a move, and nobody else is: the new builder and the former mover only", to_main() == [] and sorted(x[1] for x in sent) == sorted([U["team-aux"], U["home-peer"]]), sent)
 check("2 the record of the balancer is its own key, {at, from, to, count}, written in the save of the move, and `hand_idle` is not touched", m["balance"] == {"at": now0, "from": "home-peer", "to": "team-aux", "count": 1} and "hand_idle" not in m, m.get("balance"))
 check("2 the owner is not put in the item: next and state as they were", m.get("next") == before["metadata"]["next"] and m.get("state") == "doing" and not any("Oliver" in str(v) for k, v in m.items() if k in ("needs", "next", "mover")), m)
 check("2 the activity and progress clocks are as they were: the move is the server's own bookkeeping", all(rd(1)[k] == before[k] for k in ("activity", "progress", "written_by", "written_at")))
 check("2 a second pass a minute later finds a fresh untaken hand-off and does nothing more", tick(now0 + MIN) == [] and len(told("balance")) == 1 and len(to_builder("team-aux")) == 1 and history(1) == h1)
 check("2 the server logs it on stderr", "moved from home-peer to team-aux" in err.text, err.text)
-check("2 the minute set carries a tag the front gate knows for that notice", server._FRONT_TAG_KIND.get("balance") == "exempt", server._FRONT_TAG_KIND.get("balance"))
+check("2 the minute set carries a tag the front gate knows for that notice", telling.FRONT_TAG_KIND.get("balance") == "exempt", telling.FRONT_TAG_KIND.get("balance"))
 def base2():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); busy_on("team-back", 2); busy_on("other-back", 1, first=60); panes["team-aux"] = "idle"
 def probe_moved():
@@ -421,7 +422,7 @@ def probe_front_mover():
     real = server._balance_builder_names; server._balance_builder_names = lambda narrow=False: [*real(narrow), "home-main"]      # so only the front test stands between the item and a move
     try: return tick() == [] and mover_of(1) == "home-main" and sent == []
     finally: server._balance_builder_names = real
-rule("6 an item a front agent moves is never moved", probe_front_mover, [(server, "_front_keeper", lambda w, p="", strict=False: (False, ""))])
+rule("6 an item a front agent moves is never moved", probe_front_mover, [(telling, "front_keeper", lambda w, p="", strict=False: (False, ""))])
 def probe_dead_target():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"; dead["team-aux"] = "a retired session, its pane gone"
     return tick() == ["a1"] and mover_of(1) == "team-back"
@@ -564,14 +565,14 @@ def probe_only_moved():
     got = tick()
     return got == ["a1"] and [x[2] for x in told("balance")] == [disregard(1, "team-back")]
 rule("9 an item that stays is named to nobody: the notice carries only the ids this pass moved", probe_only_moved, [(HI, "BALANCE_MAX_PER_TICK", 0)])
-_real_fk = server._front_keeper
-server._front_keeper = lambda w, p="", strict=False: (True, "") if (not strict and w == "home-peer") else _real_fk(w, p, strict)      # the gate's own test says the former mover is front; the pass's strict one does not
+_real_fk = telling.front_keeper
+telling.front_keeper = lambda w, p="", strict=False: (True, "") if (not strict and w == "home-peer") else _real_fk(w, p, strict)      # the gate's own test says the former mover is front; the pass's strict one does not
 def probe_front_never():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
     got = tick()
     return got == ["a1"] and told("balance") == []
-rule("9 a front agent is never sent the notice unmarked (the pass checks before it sends)", probe_front_never, [(server, "_front_keeper", lambda w, p="", strict=False: (False, ""))])
-server._front_keeper = _real_fk
+rule("9 a front agent is never sent the notice unmarked (the pass checks before it sends)", probe_front_never, [(telling, "front_keeper", lambda w, p="", strict=False: (False, ""))])
+telling.front_keeper = _real_fk
 
 # ================================================================ 10. the tick: its place, and a failure that stops nothing
 from stackshot.core import runner as R
@@ -682,10 +683,10 @@ def raising_handoff_tell(gid, owner, note, tag="wake", result=None):
     if tag == "handoff": raise OSError("push gone")
     return fake_tell(gid, owner, note, tag, result)
 def probe_send_fails():
-    queue_setup(n_queued=2); real = server._tell_woken; server._tell_woken = raising_handoff_tell
+    queue_setup(n_queued=2); real = telling.tell_woken; telling.tell_woken = raising_handoff_tell
     try:
         with _Err() as e: got = tick()
-    finally: server._tell_woken = real
+    finally: telling.tell_woken = real
     return got == ["a2", "a3"] and mover_of(2) == "team-back" and mover_of(3) == "team-aux" and len(told("balance")) == 1 and "sending after the move failed" in e.text
 rule("13 a failed send of the new builder's notice (after the save) does not lose the bookkeeping: the move counts, the next item sees the new load (+1 rule), and the former mover is still told", probe_send_fails,
      [(HI, "mark_balanced", lambda meta, now, frm, to: meta.__setitem__("balance", {"at": now + 1, "from": frm, "to": to, "count": 1}))])
@@ -694,10 +695,10 @@ def probe_send_fails_cap():
     for i in range(1, 6): put(i, act=15, **ho("home-peer", 12))
     for n in ("team-back", "team-aux", "other-back", "lone-back"): panes[n] = "idle"
     real_b = server._balance_builders; server._balance_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
-    real = server._tell_woken; server._tell_woken = raising_handoff_tell
+    real = telling.tell_woken; telling.tell_woken = raising_handoff_tell
     try:
         with _Err(): got = tick()
-    finally: server._tell_woken = real; server._balance_builders = real_b
+    finally: telling.tell_woken = real; server._balance_builders = real_b
     return len(got) == 3
 rule("13 …and the cap of three per pass still holds", probe_send_fails_cap, [(HI, "mark_balanced", lambda meta, now, frm, to: meta.__setitem__("balance", {"at": now + 1, "from": frm, "to": to, "count": 1}))])
 

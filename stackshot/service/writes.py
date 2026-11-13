@@ -7,8 +7,9 @@ records the change where others read it (the For you list, the Landed list, the 
 means and is kept as it was in server.py.
 
 What a write must do differently from the usual one is the `WriteContext` passed to `save`: `settle`. It was a thread-local flag set around the save (`_NO_SETTLE`); it is an argument now, so
-nothing a save does depends on what else the thread did before it. The other per-write flags of server.py (`_TERMINAL_ROW`, `_QUESTION`, `_REFORMAT`, `_CLOSE_WAS`, `_FRONT_HINT`, `_MENTIONED`, `_HO_STATE`
-and `_SESSION_NEXT`) are read by the create and update tools, the gates and the telling, never by this save; they move with those, not here.
+nothing a save does depends on what else the thread did before it. The per-write flags the gates read (`SESSION_NEXT`, `QUESTION`, `REFORMAT`, `TERMINAL_ROW`) live here too, as thread-locals the routes and tools set
+with `.on` around a write (`session_write` is the create and update tools' own); they are read by the create and update tools and the gates, never by this save. The flags of the telling (`CLOSE_WAS`, `FRONT_HINT`,
+`MENTIONED`, `HO_STATE`) are on service/telling.py.
 
 The steps that still read server.py's own code (the mover's settling, his step, the ask record, the three hand-off steps, the phase, the For you and Landed lists, the search index, the
 hand-back line, the pending answer) are reached through `Steps`, which server.py fills once with `install`: this module cannot import server.py (the surface sits above it), and each of those
@@ -17,6 +18,7 @@ functions leaves `Steps` when its area moves under service/. Steps are looked up
 Imports point down only: this module imports the domain and core, and the store's readers beside it (service/store.py), never web/."""
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import threading
@@ -35,11 +37,49 @@ from stackshot.model import activity as _activity
 from stackshot.model import item_project as _ip
 from stackshot.model import last_activity as _lastact
 from stackshot.model import migration as _mig
+from stackshot.model import model as _model
 from stackshot.model import progress as _progress
 from stackshot.router import routing as _routing
 from stackshot.service.store import _path
 
 ITEM_LOCK = threading.RLock()      # a session's update and a failed delivery's record read, change and save an item under it
+
+# The per-write flags: set (`.on`) by a route or a tool around its write, read by the gates and the create and update services while that write runs. A flag is never rebound, so a name taken from this module stays the flag.
+SESSION_NEXT = threading.local()  # around the create and update tools' own calls: only a session's write is judged by the write checks of Next (N1, N3, N6; next_rules.py), and by the bare-URL check; a script's, the re-bullet route's and the minute loop's writes are not
+TERMINAL_ROW = threading.local()  # set by the terminal-prompt and job-gap routes around their writes: the row is a script's notification of its own, so it owes no page and no session is told of it (create_item, _update, the tell_* notices; a job-gap item's builder is told by the needs notice of its create, which this does not stop)
+QUESTION = threading.local()     # set by the script question route around its create: guard 11 (alarming words) does not judge a headless run's own question text, so it is never stranded on a wording refusal
+REFORMAT = threading.local()    # set by the re-bullet route around its update: a description written in bullets with the same content is a filing edit, no state change
+
+
+def session_next() -> bool:
+    """Is this the create or update tool's own call (a session's write)?"""
+    return bool(getattr(SESSION_NEXT, "on", False))
+
+
+def question() -> bool:
+    """Is this the script question route's create?"""
+    return bool(getattr(QUESTION, "on", False))
+
+
+def reformat() -> bool:
+    """Is this the re-bullet route's update?"""
+    return bool(getattr(REFORMAT, "on", False))
+
+
+def terminal_row() -> bool:
+    """Is this the terminal prompt's or the job-gap route's write?"""
+    return bool(getattr(TERMINAL_ROW, "on", False))
+
+
+@contextlib.contextmanager
+def session_write():
+    """Marks the create or update tool's own call as a session's write for the write checks of Next (SESSION_NEXT); restored on exit."""
+    was = getattr(SESSION_NEXT, "on", False)
+    SESSION_NEXT.on = True
+    try:
+        yield
+    finally:
+        SESSION_NEXT.on = was
 
 SETTLE_NAMED = "named"      # settle: an update that names the mover itself: the save's mover settling leaves it as the write has it, and his step on the checklist still follows the stored fields
 SETTLE_QUIET = "quiet"      # settle: a write that only files, re-bullets or confirms: no mover is settled and no hand-off record is ended
@@ -143,12 +183,45 @@ def _stamp_progress(item: dict[str, Any], before: dict[str, Any] | None, writer:
         print(f"progress: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
+def _is_mover(item: dict[str, Any], writer: str) -> bool:
+    """Is `writer` (a session's name or id) the item's mover as the item stands now: the model's mover while it is alive, the post-wake mover while it waits, else the stored mover (the board's own reading,
+    tools/board_report.mover_of)? A name, an alias and an id of one session are one mover (`anchors.canonical`: the registry's permanent id, else the fleet's). No writer, no mover or the owner as mover is no."""
+    who = str(writer or "").strip()
+    if not who:
+        return False
+    mod = _model.derive(item)
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    mover = (mod.mover if mod.state == _model.ALIVE else (mod.wait.mover if mod.wait else "")) or _model.clean(meta.get("mover"))
+    if not mover or _model.is_owner(mover):
+        return False
+    nm = _anc.names()
+    return bool({who.casefold(), _anc.canonical(who, nm).casefold()} & {mover.casefold(), _anc.canonical(mover, nm).casefold()})
+
+
+def _update_signals(item: dict[str, Any], before: dict[str, Any] | None, writer: str, now: float) -> list[dict[str, Any]]:
+    """The `update` signals of a save that is a session's real write as the item's mover: what `last_activity.update_signals` finds, kept only when `writer` is the mover (asked last: it reads the fleet's sessions).
+    [] for anything else, and for a save whose item or earlier version is not what it should be; it never raises."""
+    try:
+        meta = item.get("metadata")
+        sigs = _lastact.update_signals(before.get("metadata") if isinstance(before, dict) else None, meta if isinstance(meta, dict) else None, now)
+        return sigs if sigs and _is_mover(item, writer) else []
+    except Exception as e:  # noqa: BLE001  — never takes the step, state or merge stamp of the same save with it
+        print(f"last activity: {item.get('id')} update not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+
+
 def _stamp_last_activity(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
     """Record in `metadata.last_activity` what this save did that is visible activity (last_activity.stamp: the progress clock's own test, with the words for it); the events on a tied pull request come
-    through `_event_activity_tick`. It only records, with no publish of its own (the home page is kept for 30 s, then drawn again, and picks the record up); the On agent rows and the item page show it. A failure here never fails the write."""
+    through `_event_activity_tick`. A session's own write as the item's mover that sets a status line (the update tool's `work`) to text different from the step's previous status is an `update`, the item's
+    hourly update, counted here beside the audit's line (`last_activity.update_signals`): the same text again, a write by anyone else (a front agent relaying, the owner's answer, the audit) and the server's own
+    save are none. It only records, with no publish of its own (the home page is kept for 30 s, then drawn again, and picks the record up); the On agent rows and the item page show it. A failure here never fails the write."""
     try:
         who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
-        _lastact.stamp(item, before, time.time(), _activity.counts(_activity.kind_of(writer, author, kind), who, audit_writer_names()))
+        k = _activity.kind_of(writer, author, kind)
+        real = _activity.counts(k, who, audit_writer_names())
+        now = time.time()
+        extra = _update_signals(item, before, writer, now) if real and k == _activity.WRITE and item.get("status") == "open" else []
+        _lastact.stamp(item, before, now, real, extra)
     except Exception as e:  # noqa: BLE001  — groundwork for a later part; a write is never refused for it
         print(f"last activity: {item.get('id')} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 

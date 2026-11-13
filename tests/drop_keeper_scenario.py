@@ -47,11 +47,12 @@ def put(i, status="open", project="projects/alpha", creator=MAIN, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": creator, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 SID = server._session_id
 NOKEEP = lambda s: "keeper of record" not in str(s).lower()
@@ -61,11 +62,11 @@ r = server.stackshot_create(subject="[home] made by a background agent", descrip
 g1 = r.split()[1]; m1 = rd(g1)["metadata"]
 check("create: a background agent may create an item (D3): no refusal", r.startswith("created") and "Refused" not in r, r)
 check("create: the creator is stored (metadata.owner) as a fact, and no mover and no `then` is stored from it (D1)", SID(str(m1.get("owner"))) == SID(REVIEW) and "mover" not in m1 and "then" not in m1, m1)
-check("create: the item is moved by the project's builder (a background agent whose mandate builds), never its creator", server._holder(rd(g1)) == BUILD and server._holder(rd(g1)) != REVIEW, server._holder(rd(g1)))
+check("create: the item is moved by the project's builder (a background agent whose mandate builds), never its creator", telling.holder(rd(g1)) == BUILD and telling.holder(rd(g1)) != REVIEW, telling.holder(rd(g1)))
 check("create: the reply and get never say 'keeper of record'", NOKEEP(r) and NOKEEP(server.stackshot_get(g1)), server.stackshot_get(g1))
 r = server.stackshot_create(subject="[home] made on beta", description=DESC, project="projects/beta", sender=MAIN, next=f"{BMAIN}: carry on")
 g2 = r.split()[1]
-check("create: a project with no builder falls to its -main agent, not the creator from another project", server._holder(rd(g2)) == BMAIN and "mover" not in rd(g2)["metadata"], server._holder(rd(g2)))
+check("create: a project with no builder falls to its -main agent, not the creator from another project", telling.holder(rd(g2)) == BMAIN and "mover" not in rd(g2)["metadata"], telling.holder(rd(g2)))
 _create_decl = server._CREATE_DESC
 check("create tool text: says background agents may create, and no tool text says 'keeper of record'", NOKEEP(_create_decl) and NOKEEP(server._UPDATE_DESC) and NOKEEP(server._NEEDS_FORM) and "background agent" in _create_decl.lower(), _create_decl[:300])
 
@@ -88,8 +89,8 @@ check("start pass, dry run: writes nothing", all((T / f"store/a/{i}.json").read_
 rows = server._mover_backfill_pass(apply=True)
 check("start pass: stores the builder / the -main agent as the mover; the creator never", rd(1)["metadata"].get("mover") == BUILD and rd(2)["metadata"].get("mover") == BMAIN and rd(2)["metadata"].get("owner") == REVIEW, (rd(1)["metadata"], rd(2)["metadata"]))
 check("start pass: a project naming no agent leaves the item alone: no mover stored, the item's mover reads empty and is never its creator (BMAIN)", "mover" not in rd(3)["metadata"]
-      and {r["gid"]: r["mover"] for r in rows}.get("a3", "") == "" and server._model_of({**rd(3), "gid": "a3"}).mover == "" and server._holder(rd(3)) == "" and rd(3)["metadata"].get("owner") == BMAIN,
-      (rd(3)["metadata"], server._holder(rd(3)), [r for r in rows if r["gid"] == "a3"]))
+      and {r["gid"]: r["mover"] for r in rows}.get("a3", "") == "" and server._model_of({**rd(3), "gid": "a3"}).mover == "" and telling.holder(rd(3)) == "" and rd(3)["metadata"].get("owner") == BMAIN,
+      (rd(3)["metadata"], telling.holder(rd(3)), [r for r in rows if r["gid"] == "a3"]))
 check("start pass: needs, a hold, Oliver's call, a stored mover and a closed item are untouched", all((T / f"store/a/{i}.json").read_bytes() == before[i] for i in range(4, 9)))
 check("start pass: the clocks stay (a filing edit)", rd(1)["state_updated"] == now0 - 60 and rd(2)["state_updated"] == now0 - 60, (rd(1), rd(2)))
 again = server._mover_backfill_pass(apply=True)

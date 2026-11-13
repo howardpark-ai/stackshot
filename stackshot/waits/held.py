@@ -2,15 +2,15 @@
 
 A notice to a BACKGROUND agent (a `background:` entry of a page's agents map) that asks nothing of it is not delivered as a new turn. It is
 held here and handed over with the agent's next turn, whatever caused that turn. Held kinds (KINDS):
-  closed      an item the agent moves or observes was closed or completed by another session (server._tell_owner, _tell_observers, _tell_owner_change)
-  changed     another session changed an item the agent neither moves nor is named on: its next, needs, check or after (_tell_owner_change)
+  closed      an item the agent moves or observes was closed or completed by another session (telling.tell_owner, tell_observers, tell_owner_change)
+  changed     another session changed an item the agent neither moves nor is named on: its next, needs, check or after (tell_owner_change)
   queue       a wake that leaves an item still after an open item: its place in the queue, nothing to do yet (_wake_tell)
-  page-owed   the keeper's "the page update is owed" notice (_pilot_relay, _pilot_relay_many; also what the router passes of such a notice)
+  page-owed   the keeper's "the page update is owed" notice (pilot_relay, pilot_relay_many; also what the router passes of such a notice)
   fyi         a message its sender marked fyi (the message tool's `fyi`)
 Everything else wakes the agent as before: a notice that names it in needs, hands it an item (mover, hand-off), ends its wait, carries
 the owner's words or asks something; so does the audit's finding for an item's mover (router.py audit-owners): it is a task. When the code is unsure it delivers (decide() answers "" for any kind it does not know).
 
-THE ONE DECISION POINT is decide(): the senders (server._hold_notice, router_live._hold_kind) pass what they know and take its answer. It
+THE ONE DECISION POINT is decide(): the senders (telling.hold_notice, router_live._hold_kind) pass what they know and take its answer. It
 never raises. [router] hold_notices (default true) is the switch; false delivers everything as before.
 
 WHERE THEY LIVE. <state>/held/<key>.jsonl, one file per session, a line per notice {id, ts, kind, text, from, gid, nid}; the key is the

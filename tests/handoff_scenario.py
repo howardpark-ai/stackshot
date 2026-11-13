@@ -85,6 +85,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 # section 15's invariant, checked after every save of the run: an OPEN record never names someone but the item's mover (handoff.stale)
@@ -110,14 +111,14 @@ QUEUED, PAUSED = T / "push-queued.txt", T / "push-paused.txt"
                                f"if os.path.exists({str(QUEUED)!r}) and a[0] in open({str(QUEUED)!r}).read().split():\n    print('queued → ' + a[0]); sys.exit(1)\n"
                                f"if os.path.exists({str(PAUSED)!r}) and a[0] in open({str(PAUSED)!r}).read().split():\n    print('queued (paused for a reboot) → ' + a[0]); sys.exit(1)\n"
                                f"print('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
-_real_tell = server._tell_woken
+_real_tell = telling.tell_woken
 def _tell(gid, owner, note, tag="wake"):
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
-server._tell_woken = _tell
+telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
     while server._HO_COLD_THREADS: server._HO_COLD_THREADS.pop(0).join(30)
@@ -161,7 +162,7 @@ def tick(at, *ids):
     return server._handoff_tick(now=at, only=[f"a{i}" for i in ids] or None)
 def hand(i, to, sender="home-send", **kw):
     """sender hands item a<i> to `to`: mover=<to> (needs names only a background agent or the owner), and the next line names it."""
-    return upd(i, sender, mover=to, next=f"{to}: do the thing", **({} if server._front_sender(sender) else {"check": CHK}), **kw)       # a next line naming another session needs a check or a wake (the done-check rule); a front agent's hand-off asks for neither and may not set them
+    return upd(i, sender, mover=to, next=f"{to}: do the thing", **({} if telling.front_sender(sender) else {"check": CHK}), **kw)       # a next line naming another session needs a check or a wake (the done-check rule); a front agent's hand-off asks for neither and may not set them
 def start(i, sender, **kw):
     """sender starts work on a<i>: the one write that shows it without closing the item (a work line in progress)."""
     return upd(i, sender, work={"text": "doing it", "state": "in progress"}, **kw)
@@ -712,16 +713,16 @@ server._COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"
 
 # 11.3 nobody is told twice in one write
 item(64, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); clear_pushes()   # the record follows the mover: an item with a record to home-peer has home-peer as its mover
-server._HO_STATE.told = set()
-server._pilot_relay("projects/nowhere", "a64", rd(64), "changed", "home-send", "home-peer")
+telling.HO_STATE.told = set()
+telling.pilot_relay("projects/nowhere", "a64", rd(64), "changed", "home-send", "home-peer")
 for _ in range(100):
     if [x for x in pushes() if x[0] == "home-peer"]: break
     time.sleep(0.05)
 time.sleep(0.3)
 check("11 told: a pilot relay's push to a session is in the write's told-set (its hand-off notice would not double it), and its outcome delivers the hand-off to that session",
-      ("a64", server._session_id("home-peer")) in server._HO_STATE.told and len([x for x in pushes() if x[0] == "home-peer" and "a64" in x[1]]) == 1 and isinstance(ho(64).get("delivered_at"), float), (server._HO_STATE.told, pushes(), ho(64)))
-server._HO_STATE.told = set(); server._writer_charge("projects/alpha", "a64", "home-send", "home-stew", "created", False)
-check("11 told: …and so is a writer charge's (the writer hears the write in its reply)", ("a64", server._session_id("home-send")) in server._HO_STATE.told, server._HO_STATE.told)
+      ("a64", server._session_id("home-peer")) in telling.HO_STATE.told and len([x for x in pushes() if x[0] == "home-peer" and "a64" in x[1]]) == 1 and isinstance(ho(64).get("delivered_at"), float), (telling.HO_STATE.told, pushes(), ho(64)))
+telling.HO_STATE.told = set(); telling.writer_charge("projects/alpha", "a64", "home-send", "home-stew", "created", False)
+check("11 told: …and so is a writer charge's (the writer hears the write in its reply)", ("a64", server._session_id("home-send")) in telling.HO_STATE.told, telling.HO_STATE.told)
 
 # 11.4 writes that are no session's: Oliver's board answer, a script, the server's own save
 item(17, needs=["decision"], ask=ASK, next=f"{OWN}: decide")
@@ -742,7 +743,7 @@ except Exception:
     refusal_ok = False
 check("11 no record: …and a script's write is not refused by the send-time guard", refusal_ok, None)
 
-# 11.5 a needs-based hand-off to a remote background agent: its only notice is _tell_needed's "now needs you" line; the puller's ack of that line delivers the hand-off
+# 11.5 a needs-based hand-off to a remote background agent: its only notice is tell_needed's "now needs you" line; the puller's ack of that line delivers the hand-off
 item(25); inbox("team-back"); upd(25, "home-send", needs=["team-back"], next="team-back: do the thing"); drain(); inbox()
 check("11 ack: (setup) a needs-based hand-off whose line waits in the inbox is queued", ho(25).get("to") == "team-back" and ho(25).get("queued", "").startswith("inbox") and ho(25).get("delivered_at") is None, ho(25))
 line_ao = [x for x in pushes_to("team-back", "a25")][-1][1]
@@ -881,11 +882,11 @@ check("14 relaunch: a mover with no registry row on this box (a remote pane) is 
 # the re-send's push result is lost (the server restarts between the save and the push's report): the record is marked queued now, so its clock starts at the inbox grace and the hand-off still times out
 item(57); hand(57, "home-peer"); drain(); d_w = ho(57)["delivered_at"]
 cli_row("home-peer", "busy", d_w + 31, started=d_w + 30)
-_tell_kept = server._tell_woken; server._tell_woken = lambda *a, **k: None          # the notice goes nowhere and no result is ever reported
+_tell_kept = telling.tell_woken; telling.tell_woken = lambda *a, **k: None          # the notice goes nowhere and no result is ever reported
 try:
     done = tick(d_w + MIN, 57)
 finally:
-    server._tell_woken = _tell_kept
+    telling.tell_woken = _tell_kept
 r = ho(57); env_z = server._handoff_env(d_w)
 check("14 relaunch: a re-send saved with no push result is marked queued now (queued = resent, queued_at = the re-send), so the record has a clock", done == ["a57"] and r.get("resent_at") == d_w + MIN and r.get("delivered_at") is None
       and r.get("queued") == "resent" and r.get("queued_at") == d_w + MIN and H.clock_start(r, env_z) == d_w + MIN + env_z.inbox_grace * 60, r)
@@ -1118,10 +1119,10 @@ item(104, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); serve
 check("15 told: …a failed one marks nothing (the notice senders retry)", not ho(104).get("delivered_at") and not ho(104).get("queued"), ho(104))
 item(105, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); server._handoff_told_text("home-peer2", f"a{105}", "delivered → x")
 check("15 told: …to someone else marks nothing", not ho(105).get("delivered_at"), ho(105))
-item(106, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); got_ab = server._router_delivered("home-peer", f"a{106} was ruled → {server._notice_link(f'a{106}')}", "delivered → x")
+item(106, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); got_ab = server._router_delivered("home-peer", f"a{106} was ruled → {telling.notice_link(f'a{106}')}", "delivered → x")
 check("15 told: the router's delivery hook marks the record and returns the outcome unchanged", got_ab == "delivered → x" and isinstance(ho(106).get("delivered_at"), float), (got_ab, ho(106)))
-item(107, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); server._push_noted("home-peer", f"[stackshot] a{107} owes its page → {server._notice_link(f'a{107}')}")
-check("15 told: the keeper batch and anchors prompt send (_push_noted) marks the record of an item the note names", isinstance(ho(107).get("delivered_at"), float), ho(107))
+item(107, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); telling.push_noted("home-peer", f"[stackshot] a{107} owes its page → {telling.notice_link(f'a{107}')}")
+check("15 told: the keeper batch and anchors prompt send (push_noted) marks the record of an item the note names", isinstance(ho(107).get("delivered_at"), float), ho(107))
 
 # 15.10 the one-off repair: records the older code left, found and ended; dry by default
 item(110, mover="team-back", handoff=rec("home-peer"))                        # open record to someone but the mover
@@ -1156,11 +1157,11 @@ item(117, mover="home-peer", handoff=rec("home-peer", taken_at=now0 - 900)); it_
 check("15 no clock: a server save that leaves the mover alone makes no record over a taken one (the same mover, no hand-off)", ho(117).get("taken_at") and "handoff_history" not in mt(117), mt(117))
 
 # 15.12 a server-made record is not marked delivered until a notice actually reaches the mover: a front agent, a held notice, or a notice that goes to another session in needs
-_real_gate = server._front_gate
+_real_gate = telling.front_gate
 parked(119, "home-peer", handoff=rec("home-docs", taken_at=now0 - 900))
-server._front_gate = lambda gid, owner, note, tag, kind: True          # the front gate holds every notice (a front agent away, a quiet hour)
+telling.front_gate = lambda gid, owner, note, tag, kind: True          # the front gate holds every notice (a front agent away, a quiet hour)
 clear_pushes(); woke = server._wake_pass(); drain()
-server._front_gate = _real_gate
+telling.front_gate = _real_gate
 check("15 undelivered: a wake whose notice the front gate holds still records the hand-off (no_clock), and nothing marks it delivered while no notice reached the mover",
       f"a{119}" in woke and ho(119).get("to") == "home-peer" and ho(119).get("no_clock") is True and not ho(119).get("delivered_at") and not pushes_to("home-peer", f"a{119}"), (woke, ho(119), pushes()))
 parked(120, "home-front", handoff=rec("home-docs", taken_at=now0 - 900))
@@ -1169,25 +1170,25 @@ check("15 undelivered: a record to a front agent is made, no_clock, and is deliv
       and bool(ho(120).get("delivered_at")) == bool(pushes_to("home-front", f"a{120}")), (woke, ho(120), pushes()))
 item(121, mover="home-peer", needs=["home-docs"], handoff=rec("home-peer", taken_at=now0 - 900))
 it_af = rd(121); it_af["metadata"]["mover"] = "team-back"; writes.save(f"a{121}", it_af)          # the server's own save moves it on; the notice goes to the session in needs, not to the mover
-clear_pushes(); server._tell_woken(f"a{121}", "home-docs", f"[stackshot] a{121} changed → {server._notice_link(f'a{121}')}"); drain()
+clear_pushes(); telling.tell_woken(f"a{121}", "home-docs", f"[stackshot] a{121} changed → {telling.notice_link(f'a{121}')}"); drain()
 check("15 undelivered: a server save that moves the item on records the hand-off to the new mover, no_clock, and a notice that goes to a session in needs other than that mover marks nothing",
       ho(121).get("to") == "team-back" and ho(121).get("from") == "stackshot" and ho(121).get("no_clock") is True and not ho(121).get("delivered_at") and [x for x in pushes() if x[0] == "home-docs"] and not pushes_to("team-back", f"a{121}"), (mt(121), pushes()))
-server._handoff_told_text("team-back", f"[stackshot] a{121} woke → {server._notice_link(f'a{121}')}", "delivered → x", link_only=True)
+server._handoff_told_text("team-back", f"[stackshot] a{121} woke → {telling.notice_link(f'a{121}')}", "delivered → x", link_only=True)
 check("15 undelivered: …and a notice that does reach the mover marks it delivered", isinstance(ho(121).get("delivered_at"), float), ho(121))
 
 # 15.13 the router push and the keeper batch mark an item delivered only on its own notice link; the message path takes a citation
 item(122, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); item(123, mover="home-peer", handoff=rec("home-peer", delivered_at=None))
-batch_text = f"- a{122} needs a look → {server._notice_link(f'a{122}')}\n- a{122} follows a{123} in the subject, which this line has no link for"
+batch_text = f"- a{122} needs a look → {telling.notice_link(f'a{122}')}\n- a{122} follows a{123} in the subject, which this line has no link for"
 server._router_delivered("home-peer", batch_text, "delivered → x")
 check("15 told: a batch notice citing another item in a subject does not mark that item delivered on the router push (only the item whose own link it carries)",
       isinstance(ho(122).get("delivered_at"), float) and not ho(123).get("delivered_at"), (ho(122), ho(123)))
 item(124, mover="home-peer", handoff=rec("home-peer", delivered_at=None))
-server._push_noted("home-peer", f"- a{122} page owed → {server._notice_link(f'a{122}')} (follows a{124})")
-check("15 told: …and on the keeper batch (_push_noted) too", not ho(124).get("delivered_at"), ho(124))
+telling.push_noted("home-peer", f"- a{122} page owed → {telling.notice_link(f'a{122}')} (follows a{124})")
+check("15 told: …and on the keeper batch (push_noted) too", not ho(124).get("delivered_at"), ho(124))
 server._handoff_told_text("home-peer", batch_text, "delivered → x")
 check("15 told: the message path stays as it was: a citation of the item is enough there", isinstance(ho(123).get("delivered_at"), float), ho(123))
 item(140, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); item(1400, mover="home-peer", handoff=rec("home-peer", delivered_at=None))
-server._handoff_told_text("home-peer", f"a{140} is cited; the notice is for a{1400} → {server._notice_link(f'a{1400}')}", "delivered → x", link_only=True)
+server._handoff_told_text("home-peer", f"a{140} is cited; the notice is for a{1400} → {telling.notice_link(f'a{1400}')}", "delivered → x", link_only=True)
 check("15 told: the link of one item is no link of an item whose id it begins (the id ends at a non-word character)", isinstance(ho(1400).get("delivered_at"), float) and not ho(140).get("delivered_at"), (ho(1400), ho(140)))
 
 # 15.14 the stored copy of an item from before an earlier change is read the way the loaded one is

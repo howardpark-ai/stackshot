@@ -58,9 +58,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._front_sender = lambda who: False
+telling.front_sender = lambda who: False
 BACK = "team-back"
 def bupd(i, **kw):
     if kw.get("wake") or kw.get("until") or kw.get("ask_by") or kw.get("wait_kind"): kw.setdefault("wait_reason", "the vendor replies only after that date")
@@ -344,17 +345,17 @@ check("5.11 ...a date there is silent, and a value that is not a date is warned 
 
 # 5.12 the keeper's relay names a date-only wait as the park it replaces, and the minute loop is woken by it
 rel12 = []
-real_charge, real_relay, real_owes = server._pilot_charge, server._pilot_relay, server._writer_owes
-server._pilot_charge = lambda project, who: ("home-stew", "name")
+real_charge, real_relay, real_owes = telling.pilot_charge, telling.pilot_relay, server._writer_owes
+telling.pilot_charge = lambda project, who: ("home-stew", "name")
 server._writer_owes = lambda: False
-server._pilot_relay = lambda project, gid, item, what, debtor, stew, role, tail="": (rel12.append(what), "told")[1]
+telling.pilot_relay = lambda project, gid, item, what, debtor, stew, role, tail="": (rel12.append(what), "told")[1]
 try:
     item(69, needs=[BACK]); server._WAKE_EVENT.clear()
     bupd(69, until=w(3))
     woke12 = server._WAKE_EVENT.is_set()
     bupd(69, clear_hold=True)
 finally:
-    server._pilot_charge, server._pilot_relay, server._writer_owes = real_charge, real_relay, real_owes
+    telling.pilot_charge, telling.pilot_relay, server._writer_owes = real_charge, real_relay, real_owes
 check("5.12 a write that sets a date-only wait tells the keeper 'put on hold', and one that clears it 'released from hold'", len(rel12) == 2 and rel12[0] == "put on hold" and rel12[1] == "released from hold", rel12)
 check("5.12 ...and the minute loop is woken by the write that parks it", woke12, None)
 

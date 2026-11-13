@@ -2,7 +2,7 @@
 `server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It records; the On agent rows and the item page show it (tests/on_agent_row_scenario.py), and nothing else reads it, so every other clock must be
 exactly as it was. Fixture items, a fake clock (the passes are given their `now`, the saves are stamped from a fake `time`), no live store, no network, no model call.
 
-  1  pure: the words for each signal (a step done or dropped, a state change, a merge, created), and what is no activity (a status line, a reply, a note, a confirm, a new or reworded step, a description edit,
+  1  pure: the words for each signal (a step done or dropped, a state change, a merge, created, a status line's new text: `update_signals`), and what is no activity (a status line that repeats its text, a reply, a note, a confirm, a new or reworded step, a description edit,
      the server's own bookkeeping); newest wins; a torn candidate is skipped; a time in the future reads as now; the record never goes back
   2  a real `writes.save`: a session's step mark and state change stamp it at the save's time; a status line, a reply and the ladder's own History line (a bookkeeping save) do not; the merge pass's save says "PR n merged"
   3  the event log: kinds, a burst is one line per kind, a bot's comment is left out, a line is never written for what names no pull request; `Hub.emit` writes it for a CI result, a comment, a review and a merge
@@ -80,13 +80,14 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.model import last_activity as LA, progress as PG, activity as ACT
 from stackshot.anchors import event_log as EL, merge_log as ML
 from stackshot.anchors.anchorhub import core as HUB
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._PUSH = [sys.executable, "-c", "pass"]
+telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the clocks are stamped from the server's own clock, which a scenario with a fake `now` must be able to set."""
     t = None
@@ -129,6 +130,30 @@ check("1 save_words: a save that is no one's write (real=False) records no step 
       W(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")]), False) == "" and W(base, after(mover="n"), False) == "" and W(base, after(merged_seen=["a/b#1"]), False) == ""
       and W(base, after(phase="waiting", waits_on="time"), False) == "state: waiting (time)", None)
 cands = [{"at": 100, "kind": "step_done", "what": "step 1 done"}, {"at": 300, "kind": "ci_result", "what": "CI failed on PR 5"}, {"at": 200, "kind": "review", "what": "review on PR 5"}]
+def TG(text, state="in progress"): return {"text": text, "state": state, "ts": 5.0}
+def stp(text, status="open", tag=None): d = step(text, status, 5); d.update({"tag": tag} if tag else {}); return d
+def US(b, a): return [(x["kind"], x["what"]) for x in LA.update_signals({"steps": b}, {"steps": a}, 100.0)]
+check("1 update_signals: a new status text on an open step is an update (a first status included, the words the text itself); the same text again, a state move with the same words, a cleared status, a done step and a step with no status are none",
+      US([stp("m: a")], [stp("m: a", tag=TG("building"))]) == [("update", "building")] and US([stp("m: a", tag=TG("building"))], [stp("m: a", tag=TG("tests pass"))]) == [("update", "tests pass")]
+      and US([stp("m: a", tag=TG("building"))], [stp("m: a", tag=TG(" BUILDING "))]) == [] and US([stp("m: a", tag=TG("building"))], [stp("m: a", tag=TG("building", "done"))]) == []
+      and US([stp("m: a", tag=TG("building"))], [stp("m: a")]) == [] and US([stp("m: a")], [stp("m: a", "done", TG("finished", "done"))]) == [] and US([stp("m: a")], [stp("m: a")]) == [], None)
+check("1 update_signals: a reworded step that keeps a status the session already had is none; a reworded step with new status text is an update; an item with no steps, or torn ones, is none",
+      US([stp("m: a", tag=TG("building"))], [stp("m: a, reworded", tag=TG("building"))]) == [] and US([stp("m: a", tag=TG("building"))], [stp("m: a, reworded", tag=TG("tests pass"))]) == [("update", "tests pass")]
+      and LA.update_signals(None, None, 1.0) == [] and LA.update_signals({}, {"steps": "x"}, 1.0) == [] and LA.update_signals({"steps": [None, 3]}, {"steps": [None, {"text": ""}]}, 1.0) == [], None)
+check("1 update_signals: a status text a session used on an earlier stage (done or open) is still a first status on a later step that already exists with none; the same step reworded is the case that does not count",
+      US([stp("m: stage 1", "done", TG("waiting for CI", "done")), stp("m: stage 2")], [stp("m: stage 1", "done", TG("waiting for CI", "done")), stp("m: stage 2", tag=TG("waiting for CI"))]) == [("update", "waiting for CI")]
+      and US([stp("m: stage 1", tag=TG("waiting for CI")), stp("m: stage 2")], [stp("m: stage 1", tag=TG("waiting for CI")), stp("m: stage 2", tag=TG("Waiting  for CI"))]) == [("update", "Waiting for CI")]
+      and US([stp("m: stage 1", "done", TG("waiting for CI", "done"))], [stp("m: stage 1", "done", TG("waiting for CI", "done")), stp("m: stage 2", tag=TG("waiting for CI"))]) == [], None)
+check("1 update_signals: input that is not an item's metadata gives none, never an error (a metadata that is a list or text, steps that are not a list, an earlier version that is not a dict)",
+      LA.update_signals([], {"steps": [stp("m: a", tag=TG("x"))]}, 1.0) == [] and LA.update_signals("x", {"steps": [stp("m: a", tag=TG("x"))]}, 1.0) == [] and LA.update_signals({"steps": [stp("m: a")]}, ["x"], 1.0) == []
+      and LA.update_signals({"steps": [stp("m: a")]}, {"steps": {"a": 1}}, 1.0) == [] and LA.update_signals(None, 5, 1.0) == [] and LA.update_signals(None, {"steps": [stp("m: a", tag=TG("first"))]}, 1.0)[0]["what"] == "first", None)
+ex_ = {"status": "open", "metadata": {"mover": "m", "state": "doing", "needs": ["m"], "phase": "alive", "steps": [stp("m: a", tag=TG("building"))]}}
+ex_b = {"status": "open", "metadata": {**ex_["metadata"], "steps": [stp("m: a", tag=TG("building"))]}}
+LA.stamp(ex_b, {"status": "open", "metadata": {**ex_["metadata"], "steps": [stp("m: a")]}}, 50.0, True, LA.update_signals({"steps": [stp("m: a")]}, ex_b["metadata"], 50.0))
+check("1 stamp with extra signals: a status update alone is stamped; one in the save of a step marked done leaves the step's words (the progress signal wins at the same time)",
+      ex_b["metadata"]["last_activity"] == {"at": 50.0, "kind": "update", "what": "building"}
+      and (lambda it: (LA.stamp(it, {"status": "open", "metadata": {**ex_["metadata"], "steps": [stp("m: a", tag=TG("old"))]}}, 60.0, True, [LA.update_signal("old", "finished", 60.0)]), it["metadata"]["last_activity"])[1])(
+          {"status": "open", "metadata": {**ex_["metadata"], "steps": [stp("m: a", "done", TG("finished", "done"))]}}) == {"at": 60.0, "kind": "step_done", "what": "step 1 done"}, ex_b["metadata"].get("last_activity"))
 check("1 record: the newest candidate wins whatever the order they come in; none gives None", LA.record({"metadata": {}}, cands) == {"at": 300.0, "kind": "ci_result", "what": "CI failed on PR 5"} and LA.record({"metadata": {}}, reversed(cands)) == {"at": 300.0, "kind": "ci_result", "what": "CI failed on PR 5"}
       and LA.record({"metadata": {}}, []) is None and LA.record(None, None) is None, None)
 held_ = {"metadata": {"last_activity": {"at": 250, "kind": "state_change", "what": "state: waiting"}}}
@@ -144,8 +169,8 @@ S_ = lambda at, what="x", kind="comment": {"at": at, "kind": kind, "what": what}
 check("1 apply: stores the record with its kind; the same again, an older one and a torn one change nothing (no write); a later one replaces it",
       LA.apply(item_, [S_(10)]) and item_["metadata"]["last_activity"] == {"at": 10.0, "kind": "comment", "what": "x"} and not LA.apply(item_, [S_(10)]) and not LA.apply(item_, [S_(5, "y")]) and not LA.apply(item_, [None, {"at": "z"}])
       and LA.apply(item_, [S_(11, "y", "review")]) and item_["metadata"]["last_activity"] == {"at": 11.0, "kind": "review", "what": "y"} and not LA.apply({"metadata": "not a dict"}, [S_(1, "z")]), item_)
-check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today (the audit line since the hourly line stamps it; update is not yet)",
-      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS - {"update"} and "audit" in LA.STAMPED, sorted(LA.KINDS))
+check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today (the audit line since the hourly line stamps it; update since a mover's new status text does)",
+      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS and "audit" in LA.STAMPED and "update" in LA.STAMPED, sorted(LA.KINDS))
 check("1 save_signals: each save signal has its kind: step_done, step_dropped, state_change, pr_merged, and created is a state_change",
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]

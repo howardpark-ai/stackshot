@@ -48,10 +48,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.service import telling
 from fastmcp.exceptions import ToolError
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._front_sender = lambda who: False
+telling.front_sender = lambda who: False
 CALLS = T / "state/calls"
 def lines(month=None):
     out = []

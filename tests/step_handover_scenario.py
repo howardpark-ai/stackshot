@@ -72,6 +72,8 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
 from stackshot.web import server; from stackshot.model import needs as _model_needs
+from stackshot.service import telling
+from stackshot.service import writes
 OWNER = server.OWNER
 IDS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
 def fixtures():
@@ -108,21 +110,21 @@ def fake_pr_merged(ref, now_, gh_st):
 server._pr_merged = fake_pr_merged
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
-_real_tell = server._tell_woken
+_real_tell = telling.tell_woken
 def _tell(gid, owner, note, tag="wake", result=None):
     th = _real_tell(gid, owner, note, tag, result)
     if th: THREADS.append(th)
     return th
-server._tell_woken = _tell
+telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): drain(); return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_for(gid, to=None): return [p for p in pushes() if p[1].startswith(f"[stackshot] {gid}") and (to is None or p[0] == U.get(to, to))]
-def mover_of(i): return server._session_label(server._holder({**rd(i), "gid": f"a{i}"}))
+def mover_of(i): return server._session_label(telling.holder({**rd(i), "gid": f"a{i}"}))
 check("the fixture: home-builder is a front agent, home-one and home-two are background sessions with a pane, home-gone has none",
-      server._front_sender(U["home-builder"]) and server._handover_kind("home-two") == HO.SESSION and server._handover_kind("home-builder") == HO.FRONT and server._handover_kind(OWNER) == HO.OWNER
+      telling.front_sender(U["home-builder"]) and server._handover_kind("home-two") == HO.SESSION and server._handover_kind("home-builder") == HO.FRONT and server._handover_kind(OWNER) == HO.OWNER
       and server._handover_kind("nobody-here") == HO.OTHER and not server._handover_down("home-two") and server._handover_down("home-gone"), (server._handover_kind("home-two"), server._handover_down("home-gone")))
 s_before = {i: raw(i) for i in IDS}
 
@@ -223,12 +225,12 @@ check("by hand: marking every open step done leaves no step to hand over: no rec
 # ---- 9. the write check: a step that delivers a pull request and has another session's step after it needs its proof
 def refused(name, fn, *want):
     try:
-        with server._session_write(): fn()
+        with writes.session_write(): fn()
         check(name, False, "no refusal")
     except server.ToolError as e: check(name, str(e).startswith("Refused:") and "\n" not in str(e) and all(w in str(e) for w in want), str(e))
 def accepts(name, fn):
     try:
-        with server._session_write(): fn()
+        with writes.session_write(): fn()
         check(name, True)
     except server.ToolError as e: check(name, False, str(e))
 def mk(nxt, **kw): return lambda: server._create(subject="[home] made", description="- Goal: a thing works. It lives here.", project="projects/alpha", owner="home-builder", mover="home-one", next=nxt, **kw)

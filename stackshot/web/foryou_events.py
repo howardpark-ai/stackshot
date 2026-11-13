@@ -75,12 +75,12 @@ def _foryou_key(gid: str, kind: str, item: dict[str, Any]) -> str:
     return f"{gid}:{kind}:{_foryou_stamp(item)}"
 
 
-_FORYOU_FAILED: set[str] = set()         # keys of closes whose row could not be written (the fallback in _tell_close_owner reads it)
+_FORYOU_FAILED: set[str] = set()         # keys of closes whose row could not be written (the fallback in tell_close_owner reads it)
 
 
 def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any, urgent: bool = False) -> dict[str, Any] | None:
     """One row for a watched item's event (None when the item is not watched or the event already has its row). A write that fails is
-    raised after a close's key is noted in _FORYOU_FAILED, so the close can still reach someone (_tell_close_owner)."""
+    raised after a close's key is noted in _FORYOU_FAILED, so the close can still reach someone (tell_close_owner)."""
     watched, _why = _foryou_watched(gid, item)
     if not watched:
         return None

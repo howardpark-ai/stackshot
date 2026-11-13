@@ -1,7 +1,7 @@
 """Scenario test for holding notices that ask nothing of a background agent
 - fixture data, no live store, no network, no server.
 
-Covers (held.py is the store and the decision; server._hold_notice and router_live._hold_kind are the two places that ask it):
+Covers (held.py is the store and the decision; telling.hold_notice and router_live._hold_kind are the two places that ask it):
   1. The store: a line is added and handed over once, oldest first, one line each, with a "+N more" tail past the cap (the rest comes at the next turn); an old line
      is dropped; the files are the state, so a reload of the module (a restart of the server) loses nothing; a session is found by its transcript id or its name.
   2. The decision (held.decide) on a table: only a known kind to a background agent, with no Oliver words and no ask; the switch [router] hold_notices turns it off.
@@ -76,7 +76,8 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import held; from stackshot.fleet import client
 from stackshot.router import router as _router; from stackshot.router import router_live as _live
 from stackshot.web import server
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+from stackshot.service import telling
+server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 KEY = "projects/alpha"
@@ -145,45 +146,45 @@ def sent_to(who, since): return reach(who, since)
 def logged(kind): return [n for n in hold_lines() if n.get("reason") == f"held: asks nothing ({kind})"]
 # closed: a plain completion of an item the builder owns, by another session
 fresh(); n0 = len(pushes()); h0 = len(hold_lines()); it = server._load("a1")
-out = server._tell_owner("a1", it, "was completed (done)", B, close=True); settle()
+out = telling.tell_owner("a1", it, "was completed (done)", B, close=True); settle()
 check("3a: a completion of the builder's item by another session is not pushed to it", reach(X, n0) == [], pushes()[n0:])
 check("…it is held, one line, for its next turn", held.count(X) == 1 and "item 1" in held.take(X), held.count(X))
 check("…and the routing log says held: asks nothing (closed), logged by the server (not delivered to anyone)", len(logged("closed")) == 1 and logged("closed")[0].get("to", "") == "" and logged("closed")[0].get("ruled_by") == routing.AUTO_RULER, hold_lines())
 fresh(); n0 = len(pushes()); it = server._load("a2")
-server._tell_owner("a2", it, "was completed (done)", B, close=True); settle()
+telling.tell_owner("a2", it, "was completed (done)", B, close=True); settle()
 check("3b negative: the same completion with Oliver's words on the item (Oliver: \"ship it\") is pushed to the builder as before", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
 fresh(); n0 = len(pushes()); it = server._load("a1")
-server._tell_owner("a1", it, "was reopened (next: more work)", B); settle()
+telling.tell_owner("a1", it, "was reopened (next: more work)", B); settle()
 check("3c negative: a reopen is pushed (it asks the builder to look at the item again)", len(reach(X, n0)) == 1 and held.count(X) == 0, pushes()[n0:])
 fresh(); n0 = len(pushes()); it = server._load("a1")
-server._tell_owner("a1", it, "now names work-osprey-docs in its needs too, handed over", B); settle()
+telling.tell_owner("a1", it, "now names work-osprey-docs in its needs too, handed over", B); settle()
 check("3d negative: a notice that is neither a completion nor a change (a naming in needs told to the owner) is pushed", len(reach(X, n0)) == 1 and held.count(X) == 0, pushes()[n0:])
 
 # changed: another session set next on an item the builder owns but does not move, and on one it moves, and on one it is named on
 def changed(gid, **after):
     it_ = server._load(gid); before = dict(it_["metadata"]); it_["metadata"] = {**before, "next": "home-beta: a new line"}
-    return server._tell_owner_change(gid, it_, before, B, False, False, False, False)
-fresh(); n0 = len(pushes()); server._OWNER_HEARD.clear()
+    return telling.tell_owner_change(gid, it_, before, B, False, False, False, False)
+fresh(); n0 = len(pushes()); telling.OWNER_HEARD.clear()
 item(3, hold=True, wake="2099-01-01", hold_set={"by": "t", "at": now0}, then=X)          # the builder holds it (it comes to the builder after the wait) but does not move it
 changed("a3"); settle()
 check("3e: another session's change to next on an item the builder owns and does not move is held (changed), not pushed", reach(X, n0) == [] and held.count(X) == 1 and len(logged("changed")) >= 1, (pushes()[n0:], held.count(X)))
 for gid, what in (("a4", "an item it moves"), ("a5", "an item it is named on in needs")):
-    fresh(); n0 = len(pushes()); server._OWNER_HEARD.clear()
+    fresh(); n0 = len(pushes()); telling.OWNER_HEARD.clear()
     changed(gid); settle()
     check(f"3f negative: the same change to {what} is pushed (it may be an instruction)", len(reach(X, n0)) == 1 and held.count(X) == 0, (gid, pushes()[n0:], held.count(X)))
-fresh(); n0 = len(pushes()); server._OWNER_HEARD.clear(); it = server._load("a1"); before = dict(it["metadata"]); it["metadata"] = {**before, "outcome": "done"}; it["status"] = "completed"
-server._tell_owner_change("a1", it, before, B, True, False, False, False); settle()
+fresh(); n0 = len(pushes()); telling.OWNER_HEARD.clear(); it = server._load("a1"); before = dict(it["metadata"]); it["metadata"] = {**before, "outcome": "done"}; it["status"] = "completed"
+telling.tell_owner_change("a1", it, before, B, True, False, False, False); settle()
 check("3g: a close by another session told through the change notice is held (closed)", reach(X, n0) == [] and held.count(X) == 1, (pushes()[n0:], held.count(X)))
-fresh(); n0 = len(pushes()); server._OWNER_HEARD.clear(); it = server._load("a1"); before = dict(it["metadata"])
-server._tell_owner_change("a1", it, before, B, False, False, False, True); settle()
+fresh(); n0 = len(pushes()); telling.OWNER_HEARD.clear(); it = server._load("a1"); before = dict(it["metadata"])
+telling.tell_owner_change("a1", it, before, B, False, False, False, True); settle()
 check("3h negative: a reopen told through the change notice is pushed", len(reach(X, n0)) == 1 and held.count(X) == 0, pushes()[n0:])
 
 # an observer's close
 fresh(); n0 = len(pushes()); it = server._load("a6")
-server._tell_observers("a6", it, "was completed (done)", B); settle()
+telling.tell_observers("a6", it, "was completed (done)", B); settle()
 check("3i: a background observer's completion notice is held (closed)", reach(X, n0) == [] and held.count(X) == 1, (pushes()[n0:], held.count(X)))
 fresh(); n0 = len(pushes()); it = server._load("a6")
-server._tell_observers("a6", it, "was reopened (next: again)", B); settle()
+telling.tell_observers("a6", it, "was reopened (next: again)", B); settle()
 check("3j negative: …and a reopen is pushed to it", len(reach(X, n0)) == 1, pushes()[n0:])
 
 # queue: a wake that leaves the item still after an open item
@@ -200,59 +201,59 @@ check("3m negative: a reminder (an active item the owner is asked to close or re
 
 # page-owed: the keeper that is a background agent
 fresh(); n0 = len(pushes()); it = server._load("a1")
-out = server._pilot_relay(KEY, "a1", it, "completed (done)", B, "work-osprey-docs", "agent"); settle()
+out = telling.pilot_relay(KEY, "a1", it, "completed (done)", B, "work-osprey-docs", "agent"); settle()
 check("3n: a page-owed notice that hands the debt to the keeper ('the page update is yours as its agent') is an ask: delivered to the background keeper, not held",
       len(reach(D, n0)) == 1 and held.count(D) == 0 and not logged("page-owed"), (out, pushes()[n0:], held.count(D)))
 fresh(); n0 = len(pushes()); it = server._load("a1")
-out = server._pilot_relay(KEY, "a1", it, "completed (done)", B, "work-osprey-docs", "name", tail="home-beta left its page update undone past 30 min, so it is yours as its keeper"); settle()
+out = telling.pilot_relay(KEY, "a1", it, "completed (done)", B, "work-osprey-docs", "name", tail="home-beta left its page update undone past 30 min, so it is yours as its keeper"); settle()
 check("3n2: …and so is the fallback after the writer left it undone ('…so it is yours as its keeper'): delivered", len(reach(D, n0)) == 1 and held.count(D) == 0, (pushes()[n0:], held.count(D)))
 fresh(); n0 = len(pushes()); it = server._load("a1")
-out = server._pilot_relay(KEY, "a1", it, "completed (done)", B, "work-osprey-docs", "agent",
+out = telling.pilot_relay(KEY, "a1", it, "completed (done)", B, "work-osprey-docs", "agent",
                           tail="no page update is owed by you (home-beta writes it); this notice is for the anchors scoped to board#1"); settle()
 check("3n3: a page-owed notice that owes the keeper nothing (the anchors tail) is held (page-owed), and the writer's reply says it reads it at its next turn",
       reach(D, n0) == [] and held.count(D) == 1 and len(logged("page-owed")) == 1 and "next turn" in out, (out, pushes()[n0:], held.count(D)))
 fresh(); n0 = len(pushes())
 rows = [(KEY, "a1", server._load("a1"), "completed (done)", B), (KEY, "a3", server._load("a3"), "changed (next)", B)]
-ids_ = server._pilot_relay_many("work-osprey-docs", rows); settle()
+ids_ = telling.pilot_relay_many("work-osprey-docs", rows); settle()
 check("3o: a batch of page debts moved to a background keeper ('…so it is yours as its keeper') is delivered, one message, nothing held", len(reach(D, n0)) == 1 and held.count(D) == 0, (pushes()[n0:], held.count(D)))
 fresh(); n0 = len(pushes())
-server._pilot_relay_many("work-osprey-docs", rows, head="[board] the page debt call could not apply an edit"); settle()
+telling.pilot_relay_many("work-osprey-docs", rows, head="[board] the page debt call could not apply an edit"); settle()
 check("3p negative: the page-debt fallback, which names its recipient, is pushed", len(reach(D, n0)) == 1 and held.count(D) == 0, (pushes()[n0:], held.count(D)))
 
 # what still wakes it
 fresh(); n0 = len(pushes()); it = server._load("a1")
-server._tell_needed("a1", it, [X], B); settle()
+telling.tell_needed("a1", it, [X], B); settle()
 check("3q negative: a naming in needs wakes the builder", len(reach(X, n0)) == 1 and held.count(X) == 0, pushes()[n0:])
-fresh(); n0 = len(pushes()); th = server._tell_woken("a1", X, "[stackshot] a1 handed to you", tag="handoff"); settle()
+fresh(); n0 = len(pushes()); th = telling.tell_woken("a1", X, "[stackshot] a1 handed to you", tag="handoff"); settle()
 check("3r negative: a hand-off notice (no hold kind) is pushed", len(reach(X, n0)) == 1 and held.count(X) == 0, pushes()[n0:])
-fresh(); n0 = len(pushes()); th = server._tell_or_hold("a1", X, "[stackshot] a1 closed by home-beta", "closed", tag="owner"); settle()
+fresh(); n0 = len(pushes()); th = telling.tell_or_hold("a1", X, "[stackshot] a1 closed by home-beta", "closed", tag="owner"); settle()
 check("3s: the one decision point holds a kind the sender names (tag owner, hold closed) and returns no thread", th is None and reach(X, n0) == [] and held.count(X) == 1)
-fresh(); n0 = len(pushes()); th = server._tell_or_hold("a1", X, "[stackshot] a1 closed by home-beta [for Oliver] look", "closed", tag="owner"); settle()
+fresh(); n0 = len(pushes()); th = telling.tell_or_hold("a1", X, "[stackshot] a1 closed by home-beta [for Oliver] look", "closed", tag="owner"); settle()
 check("3t negative: …unless the text carries [for Oliver]", len(reach(X, n0)) == 1 and held.count(X) == 0)
-fresh(); n0 = len(pushes()); th = server._tell_or_hold("a1", X, "[stackshot] a1 closed", "not-a-kind", tag="owner"); settle()
+fresh(); n0 = len(pushes()); th = telling.tell_or_hold("a1", X, "[stackshot] a1 closed", "not-a-kind", tag="owner"); settle()
 check("3u negative: …or the kind is not one it knows (unsure delivers)", len(reach(X, n0)) == 1 and held.count(X) == 0)
 _cfg.CFG["router"]["hold_notices"] = False
-fresh(); n0 = len(pushes()); it = server._load("a1"); server._tell_owner("a1", it, "was completed (done)", B, close=True); settle()
+fresh(); n0 = len(pushes()); it = server._load("a1"); telling.tell_owner("a1", it, "was completed (done)", B, close=True); settle()
 _cfg.CFG["router"].pop("hold_notices")
 check("3v: with [router] hold_notices = false the completion is pushed as before", len(reach(X, n0)) == 1 and held.count(X) == 0, pushes()[n0:])
 
 # a close whose outcome is not done tells a builder to stop: delivered
 for what_ in ("was completed (dropped)", "was completed (superseded by board#2)"):
     fresh(); n0 = len(pushes()); it = server._load("a1")
-    server._tell_owner("a1", it, what_, B, close=True); settle()
+    telling.tell_owner("a1", it, what_, B, close=True); settle()
     check(f"3w negative: {what_} is pushed to the builder that owns the item (it must stop), not held", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
 fresh(); n0 = len(pushes()); it = server._load("a6")
-server._tell_observers("a6", it, "was completed (dropped)", B); settle()
+telling.tell_observers("a6", it, "was completed (dropped)", B); settle()
 check("3x negative: …and a dropped item is pushed to a background observer too", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
-fresh(); n0 = len(pushes()); server._OWNER_HEARD.clear(); it = server._load("a1"); before = dict(it["metadata"]); it["metadata"] = {**before, "outcome": "dropped"}; it["status"] = "completed"
-server._tell_owner_change("a1", it, before, B, True, False, False, False); settle()
+fresh(); n0 = len(pushes()); telling.OWNER_HEARD.clear(); it = server._load("a1"); before = dict(it["metadata"]); it["metadata"] = {**before, "outcome": "dropped"}; it["status"] = "completed"
+telling.tell_owner_change("a1", it, before, B, True, False, False, False); settle()
 check("3y negative: a drop told through the change notice is pushed", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
 
 # the rollout gate: a session whose hook has not fetched held lines (an old checkout, a cloud session, no turn since the update) gets everything as today
 os.unlink(held.clients_file())
 check("3z: can_fetch is false for a session never seen asking, and for a cloud session id", not held.can_fetch(X) and not held.can_fetch("work-osprey-x") and not held.can_fetch("cse_0123456789abcdef"))
 fresh(); n0 = len(pushes()); it = server._load("a1")
-server._tell_owner("a1", it, "was completed (done)", B, close=True); settle()
+telling.tell_owner("a1", it, "was completed (done)", B, close=True); settle()
 check("3z1 gate: a completion to a background agent whose hook does not fetch held lines is pushed as today, nothing is stranded", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
 fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
 check("3z2 gate: an fyi to it is delivered as an ordinary message", out.startswith("delivered") and len(reach(X, n0)) == 1 and held.count(X) == 0, out)
@@ -264,14 +265,14 @@ gate_open()
 
 # ---- 4. a FRONT agent is unchanged
 fresh(); n0 = len(pushes()); it = server._load("a7")
-out = server._tell_owner("a7", it, "was completed (done)", B, close=True); settle()
+out = telling.tell_owner("a7", it, "was completed (done)", B, close=True); settle()
 check("4a: a completion of a front agent's item tells nobody and holds nothing, as before", reach(A, n0) == [] and "front agent" in out and held.count(A) == 0, out)
 check("…(and the front agent's id has no held line)", held.count(A, "work-osprey-main") == 0)
 fresh(); n0 = len(pushes()); it = server._load("a7")
 for kind in ("closed", "changed", "queue", "page-owed", "fyi"):
-    check(f"4b: _hold_notice never holds a notice to a front agent (kind {kind})", server._hold_notice(A, "text", kind) is False)
-check("4c: …and holds nothing for a session that no page lists", server._hold_notice(B, "text", "closed") is False and held.count(B) == 0)
-check("4d: a front agent that keeps the page gets no page-owed notice from _pilot_relay, as before (and nothing is held)", server._pilot_relay(KEY, "a7", it, "completed (done)", B, "work-osprey-main", "name") == "" and held.count(A) == 0)
+    check(f"4b: hold_notice never holds a notice to a front agent (kind {kind})", telling.hold_notice(A, "text", kind) is False)
+check("4c: …and holds nothing for a session that no page lists", telling.hold_notice(B, "text", "closed") is False and held.count(B) == 0)
+check("4d: a front agent that keeps the page gets no page-owed notice from pilot_relay, as before (and nothing is held)", telling.pilot_relay(KEY, "a7", it, "completed (done)", B, "work-osprey-main", "name") == "" and held.count(A) == 0)
 
 # ---- 5. the router
 def notice(nid, text, hold="", **kw):
@@ -360,7 +361,7 @@ check("6l: a message to a project without fyi carries no mark", "hold" not in nn
 fresh()
 held.add(held.key_of(X), "closed", "board#1 closed by home-beta", sender="home-beta", now=time.time() - 120)
 held.add(held.key_of(X), "page-owed", "board#3 page update owed", sender="home-beta", now=time.time() - 60)
-n0 = len(pushes()); server._tell_woken("a1", X, "[stackshot] a1 is yours now", tag="handoff"); settle()
+n0 = len(pushes()); telling.tell_woken("a1", X, "[stackshot] a1 is yours now", tag="handoff"); settle()
 check("7a: a waking notice is pushed as now and takes none of the held lines with it (they wait for the turn start)", len(reach(X, n0)) == 1 and "held for you" not in json.dumps(pushes()[n0:]) and held.count(X) == 2)
 st, body_ = server._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-x"})
 txt = body_.get("text", ""); ids7 = body_.get("ids", [])

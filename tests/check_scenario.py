@@ -115,12 +115,13 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.service import writes
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)

@@ -28,9 +28,11 @@ network, no model call, no message sent.
   21 an empty or partial fleet index reads the mover unknown, never idle; the lookups by a session id (a transcript id, a neutral heartbeat id) beside the lookups by name
   22 a role map that cannot be read reads the mover as front (never as a builder) for the hourly line
   23 a pull request number written alone is the item's own repository's: two items anchored to the same number in two repositories are told apart by the URL or `owner/repo#n`
+  24 a mover's own status write with new text is the item's hourly update (kind `update`, the text its words, the row reads it), as the audit's line is: the same text again, a write by anyone but the mover and a cleared status
+     are not; the audit's own line still stamps beside it and the newer of the two is the record
   20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle, unless the fleet heartbeat holds the session running elsewhere: unknown) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
 
-  24 a subagent flagged finished still runs while it is parked on a task of its own (started by a result that opens with the start text; a Monitor ends with its lifetime; an end notice that only the session's transcript holds ends it) or resumed (`toolUseResult` of the session's transcript); one with no flag whose last row is an interruption is dead unless resumed; the values of the windows, slacks and bounds are pinned
+  25 a subagent flagged finished still runs while it is parked on a task of its own (started by a result that opens with the start text; a Monitor ends with its lifetime; an end notice that only the session's transcript holds ends it) or resumed (`toolUseResult` of the session's transcript); one with no flag whose last row is an interruption is dead unless resumed; the values of the windows, slacks and bounds are pinned
 
     tests/run-suite audit_hourly       -> exit 0 / 1"""
 import io, json, os, re, sys, pathlib, time, logging
@@ -72,13 +74,14 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.audit import hourly as HR, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
 from stackshot.model import last_activity as LA, activity as ACT
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._PUSH = [sys.executable, "-c", "pass"]
+telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the pass is given its `now`, and the saves stamp from the server's own clock."""
     t = None
@@ -89,7 +92,7 @@ server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
-server._tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
+telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 panes = {}                                                         # mover -> the pane's registry status; "boom" = unreadable
 def fake_status(who, idx=None):
@@ -273,7 +276,7 @@ check("5 the skipped items are byte for byte as they were", rd(1) == d1)
 clean_pane(); panes["home-front"] = "idle"
 for p in (T / "store/a").glob("*.json"): p.unlink()
 put(1, mover="home-front", act=90)
-check("7 the test's front agent is one for the server's own answer", server._front_keeper("home-front", "projects/alpha")[0] is True and server._front_keeper("team-back", "projects/alpha")[0] is False)
+check("7 the test's front agent is one for the server's own answer", telling.front_keeper("home-front", "projects/alpha")[0] is True and telling.front_keeper("team-back", "projects/alpha")[0] is False)
 got7 = tick()
 check("7 a front agent's item due gets its line like any other (a pane that is not in a turn: idle)", got7 == ["a1"] and lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified", lines(1))
 check("7 …and nothing is sent to it or to anyone: no message, no notice, no ladder entry", sent == [] and server._stall_load().get("a1") is None, (sent, server._stall_load()))
@@ -712,7 +715,7 @@ check("18 a clock stepped back never moves the record to an earlier time: the st
 from stackshot.audit import hand_idle as HI
 def handed_on(now_):
     items_ = {f"a{i}": rd(i) for i in range(1, 12) if (T / f"store/a/{i}.json").exists()}
-    return [g for g, _r in HI.due_all(items_, now_, lambda who, project: server._front_keeper(who, project)[0])]
+    return [g for g, _r in HI.due_all(items_, now_, lambda who, project: telling.front_keeper(who, project)[0])]
 clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 for i in (1, 2, 3): put(i, act=90)
@@ -919,10 +922,10 @@ def two_items_busy():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     put(1, mover="team-back", act=90); put(2, mover="team-back", act=90)
 try:
-    sane = (server._front_keeper("team-back", "projects/alpha"), server._front_keeper("team-back", "projects/alpha", unread_front=True), server._front_keeper("home-front", "projects/alpha", unread_front=True)[0])
+    sane = (telling.front_keeper("team-back", "projects/alpha"), telling.front_keeper("team-back", "projects/alpha", unread_front=True), telling.front_keeper("home-front", "projects/alpha", unread_front=True)[0])
     two_items_busy(); tick(); k_read = [lines(i)[0]["kind"] for i in (1, 2)]
     reg_path.write_text("{torn", encoding="utf-8")
-    torn = (server._front_keeper("team-back", "projects/alpha"), server._front_keeper("team-back", "projects/alpha", unread_front=True))
+    torn = (telling.front_keeper("team-back", "projects/alpha"), telling.front_keeper("team-back", "projects/alpha", unread_front=True))
     env_t = server._silence_env()
     torn_env = (env_t.is_front("team-back", "projects/alpha"), env_t.is_front_or_unread("team-back", "projects/alpha"), AR.Env(roles={}).is_front_or_unread("team-back", "projects/alpha"))
     two_items_busy(); tick(); k_torn = [lines(i)[0]["kind"] for i in (1, 2)]; ids_torn = [HR.idle_marked(mt(i)) for i in (1, 2)]
@@ -963,7 +966,7 @@ tick(); k_url = [lines(i)[0]["kind"] for i in (1, 2)]
 check("23 …through the audit: a subagent whose brief says `PR 5` while two of the mover's items are anchored to pull request 5 of two repositories leaves both UNKNOWN (not idle, not handed on); with the URL of one of them only that item is verified and the other reads idle",
       k_amb == ["audit_unknown", "audit_unknown"] and k_url == ["audit", "audit_idle"], (k_amb, k_url))
 
-# ================================================================ 24. a subagent flagged finished that is only parked or resumed still runs
+# ================================================================ 25. a subagent flagged finished that is only parked or resumed still runs
 # Claude Code writes `finished: true` into a subagent's meta at the end of every turn, also one that ends waiting for a background task of its own; a resume or the task's notice drops it again.
 SID3 = str(_uuid.UUID("00000000-0000-4000-8000-0000000000cc"))
 sub3 = proj / SID3 / "subagents"; sub3.mkdir(parents=True)
@@ -1000,16 +1003,16 @@ fin("old1", [BGR("bg0007")], age=int(TIE.PARKED_S) + 60)                        
 fin("old2", [BGR("bg0008")], age=int(TIE.PARKED_S) - 2)
 fin("capped2", [BGR("bg0009")], age=int(TIE.QUIET_CAP_S) + 60)
 fin("live1", [BGR("bg0010")], finished=None)                                                   # no flag: running as ever
-got24 = run3()
-check("24 a subagent flagged finished whose own transcript holds a background Bash (started so, or moved there after its timeout) or a Monitor with no ending notice, written within 90 minutes, is running, in the shape of an unfinished one (no `quiet`)",
-      all(k in got24 for k in ("pend1", "pend2", "pend3", "old2")) and got24["pend1"] == {"id": "pend1", "description": "Review pend1", "brief": "Review the change of pend1", "text": "Review pend1\nReview the change of pend1", "at": now0 - 60}
-      and all("quiet" not in got24[k] for k in ("pend1", "pend2", "pend3", "old2")), sorted(got24))
-check("24 …a Monitor's per-event notices end nothing (pend3 has two and still waits), and one of two tasks ended leaves the subagent parked on the other",
-      "pend3" in got24 and "half1" in got24, sorted(got24))
-check("24 …a task ended by a notice with a status (completed or failed), by a Monitor's end notice or by a TaskStop is no longer pending: the subagent is not running", not any(k in got24 for k in ("ended1", "ended2", "ended3", "ended4")), sorted(got24))
-check("24 …finished with nothing pending (and no resume): not running, as before", "none1" not in got24, sorted(got24))
-check("24 …a pending task whose subagent wrote nothing for more than 90 minutes is not running (90 minutes less two seconds is), and one past the 6-hour cap is dropped as ever; a subagent with no flag is as before", "old1" not in got24 and "old2" in got24 and "capped2" not in got24 and "live1" in got24, sorted(got24))
-check("24 pending_tasks names the ids that wait", TIE.pending_tasks(sub3 / "agent-half1.jsonl") == {"bg0006"} and TIE.pending_tasks(sub3 / "agent-pend3.jsonl") == {"mon001"} and TIE.pending_tasks(sub3 / "agent-ended4.jsonl") == set()
+got25 = run3()
+check("25 a subagent flagged finished whose own transcript holds a background Bash (started so, or moved there after its timeout) or a Monitor with no ending notice, written within 90 minutes, is running, in the shape of an unfinished one (no `quiet`)",
+      all(k in got25 for k in ("pend1", "pend2", "pend3", "old2")) and got25["pend1"] == {"id": "pend1", "description": "Review pend1", "brief": "Review the change of pend1", "text": "Review pend1\nReview the change of pend1", "at": now0 - 60}
+      and all("quiet" not in got25[k] for k in ("pend1", "pend2", "pend3", "old2")), sorted(got25))
+check("25 …a Monitor's per-event notices end nothing (pend3 has two and still waits), and one of two tasks ended leaves the subagent parked on the other",
+      "pend3" in got25 and "half1" in got25, sorted(got25))
+check("25 …a task ended by a notice with a status (completed or failed), by a Monitor's end notice or by a TaskStop is no longer pending: the subagent is not running", not any(k in got25 for k in ("ended1", "ended2", "ended3", "ended4")), sorted(got25))
+check("25 …finished with nothing pending (and no resume): not running, as before", "none1" not in got25, sorted(got25))
+check("25 …a pending task whose subagent wrote nothing for more than 90 minutes is not running (90 minutes less two seconds is), and one past the 6-hour cap is dropped as ever; a subagent with no flag is as before", "old1" not in got25 and "old2" in got25 and "capped2" not in got25 and "live1" in got25, sorted(got25))
+check("25 pending_tasks names the ids that wait", TIE.pending_tasks(sub3 / "agent-half1.jsonl") == {"bg0006"} and TIE.pending_tasks(sub3 / "agent-pend3.jsonl") == {"mon001"} and TIE.pending_tasks(sub3 / "agent-ended4.jsonl") == set()
       and TIE.pending_tasks(sub3 / "agent-none1.jsonl") == set() and TIE.pending_tasks(sub3 / "agent-missing.jsonl") == set(), None)
 # the parent's resume
 for f_ in sub3.glob("agent-*"): f_.unlink()
@@ -1021,21 +1024,21 @@ parent({"type": "assistant", "message": {"role": "assistant", "content": "x"}},
        resume_rec("res4", now0 - 300, typ="assistant"),                                     # an assistant message that quotes the words resumes nothing
        resume_rec("res7", now0 - 300, both=True),
        resume_rec("other", now0 - 300))                                                     # another subagent's
-got24b = run3()
-check("24 a subagent flagged finished that the session's transcript resumed (`resumedAgentId`, or `revivedAgentId`) after its meta's last write is running; one resumed before that write, one the session never resumed, one only an assistant record quotes, and a resume of another subagent are not",
-      {"res1", "res2", "res7"} <= set(got24b) and not ({"res3", "res4", "res5", "res6"} & set(got24b)), sorted(got24b))
-check("24 …the `quiet` rule is unchanged: a resumed one whose transcript is 100 minutes old is running but quiet, a fresh one is not", got24b["res7"].get("quiet") is True and "quiet" not in got24b["res1"], {k: v.get("quiet") for k, v in got24b.items()})
-check("24 resumes: the newest resume time of each subagent, as epoch seconds", abs(TIE.resumes(par3)["res1"] - (now0 - 300 + 0.25)) < 0.01 and "res4" not in TIE.resumes(par3) and TIE.resumes(par3 / "missing") == {}, TIE.resumes(par3))
-slack24 = {}
+got25b = run3()
+check("25 a subagent flagged finished that the session's transcript resumed (`resumedAgentId`, or `revivedAgentId`) after its meta's last write is running; one resumed before that write, one the session never resumed, one only an assistant record quotes, and a resume of another subagent are not",
+      {"res1", "res2", "res7"} <= set(got25b) and not ({"res3", "res4", "res5", "res6"} & set(got25b)), sorted(got25b))
+check("25 …the `quiet` rule is unchanged: a resumed one whose transcript is 100 minutes old is running but quiet, a fresh one is not", got25b["res7"].get("quiet") is True and "quiet" not in got25b["res1"], {k: v.get("quiet") for k, v in got25b.items()})
+check("25 resumes: the newest resume time of each subagent, as epoch seconds", abs(TIE.resumes(par3)["res1"] - (now0 - 300 + 0.25)) < 0.01 and "res4" not in TIE.resumes(par3) and TIE.resumes(par3 / "missing") == {}, TIE.resumes(par3))
+slack25 = {}
 for rs_, sec_ in (("res1", 599), ("res2", 600), ("res3", 601), ("res4", 602), ("res5", 603)):          # the meta was written 600 s ago; a record's time carries a quarter of a second
     parent(resume_rec(rs_, now0 - sec_))
-    slack24[sec_] = rs_ in run3()
-check("24 …a resume dated as the meta's write or within a second before it counts (a clock's grain), one dated more than a second before it does not (the slack is one second, no more, no less)",
-      slack24 == {599: True, 600: True, 601: True, 602: False, 603: False}, slack24)
+    slack25[sec_] = rs_ in run3()
+check("25 …a resume dated as the meta's write or within a second before it counts (a clock's grain), one dated more than a second before it does not (the slack is one second, no more, no less)",
+      slack25 == {599: True, 600: True, 601: True, 602: False, 603: False}, slack25)
 parent(resume_rec("res1", now0 - 300), filler=64 * 1024); saved_tail = TIE.TAIL_BYTES; TIE.TAIL_BYTES = 4096
-try: got24d = run3()
+try: got25d = run3()
 finally: TIE.TAIL_BYTES = saved_tail
-check("24 …only the tail of the session's transcript is read: a resume further back than TAIL_BYTES from its end is not seen", "res1" not in got24d, sorted(got24d))
+check("25 …only the tail of the session's transcript is read: a resume further back than TAIL_BYTES from its end is not seen", "res1" not in got25d, sorted(got25d))
 # the session's transcript is read only when it is needed, once, and never raises
 reads = []; real_rp = TIE.read_parent
 TIE.read_parent = lambda tr: (reads.append(tr), real_rp(tr))[1]
@@ -1044,7 +1047,7 @@ def n_reads(*subs):
     for s_ in subs: s_()
     reads.clear(); run3(); return len(reads)
 try:
-    n24 = (n_reads(), n_reads(lambda: fin("u1", finished=None), lambda: fin("u2", [BGR("bg0021")], finished=None)),
+    n25 = (n_reads(), n_reads(lambda: fin("u1", finished=None), lambda: fin("u2", [BGR("bg0021")], finished=None)),
            n_reads(lambda: fin("p1", [BGR("bg0020")]), lambda: fin("p2", [MON("mon020")])),
            n_reads(lambda: fin("f1"), lambda: fin("f2"), lambda: fin("f3")),
            n_reads(lambda: fin("p1", [BGR("bg0020")]), lambda: fin("f1"), lambda: fin("u1", finished=None)),
@@ -1054,32 +1057,32 @@ try:
     for f_ in sub3.glob("agent-*"): f_.unlink()
     fin("p1", [BGR("bg0020")]); fin("p2", [MON("mon020")]); fin("f1"); fin("f2"); fin("f3")
 finally: TIE.read_parent = real_rp
-check("24 the session's transcript is read once for a call (never once for each subagent), and only when a finished subagent (parked or not) or an interrupted one needs it: not for no subagent, for subagents with no flag, or for ones past the 6-hour cap",
-      n24 == (0, 0, 1, 1, 1, 0, 1, 1), n24)
+check("25 the session's transcript is read once for a call (never once for each subagent), and only when a finished subagent (parked or not) or an interrupted one needs it: not for no subagent, for subagents with no flag, or for ones past the 6-hour cap",
+      n25 == (0, 0, 1, 1, 1, 0, 1, 1), n25)
 par3.unlink(); par3.mkdir()                                                                  # a transcript that cannot be read as a file
 try:
-    got24e = run3()
-    check("24 a session transcript that cannot be read: a finished subagent with nothing pending is not running, one parked on a task still is, and nothing raises (unreadable is no reason to list a subagent unreadable)",
-          sorted(got24e) == ["p1", "p2"] and not any(x.get("unreadable") for x in got24e.values()), sorted(got24e))
+    got25e = run3()
+    check("25 a session transcript that cannot be read: a finished subagent with nothing pending is not running, one parked on a task still is, and nothing raises (unreadable is no reason to list a subagent unreadable)",
+          sorted(got25e) == ["p1", "p2"] and not any(x.get("unreadable") for x in got25e.values()), sorted(got25e))
 finally: par3.rmdir()
 par3.write_text("{not json\n" + '{"type":"user","timestamp":"nope","x":"resumedAgentId\\":\\"f1"}\n' + "\x00\xff" + "\n")
-check("24 …nor a transcript of torn lines, a resume with no readable time, or bytes that are no text", sorted(run3()) == ["p1", "p2"], sorted(run3()))
-check("24 …a finished subagent whose meta cannot be read is still listed running with no words (unreadable, as before)", (lambda: (fin("bad1"), (sub3 / "agent-bad1.meta.json").write_text("{not json"), "bad1" in run3() and run3()["bad1"].get("unreadable") is True)[2])(), None)
+check("25 …nor a transcript of torn lines, a resume with no readable time, or bytes that are no text", sorted(run3()) == ["p1", "p2"], sorted(run3()))
+check("25 …a finished subagent whose meta cannot be read is still listed running with no words (unreadable, as before)", (lambda: (fin("bad1"), (sub3 / "agent-bad1.meta.json").write_text("{not json"), "bad1" in run3() and run3()["bad1"].get("unreadable") is True)[2])(), None)
 parent({"type": "assistant", "message": {"role": "assistant", "content": "x"}})
 # a parked subagent is tied like any other
 fin("tie1", [BGR("bg0030")], desc=f"Review {BID(1)}", brief="nothing")
-check("24 a parked subagent ties to an item by its description as any other", TIE.tied(list(run3().values()), BID(1)) and not TIE.tied([run3()["tie1"]], BID(2)), None)
+check("25 a parked subagent ties to an item by its description as any other", TIE.tied(list(run3().values()), BID(1)) and not TIE.tied([run3()["tie1"]], BID(2)), None)
 # ---- the second round: what the session's transcript says, a start that is only quoted, a Monitor's lifetime, a subagent that was interrupted, a resume that is only quoted
 ASSIST = {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}}
 def wipe3():
     for f_ in sub3.glob("agent-*"): f_.unlink()
-check("24 the values the rules rest on are pinned (a window, a cap, a slack or a bound changed in the code is seen here)",
+check("25 the values the rules rest on are pinned (a window, a cap, a slack or a bound changed in the code is seen here)",
       (TIE.RUNNING_S, TIE.QUIET_CAP_S, TIE.PARKED_S, TIE.SKEW_S, TIE.RESUME_SLACK_S, TIE.TAIL_BYTES, TIE.TASK_TAIL_BYTES, TIE.LAST_ROW_BYTES)
       == (5400.0, 21600.0, 5400.0, 300.0, 1.0, 8 * 1024 * 1024, 32 * 1024 * 1024, 16 * 1024), (TIE.RUNNING_S, TIE.QUIET_CAP_S, TIE.PARKED_S, TIE.SKEW_S, TIE.RESUME_SLACK_S, TIE.TAIL_BYTES, TIE.TASK_TAIL_BYTES, TIE.LAST_ROW_BYTES))
 wipe3(); parent(ASSIST)
 fin("w89", [BGR("bgw089")], age=89 * 60); fin("w91", [BGR("bgw091")], age=91 * 60)
 got = run3()
-check("24 …the parked window is 90 minutes: a task pending in a transcript written 89 minutes ago is running, one 91 minutes ago is not", "w89" in got and "w91" not in got, sorted(got))
+check("25 …the parked window is 90 minutes: a task pending in a transcript written 89 minutes ago is running, one 91 minutes ago is not", "w89" in got and "w91" not in got, sorted(got))
 
 # 1. the end notice that reached only the session's transcript
 wipe3()
@@ -1104,23 +1107,23 @@ parent(ASSIST,
        {"type": "api-request-blob", "message": {"content": [{"type": "text", "text": "<task-notification><task-id>pn0011</task-id><status>completed</status></task-notification>"}]}},      # n11: a request's copy: nothing
        PQ("pn0013", op="remove"))                                                                      # n13: a removed notice is one too
 got = run3()
-check("24 a finished subagent's task whose end notice only the SESSION's transcript holds (a queue record, a user message, an attachment, a Monitor's expiry or end event) is ended: the subagent is not running",
+check("25 a finished subagent's task whose end notice only the SESSION's transcript holds (a queue record, a user message, an attachment, a Monitor's expiry or end event) is ended: the subagent is not running",
       not any(k in got for k in ("n1", "n2", "n3", "n4", "n8", "n13")), sorted(got))
-check("24 …a notice of another task, a Monitor's per-event notice, a task of two of which one ended, and a notice quoted in a tool result, an assistant record or a request's copy of the conversation end nothing: still running",
+check("25 …a notice of another task, a Monitor's per-event notice, a task of two of which one ended, and a notice quoted in a tool result, an assistant record or a request's copy of the conversation end nothing: still running",
       {"n5", "n6", "n7", "n9", "n10", "n11"} <= set(got), sorted(got))
-check("24 read_parent: the ids whose end the session was told, and the resumes", TIE.read_parent(par3)[1] == {"pn0001", "pn0002", "pn0003", "pn0004", "pn9999", "pn0006", "pn0008", "pn0013"} and TIE.read_parent(par3 / "missing") == ({}, set()), TIE.read_parent(par3)[1])
+check("25 read_parent: the ids whose end the session was told, and the resumes", TIE.read_parent(par3)[1] == {"pn0001", "pn0002", "pn0003", "pn0004", "pn9999", "pn0006", "pn0008", "pn0013"} and TIE.read_parent(par3 / "missing") == ({}, set()), TIE.read_parent(par3)[1])
 parent(PQ("pn0012"), filler=64 * 1024); fin("n12", [BGR("pn0012")]); saved_tail = TIE.TAIL_BYTES
 n12_all = "n12" in run3(); TIE.TAIL_BYTES = 4096
 try: n12_cut = "n12" in run3()
 finally: TIE.TAIL_BYTES = saved_tail
-check("24 …only the last TAIL_BYTES of the session's transcript are read for a notice too: one further back is not seen", not n12_all and n12_cut, (n12_all, n12_cut))
+check("25 …only the last TAIL_BYTES of the session's transcript are read for a notice too: one further back is not seen", not n12_all and n12_cut, (n12_all, n12_cut))
 par3.unlink(); par3.mkdir()
 try: n_unread = {k for k in run3() if k.startswith("n")}
 finally: par3.rmdir()
-check("24 …a session transcript that cannot be read ends nothing (every task stays pending), and raises nothing", len(n_unread) == 13, sorted(n_unread))
+check("25 …a session transcript that cannot be read ends nothing (every task stays pending), and raises nothing", len(n_unread) == 13, sorted(n_unread))
 wipe3(); parent(ASSIST)
 fin("sub1", [BGR("bgs001")]); (sub3 / "agent-sub1.jsonl").write_text((sub3 / "agent-sub1.jsonl").read_text() + json.dumps(PQ("bgs001")) + "\n")
-check("24 a notice in the subagent's own transcript (a queue record too) still ends its task", "sub1" not in run3(), None)
+check("25 a notice in the subagent's own transcript (a queue record too) still ends its task", "sub1" not in run3(), None)
 
 # 2. a start that is only quoted
 wipe3(); parent(ASSIST)
@@ -1134,13 +1137,13 @@ fin("q6", [_res([{"type": "text", "text": "Command running in background with ID
 fin("q7", [_res("see Command was moved to the background (ID: qq0007) in the log")])
 fin("q8", [{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "echo Command running in background with ID: qq0008"}}]}}])
 got = run3()
-check("24 a task starts only with a tool result that OPENS with the start text (running in the background, moved there, moved there after its timeout, a Monitor started): text that is only quoted in a result, a message, a request or a command starts none",
+check("25 a task starts only with a tool result that OPENS with the start text (running in the background, moved there, moved there after its timeout, a Monitor started): text that is only quoted in a result, a message, a request or a command starts none",
       {"q5", "q6"} <= set(got) and not any(k in got for k in ("q1", "q2", "q3", "q4", "q7", "q8")), sorted(got))
-check("24 pending_tasks reads the real start forms", TIE.pending_tasks(sub3 / "agent-q5.jsonl") == {"qq0005"} and TIE.pending_tasks(sub3 / "agent-q6.jsonl") == {"qq0006"} and TIE.pending_tasks(sub3 / "agent-q1.jsonl") == set(), None)
+check("25 pending_tasks reads the real start forms", TIE.pending_tasks(sub3 / "agent-q5.jsonl") == {"qq0005"} and TIE.pending_tasks(sub3 / "agent-q6.jsonl") == {"qq0006"} and TIE.pending_tasks(sub3 / "agent-q1.jsonl") == set(), None)
 saved_tt = TIE.TASK_TAIL_BYTES; fin("tb1", [BGR("tb0001"), {"type": "assistant", "x": "y" * 70000}]); tb_all = "tb1" in run3(); TIE.TASK_TAIL_BYTES = 4096
 try: tb_cut = "tb1" in run3()
 finally: TIE.TASK_TAIL_BYTES = saved_tt
-check("24 …only the last TASK_TAIL_BYTES of the subagent's transcript are read: a start further back is not seen", tb_all and not tb_cut, (tb_all, tb_cut))
+check("25 …only the last TASK_TAIL_BYTES of the subagent's transcript are read: a start further back is not seen", tb_all and not tb_cut, (tb_all, tb_cut))
 
 # 3. a Monitor's lifetime
 wipe3(); parent(ASSIST)
@@ -1168,15 +1171,15 @@ mon_case("m20", "expires in 15m 30s unless the source ends first", 915, 900)    
 mon_case("m21", "expires in 45s unless the source ends first", 30)                         # alive
 mon_case("m19", "expires in 10m unless the source ends first", 80 * 60, 79 * 60, finished=None)      # no flag: this reads the finished ones only
 got = run3()
-check("24 a Monitor whose start plus its lifetime is past, with no write since, has ended: a 10-minute Monitor read 80 minutes later is not running, a 30-minute one 40 minutes later neither, one still within its lifetime is",
+check("25 a Monitor whose start plus its lifetime is past, with no write since, has ended: a 10-minute Monitor read 80 minutes later is not running, a 30-minute one 40 minutes later neither, one still within its lifetime is",
       "m1" not in got and "m3" not in got and "m2" in got, sorted(got))
-check("24 …the slack is a second: a Monitor whose end is less than a second ahead of the clock counts, one past it does not; a write after its end (more than the slack) leaves the window alone to bound it, one within the slack does not",
+check("25 …the slack is a second: a Monitor whose end is less than a second ahead of the clock counts, one past it does not; a write after its end (more than the slack) leaves the window alone to bound it, one within the slack does not",
       "m4" in got and "m5" not in got and "m6" in got and "m7" not in got and "m8" in got, sorted(got))
-check("24 …a Monitor with no lifetime, a start record with no time and a background Bash have none to end: the 90-minute window alone bounds them", {"m9", "m10", "m11"} <= set(got), sorted(got))
-check("24 …the lifetime is read in every wording the start text takes (`15m 30s`, `45s`, `1h`, `1h 5m`, `timeout 900000ms`)",
+check("25 …a Monitor with no lifetime, a start record with no time and a background Bash have none to end: the 90-minute window alone bounds them", {"m9", "m10", "m11"} <= set(got), sorted(got))
+check("25 …the lifetime is read in every wording the start text takes (`15m 30s`, `45s`, `1h`, `1h 5m`, `timeout 900000ms`)",
       "m12" not in got and "m13" in got and "m14" not in got and "m15" in got and "m20" in got and "m21" in got and "m16" not in got and "m17" not in got and "m18" in got, sorted(got))
-check("24 …a subagent with no flag is untouched by a Monitor's lifetime", "m19" in got, sorted(got))
-check("24 pending_tasks: the lifetime applies only when it is given the clock", TIE.pending_tasks(sub3 / "agent-m1.jsonl") == {"mtm1"} and TIE.pending_tasks(sub3 / "agent-m1.jsonl", now0) == set() and TIE.pending_tasks(sub3 / "agent-m2.jsonl", now0) == {"mtm2"}, None)
+check("25 …a subagent with no flag is untouched by a Monitor's lifetime", "m19" in got, sorted(got))
+check("25 pending_tasks: the lifetime applies only when it is given the clock", TIE.pending_tasks(sub3 / "agent-m1.jsonl") == {"mtm1"} and TIE.pending_tasks(sub3 / "agent-m1.jsonl", now0) == set() and TIE.pending_tasks(sub3 / "agent-m2.jsonl", now0) == {"mtm2"}, None)
 
 # 4. a subagent with no flag whose last row is an interruption
 wipe3()
@@ -1191,15 +1194,15 @@ fin("i11", [ASSIST, UT("[Request interrupted by user]")], finished=None)        
 fin("i14", [ASSIST, INT()], finished=True, meta_age=600)                                    # flagged finished: the rule of a finished one
 parent(ASSIST, resume_rec("i6", now0 - 30), resume_rec("i7", now0 - 120), resume_rec("i12", now0 - 61), resume_rec("i13", now0 - 63))
 got = run3()
-check("24 a subagent with no flag whose last row is `[Request interrupted by user]` (or `... for tool use]`) is dead, not quiet: it is not running, even written a minute ago; one whose interruption is not its last row, or that says more, or is an assistant's, is running as ever",
+check("25 a subagent with no flag whose last row is `[Request interrupted by user]` (or `... for tool use]`) is dead, not quiet: it is not running, even written a minute ago; one whose interruption is not its last row, or that says more, or is an assistant's, is running as ever",
       not any(k in got for k in ("i1", "i2", "i8", "i11")) and {"i3", "i4", "i5", "i9"} <= set(got), sorted(got))
-check("24 …unless the session's transcript holds a resume of it newer than its last row (a second of slack): then it is running; an older resume is none", "i6" in got and "i7" not in got and "i12" in got and "i13" not in got, sorted(got))
-check("24 …a plain unflagged one 100 minutes old stays running but quiet; a finished one that was interrupted follows the rule of the finished", got["i9"].get("quiet") is True and "i14" not in got, sorted(got))
-check("24 interrupted: the last row only, and nothing raises", TIE.interrupted(sub3 / "agent-i1.jsonl") and TIE.interrupted(sub3 / "agent-i2.jsonl") and TIE.interrupted(sub3 / "agent-i11.jsonl") and not any(TIE.interrupted(sub3 / f"agent-{k}.jsonl") for k in ("i3", "i4", "i5", "i9")) and not TIE.interrupted(sub3 / "agent-none.jsonl"), None)
+check("25 …unless the session's transcript holds a resume of it newer than its last row (a second of slack): then it is running; an older resume is none", "i6" in got and "i7" not in got and "i12" in got and "i13" not in got, sorted(got))
+check("25 …a plain unflagged one 100 minutes old stays running but quiet; a finished one that was interrupted follows the rule of the finished", got["i9"].get("quiet") is True and "i14" not in got, sorted(got))
+check("25 interrupted: the last row only, and nothing raises", TIE.interrupted(sub3 / "agent-i1.jsonl") and TIE.interrupted(sub3 / "agent-i2.jsonl") and TIE.interrupted(sub3 / "agent-i11.jsonl") and not any(TIE.interrupted(sub3 / f"agent-{k}.jsonl") for k in ("i3", "i4", "i5", "i9")) and not TIE.interrupted(sub3 / "agent-none.jsonl"), None)
 saved_lr = TIE.LAST_ROW_BYTES; TIE.LAST_ROW_BYTES = 40
 try: cut_i = TIE.interrupted(sub3 / "agent-i1.jsonl")
 finally: TIE.LAST_ROW_BYTES = saved_lr
-check("24 …a last row longer than LAST_ROW_BYTES is none", cut_i is False, cut_i)
+check("25 …a last row longer than LAST_ROW_BYTES is none", cut_i is False, cut_i)
 
 # 5. a resume that is only quoted
 wipe3()
@@ -1215,12 +1218,153 @@ parent(ASSIST,
        RQ({"type": "user", "message": {"role": "user", "content": "x"}, "toolUseResult": {"resumedAgentId": 7, "revivedAgentId": ""}}),
        {"type": "user", "message": {"role": "user", "content": "x"}, "toolUseResult": {"resumedAgentId": "rq8"}})                                                                  # a resume with no time says nothing and spoils no other
 got = run3()
-check("24 a resume is the key `resumedAgentId` (or `revivedAgentId`) at the top level of a user record's `toolUseResult`: one quoted inside a tool result, nested deeper, in a string, in a request's copy or in a typed message is none; both keys of one record count once",
+check("25 a resume is the key `resumedAgentId` (or `revivedAgentId`) at the top level of a user record's `toolUseResult`: one quoted inside a tool result, nested deeper, in a string, in a request's copy or in a typed message is none; both keys of one record count once",
       "rq5" in got and not any(k in got for k in ("rq1", "rq2", "rq3", "rq4", "rq6", "rq7", "rq8")), sorted(got))
-check("24 …resumes: both keys on the one record, the time of the record", set(TIE.resumes(par3)) == {"rq5"} and abs(TIE.resumes(par3)["rq5"] - (now0 - 300 + 0.25)) < 0.01, TIE.resumes(par3))
+check("25 …resumes: both keys on the one record, the time of the record", set(TIE.resumes(par3)) == {"rq5"} and abs(TIE.resumes(par3)["rq5"] - (now0 - 300 + 0.25)) < 0.01, TIE.resumes(par3))
 wipe3(); parent(ASSIST)
 for f_ in sub3.glob("agent-*"): f_.unlink()
 
+clean_pane()
+
+# ================================================================ 24. a mover's status write with new text is the hourly update
+from stackshot.service import writes as WR24
+WR24.time = CLK      # the save stamps from the server's own (fake) clock
+def tagged(text, state="in progress", ts=0.0, who="home-peer"):
+    """The mover's one open step, with a status line (its tag) when `text` is given."""
+    st = {"text": f"{who}: do the thing", "status": "open", "by": who, "at": 0}
+    if text: st["tag"] = {"text": text, "state": state, "ts": ts}
+    return st
+def save24(i, at, mutate, writer="home-peer", **kw):
+    """A real save of item `i` by `writer` at the fake time `at`, `mutate` changing the loaded item's metadata first."""
+    d_ = server._load(f"a{i}"); mutate(d_["metadata"]); CLK.t = at
+    try: WR24.save(f"a{i}", d_, writer=writer, **kw)
+    finally: CLK.t = None
+def status_of(i, text, state="in progress", ts=0.0, who="home-peer"): return lambda m: m.update(steps=[tagged(text, state, ts, who)])
+def rec24(i): return mt(i).get("last_activity")
+clean_pane()
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i_ in (1, 2, 3, 4, 5): put(i_, mover="home-peer", act=90, steps=[tagged(None)])
+T0 = now0 - 30 * MIN
+save24(1, T0, status_of(1, "building the fix", ts=T0))
+check("24 the mover's first status line is an update: the record is kind update at the save's time, the words the text itself; the activity clock moved too",
+      rec24(1) == {"at": T0, "kind": "update", "what": "building the fix"} and rd(1)["activity"] == T0, (rec24(1), rd(1).get("activity")))
+a24 = parts("a1", T0 + 2 * MIN)
+check("24 …the On agent row reads it as an audit line's: active, the age <1m, `Last: building the fix at hh:mm`", a24 is not None and 'data-b="ok"' in a24[1] and ">active<" in a24[1] and last_words(a24[1]) == f"Last: building the fix at {hm(T0)}", a24)
+save24(1, T0 + 10 * MIN, status_of(1, "tests pass, opening the PR", ts=T0 + 10 * MIN))
+check("24 a second, different text is the newer update", rec24(1) == {"at": T0 + 10 * MIN, "kind": "update", "what": "tests pass, opening the PR"}, rec24(1))
+save24(1, T0 + 20 * MIN, status_of(1, "  TESTS pass,   opening the PR ", ts=T0 + 10 * MIN))
+check("24 the same text again (case and spacing aside) is no update: the record keeps its time, and the save still moved the activity clock", rec24(1) == {"at": T0 + 10 * MIN, "kind": "update", "what": "tests pass, opening the PR"} and rd(1)["activity"] == T0 + 20 * MIN, (rec24(1), rd(1).get("activity")))
+save24(1, T0 + 22 * MIN, lambda m: m.update(steps=[tagged("tests pass, opening the PR", "done", T0 + 22 * MIN)]))
+check("24 …nor is the same text moved to another state: only the words count", rec24(1)["at"] == T0 + 10 * MIN, rec24(1))
+save24(1, T0 + 24 * MIN, lambda m: m.update(steps=[tagged(None)]))
+check("24 …nor a cleared status line", rec24(1)["at"] == T0 + 10 * MIN, rec24(1))
+# a write by anyone but the mover
+save24(2, T0, status_of(2, "building the fix", ts=T0), writer="home-front")
+save24(2, T0 + MIN, status_of(2, "somebody else's words", ts=T0 + MIN), writer="home-peer2")
+save24(2, T0 + 2 * MIN, status_of(2, "the owner's words", ts=T0 + 2 * MIN), writer="", author=("Oliver", "board"))
+save24(2, T0 + 3 * MIN, status_of(2, "a bookkeeping save", ts=T0 + 3 * MIN), writer="")
+save24(2, T0 + 4 * MIN, status_of(2, "the audit's own write", ts=T0 + 4 * MIN), writer=server.NAME)
+check("24 a status written by someone who is not the item's mover (a front agent, another session, the owner's answer, the server's own save, the audit's writer) is no update: the item has no record", rec24(2) is None, rec24(2))
+save24(3, T0, status_of(3, "by the session id", ts=T0), writer=U["home-peer"])
+check("24 the mover writing under its session id (not its name) is the mover", rec24(3) == {"at": T0, "kind": "update", "what": "by the session id"}, rec24(3))
+save24(4, T0, lambda m: m.update(steps=[tagged("building the fix", ts=T0), {"text": "home-peer: second", "status": "open", "by": "home-peer", "at": 0}]), writer="home-peer")
+save24(4, T0 + 5 * MIN, lambda m: m.update(steps=[{**tagged("building the fix", ts=T0), "text": "home-peer: do the thing, reworded"}, {"text": "home-peer: second", "status": "open", "by": "home-peer", "at": 0}]), writer="home-peer")
+check("24 a step reworded with its status line kept is no update (the text is one the session already had)", rec24(4) == {"at": T0, "kind": "update", "what": "building the fix"}, rec24(4))
+# the audit's own line still stamps, and the newest wins
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()      # the mover's one item on an agent, so its busy pane verifies it
+put(5, mover="home-peer", act=90, steps=[tagged(None)])
+save24(5, now0 - 70 * MIN, status_of(5, "an hour ago", ts=now0 - 70 * MIN))
+d5 = rd(5); d5["activity"] = d5["progress"] = now0 - 90 * MIN; wr5 = (T / "store/a/5.json"); wr5.write_text(json.dumps(d5))      # the hour's silence is the item's, whatever the save above moved
+got24 = tick()
+check("24 the audit's own line still stamps (kind audit, its words) over an older update, and the update's own text is no longer the record", got24 == ["a5"] and rec24(5) == {"at": now0, "kind": "audit", "what": "audit verified the mover's pane is in a turn"} and lines(5)[0]["kind"] == "audit", (got24, rec24(5), lines(5)))
+save24(5, now0 + 5 * MIN, status_of(5, "back at it", ts=now0 + 5 * MIN))
+check("24 …and a later mover's update is newer than the audit line: newest wins both ways", rec24(5) == {"at": now0 + 5 * MIN, "kind": "update", "what": "back at it"}, rec24(5))
+# the hourly clock: an update resets it as the audit line does
+clean_pane(); panes["home-peer"] = "idle"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(6, mover="home-peer", act=90, steps=[tagged(None)])
+save24(6, now0 - 5 * MIN, status_of(6, "still going", ts=now0 - 5 * MIN))
+check("24 an item whose mover wrote new text 5 minutes ago is not owed a line (the update is the hour's update), the row reads its words and an age under an hour",
+      tick() == [] and lines(6) == [] and last_words(parts("a6", now0)[1]) == f"Last: still going at {hm(now0 - 5 * MIN)}" and 'data-b="ok"' in parts("a6", now0)[1], parts("a6", now0))
+check("24 …an hour later, when the mover has written nothing more, the audit's line is owed again (an idle one: nothing verified, the update stays the record)",
+      tick(now0 + 56 * MIN) == ["a6"] and lines(6)[0]["kind"] == "audit_idle" and rec24(6)["kind"] == "update", (lines(6), rec24(6)))
+clean_pane()
+# --- what the first review found: a status text reused on a later stage, and each way a write is no update
+clean_pane()
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+S1 = {"text": "home-peer: stage 1", "status": "done", "by": "home-peer", "at": 1, "tag": {"text": "waiting for CI", "state": "done", "ts": 1.0}}
+S2 = {"text": "home-peer: stage 2", "status": "open", "by": "home-peer", "at": 0}
+put(7, mover="home-peer", act=90, steps=[S1, S2], next="home-peer: stage 2")
+save24(7, T0, lambda m: m.update(steps=[S1, {**S2, "tag": {"text": "waiting for CI", "state": "in progress", "ts": T0}}]))
+check("24 a status text the mover used on an earlier stage is a first status on a later step that already existed with none: it is an update", rec24(7) == {"at": T0, "kind": "update", "what": "waiting for CI"}, rec24(7))
+# a mover that is the audit's own name: the audit's writes are never an update
+put(8, mover=server.NAME, act=90, steps=[tagged(None, who=server.NAME)], next=f"{server.NAME}: do the thing", needs=[server.NAME])
+save24(8, T0, status_of(8, "the audit's own words", ts=T0, who=server.NAME), writer=server.NAME)
+check("24 the audit's own writer is no mover for this: the audit's name as the item's mover and as the writer stamps no update (the audit's writes never count as work)", rec24(8) is None, rec24(8))
+# a mover's write filed under another kind of activity, or under none the clock counts
+put(9, mover="home-peer", act=90, steps=[tagged(None)])
+for n_, kind_ in enumerate((ACT.MESSAGE, ACT.EVENT), 1): save24(9, T0 + n_ * MIN, status_of(9, f"filed as {kind_}", ts=T0), activity=kind_)
+check("24 a mover's save filed as a message or an event of an anchor (kinds the activity clock counts) is no status write by the mover: no update", rec24(9) is None, rec24(9))
+for n_, kind_ in enumerate((ACT.BOOKKEEPING, ACT.MIGRATION, ACT.CONFIRM), 3): save24(9, T0 + n_ * MIN, status_of(9, f"filed as {kind_}", ts=T0), activity=kind_)
+check("24 …nor is a save of the server's own kind (bookkeeping, a migration, a confirm) written under the mover's name: it is no real write about the work", rec24(9) is None, rec24(9))
+save24(9, T0 + 9 * MIN, status_of(9, "a plain write", ts=T0 + 9 * MIN))
+check("24 …while the same mover's plain write (no kind given) does", rec24(9) == {"at": T0 + 9 * MIN, "kind": "update", "what": "a plain write"}, rec24(9))
+# the owner is the mover (the item waits on his decision): a session's status write is no update
+put(10, mover="home-peer", act=90, steps=[tagged(None)], needs=["decision"], state="your-call")
+save24(10, T0, status_of(10, "building while he decides", ts=T0))
+check("24 a session writing a status while the owner is the item's mover (it waits on his decision) is no update, whatever mover the item stores", (rec24(10) or {}).get("kind") != "update" and server._model.is_owner(server._model.derive(rd(10)).mover), (rec24(10), server._model.derive(rd(10)).mover))
+put(16, mover="home-peer", act=90, steps=[tagged(None)]); d16 = rd(16); d16["metadata"].pop("mover"); (T / "store/a/16.json").write_text(json.dumps(d16))      # no stored mover: the model reads it from the needs
+save24(16, T0, status_of(16, "mover read from the needs", ts=T0), ctx=WR24.QUIET)
+put(17, mover="Oliver", act=90, steps=[tagged(None, who="Oliver")], next="Oliver: do the thing", needs=["decision"], state="your-call")
+save24(17, T0, status_of(17, "a session named as the owner", ts=T0, who="Oliver"), writer="Oliver")
+check("24 the mover is the model's, not the stored field alone (an item with no stored mover whose needs name the session: its write is an update), and a session that carries the owner's name while he is the mover is not him: no update",
+      rec24(16) == {"at": T0, "kind": "update", "what": "mover read from the needs"} and rec24(17) is None and server._model.is_owner(server._model.derive(rd(17)).mover), (rec24(16), rec24(17), mt(16).get("mover")))
+# a mover known by another name of the same session: the registry's alias, and its id
+from stackshot.fleet import sessions_registry as SR24
+sala24 = T / "sala/a"; sala24.mkdir(parents=True)
+PID = "00000000-0000-4000-8000-0000000000aa"
+(sala24 / "session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-10-22T07:00:00Z", "sessions": {PID: {"id": PID, "name": "home-peer-new", "aliases": ["home-peer-old"], "project": None, "project_key": None,
+        "role": None, "lane": "max", "model": "opus", "effort": "medium", "pane": "home-peer-new", "cwd": "/srv/work", "state": "live", "created": "2026-10-21T21:00:00Z", "retired_at": None, "transcripts": []}}}))
+cl24 = server._cfg.CFG.setdefault("client", {}); had24 = cl24.get("session_links"); cl24["session_links"] = str(T / "sala"); SR24.reset()
+try:
+    put(11, mover="home-peer-old", act=90, steps=[tagged(None, who="home-peer-old")], next="home-peer-old: do the thing", needs=["home-peer-old"])
+    save24(11, T0, status_of(11, "under its new name", ts=T0, who="home-peer-old"), writer="home-peer-new")
+    a24_ = rec24(11)
+    put(12, mover=PID, act=90, steps=[tagged(None, who=PID)], next=f"{PID}: do the thing", needs=[PID])
+    save24(12, T0, status_of(12, "by its name, stored as its id", ts=T0, who=PID), writer="home-peer-new")
+    b24_ = rec24(12)
+    put(13, mover="home-peer-old", act=90, steps=[tagged(None, who="home-peer-old")], next="home-peer-old: do the thing", needs=["home-peer-old"])
+    save24(13, T0, status_of(13, "somebody else", ts=T0, who="home-peer-old"), writer="home-peer2")
+    c24_ = rec24(13)
+finally:
+    if had24 is None: cl24.pop("session_links", None)
+    else: cl24["session_links"] = had24
+    SR24.reset()
+check("24 a mover stored under an old name (the registry's alias) is the mover when its current name writes, and one stored as its permanent id likewise; another session is still not",
+      a24_ == {"at": T0, "kind": "update", "what": "under its new name"} and b24_ == {"at": T0, "kind": "update", "what": "by its name, stored as its id"} and c24_ is None, (a24_, b24_, c24_))
+# an odd earlier version or item never takes the step, state or merge stamp of the same save with it
+d24 = server._load("a7"); d24["metadata"]["steps"] = "not a list"; CLK.t = T0 + MIN
+try: WR24.save("a7", d24, writer="home-peer")
+finally: CLK.t = None
+bad_before = server._load("a7"); bad_before["metadata"] = ["torn"]
+err24 = _Err()
+with err24: ups24 = WR24._update_signals(rd(7), bad_before, "home-peer", T0), WR24._update_signals({"id": "x", "metadata": None}, None, "home-peer", T0), WR24._update_signals({"id": "x"}, {"metadata": 3}, "home-peer", T0)
+check("24 an earlier version or item that is not what it should be gives no update and never raises out of the save's stamp", ups24 == ([], [], []), (ups24, err24.text))
+def tripped(*a, **k): raise RuntimeError("fleet unreadable")
+mv24 = WR24._is_mover; WR24._is_mover = tripped
+try:
+    put(14, mover="home-peer", act=90, steps=[tagged(None)]); d14 = server._load("a14"); d14["metadata"]["state"] = "verifying"; d14["metadata"]["steps"] = [tagged("x", ts=T0)]; CLK.t = T0
+    with _Err() as e14: WR24.save("a14", d14, writer="home-peer")
+finally: WR24._is_mover = mv24; CLK.t = None
+check("24 a mover test that fails costs only the update: the save is written, the state change of the same save is still stamped, and the failure is on stderr", rec24(14) is not None and rec24(14)["kind"] == "state_change" and "update not recorded" in e14.text, (rec24(14), e14.text))
+calls24 = []; mv24 = WR24._is_mover; WR24._is_mover = lambda *a, **k: (calls24.append(1), mv24(*a, **k))[1]
+try:
+    put(15, mover="home-peer", act=90, steps=[tagged("same words", ts=T0)])
+    save24(15, T0 + MIN, lambda m: m.update(note="no status change here")); save24(15, T0 + 2 * MIN, status_of(15, "same words", ts=T0)); n_plain = len(calls24)
+    save24(15, T0 + 3 * MIN, status_of(15, "new words", ts=T0 + 3 * MIN)); n_new = len(calls24)
+finally: WR24._is_mover = mv24
+check("24 the mover test (it reads the fleet's sessions) is asked only when a save carries new status text: none for a save with no status change or the same text, one for a new text", (n_plain, n_new) == (0, 1), (n_plain, n_new))
 clean_pane()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

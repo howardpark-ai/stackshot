@@ -35,12 +35,17 @@ def check(name, cond, got=None):
 from fastmcp.exceptions import ToolError
 from stackshot.core import store as cstore
 from stackshot.github import ghsync as gh
-from stackshot.service import create, gates, writes
+from stackshot.service import create, gates, telling, writes
 cstore.STORE = T / "store"
 check("0 the module's request map sits in the instance's state folder", str(create.REQUESTS) == f"{tmp}/state/requests.json", create.REQUESTS)
 
 LOG = []                                                     # every hook and the save, in the order they were called: (name, args)
-FLAGS = {"session_next": False, "question": False, "terminal_row": False}
+class _Flags(dict):
+    """The per-write flags the create reads, which are service/writes.py's thread-locals now: `FLAGS.update(session_next=True)` turns one on there."""
+    def update(self, **kw):
+        for k, v in kw.items(): getattr(writes, k.upper()).on = bool(v)
+        super().update(**kw)
+FLAGS = _Flags(session_next=False, question=False, terminal_row=False)
 RET = {}                                                     # a hook's return value by name, where the default below is not what a case needs
 RAISE = {}                                                   # a hook that refuses (ToolError) by name
 BORED = {"gate_options": [], "gate_needs": [], "gate_observers": [], "gate_after": [], "gate_said": [], "parse_check": "", "gate_model_args": ({}, {}), "contact_default": "",
@@ -68,6 +73,9 @@ def flag(name):
 # the write gates are service/gates.py's, not hooks: the create calls them on that module, so this suite replaces each there (the recorder above) and puts the real ones back before it imports the server
 REAL_GATES = {n: getattr(gates, n) for n in dir(gates) if n.startswith("gate_") and callable(getattr(gates, n))}
 for _n in REAL_GATES: setattr(gates, _n, hook(_n))
+# the telling is service/telling.py's, not a hook either: the create calls each notice on that module, so this suite replaces the five it calls there with the same recorder
+REAL_TELLING = {n: getattr(telling, n) for n in ("handoff_notify", "pilot_charge", "pilot_relay", "tell_needed", "writer_charge")}
+for _n in REAL_TELLING: setattr(telling, _n, hook(_n))
 def make_hooks(**over):
     kw = {}
     for f in dataclasses.fields(create.Hooks):
@@ -127,7 +135,7 @@ check("1 a write that is not a session's own (no flag) is not judged by the goal
 # ---------------------------------------------------------------- 2. flags
 FLAGS.update(session_next=True)
 mk()
-check("2 a session's write reads the flag once per check, through the hook (goal, open step, front-agent step)", names().count("session_next") >= 3 and "gate_goal" in names(), names())
+check("2 a session's write is judged by the goal check once the flag (service/writes.py's) is on", "gate_goal" in names() and writes.SESSION_NEXT.on is True, names())
 try: mk(next=""); RAISE_NO_STEP = None
 except ToolError as e: RAISE_NO_STEP = str(e)
 check("2 a session's create with no step in next is refused with the open-step text (N6)", RAISE_NO_STEP is not None and RAISE_NO_STEP.startswith("Refused: the new item has no open step in next"), RAISE_NO_STEP)
@@ -327,11 +335,12 @@ check("7 a create with no hooks installed is refused, naming the install", bare 
 try: create.Hooks(**{f.name: None for f in dataclasses.fields(create.Hooks)[:-1]}); short = None
 except TypeError as e: short = str(e)
 check("7 a hook table with a hook missing cannot be built", short is not None, short)
-check("7 the table holds the three flags and the two constants, and no name that service must not import", {"session_next", "question", "terminal_row", "ask_none", "subject_tagged"} <= {f.name for f in dataclasses.fields(create.Hooks)}, None)
+check("7 the table holds the two constants, and neither a flag (service/writes.py's) nor a notice (service/telling.py's)", {"ask_none", "subject_tagged"} <= {f.name for f in dataclasses.fields(create.Hooks)} and not ({"session_next", "question", "terminal_row"} | set(REAL_TELLING)) & {f.name for f in dataclasses.fields(create.Hooks)}, None)
 
 # ---------------------------------------------------------------- 8. the table the server builds
 # The server's own table, not this suite's: a hook is looked up when it is called, so a suite that replaces the owner's function after the install still reaches the create.
 for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
+for _n, _f in REAL_TELLING.items(): setattr(telling, _n, _f)      # and the real notices
 from stackshot.web import server, page_debts
 tbl = create._hooks()
 check("8 no write gate is a hook of the create: the create calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(create.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))

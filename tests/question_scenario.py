@@ -53,6 +53,8 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.service import telling
+from stackshot.service import writes
 server._publish = lambda: None
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
@@ -111,7 +113,7 @@ e = refused("a bad ask is refused with the tool's own text", 400, "Refused: ask 
 ALARM_ASK = "Decide: whether to kill the stuck run and rotate the credentials · Recommend: yes · Stakes: the quota is nearly spent · By: Fri Mar 13th"
 st, out = q(subject="[home] Kill the run? The credentials leaked", ask=ALARM_ASK)
 check("a script's question with alarming words (kill, credentials, quota, leaked) is filed: guard 11 does not judge that route", st == 200 and item(out["item"])["metadata"]["ask"] == ALARM_ASK, (st, out))
-check("…while the create tool refuses the same words (the exemption is that route's only)", "uses \"" in tool_says(subject="[home] Kill the run?", ask=ALARM_ASK) and not getattr(server._QUESTION, "on", False), tool_says(subject="[home] Kill the run?", ask=ALARM_ASK))
+check("…while the create tool refuses the same words (the exemption is that route's only)", "uses \"" in tool_says(subject="[home] Kill the run?", ask=ALARM_ASK) and not getattr(writes.QUESTION, "on", False), tool_says(subject="[home] Kill the run?", ask=ALARM_ASK))
 check("…word for word what the create tool says", e == tool_says(ask="please decide"), (e, tool_says(ask="please decide")))
 e = refused("options with no recommended one: refused", 400, "exactly one option is recommended", options=[{"label": "A", "line": "do a", "recommended": False}, {"label": "B", "line": "do b", "recommended": False}])
 check("…as the tool says", e == tool_says(options=[{"label": "A", "line": "do a", "recommended": False}, {"label": "B", "line": "do b", "recommended": False}]), e)
@@ -172,7 +174,7 @@ server._owed_save({})
 pushlog = T / "push.log"
 (T / "fakepush.py").write_text("import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\n"
                                f"open({str(pushlog)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered')\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 def pilot_toml(roots):
     pass            # every project page is the router's since there is no [pilot] projects list to set
 pilot_toml(["projects/alpha"])
@@ -407,7 +409,7 @@ import _docs
 readme = _docs.page("client-contract")
 check("the docs' client contract documents POST /client/question and GET /client/answer", "POST /client/question" in readme and "GET /client/answer" in readme and "fresh item per question" in readme
       and "A caller resumes only on `decision`" in readme and "**the fleet tool passes one per parked question**" in readme and "Filed by <sender> (a script on" in readme and "GitHub issue comment" not in readme and "the keeper is the owner itself" in readme and "never reads the project record" in readme and "newest `decision`" in readme)
-check("the _pilot_charge docstring says a script's filing is never charged to the owner, the keeper being the owner included", "the owner itself" in server._pilot_charge.__doc__)
+check("the pilot_charge docstring says a script's filing is never charged to the owner, the keeper being the owner included", "the owner itself" in telling.pilot_charge.__doc__)
 check("the 404 lists of the client API name the new entries", "question" in server._client_post(me, "nope", {})[1]["error"] and "answer?key=" in server._client_get("nope", {})[2])
 
 # ---- a script's subject is cut to the subject limit, never refused (a script's item must not be lost on a 400)

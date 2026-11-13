@@ -45,9 +45,10 @@ def put(i, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 SID = server._session_id
 OWNER = server.OWNER
@@ -66,17 +67,17 @@ def fixed(reply, front, field="mover"):
 # ---- create
 r = server.stackshot_create(subject="[home] handed to the front", description=DESC, project="projects/delta", sender=BUILD, mover=MAIN, next=f"{BUILD}: look at it")
 g = r.split()[1]
-check("create: another session's front-agent mover becomes the builder, and the reply says so", r.startswith("created") and server._holder(rd(g)) == BUILD and fixed(r, MAIN), r)
+check("create: another session's front-agent mover becomes the builder, and the reply says so", r.startswith("created") and telling.holder(rd(g)) == BUILD and fixed(r, MAIN), r)
 check("create: the fix is on the item: server_fixed names it", MAIN in json.dumps(rd(g)["metadata"].get("server_fixed")), rd(g)["metadata"].get("server_fixed"))
 r = server.stackshot_create(subject="[home] handed to the side desk", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{BUILD}: look at it")
-check("create: one front agent handing to another front agent gets the builder too", r.startswith("created") and server._holder(rd(r.split()[1])) == BUILD and fixed(r, SIDE), r)
+check("create: one front agent handing to another front agent gets the builder too", r.startswith("created") and telling.holder(rd(r.split()[1])) == BUILD and fixed(r, SIDE), r)
 
 r = server.stackshot_create(subject="[home] the front agent's own", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on")
-check("create: a front agent naming itself as mover is accepted", r.startswith("created") and server._holder(rd(r.split()[1])) == MAIN, r)
+check("create: a front agent naming itself as mover is accepted", r.startswith("created") and telling.holder(rd(r.split()[1])) == MAIN, r)
 r = server.stackshot_create(subject="[home] the front agent's own by id", description=DESC, project="projects/delta", sender=U[MAIN], mover=MAIN, next=f"{MAIN}: carry on")
 check("create: a front agent naming itself by name while sending by its id is accepted", r.startswith("created"), r)
 r = server.stackshot_create(subject="[home] built by the builder", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, next=f"{BUILD}: build it")
-check("create: a background mover set by a front agent is accepted", r.startswith("created") and server._holder(rd(r.split()[1])) == BUILD, r)
+check("create: a background mover set by a front agent is accepted", r.startswith("created") and telling.holder(rd(r.split()[1])) == BUILD, r)
 r = server.stackshot_create(subject="[home] reviewed by the reviewer", description=DESC, project="projects/delta", sender=BUILD, mover=REVIEW, next=f"{REVIEW}: review it")
 check("create: a background mover set by another background agent is accepted", r.startswith("created"), r)
 r = refusal(lambda: server.stackshot_create(subject="[home] the owner decides", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
@@ -90,18 +91,18 @@ check("create: then=<front agent> by another session becomes the builder, and th
 put(1, mover=BUILD)
 before = (T / "store/a/1.json").read_bytes()
 r = server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{BUILD}: check it")
-check("update: another session's front-agent mover becomes the builder, and the reply says so", fixed(r, MAIN) and server._holder(rd(1)) == BUILD, r)
+check("update: another session's front-agent mover becomes the builder, and the reply says so", fixed(r, MAIN) and telling.holder(rd(1)) == BUILD, r)
 check("update: the fix is on the item", MAIN in json.dumps(rd(1)["metadata"].get("server_fixed")), rd(1)["metadata"].get("server_fixed"))
 r = server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN)
-check("update: sending the same front-agent mover again keeps it as sent, with a note", server._holder(rd(1)) == MAIN and "kept as you sent it" in r, r)
+check("update: sending the same front-agent mover again keeps it as sent, with a note", telling.holder(rd(1)) == MAIN and "kept as you sent it" in r, r)
 put(1, mover=BUILD)
 r = server.stackshot_update(item_id="a1", sender=BUILD, then=MAIN)
 check("update: then=<front agent> by another session becomes the builder", fixed(r, MAIN, "then") and rd(1)["metadata"].get("then") == BUILD, r)
 r = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, mover=REVIEW))
-check("update: a background mover is accepted", r == "" and server._holder(rd(1)) == REVIEW, r)
+check("update: a background mover is accepted", r == "" and telling.holder(rd(1)) == REVIEW, r)
 put(2, mover=BUILD)
 r = server.stackshot_update(item_id="a2", sender=MAIN, mover=MAIN, next=f"{MAIN}: take it over")
-check("update: a front agent naming itself as mover is accepted", "Refused" not in r and server._holder(rd(2)) == MAIN, r)
+check("update: a front agent naming itself as mover is accepted", "Refused" not in r and telling.holder(rd(2)) == MAIN, r)
 put(3, mover=BUILD)
 r = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, mover=OWNER, step="press the button"))
 check("update: the owner as mover is accepted", r == "", r)
@@ -163,7 +164,7 @@ check("roles read fails: the front-mover gate lets the write through and says so
 # ---- the server's own moves do not come through the tools' gate
 put(5, mover=BUILD)
 r = server._update("a5", mover=MAIN, sender=BUILD)
-check("server-side move (the internal update) is not refused by the tool gate", "Refused" not in r and server._holder(rd(5)) == MAIN, r)
+check("server-side move (the internal update) is not refused by the tool gate", "Refused" not in r and telling.holder(rd(5)) == MAIN, r)
 
 # ---- a refused hand-off is a no-op on the item: mover, state, needs and the hand-off record stay as before the call, and the refusal text still comes back
 ASK = "Decide: a or b - Recommend: a - Stakes: none - By: no date"
@@ -190,7 +191,7 @@ check("refused hand-off by a line of next: the refusal text comes back, nothing 
 put(33, mover=REVIEW, needs=[REVIEW])
 r = refusal(lambda: server.stackshot_update(item_id="a33", sender=REVIEW, mover=BUILD, next=f"{REVIEW}: handed it over", check="item_closed a1"))
 m33 = rd(33)["metadata"]
-check("accepted hand-off: the mover changes and the hand-off to it is recorded", r == "" and server._holder(rd(33)) == BUILD and (m33.get("handoff") or {}).get("to") == BUILD and (m33.get("handoff") or {}).get("from"), (r, m33))
+check("accepted hand-off: the mover changes and the hand-off to it is recorded", r == "" and telling.holder(rd(33)) == BUILD and (m33.get("handoff") or {}).get("to") == BUILD and (m33.get("handoff") or {}).get("from"), (r, m33))
 put_his(34)
 r = refusal(lambda: server.stackshot_update(item_id="a34", sender=REVIEW, mover=OWNER, then=BUILD, next=f"{OWNER}: pick one"))
 check("accepted write on an item that waits on his call: stored, the writer named in needs", r == "" and REVIEW in (rd(34)["metadata"].get("needs") or []), (r, shape(34)))

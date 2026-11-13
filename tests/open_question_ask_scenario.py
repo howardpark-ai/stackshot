@@ -79,10 +79,12 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.service import telling
+from stackshot.service import writes
 from stackshot.web.ui import render as r2
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
 mk = lambda **kw: server._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
                                     "next": "Oliver: answer the ask", "needs": ["decision"], "ask": YN, **kw})
@@ -206,11 +208,11 @@ ok, why = cc.validate({"action": "ask_owner", "ask": OPEN("which layout to ship"
 check("4 cold call: the answer's own validation is unchanged: an ask and two to six options", ok is not None and not why, (ok, why))
 
 # a script's question (client.py post question) is never lost on its wording: the marker the question route sets skips the open-question gate
-server._QUESTION.on = True
+writes.QUESTION.on = True
 try:
     out = passes("4 question route: an open question with no options still files an item", lambda: mk(ask=OPEN("which layout to ship", "none, your call")))
 finally:
-    server._QUESTION.on = False
+    writes.QUESTION.on = False
 check("4 question route: …it is stored", bool(re.match(r"created \w\d+", out or "")), out)
 refused_nc("4 question route: …while the same ask through the create tool is refused", lambda: mk(ask=OPEN("which layout to ship", "none, your call")), *OQ)
 

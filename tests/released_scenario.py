@@ -117,29 +117,30 @@ def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
 server._HERE = T / "repo"
 check("the last-good path is release.sh's ($LOGDIR/last-good, LOGDIR = config.py state releases)", server._cfg.state("releases", "last-good") == LAST_GOOD)
-# the delivery path is the real one: _tell_woken → the front gate → push.py (a fake that logs what it was asked to send)
+# the delivery path is the real one: tell_woken → the front gate → push.py (a fake that logs what it was asked to send)
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
-server._PUSH = [sys.executable, str(T / "fakepush.py")]
+telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []; GATED = []
-_real_tell, _real_gate = server._tell_woken, server._front_gate
+_real_tell, _real_gate = telling.tell_woken, telling.front_gate
 def _gate(gid, owner, note, tag, kind):
     r = _real_gate(gid, owner, note, tag, kind); GATED.append((gid, tag, r)); return r
-server._front_gate = _gate
+telling.front_gate = _gate
 def _tell(gid, owner, note, tag="wake", result=None):
     th = _real_tell(gid, owner, note, tag, result)
     if th: THREADS.append(th)
     return th
-server._tell_woken = _tell
+telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): drain(); return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_for(gid): return [p for p in pushes() if p[1].startswith(f"[stackshot] {gid}: ")]
-check("home-builder is a front agent, so the notices below go through the front gate", server._front_sender(U["home-builder"]))
+check("home-builder is a front agent, so the notices below go through the front gate", telling.front_sender(U["home-builder"]))
 
 # ---- 1. release.sh's call: main's full run passed on the merge of PR #41 and it is in last-good
 before = snap()

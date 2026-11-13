@@ -382,7 +382,7 @@ def _anchor_items(key: str, n: dict[str, Any], cx: Context) -> list[dict[str, An
     return [cx.index[g] for g in scope if g in cx.index and cx.index[g].get("status") != "completed"]
 
 
-# stackshot's own `[board]` notice to an item's owner (server._tell_owner): "[board] <id> <subject>: <writer> set next: …" (or
+# stackshot's own `[board]` notice to an item's owner (telling.tell_owner): "[board] <id> <subject>: <writer> set next: …" (or
 # "changed needs/check/after: …", "closed it: …", "reopened it"). Its `who` is the server's instance name; the writer is in the text.
 _BOARD_WRITE = r"(\S+) (?:set next:|changed (?:needs|check|after):|closed it\b|reopened it\b)"
 _BOARD_ACTOR = re.compile(r"^\s*\[board\] \S+ .*?: " + _BOARD_WRITE, re.S)
@@ -882,7 +882,7 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
                     stays only to settle a notice recorded before that: merged, with the reason.
       hand-back     a board notice that an item was handed back to its mover alone and carries the `handback` mark (a session other than the
                     mover left the item's needs naming only the mover, a front agent, who is never woken by item notices otherwise,
-                    server._tell_handback), for a mover that is one of the project's agents: passed to that mover, whatever the thin
+                    telling.tell_handback), for a mover that is one of the project's agents: passed to that mover, whatever the thin
                     call would make of it. Delivered as one line (router_live.compose), with the mark when the mover is a front agent.
       image         a notice whose text is only a file marker ("[files: image.png]"): held, reason "image not read"; never passed.
       release-self  a `[release]` message from the project's own maintainer (a sender named *-maintainer that the page lists as an

@@ -51,9 +51,9 @@ def record(project: str, *, kind: str, to: str, label: str = "", who: str = "", 
     so a count of the turns notices cost counts that message once; a notice delivered alone carries none.
     `live` (router_live.py): the notice was NOT delivered to the name the project's notices are addressed to, `to` is empty, and the router
     rules it and delivers it to the agent it fits; `"live": true` is the router's work list.
-    `words` (a close with the owner's own words on the item, server._tell_close_owner): what shows they are there ("a said entry",
+    `words` (a close with the owner's own words on the item, telling.tell_close_owner): what shows they are there ("a said entry",
     "quoted in the text"); `"words": …` is the mark router.py's close-words rule reads.
-    `handback` (an item handed back to its front agent owner alone, server._tell_handback): `"handback": true` is the mark router.py's
+    `handback` (an item handed back to its front agent owner alone, telling.tell_handback): `"handback": true` is the mark router.py's
     hand-back rule reads.
     `head`, `author` (a GitHub pull request's anchor notice, anchor-hub): the PR's head branch and its author's login. The router's
     anchor-builder rule passes a notice on a branch prefixed with a background agent's name to that agent, not to the item's front keeper.

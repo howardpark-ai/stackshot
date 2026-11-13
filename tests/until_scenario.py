@@ -46,7 +46,7 @@ from stackshot.waits import waiting as W, watchers as WK, stall as ST, dated_wai
 from stackshot.model import model as M, states as S
 from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
-from stackshot.service import gates
+from stackshot.service import gates, telling
 from stackshot.web.ui import render as UR
 
 H = 3600.0; DAY = 86400.0
@@ -245,7 +245,7 @@ import logging
 logging.disable(logging.INFO)
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
 def sitem(i, status="open", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": status, "updated": now - 10 * DAY,
                                                       "state_updated": now - 10 * DAY, "confirmed": now - 10 * DAY, "metadata": {"owner": U["home-owner"], "project": "projects/quill", "next": f"{BACK}: do it", **meta}}))

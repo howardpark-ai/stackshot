@@ -58,10 +58,11 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, owner, note))
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, owner, note))
 owed = lambda: json.dumps(server._owed_load())
 
 # ---- 1. setting, showing, refusing, clearing

@@ -94,13 +94,14 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.anchors.anchorhub import core
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends its close line (the held case is in front_quiet_scenario)
-_real_verdict = server._front_verdict
-server._front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
+_real_verdict = telling.front_verdict
+telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
 def cfg(live=True): _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, **({"live": True} if live else {})}
 cfg(True)
 saved = []                                                  # every writes.save with a note: the item's History line the report becomes
@@ -369,7 +370,7 @@ try:
 finally:
     (T / "store/projects.json").write_text(_reg0); (T / "store/anchors.json").write_text(_anc0)
 
-# the builder's own board notices about an item whose keeper of record is a front agent (server._tell_owner_change records them as a message to the project): no front turn
+# the builder's own board notices about an item whose keeper of record is a front agent (telling.tell_owner_change records them as a message to the project): no front turn
 instance =str(_cfg.get("instance", "name") or "stackshot")
 def board_msg(nid, writer, what): return {"id": nid, "ts": 1000.0, "kind": "message", "label": "message to projects/alpha", "who": instance, "to": "", "target": "project-wide", "pilot": True, "live": True,
                                          "text": f"[board] a40 [home] item 40: {writer} {what} (keeper of record osprey-main may need to act) → https://board.example.org/items/a40"}
@@ -456,7 +457,7 @@ def held(): return json.loads(HELDF.read_text()) if HELDF.exists() else {}
 def hb_notes(gid, since=0): return [x for x in (settle() or pushes()[since:]) if x[0] in (X, "osprey-x") and "a front agent, alone" in x[1] and re.search(rf"\b{gid}\b", x[1])]      # a front agent keeper is not handed the item: its builder is told
 def hb_pushes(gid, since): return [x for x in to(A, since) if "back with you alone" in x[1] and re.search(rf"\b{gid}\b", x[1])]
 _cfg.CFG.setdefault("board", {}).pop("handback_hold_seconds", None)
-check("3a: the hold defaults to 180 seconds and is set by [board] handback_hold_seconds", server._handback_hold_s() == 180.0, server._handback_hold_s())
+check("3a: the hold defaults to 180 seconds and is set by [board] handback_hold_seconds", telling.handback_hold_s() == 180.0, telling.handback_hold_s())
 p0, n0 = len(pushes()), len(pushes()); t0 = time.time()
 out = server._update("a20", needs=["osprey-main"], next="osprey-main: over to you", sender="osprey-front2"); settle()
 check("3b: another front agent hands the item back to the front agent keeper alone: nothing is pushed yet (not to the keeper, not to the builder), the line is held, and the reply says the builder is told, not the keeper",
@@ -469,18 +470,18 @@ p0, n0 = len(pushes()), len(pushes())
 h = [v for v in held().values() if v["gid"] == "a20"][0]
 check("…the held line is the one the keeper would have heard, due 180 seconds on", h["gid"] == "a20" and h["oid"] == A and h["line"].startswith("[stackshot] a20 is back with you alone (handed back by osprey-front2): [home] item 20; next: ")
       and h["line"].endswith("/items/a20") and abs(h["due"] - (t0 + 180)) < 30, h)
-check("3c: the tick before the window ends sends nothing", server._handback_tick(now=t0 + 60) == [] and len(held()) == 1 and not hb_notes("a20", n0))
+check("3c: the tick before the window ends sends nothing", telling.handback_tick(now=t0 + 60) == [] and len(held()) == 1 and not hb_notes("a20", n0))
 out = server.stackshot_complete("a20", outcome="done", reason="PR 26 is live", description="- The thing works and is in use", sender="osprey-x"); settle()
 check("3d: the builder closes the item inside the window: the held hand-back is dropped, and the keeper gets only the close line (one marked message)",
       held() == {} and not hb_notes("a20", n0) and not hb_pushes("a20", p0) and len(to(A, p0)) == 1 and "closed by osprey-x: done (PR 26 is live)" in to(A, p0)[0][1] and to(A, p0)[0][1].startswith(MK + " "), (held(), to(A, p0)))
-check("…and the tick after the window sends nothing more", server._handback_tick(now=t0 + 400) == [] and not hb_notes("a20", n0) and len(to(A, p0)) == 1)
+check("…and the tick after the window sends nothing more", telling.handback_tick(now=t0 + 400) == [] and not hb_notes("a20", n0) and len(to(A, p0)) == 1)
 # no close: delivered when the window ends
 p0, n0 = len(pushes()), len(pushes()); t1 = time.time()
 server._update("a21", needs=["osprey-main"], next="osprey-main: review the PR", sender="osprey-front2"); settle()
 check("3e negative: a hand-back with no close in the window is delivered when it ends, to the builder (not the keeper), reworded, once",
-      server._handback_tick(now=t1 + 100) == [] and server._handback_tick(now=t1 + 181) == ["a21"] and len(hb_notes("a21", n0)) == 1 and held() == {}
+      telling.handback_tick(now=t1 + 100) == [] and telling.handback_tick(now=t1 + 181) == ["a21"] and len(hb_notes("a21", n0)) == 1 and held() == {}
       and hb_notes("a21", n0)[0][1].startswith("[stackshot] a21 is back with osprey-main, a front agent, alone (handed back by osprey-front2)") and "told to you, not to osprey-main" in hb_notes("a21", n0)[0][1]
-      and not hb_pushes("a21", p0) and server._handback_tick(now=t1 + 999) == [], (held(), hb_notes("a21", n0), to(A, p0)))
+      and not hb_pushes("a21", p0) and telling.handback_tick(now=t1 + 999) == [], (held(), hb_notes("a21", n0), to(A, p0)))
 # a restart loses nothing: the held line is a file
 server._update("a23", needs=["osprey-main"], next="osprey-main: first", sender="osprey-front2"); settle()
 f1 = held(); k = list(f1)[0]
@@ -489,17 +490,17 @@ server._update("a23", needs=["osprey-main"], next="osprey-main: second", sender=
 f2 = held()
 check("3f: a second hand-back of the same item inside the window is the same held line, with the first due time (one line for the item)",
       list(f2) == [k] and f2[k]["due"] == f1[k]["due"], (f1, f2))
-n0 = len(pushes()); server._handback_tick(now=f2[k]["due"] + 1)
+n0 = len(pushes()); telling.handback_tick(now=f2[k]["due"] + 1)
 check("…and one line is delivered for the two", len(hb_notes("a23", n0)) == 1, hb_notes("a23", n0))
 n0 = len(pushes())
 server._update("a24", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 server._update("a24", needs=["osprey-main", "osprey-x"], next="osprey-x: more", sender="osprey-main"); settle()
-server._handback_tick(now=time.time() + 999)
+telling.handback_tick(now=time.time() + 999)
 check("3g negative: an item that moved on while the line was held (the builder is named again) is not announced as back with the keeper", not hb_notes("a24", n0) and held() == {}, (hb_notes("a24", n0), held()))
 n0 = len(pushes())
 server._update("a25", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 server._update("a25", needs=["decision"], ask="Decide: whether to ship · Recommend: yes · Stakes: none · By: no date", sender="osprey-x"); settle()
-server._handback_tick(now=time.time() + 999)
+telling.handback_tick(now=time.time() + 999)
 check("…nor one that now waits on his decision", not hb_notes("a25", n0) and held() == {}, (hb_notes("a25", n0), held()))
 # 0 = no hold
 _cfg.CFG["board"]["handback_hold_seconds"] = 0; n0 = len(pushes())
@@ -510,42 +511,42 @@ _cfg.CFG["board"].pop("handback_hold_seconds", None)
 n0 = len(pushes()); t3 = time.time()
 server._update("a27", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 server.stackshot_complete("a28", outcome="done", reason="done", description="- done", sender="osprey-x"); settle()
-check("3i negative: closing another item does not drop it", len(held()) == 1 and server._handback_tick(now=t3 + 181) == ["a27"] and len(hb_notes("a27", n0)) == 1, (held(), hb_notes("a27", n0)))
+check("3i negative: closing another item does not drop it", len(held()) == 1 and telling.handback_tick(now=t3 + 181) == ["a27"] and len(hb_notes("a27", n0)) == 1, (held(), hb_notes("a27", n0)))
 # a reopened item is open again: a new hand-back is held again
 server._update("a20", status="open", next="osprey-x: more", needs=["osprey-x"], then="osprey-main", sender="osprey-main"); settle()
 p0 = len(pushes()); server._update("a20", needs=["osprey-main"], next="osprey-main: look again", sender="osprey-front2"); settle()
 check("…a reopened item's new hand-back is held like any other", len(held()) == 1, held())
 
 # the held line is never lost: a write that fails sends at once; a tick sends first and removes after (at least once)
-n0 = len(pushes()); k0 = len(held()); _real_w = server._handback_write
-server._handback_write = lambda d: False
+n0 = len(pushes()); k0 = len(held()); _real_w = telling.handback_write
+telling.handback_write = lambda d: False
 try:
     out = server._update("a29", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 finally:
-    server._handback_write = _real_w
+    telling.handback_write = _real_w
 check("3j negative: when the held line cannot be written it is sent at once, never lost (the reply does not promise a window)",
       len(hb_notes("a29", n0)) == 1 and len(held()) == k0 and "unless you close" not in out and "told it is back with them alone" in out, (out, hb_notes("a29", n0), held()))
 def rehold(gid):          # the item goes to the builder and comes back: a fresh held line
     server._update(gid, needs=["osprey-x"], next="osprey-x: more work", sender="osprey-main"); settle()
     server._update(gid, needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
-n0 = len(pushes()); _real_send = server._handback_send; calls = []
+n0 = len(pushes()); _real_send = telling.handback_send; calls = []
 def _send_fails(rec): calls.append(rec["gid"]); raise OSError("router log full")
-server._handback_send = _send_fails
+telling.handback_send = _send_fails
 try:
-    sent = server._handback_tick(now=time.time() + 999)
+    sent = telling.handback_tick(now=time.time() + 999)
 finally:
-    server._handback_send = _real_send
+    telling.handback_send = _real_send
 left = held()
 check("3k negative: a send that fails keeps the line (with its try count) for the next tick, and sends nothing", sent == [] and calls == ["a20"] and len(left) == 1 and list(left.values())[0].get("tries") == 1 and not hb_notes("a20", n0), (sent, calls, left))
-check("…the next tick sends it and removes it", server._handback_tick(now=time.time() + 999) == ["a20"] and len(hb_notes("a20", n0)) == 1 and held() == {}, (held(), hb_notes("a20", n0)))
-rehold("a21"); n0 = len(pushes()); server._handback_write = lambda d: False
+check("…the next tick sends it and removes it", telling.handback_tick(now=time.time() + 999) == ["a20"] and len(hb_notes("a20", n0)) == 1 and held() == {}, (held(), hb_notes("a20", n0)))
+rehold("a21"); n0 = len(pushes()); telling.handback_write = lambda d: False
 try:
-    first = server._handback_tick(now=time.time() + 999)
+    first = telling.handback_tick(now=time.time() + 999)
 finally:
-    server._handback_write = _real_w
+    telling.handback_write = _real_w
 check("3l: the tick sends first and removes after: when the removal fails the line was sent and stays, so the next tick sends it again (at least once, never zero)",
       first == ["a21"] and len(hb_notes("a21", n0)) == 1 and len(held()) == 1, (first, hb_notes("a21", n0), held()))
-check("…and the next tick sends it again and clears the file", server._handback_tick(now=time.time() + 999) == ["a21"] and len(hb_notes("a21", n0)) == 2 and held() == {}, (hb_notes("a21", n0), held()))
+check("…and the next tick sends it again and clears the file", telling.handback_tick(now=time.time() + 999) == ["a21"] and len(hb_notes("a21", n0)) == 2 and held() == {}, (hb_notes("a21", n0), held()))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)

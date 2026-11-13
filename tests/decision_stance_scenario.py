@@ -79,9 +79,11 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import watchers as wk
+from stackshot.service import telling
+from stackshot.service import writes
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
 mk = lambda **kw: server._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
                                     "next": "Oliver: answer the ask", "needs": ["decision"], "ask": YN, **kw})
@@ -184,11 +186,11 @@ try:
         passes(f"5 watcher: {what} without its options is still the watcher's own and passes", lambda m2=m2: server._gate_recommend_stance(m2))
     ask, opts = server._watch_ask("a1", {}, "its wait ended")
     passes("5 post-wake: the question the server builds (two options) passes", lambda: server._gate_recommend_stance({"needs": ["decision"], "ask": ask, "options": opts}))
-    server._QUESTION.on = True
+    writes.QUESTION.on = True
     try:
         out = passes("5 question route: a script's question with a Recommend that is no yes or no still files an item", lambda: mk(ask=ASK(GUEST, "none, your call")))
     finally:
-        server._QUESTION.on = False
+        writes.QUESTION.on = False
     check("5 question route: …it is stored", stored(out), out)
     refused_nc("5 question route: …while the same ask through the create tool is refused", lambda: mk(ask=ASK(GUEST, "none, your call")), *STANCE[:4])
 
