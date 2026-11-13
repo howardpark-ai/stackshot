@@ -92,11 +92,12 @@ def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 def refused(name, f, *want, i=None):
     was = rd(i) if i is not None else None
     try:

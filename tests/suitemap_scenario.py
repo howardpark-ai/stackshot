@@ -1831,7 +1831,7 @@ DOCUSE_ALLOW = {
     ("tests/locale_pages_scenario.py", "__doc__"): (1, "i18n.__doc__, a module docstring: read by name, unchanged rule"),
     ("tests/model_scenario.py", "__doc__"): (1, "server.stackshot_get.__doc__, a decorated tool: unchanged rule"),
     ("tests/project_record_scenario.py", "__doc__"): (1, "prj.__doc__, a module docstring: read by name, unchanged rule"),
-    ("tests/question_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and server._pilot_charge.__doc__ (a function it names: the name rule selects the suite)"),
+    ("tests/question_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and telling.pilot_charge.__doc__ (a function it names: the name rule selects the suite)"),
     ("tests/rebullet_scenario.py", "__doc__"): (1, "rd_tool.__doc__, a module docstring: read by name, unchanged rule"),
     ("tests/released_scenario.py", "__doc__"): (5, "client.__doc__ five times, a module docstring: read by name, unchanged rule"),
     ("tests/retired_inputs_scenario.py", "__doc__"): (1, "_client.__doc__, a module docstring: read by name, unchanged rule"),

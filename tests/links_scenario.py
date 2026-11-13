@@ -36,8 +36,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.core import instance as _core_instance
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 from fastmcp import Client
 L = lambda gid: f"[{gid}](https://board.example.org/items/{gid})"
 

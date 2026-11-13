@@ -174,10 +174,10 @@ class Env:
         self.wait_end = kw.get("wait_end")          # (gid, plan, now) -> {"fixed": bool, "what": str, "why": str}: the server sets the wait a next line names, with a History line (wait_end.py, server_fixes.py); None = the pass only asks the mover
         self.wait_facts = kw.get("wait_facts")      # () -> wait_end.Facts: the machines, the pull requests and the links the wait-end rule reads; None = the rule reads only the items themselves
         self.wake_park = kw.get("wake_park")        # (gid, now) -> {"parked": bool, "wake": str, "line": str}: the server parks a wake that is the whole of the mover's wait, with a History line (server_fixes.py); None = the pass only reports it
-        self.front = kw.get("front")                # (name, project) -> whether that session is a front agent of the project (the server's `_front_keeper`); None = the role map's `front` role
+        self.front = kw.get("front")                # (name, project) -> whether that session is a front agent of the project (service/telling.py's `front_keeper`); None = the role map's `front` role
         self.front_only_of = kw.get("front_only")   # (project) -> whether the project is front-only (anchors.front_only); None = read it from the registry (`registry` when given), except that an environment which names the builder itself (`builder`) says the project has one
-        self.front_strict = kw.get("front_strict")  # (name, project) -> whether that session is a front agent, answering True when it cannot tell (the server's `_front_keeper(strict=True)`); the queue rule's test (model/queued.py)
-        self.front_or_unread = kw.get("front_or_unread")   # (name, project) -> whether that session is a front agent, answering True when the role map cannot be read (the server's `_front_keeper(unread_front=True)`); the hourly audit's test (audit/hourly.py)
+        self.front_strict = kw.get("front_strict")  # (name, project) -> whether that session is a front agent, answering True when it cannot tell (service/telling.py's `front_keeper(strict=True)`); the queue rule's test (model/queued.py)
+        self.front_or_unread = kw.get("front_or_unread")   # (name, project) -> whether that session is a front agent, answering True when the role map cannot be read (service/telling.py's `front_keeper(unread_front=True)`); the hourly audit's test (audit/hourly.py)
         self._told: set[str] = set()                # the projects whose "front-only, no -main agent" line this run has already printed
 
     def role_map(self) -> dict[str, dict[str, Any]]:

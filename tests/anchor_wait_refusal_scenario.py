@@ -70,9 +70,10 @@ def accepted(name, f):
         check(name, False, str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
 CFG = server._cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, watchers=True, pause=False)       # the write guards have their own suite
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOURS * 3600))

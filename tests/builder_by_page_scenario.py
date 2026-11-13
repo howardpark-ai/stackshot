@@ -1,6 +1,6 @@
 """Scenario test for: a new item goes to the builder of its area — fixture data, no live store, no network.
 
-Covers: `[handoff.builder_by_page]` maps a project page key to a background agent of the project. The DEFAULT hand-off of an item with no mover (server._fallback_mover, which the item model
+Covers: `[handoff.builder_by_page]` maps a project page key to a background agent of the project. The DEFAULT hand-off of an item with no mover (telling.fallback_mover, which the item model
 and the notices read) goes to the mapped builder when the item is filed on the mapped page or on a page under it (a prefix at a page boundary, the longest key first), and only when that
 agent is listed on the item's project as a background agent; an unmapped page, a mapped agent the project does not list, and an empty, missing or malformed map all keep the first
 builder, never an error. An explicit mover on a create always wins. The example config carries the table only as a comment, and the docs and create's description say so.
@@ -46,9 +46,10 @@ def rd(g):
     return json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 
 def conf(table):
@@ -57,14 +58,14 @@ def conf(table):
         server._cfg.CFG.pop("handoff", None)
     else:
         server._cfg.CFG["handoff"] = {"builder_by_page": table}
-    server._FALLBACK_CACHE.clear()
+    telling.FALLBACK_CACHE.clear()
 
 def filed(project, n, **kw):
     """Create an item on `project` with no mover (the creator is the project's first builder) -> the session that holds it."""
     r = server.stackshot_create(subject=f"[home] filed {n}", description=DESC, project=project, sender=CORE if project.startswith("projects/delta") else CORE2,
                                 next=f"{CORE if project.startswith('projects/delta') else CORE2}: look at it", **kw)
     assert r.startswith("created"), r
-    return server._holder(rd(r.split()[1]))
+    return telling.holder(rd(r.split()[1]))
 
 MAP = {"projects/delta/ui": SCREEN, "projects/echo/ui": SCREEN}
 
@@ -76,8 +77,8 @@ check("an empty map is today's behaviour", filed("projects/delta/ui", 2) == CORE
 for odd in ("not a table", ["projects/delta/ui"], {"projects/delta/ui": 7, "": SCREEN, 5: SCREEN}):
     conf(odd)
     check(f"a malformed map ({odd!r}) reads as empty: the first builder", filed("projects/delta/ui", 3) == CORE and server._builder_by_page() == {}, server._builder_by_page())
-server._cfg.CFG["handoff"] = "not a table"; server._FALLBACK_CACHE.clear()
-check("a [handoff] that is not a table reads as empty", server._builder_by_page() == {} and server._fallback_mover("projects/delta/ui") == CORE)
+server._cfg.CFG["handoff"] = "not a table"; telling.FALLBACK_CACHE.clear()
+check("a [handoff] that is not a table reads as empty", server._builder_by_page() == {} and telling.fallback_mover("projects/delta/ui") == CORE)
 
 # ---- the map
 conf(MAP)
@@ -88,27 +89,27 @@ check("an unmapped page goes to the first builder", filed("projects/delta/core",
 check("the project's own page, unmapped, goes to the first builder", filed("projects/delta", 7) == CORE)
 check("a prefix is matched at a page boundary: ui is not uikit", filed("projects/delta/uikit", 8) == CORE)
 check("a mapped builder the project does not list falls back to the first builder, with no error", filed("projects/echo/ui", 9) == CORE2)
-check("the default mover read directly agrees", (server._fallback_mover("projects/delta/ui/panel"), server._fallback_mover("projects/delta/core"), server._fallback_mover("projects/echo/ui"))
-      == (SCREEN, CORE, CORE2), (server._fallback_mover("projects/delta/ui/panel"), server._fallback_mover("projects/delta/core"), server._fallback_mover("projects/echo/ui")))
+check("the default mover read directly agrees", (telling.fallback_mover("projects/delta/ui/panel"), telling.fallback_mover("projects/delta/core"), telling.fallback_mover("projects/echo/ui"))
+      == (SCREEN, CORE, CORE2), (telling.fallback_mover("projects/delta/ui/panel"), telling.fallback_mover("projects/delta/core"), telling.fallback_mover("projects/echo/ui")))
 
 # the longest key wins; a key whose agent is not listed leaves the shorter one standing
 conf({"projects/delta": OTHER, "projects/delta/ui": SCREEN})
-check("the longest matching key wins", server._fallback_mover("projects/delta/ui/panel") == SCREEN and server._fallback_mover("projects/delta/core") == OTHER)
+check("the longest matching key wins", telling.fallback_mover("projects/delta/ui/panel") == SCREEN and telling.fallback_mover("projects/delta/core") == OTHER)
 conf({"projects/delta": SCREEN, "projects/delta/ui": CORE2})
-check("a longer key naming an agent the project does not list leaves the shorter key's builder", server._fallback_mover("projects/delta/ui") == SCREEN)
+check("a longer key naming an agent the project does not list leaves the shorter key's builder", telling.fallback_mover("projects/delta/ui") == SCREEN)
 conf({"projects/delta/ui/": SCREEN, " projects/delta/core ": OTHER})
-check("a key's stray slashes and spaces are dropped", server._fallback_mover("projects/delta/ui/panel") == SCREEN and server._fallback_mover("projects/delta/core") == OTHER)
+check("a key's stray slashes and spaces are dropped", telling.fallback_mover("projects/delta/ui/panel") == SCREEN and telling.fallback_mover("projects/delta/core") == OTHER)
 conf({"projects/delta/ui": MAIN})
-check("a front agent is no builder of the project: the first builder takes the item", server._fallback_mover("projects/delta/ui") == CORE)
+check("a front agent is no builder of the project: the first builder takes the item", telling.fallback_mover("projects/delta/ui") == CORE)
 conf({"projects/delta/ui": "home-ghost-core"})
-check("a mapped agent no page lists falls back to the first builder", server._fallback_mover("projects/delta/ui") == CORE)
+check("a mapped agent no page lists falls back to the first builder", telling.fallback_mover("projects/delta/ui") == CORE)
 
 # ---- an explicit mover wins
 conf(MAP)
 r = server.stackshot_create(subject="[home] named mover", description=DESC, project="projects/delta/ui", sender=CORE, mover=OTHER, next=f"{OTHER}: look at it")
-check("an explicit mover on a create wins over the map", r.startswith("created") and server._holder(rd(r.split()[1])) == OTHER, r)
+check("an explicit mover on a create wins over the map", r.startswith("created") and telling.holder(rd(r.split()[1])) == OTHER, r)
 r = server.stackshot_create(subject="[home] named first builder", description=DESC, project="projects/delta/ui", sender=CORE, mover=CORE, next=f"{CORE}: look at it")
-check("…even when it names the project's first builder", r.startswith("created") and server._holder(rd(r.split()[1])) == CORE, r)
+check("…even when it names the project's first builder", r.startswith("created") and telling.holder(rd(r.split()[1])) == CORE, r)
 
 # ---- the same default serves the `then` of an item that waits on a call
 check("an item that waits on a call takes the mapped agent as its then when next names it", server._owner_then("projects/delta/ui", "", CORE, f"{SCREEN}: build it", []) == SCREEN)

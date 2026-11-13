@@ -43,6 +43,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
+from stackshot.service import telling
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -293,19 +294,19 @@ check("empty writer and no keeper: any sender's write replaces it", me["next"] =
 
 # the owner-change notice: the line set, or that lines were removed, never someone else's head line
 told = []
-_tw = server._tell_woken
-server._tell_woken = lambda gid, to, line, tag="wake": told.append((to, line))
+_tw = telling.tell_woken
+telling.tell_woken = lambda gid, to, line, tag="wake": told.append((to, line))
 gn = create(f"{ENG}: keeper line", sender=GEN)
 upd(gn, GEN, mover=ENG)      # the notice goes to the item's mover alone
 upd(gn, MAIN, next=f"{MAIN}: my line")
 check("notice: a session setting a line is reported with that line, not the head of the list", any(f"set next: {MAIN}: my line" in l for _, l in told), told)
-told.clear(); server._OWNER_HEARD.clear()      # one notice per item per window
+told.clear(); telling.OWNER_HEARD.clear()      # one notice per item per window
 upd(gn, MAIN, next="none")
 check("notice: removing its own lines says so and quotes no one's line", any("removed their next lines" in l for _, l in told) and not any("set next:" in l for _, l in told), told)
-told.clear(); server._OWNER_HEARD.clear()      # one notice per item per window
+told.clear(); telling.OWNER_HEARD.clear()      # one notice per item per window
 upd(gn, MAIN, next=f"{ENG}: keeper line")
 check("notice: setting a line identical to another session's says nothing about next", not any("set next:" in l for _, l in told), told)
-server._tell_woken = _tw
+telling.tell_woken = _tw
 
 # the migration's own write: a nameless line given a name keeps its writer
 gm = _model_ids._norm_id(server._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN, next="nameless line").split()[1])     # a line stored before N1: only the server's own write can make one now
@@ -329,8 +330,8 @@ server._cfg.CFG["model"]["guards"] = False
 # a notice quotes the line the writer wrote, not the head of lines others wrote
 mn = {"owner": U[MAIN], "next": f"{MAIN}: head line"}
 NL.write(mn, f"{GEN}: the engineer's line", U[GEN], U[MAIN], server._ho_same)
-check("_next_head: the writer's own first line when it wrote one", server._next_head(mn, GEN) == f"{GEN}: the engineer's line", server._next_head(mn, GEN))
-check("_next_head: the head of the list for a session with no line, or none named", server._next_head(mn, ENG) == f"{MAIN}: head line" and server._next_head(mn, "") == f"{MAIN}: head line")
+check("next_head: the writer's own first line when it wrote one", telling.next_head(mn, GEN) == f"{GEN}: the engineer's line", telling.next_head(mn, GEN))
+check("next_head: the head of the list for a session with no line, or none named", telling.next_head(mn, ENG) == f"{MAIN}: head line" and telling.next_head(mn, "") == f"{MAIN}: head line")
 
 # ================================================================ the tool text says it
 tools = {t.name: t for t in __import__("asyncio").run(server.mcp.list_tools())}

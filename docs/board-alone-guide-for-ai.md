@@ -340,7 +340,7 @@ In the new session, call `create` with:
 - `description`: 1 to 8 lines, each starting `- `, at most 120 characters (no `resolved:` or `done:` words); the first bullet opens `Goal:` and states the outcome wanted (the subject names the same outcome, "Make X work when Y", never the symptom "X fails when Y"); a symptom goes in a later bullet that opens `Problem:`
 - `project`: `projects/getting-started`
 - `sender`: a short stable name for this session
-- `mover`: the same name. A fresh page lists no agents, so the default mover (`_fallback_mover` in stackshot/web/server.py: the project's builder, else its `-main` agent, else the page's `display-name:` session) is the `display-name:` session, which nothing answers to on a solo install. `create` without `mover` is not refused there (observed on a fresh install): the item gets that nonexistent mover and the stall pass logs "nobody could take it". Only a page-less project (`prj_...`) is refused ("names no mover")
+- `mover`: the same name. A fresh page lists no agents, so the default mover (`fallback_mover` in stackshot/service/telling.py: the project's builder, else its `-main` agent, else the page's `display-name:` session) is the `display-name:` session, which nothing answers to on a solo install. `create` without `mover` is not refused there (observed on a fresh install): the item gets that nonexistent mover and the stall pass logs "nobody could take it". Only a page-less project (`prj_...`) is refused ("names no mover")
 - `next`: one line per step, each starting with `<name>: `
 
 Expected: the call succeeds and returns an id.

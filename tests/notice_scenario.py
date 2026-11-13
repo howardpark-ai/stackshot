@@ -64,9 +64,10 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.fleet import client
 from fastmcp.exceptions import ToolError
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 CMD = [sys.executable, str(T / "fake_claude.py")]
 _cfg.CFG["router"] = {"command": CMD, "timeout_seconds": 20}
 def answer(rows): return json.dumps([{"id": i, "ruling": r, "target": t, "reason": reason, "for_owner": False} for i, r, t, reason in rows])

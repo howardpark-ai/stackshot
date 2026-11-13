@@ -74,11 +74,12 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as pg; from stackshot.projects import project_registry as PR; from stackshot.model import item_project as IP
 from stackshot.web import server; from stackshot.service import writes; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
+from stackshot.service import telling
 from stackshot.web.ui import render as R2
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
-server._front_sender = lambda who: False
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
+telling.front_sender = lambda who: False
 CFGM = server._cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)
 pg.cmd_registry(quiet=True)                                     # mints the ids of the pages above and writes <store>/project-record.json

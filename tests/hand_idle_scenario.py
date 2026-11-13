@@ -61,12 +61,13 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.audit import hourly as HR, hand_idle as HI, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._PUSH = [sys.executable, "-c", "pass"]
+telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the pass is given its `now`, and the saves stamp from the server's own clock."""
     t = None
@@ -77,7 +78,7 @@ server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
 def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
-server._tell_woken = fake_tell
+telling.tell_woken = fake_tell
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", "", "", "flag"))
 panes = {}; dead = {}                                              # a name -> its pane's registry status; a name -> why it has no pane
@@ -276,7 +277,7 @@ def probe_untaken():
 rule("4 an untaken hand-off is left to the hand-off audit", probe_untaken, [(HO, "awaiting_session", lambda it: False)])
 def probe_front_mover():
     wipe(); on(); panes["team-back"] = "idle"; put(1, mover="home-main", act=90); return tick() == [] and mover_of(1) == "home-main" and sent == []
-rule("4 an item a front agent moves is left where it is (it is the owner's work)", probe_front_mover, [(server, "_front_keeper", lambda w, p: (False, ""))])
+rule("4 an item a front agent moves is left where it is (it is the owner's work)", probe_front_mover, [(telling, "front_keeper", lambda w, p: (False, ""))])
 def probe_unreadable():
     wipe(); on(); panes["team-back"] = "idle"; put(1, act=90); d = rd(1); d["metadata"]["next"] = 7; d["metadata"]["needs"] = {"x": 1}; (T / "store/a/1.json").write_text(json.dumps(d))
     return isinstance(tick(), list)

@@ -1,12 +1,12 @@
 """field_gates.py: the write-time checks of an item's fields and the registry readers they look pages up with: the subject (its scope prefix and length, `_gate_subject`, `_project_subject_prefix`),
 the description (short `- ` bullets, `_gate_description`, and its opening goal, `_gate_goal`), `next` (a named actor and a length per line, `_gate_next`; the marks of a dropped step), a session's bare URLs
 (`_gate_bare_urls`), the metadata (`_gate_metadata`, with its page lookup in the registry: `_registry_hit`, `_registry_hits`, `_registry_text`), the small limits they read (`_subject_max`, `_close_reason_max`,
-`_description_limits`, `_next_line_max`, `_bullets_on`, `_fit`) and the thread-local that marks a session's own write (`_SESSION_NEXT`).
+`_description_limits`, `_next_line_max`, `_bullets_on`, `_fit`) and the reader of the flag that marks a session's own write (`service/writes.SESSION_NEXT`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the store's
-path, the registry (`projects/project_registry.py`) and the pure text modules. server.py imports each name its writes, its tools and the suites read back from here, so `server._gate_description`, `server._fit`,
-`server._SESSION_NEXT` and the others stay the names they use. `_SESSION_NEXT` is set (`.on`) by the create and update tools' own calls in server.py and read here; it is never rebound, so the name on `server` and the one
-here are one object. No suite sets a name on `server` that code here reads."""
+path, the registry (`projects/project_registry.py`), the pure text modules and the write path's flags (service/writes.py). server.py imports each name its writes, its tools and the suites read back from here, so `server._gate_description`, `server._fit`,
+and the others stay the names they use. The flag of a session's own write (`SESSION_NEXT`) is service/writes.py's: set (`.on`) by the create and update tools' own calls in server.py and read here; it is never rebound.
+No suite sets a name on `server` that code here reads."""
 from __future__ import annotations
 
 import datetime as dt
@@ -14,7 +14,6 @@ import json
 import re
 import shlex
 import sys
-import threading
 from typing import Any
 
 from fastmcp.exceptions import ToolError
@@ -32,8 +31,8 @@ from stackshot.core import store as _store
 from stackshot.core.instance import OWNER
 from stackshot.model.bullet_text import _clip_line
 from stackshot.projects.project_registry import _registry, _roles_sync_safe
+from stackshot.service import writes as _writes
 
-_SESSION_NEXT = threading.local()  # `.on` around the create and update tools' own calls: only a session's write is judged by the write checks of Next (N1, N3, N6; next_rules.py); a script's, the router's and the server's own writes (_update and _create called inside the server) are not
 
 
 # ----------------------------------------------------------------------------- registries
@@ -217,11 +216,11 @@ def _gate_goal(desc: str) -> None:
 
 
 def _gate_bare_urls(fields: dict[str, str], stored: dict[str, Any] | None = None) -> None:
-    """A session's write through the create and update tools (_SESSION_NEXT) may not put a bare http(s) URL in description, next or ask: the page does not always draw one as a
+    """A session's write through the create and update tools (`writes.SESSION_NEXT`) may not put a bare http(s) URL in description, next or ask: the page does not always draw one as a
     link, so a reader sees plain text. A URL inside `[words](url)`, a code span or a fenced block is fine. Judges the text written in this call, `fields` by name, and of that only a URL
     the stored text of the field (`stored`, an update's) does not already hold, so an update that sets a field again with an old bare URL in it is not refused for that. Scripts and the
     server's own writes are not judged. How a page draws a bare URL is not changed here."""
-    if not getattr(_SESSION_NEXT, "on", False):
+    if not _writes.session_next():
         return
     for field, text in fields.items():
         if not text:
@@ -266,8 +265,8 @@ def _gate_next(next_: str, has_ask: bool = False) -> None:
     in this call. A link counts by its text and a naked URL not at all, as in a description. Not judged: a `<owner>: `command`` line (the
     whole command in one backtick span; any other line of his is prose and counts), and next's first non-blank line when it is an ask line and
     the call passes no `ask` (a client without the ask parameter writes the ask there; the server lifts it). Hashes, test counts and past
-    tense stay notes (_report_note). (a session's write through the create and update tools only, _SESSION_NEXT): a line that opens with no `<actor>:` is refused, naming the line and the fix; a sub-line under a named step is fine."""
-    if getattr(_SESSION_NEXT, "on", False) and (bad := _nr.unnamed(next_, skip_first=None if has_ask else (lambda ln: _rmod.parse_ask(ln) is not None))):
+    tense stay notes (_report_note). (a session's write through the create and update tools only, writes.SESSION_NEXT): a line that opens with no `<actor>:` is refused, naming the line and the fix; a sub-line under a named step is fine."""
+    if _writes.session_next() and (bad := _nr.unnamed(next_, skip_first=None if has_ask else (lambda ln: _rmod.parse_ask(ln) is not None))):
         raise ToolError(f"Refused: a line of next names no one: \"{_clip_line(bad[0], 60)}\"" + (f" (and {len(bad) - 1} more)" if len(bad) > 1 else "") + (f" ({h})" if (h := _nr.hint(bad[0])) else "") + f". One step is one action with one named actor: {_nr.FIX}. "
                         "A line under a step that belongs to it starts with `- `; results go on the project page (Current state or a timeline line), never into next")
     limit = _next_line_max()

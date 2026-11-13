@@ -70,6 +70,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 
 def live_tools():
@@ -79,7 +80,7 @@ def live_tools():
     return {t.name: {"description": (t.description or "").replace("Oliver", "the owner")} for t in asyncio.run(server.mcp.list_tools())}
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
 get = lambda i: server.stackshot_get(f"a{i}")
 

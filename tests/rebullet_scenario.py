@@ -61,9 +61,11 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb; from stackshot.model import ids as _model_ids
+from stackshot.service import telling
+from stackshot.service import writes
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
 def upd(i, letter="a", **kw): return server._update(f"{letter}{i}", sender="home-front", **kw)
 def set_cfg(**kw):
@@ -143,11 +145,11 @@ check("2 reopen: …(nothing written)", raw(71) == was71, None)
 upd(71, status="open", next="home-front: pick it up again", description=DESC)
 check("2 reopen: …and one that sets bullets reopens", rd(71)["status"] == "open" and rd(71)["description"] == DESC, rd(71)["status"])
 refused("2 question route: without the exemption the thick create is refused in refuse mode", lambda: server._create(subject="[home] a question", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go"), "description has a paragraph of")
-server._QUESTION.on = True
+writes.QUESTION.on = True
 try:
     out_q = server._create(subject="[home] a script's question", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go")
 finally:
-    server._QUESTION.on = False
+    writes.QUESTION.on = False
 check("2 question route: …a create under the question route's flag is exempt (a script's text is never stranded on a wording refusal)", out_q.startswith("created") and "description has" not in out_q, out_q[:200])
 set_cfg()
 
@@ -466,9 +468,9 @@ item(9017, letter="g", desc=THICK, su=now0 - 9 * DAY); item(9009, letter="g", su
 item(9024, letter="g", desc=THICK.replace("shelf-2", "home-bob"), su=now0 - 9 * DAY); item(9023, letter="g", desc=PLAIN, su=now0 - 9 * DAY)
 before = {n: raw(n, "g") for n in (9017, 9009, 9031, 9024, 9023)}
 told = []
-for fn in ("_pilot_relay", "_owed_mark", "_tell_owner"):
-    orig = getattr(server, fn)
-    setattr(server, fn, (lambda o, f: (lambda *a, **k: (told.append(f), o(*a, **k))[1]))(orig, fn))
+for mod, fn in ((telling, "pilot_relay"), (server, "_owed_mark"), (telling, "tell_owner")):
+    orig = getattr(mod, fn)
+    setattr(mod, fn, (lambda o, f: (lambda *a, **k: (told.append(f), o(*a, **k))[1]))(orig, fn))
 post = lambda what, body, timeout: server._client_post(SERVER_BOX, what, body)
 calls.clear()
 apply_json = T / "approved-apply.json"

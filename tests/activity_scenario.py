@@ -55,6 +55,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server; from stackshot.service import create as create_svc
+from stackshot.service import telling
 from stackshot.service import writes
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -209,8 +210,8 @@ check("6 the GitHub mirror's body and text are the same with and without the fie
 
 # ---- 7. the real call sites: each save the server makes on its own account is filed under the kind that moves (or leaves) the clock
 # (the step-proof saves are driven in tests/step_proof_scenario.py, which has the checkout and pull-request fixtures they need)
-server._tell_woken = lambda *a, **k: None
-server._tell_comment = lambda *a, **k: []
+telling.tell_woken = lambda *a, **k: None
+telling.tell_comment = lambda *a, **k: []
 server._release_after = lambda *a, **k: None
 for i in range(20, 36): item(i)
 t7 = time.time()

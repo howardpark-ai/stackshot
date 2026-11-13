@@ -90,11 +90,12 @@ git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 from stackshot.core import config as _cfg
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
-(T / "fakepush.py").write_text("import sys\nprint('delivered')\n"); server._PUSH = [sys.executable, str(T / "fakepush.py")]
+(T / "fakepush.py").write_text("import sys\nprint('delivered')\n"); telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 for i, oc, why in ((10, "done", "Live at 0168c0d: the sample shows once in the list; rows follow the list order"), (11, "dropped", "Not needed any more: the supplier changed the plan and the question is moot"),
                    (12, "superseded", "Replaced by the paged Completed page; see the new item for the build"), (13, "done", "The sample check runs as a script; on-demand run worked")):
     kw = dict(outcome=oc, reason=why, sender="alpha-builder")

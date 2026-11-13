@@ -671,7 +671,7 @@ def writer_owes():
     return bool(_cfg.get("pilot", "writer_owes_page"))
 
 def touch_settle(name, inp):
-    """How a writer's debt settles, as the server's _writer_charge has it: "any" (any page write) when only next or the hold
+    """How a writer's debt settles, as service/telling.py's writer_charge has it: "any" (any page write) when only next or the hold
     changed, else "ct" (a Current-state edit)."""
     if name != "update": return "ct"
     return "ct" if any(inp.get(k) for k in STATE_FIELDS if k != "next") else "any"

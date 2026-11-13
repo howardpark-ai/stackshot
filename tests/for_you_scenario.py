@@ -90,16 +90,17 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
-server._publish = server._fyev._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = server._fyev._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about the notice's shape and
 # who is named in it, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
 PRESENT = [True]
-_real_verdict = server._front_verdict
-server._front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
+_real_verdict = telling.front_verdict
+telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
 def cfg(live=False): _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, **({"live": True} if live else {})}
 slack = []
 REAL_SLACK_POST, REAL_SLACK_ON = server._fyslack._for_you_slack_post, server._fyslack._for_you_slack_on
@@ -333,7 +334,7 @@ server._fyslack._foryou_slack_wait()
 # ---- 7. the stub every later section reads
 server._wt.cap_needs_owner = lambda: False
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 
 # ---- 8. the board page, the item page, the routes
 fy.seen("all")
@@ -657,10 +658,10 @@ try:
     with contextlib.redirect_stderr(err12):
         out60 = cl(60); out62 = cl(62); settle()
         it61 = server._load("a61"); it61["status"] = "completed"; it61["state_updated"] = time.time(); it61["metadata"] = {**it61["metadata"], "outcome": "done", "reason": "its check passed"}
-        writes.save("a61", it61); told61 = server._tell_check_closed("a61", it61, "item_closed a99"); settle()
+        writes.save("a61", it61); told61 = telling.tell_check_closed("a61", it61, "item_closed a99"); settle()
 finally:
     fy._save = orig_save
-to_a = lambda g: [(o, n) for _t, _g, o, n in told[t12:] if o == A and g in n]       # _tell_woken is section 7's stub: it records what would be pushed
+to_a = lambda g: [(o, n) for _t, _g, o, n in told[t12:] if o == A and g in n]       # tell_woken is section 7's stub: it records what would be pushed
 check("the row write fails on a close with his words: no row, the failure is logged, and the old notice goes to the front owner at once, marked [for Oliver]",
       not of("a60") and "for-you: a60 not recorded" in err12.getvalue() and len(to_a("a60 closed by osprey-x (done)")) == 1 and to_a("a60 closed")[0][1].startswith("[for Oliver] [stackshot] a60 closed by osprey-x (done)"),
       (of("a60"), err12.getvalue(), told[t12:]))

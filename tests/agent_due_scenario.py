@@ -60,6 +60,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import states
+from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -67,8 +68,8 @@ ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
-server._tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
-server._front_sender = lambda who: False
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
+telling.front_sender = lambda who: False
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
 BACK = "team-back"

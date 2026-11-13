@@ -66,14 +66,16 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import telling
+from stackshot.service import writes
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
-server._front_sender = lambda who: False
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
+telling.front_sender = lambda who: False
 from stackshot.waits import waiting as W
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
@@ -86,7 +88,7 @@ CFG.update(guards=True, pause=False)
 mt = lambda i: rd(i)["metadata"]
 raw = lambda i: (T / f"store/a/{i}.json").read_text()
 def upd(i, sender=BACK, **kw):
-    with server._session_write():
+    with writes.session_write():
         return server._update(f"a{i}", sender=sender, **kw)
 def refused_nw(name, i, f, *want):
     was = raw(i)

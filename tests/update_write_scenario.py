@@ -37,11 +37,16 @@ def check(name, cond, got=None):
 
 from fastmcp.exceptions import ToolError
 from stackshot.core import store as cstore
-from stackshot.service import gates, update, writes
+from stackshot.service import gates, telling, update, writes
 cstore.STORE = T / "store"
 
 LOG = []                                                     # every hook and the save, in the order they were called: (name, args, kwargs)
-FLAGS = {"session_next": False, "reformat": False, "terminal_row": False, "question": False}
+class _Flags(dict):
+    """The per-write flags the update reads, which are service/writes.py's thread-locals now: `FLAGS.update(session_next=True)` turns one on there."""
+    def update(self, **kw):
+        for k, v in kw.items(): getattr(writes, k.upper()).on = bool(v)
+        super().update(**kw)
+FLAGS = _Flags(session_next=False, reformat=False, terminal_row=False, question=False)
 RET = {}                                                     # a hook's return value by name, where the default below is not what a case needs
 RAISE = {}                                                   # a hook that refuses (ToolError) by name
 SEEN = {}                                                    # what a hook saw when it ran (the lock, a thread's view)
@@ -79,6 +84,15 @@ def flag(name):
 # the write gates are service/gates.py's, not hooks: the update calls them on that module, so this suite replaces each there (the recorder above) and puts the real ones back before it imports the server
 REAL_GATES = {n: getattr(gates, n) for n in dir(gates) if n.startswith("gate_") and callable(getattr(gates, n))}
 for _n in REAL_GATES: setattr(gates, _n, hook(_n))
+# the telling is service/telling.py's, not a hook either: the update calls each notice on that module, so this suite replaces the ones it calls there with the same recorder (logged under the name the hook had)
+REAL_TELLING = {n: getattr(telling, n) for n in ("front_sender", "handoff_notify", "holder", "mentions_reply", "owner_reached", "page_keeper", "pilot_charge", "pilot_relay", "push_noted", "quiet_line",
+                                                 "tell_decided", "tell_handback", "tell_needed", "tell_observers", "tell_owner", "tell_owner_change", "tell_owner_close", "writer_charge")}
+for _n in REAL_TELLING: setattr(telling, _n, hook("quiet" if _n == "quiet_line" else _n))
+_rec_owner = telling.tell_owner
+def _tell_owner_seen(*a, **k):
+    SEEN["close_was_in_tell"] = getattr(telling.CLOSE_WAS, "item", None)      # what the close flag held when the mover was told
+    return _rec_owner(*a, **k)
+telling.tell_owner = _tell_owner_seen
 def make_hooks(**over):
     kw = {}
     for f in dataclasses.fields(update.Hooks):
@@ -156,7 +170,7 @@ check("2 the same write that is no session's runs neither the front-step gate no
 check("2 …but the owner-step gate follows the write of next, a session's or not", "gate_owner_step" in off, [n for n in off if n.startswith("gate")])
 desc_on, _g = judged(True, 33, description="- Goal: Done when it is done\n- Changed by a session", sender=OWNER)
 check("2 a session's write that leaves next alone reaches no front-step gate (no checklist is written) and no owner-step gate (nothing it reads changed)", "gate_front_step" not in desc_on and "gate_owner_step" not in desc_on, [n for n in desc_on if n.startswith("gate")])
-check("2 …and it still reads the flag through the hook", desc_on.count("session_next") >= 1, desc_on.count("session_next"))
+check("2 …and the flag (service/writes.py's) is off again after the write", writes.SESSION_NEXT.on is False, writes.SESSION_NEXT.on)
 scr_on, _g = judged(True, 34, next=STEP, sender="a script on a box")
 check("2 a script's write is no write of a session even with the flag on: no front-step gate", "gate_front_step" not in scr_on, [n for n in scr_on if n.startswith("gate")])
 RET["model_guards_on"] = False
@@ -176,7 +190,7 @@ upd(g2, description="- Goal: Done when it is done\n- Changed by a script", sende
 check("2 a description write that is no session's runs none of the session-only gates", "gate_front_step" not in names() and "gate_clock_renewal" not in names(), [n for n in names() if n.startswith("gate")])
 FLAGS.update(reformat=True)
 upd(g2, description="- Goal: Done when it is done\n- Changed by a script", sender=OWNER)
-check("2 a re-bullet of the description reads its flag through the hook", names().count("reformat") >= 1, names().count("reformat"))
+check("2 a re-bullet of the description is saved as a filing edit when the flag (service/writes.py's) is on", called("save")[0][1].get("ctx") is writes.QUIET, called("save")[0][1])
 FLAGS.update(reformat=False)
 g2r = put(13)
 RET["pilot_charge"] = ("stew-session", "name")
@@ -248,11 +262,12 @@ check("4 an update that refuses leaves the lock free", refused is not None and f
 g5 = put(8)
 RET["gate_close"] = ""
 SETS = []
-update.install(make_hooks(close_was_set=lambda v: (LOG.append(("close_was_set", (v,), {})), SETS.append(v))[1]))
+update.install(make_hooks())
+telling.CLOSE_WAS.item = None
 try: upd(g5, status="completed", outcome="done", reason="it is done", outcome_text="- done", sender=OWNER); closed = True
 except ToolError as e: closed = str(e)
-sets = [c[0][0] for c in called("close_was_set")]
-check("5 a close hands the item as it stood to the close flag, and the entry clears it after the write", closed is True and len(sets) >= 2 and isinstance(sets[0], dict) and sets[0].get("status") == "open" and sets[-1] is None, (closed, sets))
+sets = [SEEN.get("close_was_in_tell"), getattr(telling.CLOSE_WAS, "item", 1)]
+check("5 a close hands the item as it stood to the close flag (service/telling.py's) while the mover is told, and the entry clears it after the write", closed is True and isinstance(sets[0], dict) and sets[0].get("status") == "open" and sets[1] is None, (closed, sets))
 check("5 the item is closed on disk", rd(g5)["status"] == "completed", rd(g5).get("status"))
 g5b = put(9)
 SETS.clear(); LOG.clear()
@@ -260,7 +275,7 @@ RAISE["gate_subject"] = "Refused: x"
 try: update.update_item(g5b, subject="[home] x", sender=OWNER)
 except ToolError: pass
 RAISE.pop("gate_subject")
-check("5 an update that refuses clears the flag too", called("close_was_set") and called("close_was_set")[-1][0] == (None,), called("close_was_set"))
+check("5 an update that refuses clears the flag too", getattr(telling.CLOSE_WAS, "item", 1) is None, getattr(telling.CLOSE_WAS, "item", 1))
 update.install(make_hooks())
 
 # ---------------------------------------------------------------- 6. refusals
@@ -365,6 +380,7 @@ try: update.Hooks(**{f.name: None for f in dataclasses.fields(update.Hooks)[:-1]
 except TypeError as e: short = str(e)
 check("10 a hook table with a hook missing cannot be built", short is not None, short)
 for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
+for _n, _f in REAL_TELLING.items(): setattr(telling, _n, _f)      # and the real notices
 from stackshot.web import server, page_debts
 tbl = update._hooks()
 check("10 no write gate is a hook of the update: the update calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(update.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))
@@ -488,21 +504,13 @@ try:
     except Exception as e: via_update = f"raised {e!r}"
 finally: server._update = real_upd
 check("10 the complete reaches the server's `_update` by a late lookup (a suite that replaces it there still reaches the close)", via_update == "<patched update>", via_update)
-check("10 the flags the server keeps are read through the hooks it gives (the thread-local's own value, not a copy)", tbl.session_next() is False and tbl.reformat() is False and tbl.terminal_row() is False, (tbl.session_next(), tbl.reformat(), tbl.terminal_row()))
-server._SESSION_NEXT.on = True
-try: flag_on = tbl.session_next()
-finally: server._SESSION_NEXT.on = False
-check("10 …and a flag set after the install is seen", flag_on is True, flag_on)
+check("10 no flag and no notice is a hook of the update: the flags are service/writes.py's and the notices service/telling.py's, each read on its module", not ({"session_next", "reformat", "terminal_row", "question", "close_was_set"} | set(REAL_TELLING) | {"quiet"}) & {f.name for f in dataclasses.fields(update.Hooks)}, sorted({f.name for f in dataclasses.fields(update.Hooks)} & ({"session_next", "reformat", "terminal_row", "question", "close_was_set", "quiet"} | set(REAL_TELLING))))
 check("10 the zone the confirm reply is told in is the server's own ZONE, looked up when the reply is made", tbl.zone() is server.ZONE, tbl.zone())
 real_zone = server.ZONE
 server.ZONE = datetime.timezone(datetime.timedelta(hours=-5))
 try: seen_zone = tbl.zone()
 finally: server.ZONE = real_zone
 check("10 …so a later change of it reaches the update", seen_zone == datetime.timezone(datetime.timedelta(hours=-5)), seen_zone)
-tbl.close_was_set({"status": "open"})
-seen_close = getattr(server._CLOSE_WAS, "item", None)
-tbl.close_was_set(None)
-check("10 the close flag is written through its hook and cleared by it", seen_close == {"status": "open"} and getattr(server._CLOSE_WAS, "item", 1) is None, seen_close)
 
 # ---------------------------------------------------------------- 11. the layers
 src = pathlib.Path(STACK, "stackshot/service/update.py").read_text(encoding="utf-8")

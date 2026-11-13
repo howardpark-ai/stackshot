@@ -64,11 +64,12 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.service import telling
 REAL_MERGED_PRS, REAL_GIT_COMMIT = server._merged_prs, server._git_commit      # before the checks below swap them for tables
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
-server._tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
+telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 56 * DAY, "seen": {}, "reported": []}))
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving

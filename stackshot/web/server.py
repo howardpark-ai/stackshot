@@ -219,10 +219,6 @@ else:
 _NOT_FOR_OWNER = (f"nothing needed from {OWNER}", f"nothing for {OWNER}", "no action needed", f"no action for {OWNER}", "no decision needed",
                   "nothing to decide", "FYI", "for your information", "for the record", "no reply needed")
 _NOT_FOR_OWNER_RE = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in _NOT_FOR_OWNER) + r")\b", re.IGNORECASE)
-# The same ruling on the item's notices: a front agent mover (the mover, or its `then`, or the project's -main agent, never the creator) hears the owner's own answer or comment and nothing else.
-# not a move to needs=decision either, since the board's "Waiting on you" (now Need your call (agents)) view is where he reads it. The reply
-# line a writer gets when its write would have told the mover.
-_FRONT_QUIET = "\n(its {word} {owner} is a front agent: not told; the board shows it)"
 ZONE = _cfg.tz()
 
 
@@ -233,6 +229,7 @@ def _pub_letter() -> str:
 from stackshot.core import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import), its item files, the next id and the file write (core/store.py); `STORE` is read and set on that module, never here
 from stackshot.core.store import _item_files, _next_id  # noqa: E402  — core/store.py
 from stackshot.service import writes as _writes  # noqa: E402  — the one write path of an item: its lock (`ITEM_LOCK`), its save (`save`) and the write context (service/writes.py)
+from stackshot.service import telling as _telling  # noqa: E402  — who is told of a write: the senders, the gate in front of a front agent, the holds and the notices (service/telling.py)
 from stackshot.service.store import _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of one item (service/store.py)
 from stackshot.service import create as _create_svc  # noqa: E402  — creating an item: every gate and write of the create tool in their order, and the request map (service/create.py)
 from stackshot.service import gates as _gates  # noqa: E402  — the write gates of the create, update and complete tools and the checks before the item lock (service/gates.py)
@@ -461,7 +458,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
                 if mod.state != _model.ALIVE or _model.is_owner(mod.mover) or mod.wait is not None:
                     continue
                 project = str(m.get("project") or "")
-                who = _fallback_mover(project)
+                who = _telling.fallback_mover(project)
                 out.append({"gid": gid, "item": _gh.shown(gid), "project": project, "mover": who, "creator": _session_label(str(m.get("owner") or "")) or str(m.get("owner") or "")})
                 if apply and who:
                     it.setdefault("metadata", {})["mover"] = who
@@ -690,7 +687,7 @@ _writes.install(_writes.Steps(
     foryou_on_save=lambda gid, before, item, writer, own: _foryou_on_save(gid, before, item, writer, own),
     landed_on_save=lambda gid, before, item, writer, own: _landed_on_save(gid, before, item, writer, own),
     search_touch=lambda gid: _search.touch(gid),
-    handback_drop=lambda gid, why: _handback_drop(gid, why),
+    handback_drop=lambda gid, why: _telling.handback_drop(gid, why),
     answer_ack=lambda gid, writer: _answer_ack(gid, writer),
 ))
 
@@ -700,11 +697,11 @@ def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
     hears the new id in one plain line (the creator is no one's to tell). The old id still resolves to it (an alias), so a front
     agent mover, which no item notice wakes, is not told: its old id still names the item."""
     meta = item.get("metadata") or {}
-    owner = _holder(item)
-    if owner and _front_keeper(owner, str(meta.get("project") or ""))[0]:
+    owner = _telling.holder(item)
+    if owner and _telling.front_keeper(owner, str(meta.get("project") or ""))[0]:
         print(f"owner: {old} is now {new}; its mover {_session_label(owner)} is a front agent, not told (the old id still resolves)", file=sys.stderr, flush=True)
         return
-    _tell_woken(new, _session_id(owner) if owner else "", f"[stackshot] {_gh.shown(old)} is now {_gh.shown(new)} (the item took its issue number; "
+    _telling.tell_woken(new, _session_id(owner) if owner else "", f"[stackshot] {_gh.shown(old)} is now {_gh.shown(new)} (the item took its issue number; "
                 f"{_gh.shown(old)} still names it): {item.get('subject') or ''} → {_inst.BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
 
 
@@ -719,7 +716,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
     is recorded on the item under metadata.answers, the list the board's answer buttons write too (the board's
     answer box): {ts, kind: "comment", text, via: "github", url, comment_id}, `via` being the flag that it was written
     on GitHub. The save is the server's own (no author): the mirror carries no answers, so the owner's comment is never posted back to the issue. Then the mover and the sessions named in
-    its needs are told one line each (_tell_comment). Reading only: needs, status and the page stay as they are. → False when
+    its needs are told one line each (tell_comment). Reading only: needs, status and the page stay as they are. → False when
     no item has the id (the reader skips the comment); True when it is on the item (a second call for the same comment, after
     a restart between the save and the reader's mark, tells nobody again)."""
     with _writes.ITEM_LOCK:        # it reads, changes the hand-off record and saves, so it takes turns with an update and an answer
@@ -744,29 +741,8 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
             print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         _writes.save(gid, item, activity=_activity.ANSWER, activity_at=float(c.get("ts") or 0) or None)      # the owner's comment is an answer: real activity though the save is the server's, stamped at the comment's own time (a backlog read after a restart is not activity now)
     _publish()
-    _tell_comment(gid, item, str(c.get("text") or ""))
+    _telling.tell_comment(gid, item, str(c.get("text") or ""))
     return True
-
-
-def _tell_comment(gid: str, item: dict[str, Any], text: str) -> list[str]:
-    """the owner's comment on GitHub, one line to the item's mover (_holder) and to every session named in its needs, each
-    once. A front agent mover hears it marked for the owner (_FOR_OWNER): the mark is what reaches its Claude. The text is clipped
-    to one line; the whole comment is on the item and its issue. → the session ids told."""
-    meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
-    note = f"[stackshot] {OWNER} commented on {_gh.shown(gid)} on GitHub: {_clip_line(text)} → {_notice_link(gid)}"
-    told: list[str] = []
-    oid = _session_id(owner) if owner else ""
-    if oid:
-        _tell_woken(gid, oid, f"{_FOR_OWNER} {note}" if _front_keeper(owner, project)[0] else note, tag="comment")
-        told.append(oid)
-    for s in _needs_sessions(meta):
-        sid = _session_id(s)
-        if sid and sid not in told:
-            _tell_woken(gid, sid, note, tag="comment"); told.append(sid)
-    if not told:
-        print(f"comment: {gid} has nobody to tell", file=sys.stderr, flush=True)
-    return told
 
 
 _gh.on_comment = _github_comment
@@ -775,7 +751,6 @@ _gh.on_comment = _github_comment
 # The write-time field checks and the registry readers they use (field_gates.py), kept on this module as well: the writes, the tools and the suites call `server.<name>`. Private names no caller on this module reads stay in that module:
 # SUBJECT_MAX_DEFAULT, CLOSE_REASON_MAX_DEFAULT, _RECYCLE_ONLY, _GOAL_RETRY, _registry_hit.
 from stackshot.web.field_gates import (  # noqa: E402,F401
-    _SESSION_NEXT,
     NEXT_PREFIX_ROOM,
     _bullets_on,
     _close_reason_max,
@@ -840,34 +815,6 @@ from stackshot.web.page_debts import (  # noqa: E402,F401
 import threading
 
 
-def _pilot_keeper(project: str) -> tuple[str, str]:
-    """Who accounts for a board change on a pilot project: the agent that keeps the item's page when the item sits on a
-    sub-page with an `agent:` line (the keeper is neither charged nor told for a page an agent keeps),
-    else the project's keeper. → (session name, "agent" | "name"); ("", "") outside the pilot or with nobody named."""
-    try:
-        if not _anc.pilot_root(project):
-            return "", ""
-        e = _anc.registry().get(project) or {}
-        if e.get("role") == "agent" and e.get("session"):
-            return str(e["session"]), "agent"
-        stew = _anc.notice_name(project)
-        return (stew, "name") if stew else ("", "")
-    except Exception:
-        return "", ""
-
-
-def _pilot_charge(project: str, writer: str) -> tuple[str, str]:
-    """The pilot (stackshot.toml [pilot]): a state-changing board write on a pilot project
-    is the page keeper's to account for. → (the keeper's session id, its role) when `writer` is not the keeper, else ("", ""). A script's
-    filing (create_item with `by`) charges the keeper this returns and nobody else: no one when it returns none, and no one when the keeper
-    is the owner itself (the owner is never charged for what a script filed)."""
-    who, role = _pilot_keeper(project)
-    if who and _front_keeper(who, project)[0] and not _router_live.holds(project, who):    # a front agent keeper (a sub-page's `agent:`) is passed by: the writer owes it, the keeper past the grace; the general -main agent a nameless page's notices are addressed to is the router's, not passed by
-        who, role = _anc.notice_name(project), "name"
-    sid = _session_id(who) if who else ""
-    return (sid, role) if sid and sid != _session_id(writer) else ("", "")
-
-
 # ----------------------------------------------------------------------------- how an item relates to sessions (the linked agent before it)
 # On the whole board; since an earlier change an item has a mover and nothing else that acts as an owner (the creator is a
 # fact of the History, "created by"): `needs`, the sessions whose move it is now, which hear its wake, recycle and after notices and
@@ -898,165 +845,7 @@ _NEEDS_FORM = (
 ).replace("{OWNER}", OWNER)
 
 
-
-# Vocabulary of this file (the router rules every project, and the role the project sessions once had is
-# gone): the KEEPER of a project is the session its notices fall to (_stand_in_keeper: its builder, else its -main agent; for a page with
-# no agent of its own its hub's, else the scope's general -main agent), and a notice that would have gone to the page's `display-name:`
-# session is held for the router (router_live.holds). Text a session or the owner reads says keeper, builder or router.
-def _stand_in_keeper(project: str, reg: dict[str, Any] | None = None) -> str:
-    """The keeper of a project, where the page's `display-name:` session used to be written to: its builder (a background agent whose mandate says build, maintain,
-    merge or engineer), else its -main agent; for a page with no user-facing agent of its own, its hub's -main agent, else the general
-    -main agent of its scope (router_live.stand_in, anchors.general_main). "" for a key that names no page."""
-    return _router_live.stand_in(project, reg)
-
-
-def _page_keeper(project: str, reg: dict[str, Any] | None = None) -> str:
-    """The keeper an item's project answers to. A project whose page or hub lists a user-facing agent: its stand-in (builder, else -main).
-    A one-session page (a name-line session, no agents map; none on its hub either): that session, as before, not the general -main agent,
-    which is for the router's passes alone (the owner); else the name line of its hub or top-level page. "" when the project has
-    none (its mover then hears what a keeper would)."""
-    try:
-        reg = _anc.registry() if reg is None else reg
-        if _anc.has_front(project, reg):
-            return _stand_in_keeper(project, reg)
-        root = _anc.pilot_root(project)
-        return (_anc.name_line(root, reg) if root else "") or _anc.name_line(_anc.hub_of(project, reg), reg) or _anc.name_line("/".join(str(project).split("/")[:2]), reg) or ""
-    except Exception:
-        return ""
-
-
-def _keeper(project: str, owner: str = "") -> str:
-    """Who hears an item's notices when its needs names no session and nothing else names one (the whole board): the keeper of its page (a
-    sub-page's `agent:`, unless that is a front agent), else the keeper of its pilot root or of its hub, else the project's builder, else its
-    -main agent, else, for a mover that is a front agent, that mover's keeper, else the mover itself (`owner` here is the item's mover, never its creator). → a session name or id, "" when none is named."""
-    try:
-        reg = _anc.registry()
-        e = reg.get(str(project or "").strip().strip("/")) or {}
-        if e.get("role") == "agent" and e.get("session") and not _front_keeper(str(e["session"]), project)[0]:
-            return str(e["session"])
-    except Exception:
-        reg = None
-    return _page_keeper(project, reg) or _fallback_mover(project) or (_front_keeper(owner, project)[1] if owner else "") or owner
-
-
-_FALLBACK_CACHE: dict[str, tuple[int, float, str]] = {}
-
-
-_CLOSE_WAS = threading.local()      # the item as it stood before the close being saved on this thread: a close drops mover and then, and the close is told to the mover
-
-
-def _fallback_mover(project: str) -> str:
-    """the session that moves, and hears the notices of, an item nothing else names: the project's builder (the background agent whose mandate builds; for a page
-    [handoff.builder_by_page] maps, the mapped builder when the project lists it: _builder_for), else its -main agent, never the item's creator. "" when the project names neither. Cached for a few seconds per project and registry version: the board derives every item's mover."""
-    key = str(project or "").strip()
-    if not key:
-        return ""
-    try:
-        ver = os.stat(_anc.REGISTRY).st_mtime_ns
-    except OSError:
-        ver = 0
-    now = time.monotonic()
-    hit = _FALLBACK_CACHE.get(key)
-    if hit and hit[0] == ver and now - hit[1] < 20.0:
-        return hit[2]
-    who = _builder_for(key) or _main_agent(key)
-    if not who:
-        try:
-            who = _page_keeper(key)        # a page that lists no -main agent but names its keeper (`session:`, the -main agent of a page not yet converted)
-        except Exception:  # noqa: BLE001
-            who = ""
-    _FALLBACK_CACHE[key] = (ver, now, who)
-    return who
-
-
-_wt.FALLBACK_MOVER = _fallback_mover        # model.derive and waiting.mover_of read the default mover through this (the server alone can read the project registry)
-
-
-def _held_by(item: dict[str, Any], was: dict[str, Any] | None = None) -> tuple[str, str]:
-    """the one session an item's notices go to, and the word for why → (session, "mover" | "then"): the item's mover; when its mover is the owner, its `then`; when it has neither,
-    the project's builder, else its -main agent (which the model already names as the default mover). A closed item has no mover left (a close drops it), so `was`, the item as it stood
-    before the close, is read instead. The creator (metadata.owner) is a fact of the History and holds no part here. ("", "mover") when no session can be named."""
-    if was is None and item.get("status") != "open":
-        w0 = getattr(_CLOSE_WAS, "item", None)
-        if isinstance(w0, dict) and str(w0.get("id") or "") == str(item.get("id") or "x"):
-            was = w0
-    src = was if (was is not None and item.get("status") != "open") else item
-    meta = src.get("metadata") or {}
-    cands: list[tuple[str, str]] = []
-    try:
-        if src.get("status") == "open":
-            mod = _model_of({**src, "gid": src.get("gid") or src.get("id") or ""})
-            if mod.state == _model.ALIVE:
-                cands = [(mod.mover, "mover"), (mod.then, "then")]
-            elif mod.wait:      # a waiting item: the post-wake mover when the writer named one, else the stored mover / `then` (it relays), else the model's default for who takes it after the wait.
-                # The order is the one the hand-over writers (_hand_stored_then, _decision_hand_over, _release_after) still use: they hand to the stored `then`, so the reader must find the same session.
-                cands = [(_model.norm_who(meta.get("post_wake_mover")), "then"), (_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then"), (mod.wait.mover, "then")]
-    except Exception:  # noqa: BLE001  — a notice's addressee is never worth failing a write over
-        cands = []
-    cands += [(_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then")]      # a stored mover or `then` still holds an item that waits on someone outside (it relays; it is told when the wait ends)
-    for who, word in cands:
-        if who and not _model.is_owner(who):
-            return who, word
-    return _fallback_mover(str(meta.get("project") or "")), "mover"
-
-
-def _holder(item: dict[str, Any], was: dict[str, Any] | None = None) -> str:
-    """The session an item's notices go to (_held_by): "" when none can be named."""
-    return _held_by(item, was)[0]
-
-
-def _quiet(item: dict[str, Any], owner: str = "") -> str:
-    """The reply line that says a front agent holding the item (its mover, else its `then`) is not told: the board shows it. `owner` = the session when the caller has it."""
-    who, word = _held_by(item)
-    return _FRONT_QUIET.format(word=word, owner=_session_label(owner or who))
-
-
-_HELD_LINE = re.compile(r"\n\(its (?:mover|then) ")
-
-
-def _then_label(item: dict[str, Any]) -> str:
-    """The item's `then` (stored, else the model's) as a session label; "" when it has none or it is the owner."""
-    try:
-        mod = _model_of({**item, "gid": item.get("gid") or item.get("id") or ""})
-        who = mod.then if mod.state == _model.ALIVE else ((mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else "")
-    except Exception:  # noqa: BLE001
-        who = _model.norm_who((item.get("metadata") or {}).get("then"))
-    return "" if (not who or _model.is_owner(who)) else (_session_label(who) or who)
-
-
-def _then_part(item: dict[str, Any]) -> str:
-    """", then <session>" for a notice that names who takes the item after the owner; "" when it has no `then` (the notice names no creator)."""
-    t = _then_label(item)
-    return f", then {t}" if t else ""
-
-
-def _keeper_words(project: str, keeper: str) -> str:
-    """How a notice names the keeper's standing: "the keeper of projects/alpha" when it keeps the item's project, else
-    "the keeper of its page (projects/alpha/sub)"."""
-    try:
-        nm = _anc.names()
-        if _anc.canonical(keeper, nm) == _anc.canonical(_page_keeper(project), nm):
-            return f"the keeper of {project}"
-        roles = _anc.session_roles()
-        r = roles.get(keeper) or roles.get(_session_label(keeper)) or roles.get(_anc.canonical(keeper, nm)) or {}
-    except Exception:
-        r = {}
-    return f"the keeper of {r.get('project') or project}" if r.get("role") == _anc.NAME_ROLE else f"the keeper of its page ({project})"
-
-
-def _notice_to(meta: dict[str, Any]) -> list[tuple[str, str]]:
-    """The sessions an item's notices go to → [(session id, why)]: the sessions named in its needs, else its mover or its `then` or, with neither, the project's builder, else its
-    -main agent (_holder: never the creator). `why` is the words for the notice: "as a session named in its needs" | "as its mover" | "as its then"."""
-    out: list[tuple[str, str]] = []
-    for s in _needs_sessions(meta):
-        sid = _session_id(s)
-        if sid and sid not in [x for x, _w in out]:
-            out.append((sid, "as a session named in its needs"))
-    if out:
-        return out
-    who, word = _held_by({"status": "open", "metadata": meta})
-    kid = _session_id(who) if who else ""
-    return [(kid, f"as its {word}")] if kid else []
+_wt.FALLBACK_MOVER = _telling.fallback_mover        # model.derive and waiting.mover_of read the default mover through this (the server alone can read the project registry)
 
 
 def _hub_sessions(project: str) -> tuple[str, str, list[str], list[str], str]:
@@ -1247,22 +1036,6 @@ def _open_item_named(ref: str) -> str:
         return ""
 
 
-_TERMINAL_ROW = threading.local()  # set by the terminal-prompt and job-gap routes around their writes: the row is a script's notification of its own, so it owes no page and no session is told of it (create_item, _update, the _tell_* notices; a job-gap item's builder is told by the needs notice of its create, which this does not stop)
-_QUESTION = threading.local()     # set by the script question route around its create: guard 11 (alarming words) does not judge a headless run's own question text, so it is never stranded on a wording refusal
-_REFORMAT = threading.local()    # set by the re-bullet route around its update: a description written in bullets with the same content is a filing edit, no state change
-
-
-@contextlib.contextmanager
-def _session_write():
-    """Marks the create or update tool's own call as a session's write for the write checks of Next (_SESSION_NEXT); restored on exit."""
-    was = getattr(_SESSION_NEXT, "on", False)
-    _SESSION_NEXT.on = True
-    try:
-        yield
-    finally:
-        _SESSION_NEXT.on = was
-
-
 def _model_apply(meta: dict[str, Any], status: str, setv: dict[str, str], drop: set[str]) -> None:
     """Store or drop the model fields on `meta` (the metadata as this write leaves it). A completed item has no mover and waits on nothing: only its goal can be set."""
     if status == "completed":
@@ -1272,7 +1045,6 @@ def _model_apply(meta: dict[str, Any], status: str, setv: dict[str, str], drop: 
     for k in drop:
         meta.pop(k, None)
     meta.update(setv)
-
 
 
 def _is_background(who: str, project: str) -> bool:
@@ -1476,876 +1248,6 @@ def project_ref(x: str) -> dict[str, Any] | None:
     return _prj.ref(x, _registry("projects"))
 
 
-def _front_keeper(who: str, project: str = "", strict: bool = False, unread_front: bool = False) -> tuple[bool, str]:
-    """is `who` (a name or a transcript id) a front agent, by anchors.session_roles() (which roles.json builds on)? → (True, the
-    keeper of `project`, else of the project it is front in: notice_name or keeper, as _gate_front finds it; "" when none),
-    or (False, "") for a back agent, a keeper or a session with no role, and for the keeper of `project` itself even when
-    session_roles ranks it front for another page. `strict` (the queue rule's: model/queued.py) answers (True, "") for any session whose role is front, the keeper of `project` included, and when the roles cannot be read, where the default answers False.
-    `unread_front` (the hourly audit's: audit/hourly.py) keeps the default's answers for a role map that was read, and answers (True, "") when it was not (an error, or no role at all: the registry reads {} when its file cannot be read), so an unreadable registry is no proof that the session is a builder."""
-    try:
-        roles = _anc.session_roles()
-        if unread_front and not roles:
-            return True, ""
-        name = _role_name(roles, who)
-        if not name or roles[name]["role"] != "front":
-            return False, ""
-        if strict:
-            return True, ""        # the queue rule asks only whether the session is a front agent: the keeper of the project is one too
-        root = _anc.pilot_root(project) if project else ""
-        own = (_anc.name_line(root) if root else _anc.name_line(project)) if project else ""      # the page's name line only (a sub-page's own `session:` is its agent: keeper, never the project's keeper): the fallback -main agent a nameless page's notices go to is no keeper, and it is front
-        if own and _session_id(own) == _session_id(who):     # the keeper of this item's project is its keeper here, front elsewhere or not
-            return False, ""
-        for p in (project, roles[name]["project"]):
-            stew = (_page_keeper(p) or _anc.name_line(p)) if p else ""     # the page's keeper (_page_keeper: the stand-in of a page that lists agents, a one-session page's own session), not the retired name-line session
-            if stew and _session_id(stew) == _session_id(who):
-                return True, ""        # the stand-in is this front agent itself: it tells nobody about its own
-            if stew:
-                return True, stew
-        return True, ""
-    except Exception:
-        return (True, "") if (strict or unread_front) else (False, "")
-
-
-def _front_sender(who: str) -> bool:
-    """Is `who` (a name or a transcript id) a front agent by anchors.session_roles(), the test the message tool's front gate uses (_gate_front)? A session
-    no page lists, a background agent and the owner are not: the watch rule fails open (one stderr line when the check itself fails)."""
-    who = str(who or "").strip()
-    if not who or _model.is_owner(who):
-        return False
-    try:
-        roles = _anc.session_roles()
-        name = _role_name(roles, who)
-        return bool(name) and roles[name]["role"] == "front"
-    except Exception as e:  # noqa: BLE001  — the rule is an extra: a failure in it lets the write through
-        print(f"watch rule: front test of {who} failed ({e.__class__.__name__}: {e}); the write passes", file=sys.stderr, flush=True)
-        return False
-
-
-# ---- a front agent is no channel to the owner for an item's moves
-# Two rules. (1) A return or fallback that stackshot makes itself (the hand-off ladder's return to the sender, the cold call's pick, the fallback mover a stepped answer or an
-# ended wait lands on) never goes to a front agent: the item goes to the project's builder; a project without one keeps the item with its current mover. What
-# The owner or a session sets explicitly (a mover, a `then`) is left as written. (2) A notice about an item reaches a front agent only when the owner is there for that pane (he typed in
-# it within [presence] minutes: a stamp file the prompt hook writes) AND the agent touched the item in its current conversation; a progress notice then rides his next turn (fyi),
-# a close or a stuck item is told as a turn (the [for <owner>] mark on one stackshot sends itself exempts nothing), everything else is held and logged. Messages a session sends on
-# purpose through the message tool are not touched.
-PRESENCE_MINUTES = 30.0
-_FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
-                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
-                   "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
-                   "owner": "progress", "observer": "progress"}      # news about the item: progress (named here so a new, unmapped tag is a decision the tag-coverage test catches)
-
-
-_FRONT_HINT = threading.local()      # the kind the sender gives the gate for the one notice it is telling (see _tell_kind)
-
-
-def _tell_kind(kind: str, *args: Any, **kw: Any) -> "threading.Thread | None":
-    """_tell_woken for a sender that knows what kind of notice it tells a front agent (progress | close | stuck | exempt); the hint lasts for this call only, so
-    _tell_woken keeps its signature (the tests replace it)."""
-    old = getattr(_FRONT_HINT, "kind", "")
-    _FRONT_HINT.kind = kind
-    _FRONT_HINT.result = ("", "")
-    try:
-        return _tell_woken(*args, **kw)
-    finally:
-        _FRONT_HINT.kind = old
-
-
-def _gate_result() -> tuple[str, str]:
-    """what the gate did with the last notice _tell_kind told on this thread: ("", "") sent as ever (or a recipient that is no front agent), ("fyi", "") filed to ride his next
-    turn, ("held", why) nobody is told. A sender words its reply line from it, so a line never says "told" of a notice the gate held. (_tell_woken returns None for a held notice, but a
-    test's stand-in returns None too, so the verdict is read here.)"""
-    return getattr(_FRONT_HINT, "result", ("", ""))
-
-
-def _no_front(who: str, project: str) -> str:
-    """`who` unless it is a front agent, then the project's builder (_handoff_builder: a list of one, or none), "" when the project has none."""
-    if not who or not _front_sender(who):
-        return who
-    b = _handoff_builder(project)
-    return b[0] if b else ""
-
-
-def _auto_mover(who: str, project: str) -> str:
-    """a mover stackshot picks by itself (a fallback, never one a session or the owner wrote): `who`, moved to the project's builder when `who` is a front agent. A project
-    with no builder keeps `who`: the item (his answer, an ended wait) has no other holder to stay with, and it is the item model's own default."""
-    return _no_front(who, project) or who
-
-
-def _presence_minutes() -> float:
-    try:
-        raw = _cfg.get("presence", "minutes", default=PRESENCE_MINUTES)
-        v = float(raw)
-        return v if v > 0 and not isinstance(raw, bool) else PRESENCE_MINUTES      # a value that is no number above 0 reads as 30; config.notes() says so (start, reload)
-    except (TypeError, ValueError):
-        return PRESENCE_MINUTES
-
-
-def _presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None = None) -> bool:
-    """is the owner there for this pane: the stamp file <state>/prompts/<session id> (written by the prompt hook of the config repo; stackshot only reads it) holds epoch seconds
-    within [presence] minutes. The pane's session id comes from the CLI registry (_handoff_pane_row: ~/.claude/sessions/<pid>.json). A pane this box does not run, a missing, empty or
-    unreadable file, a stamp from the future or an old one: not there."""
-    try:
-        row = _handoff_pane_row(who, idx)
-        sid = str((row[1] if row else {}).get("sessionId") or "")
-        if not sid or "/" in sid or sid.startswith("."):
-            return False
-        ts = float(_cfg.state("prompts", sid).read_text(encoding="utf-8").strip().split()[0])
-        now = time.time() if now is None else now
-        return 0 <= now - ts <= _presence_minutes() * 60.0
-    except Exception:  # noqa: BLE001  — no stamp, no presence
-        return False
-
-
-def _stamped_at(v: dict[str, Any]) -> float:
-    """When a revision's writer stamp (`written_by`, `written_by_id`) was written: `written_at`, which only a write by a session or the owner sets (`writes.record_writer`); a revision from before
-    that field has `updated`. A server save with no writer moves `updated` and leaves the stamp (and `written_at`) as the last real writer left them, so it is never a touch."""
-    try:
-        return float(v.get("written_at") or v.get("updated") or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _writers_since(gid: str, since: float) -> list[tuple[str, str]]:
-    """The (name, id) every revision of the item whose writer stamp (`written_by`, `written_by_id`) was written at or after `since` (_stamped_at; a git revision committed after `since` that
-    only carries an older stamp, a server save, does not count): the file on disk, then the store's git revisions (one `git log` and one `git cat-file --batch`, as render.item_versions
-    reads them; a store outside git adds none)."""
-    out: list[tuple[str, str]] = []
-    try:
-        it = _load(gid)
-        if _stamped_at(it) >= since:
-            out.append((str(it.get("written_by") or ""), str(it.get("written_by_id") or "")))
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        p = _path(gid)
-        lg = subprocess.run(["git", "-C", str(_store.STORE), "log", f"--since={int(since)}", "--name-only", "--format=%x01%H", "--", str(p)], capture_output=True, timeout=10)
-        if lg.returncode:
-            return out
-        want = []
-        for chunk in lg.stdout.decode("utf-8", "replace").split("\x01")[1:]:
-            head, _, rest = chunk.partition("\n")
-            path = next((x.strip() for x in rest.splitlines() if x.strip()), "")
-            if head.strip() and path:
-                want.append(f"{head.strip()}:{path}\n")
-        if not want:
-            return out
-        buf = subprocess.run(["git", "-C", str(_store.STORE), "cat-file", "--batch"], input="".join(want[:60]).encode(), capture_output=True, timeout=10).stdout
-        i = 0
-        while i < len(buf):
-            nl = buf.find(b"\n", i)
-            if nl < 0:
-                break
-            hdr = buf[i:nl].split()
-            i = nl + 1
-            if len(hdr) < 3 or hdr[1] != b"blob":
-                continue
-            n = int(hdr[2])
-            try:
-                v = json.loads(buf[i:i + n].decode("utf-8", "replace"))
-                if _stamped_at(v) >= since:
-                    out.append((str(v.get("written_by") or ""), str(v.get("written_by_id") or "")))
-            except Exception:  # noqa: BLE001
-                pass
-            i += n + 1
-    except Exception:  # noqa: BLE001
-        pass
-    return out
-
-
-def _touched(gid: str, who: str, since: float) -> bool:
-    """did this session write the item in its current conversation: one of the item's revisions since the pane's process started (the CLI registry's startedAt, which a
-    relaunch, a resume or a recycle moves) names it as the writer, as the item's History shows it. `gid` may name several items (a batched notice): any one counts. No start time
-    (`since` of 0 or less) is never a touch: every write since the epoch would count, so it fails closed, as presence does."""
-    if not since or since <= 0:
-        return False
-    for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)]:
-        for name, wid in _writers_since(g, since):
-            if (wid and _same_sess(wid, who)) or (name and _same_sess(name, who)):
-                return True
-    return False
-
-
-def _front_verdict(gid: str, owner: str, kind: str) -> tuple[str, str]:
-    """what a notice about an item does when it is for a front agent: ("send", "") as ever, ("fyi", "") rides its next turn, ("hold", why) nobody is told (logged)."""
-    idx = _sessions_index()
-    row = _handoff_pane_row(owner, idx)
-    if not row:
-        return "hold", "its pane is not on this box"
-    if not _presence_here(owner, idx=idx):
-        return "hold", f"{OWNER} is not there for its pane ({_presence_minutes():g} min)"
-    try:
-        since = float(row[1].get("startedAt") or 0) / 1000.0
-    except (TypeError, ValueError):
-        since = 0.0
-    if since <= 0:
-        return "hold", "its start time is not on record, so what it touched cannot be told"      # fails closed, like presence
-    if not _touched(gid, owner, since):
-        return "hold", "it did not touch the item in this conversation"
-    return ("send", "") if kind in ("close", "stuck") else ("fyi", "")
-
-
-def _front_board_line(gid: str, owner: str, told: bool, why: str, note: str) -> list[str]:
-    """The news of a progress notice for a front agent goes onto the
-    item in the same pass, whether the notice is passed on or held: one History line (`metadata.front_quiet.log`, quiet.py), written by the server (no writer, no clock moves, nothing
-    posted to the issue). A close and a stuck mark need none: the close is the item's own revision, and a stuck mark (metadata.wait_failed, a wait that can no longer end) is
-    written before its notice is told. A closed item gets none (its close is the record). → the ids written. Never raises."""
-    out: list[str] = []
-    try:
-        label = _session_label(owner) or str(owner)
-        text = _frontq.line(label, told, why, note)
-        for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)][:5]:
-            with _writes.ITEM_LOCK:
-                it = _load(g)
-                if it.get("status") != "open":
-                    continue
-                meta = dict(it.get("metadata") or {})
-                if _frontq.note(meta, time.time(), text):
-                    it["metadata"] = meta
-                    _writes.save(g, it, note="a front agent's notice: " + ("told on his next turn" if told else "not told"))
-                    out.append(g)
-    except Exception as e:  # noqa: BLE001  — the line is a record; the gate's verdict stands without it
-        print(f"front gate: {gid} board line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return out
-
-
-def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str) -> None:
-    """the routing-log line (ruled `held` by stackshot (auto)) for a notice a front agent was not told. Never raises."""
-    try:
-        proj = _hold_project(owner, gid)
-        if proj:
-            _routing.record_auto(proj, "held", reason, kind="board", label=f"{kind} {gid}".strip(), who=NAME, text=note,
-                                 target="for " + (_session_label(owner) or str(owner)), pilot=bool(_anc.pilot_root(proj)))
-    except Exception as e:  # noqa: BLE001  — the log line is a record
-        print(f"front gate: {gid} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _front_gate(gid: str, owner: str, note: str, tag: str, kind: str) -> bool:
-    """the one gate every item notice passes in _tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
-    Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act). The [for <owner>]
-    mark does not exempt a notice: a close or a stuck notice stackshot itself sends carries it, and takes a turn of its own only under presence plus touched. A message a session sends
-    on purpose goes through the message tool, which does not pass here.
-    A tag the map does not know is a progress notice (held when he is away); tests/front_quiet_scenario.py fails on a tag passed to the gate that the map lacks."""
-    kind = kind or _FRONT_TAG_KIND.get(tag, "progress")
-    _FRONT_HINT.result = ("", "")
-    if kind == "exempt" or not _front_sender(owner):
-        return False
-    try:
-        verdict, why = _front_verdict(gid, owner, kind)
-        if verdict == "send":
-            return False
-        fyi_ok = verdict == "fyi" and _held.enabled() and _held.can_fetch(owner)
-        if fyi_ok:
-            fyi_ok = _held.add(_held.key_of(owner), "fyi", note, sender=NAME, gid=gid)
-        if verdict == "fyi" and not fyi_ok:
-            why = "its hook cannot fetch held lines, and a new turn is not worth it"
-        reason = f"held: front agent, rides {OWNER}'s next turn (fyi, {kind})" if fyi_ok else f"held: front agent, {why} ({kind})"
-        _FRONT_HINT.result = ("fyi", "") if fyi_ok else ("held", why)
-        if kind == "progress":
-            _front_board_line(gid, owner, fyi_ok, why, note)      # the board keeps the news whether or not the pane hears it
-        _front_held_log(gid, owner, kind, reason, note)
-        return True
-    except Exception as e:  # noqa: BLE001  — the gate is an extra: a failure in it sends the notice as before
-        print(f"front gate: {gid} notice to {owner} sent as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return False
-
-
-def _notice_link(gid: str) -> str:
-    """the link a notice pushed to a session (and its routing-log line) carries to its item: the item's page, as the item
-    is shown (board#N → <board_url>/items/<n>, a temporary id → /items/board-tmp-<machine>-<n>, ghsync.href_id through
-    _item_url), never the board card's anchor (#task-g-7), which spells the store id. The id the notice names is
-    ghsync.shown(gid)."""
-    return _item_url(gid) or f"/items/{_gh.href_id(gid)}"
-
-
-def _tell_close_owner(gid: str, item: dict[str, Any], owner: str, project: str, writer: str, by: str = "") -> str:
-    """A close with his own words on the item (_owner_words) was the one close a front agent mover was told,
-    in one line. It is a row on his For you list now, instead of a message to a front
-    agent, which cost that agent a turn and him a place in a chat. The row is made when the close is saved (_foryou_on_save, which
-    also holds the muted and unwatched rules), so nothing is delivered here; this only says whether the row exists, for the writer's
-    reply line. The front agent mover is told of any close by another session all the same, in its own
-    message (_tell_owner_close), so it need not set a far wake and wait; the row for his words is unchanged. The router's `close-words` rule stays for a notice recorded before this change (it rules it merged). → what shows his
-    words ("" = no row: no words on the item, or the item is muted)."""
-    signal = _owner_words(item)
-    if not signal:
-        return ""
-    key = _foryou_key(gid, "closed", item)
-    if _fy.has_key(key):
-        return signal
-    if key in _FORYOU_FAILED:           # the row could not be written (the list's file, the disk): the close must still reach someone
-        _FORYOU_FAILED.discard(key)
-        if _close_owner_notice(gid, item, owner, project, writer, by, signal):
-            _FORYOU_FELL.add(key)
-            if len(_FORYOU_FELL) > 500:
-                _FORYOU_FELL.clear()
-            return signal
-    return ""
-
-
-_FORYOU_FELL: set[str] = set()          # keys of closes told to the mover the old way because their row could not be written
-
-
-def _close_owner_notice(gid: str, item: dict[str, Any], owner: str, project: str, writer: str, by: str, signal: str) -> bool:
-    """The way a close with his words was told to a front agent mover before the For you list, kept as the fallback for a row that could
-    not be written. It is delivered at once with the mark (_FOR_OWNER), router live or not: the router's close-words rule now rules a
-    recorded close merged, so a notice left to the router would reach nobody. → True when it was sent."""
-    meta = item.get("metadata") or {}
-    who, olabel, subject = by or _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
-    outcome, sup, reason = str(meta.get("outcome") or "done"), str(meta.get("superseded_by") or ""), _clip_line(meta.get("reason"), 240)
-    line = (f"[stackshot] {_gh.shown(gid)} closed by {who} ({outcome}{' by ' + _gh.shown(sup) if sup else ''}): {subject}"
-            + (f" — {reason}" if reason else "") + f" → {_notice_link(gid)}")
-    try:
-        _tell_kind("close", gid, _session_id(owner), f"{_FOR_OWNER} {line}", tag="owner")      # a close takes a turn only under presence plus touched; held, its news is the close revision
-        return True
-    except Exception as e:  # noqa: BLE001
-        print(f"for-you: {gid} fallback notice to {olabel} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return False
-
-
-def _tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision: bool = False, heard: list[str] | None = None, close: bool = False, to: str = "") -> str:
-    """on a pilot project, the item's mover (its mover, else its `then`, else the project's builder, else its -main agent; never the creator; `to` names it when the caller knows who it was before the write) hears what another session did to its item that it must know: a move to
-    needs=decision (with the ask and its options), a completion, a reopen. a mover that is a front agent hears none of
-    these itself; a completion or a reopen goes unmarked to the project's keeper instead, which passes it on only if it needs
-    the owner. One the keeper made itself is told to nobody (an earlier rule used to tell
-    the mover plainly, which woke its pane for nothing he had to do); the board shows it. A move to
-    decision (`decision`) is told to nobody either, neither the front agent mover (it used to hear it marked with _FOR_OWNER)
-    nor its keeper: the board's "Waiting on you" (now Need your call (agents)) view is where he reads it. `heard`, when given, gets the mover's id appended
-    when the mover itself was told (not its keeper instead), and when a front agent mover is passed by on a move to decision,
-    so a "now needs you" or quiet line in the same write does not double it. → the writer's reply line, or "" (no mover, or the
-    mover wrote it). A close (`close`) with his own words on the item (_owner_words) was the one thing
-    a front agent mover was told; it is a row on his For you list instead (_tell_close_owner says so in the
-    reply line); its keeper is told as before. This function still tells a front agent mover nothing itself;
-    the mover's own line for a close by another session (with his words or not) is _tell_owner_close's."""
-    if getattr(_TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
-        return ""
-    meta = item.get("metadata") or {}
-    owner, project = to or _holder(item), str(meta.get("project") or "")
-    word = _held_by(item)[1]
-    if not owner or not _anc.pilot_root(project) or _session_id(owner) == _session_id(writer):
-        return ""
-    who = _session_label(writer) or "a session"
-    note = f"[stackshot] {_gh.shown(gid)} {what} by {who}: {item.get('subject') or ''} → {_notice_link(gid)}"
-    front, stew = _front_keeper(owner, project)
-    if front and decision:                 # the board shows it; nobody is told
-        if heard is not None:
-            heard.append(_session_id(owner))   # its quiet line is this one: _tell_needed leaves the mover out of the same write
-        return _quiet(item, owner)
-    if front:
-        words = _tell_close_owner(gid, item, owner, project, writer) if close else ""       # a close with his words on it is the one thing a front agent mover hears
-        row_note = f"{OWNER}'s words are on it ({words}), so it is a row on his For you list"     # no "not told;" in it: the mover's part is settled (_owner_reached); the mover itself is told by _tell_owner_close
-        if words and _foryou_key(gid, "closed", item) in _FORYOU_FELL:
-            row_note = f"{OWNER}'s words are on it ({words}), but the For you list could not be written, so the old notice marked {_FOR_OWNER} was sent to {_session_label(owner)} instead"
-        if not stew or _session_id(stew) == _session_id(writer):
-            return f"\n(its {word} {_session_label(owner)} is a front agent: {row_note})" if words else _quiet(item, owner)
-        _tell_kind("close" if close else "progress", gid, _session_id(stew), f"[stackshot] {_gh.shown(gid)} ({word} {_session_label(owner)}, a front agent) {what} by {who}: {item.get('subject') or ''} → {_notice_link(gid)}", tag="owner")
-        res, why = _gate_result()      # the gate may have held it, or filed it for his next turn there: the reply says what became of it
-        klabel = _session_label(stew)
-        tail = (f"its keeper {klabel} was not told ({why}); the board carries it" if res == "held" else f"its keeper {klabel} hears of it on his next turn" if res == "fyi"
-                else f"its keeper {klabel} has been told {'too' if words else 'instead'}")
-        return f"\n(its {word} {_session_label(owner)} is a front agent: " + (f"{row_note}; " if words else "") + tail + ")"
-    else:
-        _tell_or_hold(gid, _session_id(owner), note, "closed" if _done_close(what) and not _owner_words(item) else "", tag="owner")      # a plain completion asks a background mover nothing; a dropped or superseded one tells it to stop
-    if heard is not None:
-        heard.append(_session_id(owner))
-    return f"\n(its {word} {_session_label(owner)} has been told)"
-
-
-def _tell_observers(gid: str, item: dict[str, Any], what: str, writer: str) -> str:
-    """an item's observers hear a close or a reopen, one line each, unmarked; a front agent observer hears it through its
-    project's keeper. Neither the writer nor the item's mover (told by _tell_owner) is told here. → the writer's reply line, or ""."""
-    if getattr(_TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
-        return ""
-    meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
-    wid, oid = _session_id(writer), _session_id(owner) if owner else ""
-    who = _session_label(writer) or "a session"
-    told, sent = [], set()
-    try:
-        roles = _anc.session_roles()
-    except Exception:
-        roles = {}
-    for ob in _observers_of(meta):
-        sid = _session_id(ob)
-        if not sid or sid in (wid, oid) or sid in sent:
-            continue
-        r = roles.get(_role_name(roles, ob)) or {}
-        front = r.get("role") == "front"
-        stew = _page_keeper(str(r.get("project") or project)) if front else ""   # its own project's keeper (the spec's words), not the item's
-        if front:
-            if not stew or _session_id(stew) in (wid, sent):
-                continue
-            sent.add(_session_id(stew))
-            _tell_kind("close" if str(what).startswith("was completed") else "progress", gid, _session_id(stew), f"[stackshot] {_gh.shown(gid)} (observer {_session_label(ob)}, a front agent) {what} by {who}: {item.get('subject') or ''} "
-                                                f"→ {_notice_link(gid)} — pass it on only if it needs {_session_label(ob)}", tag="observer")
-            if _gate_result()[0] != "held":      # held by the gate: not told
-                told.append(f"{_session_label(stew)} for {_session_label(ob)}")
-        else:
-            sent.add(sid)
-            _tell_or_hold(gid, sid, f"[stackshot] {_gh.shown(gid)} {what} by {who}: {item.get('subject') or ''} → {_notice_link(gid)} (you observe it)",
-                          "closed" if _done_close(what) and not _owner_words(item) else "", tag="observer")
-            told.append(_session_label(ob))
-    return f"\n(observers told: {', '.join(told)})" if told else ""
-
-
-# The mover hears what another session changed (a defect fix: a builder set `next` on an item another session moved,
-# and a session other than its mover closed one, and the mover learned of it only at the audit). One short notice per item per mover per window; the
-# window is kept in memory (a restart forgets it, at worst one extra notice), and a close is never held back by it.
-_OWNER_HEARD: dict[tuple[str, str], float] = {}
-_OWNER_HEARD_WINDOW = 600.0
-
-
-def _tell_owner_on() -> bool:
-    """[board] tell_owner: whether the mover is told of another session's change (true when unset). Read where used (live)."""
-    v = _cfg.get("board", "tell_owner")
-    return v if isinstance(v, bool) else True
-
-
-def _owner_is_session(owner: str) -> bool:
-    """Is the item's mover a session that can be told: an id (cse_… or a transcript uuid), or a name the fleet or a page's roles know.
-    the owner (the instance owner, as _sender_not_owner reads the name), an outside party's name and an empty mover are not."""
-    o = str(owner or "").strip()
-    if not o:
-        return False
-    norm = lambda x: re.sub(r"[^0-9a-z]+", " ", str(x or "").lower()).strip()
-    if norm(o) in {norm(OWNER), norm(OWNER) + " board"}:
-        return False
-    if _anc.is_id(o):
-        return True
-    try:
-        return o in set(_anc.names().values()) or o in _anc.session_roles()
-    except Exception:
-        return False
-
-
-def _owner_reached(text: str, relayed: bool) -> bool:
-    """Did a reply line of _tell_owner (or of _auto_name, which carries it) say the mover was reached this write? Its "not told; the board
-    shows it" line for a front agent mover counts only when the write also went to the project's keeper or router (`relayed`: _pilot_relay),
-    where the mover's part is ruled; otherwise nobody got it and _tell_owner_change hands it to the page key."""
-    return bool(_HELD_LINE.search(text)) and ("not told;" not in text or relayed)
-
-
-def _tell_owner_change(gid: str, item: dict[str, Any], before: dict[str, Any], writer: str, closing: bool, handled: bool, relayed: bool = False, reopening: bool = False) -> str:
-    """The mover hears one short line when another session closes its item or changes its next, needs, check or after (a filing edit
-    sends nothing). A session mover is pushed to through _tell_woken like the other board notices. A front agent mover
-    is not messaged itself (the mark is for what the owner has to do) and the router rules a project's notices, so the line goes to the item's project
-    page key as a message, where the router rules it like any inbound (the stand-in), saying the mover may need to act. One event makes one inbound there: nothing goes to the page key when the
-    write already reached the project's keeper or router (`relayed`, _pilot_relay), when the writer is itself the project's keeper,
-    keeper or stand-in, when the project has none of them (quietly), or when the routing record cannot be written (logged); the page
-    key's delivery is built here, not through _message, which would name the stand-in builder in the item's needs. Not when the mover
-    is the owner or not a session, when the writer is the mover, or when `handled` (_tell_owner, the server's naming of the writer, or a
-    needs notice already told it this write, or _tell_owner_close, which tells a front agent mover of a close by another session, the owner).
-    Otherwise a front agent is never pushed to by this notice: when the page key's target is a front agent (the
-    stand-in of a project is its -main agent) or the mover itself, and when the write moves a front agent
-    mover's item to needs=decision (the board shows it), nothing is pushed and the reply says so. At most one
-    per item per mover per _OWNER_HEARD_WINDOW: a later change inside it is dropped (the item holds the newest state); a close and a
-    reopen are always sent. → the writer's reply line, or "" (nobody told)."""
-    if getattr(_TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
-        return ""
-    if handled or not _tell_owner_on():
-        return ""
-    meta = item.get("metadata") or {}
-    owner, word = _held_by(item)
-    if not _owner_is_session(owner):
-        return ""
-    oid, wid = _session_id(owner), _session_id(writer)
-    if not wid or wid == oid:
-        return ""
-    parts: list[str] = []
-    if reopening:
-        parts.append("reopened it")
-    if closing:
-        reason = _clip_line(meta.get("reason"), 120)
-        parts.append(f"closed it: {meta.get('outcome') or 'done'}" + (f" ({reason})" if reason else ""))
-    else:
-        if (meta.get("next") or "") != (before.get("next") or ""):
-            was_ln = [ln.strip() for ln in str(before.get("next") or "").splitlines() if ln.strip()]      # the line this write set, never the head of lines other sessions wrote
-            now_ln = [ln.strip() for ln in str(meta.get("next") or "").splitlines() if ln.strip()]
-            added = [ln for ln in now_ln if ln not in set(was_ln)]      # a line identical to one already there (another session's) is not a line this write set
-            gone = [ln for ln in was_ln if ln not in set(now_ln)]
-            if added:
-                parts.append("set next: " + _clip_line(added[0], 120))
-            elif gone:
-                parts.append("removed their next lines")
-        if set(_needs_of(meta)) != set(_needs_list(before.get("needs"))):
-            parts.append("changed needs: " + (", ".join(_shown_needs(_needs_of(meta))) or "cleared"))
-        if _check_changed(meta.get("check"), before.get("check")):
-            parts.append("changed check: " + (_clip_line(_check_lane_shown(meta.get("check") or ""), 120) or "cleared"))
-        if meta.get("after") != before.get("after"):
-            parts.append("changed after: " + (", ".join(_gh.shown(x) for x in meta["after"]) if isinstance(meta.get("after"), list) and meta["after"] else "cleared"))
-    if not parts:
-        return ""
-    now = time.time()
-    for k in [k for k, t in _OWNER_HEARD.items() if now - t >= _OWNER_HEARD_WINDOW]:
-        _OWNER_HEARD.pop(k, None)
-    if not (closing or reopening) and (gid, oid) in _OWNER_HEARD:
-        return ""
-    project, who, olabel = str(meta.get("project") or ""), _session_label(writer) or "a session", _session_label(owner)
-    front = _front_keeper(owner, project)[0]
-    subject = str(item.get("subject") or "")
-    line = f"[board] {_gh.shown(gid)} {subject}: {who} {'; '.join(parts)}" + (f" ({word} {olabel} may need to act)" if front else "") + f" → {_notice_link(gid)}"
-    if not front:
-        _OWNER_HEARD[(gid, oid)] = now
-        hk = "" if reopening else (("" if _owner_words(item) or (meta.get("outcome") or "done") != "done" else "closed") if closing else ("" if _asks_of(gid, item, oid) else "changed"))     # a close, or a change to an item it neither moves nor is asked on, asks a background mover nothing
-        _tell_or_hold(gid, oid, line, hk, tag="owner")
-        return f"\n(its {word} {olabel} has been told)"
-    quiet = _quiet(item, owner)
-    if "decision" in _needs_kinds(meta) and "decision" not in [str(x).lower() for x in _needs_list(before.get("needs"))]:
-        return quiet                   # a move to decision is told to nobody, a front agent mover's item in or out of the pilot: the board shows it
-    if relayed:
-        return ""                      # the keeper or the router already has this write (_pilot_relay) and rules it: one event, one inbound
-    key = project.strip().rstrip("/")
-    try:
-        reg = _anc.registry()
-        stew = (_anc.notice_name(key, reg) or _anc.name_line(key, reg)) if key in reg else ""
-        kept = _stand_in_keeper(key, reg) if key in reg else ""
-        keepers = {_session_id(x) for x in (stew, kept, _page_keeper(key, reg), _front_keeper(owner, key)[1], _keeper(key)) if x}
-    except Exception:  # noqa: BLE001
-        return ""
-    if not (stew or kept) or wid in keepers:
-        return ""                      # no page key with someone behind it, or the writer is that someone: the board shows it
-    pilot = bool(_anc.pilot_root(key))
-    live = pilot                       # the router rules it (a page of the registry always has a pilot root)
-    to = _session_id(kept or stew)
-    if not live and (to == oid or _front_keeper(kept or stew, key)[0]):
-        return quiet                   # a front agent is never pushed to unmarked: the board shows it
-    try:
-        nid = _routing.record(key, kind="message", to="" if live else to, label=f"message to {key}", who=NAME, text=line, target="project-wide", pilot=pilot, live=live)
-    except Exception as e:  # noqa: BLE001
-        print(f"owner: {gid} notice to {key} not recorded, so not sent: {e}", file=sys.stderr, flush=True)
-        return ""
-    _OWNER_HEARD[(gid, oid)] = now
-    stamp = dt.datetime.now(ZONE).strftime("%Y-%m-%d %H:%M %Z")
-    if live and nid:
-        _router_live.stash(nid, f"[stackshot message] from {NAME} · {stamp} · to {key}\n{line}")
-    else:
-        _tell_kind("progress", gid, kept or stew, f"[stackshot message] from {NAME} · {stamp} · to {key}\n{line}", tag="owner")      # the notice could not be recorded for the router: told at once, never lost
-    return f"\n(its {word} {olabel} is a front agent: the notice went to {key}, where the router rules it)"
-
-
-def _next_head(meta: dict[str, Any], writer: str = "") -> str:
-    """The line of next a notice quotes: the first line the writer wrote when it wrote one (next is kept by writer, so the head of the list may be another session's line), else the head."""
-    own = _nl.text_of(meta, _session_id(writer), str(meta.get("owner") or ""), _ho_same) if str(writer or "").strip() else ""      # a line stored with no writer belongs to the creator: a fact of the History
-    return ((own or str(meta.get("next") or "")).strip().splitlines() or [""])[0]
-
-
-def _tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, heard: list[str] | None = None) -> str:
-    """a session newly named in an item's needs gets one notice, never the writer. The item's mover (_holder) named by another session is told
-    like any other, unless `heard` shows this same write already told it as mover (a move to decision, a reopen) or passed a front agent mover by on a move
-    to decision, so it hears the write once and the reply says so once. → the reply line, or ""."""
-    meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
-    wid = _session_id(writer)
-    skip = {wid, *(_session_id(h) for h in (heard or []))}
-    who = _session_label(writer) or "a session"
-    told, quiet = [], ""
-    for s in added:
-        sid = _session_id(s)
-        if not sid or sid in skip:
-            continue
-        skip.add(sid)
-        if owner and sid == _session_id(owner) and _front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
-            quiet = _quiet(item, owner); continue
-        nxt = _next_head(meta, writer)[:160]
-        thn = _then_part(item)
-        _tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)} now needs you (named in its needs by {who}): {item.get('subject') or ''} ({project}){thn}"
-                              + (f"; next: {nxt}" if nxt else "") + f". Do your part and close it or hand it back (sender={_session_label(s)!r}); "
-                              f"Your turn-end board check asks about it until then. → {_notice_link(gid)}", tag="needs")
-        told.append(_session_label(s))
-        if heard is not None and owner and sid == _session_id(owner):
-            heard.append(sid)     # the mover has heard this write: a later notice in it (_tell_decided) leaves it out
-    return (f"\n({', '.join(told)} {'has' if len(told) == 1 else 'have'} been told the item needs {'it' if len(told) == 1 else 'them'})" if told else "") + quiet
-
-
-def _tell_decided(gid: str, item: dict[str, Any], sessions: list[str], writer: str, heard: list[str] | None = None) -> str:
-    """(if something can be done without the owner, he is pinged after it is done, and the other
-    way round): when `decision` leaves an item's needs, the sessions still named in it are told at once that the move is theirs,
-    never the writer. The item's mover named by another session is told like any other (a mover that wrote it is the writer), unless
-    `heard` shows this same write already reached it as mover, so it hears the write once. → the reply line, or ""."""
-    meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
-    skip = {_session_id(writer), *(_session_id(h) for h in (heard or []))}
-    thn = _then_part(item)
-    nxt = _next_head(meta, writer)[:160]
-    told, quiet = [], ""
-    for s in sessions:
-        sid = _session_id(s)
-        if not sid or sid in skip or sid in [_session_id(x) for x in told]:
-            continue
-        if owner and sid == _session_id(owner) and _front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
-            quiet = _quiet(item, owner); continue
-        _tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)}: {OWNER} has decided (decision left its needs, by {_session_label(writer) or 'a session'}), so the move is yours "
-                              f"as named in its needs: {item.get('subject') or ''} ({project}){thn}" + (f"; next: {nxt}" if nxt else "")
-                              + f". Read its next for his call, do your part and close it or hand it back (sender={_session_label(s)!r}). → {_notice_link(gid)}", tag="needs")
-        told.append(s)
-        if heard is not None and owner and sid == _session_id(owner):
-            heard.append(sid)     # the mover has heard this write, as _tell_needed records it: _tell_owner_change leaves it out
-    return (f"\n({', '.join(_session_label(s) for s in told)} {'has' if len(told) == 1 else 'have'} been told the move is {'its' if len(told) == 1 else 'theirs'} now that the decision is in)" if told else "") + quiet
-
-
-def _tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: str, heard: list[str] | None = None) -> str:
-    """A front agent mover is not woken by most item notices, so an item a builder hands back
-    sat with it until its next turn. This is the first exception (a close by another session, _tell_owner_close,
-    skips a mover this function told; this is the one line a front agent
-    mover hears of an open item's needs, only when back with it): a write by a session other than the mover that leaves the
-    item's needs naming the mover alone (the sessions in it; `decision` still in it is his, not a hand-back, and `external` is ignored),
-    when before the write they named someone else or others beside it (`was_needs`: nothing named before is no hand-back, the older
-    silence), tells that front agent mover one short line, with the first line of `next`. Not on a close or a reopen, not when the mover
-    wrote it, not when [board] tell_owner is off. A project the router is live for records it for the router, whose hand-back rule
-    passes it straight to the mover (router.py), marked as every delivery to a front agent is; any other project delivers it at once with
-    the mark (_FOR_OWNER), as _tell_close_owner does. The mover is added to `heard` and to _OWNER_HEARD, so the write's other notices
-    (_tell_needed, _tell_decided, _tell_owner_change) leave it out: it hears the write once. There is no pilot gate, on purpose: a project outside the pilot gets the marked push. → the writer's reply line, or ""."""
-    meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
-    if item.get("status") != "open" or not owner or not _tell_owner_on():
-        return ""
-    oid, wid = _session_id(owner), _session_id(writer)
-    if not oid or not wid or wid == oid or "decision" in _needs_kinds(meta):
-        return ""
-    after = {_session_id(x) for x in _needs_sessions(meta)}
-    before = {_session_id(x) for x in _needs_list(was_needs) if x.lower() not in _NEEDS_KINDS}
-    if after != {oid} or not before or before == {oid} or not _front_keeper(owner, project)[0]:
-        return ""
-    who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
-    nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
-    line = f"[stackshot] {_gh.shown(gid)} is back with you alone (handed back by {who}): {subject}" + (f"; next: {nxt}" if nxt else "") + f" → {_notice_link(gid)}"
-    rec = {"gid": gid, "oid": oid, "olabel": olabel, "project": project, "who": who, "wid": wid, "subject": subject, "line": line}
-    hold = _handback_hold_s()
-    dest = _no_front(oid, project) if _front_sender(oid) else oid      # a front agent mover is not handed the item by stackshot: its builder is told, else nobody
-    if dest and dest != oid and _session_id(dest) == wid:              # ... and the builder that wrote the hand-back itself needs no line about its own write
-        told = "nobody is told: a front agent is not handed an item on stackshot's own motion, so the board shows it (your own write; the project's builder is you)"
-        dest = ""
-    elif dest and dest != oid:
-        if _held.can_fetch(dest):      # the builder's hook fetches held lines: the line rides its next turn (_tell_or_hold); else it is pushed as a message
-            told = f"its builder {_session_label(dest)} is passed a note that it is back with them alone, not them (a note for its next turn, not a wake-up): a front agent is not handed an item on stackshot's own motion"
-        else:
-            told = f"its builder {_session_label(dest)} is told it is back with them alone, not them: a front agent is not handed an item on stackshot's own motion"
-    elif dest:
-        told = "told it is back with them alone"
-    else:
-        told = "nobody is told: a front agent is not handed an item on stackshot's own motion, so it stays with them and the board shows it"
-    if hold > 0 and dest:
-        if _handback_hold(rec, hold):     # held for a few minutes; a close of the item inside the window sends the keeper only the close line
-            tail = f"{told}, in {_handback_minutes(hold)} unless you close {_gh.shown(gid)} first (then it is told only that it was closed)"
-        else:                             # the held line could not be written: sent at once, never lost
-            if not _handback_send(rec):
-                told = "nobody is told: the board shows it"
-            tail = told
-    else:
-        if dest and not _handback_send(rec):
-            told = "nobody is told: a front agent is not handed an item on stackshot's own motion, so the board shows it"
-        elif not dest:
-            _handback_send(rec)      # nobody to tell: records the board line and the routing log line
-        tail = told
-    if heard is not None:
-        heard.append(oid)
-    _OWNER_HEARD[(gid, oid)] = time.time()
-    return f"\n(its {_held_by(item)[1]} {olabel} is a front agent: {tail})"
-
-
-# A builder that hands an item back to its front agent keeper and then closes the same
-# item soon after woke the keeper twice. The hand-back line is now held for [board] handback_hold_seconds (default 180; 0 = sent at once, as before). A close of the item
-# inside the window (any close: `writes.save` sees it) drops the held line, so the keeper hears only "closed by …" (_tell_owner_close); a second hand-back
-# of the same item inside the window replaces the first (one line, the latest `next`, the original due time). When the window ends the line is sent
-# if the item is still open and its needs still name the keeper alone; if the item moved on, it is dropped. The held lines are kept in
-# <state>/handback-held.json, so a restart loses none: the runner's fleet tick (every 60 s) sends what is due.
-HANDBACK_HOLD_S = 180.0
-_HANDBACK_LOCK = threading.Lock()
-
-
-def _handback_hold_s() -> float:
-    """[board] handback_hold_seconds: how long a hand-back line to a front agent keeper is held for a close to cancel it (default 180; 0 = no hold). Read where used (live)."""
-    v = _cfg.get("board", "handback_hold_seconds")
-    try:
-        return max(0.0, float(v)) if v is not None and not isinstance(v, bool) else HANDBACK_HOLD_S
-    except (TypeError, ValueError):
-        return HANDBACK_HOLD_S
-
-
-def _handback_minutes(seconds: float) -> str:
-    m = max(1, int(round(seconds / 60.0)))
-    return f"{m} minute" + ("" if m == 1 else "s")
-
-
-def _handback_file() -> Path:
-    return _cfg.state("handback-held.json")
-
-
-def _handback_read() -> dict[str, dict[str, Any]]:
-    try:
-        d = json.loads(_handback_file().read_text(encoding="utf-8"))
-        return {str(k): v for k, v in d.items() if isinstance(v, dict)} if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def _handback_write(d: dict[str, dict[str, Any]]) -> bool:
-    """Write the held lines whole (an empty set removes the file) → True when written."""
-    p = _handback_file()
-    try:
-        if not d:
-            p.unlink(missing_ok=True)
-            return True
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_name(f".{p.name}.tmp")
-        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, p)
-        return True
-    except OSError as e:
-        print(f"hand-back: held lines not written: {e}", file=sys.stderr, flush=True)
-        return False
-
-
-def _handback_hold(rec: dict[str, Any], hold: float, now: float | None = None) -> bool:
-    """Hold the hand-back line `rec` (gid, oid, olabel, project, who, subject, line) for `hold` seconds. One per item and keeper: a second one inside the window replaces the line and keeps the first due time. → False when the line could not be kept (the caller sends it at once)."""
-    now = time.time() if now is None else now
-    key = f"{rec['gid']}|{rec['oid']}"
-    with _HANDBACK_LOCK:
-        d = _handback_read()
-        d[key] = {**rec, "due": float((d.get(key) or {}).get("due") or (now + hold))}
-        return _handback_write(d)
-
-
-def _handback_drop(gid: str, why: str = "") -> int:
-    """The item closed (or is no longer handed back): its held hand-back lines are dropped → how many."""
-    with _HANDBACK_LOCK:
-        d = _handback_read()
-        gone = [k for k, v in d.items() if v.get("gid") == gid]
-        if gone:
-            for k in gone:
-                d.pop(k, None)
-            _handback_write(d)
-    if gone:
-        print(f"hand-back: {gid}: {len(gone)} held line(s) dropped{(' (' + why + ')') if why else ''}", file=sys.stderr, flush=True)
-    return len(gone)
-
-
-def _handback_send(rec: dict[str, Any]) -> bool:
-    """Deliver one hand-back line: recorded for the router when the project's is live (its hand-back rule passes it, marked), else pushed at once with the mark; a record that cannot be written is pushed (never lost).
-    for a front agent mover the line goes to the project's builder instead (_tell_or_hold: it asks the builder nothing, so it rides the builder's next turn), or to nobody. → True when
-    a line was passed to someone, False when nobody was told (the board and the routing log hold it)."""
-    gid, oid, project, who, olabel = rec["gid"], rec["oid"], rec["project"], rec["who"], rec["olabel"]
-    if _front_sender(oid):      # "back with you alone" is stackshot handing an item to a front agent by itself: it goes to the project's builder, or nowhere (the item stays with its mover)
-        dest = _no_front(oid, project)
-        wid = str(rec.get("wid") or "")      # a record held before this release has no writer on file: unknown, so the builder may be the writer, and is not told about its own write
-        if dest and wid and _session_id(dest) != wid:
-            _tell_or_hold(gid, dest, str(rec["line"]).replace("is back with you alone", f"is back with {olabel}, a front agent, alone", 1)
-                          + f" — told to you, not to {olabel}: an item is not handed to a front agent on stackshot's own motion", "changed", tag="owner")
-            return True
-        # no builder to tell, or the builder wrote the hand-back itself (or may have): the board holds it (the item's needs and History), the routing log says it was held
-        why = "the project lists no builder to tell instead" if not dest else "the builder wrote the hand-back itself" if wid else "who wrote the hand-back is not on record, so the builder may have"
-        _front_board_line(gid, oid, False, f"{why}, and an item is not handed to a front agent on stackshot's own motion", str(rec["line"]))
-        _front_held_log(gid, oid, "progress", f"held: front agent, {why} (hand-back)", str(rec["line"]))
-        return False
-    delivered = False
-    if _router_live.is_live(project):
-        try:
-            nid = _routing.record(project, kind="board", to="", label=f"hand-back {_gh.shown(gid)}", who=who, text=f"handed back by {who}: {rec['subject']}",
-                                  url=_notice_link(gid), target="for " + olabel, pilot=True, live=True, handback=True)
-            _router_live.stash(nid, rec["line"])
-            delivered = True
-        except Exception:
-            pass       # not recorded: told at once below, never lost
-    if not delivered:
-        _tell_woken(gid, oid, f"{_FOR_OWNER} {rec['line']}", tag="owner")
-    return True
-
-
-def _handback_tick(now: float | None = None) -> list[str]:
-    """The fleet tick: send every held hand-back line whose window ended, if the item is still open and its needs still name the keeper alone; drop
-    the rest. **At least once:** a line is sent first and removed from the file after, so a crash between the two (or a failed write of the file)
-    sends it again at the next tick rather than never; a line whose send raises is tried at the next ticks and given up after 3 tries. → the gids sent."""
-    now = time.time() if now is None else now
-    with _HANDBACK_LOCK:
-        due = {k: v for k, v in _handback_read().items() if float(v.get("due") or 0) <= now}
-    sent: list[str] = []
-    for key, rec in due.items():
-        done = True
-        try:
-            item = _load(rec["gid"])
-            meta = item.get("metadata") or {}
-            if item.get("status") != "open" or {_session_id(x) for x in _needs_sessions(meta)} != {rec["oid"]} or "decision" in _needs_kinds(meta):
-                print(f"hand-back: {rec['gid']} moved on while held, not sent", file=sys.stderr, flush=True)
-            else:
-                _handback_send(rec)
-                sent.append(rec["gid"])
-        except Exception as e:  # noqa: BLE001
-            print(f"hand-back: {rec.get('gid')} not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-            tries = int(rec.get("tries") or 0) + 1
-            done = tries >= 3
-            if not done:
-                with _HANDBACK_LOCK:
-                    d = _handback_read()
-                    if key in d:
-                        d[key]["tries"] = tries
-                        _handback_write(d)
-        if done:
-            with _HANDBACK_LOCK:
-                d = _handback_read()
-                if d.pop(key, None) is not None:
-                    _handback_write(d)
-    return sent
-
-
-def _closed_by(item: dict[str, Any], who: str) -> str:
-    """The words of a close in the mover's line: "closed by <who>: done (<reason>)", with "by <id>" after a superseded outcome."""
-    meta = item.get("metadata") or {}
-    sup, reason = str(meta.get("superseded_by") or ""), _clip_line(meta.get("reason"), 120)
-    return f"closed by {who}: {meta.get('outcome') or 'done'}{' by ' + _gh.shown(sup) if sup else ''}" + (f" ({reason})" if reason else "")
-
-
-def _tell_owner_check_closed(gid: str, item: dict[str, Any], told: list[str]) -> bool:
-    """The server's own close on a done check (a merged pull request) tells
-    a front agent mover at once too, in the line _tell_owner_close sends for a close by a session, with "stackshot's done check" as the
-    closer. The same rules: not when [board] tell_owner is off, the mover is not a session or not a front agent, the item is muted on his
-    For you list, the mover is already among `told` (it keeps the page, so the keeper's line reached it), or its For you row failed and
-    the old notice went to it (_FORYOU_FELL). → True when sent."""
-    meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
-    if not _tell_owner_on() or not _owner_is_session(owner):
-        return False
-    oid = _session_id(owner)
-    if not oid or oid in {_session_id(t) for t in told} or _fy.flag(gid) == "mute" or not _front_keeper(owner, project)[0] \
-            or _foryou_key(gid, "closed", item) in _FORYOU_FELL:
-        return False
-    by = "stackshot's done check"
-    _tell_kind("close", gid, oid, f"{_FOR_OWNER} [stackshot] {_gh.shown(gid)} {item.get('subject') or ''}: {_closed_by(item, by)} \u2192 {_notice_link(gid)}", tag="owner")      
-    _OWNER_HEARD[(gid, oid)] = time.time()
-    return _gate_result()[0] != "held"      # False when the gate held it: the caller does not count the mover as told
-
-
-def _tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool, heard: list[str]) -> str:
-    """A session other than the mover closes the item, and the front agent that
-    moves it is told at once, by one marked line (any close, not only one with his words on it: that close is also a row on his For you
-    list, which stays as it is, _foryou_on_save). It is delivered at once with the mark (_FOR_OWNER), router live or not, as
-    _close_owner_notice does: the server's own delivery to the mover is what reaches a front agent (the message tool refuses an unmarked
-    message to one, and a marked one that says nothing is needed from him). There is no pilot gate, as for _tell_handback. Not when the
-    mover wrote it or is the owner or not a session, not when [board] tell_owner is off, not when the item is muted on his For you list, not
-    when the mover is not a front agent (it already hears a close through _tell_owner), not when this write already told the mover
-    (`heard`), not when the close's For you row failed and was told the old way (_FORYOU_FELL). This function once also told the mover of a builder's step, when a session the
-    item's needs named took itself out of needs or finished its last step by a status done. That line is gone: a front agent mover hears of an
-    item only when it is closed (here) or back with it alone (_tell_handback); a builder's step stays on the item's History (one line a change)
-    and, for a state-changing write, the page debt it leaves (_owed_mark). The mover is added to `heard` and to _OWNER_HEARD so the write's other notices leave it out.
-    → the writer's reply line, or "" (nobody told)."""
-    if getattr(_TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
-        return ""
-    if not closing:
-        return ""
-    meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
-    if not _tell_owner_on() or not _owner_is_session(owner):
-        return ""
-    oid, wid = _session_id(owner), _session_id(writer)
-    if not oid or not wid or wid == oid or oid in {_session_id(h) for h in heard} or _fy.flag(gid) == "mute":
-        return ""
-    if not _front_keeper(owner, project)[0] or _foryou_key(gid, "closed", item) in _FORYOU_FELL:
-        return ""
-    who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
-    _tell_kind("close", gid, oid, f"{_FOR_OWNER} [stackshot] {_gh.shown(gid)} {subject}: {_closed_by(item, who)} \u2192 {_notice_link(gid)}", tag="owner")      
-    res, why = _gate_result()      # the gate may have held it: the reply says what became of it
-    heard.append(oid)
-    _OWNER_HEARD[(gid, oid)] = time.time()
-    return f"\n(its {_held_by(item)[1]} {olabel} is a front agent: " + (f"not told that it was closed ({why}); the close is on the board)" if res == "held" else "told at once that it was closed)")
-
-
 # ----------------------------------------------------------------------------- the server names the working background agent
 # The server links a background agent to the item it works on, in code and at
 # the moments it already sees, so the item page shows what is in motion without a survey. (1) A handover: a message through the
@@ -2429,14 +1331,14 @@ def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str
     me = _anc.canonical(agent, nm)
     if any(_anc.canonical(s, nm) == me for s in _needs_sessions(meta)):
         return ""
-    prev = _holder(item)       # the session that held the item before the agent is named hears of it
+    prev = _telling.holder(item)       # the session that held the item before the agent is named hears of it
     already = list(_needs_sessions(meta))
     _needs_store(meta, _canon_needs([*_needs_of(meta), _store_ref(agent)], nm))
     _writes.save(gid, item, note=f"named {agent}: {why}")
     was = ", ".join(_session_label(s) for s in already)
     told = ""
     if tail:
-        told = _tell_owner(gid, item, f"now names {agent} in its needs" + (f" too ({was} {'was' if len(already) == 1 else 'were'} already named)" if already else "") + f", {tail}", writer, to=prev)
+        told = _telling.tell_owner(gid, item, f"now names {agent} in its needs" + (f" too ({was} {'was' if len(already) == 1 else 'were'} already named)" if already else "") + f", {tail}", writer, to=prev)
     return f"\n(named {agent} in {_gh.shown(gid)}'s needs: {why}" + (f"; {was} {'stays' if len(already) == 1 else 'stay'} named" if already else "") + ")" + told
 
 
@@ -2493,126 +1395,10 @@ def _router_delivered(target: str, text: str, outcome: str) -> str:
     return outcome
 
 
-def _live_pass(project: str, nid: str, to: str) -> None:
-    """A notice delivered at once to an agent of a project the router is live for (not the keeper): ruled passed by the router's name,
-    so it does not sit unruled (there is no keeper to chase it, and the board flags the unruled ones)."""
-    if nid and _router_live.is_live(project):
-        try:
-            _routing.rule(nid, "passed", to=to, reason="delivered at once to the agent it is for", by=_router_live.BY)
-        except Exception:
-            pass
-
-
-def _pilot_relay(project: str, gid: str, item: dict[str, Any], what: str, writer: str, keeper: str, role: str = "name", tail: str = "") -> str:
-    """Tell the page's keeper what another session changed on the board (one routing-log line, one notice). → a line for the writer's reply.
-    tail replaces "the page update is yours" (the fallback after the writer left it undone, or a close told for its anchors)."""
-    if _front_keeper(keeper, project)[0] and not _router_live.holds(project, keeper):      # a front agent gets no page-owed notice; the charge already passed it by (_pilot_charge); one that is only the address of a nameless page's notices is the router's
-        return ""
-    who = _session_label(writer) or "a session"
-    subject = str(item.get("subject") or "")
-    tail = tail or f"the page update is yours as {'its agent' if role == 'agent' else 'its keeper'}"
-    live = _router_live.holds(project, keeper, stand_in_too=(role != "agent"))      # a live project: the router rules this notice, the keeper (or the stand-in standing in for it) is not told; a page's own agent is told directly
-    ask = "yours as" in tail          # "…so it is yours as its keeper" (the fallback after the writer left it undone) and "the page update is yours as its keeper" hand the debt to the keeper: an ask, delivered
-    if not live and not ask and _hold_notice(keeper, f"[board] {_gh.shown(gid)} {what} by {who} — {subject} ({project}) → {_notice_link(gid)} — {tail}", "page-owed", gid=gid, project=project, sender=who):
-        return f"\n(pilot project: this change is charged to the {'agent' if role == 'agent' else 'keeper'} {_session_label(keeper)}, who keeps the page; it reads this at its next turn, it was not woken for it)"      
-    try:
-        nid = _routing.record(project, kind="board", to="" if live else keeper, label=f"board {_gh.shown(gid)}", who=who, text=f"{what}: {subject}",
-                              url=_notice_link(gid), target="for " + who, pilot=True, live=live, hold="page-owed" if live and not ask else "")
-    except Exception:
-        nid = ""
-    if live and nid:
-        _router_live.stash(nid, f"[board] {_gh.shown(gid)} {what} by {who} — {subject} ({project}) → {_notice_link(gid)} — "
-                                + tail.replace("so it is yours as its keeper", "so the page update is owed").replace("the page update is yours as its keeper", "the page update is owed"))
-        return ("\n(pilot project: this change is charged to the router, which passes the page update to the agent that keeps the page)")
-    _live_pass(project, nid, keeper)
-    note = (f"[board] {_gh.shown(gid)} {what} by {who} — {subject} ({project}) → {_notice_link(gid)}"
-            + (f" — {tail} · notice {nid}" if nid else ""))
-    _ho_told(gid, keeper)          # step 2: a hand-off to the keeper in this same write is not told a second time
-    threading.Thread(target=_relay_push, args=(gid, keeper, note), daemon=True).start()
-    return f"\n(pilot project: this change is charged to the {'agent' if role == 'agent' else 'keeper'} {_session_label(keeper)}, who keeps the page and has been told; write your own page or the hub's timeline as usual)"
-
-
-def _ho_told(gid: str, who: str) -> None:
-    """This write has told `who` about `gid` (a notice, a relay, a charge): its hand-off notice leaves it out, so nobody hears one write twice."""
-    try:
-        told = getattr(_HO_STATE, "told", None)
-        if told is not None and who:
-            told.add((gid, _session_id(who)))
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def _push_noted(to: str, note: str) -> None:
-    """One notice to a session through push.py, on a thread of its own, for a notice path that names items in its text (the keeper's page-owed batch, the anchors prompt): the outcome is
-    recorded on the open hand-off of any item the text names to that session (_handoff_told_text). A failure is a stderr line, as these senders always had it. Never raises."""
-    try:
-        r = subprocess.run([*_interp.resilient(_PUSH), "--from", NAME, to, note], capture_output=True, text=True, timeout=110, env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
-        _handoff_told_text(to, note, (r.stdout.strip().splitlines() or [""])[-1], link_only=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"push: notice to {to} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _relay_push(gid: str, keeper: str, note: str) -> None:
-    """The keeper's page-owed notice, pushed on a thread of its own; a hand-off to the keeper that this push stands for is delivered (or not) by its outcome."""
-    try:
-        r = subprocess.run([*_interp.resilient(_PUSH), "--from", NAME, keeper, note], capture_output=True, text=True, timeout=110, env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
-        out = (r.stdout.strip().splitlines() or [""])[-1]
-        _handoff_pushed(gid, keeper, out or "failed", (r.stderr.strip().splitlines() or [""])[-1])
-    except Exception as e:  # noqa: BLE001
-        _handoff_pushed(gid, keeper, "failed", str(e))
-
-
-def _writer_charge(project: str, gid: str, writer: str, keeper: str, what: str, loose: bool) -> str:
-    """charge a pilot board write to its writer, with the keeper as the fallback (_pilot_fallback_tick). → the writer's reply line."""
-    _ho_told(gid, writer)         # step 2: the writer hears this write in the reply
-    _owed_mark(project, writer, gid, settle="any" if loose else "ct", moves=keeper, what=what)
-    which = ("any page write, a timeline line included, since only next or the hold changed" if loose
-             else "its Current state, since the item's state changed")
-    return (f"\n(pilot project: the page update is yours in this turn: {project}, {which}. If it is still missing after "
-            f"{_grace_min()} min, it moves to {_debt_mover(project, keeper)}.)")
-
-
-def _pilot_relay_many(keeper: str, rows: list[tuple[str, str, dict[str, Any], str, str]], head: str = "") -> list[str]:
-    """Several debts moved to one keeper in one tick (the turn rule's fourth build: each relay cost the
-    keeper a turn): one message listing them, rows = [(project, gid, item, what, writer)]. Each debt still gets its own
-    routing-log line, as _pilot_relay writes it, the lines sharing one `batch` id so a count of the turns notices cost counts
-    the message once. `head` = another first line (the page-debt call's fallback to the -main agent, _page_debt_fallback)."""
-    batch = os.urandom(3).hex(); nids: list[str] = []
-    held = [] if head else [r for r in rows if _router_live.holds(r[0], keeper, stand_in_too=True)]       # a live project: the router rules these, the keeper (or its stand-in) is not told; a caller that names its recipient (head: the page-debt fallback to the page's agent or -main) is delivered to
-    if held:
-        for project, gid, item, what, writer in held:
-            who = _session_label(writer) or "a session"; subject = str(item.get("subject") or "")
-            try:
-                nid = _routing.record(project, kind="board", to="", label=f"board {_gh.shown(gid)}", who=who, text=f"{what}: {subject}",
-                                      url=_notice_link(gid), target="for " + who, pilot=True, live=True)
-            except Exception:
-                continue          # not recorded: it stays in `rows` below and goes out as before, never lost
-            _router_live.stash(nid, f"[board] {_gh.shown(gid)} {what} by {who} — {subject} ({project}) → {_notice_link(gid)} — {who} left its page update undone past {_grace_min()} min, so the page update is owed")
-            nids.append(nid)
-            rows = [r for r in rows if not (r[0] == project and r[1] == gid and r[3] == what and r[4] == writer)]
-        if not rows:
-            return nids
-    lines = [head or f"[board] {len(rows)} page updates are yours as its keeper: their writers left them undone past {_grace_min()} min."]
-    for project, gid, item, what, writer in rows:
-        who = _session_label(writer) or "a session"
-        subject = str(item.get("subject") or "")
-        try:
-            nid = _routing.record(project, kind="board", to=keeper, label=f"board {_gh.shown(gid)}", who=who, text=f"{what}: {subject}",
-                                  url=_notice_link(gid), target="for " + who, pilot=True, batch=batch)
-        except Exception:
-            nid = ""
-        if nid:
-            nids.append(nid); _live_pass(project, nid, keeper)
-        lines.append(f"- {_gh.shown(gid)} {what} by {who} — {subject} ({project}) → {_notice_link(gid)}" + (f" · notice {nid}" if nid else ""))
-    note = "\n".join(lines)
-    threading.Thread(target=_push_noted, args=(keeper, note), daemon=True).start()
-    return nids
-
-
 def _pilot_fallback_tick(now: float | None = None) -> int:
     """a writer's pilot debt still unsettled past [page_rule] grace_minutes moves to the keeper: re-marked to the keeper,
     dropped from the writer, and the keeper gets the board notice saying who left it undone. The turn rule's fourth build:
-    the debts that move to one keeper in the same tick go in one message (_pilot_relay_many); one alone
+    the debts that move to one keeper in the same tick go in one message (pilot_relay_many); one alone
     keeps its old text. Batching never waits: a debt moves at the first tick past the grace, as before, with whatever else
     is due for that keeper in that tick. → how many moved."""
     now = time.time() if now is None else now
@@ -2647,14 +1433,14 @@ def _pilot_fallback_tick(now: float | None = None) -> int:
             item = _load(gid)
         except Exception:
             item = {}
-        if not _front_keeper(str(e["moves"]), key)[0] or _router_live.holds(key, str(e["moves"])):     # a front agent gets no page-owed notice (as _pilot_relay), unless it is only the address of a nameless page's notices: the router's
+        if not _telling.front_keeper(str(e["moves"]), key)[0] or _router_live.holds(key, str(e["moves"])):     # a front agent gets no page-owed notice (as pilot_relay), unless it is only the address of a nameless page's notices: the router's
             out.setdefault(str(e["moves"]), []).append((key, gid, item, str(e.get("what") or "changed"), o))
     for stew, rows in out.items():
         if len(rows) == 1:
             key, gid, item, what, o = rows[0]
-            _pilot_relay(key, gid, item, what, o, stew, tail=f"{_session_label(o)} left its page update undone past {_grace_min()} min, so it is yours as its keeper")
+            _telling.pilot_relay(key, gid, item, what, o, stew, tail=f"{_session_label(o)} left its page update undone past {_grace_min()} min, so it is yours as its keeper")
         else:
-            _pilot_relay_many(stew, rows)
+            _telling.pilot_relay_many(stew, rows)
     return len(due)
 
 
@@ -2708,7 +1494,7 @@ def _page_debt_forget(key: str, moved: dict[str, dict[str, Any]], keeper: str = 
 def _page_agent(key: str) -> str:
     """The agent that keeps the page `key` as its own working document: the registry's entry for the page, when its frontmatter names an
     `agent:` (pages.keeper_of: role "agent", the entry's `session`; anchors.registry), and that session is live (a heartbeat in the fleet's
-    sessions index, by name or id, not marked gone; _keeper reads the same entry for the item notices). A hub page names a `display-name:` and
+    sessions index, by name or id, not marked gone; project_keeper reads the same entry for the item notices). A hub page names a `display-name:` and
     a sub-page that names nobody belongs to its keeper, so neither has one → "" ."""
     try:
         e = _anc.registry().get(str(key or "").strip().strip("/")) or {}
@@ -2734,7 +1520,7 @@ def _page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[
     keeper = own or builder or main
     if not keeper:
         return ""         # nobody can take them: they stay moved, and the next audit run's call tries again
-    front = _front_keeper(own, key)[0] if own else (not builder and bool(main))      # the -main agent is front by construction; a builder and the keeper fallback are not
+    front = _telling.front_keeper(own, key)[0] if own else (not builder and bool(main))      # the -main agent is front by construction; a builder and the keeper fallback are not
     rows = []
     for gid, what, writer in debts:
         try:
@@ -2748,7 +1534,7 @@ def _page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[
             f"audit's page call could not write {them} ({_clean_line(why, 200)}). "
             + ("Write the Current state: you keep this page." if own else "Write the Current state, or hand it to the agent that keeps the page."))
     if keeper and rows:
-        for nid in _pilot_relay_many(keeper, rows, head=head):
+        for nid in _telling.pilot_relay_many(keeper, rows, head=head):
             if own or builder or main:      # the notices went to the page's agent, the builder or the -main agent, which has no `route`: ruled passed at once, so nothing is left unruled
                 try:
                     _routing.rule(nid, "passed", to=keeper, by=AUTO_RULER,
@@ -2909,7 +1695,6 @@ from stackshot.audit import audit_overview as _audit_overview  # noqa: E402  —
 from stackshot.audit import audit_checks as _ac  # noqa: E402  — the audit's code checks: the filing pass, and the broad wait words of an alive item's next
 from stackshot.core import interp as _interp  # noqa: E402  — a child process still starts when this process's own interpreter was deleted under it
 _HERE = _paths.ROOT
-_PUSH = [sys.executable, _paths.program("fleet", "push")]   # the delivery script (push.py since an earlier change); each call runs it through _interp.resilient
 
 
 def _healthz_body() -> str:
@@ -3077,7 +1862,7 @@ def _ask_authors(item: dict[str, Any]) -> "list[str]":
     by = str(_askl.rec_of(meta).get("by") or "")
     if by:
         return [by]
-    return [x for x in (_holder(item), str(meta.get("owner") or "")) if x and not _model.is_owner(x)]
+    return [x for x in (_telling.holder(item), str(meta.get("owner") or "")) if x and not _model.is_owner(x)]
 
 
 def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
@@ -3113,12 +1898,12 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
         _writes.save(gid, item, note="ask taken off his move")
     _publish()
     item["gid"] = gid
-    to = _holder(item)
+    to = _telling.holder(item)
     line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said it is wrong: {_clip_line(why, 140)}). "
-            f"The item is back with {_session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _notice_link(gid)}")
+            f"The item is back with {_session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _telling.notice_link(gid)}")
     if to and not (sender.strip() and _ho_same(to, sender)):
         try:
-            _tell_woken(gid, _session_id(to), f"{_FOR_OWNER} {line}" if _front_keeper(to, str(meta.get("project") or ""))[0] else line, tag="ask")
+            _telling.tell_woken(gid, _session_id(to), f"{_FOR_OWNER} {line}" if _telling.front_keeper(to, str(meta.get("project") or ""))[0] else line, tag="ask")
         except Exception as e:  # noqa: BLE001  — the ask is off his move; a notice that fails is a stderr line
             print(f"ask: {gid} mover not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     print(f"ask: {gid} taken off the owner's move (its author's word): {why}", file=sys.stderr, flush=True)
@@ -3177,7 +1962,7 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
                 out = _ask_leave(gid, word, sender=who, expect=now_ask)
                 if out:
                     return out
-        if mine or (who and _ho_same(who, _holder(item))) or (who and _ho_same(who, str(meta.get("owner") or ""))):
+        if mine or (who and _ho_same(who, _telling.holder(item))) or (who and _ho_same(who, str(meta.get("owner") or ""))):
             since = float(_askl.rec_of(meta).get("at") or pre.get("look") or 0)
             at = _askl.rec_of(meta).get("at")      # an ask with no record has no time to compare a drop with: nothing is said of its dependencies
             dropped = _askl.dropped_line(_askl.dropped_deps(now_ask, _ask_lookup, float(at)), _ask_when) if mine and at else ""
@@ -3427,7 +2212,7 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
     come ([instance] timezone; a date-only wake comes at the start of its day) is released, its hold and wake dropped and
     both clocks moved, as _update moves them; it is back in the lane its needs give it (your call, on others, on agent).
     A wake on an item not on hold, with no until, is a notice (items kept showing "on hold" while their work was
-    live, because a wake set as a notice parked them): at its moment the sessions its notices go to (_notice_to: the sessions in its needs, else its mover) are told once
+    live, because a wake set as a notice parked them): at its moment the sessions its notices go to (notice_to: the sessions in its needs, else its mover) are told once
     and the wake goes; status, hold, needs and the state clock stay as they were (the item never left its lane).
     The server's own act, not a session's: it owes no page and tells no keeper; it tells the item's mover, one line through
     push.py (the message tool's delivery: a pane by name or uuid, a cse_… session, queued when not live), and a delivery that
@@ -3502,14 +2287,14 @@ def _back_words(meta: dict[str, Any], sh: Callable[[str], str] = str) -> str:
 
 
 def _reminder_to(meta: dict[str, Any]) -> list[tuple[str, str]]:
-    """Who a notice (a wake on an item not on hold) tells: the sessions its notices go to (_notice_to: the sessions named in its needs, else its mover, else its
+    """Who a notice (a wake on an item not on hold) tells: the sessions its notices go to (notice_to: the sessions named in its needs, else its mover, else its
     `then`, else the project's builder, else its -main agent: never the creator). → [(session id, why)], each once."""
-    return _notice_to(meta)
+    return _telling.notice_to(meta)
 
 
 def _wake_notify(gid: str, it: dict[str, Any], what: str, out: dict[str, list[tuple[str, dict[str, Any], str, str, bool]]] | None = None,
                  reminder: bool = False) -> list[str]:
-    """An item back in its lane (a wake, or its last `after` closed) tells the sessions its notices go to (_notice_to:
+    """An item back in its lane (a wake, or its last `after` closed) tells the sessions its notices go to (notice_to:
     the sessions in its needs other than the mover, else the page's keeper). The mover itself, when it is the one, hears the
     short line as before; another session hears the item, its mover and what to do with it, and on a pilot project the line
     is a pilot notice (a routing-log line the keeper rules on) naming the mover. Still after an open item, the line
@@ -3518,7 +2303,7 @@ def _wake_notify(gid: str, it: dict[str, Any], what: str, out: dict[str, list[tu
     here: each session's rows are collected there, for one message per session (_wake_tell). → the session ids told."""
     meta = it.get("metadata") or {}
     told = []
-    for sid, why in (_reminder_to(meta) if reminder else _notice_to(meta)):
+    for sid, why in (_reminder_to(meta) if reminder else _telling.notice_to(meta)):
         if out is not None:
             out.setdefault(sid, []).append((gid, it, what, why, reminder))
         else:
@@ -3535,7 +2320,7 @@ def _hold_queue_row(sid: str, row: "tuple[str, dict[str, Any], str, str, bool]")
     meta = it.get("metadata") or {}
     if rem or not _after_open(meta):
         return False
-    return _hold_notice(sid, f"[stackshot] {_gh.shown(gid)} {what}: {it.get('subject') or ''} ({meta.get('project') or ''}) — {_back_words(meta, _gh.shown)} → {_notice_link(gid)}", "queue", gid=gid)
+    return _telling.hold_notice(sid, f"[stackshot] {_gh.shown(gid)} {what}: {it.get('subject') or ''} ({meta.get('project') or ''}) — {_back_words(meta, _gh.shown)} → {_telling.notice_link(gid)}", "queue", gid=gid)
 
 
 def _wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], extra: tuple[str, str, list[str]] | None = None) -> None:
@@ -3550,29 +2335,29 @@ def _wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]],
     for row in rows:
         gid, it, what, _why, rem = row
         meta = it.get("metadata") or {}
-        project, owner = str(meta.get("project") or ""), _holder(it)
+        project, owner = str(meta.get("project") or ""), _telling.holder(it)
         if not _router_live.holds(project, sid):      # the recipient is the item's mover, so there is no "its own item" to tell directly
             keep.append(row); continue
-        thn, subject = _then_part(it), str(it.get("subject") or "")
+        thn, subject = _telling.then_part(it), str(it.get("subject") or "")
         try:
             nid = _routing.record(project, kind="board", to="", label=f"wake {_gh.shown(gid)}", who="stackshot", text=f"{what}{thn}: {subject}",
-                                  url=_notice_link(gid), target="for " + _session_label(sid), pilot=True, live=True)
+                                  url=_telling.notice_link(gid), target="for " + _session_label(sid), pilot=True, live=True)
         except Exception:
             keep.append(row); continue      # not recorded: told as before, never lost
         _router_live.stash(nid, f"[stackshot] {_gh.shown(gid)} {what}: {subject} ({project}){thn}"
-                                + ("; the item is still active" if rem else f"; {_back_words(meta, _gh.shown)}") + f" → {_notice_link(gid)}")
+                                + ("; the item is still active" if rem else f"; {_back_words(meta, _gh.shown)}") + f" → {_telling.notice_link(gid)}")
     rows = [r for r in keep if not _hold_queue_row(sid, r)]       # a wake that leaves the item still after an open item is a place in the queue, nothing to do yet
     if not rows:
         if xtext:
-            _tell_woken(",".join(xgids), sid, (xmark + " " if xmark else "") + xtext, tag="watch")
+            _telling.tell_woken(",".join(xgids), sid, (xmark + " " if xmark else "") + xtext, tag="watch")
         return
     batch = os.urandom(3).hex() if len(rows) > 1 else ""
     lines, mine, others = [], False, False
     for gid, it, what, why, rem in rows:
         meta = it.get("metadata") or {}
-        project, owner = str(meta.get("project") or ""), _holder(it)
+        project, owner = str(meta.get("project") or ""), _telling.holder(it)
         back = f"still active ({_rmod.WHOSE[_rmod.needs_kind({'metadata': meta})]}), check where it stands" if rem else _back_words(meta, _gh.shown)
-        subject, thn, oid = str(it.get("subject") or ""), _then_part(it), (_session_id(owner) if owner else "")
+        subject, thn, oid = str(it.get("subject") or ""), _telling.then_part(it), (_session_id(owner) if owner else "")
         if sid == oid:
             mine = True
             lines.append(f"{_gh.shown(gid)} {what}: {back}")
@@ -3582,21 +2367,21 @@ def _wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]],
         if _anc.pilot_root(project):
             try:
                 nid = _routing.record(project, kind="board", to=sid, label=f"wake {_gh.shown(gid)}", who="stackshot", text=f"{what}{thn}: {subject}",
-                                      url=_notice_link(gid), target="for " + _session_label(sid), pilot=True, batch=batch)
+                                      url=_telling.notice_link(gid), target="for " + _session_label(sid), pilot=True, batch=batch)
             except Exception:
                 nid = ""
-            _live_pass(project, nid, sid)
+            _telling.live_pass(project, nid, sid)
         if not batch:
             lines.append(f"{_gh.shown(gid)} {what}, {back}: {subject} ({project}){thn}. It comes to you {why}: act on it, "
                          f"or pass it to the session that does the work" + ("" if rem else "; refresh its ask if things moved")
-                         + f". → {_notice_link(gid)}" + (f" · notice {nid}" if nid else ""))
+                         + f". → {_telling.notice_link(gid)}" + (f" · notice {nid}" if nid else ""))
         else:
-            lines.append(f"{_gh.shown(gid)} {what}, {back}: {subject} ({project}){thn}, to you {why} → {_notice_link(gid)}" + (f" · notice {nid}" if nid else ""))
+            lines.append(f"{_gh.shown(gid)} {what}, {back}: {subject} ({project}){thn}, to you {why} → {_telling.notice_link(gid)}" + (f" · notice {nid}" if nid else ""))
     gids = [g for g, *_ in rows]
     allrem = all(r[4] for r in rows)
     ask = "close it, refresh its next, or set an until date" if allrem else "refresh its ask if things moved"
     if not batch:
-        _tell_woken(", ".join([gids[0], *xgids]), sid, (xmark + " " if xmark else "") + f"[stackshot] {lines[0]}" + (f"; {ask}." if mine else "") + (f"\n{xtext}" if xtext else ""))
+        _telling.tell_woken(", ".join([gids[0], *xgids]), sid, (xmark + " " if xmark else "") + f"[stackshot] {lines[0]}" + (f"; {ask}." if mine else "") + (f"\n{xtext}" if xtext else ""))
         return
     head = (f"{len(rows)} backstops came due for you:" if allrem else f"{len(rows)} items woke for you:" if not any(r[4] for r in rows)
             else f"{len(rows)} items came due for you (woken, or a backstop came due):")
@@ -3604,7 +2389,7 @@ def _wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]],
     if others:
         text.append("For an item that is not yours: act on it, or pass it to the session that does the work.")
     text.append(("Close each one, refresh its next, or set an until date." if allrem else "Refresh each one's ask if things moved."))
-    _tell_woken(", ".join([*gids, *xgids]), sid, (xmark + " " if xmark else "") + "\n".join(text) + (f"\n{xtext}" if xtext else ""))
+    _telling.tell_woken(", ".join([*gids, *xgids]), sid, (xmark + " " if xmark else "") + "\n".join(text) + (f"\n{xtext}" if xtext else ""))
 
 
 def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reason: str = "") -> list[str]:
@@ -3612,7 +2397,7 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
     replacement (the item then waits on that, when it is open), a done or dropped one simply goes. An item left with no open
     prerequisite wakes: after, hold and wake go, both clocks move, and the sessions its notices go to are told what closed
     and how (a dropped one says so). The server's own act: no page owed. Then every other open item whose next or description names the closed one, and that no `after` link just woke,
-    tells its mover once (_tell_close_mentions). → the gids released."""
+    tells its mover once (tell_close_mentions). → the gids released."""
     released = []
     waiting_on: set[str] = set()        # the open items that had the closed one in `after`: the wake above is their notice
     rep = _follow_superseded(superseded_by) if outcome == "superseded" and superseded_by else ""
@@ -3666,267 +2451,10 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
     for sid, rows in wout.items():
         _watch_tell(sid, rows)
     try:
-        _tell_close_mentions(gid, outcome, reason, writer, waiting_on)
+        _telling.tell_close_mentions(gid, outcome, reason, writer, waiting_on)
     except Exception as e:  # noqa: BLE001  — the close is saved and published; a notice that fails is a stderr line, never a failed close
         print(f"close: {gid} mentions not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return released
-
-
-def _mentions_ref(gid: str) -> "re.Pattern[str]":
-    """`board#N` of a store id as a whole id in a text: not board#N0 (a longer number), not glued to a word or a `#` before it."""
-    n = _gh.shown(gid)
-    return re.compile(r"(?<![\w#/&-])" + re.escape(n) + r"(?!\d)", re.I)
-
-
-_MENTION_LINES_MAX = 8          # the items a close notice lists (the rest as a count): a very long list once overran MSG_MAX
-_MENTIONED = threading.local()      # what the last close of this thread told (_tell_close_mentions): ([item ids that named it], [the movers told]); the close's reply says it once
-
-
-def _mentions_reply(gid: str) -> str:
-    """The reply line of a close for the notice to the movers of the items that name it, and forget it. "" when none named it."""
-    got = getattr(_MENTIONED, "got", None)
-    _MENTIONED.got = None
-    if not got or got[0] != gid or not got[1]:
-        return ""
-    items, movers = got[1], got[2]
-    return (f"\n({len(items)} other open item{'s' if len(items) != 1 else ''} name{'' if len(items) != 1 else 's'} {_gh.shown(gid)} in next or description ({', '.join(_gh.shown(x) for x in items[:6])}"
-            f"{', …' if len(items) > 6 else ''}); {', '.join(movers) if movers else 'nobody'} {'has' if len(movers) == 1 else 'have'} been told)")
-
-
-def _tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: "set[str] | None" = None) -> list[str]:
-    """(a next that says "after Sam's review" with no `after` can be left asleep after the item it named closed):
-    a close tells the mover of every other open item whose next or description names the closed item, one batched notice per mover, naming the closed item, how it ended and why, and the
-    items that named it. Left out: the closer itself (the session that wrote the close), the closed item, and the items in `skip` (the ones with the closed item in `after`: the wake they get
-    is their notice). The mover is the item's mover as the model reads it; when that is the owner, or no session, the sessions its notices go to (_notice_to) hear it instead. A superseded
-    item names its replacement. → the session ids told."""
-    try:
-        closed = _load(gid)
-    except ToolError:
-        return []
-    cm = closed.get("metadata") or {}
-    rx = _mentions_ref(gid)
-    wid = _session_id(writer) if writer else ""
-    by_sid: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-    for g, _p in _item_files():
-        if g == gid or g in (skip or set()):
-            continue
-        try:
-            it = _load(g)
-        except Exception:  # noqa: BLE001
-            continue
-        m = it.get("metadata") or {}
-        if it.get("status") != "open" or not (rx.search(str(m.get("next") or "")) or rx.search(str(it.get("description") or ""))):
-            continue
-        try:
-            mover = _model_of({**it, "gid": g}).mover
-        except Exception:  # noqa: BLE001
-            mover = ""
-        sids = [_session_id(mover)] if mover and not _model.is_owner(mover) else [s for s, _w in _notice_to(m)]
-        for sid in dict.fromkeys(x for x in sids if x):
-            if sid != wid:
-                by_sid.setdefault(sid, []).append((g, it))
-    sup = str(cm.get("superseded_by") or "")
-    how = f"{_rmod.outcome_word(cm.get('outcome') or outcome or 'done')}" + (f" by {_gh.shown(sup)}" if sup else "")
-    why = _clip_line(cm.get("reason") or reason, 160)
-    told = []
-    me = _gh.shown(gid)
-    cause = f"{me} {_clip_line(closed.get('subject') or '', 100)} closed ({how}" + (f": {why}" if why else "") + f"){' by ' + _session_label(writer) if writer else ''}"
-    for sid, rows in by_sid.items():
-        keep: list[tuple[str, dict[str, Any]]] = []
-        for g, it in rows:         # the path of _wake_tell: a recipient the router holds the project for gets the notice through the routing log, the router passes it on
-            m_ = it.get("metadata") or {}
-            project, owner = str(m_.get("project") or ""), _holder(it)
-            if not _router_live.holds(project, sid):      # the recipient is the item's mover, so there is no "its own item" to tell directly
-                keep.append((g, it)); continue
-            thn = _then_part(it)
-            try:
-                nid = _routing.record(project, kind="board", to="", label=f"close {me}", who="stackshot", text=f"{cause}; {_gh.shown(g)} names it{thn}: {it.get('subject') or ''}",
-                                      url=_notice_link(g), target="for " + _session_label(sid), pilot=True, live=True)
-            except Exception:
-                keep.append((g, it)); continue      # not recorded: told as before, never lost
-            _router_live.stash(nid, f"[stackshot] {cause}. {_gh.shown(g)} {it.get('subject') or ''} ({project}){thn}, names it → {_notice_link(g)}")
-        if keep != rows or not keep:
-            told.append(sid)
-        if not keep:
-            continue
-        batch = os.urandom(3).hex() if len(keep) > 1 else ""
-        lines = []
-        for g, it in keep[:_MENTION_LINES_MAX]:
-            m_ = it.get("metadata") or {}
-            project, owner = str(m_.get("project") or ""), _holder(it)
-            thn = _then_part(it)
-            nid = ""
-            if _anc.pilot_root(project) and sid != (_session_id(owner) if owner else ""):
-                try:
-                    nid = _routing.record(project, kind="board", to=sid, label=f"close {me}", who="stackshot", text=f"{cause}; {_gh.shown(g)} names it{thn}: {it.get('subject') or ''}",
-                                          url=_notice_link(g), target="for " + _session_label(sid), pilot=True, batch=batch)
-                except Exception:
-                    nid = ""
-                _live_pass(project, nid, sid)
-            lines.append(f"- {_gh.shown(g)} {_clip_line(it.get('subject') or '', 100)} (its {'next' if rx.search(str(m_.get('next') or '')) else 'description'} names {me}) → {_notice_link(g)}" + (f" · notice {nid}" if nid else ""))
-        if len(keep) > _MENTION_LINES_MAX:
-            lines.append(f"- … and {len(keep) - _MENTION_LINES_MAX} more")
-        body = f"[stackshot] {cause}." + (" An open item you move names it:\n" if len(keep) == 1 else f" {len(keep)} open items you move name it:\n") + "\n".join(lines) \
-            + f"\nIf one of them waited on {me}, it can go on now: refresh its next and set after= for any wait that is left."
-        project = str((keep[0][1].get("metadata") or {}).get("project") or "")
-        _tell_kind("close", ",".join(g for g, _i in keep), sid, (_FOR_OWNER + " " if _front_keeper(sid, project)[0] else "") + body, tag="close")      # a front keeper hears a close only under presence plus touched
-        if sid not in told and _gate_result()[0] != "held":      # a front keeper the gate held was not told: the reply line must not say it was
-            told.append(sid)
-    _MENTIONED.got = (gid, list(dict.fromkeys(g for rows in by_sid.values() for g, _i in rows)), [_session_label(x) or x for x in told])
-    return told
-
-
-def _tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip: list[str] | None = None) -> str:
-    """A wait that can no longer end (a check whose pull request was closed unmerged) is told at once to the keeper of the item's
-    page (_keeper: its builder or -main agent): the item stays open, and the keeper
-    decides what it waits on now. (An `after` item that is dropped or closed undone is not one: the item is released with the wake
-    notice, which says so.) `skip` = session ids already
-    told of the same event. → the session id told, "" when nobody."""
-    meta = item.get("metadata") or {}
-    project = str(meta.get("project") or "")
-    k = _keeper(project)
-    kid = _session_id(k) if k else ""
-    if not kid or kid in (skip or []):
-        if not kid:
-            print(f"waiting: {gid} wait failed ({why}); no keeper to tell", file=sys.stderr, flush=True)
-        return ""
-    _tell_kind("stuck", gid, kid, f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({project}){_then_part(item)}: its wait ({what}) can no longer end: {why}. "
-                          f"The item stays open. As {_keeper_words(project, k)}: see that its mover or the session doing the work "
-                          f"gives it what it waits on now (a new check, a wake, an item to wait after) or closes it. → {_notice_link(gid)}", tag="wait")
-    return kid
-
-
-_UNDELIVERED_KEEP = 5       # the last this many failed deliveries stay on an item (metadata.undelivered); a state change drops them
-
-
-def _record_undelivered(gids: str, to: str, tag: str, why: str) -> list[str]:
-    """A notice that could not be delivered is recorded on the item it was about (the owner's one rule: a failed delivery was a log
-    line nobody read), as `metadata.undelivered` = [{to, tag, at, why}], the last _UNDELIVERED_KEEP. A filing record: no clock
-    moves; the server's note goes to the History (nothing is posted to the issue). The item shows it in `get`, and the brief and
-    board.md count the open items that carry one. `gids` = one store id or several, comma-separated (a batched
-    notice). A state change by a session drops the record: the item has moved since. → the gids recorded."""
-    out = []
-    for g in [x for x in re.split(r"[,\s]+", str(gids or "")) if _GID.match(x)]:
-        with _writes.ITEM_LOCK:                       # re-read under the lock: an update that landed meanwhile is kept
-            try:
-                it = _load(g)
-                meta = dict(it.get("metadata") or {})
-                rows = [x for x in (meta.get("undelivered") if isinstance(meta.get("undelivered"), list) else []) if isinstance(x, dict)]
-                rows.append({"to": _session_label(to) or str(to), "tag": tag, "at": time.time(), "why": _clip_line(why, 200)})
-                meta["undelivered"] = rows[-_UNDELIVERED_KEEP:]
-                it["metadata"] = meta
-                _writes.save(g, it, note=f"a notice ({tag}) to {_session_label(to) or to} was not delivered: {_clip_line(why, 160)}")
-                out.append(g)
-            except Exception as e:  # noqa: BLE001  — the record never fails the pass that told
-                print(f"{tag}: {g} undelivered notice not recorded: {e}", file=sys.stderr, flush=True)
-    return out
-
-
-def _hold_project(target: str, gid: str = "") -> str:
-    """The project page a held notice is logged under: the item's (the first of `gid`), else the page that lists the target."""
-    for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)][:1]:
-        try:
-            pr = str((_load(g).get("metadata") or {}).get("project") or "")
-            if pr:
-                return pr
-        except Exception:  # noqa: BLE001
-            pass
-    try:
-        roles = _anc.session_roles()
-        return str((roles.get(_role_name(roles, target)) or {}).get("project") or "")
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _hold_notice(target: str, text: str, kind: str, *, gid: str = "", project: str = "", sender: str = "", asks: bool = False, owner_words: bool = False) -> bool:
-    """THE decision point for a notice this server delivers itself. A notice to a BACKGROUND agent that asks nothing of it
-    is not pushed as a new turn: it is held (held.py, server-side) and handed over with the agent's next turn, and the routing log says so with the reason
-    "held: asks nothing (kind)". The sender names the kind (held.KINDS) and what it knows: `asks` (the agent is named in needs, moves the item, is handed it, its wait
-    ends), `owner_words` (the notice carries his words); held.decide answers, and anything unsure is delivered. A front agent, a kind the code does not know, a
-    notice marked for the owner and a failure here all deliver as before. → True when the notice was held (the caller sends nothing). Never raises."""
-    try:
-        if not kind or not target or not _held.decide(kind, is_background=bool(_back_agent(target)), text=text, owner_words=owner_words, asks=asks, target=target):
-            return False
-        if not _held.add(_held.key_of(target), kind, text, sender=sender or NAME, gid=gid):
-            return False
-        try:
-            proj = project or _hold_project(target, gid)
-            if proj:
-                _routing.record_auto(proj, "held", _held.reason(kind), kind="board", label=f"{kind} {gid}".strip(), who=sender or NAME, text=text,
-                                     target="for " + (_session_label(target) or str(target)), pilot=bool(_anc.pilot_root(proj)))
-        except Exception as e:  # noqa: BLE001  — the log line is a record; the hold stands without it
-            print(f"held: {kind} notice for {target} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return True
-    except Exception as e:  # noqa: BLE001
-        print(f"held: {kind} notice for {target} not held, delivered as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return False
-
-
-def _done_close(what: str) -> bool:
-    """Is this notice's `what` a close with the outcome done (`was completed (done…`)? Only that asks a background agent nothing: a dropped or superseded item tells a builder to stop. False when unsure."""
-    return str(what or "").startswith("was completed (done")
-
-
-def _asks_of(gid: str, item: dict[str, Any], sid: str) -> bool:
-    """Does the item put something to this session: it is named in its needs, or it is the item's mover as the model reads it (a change to it may be an instruction)? True when unsure."""
-    try:
-        meta = item.get("metadata") or {}
-        if any(_session_id(x) == sid for x in _needs_sessions(meta)):
-            return True
-        mover = _model_of({**item, "gid": gid}).mover
-        return bool(mover) and _session_id(mover) == sid
-    except Exception:  # noqa: BLE001
-        return True
-
-
-def _tell_or_hold(gid: str, owner: str, note: str, hold: str, tag: str = "wake") -> "threading.Thread | None":
-    """The notice senders' one entry for a notice of a kind that asks nothing (`hold` is a held.KINDS kind): held for a background agent's next turn
-    when _hold_notice says so (before anything is recorded as told, so a hand-off notice is not suppressed by it), else _tell_woken as ever. → the sending thread, None when held."""
-    if hold and _hold_notice(owner, note, hold, gid=gid):
-        return None
-    return _tell_woken(gid, owner, note, tag=tag)
-
-
-def _tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict[str, Any] | None" = None) -> "threading.Thread | None":
-    """The wake pass's one line to the item's mover, through push.py in the background (as the keeper relay sends). A
-    failure is a stderr line and, since the owner's one rule, a record on the item (_record_undelivered), never an exception: the
-    pass has already saved the item. `gid` may name several items (a batched notice, comma-separated). `tag` names the sender in
-    those lines (the recycle pass sends through here too). `result`, when given, is filled in by the thread: {"ok": bool, "why": str} (the migration's send_wake waits for it).
-    a notice for a front agent first passes _front_gate (its kind: progress | close | stuck | exempt, from _tell_kind's hint, else from the tag); a held one returns None like "no owner".
-    A notice that asks nothing of a background agent goes through _tell_or_hold instead. → the sending thread (a test joins it), None with no owner."""
-    if not owner:
-        print(f"{tag}: {gid} has no owner to tell", file=sys.stderr, flush=True)
-        return None
-    if _front_gate(gid, owner, note, tag, getattr(_FRONT_HINT, "kind", "")):
-        return None
-    try:
-        told = getattr(_HO_STATE, "told", None)      # step 2: what this write has told, so its hand-off notice does not double it
-        if told is not None:
-            told.update((g, _session_id(owner)) for g in re.split(r"[,\s]+", str(gid)) if g)
-    except Exception:  # noqa: BLE001
-        pass
-    def run() -> None:
-        try:
-            r = subprocess.run([*_interp.resilient(_PUSH), "--from", NAME, owner, note], capture_output=True, text=True, timeout=110,
-                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
-            out = (r.stdout.strip().splitlines() or [""])[-1]
-            err = (r.stderr.strip().splitlines() or [""])[-1]
-            if result is not None:
-                result.update(ok=out.startswith(("delivered", "queued", "inbox")), why="" if out.startswith(("delivered", "queued", "inbox")) else f"{out or 'no result'}{(' — ' + err) if err else ''}")
-            if not out.startswith(("delivered", "queued", "inbox")):
-                why = f"{out or 'no result'}{(' — ' + err) if err else ''}"
-                print(f"{tag}: {gid} notice to {owner} not delivered: {why}", file=sys.stderr, flush=True)
-                _record_undelivered(gid, owner, tag, why)
-            _handoff_pushed(gid, owner, out or "failed", err)     # step 2: a hand-off to this session is delivered, waiting or failed by this push
-        except Exception as e:  # noqa: BLE001
-            if result is not None:
-                result.update(ok=False, why=f"failed: {e}")
-            print(f"{tag}: {gid} notice to {owner} failed: {e}", file=sys.stderr, flush=True)
-            _record_undelivered(gid, owner, tag, f"failed: {e}")
-            _handoff_pushed(gid, owner, "failed", str(e))
-    th = threading.Thread(target=run, daemon=True)
-    th.start()
-    return th
 
 
 def _anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched: bool = False) -> list[str]:
@@ -3942,7 +2470,7 @@ def _anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched:
     url = str(n.get("anchor") or "")
     if n.get("kind") != "anchor" or not url or not (n.get("to") or n.get("live") or _auto_line(n)):
         return []      # no recipient: a log-only direct anchor's line ([anchor_hub] direct = "none"), which wakes nobody (a line the live router holds has none either, but it rules it: `live`)
-    stew = _page_keeper(project)
+    stew = _telling.page_keeper(project)
     if _auto_line(n):
         at = float(n.get("ruled_at") or n.get("ts") or 0)
         how = f"was logged and ruled {n['ruling']} by {AUTO_RULER} (a routine event on the fleet's own pull request)"
@@ -4047,7 +2575,7 @@ def _anchor_pass() -> list[str]:
     for project in dict.fromkeys([*held, *watched]):
         if not project:
             continue
-        stew = bool(_page_keeper(project))
+        stew = bool(_telling.page_keeper(project))
         try:
             scoped = {_anchor_key(e["url"]) for e in _ascope.clean_entries(store.get(project)) if e["items"] and set(e["items"]) & set(held.get(project, []))}
         except Exception:
@@ -4078,9 +2606,9 @@ def _router_live_after(project: str, n: dict[str, Any]) -> None:
 
 
 # the router's live mode reaches the server only through these three (router_live.configure): which agents are front ones, the push,
-# and the call after a ruling. `_PUSH` is read at each call, so a test's fake push is the one used.
-_router_live.configure(is_front=lambda who, project: _front_keeper(who, project)[0],
-                       deliver=lambda target, text: _router_delivered(target, text, _router_live.deliver_via(_PUSH, target, text)),
+# and the call after a ruling. `PUSH` is read at each call, so a test's fake push is the one used.
+_router_live.configure(is_front=lambda who, project: _telling.front_keeper(who, project)[0],
+                       deliver=lambda target, text: _router_delivered(target, text, _router_live.deliver_via(_telling.PUSH, target, text)),
                        after_rule=_router_live_after)
 
 
@@ -4158,7 +2686,7 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
         mod = _model_of({**it, "gid": gid})
         if mod.state != _model.WAITING or mod.wait is None:
             raise _WatchStuck(f"{gid} reads as {mod.state}, not as a wait")
-        post = mod.wait.mover or _auto_mover(_fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or ""))      # a fallback is never a front agent when the project has a builder
+        post = mod.wait.mover or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or ""))      # a fallback is never a front agent when the project has a builder
         until = _watch.backstop_epoch(meta)
         date = (dt.datetime.fromtimestamp(until, ZONE).strftime("%Y-%m-%d") if until else "")
         url = str(meta.get("wait_anchor") or "")
@@ -4213,20 +2741,20 @@ def _watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[
     """The message to one session about the items whose wait ended and are now its move: (the text, the mark a front agent takes or "", the item ids), None for no rows."""
     if not rows:
         return None
-    msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _notice_link(g)) for g, it, what in rows]
+    msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
     project = str((rows[0][1].get("metadata") or {}).get("project") or "")
-    return _watch.message(msg_rows), (_FOR_OWNER if _front_keeper(sid, project)[0] else ""), [g for g, *_ in rows]
+    return _watch.message(msg_rows), (_FOR_OWNER if _telling.front_keeper(sid, project)[0] else ""), [g for g, *_ in rows]
 
 
 def _watch_tell(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> None:
     """One message to one session about every item whose wait ended and is now its move (several items for one recipient in one pass are one message, a single one a single line).
-    A front agent gets the mark a front agent takes. A delivery that fails is recorded on the items (_tell_woken)."""
+    A front agent gets the mark a front agent takes. A delivery that fails is recorded on the items (tell_woken)."""
     if not sid:
         print(f"watch: {', '.join(g for g, *_ in rows)} woke with nobody to tell", file=sys.stderr, flush=True)
         return
     x = _watch_text(sid, rows)
     if x:
-        _tell_woken(",".join(x[2]), sid, (x[1] + " " if x[1] else "") + x[0], tag="watch")
+        _telling.tell_woken(",".join(x[2]), sid, (x[1] + " " if x[1] else "") + x[0], tag="watch")
 
 
 def _watch_pass(now: float | None = None, wout: dict[str, list[tuple[str, dict[str, Any], str]]] | None = None) -> list[str]:
@@ -4730,7 +3258,7 @@ def _machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
                 if not hits:
                     continue
                 who, _alive = _item_mover_model(it)
-                sid = _session_id(_holder(it))
+                sid = _session_id(_telling.holder(it))
                 if _model.is_owner(who) or not sid:
                     continue                  # the owner moves it now (alive) or takes it when its wait ends (waiting): an agent-facing notice never stands in for his queue
                 own = _evw_spec(meta.get("wait_event")) if _watch.stored_kind(meta) == "event" else None
@@ -4749,7 +3277,7 @@ def _machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
             for fleet in dict.fromkeys(r[0] for r in rows):
                 mine = [r for r in rows if r[0] == fleet]
                 at = dt.datetime.fromtimestamp(news[fleet.lower()][1], ZONE).strftime("%H:%M %Z") if news[fleet.lower()][1] else ""
-                _tell_woken(",".join(r[1] for r in mine), sid, _ma.notice(fleet, at, [(_gh.shown(g), subj + (f" (step: {step})" if step else ""), _notice_link(g)) for _f, g, subj, step in mine]), tag="watch")
+                _telling.tell_woken(",".join(r[1] for r in mine), sid, _ma.notice(fleet, at, [(_gh.shown(g), subj + (f" (step: {step})" if step else ""), _telling.notice_link(g)) for _f, g, subj, step in mine]), tag="watch")
                 told += [r[1] for r in mine]
                 print(f"machine anchor: {fleet} checked in: {', '.join(r[1] for r in mine)} told to {sid}", file=sys.stderr, flush=True)
         return told
@@ -4892,13 +3420,13 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
     do = eff["do"]
     if do == "arrived":
         was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
-        post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _auto_mover(_fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
+        post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
         _watch.turn_alive(meta, post, f"{OWNER} says {what} arrived", now)
         meta.pop("chases", None)
         return f"arrived → {_watch_label(post)}"
     if do == "words":     # his words with no button: never an arrival or a drop; the post-wake mover has the item, the wait's record (watch.was) and his words, and judges
         was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
-        post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _auto_mover(_fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))
+        post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))
         keep = w.get("was")
         _watch.turn_alive(meta, post, f'{OWNER} answered in words: "{_clip_line(eff.get("text") or "", 300)}"', now)
         meta.pop("options", None); meta.pop("ask", None)
@@ -5001,7 +3529,7 @@ def _minute_ticks() -> "list[_minute.Tick]":
         T("clients_tick", lambda: _clients_tick(), "fleet"),
         T("pilot_fallback_tick", lambda: _pilot_fallback_tick(), "fleet", board=True),
         T("stall_tick", lambda: _stall_tick(), "fleet", board=True),
-        T("handback_tick", lambda: _handback_tick(), "fleet", board=True),
+        T("handback_tick", lambda: _telling.handback_tick(), "fleet", board=True),
         T("fleet_publish", lambda: _minute_fleet_publish(), "fleet"),
         T("filing_tick", lambda: _filing_tick(), "tenmin", "tenmin", board=True),
         T("dates_tick", lambda: _dates_tick(), "tenmin", "tenmin", board=True),
@@ -5143,14 +3671,14 @@ def _archive_tick() -> "list[tuple[str, str]]":
 
 
 def _silence_env() -> Any:
-    """The audit passes' environment, built in one place for the hourly line, the idle hand-over, the balancer and the queue reading: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`_front_keeper`), which is stricter than the
+    """The audit passes' environment, built in one place for the hourly line, the idle hand-over, the balancer and the queue reading: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`front_keeper` of `stackshot/service/telling.py`), which is stricter than the
     role map (a project's keeper is not front for its own project; a transcript id resolves). Every pass judges a hand-off by the very answer the others do."""
     from stackshot.audit import audit_run as _ar
-    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0], front_strict=lambda who, project: _front_keeper(who, project, True)[0],
-                    front_or_unread=lambda who, project: _front_keeper(who, project, unread_front=True)[0])
+    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _telling.front_keeper(who, project)[0], front_strict=lambda who, project: _telling.front_keeper(who, project, True)[0],
+                    front_or_unread=lambda who, project: _telling.front_keeper(who, project, unread_front=True)[0])
 
 
-_queued.configure(is_front=lambda who, project: _front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
+_queued.configure(is_front=lambda who, project: _telling.front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
 _QUEUE_CACHE: "dict[str, Any]" = {"at": 0.0, "map": {}}
 _QUEUE_TTL = 30.0
 
@@ -5381,8 +3909,8 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         try:
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in lines)
-            _tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+            _telling.tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
         except Exception as e:  # noqa: BLE001
             print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return handed
@@ -5413,7 +3941,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     """The balancer (audit/hand_idle.py, `[audit] balance`, on by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
     untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder with the fewest open
     items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
-    why. The mover it left is told ONCE, by `_tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
+    why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
     subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
     in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it (another builder than its mover is in the role map and none is usable) the item stays, one History line says so and -main is told once per item per 24 hours, and the pass looks again every minute; with no other builder, or a builder that is no improvement, it is a log line only.
     Only an item whose mover is itself a builder is balanced, and only to builders. The notice to the mover it left is at-most-once (a crash between the save and the send loses it) and is not sent to a pane that is gone. An item the idle
@@ -5524,7 +4052,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             print(f"balance: {gid} not balanced: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     for frm in dict.fromkeys(f for f, _g, _t in gone):      # the former mover is told once per item it left, in one message however many: only for an item this pass moved
         try:
-            if _front_keeper(frm, "")[0] or _model.is_owner(frm) or not _ho.is_session_name(frm) or dead(frm):
+            if _telling.front_keeper(frm, "")[0] or _model.is_owner(frm) or not _ho.is_session_name(frm) or dead(frm):
                 continue      # a front agent is never sent it unmarked; a pane that is gone cannot take it (and a failed send would leave an `undelivered` note on the item that just moved)
             mine = [(g, t) for f, g, t in gone if f == frm]
             if len(mine) == 1:
@@ -5532,15 +4060,15 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             else:
                 text = (f"Disregard: {len(mine)} items are now with other sessions:\n" + "\n".join(f"- {_gh.shown(g)} is now with {_session_label(t)}" for g, t in mine)
                         + "\nDrop them, stop any work or subagent on them, and write nothing to them. No reply is owed.")
-            _tell_woken(",".join(g for g, _t in mine), _session_id(frm) or frm, text, tag="balance")
+            _telling.tell_woken(",".join(g for g, _t in mine), _session_id(frm) or frm, text, tag="balance")
         except Exception as e:  # noqa: BLE001
             print(f"balance: {frm} not told to disregard: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     for main, pairs in told.items():
         try:
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items stay where they are:\n" + "\n".join("- " + x for x in lines)
-            _tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+            _telling.tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
         except Exception as e:  # noqa: BLE001
             print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return moved
@@ -5596,7 +4124,7 @@ def _inbox_flag_send(to: str, text: str) -> "threading.Thread":
     """One flag line to a session through push.py in the background (as the wake pass sends); a failure is a stderr line. → the thread (a test joins it)."""
     def run() -> None:
         try:
-            r = subprocess.run([*_interp.resilient(_PUSH), "--from", NAME, to, text], capture_output=True, text=True, timeout=110,
+            r = subprocess.run([*_interp.resilient(_telling.PUSH), "--from", NAME, to, text], capture_output=True, text=True, timeout=110,
                                env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
             out = (r.stdout.strip().splitlines() or [""])[-1]
             if not out.startswith(("delivered", "queued", "inbox")):
@@ -5714,7 +4242,7 @@ def _fleet_builder() -> str:
     except Exception:  # noqa: BLE001
         r = {}
     if r.get("retired"):
-        return _page_keeper(str(r.get("project") or "")) if r.get("project") else ""
+        return _telling.page_keeper(str(r.get("project") or "")) if r.get("project") else ""
     return op
 
 
@@ -5794,12 +4322,12 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
             if kind == "main":
                 text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
                         f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please decide what it needs: bring the session back, message {quiet}, or hand the item on (update mover=<session>). "
-                        f"The item stays with {quiet} meanwhile, and no reply is owed (put the result on the item). → {_notice_link(gid)}")
+                        f"The item stays with {quiet} meanwhile, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
             else:
                 text = (f"[stackshot] fleet recovery: {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it. "
                         f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please take the fix through your usual path: bring the session back, or hand the item to a session that runs. "
-                        f"The item stays with {quiet} meanwhile; nothing here is for {OWNER}, and no reply is owed (put the result on the item). → {_notice_link(gid)}")
-            th = _tell_woken(gid, to_id, text, tag=tag)
+                        f"The item stays with {quiet} meanwhile; nothing here is for {OWNER}, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
+            th = _telling.tell_woken(gid, to_id, text, tag=tag)
             outcome = "asked" if th is not None else "held"
             print(f"recovery: {gid} {quiet} is quiet; " + (f"{to} asked to recover it" if th is not None else f"the message to {to} was held back"), file=sys.stderr, flush=True)
     except Exception as e:  # noqa: BLE001
@@ -5830,8 +4358,6 @@ def _idle_live(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]]) -> 
     server and does not count: its time is never live time."""
     sid = _anc.canonical(who, nm)
     return _lv.idle_live(idx.get(sid.lower()) or idx.get(sid))
-
-
 
 
 # ----------------------------------------------------------------------------- the done check
@@ -5870,7 +4396,7 @@ def _idle_live(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]]) -> 
 # (a review of the first cut: the plain-word match fired on all three). A write that leaves an
 # existing hand-off as it was is not asked again, and an item already in that state before this rule is never retro-refused. A
 # session named in needs alone is not a gated hand-off: it is asked about the item at each of its turn ends and told to close it
-# or hand it back (_tell_needed). A check alone is a filing edit: no page owed, the state clock unmoved. The pass's own state
+# or hand it back (tell_needed). A check alone is a filing edit: no page owed, the state clock unmoved. The pass's own state
 # (the last error per item, the GitHub answers and backoff) lives in <state>/checks.json, out of the store, so a pass that
 # reads touches no item file.
 _CHECK_FORMS = ("pr_merged <owner>/<repo>#<n> (or the PR's URL)", "item_closed <item id>", "lane <session> <lane>",
@@ -6120,8 +4646,8 @@ def _check_close(gid: str, it: dict[str, Any], check: str, now: float) -> None:
     """Close `gid` on its check, the server's own act: outcome done, the reason naming the check, the live fields cleared as a
     session's close clears them, the description as it stands (the reason says how it ended). No page owed; the History
     and the after releases are the record. The owner's one rule: a close that nobody was told of is a wait that ended unseen, so the
-    item's mover is told (_tell_check_closed); a close with his words on the item is a row on his For you list (_foryou_on_save)."""
-    _CLOSE_WAS.item = json.loads(json.dumps(it))      # the close is told to the mover, which the close drops
+    item's mover is told (tell_check_closed); a close with his words on the item is a row on his For you list (_foryou_on_save)."""
+    _telling.CLOSE_WAS.item = json.loads(json.dumps(it))      # the close is told to the mover, which the close drops
     meta = dict(it.get("metadata") or {})
     _steps.close_meta(meta, "done", NAME, now)       # a close marks the open steps, the server's own close included
     for k in ("next", "next_by", "owner_step", "ask", "needs", "options", "after", "hold", "hold_set", "wake", "recycle", "recycle_at", "idle", "check", "watch_reason", "waiting", "wait_failed", "wait_basis", *_states.DROP_ON_CLOSE, *_states.CLOSE_EXTRA, *_model.DROP_ON_CLOSE, *_watch.DROP_ON_CLOSE):
@@ -6133,47 +4659,21 @@ def _check_close(gid: str, it: dict[str, Any], check: str, now: float) -> None:
     _writes.save(gid, it, activity=_activity.EVENT)      # no writer, no note: the History line is the change itself ("completed · done — done check passed: …"); the event the check waited for is activity
     print(f"check: {gid} closed, {label} — {it.get('subject')}", file=sys.stderr, flush=True)
     try:
-        _tell_check_closed(gid, it, label)
+        _telling.tell_check_closed(gid, it, label)
     except Exception as e:  # noqa: BLE001
         print(f"check: {gid} closed but its keeper was not told: {e}", file=sys.stderr, flush=True)
-    _CLOSE_WAS.item = None
+    _telling.CLOSE_WAS.item = None
     try:
         _release_after(gid, "done", "", "")
     except Exception as e:  # noqa: BLE001
         print(f"check: {gid} closed but its after releases failed: {e}", file=sys.stderr, flush=True)
 
 
-def _tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
-    """The server closed `gid` itself on its done check: its mover is told in one line (_holder, the mover as it stood before the close; a close is told to the mover alone,
-    never to its `then` or its creator). A front agent mover hears it as a close by another session does, marked (_tell_owner_check_closed). A close with the owner's own words on the item
-    is also a row on his For you list, made when the close is saved (_foryou_on_save). → the session ids told."""
-    meta = item.get("metadata") or {}
-    project = str(meta.get("project") or "")
-    owner = _holder(item)
-    told: list[str] = []
-    oid = _session_id(owner) if owner else ""
-    front = bool(owner) and _front_keeper(owner, project)[0]
-    if oid and not front:
-        _tell_woken(gid, oid, f"[stackshot] {_gh.shown(gid)} closed itself: its done check passed ({label}): {item.get('subject') or ''} ({project}){_then_part(item)} → {_notice_link(gid)}", tag="check")
-        told.append(oid)
-    elif not oid:
-        print(f"check: {gid} closed, and nobody moves it to tell", file=sys.stderr, flush=True)
-    if front and _foryou_key(gid, "closed", item) in _FORYOU_FAILED:       # the row could not be written: the old notice, so the close still reaches someone
-        if _tell_close_owner(gid, item, owner, project, "", by=f"stackshot's done check ({label})"):
-            told.append(oid)
-    try:
-        if _tell_owner_check_closed(gid, item, told):
-            told.append(oid)
-    except Exception as e:  # noqa: BLE001  — the close is saved; a notice that fails is a stderr line
-        print(f"check: {gid} closed but its mover was not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return told
-
-
 def _check_fail(gid: str, it: dict[str, Any], check: str, why: str, now: float) -> None:
     """A done check that can no longer pass (a pr_merged whose pull request was closed unmerged, the owner's one rule) fails at once
     instead of reading "not yet" for ever: the check goes, the failure is recorded on the item (metadata.wait_failed),
     the item stays open and both clocks move, as a wait ending does. The server's own act:
-    no page owed, the History says it. The item's mover is told at once (_tell_wait_failed)."""
+    no page owed, the History says it. The item's mover is told at once (tell_wait_failed)."""
     meta = dict(it.get("metadata") or {})
     meta.pop("check", None); meta.pop("idle", None); meta.pop("waiting", None); meta.pop("watch_reason", None)
     label = _check_label(check)
@@ -6182,7 +4682,7 @@ def _check_fail(gid: str, it: dict[str, Any], check: str, why: str, now: float) 
     it["updated"] = it["state_updated"] = now
     _writes.save(gid, it, note=f"check failed: {label}: {why}; the item stays open")
     print(f"check: {gid} failed, {label}: {why} — {it.get('subject')}", file=sys.stderr, flush=True)
-    _tell_wait_failed(gid, it, f"check {label}", why)
+    _telling.tell_wait_failed(gid, it, f"check {label}", why)
 
 
 def _check_wait(gid: str, it: dict[str, Any], check: str) -> None:
@@ -6466,12 +4966,12 @@ def _contact_same(a: str, b: str) -> bool:
 
 def _contact_alive(contact: str) -> bool:
     """Is a stored contact still a front agent (of any project: a front agent that created an item of another project stays its contact)?"""
-    return _front_sender(contact)
+    return _telling.front_sender(contact)
 
 
 def _contact_default(creator: str, project: str) -> str:
     """The contact of an item nobody named one for: its creator when that is a front agent, else the project's -main agent; "" when the project names neither."""
-    if creator and _front_sender(creator):
+    if creator and _telling.front_sender(creator):
         return _store_ref(creator)
     main = _main_agent(project)
     return _store_ref(main) if main else ""
@@ -6595,7 +5095,7 @@ def _contact_backfill(dry: bool = True) -> dict[str, Any]:
         if project not in mains:
             mains[project] = _main_agent(project) if project else ""
         if creator not in fronts:
-            fronts[creator] = bool(creator) and _front_sender(creator)
+            fronts[creator] = bool(creator) and _telling.front_sender(creator)
         new, rule = _contact.plan(it, creator_front=fronts[creator], main=(_store_ref(mains[project]) if mains[project] else ""), alive=_contact_alive)
         counts[rule] += 1
         if rule in (_contact.RULE_CLOSED, _contact.RULE_HAS):
@@ -7422,7 +5922,7 @@ def _holds_unexplained() -> list[dict[str, Any]]:
         meta = it.get("metadata") or {}
         if _hold_held_by(gid, meta):
             continue
-        owner = _holder(it)
+        owner = _telling.holder(it)
         rows.append({"gid": gid, "owner": _session_label(_session_id(owner)) if owner else "", "wake": str(_wt.wake_value(meta) or ""),
                      "by": _rmod.hold_by(it), "at": _rmod.hold_at(it), "subject": str(it.get("subject") or "")})
     return sorted(rows, key=lambda r: (r["at"], r["gid"]))
@@ -7439,9 +5939,6 @@ def _holds_report() -> str:
         when = _rmod.when_words(dt.datetime.fromtimestamp(r["at"], ZONE)) if r["at"] else "before the record"
         out.append(f"{_gh.shown(r['gid'])} · mover {r['owner'] or 'none'} · wake {r['wake'] or 'none'} · set by {r['by'] or 'unknown'} ({when}) · {r['subject']}")
     return "\n".join(out) + "\n"
-
-
-
 
 
 # The create reply's similar-items note (similar.py), kept on this module as well: the create tool calls `_similar_note`, and the similar-items suite reads `_subject_words` and `_similar_score` here. Private constants no caller on this module reads stay in that module:
@@ -7529,12 +6026,11 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
 
 # ----------------------------------------------------------------------------- the hand-off machinery (handoff.py, cold_call.py)
 # An alive item has one mover. A write that changes the effective mover to a session other than the writer records a hand-off on the item (metadata.handoff, handoff.py): who it
-# went to, from whom, when, when it was delivered (a push that came back "delivered": _tell_woken reports to _handoff_pushed), and when the new mover first started work on it (a write showing it: handoff.started; `writes.save`
+# went to, from whom, when, when it was delivered (a push that came back "delivered": tell_woken reports to _handoff_pushed), and when the new mover first started work on it (a write showing it: handoff.started; `writes.save`
 # reports to _handoff_on_save). A delivered hand-off not taken in [model] handoff_minutes, one whose recipient's turn ended with no write to it, and a mover whose pane is gone go
 # down section 5 (_handoff_tick): the project's background agent, the cold call, the sender, then a recovery request to the fleet's builder; a background agent that is the mover is reminded once first (handoff.remind), and an anchor scoped to the item counts as taken. [model] handoff = false turns all of it off; [model] pause = true holds the
 # tick, and what is due fires in one batch, one message per recipient, when it is turned off again. The send-time guard (gates.gate_handoff) refuses a hand-off to a session with no pane.
 _ho.SERVER = NAME
-_HO_STATE = threading.local()      # per write: the hand-offs it has just recorded ({gid: to}), and the (gid, session) pairs it has already told
 _HO_COLD_THREADS: list[threading.Thread] = []       # the cold calls started (a test joins them)
 _COLD_RUNNER: Any = None           # a test puts a callable here: runner(message) -> router.run_call's result dict; None = a real `claude -p`
 CLI_SESSIONS = Path.home() / ".claude" / "sessions"    # the CLI's own registry of its panes on this box (push.py reads it too): status busy | idle | shell and when it changed
@@ -7705,7 +6201,7 @@ def _handoff_builder(project: str) -> list[str]:
 def _handoff_exempt(item: dict[str, Any], who: str) -> bool:
     """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock)."""
     m = item.get("metadata") or {}
-    return _front_keeper(who, str(m.get("project") or ""))[0]
+    return _telling.front_keeper(who, str(m.get("project") or ""))[0]
 
 
 def _handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
@@ -7753,7 +6249,7 @@ def _handoff_env(now: float) -> "_ho.Env":
     return _ho.Env(now=now, derive=_ho_derive, same=_ho_same, minutes=_handoff_minutes(), idle_grace=_handoff_num("handoff_idle_seconds", _ho.IDLE_GRACE),
                    gone_days=_handoff_num("handoff_gone_days", _ho.GONE_DAYS), cold_call=_cold_call_on(), pane=lambda w: _handoff_pane(w, idx),
                    inbox_grace=_handoff_num("handoff_inbox_grace_minutes", 10.0), status=lambda w: _handoff_status(w, idx), started=lambda w: _handoff_started(w, idx), background=_handoff_builder,
-                   exempt=_handoff_exempt, label=_session_label, cover_all=_switchover_on(), is_front=lambda w, _p: _front_sender(w), anchored=anchored, remind=remind,
+                   exempt=_handoff_exempt, label=_session_label, cover_all=_switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
                    ladder=_ladder_on(), laddered=lambda g, w, at: _laddered(g, w, now, at))
 
 
@@ -7768,13 +6264,13 @@ def _handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, An
     if not _handoff_on() or author or not writer or _ho.is_script(writer):
         return      # the server's own save; the owner's board answer (author: _answer_tick covers it); a script's write (cap-words): no session's, so no hand-off
     try:
-        _HO_STATE.told = set()
+        _telling.HO_STATE.told = set()
         name, wid = str(item.get("written_by") or ""), str(item.get("written_by_id") or "")
         derive = lambda it: _ho_derive({**it, "gid": gid})
         r = _ho.apply(item, before, name, wid, time.time(), derive, _ho_same, _session_label, _ho_ident)
-        fresh = getattr(_HO_STATE, "fresh", None)
+        fresh = getattr(_telling.HO_STATE, "fresh", None)
         if fresh is None:
-            fresh = _HO_STATE.fresh = {}
+            fresh = _telling.HO_STATE.fresh = {}
         fresh.pop(gid, None)
         if r:
             fresh[gid] = (str(r.get("to")), r.get("at"))
@@ -7901,15 +6397,15 @@ def _handoff_repair_pass() -> int:
 
 def _handoff_told_text(to: str, text: str, outcome: str, err: str = "", link_only: bool = False) -> None:
     """A push to `to` whose text names items (a message, a router pass, a page-owed relay) came back `outcome`: an open hand-off of any of those items to `to` is delivered, or waits
-    in the inbox (_handoff_pushed). Only a push that reached the inbox or the pane counts here; a failed one is the notice senders' own (_tell_woken retries and falls back).
-    `link_only`: the text must carry the item's own notice link (_notice_link), not just cite its id. The router's push and the keeper's batch pass it: a batch cites other items in a subject,
+    in the inbox (_handoff_pushed). Only a push that reached the inbox or the pane counts here; a failed one is the notice senders' own (tell_woken retries and falls back).
+    `link_only`: the text must carry the item's own notice link (notice_link), not just cite its id. The router's push and the keeper's batch pass it: a batch cites other items in a subject,
     and a citation is no notice of that item; a message a session sends on purpose does not (a session names the item it means). Never raises."""
     try:
         if not str(outcome or "").startswith(("delivered", "queued", "inbox")) or not to:
             return
         gids = [g for g in _item_refs(text) if (_ho.record_of(_load_or_none(g)) or {}).get("to")]
         if link_only:
-            gids = [g for g in gids if re.search(re.escape(_notice_link(g)) + r"(?![\w])", str(text or ""))]
+            gids = [g for g in gids if re.search(re.escape(_telling.notice_link(g)) + r"(?![\w])", str(text or ""))]
         if gids:
             _handoff_pushed(",".join(gids), to, outcome, err)
     except Exception as e:  # noqa: BLE001
@@ -7932,10 +6428,10 @@ def _handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool
     if float(r.get("reminded_at") or 0) > float(r.get("resent_at") or 0):      # the later of the two is what this notice is (a reminder's retry stays a reminder; a resend after it is a resend)
         return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {_handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
                 + (f"; next: {nxt}" if nxt else "")
-                + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
+                + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
     return (f"[stackshot] {_gh.shown(gid)} is handed to you by {by}" + (" (sent again: your pane restarted before the item was written to)" if again else "")
             + f": {item.get('subject') or ''} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")
-            + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
+            + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
 
 
 def _front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
@@ -7947,31 +6443,9 @@ def _front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
         return False
 
 
-def _handoff_notify(gid: str, item: dict[str, Any]) -> str:
-    """At the tail of a create or update: the hand-off this write just recorded is told to its new mover when no notice of the write has told it already (a change of `mover` or
-    `then` names no one in needs, so _tell_needed said nothing). Not the owner, not a front agent (an item notice wakes none of them). → the reply line, or ""."""
-    try:
-        to, at = (getattr(_HO_STATE, "fresh", None) or {}).pop(gid, ("", None))
-        r = _ho.record_of(item)
-        if not to or not r or r.get("at") != at or not _handoff_on() or _model.is_owner(to):
-            return ""
-        told = getattr(_HO_STATE, "told", set())
-        tid = _session_id(to)
-        if any(g == gid and (s == tid or _ho_same(s, to)) for g, s in told):
-            return ""
-        proj = str((item.get("metadata") or {}).get("project") or "")
-        if _front_keeper(to, proj)[0] and not _front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a front agent of its own project when that project is front-only
-            return ""
-        _tell_woken(gid, tid or to, _handoff_text(gid, item, r), tag="handoff")
-        return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)})"
-    except Exception as e:  # noqa: BLE001
-        print(f"handoff: {gid} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return ""
-
-
 # ---- delivery: every push about an item
 def _handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
-    """Called by _tell_woken when a push to `owner` about these items is over: `outcome` is push.py's last line (delivered … | queued … | inbox …), or "failed". A delivered push
+    """Called by tell_woken when a push to `owner` about these items is over: `outcome` is push.py's last line (delivered … | queued … | inbox …), or "failed". A delivered push
     makes the open hand-off to that session delivered now (its clock starts); one that waits (`inbox`, `queued`: the machine is away, the pane is not reachable now, a reboot's pause)
     is neither delivered nor failed: the puller's ack makes it delivered (_handoff_acked), else the clock starts [model] handoff_inbox_grace_minutes after it was queued; only a
     refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item. Never raises."""
@@ -7999,7 +6473,7 @@ def _handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
                     _writes.save(g, it)
             if act == "retry":
                 rec = _ho.record_of(it) or {}
-                _tell_woken(g, owner, _handoff_text(g, it, rec, again=bool(rec.get("resent_at"))), tag="handoff")      # a notice sent again stays worded as one when its push is tried once more
+                _telling.tell_woken(g, owner, _handoff_text(g, it, rec, again=bool(rec.get("resent_at"))), tag="handoff")      # a notice sent again stays worded as one when its push is tried once more
             elif act == "fallback":
                 _handoff_fallback(g, f"a push to {_session_label(owner)} failed twice ({_clip_line(why or outcome, 100)})")
         except Exception as e:  # noqa: BLE001
@@ -8259,7 +6733,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
         _recovery_tell(gid, it, quiet, why, tried, tag="handoff", now=now, target=target)
     for gid, who, text in to_again:
         try:
-            _tell_woken(gid, _session_id(who) or who, text, tag="handoff")      # its push result makes the record delivered (or queued), which starts the clock again
+            _telling.tell_woken(gid, _session_id(who) or who, text, tag="handoff")      # its push result makes the record delivered (or queued), which starts the clock again
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {gid} resend not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     for sid, lines in _ho.batch([(w, g, ln) for g, w, ln, _t in to_remind]).items():      # one message per recipient, however many of its items fired
@@ -8268,20 +6742,20 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
             lines, "", f"[stackshot] reminder: {{n}} items were handed to you and nothing has been written to them in {_handoff_minutes():g} min:",
             f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → {_inst.BOARD_URL}")
         try:
-            _tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
+            _telling.tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {','.join(gs)} reminder not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     for who, lines in _ho.batch(to_new).items():
         gids = ",".join(g for w, g, _l in to_new if w == who)
-        if _front_keeper(who, "")[0]:
+        if _telling.front_keeper(who, "")[0]:
             continue                                 # a front agent is never pushed to unmarked: the board shows it
-        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → " + (_notice_link(gids) if len(lines) == 1 else f"{_inst.BOARD_URL}")
-        _tell_woken(gids, _session_id(who) or who, _ho.message(lines, "[stackshot] it came to you:", "[stackshot] {n} items came to you, the sessions they were handed to did not take them:", tail),
+        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → " + (_telling.notice_link(gids) if len(lines) == 1 else f"{_inst.BOARD_URL}")
+        _telling.tell_woken(gids, _session_id(who) or who, _ho.message(lines, "[stackshot] it came to you:", "[stackshot] {n} items came to you, the sessions they were handed to did not take them:", tail),
                     tag="handoff")
     for who, lines in _ho.batch(to_sender).items():
-        if _front_keeper(who, "")[0] or _model.is_owner(who):
+        if _telling.front_keeper(who, "")[0] or _model.is_owner(who):
             continue
-        _tell_woken(",".join(g for w, g, _l in to_sender if w == who), _session_id(who) or who,
+        _telling.tell_woken(",".join(g for w, g, _l in to_sender if w == who), _session_id(who) or who,
                     _ho.message(lines, "[stackshot] a hand-off of yours was not taken:", "[stackshot] {n} hand-offs of yours were not taken:"), tag="handoff")
     if done:
         _publish()
@@ -8320,8 +6794,6 @@ def _handoff_page_state(project: str) -> str:
         return _pages.current_state(project, cap=3000) or ""
     except Exception:  # noqa: BLE001
         return ""
-
-
 
 
 def _handoff_cold(gid: str, cold_at: float) -> None:
@@ -8387,7 +6859,7 @@ def _handoff_cold(gid: str, cold_at: float) -> None:
                 cmeta = cur.get("metadata") or {}
                 if ans["action"] == "hand_to":
                     kinds = [k for k in _needs_kinds(cmeta) if k != "decision"]
-                    to_front = _front_keeper(ans["to"], str(cmeta.get("project") or ""))[0]      # a user-facing agent is never named in needs (only a mover): the item goes to it by mover=
+                    to_front = _telling.front_keeper(ans["to"], str(cmeta.get("project") or ""))[0]      # a user-facing agent is never named in needs (only a mover): the item goes to it by mover=
                     _update(gid, needs=[*kinds] if to_front else [*kinds, ans["to"]], sender=_ho.COLD, **({"mover": ans["to"]} if (cmeta.get("mover") or to_front) else {}),
                             **({"clear_needs": True} if to_front and not kinds else {}))      # a stored doing or verifying state stands on a session in needs, and a front agent is never named there: the write drops the state (_state_apply) and the item reads as derived
                 elif ans["action"] == "close":
@@ -8441,12 +6913,12 @@ def _stall_cold_kept(gid: str, cold_at: float, mover: str, reason: str) -> None:
             rec["kept"] = now
             st[gid] = rec
             _stall_save(st)
-        if not _front_keeper(mover, project)[0]:          # no item notice wakes a front agent
-            _tell_woken(gid, _session_id(mover) or mover,
+        if not _telling.front_keeper(mover, project)[0]:          # no item notice wakes a front agent
+            _telling.tell_woken(gid, _session_id(mover) or mover,
                         f"[stackshot] {_gh.shown(gid)} \"{subject}\" is still yours: a fresh session read it and judged you the right one" + (f" ({why})" if why else "") + ". "
                         "If you are waiting on something to happen (a release, a PR's merge, a recycle or fleet op, a job's run), store the wait so the server watches it and the item stops reading as idle: "
                         "update(wait_kind=\"event\", wait_event=\"<the event>\", ask_by=<the day it comes back anyway>, post_wake_mover=<who takes it then>). Otherwise work it, hand it on or close it. "
-                        f"→ {_notice_link(gid)}", tag="stall")
+                        f"→ {_telling.notice_link(gid)}", tag="stall")
         print(f"stall: {gid} cold call named its mover {mover} as the right owner: left with it", file=sys.stderr, flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"stall: {gid} cold call's keep step failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -8788,9 +7260,9 @@ def _stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tu
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return ""
         meta = item.setdefault("metadata", {})
-        # review: no item notice wakes a front agent (see _rekeyed, and _handoff_exec, which skips them via _front_keeper). For a front mover this step is the History line
+        # review: no item notice wakes a front agent (see _rekeyed, and _handoff_exec, which skips them via front_keeper). For a front mover this step is the History line
         # alone; the cold call and the builder, steps 2 and 3, are what cover its item.
-        front = _front_keeper(who, str(meta.get("project") or ""))[0]
+        front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
         _stall.note(meta, now, f"{_session_label(who)} had no turn running for {minutes:g} min" + (": no notice is sent to a front agent, the next step follows" if front else ": the notice was sent to it again"))
         _writes.save(gid, item, note="stall: " + ("no notice to a front agent" if front else "the notice was sent again"))
         nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
@@ -8926,16 +7398,16 @@ def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return False
         meta = item.setdefault("metadata", {})
-        front = _front_keeper(who, str(meta.get("project") or ""))[0]
+        front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
         span = _silence.minutes(now - _silence.clock(item, who))
         _stall.note(meta, now, f"{_session_label(who)}: nothing was written to it for {span}" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
         _writes.save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
         subject = str(item.get("subject") or "")
     if not front:
         tail = "" if _stall_background(who) else (f" If nothing is written to it and your pane stays quiet for {minutes:g} more minutes, a fresh session is asked who takes it.")
-        _tell_woken(gid, _session_id(who) or who,
+        _telling.tell_woken(gid, _session_id(who) or who,
                     f"[stackshot] {_gh.shown(gid)} \"{subject}\" is still yours: nothing written for {span}. Work it, hand it on (update sender=<you>) or close it. "
-                    f"If you are waiting on something to happen, store the wait so the server watches it.{tail} → {_notice_link(gid)}", tag="stall")
+                    f"If you are waiting on something to happen, store the wait so the server watches it.{tail} → {_telling.notice_link(gid)}", tag="stall")
     print(f"ladder: {gid} {who} still silent after the ask: " + ("front agent, history line only" if front else "notice sent again"), file=sys.stderr, flush=True)
     return True
 
@@ -9062,26 +7534,26 @@ def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, 
             again = f" {_session_label(to)} was told about this at {d['told']} and it has not moved since." if d["told"] else ""
             text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gids[0])} \"{d['subject']}\" has not moved for {d['span']} (since {d['since']}): its mover {d['mover']} has marked no step done or dropped, changed no state and merged nothing in that time; "
                     f"a status line, a note or a reply does not count. It is queued behind: {d['behind']}.{again} "
-                    f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop_p}→ {_notice_link(gids[0])}")
+                    f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop_p}→ {_telling.notice_link(gids[0])}")
         else:
             head = (f"{_FOR_OWNER}\n[stackshot] {len(items)} items have not moved (no step done or dropped, no state change, no merge; a status line, a note or a reply does not count), "
                     "or have had no write from live background movers, and the ladder asks no one else:")
             tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. "
                     f"To stop the repeats, get the item moving (mark a step done or dropped, change its state, set its wait) or write to it if it is silent; each comes again in {every} while it stays as it is. → {_inst.BOARD_URL}")
             text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
-        _tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
+        _telling.tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
         return
     if len(items) == 1:
         d = info[gids[0]]
         again = f" {_session_label(to)} was told about this at {d['told']} and nothing has been written since." if d["told"] else ""
         text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gids[0])} \"{d['subject']}\" has had no write from its background mover {d['mover']} since {d['since']} ({d['span']}), and that session is live, so the ladder asks no one else.{again} "
-                f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop}→ {_notice_link(gids[0])}")
+                f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop}→ {_telling.notice_link(gids[0])}")
     else:
         head = f"{_FOR_OWNER}\n[stackshot] {len(items)} items have had no write from their background movers, and those sessions are live, so the ladder asks no one else:"
         tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. {stop}"
                 f"→ {_inst.BOARD_URL}")
         text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
-    _tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
+    _telling.tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
 
 
 def _laddered(gid: str, who: str, now: float, at: float | None = None) -> bool:
@@ -9118,12 +7590,12 @@ def _ladder_ask(gid: str, who: str, now: float, act: str) -> str:
         if item.get("status") != "open" or not r or not _ho_same(_stall_mover(gid, item), who):
             return ""
         meta = item.setdefault("metadata", {})
-        front = _front_keeper(who, str(meta.get("project") or ""))[0]
+        front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
         _stall.note(meta, now, f"{_session_label(who)} has not taken it" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
         _writes.save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
         text = "" if front else _handoff_text(gid, item, r)
     if text:
-        _tell_woken(gid, _session_id(who) or who, text, tag="handoff")
+        _telling.tell_woken(gid, _session_id(who) or who, text, tag="handoff")
     print(f"ladder: {gid} {who} has not taken it: " + ("front agent, history line only" if front else "notice sent again"), file=sys.stderr, flush=True)
     return act
 
@@ -9214,7 +7686,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 continue                 # no session mover, or the fleet's builder was asked already for this record
             if isinstance(r and r.get("cold"), dict) and r["cold"].get("state") == "running" and now - float(r["cold"].get("at") or 0) < _ho.COLD_STALE:
                 continue                 # a cold call is out
-            front = _front_keeper(who, str(meta.get("project") or ""))[0]
+            front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
             quiet = bool(ladder_on and old and _ladder.quiet(old))      # the dates pass's entry: it ends with activity on the item, a new mover, not with a write or a confirm that is no activity
             if quiet and _ladder.quiet_over(old, who, _ho_same, _silence.clock(it, who)):
                 keep.pop(gid, None)
@@ -9318,8 +7790,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
     for who, ls in _ho.batch(lines).items():
         gids = ",".join(g for w, g, _l in lines if w == who)
         tail = (f" Work it, hand it on (update sender=<you>) or close it. If nothing is written to it and your pane has no turn running for {minutes:g} more minutes, a fresh session is asked who takes it. → "
-                + (_notice_link(gids) if len(ls) == 1 else f"{_inst.BOARD_URL}"))
-        _tell_woken(gids, _session_id(who) or who,
+                + (_telling.notice_link(gids) if len(ls) == 1 else f"{_inst.BOARD_URL}"))
+        _telling.tell_woken(gids, _session_id(who) or who,
                     _ho.message(ls, f"[stackshot] you have had no turn running for {minutes:g} minutes and this is still yours:",
                                 f"[stackshot] you have had no turn running for {minutes:g} minutes and these {{n}} items are still yours:", tail), tag="stall")
     for to in _ho.batch(main_rows):      # ONE notice per -main agent for every silent live background mover's item that came due in this pass
@@ -9569,8 +8041,8 @@ def stackshot_brief() -> str:
         j = text.find("\n## Your move")          # the head: counts, Machines, Anchor hub, the Task board index; the items follow in full
         head = text[:j].rstrip() if j > 0 else text[:8000]
         # board.md links an item to its card on the same page ([board#N](#task-g-7)), an anchor that spells the store id and
-        # leads nowhere outside the board; the brief a session reads links the item's page instead, as a notice does (_notice_link)
-        head = re.sub(r"\]\(#task-([a-z])-([1-9]\d*)\)", lambda m_: f"]({_notice_link(m_.group(1) + m_.group(2))})", head)
+        # leads nowhere outside the board; the brief a session reads links the item's page instead, as a notice does (notice_link)
+        head = re.sub(r"\]\(#task-([a-z])-([1-9]\d*)\)", lambda m_: f"]({_telling.notice_link(m_.group(1) + m_.group(2))})", head)
     changed = "\n".join(_wc.lines())                  # step 4b: what changed in the tools in the last 7 days (whatschanged.py, generated from the tools' text snapshot), at the top
     if changed:
         head = changed + ("\n\n" + head if head else "")
@@ -9882,7 +8354,6 @@ _CHECK_FORM = (
 )
 
 
-
 # What an item waits on: every open item has a mover, whatever wait it is in (waiting.py); no date is derived for it.
 _CAP_FORM = (
     f" A wake runs at most {_wt.cap_days():g} days from the item's last move: a wake further out is refused without {OWNER}'s words. A due date is a deadline and is accepted as it is. "
@@ -10041,7 +8512,6 @@ _STEP_PROOF_FORM = (
 )
 
 
-
 _DRAFT_FORM = (
     f" draft: the text exactly as it is to be posted, sent or pasted somewhere else by the person whose step it is (a channel message, an email, a reply), as many lines as it has, stored and shown as written (no bullets, no line limit; at most {_draft.MAX} characters). "
     "His item page draws it under the step as a block with a Copy button; a close drops it, and so does his Done or Send note on the step. "
@@ -10155,7 +8625,7 @@ def stackshot_create(
     mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
     _gates.gate_self_wait("", owner, next_text=next, mover=mover, needs=needs, after=after, wait_kind=wait_kind, wait_reason=wait_reason, creating={"subject": subject, "project": project})   # before the item lock: it may ask a model
     _evwait_preread(wait_kind, wait_event)      # an event wait's facts (GitHub, git) are read before the item lock, not under it
-    with _session_write():
+    with _writes.session_write():
         return _create(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until=until, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes) + fix_note + note + _off_map_note(owner, project)
 
 
@@ -10210,6 +8680,39 @@ def _late(name: str) -> Callable[..., Any]:
     return lambda *a, **k: globals()[name](*a, **k)
 
 
+# What the telling still reaches on this module (service/telling.py tells the sessions a write concerns): the hand-off record's own functions, the page keepers of a project's agents, the For you list's rows, the
+# page debt's marks and the time zone. A hook leaves this table when the area that holds it moves under service/.
+_telling.install(_telling.Hooks(
+    back_agent=_late("_back_agent"),
+    builder_for=_late("_builder_for"),
+    check_changed=_late("_check_changed"),
+    check_lane_shown=_late("_check_lane_shown"),
+    debt_mover=_late("_debt_mover"),
+    foryou_failed=lambda: _FORYOU_FAILED,
+    foryou_key=_late("_foryou_key"),
+    front_handed_by_peer=_late("_front_handed_by_peer"),
+    fy_flag=lambda *a, **k: _fy.flag(*a, **k),
+    fy_has_key=lambda *a, **k: _fy.has_key(*a, **k),
+    grace_min=_late("_grace_min"),
+    handoff_builder=_late("_handoff_builder"),
+    handoff_on=_late("_handoff_on"),
+    handoff_pane_row=_late("_handoff_pane_row"),
+    handoff_pushed=_late("_handoff_pushed"),
+    handoff_text=_late("_handoff_text"),
+    handoff_told_text=_late("_handoff_told_text"),
+    ho_same=_late("_ho_same"),
+    main_agent=_late("_main_agent"),
+    model_of=_late("_model_of"),
+    owed_mark=_late("_owed_mark"),
+    rmod_outcome_word=lambda *a, **k: _rmod.outcome_word(*a, **k),
+    role_name=_late("_role_name"),
+    same_sess=_late("_same_sess"),
+    session_id=_late("_session_id"),
+    shown_needs=_late("_shown_needs"),
+    zone=lambda: ZONE,
+))
+
+
 # What a create still reaches on this module (service/create.py runs the create in its order): the gates and notices the update tool, the close and the telling share, the three thread-local flags
 # and two constants. A hook leaves this table when the area that holds it moves under service/.
 _create_svc.install(_create_svc.Hooks(
@@ -10237,7 +8740,6 @@ _create_svc.install(_create_svc.Hooks(
     gate_recommend_stance=_late("_gate_recommend_stance"),
     gate_recycle_item=_late("_gate_recycle_item"),
     gate_subject=_late("_gate_subject"),
-    handoff_notify=_late("_handoff_notify"),
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
     model_guards_on=_late("_model_guards_on"),
@@ -10248,8 +8750,6 @@ _create_svc.install(_create_svc.Hooks(
     owner_then_default=_late("_owner_then_default"),
     parse_check=_late("_parse_check"),
     parse_wake=_late("_parse_wake"),
-    pilot_charge=_late("_pilot_charge"),
-    pilot_relay=_late("_pilot_relay"),
     project_subject_prefix=_late("_project_subject_prefix"),
     publish=_late("_publish"),
     record_fixes=_late("_record_fixes"),
@@ -10258,18 +8758,12 @@ _create_svc.install(_create_svc.Hooks(
     session_id=_late("_session_id"),
     similar_note=_late("_similar_note"),
     step_proof_set=_late("_step_proof_set"),
-    tell_needed=_late("_tell_needed"),
     wait_alias_gate=_late("_wait_alias_gate"),
     wake_at=_late("_wake_at"),
-    writer_charge=_late("_writer_charge"),
     writer_owes=_late("_writer_owes"),
-    session_next=lambda: bool(getattr(_SESSION_NEXT, "on", False)),
-    question=lambda: bool(getattr(_QUESTION, "on", False)),
-    terminal_row=lambda: bool(getattr(_TERMINAL_ROW, "on", False)),
     ask_none=_ASK_NONE,
     subject_tagged=_SUBJECT_TAGGED,
 ))
-
 
 
 # A close carries how the item ended, like an issue tracker's closed issue. Before, a completed
@@ -10616,7 +9110,7 @@ def _rebullet_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     the search), under the item lock, as the author `rebullet`. The body: item, sender, old (the description the rewrite was made from) and description
     (the rewrite). This is the only writer of the pass: the caller's token must be a machine in [model] rebullet_machines (default: the server box); the item must be open and its
     description still the `old` the rewrite was made from (a session's edit since then wins and the rewrite is dropped); and rebullet.verdict judges the rewrite here too,
-    so a lossy one (a link, a number, a date or a quote gone) is refused whoever sends it. The write is a filing edit (_REFORMAT): the item's state clock and its confirm stay (its `updated` time does move), no page
+    so a lossy one (a link, a number, a date or a quote gone) is refused whoever sends it. The write is a filing edit (REFORMAT): the item's state clock and its confirm stay (its `updated` time does move), no page
     is owed and no one is told. `sender` must not name a session. → {"item", "action": set | already, "result"}; refusals raise ToolError."""
     allowed = _cfg.get("model", "rebullet_machines", default=[])
     allowed = [allowed] if isinstance(allowed, str) else [str(x) for x in allowed] if isinstance(allowed, list) else []
@@ -10642,11 +9136,11 @@ def _rebullet_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
                                   subject=str(item.get("subject") or ""))
         if why:
             raise ToolError(f"Refused: {why}")
-        _REFORMAT.on = True
+        _writes.REFORMAT.on = True
         try:
             out = _update(gid, description=new, sender=by)
         finally:
-            _REFORMAT.on = False
+            _writes.REFORMAT.on = False
     return {"item": _gh.shown(gid), "action": "set", "result": out.splitlines()[0] if out else ""}
 
 
@@ -11040,7 +9534,7 @@ def _migrate_send_wake(spec: dict[str, Any], by: str) -> dict[str, Any]:
         ent["sent"] = {"at": dt.datetime.now(ZONE).isoformat(timespec="seconds"), "by": by, "note": note or ""}
         _pass_save(rec)            # marked before it goes: a second caller meanwhile is refused; a failure below clears the mark
         outcome: dict[str, Any] = {}
-        th = _tell_woken(",".join(_norm_id(g) for g in gids), sid, text, tag="migration", result=outcome)
+        th = _telling.tell_woken(",".join(_norm_id(g) for g in gids), sid, text, tag="migration", result=outcome)
         if th is not None:
             th.join(timeout=120)
         if not outcome.get("ok"):
@@ -11586,11 +10080,9 @@ _gates.install(_gates.Hooks(
     contact_fronts=_late("_contact_fronts"),
     contact_same=_late("_contact_same"),
     eff_state=_late("_eff_state"),
-    fallback_mover=_late("_fallback_mover"),
     follow_superseded=_late("_follow_superseded"),
     front_held=_late("_front_held"),
     front_pair_ok=_late("_front_pair_ok"),
-    front_sender=_late("_front_sender"),
     gate_description=_late("_gate_description"),
     handoff_background=_late("_handoff_background"),
     handoff_builder=_late("_handoff_builder"),
@@ -11610,18 +10102,14 @@ _gates.install(_gates.Hooks(
     own_repo=_late("_own_repo"),
     owner_words_on=_late("_owner_words_on"),
     parse_wake=_late("_parse_wake"),
-    question=lambda: bool(getattr(_QUESTION, "on", False)),
-    reformat=lambda: bool(getattr(_REFORMAT, "on", False)),
     relaunch=_RELAUNCH,
     role_of=_late("_role_of"),
     same_sess=_late("_same_sess"),
     scoped_anchors=_late("_scoped_anchors"),
     session_id=_late("_session_id"),
-    session_next=lambda: bool(getattr(_SESSION_NEXT, "on", False)),
     session_roster=_late("_session_roster"),
     shown_ref=_late("_shown_ref"),
     store_ref=_late("_store_ref"),
-    terminal_row=lambda: bool(getattr(_TERMINAL_ROW, "on", False)),
     wake_at=_late("_wake_at"),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
     zone=lambda: ZONE,
@@ -11641,7 +10129,6 @@ _update_svc.install(_update_svc.Hooks(
     cap_ok_drop=_late("_cap_ok_drop"),
     cap_ok_put=_late("_cap_ok_put"),
     check_how=_CHECK_HOW,
-    close_was_set=lambda item: setattr(_CLOSE_WAS, "item", item),
     contact_alive=_late("_contact_alive"),
     contact_fronts=_late("_contact_fronts"),
     contact_same=_late("_contact_same"),
@@ -11653,7 +10140,6 @@ _update_svc.install(_update_svc.Hooks(
     finishes_own_line=_late("_finishes_own_line"),
     fmt=_late("_fmt"),
     form_notes=_late("_form_notes"),
-    front_sender=_late("_front_sender"),
     gate_alternatives=_late("_gate_alternatives"),
     gate_ask=_late("_gate_ask"),
     gate_bare_urls=_late("_gate_bare_urls"),
@@ -11668,20 +10154,17 @@ _update_svc.install(_update_svc.Hooks(
     gate_own_action=_late("_gate_own_action"),
     gate_recommend_stance=_late("_gate_recommend_stance"),
     gate_subject=_late("_gate_subject"),
-    handoff_notify=_late("_handoff_notify"),
     handoffs_in=_late("_handoffs_in"),
     handover=_late("_handover"),
     ho_derive=_late("_ho_derive"),
     ho_same=_late("_ho_same"),
     hold_held_by=_late("_hold_held_by"),
     hold_set=_late("_hold_set"),
-    holder=_late("_holder"),
     is_held=_late("_is_held"),
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
     main_agent=_late("_main_agent"),
     marks_given=_late("_marks_given"),
-    mentions_reply=_late("_mentions_reply"),
     model_apply=_late("_model_apply"),
     model_guards_on=_late("_model_guards_on"),
     model_of=_late("_model_of"),
@@ -11692,20 +10175,13 @@ _update_svc.install(_update_svc.Hooks(
     options_note=_late("_options_note"),
     owed_mark=_late("_owed_mark"),
     owner_quote_on=_late("_owner_quote_on"),
-    owner_reached=_late("_owner_reached"),
     owner_state_mover=_late("_owner_state_mover"),
     owner_then_default=_late("_owner_then_default"),
     owner_want=_late("_owner_want"),
-    page_keeper=_late("_page_keeper"),
     parse_check=_late("_parse_check"),
     parse_wake=_late("_parse_wake"),
-    pilot_charge=_late("_pilot_charge"),
-    pilot_relay=_late("_pilot_relay"),
     publish=_late("_publish"),
-    push_noted=_late("_push_noted"),
-    quiet=_late("_quiet"),
     record_fixes=_late("_record_fixes"),
-    reformat=lambda: bool(getattr(_REFORMAT, "on", False)),
     refuse_if_owing=_late("_refuse_if_owing"),
     release_after=_late("_release_after"),
     render_hold_at=lambda *a, **k: _rmod.hold_at(*a, **k),
@@ -11716,7 +10192,6 @@ _update_svc.install(_update_svc.Hooks(
     said_note=_late("_said_note"),
     scoped_anchors=_late("_scoped_anchors"),
     session_id=_late("_session_id"),
-    session_next=lambda: bool(getattr(_SESSION_NEXT, "on", False)),
     session_roster=_late("_session_roster"),
     state_apply=_late("_state_apply"),
     state_end=_late("_state_end"),
@@ -11724,14 +10199,6 @@ _update_svc.install(_update_svc.Hooks(
     step_proof_set=_late("_step_proof_set"),
     store_ref=_late("_store_ref"),
     switchover_on=_late("_switchover_on"),
-    tell_decided=_late("_tell_decided"),
-    tell_handback=_late("_tell_handback"),
-    tell_needed=_late("_tell_needed"),
-    tell_observers=_late("_tell_observers"),
-    tell_owner=_late("_tell_owner"),
-    tell_owner_change=_late("_tell_owner_change"),
-    tell_owner_close=_late("_tell_owner_close"),
-    terminal_row=lambda: bool(getattr(_TERMINAL_ROW, "on", False)),
     update=_late("_update"),
     wait_end_sent_back=_late("_wait_end_sent_back"),
     wake_at=_late("_wake_at"),
@@ -11740,7 +10207,6 @@ _update_svc.install(_update_svc.Hooks(
     wake_step_note=_late("_wake_step_note"),
     wake_window_note=_late("_wake_window_note"),
     watch_on_write=_late("_watch_on_write"),
-    writer_charge=_late("_writer_charge"),
     writer_owes=_late("_writer_owes"),
     zone=lambda: ZONE,      # looked up when the reply is made, as the confirm tool did before the move
 ))
@@ -11847,7 +10313,7 @@ def stackshot_update(
     _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
     ask_pre = _gates.ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
-    with _session_write():
+    with _writes.session_write():
         out = _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
                        hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, after=after, work=work, said=said, check=check,
                        clear_options=clear_options, clear_ask=clear_ask, clear_after=clear_after, wait_basis=wait_basis, clear_wait_basis=clear_wait_basis,
@@ -11980,7 +10446,7 @@ def _sessions_listing(q: str = "", now: float | None = None) -> str:
     for t in _anc.items():
         m = t.get("metadata") or {}
         if t.get("status") not in ("open", "on_hold"): continue
-        o = _holder({**t, "status": "open"})
+        o = _telling.holder({**t, "status": "open"})
         owners.update(x for x in (o, str(m.get("owner_name") or "")) if x)
         if not o.startswith("cse_") or o in seen: continue
         seen.add(o); ci = _cloud.info(o); nm = ci["title"] or m.get("owner_name") or o
@@ -12048,7 +10514,7 @@ def _project_of_name(name: str, roles: dict[str, Any], idx: dict[str, Any]) -> s
     router rules every page's message. "" when no page can be told."""
     reg = _anc.registry()
     def reaches(k: str) -> bool:
-        return bool(_stand_in_keeper(k, reg))
+        return bool(_telling.stand_in_keeper(k, reg))
     k = str((roles.get(_role_name(roles, name)) or {}).get("project") or "")
     if k in reg and reaches(k):
         return k
@@ -12183,7 +10649,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
 def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False) -> str:
     """`origin` = the machine, when the sender is a script there and not a session (POST /client/message): the envelope
     says so, and that it cannot be answered. `fyi`: the sender marks a message that asks nothing. To a background agent it is held and
-    handed over with the agent's next turn (_hold_notice, kind fyi) instead of starting one; to a project it is recorded with the mark, so the router holds it
+    handed over with the agent's next turn (hold_notice, kind fyi) instead of starting one; to a project it is recorded with the mark, so the router holds it
     when it passes it to a background agent; to a front agent it is delivered or refused exactly as without the flag (the flag is only logged). The sender being
     the owner himself, or the text carrying [for <owner>] or needs: decision, makes it an ordinary message."""
     # g7 → for what is delivered and logged only: the gates, the length cap and the handover's naming
@@ -12226,7 +10692,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         if key not in _anc.registry():
             raise ToolError(f"Refused: {to!r} names no project page — address a session, or a page key like projects/<slug>")
         pilot = bool(_anc.pilot_root(key))
-        kept = _stand_in_keeper(key)      # the page's keeper (its builder, else its -main agent; its hub's, else the scope's general one for a page with none): used only when the notice cannot be recorded
+        kept = _telling.stand_in_keeper(key)      # the page's keeper (its builder, else its -main agent; its hub's, else the scope's general one for a page with none): used only when the notice cannot be recorded
         if not kept:
             raise ToolError(f"Refused: no agent can take a message for {key}: the page and its hub list no user-facing agent, and the scope's general -main agent ([router] general_*) is on no page")
         try:
@@ -12267,7 +10733,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                             "which it shows as the sender of its own messages and as the creator of its board items (the sessions tool lists those); until it has done either, "
                             "stackshot cannot reach it. A pane started in the last few minutes on another machine appears at that machine's next heartbeat: address it by name then.")
     if fyi and not held and _back_agent(to, idx):         # an fyi to a background agent starts no turn; it is handed over with the next one (it names the agent in no item's needs: it asked nothing)
-        if _hold_notice(to, f"[stackshot message] from {who}: {text}", "fyi", sender=who):
+        if _telling.hold_notice(to, f"[stackshot message] from {who}: {text}", "fyi", sender=who):
             try:
                 MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
                 with open(MSG_LOG, "a", encoding="utf-8") as f:
@@ -12294,7 +10760,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         if held:
             _router_live.stash(nid, envelope); outcome, err = "held for the router", ""
         else:
-            r = subprocess.run([*_interp.resilient(_PUSH), "--from", who, ref, envelope], capture_output=True, text=True, timeout=110,
+            r = subprocess.run([*_interp.resilient(_telling.PUSH), "--from", who, ref, envelope], capture_output=True, text=True, timeout=110,
                                env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})      # its own queue and pause (the reboot hook); `ref` = a permanent id stays one, push.py turns it into the address and the inbox keeps the id
             outcome = (r.stdout.strip().splitlines() or [""])[-1]
             err = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ""
@@ -12366,7 +10832,6 @@ def stackshot_message(to: Annotated[str, Field(description="Who gets it: a sessi
                       fyi: Annotated[bool, Field(description="True when the message asks nothing of its receiver (news, a result, a status). A background agent then gets it with its next turn instead of a turn of its own; a front agent is unaffected. Default false.")] = False) -> str:
     out = _message(to, text, sender, auth=_who(), fyi=fyi)      # `sender` is the caller's own label; `auth` is the signed-in account the server checked, kept in the log
     return out + _off_map_note_to(sender, to)       # a message to a project page: the sender may be off that project's map
-
 
 
 # ----------------------------------------------------------------------------- the routing log (the pilot)
@@ -12586,7 +11051,7 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
         hub = json.load(open(_cfg.state("anchor-hub", "status.json"), encoding="utf-8")).get("anchors") or {}
     except Exception:
         hub = {}
-    kp = _page_keeper(key)                               # its keeper, not the retired name-line session
+    kp = _telling.page_keeper(key)                               # its keeper, not the retired name-line session
     who_gets = f"router: rules this project; keeper: {kp or 'none: no page, hub or scope general agent lists a -main agent'}{kept}"
     out = f"{key} anchors ({who_gets}):\n" + (_anc.fmt(store.get(key, []), hub, boxes) if store.get(key) or not mstore.get(key) else "") + _machine_listing(mstore.get(key, []))
     for u in add or []:
@@ -12726,7 +11191,6 @@ def stackshot_rules(profile: str = "cowork") -> str:
 @mcp.resource("stackshot://rules", name="standing-rules", description=f"{OWNER}'s standing rules ({_cfg.path('paths', 'rules').name}, git-synced), with the rulebook parts named in config appended", mime_type="text/markdown")
 def rules_resource() -> str:
     return _rules_text("cowork")
-
 
 
 _SITE_DIR = _cfg.state("site")
@@ -13254,7 +11718,7 @@ def _recycle_wanted_tokens(machine: str) -> list[str]:
 def _recycle_sessions(it: dict[str, Any]) -> list[str]:
     """The sessions a recycle of an item's flag waits for (D6): its mover (by its needs, its stored mover or the project's default), the sessions named in its needs and its `then`; never the creator."""
     meta = it.get("metadata") or {}
-    out = [_holder(it), *_needs_sessions(meta), _then_label_raw(it)]
+    out = [_telling.holder(it), *_needs_sessions(meta), _then_label_raw(it)]
     return [w for i, w in enumerate(out) if w and w not in out[:i]]
 
 
@@ -13271,7 +11735,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
     recycle skipped (by name in `skipped`), items flagged after the flag (or after the sweep began), and
     items whose mover is on another machine or not live anywhere. A held item whose hold waited only for the recycle (no wake,
     no open after) is released with it (a hold names what it waits for, and that has happened); one that also waits on a
-    wake or an after stays on hold. The line goes to the sessions the item's notices go to (_notice_to: the sessions in
+    wake or an after stays on hold. The line goes to the sessions the item's notices go to (notice_to: the sessions in
     its needs, else the page's keeper, which for a front agent mover is its keeper); a session other than the mover gets a
     line naming the mover. → {"cleared", "kept", "told"}."""
     flag_at = float(flag_at or 0)
@@ -13291,7 +11755,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
         meta = dict(it.get("metadata") or {})
         if it.get("status") != "open" or not _rmod.waits_recycle(it):
             continue
-        owner = _anc.canonical(_holder(it), nm)
+        owner = _anc.canonical(_telling.holder(it), nm)
         on = on_machine(owner)
         at = meta.get("recycle_at")
         later = isinstance(at, (int, float)) and (at > flag_at if flag_at else at >= started)   # a flag's call covers its own time; started-only: flagged after the sweep began
@@ -13310,7 +11774,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
         it["metadata"] = meta
         _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
               + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _is_held(it) or _date_parked(it) else ""))
-        for sid, _why in _notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
+        for sid, _why in _telling.notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
             to = (sid, "") if sid == owner else (sid, _session_label(owner) or owner)
             cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _is_held(it) or _date_parked(it) else ""))
         print(f"recycle: {gid} no longer waits ({kind} on {machine})", file=sys.stderr, flush=True)
@@ -13328,7 +11792,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
         note += (f" {' and '.join(freed)} waited only for the recycle and {'is' if len(freed) == 1 else 'are'} released from hold." if freed else "")
         note += (f" {' and '.join(held)} {'stays' if len(held) == 1 else 'stay'} on hold, waiting on {'its' if len(held) == 1 else 'their'} wake or after too: clear_hold=true if it should come back now." if held else "")
         raw = [g for g, _ in rows]
-        _tell_woken(raw[0] if len(raw) == 1 else ", ".join(raw[:-1]) + " and " + raw[-1], to, note, tag="recycle")
+        _telling.tell_woken(raw[0] if len(raw) == 1 else ", ".join(raw[:-1]) + " and " + raw[-1], to, note, tag="recycle")
     if cleared:
         _publish()
     try:                           # an event wait on a recycle (or on a fleet op of this verb) is over: its mover hears it live. The count of sessions is sala's to report (client.py event), so `many` is not matched here
@@ -13401,7 +11865,7 @@ def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
             if action == "set":
                 _update(g, recycle=True, sender=f"a script on {machine}")   # the script's write, not the owner's (the History names it)
                 it = _load(g)
-            done.append({"item": g, "action": action, "held": _is_held(it) or _date_parked(it), "owner": _session_label(_holder(it)),
+            done.append({"item": g, "action": action, "held": _is_held(it) or _date_parked(it), "owner": _session_label(_telling.holder(it)),
                          "needs": [_shown_ref(x) for x in _needs_sessions(it.get("metadata") or {})]})
     return {"items": done, "pr": pr}
 
@@ -13721,7 +12185,7 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
         if it.get("status") != "open":
             return None
         meta = dict(it.get("metadata") or {})
-        mover = _holder(it)
+        mover = _telling.holder(it)
         row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "action": "none", "to": "", "step": "", "why": "", "told": ""}
         if (why := _released_skip(it, meta, mover)):
             return {**row, "action": "left", "why": why}
@@ -13738,9 +12202,9 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
             it["metadata"] = meta
             _writes.save(gid, it, note=f"step hand-over: the next step is {_session_label(to)}'s but it cannot take the item now ({_clip_line(plan['why'], 100)}), so the item stays with {_session_label(frm) or 'its mover'}: {step}")
             row.update(action="fallback")
-            if frm and not _model.is_owner(frm) and not _front_keeper(frm, project)[0]:
-                _tell_woken(gid, _session_id(frm), f"[stackshot] {_gh.shown(gid)}: the next step is {_session_label(to)}'s ({step}), but {_session_label(to)} cannot take the item now ({_clip_line(plan['why'], 100)}), "
-                            f"so it stays with you. Do the step yourself, hand the item to another session, or reword the step. {subject} ({project}) → {_notice_link(gid)}", tag="handoff")
+            if frm and not _model.is_owner(frm) and not _telling.front_keeper(frm, project)[0]:
+                _telling.tell_woken(gid, _session_id(frm), f"[stackshot] {_gh.shown(gid)}: the next step is {_session_label(to)}'s ({step}), but {_session_label(to)} cannot take the item now ({_clip_line(plan['why'], 100)}), "
+                            f"so it stays with you. Do the step yourself, hand the item to another session, or reword the step. {subject} ({project}) → {_telling.notice_link(gid)}", tag="handoff")
                 row["told"] = _session_label(frm)
             return row
         keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (_ho_same(x, frm) or _ho_same(x, to))]
@@ -13751,8 +12215,8 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
         it["metadata"] = meta
         _writes.save(gid, it, note=f"step hand-over: {did} is done and the next step is {_session_label(to)}'s, so the item moved from {_session_label(frm) or 'its mover'} to {_session_label(to)}: {step}")
         text = (f"[stackshot] {_gh.shown(gid)} is yours: {did} is done, and the next step is yours: {step}. {subject} ({project}). Do your part and close it or hand it back"
-                + (f" (sender={_session_label(frm)!r})" if frm else "") + f"; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
-        _tell_woken(gid, _session_id(to) or to, text, tag="handoff")
+                + (f" (sender={_session_label(frm)!r})" if frm else "") + f"; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
+        _telling.tell_woken(gid, _session_id(to) or to, text, tag="handoff")
         _PROOF_TOLD_SID[gid] = (_session_id(to), now)
         row.update(action="moved", told=_session_label(to))
         return row
@@ -13776,7 +12240,7 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
     word = _sp.WORD[kind]
     ref = _pr_shown(key)
     tests = " and main's tests passed" if kind == _sp.PR_RELEASED and key.rsplit("#", 1)[0] == _cfg.canon_repo(_own_repo()) else ""      # only this repository's release is gated on main's full run
-    mover = _holder(it)
+    mover = _telling.holder(it)
     row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "mover": _session_label(mover) if mover else "", "kind": kind, "ref": ref}
     why = _released_skip(it, meta, mover)
     if why:
@@ -13796,8 +12260,8 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
         it["updated"] = now
         _writes.save(gid, it, note=f"{NAME}: {ref} was closed without being merged, so the step \"{step}\" cannot be ticked by it" + ("" if mover else " (no mover to tell)"), activity=_activity.EVENT)
         if mover:
-            _tell_woken(gid, _session_id(mover), f"[stackshot] {_gh.shown(gid)}: {ref} was closed without being merged, so its step \"{step}\" will never be ticked by it. "
-                        f"Reword or drop the step, or give it another proof. {it.get('subject') or ''} → {_notice_link(gid)}", tag="release")
+            _telling.tell_woken(gid, _session_id(mover), f"[stackshot] {_gh.shown(gid)}: {ref} was closed without being merged, so its step \"{step}\" will never be ticked by it. "
+                        f"Reword or drop the step, or give it another proof. {it.get('subject') or ''} → {_telling.notice_link(gid)}", tag="release")
             row["told"] = _session_label(mover)
         else:
             row["told"] = ""
@@ -13810,7 +12274,7 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
         row.update(action="closed", reason=reason, step=step)
         if dry:
             return row
-        _CLOSE_WAS.item = json.loads(json.dumps(it))
+        _telling.CLOSE_WAS.item = json.loads(json.dumps(it))
         try:
             _steps.close_meta(meta, "done", NAME, now)       # the proof's step (and only it) is marked done by the server
             for k in ("next", "next_by", "owner_step", "ask", "needs", "options", "after", "hold", "hold_set", "wake", "recycle", "recycle_at", "idle", "check", "watch_reason", "waiting", "wait_failed", "wait_basis", "step_proof", *_states.DROP_ON_CLOSE, *_states.CLOSE_EXTRA, *_model.DROP_ON_CLOSE, *_watch.DROP_ON_CLOSE):
@@ -13821,7 +12285,7 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
             _writes.save(gid, it, note=(f"closed by {NAME}: {ref} is live{tests}, and its only open step was that release" if kind == _sp.PR_RELEASED
                                  else f"closed by {NAME}: {ref} is merged, and its only open step was waiting on that merge"), activity=_activity.EVENT)   # the server's act: no session turn, no page owed; the anchor's event is activity
         finally:
-            _CLOSE_WAS.item = None
+            _telling.CLOSE_WAS.item = None
         print(f"released: {gid} closed, {ref} is {word} — {it.get('subject')}", file=sys.stderr, flush=True)
         try:
             _release_after(gid, "done", "", "")
@@ -13853,9 +12317,9 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
         _writes.save(gid, it, note=(f"step done: {step} ({ref} is {word}{tests}; ticked by {NAME})" if pure
                              else f"{NAME}: told its mover {ref} is {word}{tests}"), activity=_activity.EVENT)
     note = (f"[stackshot] {_gh.shown(gid)}: {ref} is {word}; its step is " + ("ticked" if pure else "not ticked (it names a follow-up)") + "; the item's other open steps remain. "
-            + (f"Next step: {nxt}. " if nxt else "") + f"{it.get('subject') or ''} → {_notice_link(gid)}")
+            + (f"Next step: {nxt}. " if nxt else "") + f"{it.get('subject') or ''} → {_telling.notice_link(gid)}")
     if tell:
-        _tell_woken(gid, _session_id(mover), note, tag="release")      # a real notice, not the log-only result: the mover's next step waits on it
+        _telling.tell_woken(gid, _session_id(mover), note, tag="release")      # a real notice, not the log-only result: the mover's next step waits on it
         row["told"] = _session_label(mover)
         _PROOF_TOLD_SID[gid] = (_session_id(mover), now)
     else:
@@ -14573,13 +13037,13 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return 400, {"error": why}
     try:
         with _QUESTION_LOCK:       # the check of the request map and the write are one step, so two calls with one triple file one item
-            _QUESTION.on = True
+            _writes.QUESTION.on = True
             try:
                 subject = _fit(_shown_ids(subject), _subject_max())      # a script's subject is cut to the limit (ids expanded first), never refused: a script's item must not be lost on a 400
                 gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=front[0], then=front[0], needs=["decision"], ask=ask, options=options,      # the project's -main agent takes it after the owner
                                            by=f"{sender} (a script on {machine})", request_id=f"question\x1f{machine}\x1f{sender}\x1f{rid}")
             finally:
-                _QUESTION.on = False
+                _writes.QUESTION.on = False
         meta = _load(gid).get("metadata") or {}
     except ToolError as e:
         return 400, {"error": str(e)}
@@ -14683,7 +13147,7 @@ def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str,
     question in its terminal" (a create sets no step). A second open for a session that has an open item changes that item's next line and creates nothing; the same question
     again writes nothing. clear: closes the session's open item (outcome done, reason "the pane stopped waiting"); with none open it does nothing and answers 200. The session is
     matched through the registry, so an id, an old name and the current name reach one item. The writes are a script's (like _question's): the guard on alarming words does not judge
-    a pane's own question (_QUESTION) and the script owes no page. -> (status, {item, session, project, repeat} | {session, cleared: [ids]})."""
+    a pane's own question (QUESTION) and the script owes no page. -> (status, {item, session, project, repeat} | {session, cleared: [ids]})."""
     action = str(body.get("action") or "").strip()
     session, sender = (str(body.get(k) or "").strip() for k in ("session", "sender"))
     question = body.get("question") if isinstance(body.get("question"), str) else ""
@@ -14711,15 +13175,15 @@ def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str,
     by = f"{sender} via a script on {machine}"
     try:
         with _TERMINAL_LOCK:         # the look for an open item and the write that follows are one step, so two calls for one session file one item
-            _QUESTION.on = True      # a pane's own words are not judged for alarming ones (see _question)
-            _TERMINAL_ROW.on = True  # the row owes no page and tells no session (create_item, _update, the _tell_* notices)
+            _writes.QUESTION.on = True      # a pane's own words are not judged for alarming ones (see _question)
+            _writes.TERMINAL_ROW.on = True  # the row owes no page and tells no session (create_item, _update, the tell_* notices)
             try:
                 found = _terminal_open_items(name)
                 if action == "clear":
                     return 200, _terminal_clear(found, name, sender, machine, by)
                 return _terminal_open(found, session, name, question, sender, machine, by)
             finally:
-                _QUESTION.on = _TERMINAL_ROW.on = False
+                _writes.QUESTION.on = _writes.TERMINAL_ROW.on = False
     except ToolError as e:
         return 400, {"error": str(e)}
 
@@ -14891,15 +13355,15 @@ def _jobgap_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any
         rec = recs[0]
     try:
         with _JOBGAP_LOCK:           # the look for an open item and the write that follows are one step, so two calls for one gap file one item
-            _QUESTION.on = True      # the watcher's own detail is not judged for alarming words: a script's item must not be lost on a wording refusal (see _question)
-            _TERMINAL_ROW.on = True  # a script's notification: it owes no page, and a close tells no front agent (the builder is told at the create, by the needs notice)
+            _writes.QUESTION.on = True      # the watcher's own detail is not judged for alarming words: a script's item must not be lost on a wording refusal (see _question)
+            _writes.TERMINAL_ROW.on = True  # a script's notification: it owes no page, and a close tells no front agent (the builder is told at the create, by the needs notice)
             try:
                 found = _jobgap_open_items(mark)
                 if action == "clear":
                     return 200, _jobgap_clear(found, timer, code, sender, machine, by)
                 return _jobgap_open(found, rec, repo, timer, code, detail, sender, machine, by, mark)
             finally:
-                _QUESTION.on = _TERMINAL_ROW.on = False
+                _writes.QUESTION.on = _writes.TERMINAL_ROW.on = False
     except ToolError as e:
         return 400, {"error": str(e)}
 
@@ -15078,11 +13542,11 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
             if len(open_here) >= _ITEMOPEN_OPEN_MAX:
                 return 400, {"error": f"{key} already has {len(open_here)} open items filed by this route and the cap is {_ITEMOPEN_OPEN_MAX}: an open item must close before another is filed "
                                       "(a repeat of an open marker is always answered; a marker that changes on every run is the usual cause)"}
-            _TERMINAL_ROW.on = True  # a script's notification: it owes no page (the mover is told at the create, by the needs notice)
+            _writes.TERMINAL_ROW.on = True  # a script's notification: it owes no page (the mover is told at the create, by the needs notice)
             try:
                 gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=step, needs=[mover], mover=mover, by=by, extra={"item_open": marker})
             finally:
-                _TERMINAL_ROW.on = False
+                _writes.TERMINAL_ROW.on = False
     except ToolError as e:
         return 400, {"error": str(e)}
     meta = _load(gid).get("metadata") or {}
@@ -15549,13 +14013,13 @@ def _answer_ack(gid: str, writer: str) -> None:
 
 
 def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "") -> list[str]:
-    """Push the answer to the item's mover (_holder, never the creator) and to every session named in its needs, one line each, through the owner-notice
-    path (_tell_woken). A front-agent mover's line carries the mark a front agent takes. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
+    """Push the answer to the item's mover (holder, never the creator) and to every session named in its needs, one line each, through the owner-notice
+    path (tell_woken). A front-agent mover's line carries the mark a front agent takes. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
     in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". → the session ids told."""
     meta = item.get("metadata") or {}
-    owner, project = _holder(item), str(meta.get("project") or "")
+    owner, project = _telling.holder(item), str(meta.get("project") or "")
     verb = "answered" if rec.get("kind") == "decision" else "commented on"
-    url = _item_url(gid) or _notice_link(gid)
+    url = _item_url(gid) or _telling.notice_link(gid)
     done = f"; on hold with a wake on {rec['parked']}, set by the server" if rec.get("parked") else ""   # a stored raise's park, applied
     line = f"[stackshot] {OWNER} {verb} {_gh.shown(gid)} on the board: {_answer_words(rec)}{done} → {url}"
     thenid = _session_id(then or handed) if (then or handed) else ""
@@ -15578,11 +14042,11 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     if judge and rec.get("applied"):      # the server read his note and applied it (note_read.py): the then-mover is told what was done instead of being asked to judge the note
         judge = ". " + str(rec["applied"])
     def tell(sid: str, text: str) -> None:
-        _tell_woken(gid, sid, text, tag="answer")
+        _telling.tell_woken(gid, sid, text, tag="answer")
         told.append(sid)
     if owner:
         oid = _session_id(owner)
-        front = _front_keeper(owner, project)[0]
+        front = _telling.front_keeper(owner, project)[0]
         mine = oid == thenid
         base = to_then(line) if mine else line
         tell(oid, f"{_FOR_OWNER} {base}" if front else base)
@@ -15599,7 +14063,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
 
 def _hand_to_mover(meta: dict[str, Any], who: str) -> None:
     """The one place an answer or a Done gives an item to its then-mover (a session, never he): mover = who, `then` cleared, and who is named in needs, first among the sessions, so the pending
-    answer, the notice (_notice_to) finds it and not the page's keeper. The decision path and the Done path both call this, so they cannot drift."""
+    answer, the notice (notice_to) finds it and not the page's keeper. The decision path and the Done path both call this, so they cannot drift."""
     sid = _session_id(who)
     meta["mover"] = who
     meta.pop("then", None)
@@ -15619,7 +14083,7 @@ def _hand_stored_then(gid: str, item: dict[str, Any], meta: dict[str, Any]) -> b
     your-step, no other wait). An item whose stored mover or needs already name an agent is left alone (an agent-set `then` must not take an item from the agent working it), and so is a `then`
     that is not a live session (_then_live: free text, a retired or unknown name). A `then` left over when this declines is dropped where it follows nobody (the model reads a `then` only while the owner is the mover, so it
     would only sit unread): when it already is the stored mover or is named in needs, or is not a live session; in any other case (the item still reads as waiting or his) it stays.
-    Then: the stored mover he goes, mover = `then` named first in needs (_hand_to_mover), and the notice the release sends (_notice_to reads needs) reaches it. → True when handed."""
+    Then: the stored mover he goes, mover = `then` named first in needs (_hand_to_mover), and the notice the release sends (notice_to reads needs) reaches it. → True when handed."""
     then = _model.norm_who(meta.get("then"))
     if not then or _model.is_owner(then):
         return False
@@ -15817,7 +14281,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _pm = dict(meta); _watch.end_wait(_pm)      # who takes it is read with any leftover wait already ended (a stored wait would make the item read as waiting, with no then)
             then = _model.derive({**item, "metadata": _pm}).then
             if not then or _model.is_owner(then):      # no default mover and no session in needs: a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
-                then = _builderless_answer_to(meta, str(meta.get("project") or "")) or _auto_mover(_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
+                then = _builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
@@ -15838,7 +14302,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; the owner's words for the wake go with it)
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))      # a needs that named him would read the item as his call again
             if then and not _model.is_owner(then):
-                _hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else _notice_to falls back to the page's keeper)
+                _hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else notice_to falls back to the page's keeper)
             if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
                 until = _parse_wake(until)
                 meta["until"] = until           # the one date the wait ends on (until_write.py); no hold and no wake are stored
@@ -15883,7 +14347,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         told = [t for t in _answer_deliver(gid, item, rec, then if stepped else "", handed) if t]
         if kind in ("decision", "step-reply") and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
             st = _answers_load()
-            st[gid] = {"ts": now, "owner": _session_id(_holder(item)), "project": str(meta.get("project") or ""),
+            st[gid] = {"ts": now, "owner": _session_id(_telling.holder(item)), "project": str(meta.get("project") or ""),
                        "told": told, "words": _answer_words(rec, 300)}
             _answers_save(st)
     kind = ("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
@@ -15894,7 +14358,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
 
 def _answer_tick(now: float | None = None) -> list[str]:
     """The escalation pass (on the runner): a decision answer that no session it was sent to has followed with a write to
-    the item within _ANSWER_ESCALATE_S goes to the project's keeper (_page_keeper: the project's keeper), once; then it is dropped. A closed
+    the item within _ANSWER_ESCALATE_S goes to the project's keeper (page_keeper: the project's keeper), once; then it is dropped. A closed
     or missing item drops it silently, and so does a keeper that is the mover itself. → the gids escalated."""
     now = time.time() if now is None else now
     out: list[str] = []
@@ -15912,17 +14376,17 @@ def _answer_tick(now: float | None = None) -> list[str]:
             if it.get("status") != "open":
                 continue
             meta = it.get("metadata") or {}
-            owner, project = _holder(it), str(e.get("project") or meta.get("project") or "")
-            stew = _page_keeper(project) or _keeper(project)
+            owner, project = _telling.holder(it), str(e.get("project") or meta.get("project") or "")
+            stew = _telling.page_keeper(project) or _telling.project_keeper(project)
             sid = _session_id(stew) if stew else ""
             if not sid or sid == _session_id(owner):
                 print(f"answer: {gid} unacted after {_ANSWER_ESCALATE_S / 60:g} min, but no keeper other than its mover to tell", file=sys.stderr, flush=True)
                 continue
             at = _rmod.when_words(dt.datetime.fromtimestamp(float(e.get("ts") or now), ZONE))
             olabel = _session_label(owner) if owner else "none"
-            _tell_woken(gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
-                                  f"in {_ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_keeper_words(project, stew)}: see that his answer is acted on "
-                                  f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _notice_link(gid)}", tag="answer")
+            _telling.tell_woken(gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
+                                  f"in {_ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: see that his answer is acted on "
+                                  f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}", tag="answer")
             out.append(gid)
         _answers_save(st)
     for gid in out:
@@ -16798,10 +15262,6 @@ async def site_file(request: Request):
             return _icon_file(request, p, _SITE_TYPES[p.suffix])
         return FileResponse(str(p), media_type=_SITE_TYPES[p.suffix])
     return PlainTextResponse("not found", status_code=404)
-
-
-
-
 
 
 # ----------------------------------------------------------------------------- the access log keeps no sign-in secrets

@@ -103,14 +103,15 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.anchors.anchorhub import core
 for _bg in ("work-osprey-x", "work-osprey-docs", "work-zeta-lib"): held.mark_client(_bg)      # the rollout gate: these background agents' hooks fetch held lines (a notice is held only for such a session)
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about what the router and
 # the server record and push, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
 PRESENT = [True]
-_real_verdict = server._front_verdict
-server._front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
+_real_verdict = telling.front_verdict
+telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
 CMD = [sys.executable, str(T / "fake_claude.py")]
 OLIVER_ROUTER = {"general_home": "home-commons-main", "general_ops": "heron-main", "general_work": "projects/work-commons",      # the example-owner instance (tests/_instance.py), kept when a step re-sets [router]
                  "watch": [{"page": "projects/example-brain", "anchor": "github:example-upstream/tool#32", "agent": "kestrel-main"}], "quiet": [{"page": "projects/example-site", "agent": "example-site-builder"}]}
@@ -129,12 +130,12 @@ check("every project page is the router's, a sub-page with its top-level page (e
 cfg(live=True)
 check("stand-in: alpha's builder (a background agent whose mandate says builds, merges), gamma's -main, a page with no agent and no hub (delta, beta) the scope's general -main", live.stand_in("projects/alpha") == "work-osprey-x" and live.stand_in("projects/gamma") == "work-gamma-main"
       and live.stand_in("projects/delta") == "home-commons-main" and live.stand_in("projects/beta") == "home-commons-main", [live.stand_in(k) for k in ("projects/alpha", "projects/gamma", "projects/delta")])
-check("a page that lists agents: the stand-in is what _page_keeper answers; a one-session page (delta, a name line and no agents) keeps its own session as keeper, the general -main agent is only the router's pass target",
-      server._page_keeper("projects/alpha") == "work-osprey-x" and server._page_keeper("projects/gamma") == "work-gamma-main" and server._page_keeper("projects/delta") == "work-delta"
-      and server._stand_in_keeper("projects/delta") == "home-commons-main", (server._page_keeper("projects/alpha"), server._page_keeper("projects/delta")))
+check("a page that lists agents: the stand-in is what page_keeper answers; a one-session page (delta, a name line and no agents) keeps its own session as keeper, the general -main agent is only the router's pass target",
+      telling.page_keeper("projects/alpha") == "work-osprey-x" and telling.page_keeper("projects/gamma") == "work-gamma-main" and telling.page_keeper("projects/delta") == "work-delta"
+      and telling.stand_in_keeper("projects/delta") == "home-commons-main", (telling.page_keeper("projects/alpha"), telling.page_keeper("projects/delta")))
 check("the page's name line still names the project's notices", a.notice_name("projects/alpha") == "work-osprey" and a.pilot_root("projects/alpha") == "projects/alpha")
-check("the item notices' keeper follows the stand-in, whatever session moves the item", server._keeper("projects/alpha") == "work-osprey-x" and server._keeper("projects/alpha", "home-other") == "work-osprey-x", (server._keeper("projects/alpha"), server._keeper("projects/alpha", "home-other")))
-check("a front agent is told nothing about its own project through its stand-in (the stand-in is itself)", server._front_keeper("work-gamma-main", "projects/gamma") in ((True, ""), (False, "")), server._front_keeper("work-gamma-main", "projects/gamma"))
+check("the item notices' keeper follows the stand-in, whatever session moves the item", telling.project_keeper("projects/alpha") == "work-osprey-x" and telling.project_keeper("projects/alpha", "home-other") == "work-osprey-x", (telling.project_keeper("projects/alpha"), telling.project_keeper("projects/alpha", "home-other")))
+check("a front agent is told nothing about its own project through its stand-in (the stand-in is itself)", telling.front_keeper("work-gamma-main", "projects/gamma") in ((True, ""), (False, "")), telling.front_keeper("work-gamma-main", "projects/gamma"))
 cfg()
 
 T_LIVE = time.time()
@@ -180,31 +181,31 @@ check("live: …and so is every project (live for all): gamma's notice is held t
 cfg(live=True)
 
 item1 = server._load("a1")
-server._pilot_relay("projects/alpha", "a1", item1, "completed", "work-osprey-x", "work-osprey")
+telling.pilot_relay("projects/alpha", "a1", item1, "completed", "work-osprey-x", "work-osprey")
 n_board = routing.read("projects/alpha")[-1]
 check("live: a board relay to the keeper is held for the router, not pushed", n_board["kind"] == "board" and n_board["live"] is True and n_board["to"] == "" and len(pushes()) == p0 and "completed" in live.stashed(n_board["id"]), (n_board, pushes()[p0:]))
-server._pilot_relay("projects/alpha", "a1", item1, "completed", "work-osprey-x", "work-osprey-docs", tail="a page keeper's relay"); settle()
+telling.pilot_relay("projects/alpha", "a1", item1, "completed", "work-osprey-x", "work-osprey-docs", tail="a page keeper's relay"); settle()
 check("live: a relay to a background agent that keeps the page (not the keeper) is held for its next turn (a page-owed notice asks nothing), not pushed, and not the router's",
       [x[0] for x in pushes()[p0:]] == [] and held.count("work-osprey-docs") == 1 and routing.read("projects/alpha")[-1].get("ruling") == "held" and not routing.read("projects/alpha")[-1].get("live")
       and routing.read("projects/alpha")[-1].get("reason") == "held: asks nothing (page-owed)", (pushes()[p0:], routing.read("projects/alpha")[-1]))
 held.take("work-osprey-docs")
-nids = server._pilot_relay_many("work-osprey", [("projects/alpha", "a1", item1, "completed", "work-osprey-x"), ("projects/alpha", "a2", server._load("a2"), "changed", "work-osprey-x")])
+nids = telling.pilot_relay_many("work-osprey", [("projects/alpha", "a1", item1, "completed", "work-osprey-x"), ("projects/alpha", "a2", server._load("a2"), "changed", "work-osprey-x")])
 check("live: several page debts moved to the keeper are held, one routing line each, nothing pushed", len(nids) == 2 and all(rule_of(i).get("live") for i in nids) and len(pushes()) == p0, (nids, pushes()[p0:]))
 server._wake_tell(S, [("a2", server._load("a2"), "woke", "as the keeper of its page", False)])
 n_wake = routing.read("projects/alpha")[-1]
 check("live: a wake meant for the keeper is held for the router", n_wake["label"].startswith("wake") and n_wake["live"] is True and len(pushes()) == p0, (n_wake, pushes()[p0:]))
 
-# the keeper of a live project's board relays resolves through _keeper, which answers the stand-in (the builder): that relay is the router's too
-check("the keeper of a live project's board writes is the stand-in", server._keeper("projects/alpha") == "work-osprey-x")
-p1 = len(pushes()); server._pilot_relay("projects/alpha", "a1", item1, "updated", "work-osprey-main", server._keeper("projects/alpha")); settle()
+# the keeper of a live project's board relays resolves through project_keeper, which answers the stand-in (the builder): that relay is the router's too
+check("the keeper of a live project's board writes is the stand-in", telling.project_keeper("projects/alpha") == "work-osprey-x")
+p1 = len(pushes()); telling.pilot_relay("projects/alpha", "a1", item1, "updated", "work-osprey-main", telling.project_keeper("projects/alpha")); settle()
 n_sb = routing.read("projects/alpha")[-1]
 check("live: a board write by another session, relayed to the stand-in (the builder), is held for the router and not pushed to the builder", n_sb["live"] is True and n_sb["to"] == "" and n_sb["label"] == "board a1" and len(pushes()) == p1, (n_sb, pushes()[p1:]))
-nm_ = server._pilot_relay_many("work-osprey-x", [("projects/alpha", "a1", item1, "completed", "work-osprey-main")]); settle()
+nm_ = telling.pilot_relay_many("work-osprey-x", [("projects/alpha", "a1", item1, "completed", "work-osprey-main")]); settle()
 check("live: page debts relayed to the stand-in are held for the router too", len(nm_) == 1 and rule_of(nm_[0]).get("live") and len(pushes()) == p1, (nm_, pushes()[p1:]))
-server._pilot_relay("projects/alpha", "a1", item1, "updated", "work-osprey-main", "work-osprey-x", role="agent", tail="you keep this page"); settle()
+telling.pilot_relay("projects/alpha", "a1", item1, "updated", "work-osprey-main", "work-osprey-x", role="agent", tail="you keep this page"); settle()
 check("…while the relay to a page's own agent (role agent) skips the router and, to a background agent such as the builder, is held for its next turn", [x[0] for x in pushes()[p1:]] == [] and held.count("work-osprey-x") == 1, (pushes()[p1:], held.count("work-osprey-x")))
 held.take("work-osprey-x")
-p1 = len(pushes()); server._pilot_relay_many("work-osprey-main", [("projects/alpha", "a1", item1, "completed", "work-osprey-x")], head="[for Oliver] the page-debt fallback"); settle()
+p1 = len(pushes()); telling.pilot_relay_many("work-osprey-main", [("projects/alpha", "a1", item1, "completed", "work-osprey-x")], head="[for Oliver] the page-debt fallback"); settle()
 check("…and a caller that names its recipient (the page-debt fallback to -main) is delivered to, not held", [x[0] for x in pushes()[p1:]] == ["work-osprey-main"], pushes()[p1:])
 for _i in (n_sb["id"], *nm_): routing.rule(_i, "dropped", by="test")      # settled by hand: the plan below is about the other notices
 p0 = len(pushes())
@@ -655,15 +656,15 @@ check("retired-name: a retired name-line session that has a gone row is refused 
 SJ.write_text(SJ_SAVE)
 check("retired-name: a retired name-line session (the router is live for projects/alpha) whose pane is running is still delivered to: a running pane is a pane",
       a.session_roles()["work-osprey"].get("retired") and server._message("work-osprey", "to a running retired name-line session", "home-beta").startswith("delivered") and [x[0] for x in pushes()[p_a:]][-1:] == ["work-osprey"], pushes()[p_a:])
-check("the keeper of eta's items is its -main agent, of theta's the hub's; none is a retired name-line session", server._keeper("projects/eta") == "home-eta-main" and server._keeper("projects/theta") == "home-eta-main"
-      and server._page_keeper("projects/eta") == "home-eta-main", (server._keeper("projects/eta"), server._keeper("projects/theta")))
+check("the keeper of eta's items is its -main agent, of theta's the hub's; none is a retired name-line session", telling.project_keeper("projects/eta") == "home-eta-main" and telling.project_keeper("projects/theta") == "home-eta-main"
+      and telling.page_keeper("projects/eta") == "home-eta-main", (telling.project_keeper("projects/eta"), telling.project_keeper("projects/theta")))
 # ---- 19. review of the one-session-keeper change: a one-session page keeps its own session as keeper; a nameless page's debts reach the general -main agent
 check("one-session page (beta: a name line, no agents map): the keeper of its items is that session, whoever owns the item; the general -main agent is not its keeper",
-      server._keeper("projects/beta", "home-beta") == "home-beta" and server._keeper("projects/beta", "home-other") == "home-beta" and server._page_keeper("projects/beta") == "home-beta"
-      and server._stand_in_keeper("projects/beta") == "home-commons-main", (server._keeper("projects/beta", "home-beta"), server._keeper("projects/beta", "home-other")))
+      telling.project_keeper("projects/beta", "home-beta") == "home-beta" and telling.project_keeper("projects/beta", "home-other") == "home-beta" and telling.page_keeper("projects/beta") == "home-beta"
+      and telling.stand_in_keeper("projects/beta") == "home-commons-main", (telling.project_keeper("projects/beta", "home-beta"), telling.project_keeper("projects/beta", "home-other")))
 check("one-session page: an item moved by the name-line pane on its own page has that pane as the session its notices go to (wake, done-check, completion anchor)",
-      server._notice_to({"mover": "home-beta", "project": "projects/beta"}) == [(server._session_id("home-beta"), "as its mover")] and server._keeper("projects/beta", "home-beta") == "home-beta"
-      and server._notice_to({"mover": "home-other", "project": "projects/beta"}) == [(server._session_id("home-other"), "as its mover")], (server._notice_to({"mover": "home-beta", "project": "projects/beta"}), server._notice_to({"mover": "home-other", "project": "projects/beta"})))
+      telling.notice_to({"mover": "home-beta", "project": "projects/beta"}) == [(server._session_id("home-beta"), "as its mover")] and telling.project_keeper("projects/beta", "home-beta") == "home-beta"
+      and telling.notice_to({"mover": "home-other", "project": "projects/beta"}) == [(server._session_id("home-other"), "as its mover")], (telling.notice_to({"mover": "home-beta", "project": "projects/beta"}), telling.notice_to({"mover": "home-other", "project": "projects/beta"})))
 _pj_save = (T / "store/projects.json").read_text(); _pj = json.loads(_pj_save)
 _pj["pages"]["ops/general"] = page("Harbor general", "heron", agents={"heron-main": "the ops general contact"})
 _pj["pages"]["ops/note-x"] = page("Note X", ""); _pj["pages"]["ops/note-x/child"] = page("Note X child", "")      # pages with no `session:` line and no agents (ops/* note pages)
@@ -671,12 +672,12 @@ _pj["pages"]["projects/bgonly"] = page("Bg only", "home-bg", hub="projects/eta",
 (T / "store/projects.json").write_text(json.dumps(_pj))
 check("a page with background agents only is served by its hub's -main agent, the same in the stand-in and in anchors.fallback_main", live.stand_in("projects/bgonly") == "home-eta-main" == a.fallback_main("projects/bgonly"), (live.stand_in("projects/bgonly"), a.fallback_main("projects/bgonly")))
 check("a nameless page's notices are addressed to its scope's general -main agent, and that agent is front there: (True, no keeper), so a pass to it is marked", a.notice_name("ops/note-x") == "heron-main" and a.notice_name("ops/note-x/child") == "heron-main"
-      and server._front_keeper("heron-main", "ops/note-x") == (True, "") and server._front_keeper("heron-main", "ops/note-x/child") == (True, ""), (server._front_keeper("heron-main", "ops/note-x"), a.notice_name("ops/note-x")))
+      and telling.front_keeper("heron-main", "ops/note-x") == (True, "") and telling.front_keeper("heron-main", "ops/note-x/child") == (True, ""), (telling.front_keeper("heron-main", "ops/note-x"), a.notice_name("ops/note-x")))
 item(30, "ops/note-x", "work-osprey-main"); item(31, "ops/note-x/child", "work-osprey-main")
 p_n = len(pushes()); n_log = len(routing.read("ops/note-x"))
-who_, role_ = server._pilot_charge("ops/note-x", "work-osprey-x")
+who_, role_ = telling.pilot_charge("ops/note-x", "work-osprey-x")
 check("a nameless page: a board change is charged to the router (the address of its notices), not passed by as a front keeper", who_ == server._session_id("heron-main") and role_ == "name", (who_, role_))
-r_ = server._pilot_relay("ops/note-x", "a30", server._load("a30"), "changed (next)", "work-osprey-x", "heron-main", "name"); settle()
+r_ = telling.pilot_relay("ops/note-x", "a30", server._load("a30"), "changed (next)", "work-osprey-x", "heron-main", "name"); settle()
 ln_ = routing.read("ops/note-x")[n_log:]
 check("a nameless page: the board relay is held for the router (live line, stashed, nobody pushed)", "charged to the router" in r_ and len(ln_) == 1 and ln_[0].get("live") is True and ln_[0]["to"] == "" and live.stashed(ln_[0]["id"]) and len(pushes()) == p_n, (r_, ln_, pushes()[p_n:]))
 p_n = len(pushes()); n_log = len(routing.read("ops/note-x"))
@@ -696,13 +697,13 @@ ln_ = routing.read("ops/note-x")[n_log:]
 check("30-minute move on a nameless page (page call not live): the debt that moved to the general -main agent is held for the router in one routing line, not dropped",
       k_n == 1 and len(ln_) == 1 and ln_[0].get("live") is True and ln_[0]["to"] == "" and live.stashed(ln_[0]["id"]) and len(pushes()) == p_n, (k_n, ln_, pushes()[p_n:]))
 check("a sub-page kept by a front agent (ops/note-x/kept, role agent, nameless root): the agent is front there, its `session:` is no keeper of the project",
-      server._front_keeper("work-osprey-main", "ops/note-x/kept")[0] is True and server._pilot_keeper("ops/note-x/kept") == ("work-osprey-main", "agent"), (server._front_keeper("work-osprey-main", "ops/note-x/kept"), server._pilot_keeper("ops/note-x/kept")))
-who_, role_ = server._pilot_charge("ops/note-x/kept", "work-osprey-x")
+      telling.front_keeper("work-osprey-main", "ops/note-x/kept")[0] is True and telling.pilot_keeper("ops/note-x/kept") == ("work-osprey-main", "agent"), (telling.front_keeper("work-osprey-main", "ops/note-x/kept"), telling.pilot_keeper("ops/note-x/kept")))
+who_, role_ = telling.pilot_charge("ops/note-x/kept", "work-osprey-x")
 check("…a board change on it is charged to the router (the address of the project's notices), never to the front agent", who_ == server._session_id("heron-main") and role_ == "name", (who_, role_))
-k_, r_k = server._pilot_keeper("ops/note-x/kept"); p_n = len(pushes())
-res_ = server._pilot_relay("ops/note-x/kept", "a31", server._load("a31"), "changed (next)", "work-osprey-x", k_, r_k); settle()
+k_, r_k = telling.pilot_keeper("ops/note-x/kept"); p_n = len(pushes())
+res_ = telling.pilot_relay("ops/note-x/kept", "a31", server._load("a31"), "changed (next)", "work-osprey-x", k_, r_k); settle()
 check("…and the relay to the agent keeper pushes nothing unmarked to it", res_ == "" and len(pushes()) == p_n and not [x for x in pushes() if x[0] == "work-osprey-main" and "the page update is yours" in x[1]], (res_, pushes()[p_n:]))
-check("a front agent that owns an item on a one-session page (beta, name line home-beta): its keeper is the page's own session, not the general -main agent", server._front_keeper("home-eta-main", "projects/beta") == (True, "home-beta"), server._front_keeper("home-eta-main", "projects/beta"))
+check("a front agent that owns an item on a one-session page (beta, name line home-beta): its keeper is the page's own session, not the general -main agent", telling.front_keeper("home-eta-main", "projects/beta") == (True, "home-beta"), telling.front_keeper("home-eta-main", "projects/beta"))
 check("…a reminder for an item it moves goes to the mover itself (no keeper stands in for a front agent)", server._reminder_to({"mover": "home-eta-main", "project": "projects/beta"})[:1] == [(server._session_id("home-eta-main"), "as its mover")], server._reminder_to({"mover": "home-eta-main", "project": "projects/beta"}))
 _an = json.loads((T / "store/anchors.json").read_text()); _an["projects/beta"].append({"url": "https://x.slack.com/archives/C0000000009", "items": ["a40"], "added": 1, "by": "t"}); (T / "store/anchors.json").write_text(json.dumps(_an))
 item(40, "projects/beta", "home-other", status="completed")
@@ -1014,7 +1015,7 @@ try:
     check("15: …while every other key of the file is still sorted", list(omega) == sorted(omega), list(omega))
     check("15: the builder is the first background agent the page lists whose mandate says build, whatever the alphabet says",
           live.builder("projects/alpha") == "ops-tide-engineer" and live.stand_in("projects/alpha") == "ops-tide-engineer", (live.builder("projects/alpha"), live.stand_in("projects/alpha")))
-    check("15: …so the project's keeper (anchors, item notices) is that builder", server._page_keeper("projects/alpha") == "ops-tide-engineer" and server._keeper("projects/alpha") == "ops-tide-engineer", (server._page_keeper("projects/alpha"), server._keeper("projects/alpha")))
+    check("15: …so the project's keeper (anchors, item notices) is that builder", telling.page_keeper("projects/alpha") == "ops-tide-engineer" and telling.project_keeper("projects/alpha") == "ops-tide-engineer", (telling.page_keeper("projects/alpha"), telling.project_keeper("projects/alpha")))
     check("15: the other builder is still one of the page's own agents, and is no keeper", live.agent_root("projects/alpha", a.registry()) == "projects/alpha" and "ops-tide-aux-engineer" in a.registry()["projects/alpha"]["back_agents"], a.registry()["projects/alpha"].get("back_agents"))
     # the one-time backfill rewrites the file when it adds fields: it must not sort the agents again
     doc = json.loads((T / "omega-registry.json").read_text()); doc["pages"]["projects/alpha"].pop("agent_records", None); (T / "omega-registry.json").write_text(json.dumps(doc))
@@ -1077,11 +1078,11 @@ check("17: /healthz is a bare 'ok' while the interpreter exists", server._health
 n0 = len(pushes())
 check("17: deliver_via with a dead interpreter delivers through the fallback", live.deliver_via([DEAD, FAKE], "work-osprey", "no env, still delivered") == "delivered → work-osprey", None)
 check("17: …and the fake push saw the line", pushes()[n0:] == [["work-osprey", "no env, still delivered"]], pushes()[n0:])
-server._PUSH = [DEAD, FAKE]; cfg()
+telling.PUSH = [DEAD, FAKE]; cfg()
 try:
     server._message("work-osprey-docs", "sent with the env gone", "home-beta"); settle()      # a session by name: a message to a project key is held for the router, nothing is spawned for it
 finally:
-    server._PUSH = [sys.executable, FAKE]
+    telling.PUSH = [sys.executable, FAKE]
 check("17: the server's own message relay delivers with a dead interpreter", any(x[0] == "work-osprey-docs" and "sent with the env gone" in x[1] for x in pushes()[n0 + 1:]), pushes()[n0 + 1:])
 # anchor-hub's own delivery (core.Hub.deliver) runs on a deleted interpreter too
 real_push = core.PUSH; core.PUSH = [DEAD, FAKE]; n1 = len(pushes())
@@ -1132,7 +1133,7 @@ w19 = [n for n in routing.read("projects/alpha") if str(n.get("label") or "").st
 check("19 a hold wakes on a live project whose mover is the notice-name session: the wake is ruled passed, not dropped, and the mover is told",
       bool(w19) and rule_of(w19[-1]["id"]).get("ruling") == "passed" and rule_of(w19[-1]["id"]).get("ruled_to") == "work-osprey"
       and any(x[0] == "work-osprey" and "a50" in x[1] and "woke" in x[1] for x in pushes()[p0:]), (w19[-1:], pushes()[p0:]))
-p0 = len(pushes()); told19 = server._tell_close_mentions("a52", "done", "it is in", "work-osprey-x"); live.tick(); settle()
+p0 = len(pushes()); told19 = telling.tell_close_mentions("a52", "done", "it is in", "work-osprey-x"); live.tick(); settle()
 check("19 the close-mentions path: an open item that names the closed one, moved by the notice-name session, gets the notice through the router",
       S in told19 and any(x[0] == "work-osprey" and "a52" in x[1] and "a51" in x[1] for x in pushes()[p0:]), (told19, pushes()[p0:]))
 

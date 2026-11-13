@@ -62,11 +62,12 @@ def sts(i): return [(x["status"], x.get("by") or "") for x in rd(i)["metadata"].
 def kinds(i): return [k for k, _ in sts(i)]
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import steps as S
+from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told: list = []
-server._tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
-server._tell_check_closed = lambda gid, item, label: []
+telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
+telling.tell_check_closed = lambda gid, item, label: []
 def close(i, outcome="done", sup="", **kw):
     return server._update(f"board#{i}", status="completed", outcome=outcome, reason="it ended", description=NEW, superseded_by=sup, sender="home-front", **kw)
 def refused(name, f, *want):

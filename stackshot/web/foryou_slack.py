@@ -2,7 +2,7 @@
 that post an urgent row (so no write waits on a command), and `_for_you_slack_post`, the hook itself.
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The rows a change of an item makes (whether an item is watched, the row a save makes, the due-date pass) are foryou_events.py's,
-and they are what call `_foryou_slack` here; what stays in server.py of the list is the close fallback (`_tell_close_owner` and the notices after it, with `_FORYOU_FELL`), which reads foryou_events.py's
+and they are what call `_foryou_slack` here; what service/telling.py keeps of the list is the close fallback (`tell_close_owner` and the notices after it, with `_FORYOU_FELL`), which reads foryou_events.py's
 `_FORYOU_FAILED`. A suite that stubs the hook (`_for_you_slack_post`, `_for_you_slack_on`) or shortens the command's timeout (`_FORYOU_SLACK_TIMEOUT`) sets it on
 this module (`server._fyslack._for_you_slack_post = ...`), the one place the readers look it up: the server's own read of `_for_you_slack_on` goes through the module as well, and is not imported
 back. `_foryou_slack` and `_foryou_slack_wait` are imported back by server.py, so `server._foryou_slack` and `server._foryou_slack_wait` stay the names the row and the tests use."""

@@ -80,13 +80,14 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.model import last_activity as LA, progress as PG, activity as ACT
 from stackshot.anchors import event_log as EL, merge_log as ML
 from stackshot.anchors.anchorhub import core as HUB
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._PUSH = [sys.executable, "-c", "pass"]
+telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the clocks are stamped from the server's own clock, which a scenario with a fake `now` must be able to set."""
     t = None

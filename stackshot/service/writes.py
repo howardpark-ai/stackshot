@@ -7,8 +7,9 @@ records the change where others read it (the For you list, the Landed list, the 
 means and is kept as it was in server.py.
 
 What a write must do differently from the usual one is the `WriteContext` passed to `save`: `settle`. It was a thread-local flag set around the save (`_NO_SETTLE`); it is an argument now, so
-nothing a save does depends on what else the thread did before it. The other per-write flags of server.py (`_TERMINAL_ROW`, `_QUESTION`, `_REFORMAT`, `_CLOSE_WAS`, `_FRONT_HINT`, `_MENTIONED`, `_HO_STATE`
-and `_SESSION_NEXT`) are read by the create and update tools, the gates and the telling, never by this save; they move with those, not here.
+nothing a save does depends on what else the thread did before it. The per-write flags the gates read (`SESSION_NEXT`, `QUESTION`, `REFORMAT`, `TERMINAL_ROW`) live here too, as thread-locals the routes and tools set
+with `.on` around a write (`session_write` is the create and update tools' own); they are read by the create and update tools and the gates, never by this save. The flags of the telling (`CLOSE_WAS`, `FRONT_HINT`,
+`MENTIONED`, `HO_STATE`) are on service/telling.py.
 
 The steps that still read server.py's own code (the mover's settling, his step, the ask record, the three hand-off steps, the phase, the For you and Landed lists, the search index, the
 hand-back line, the pending answer) are reached through `Steps`, which server.py fills once with `install`: this module cannot import server.py (the surface sits above it), and each of those
@@ -17,6 +18,7 @@ functions leaves `Steps` when its area moves under service/. Steps are looked up
 Imports point down only: this module imports the domain and core, and the store's readers beside it (service/store.py), never web/."""
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import threading
@@ -40,6 +42,43 @@ from stackshot.router import routing as _routing
 from stackshot.service.store import _path
 
 ITEM_LOCK = threading.RLock()      # a session's update and a failed delivery's record read, change and save an item under it
+
+# The per-write flags: set (`.on`) by a route or a tool around its write, read by the gates and the create and update services while that write runs. A flag is never rebound, so a name taken from this module stays the flag.
+SESSION_NEXT = threading.local()  # around the create and update tools' own calls: only a session's write is judged by the write checks of Next (N1, N3, N6; next_rules.py), and by the bare-URL check; a script's, the re-bullet route's and the minute loop's writes are not
+TERMINAL_ROW = threading.local()  # set by the terminal-prompt and job-gap routes around their writes: the row is a script's notification of its own, so it owes no page and no session is told of it (create_item, _update, the tell_* notices; a job-gap item's builder is told by the needs notice of its create, which this does not stop)
+QUESTION = threading.local()     # set by the script question route around its create: guard 11 (alarming words) does not judge a headless run's own question text, so it is never stranded on a wording refusal
+REFORMAT = threading.local()    # set by the re-bullet route around its update: a description written in bullets with the same content is a filing edit, no state change
+
+
+def session_next() -> bool:
+    """Is this the create or update tool's own call (a session's write)?"""
+    return bool(getattr(SESSION_NEXT, "on", False))
+
+
+def question() -> bool:
+    """Is this the script question route's create?"""
+    return bool(getattr(QUESTION, "on", False))
+
+
+def reformat() -> bool:
+    """Is this the re-bullet route's update?"""
+    return bool(getattr(REFORMAT, "on", False))
+
+
+def terminal_row() -> bool:
+    """Is this the terminal prompt's or the job-gap route's write?"""
+    return bool(getattr(TERMINAL_ROW, "on", False))
+
+
+@contextlib.contextmanager
+def session_write():
+    """Marks the create or update tool's own call as a session's write for the write checks of Next (SESSION_NEXT); restored on exit."""
+    was = getattr(SESSION_NEXT, "on", False)
+    SESSION_NEXT.on = True
+    try:
+        yield
+    finally:
+        SESSION_NEXT.on = was
 
 SETTLE_NAMED = "named"      # settle: an update that names the mover itself: the save's mover settling leaves it as the write has it, and his step on the checklist still follows the stored fields
 SETTLE_QUIET = "quiet"      # settle: a write that only files, re-bullets or confirms: no mover is settled and no hand-off record is ended

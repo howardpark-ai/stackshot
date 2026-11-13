@@ -68,6 +68,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+from stackshot.service import writes
 server._publish = lambda: None
 pushed = []                           # every delivery to a session the server would make (a notice to the keeper, a relay): none is expected
 class _FakePush:
@@ -211,7 +212,7 @@ check("a question with alarming words (kill, credentials, quota) is filed: a pan
 create_says = ""
 try: server.stackshot_create(subject="[home] Kill the run?", description="- Goal: A thing", project="projects/alpha", owner="home-sparrow-main", next="Oliver: kill it and rotate the credentials")
 except server.ToolError as e: create_says = str(e)
-check("…while the create tool refuses the same words (the exemption is that route's only)", "uses \"" in create_says and not getattr(server._QUESTION, "on", False), create_says[:200])
+check("…while the create tool refuses the same words (the exemption is that route's only)", "uses \"" in create_says and not getattr(writes.QUESTION, "on", False), create_says[:200])
 tp("clear", "home-sparrow-builder", None)
 LONG = "Should I " + " ".join(f"word{i}" for i in range(1, 40)) + " end?"
 LONG = LONG[:200]

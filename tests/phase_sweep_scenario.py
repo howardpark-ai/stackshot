@@ -60,11 +60,12 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.service import telling
 from stackshot.core import store as _core_store
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake": None
-server._front_sender = lambda who: False
+telling.tell_woken = lambda gid, owner, note, tag="wake": None
+telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": time.time() - 100 * 86400, "seen": {}, "reported": []}))
 server._cfg.CFG.setdefault("model", {}).update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False)
 ZONE = zoneinfo.ZoneInfo("Asia/Dubai"); H = 3600.0; DAY = 86400.0
@@ -193,18 +194,18 @@ put(60, needs=[BACK], state="doing", hold=True, wake=local_str(TL + 3 * H)); swe
 d = raw(60); d["metadata"]["phase"] = "alive"; d["metadata"].pop("waits_on")
 (T / "store/g/60.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))                     # stale: the fields read waiting
 calls = []
-real = {k: getattr(server, k) for k in ("_foryou_on_save", "_landed_on_save", "_handoff_on_save", "_tell_woken", "_push_noted", "_wake_tell")}
+real = {(m, k): getattr(m, k) for m, k in ((server, "_foryou_on_save"), (server, "_landed_on_save"), (server, "_handoff_on_save"), (telling, "tell_woken"), (telling, "push_noted"), (server, "_wake_tell"))}
 real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name)
     return f
-for k in real: setattr(server, k, spy(k))
+for m, k in real: setattr(m, k, spy(k))
 server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch"); writes.save = spy("save")
 state0 = state_listing()
 try:
     done = sweep(TL)
 finally:
-    for k, v in real.items(): setattr(server, k, v)
+    for (m, k), v in real.items(): setattr(m, k, v)
     server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch; writes.save = real_save
 check("4 a sweep that stamps calls no save, no GitHub job, no notice, no For you or landed row, no hand-off, no search touch", done == ["g60"] and calls == [], (done, calls))
 check("4 …no writer is recorded, no clock moves, the state folder is as it was, no temporary file is left", "written_by" not in raw(60) and raw(60)["updated"] == T0 - 10 * DAY and state_listing() == state0 and not list((T / "store/g").glob(".*")), raw(60))

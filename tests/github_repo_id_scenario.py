@@ -132,11 +132,12 @@ STORE = T / "store"
 DESC = "- A thing\n- It lives here\n- Finished when it works"
 
 from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False
 server._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda *a, **k: None
+telling.tell_woken = lambda *a, **k: None
 GHC = server._cfg.CFG["github"]
 
 

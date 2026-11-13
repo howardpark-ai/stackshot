@@ -109,6 +109,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 # ---- 2. the server's note
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import telling
 from stackshot.projects import project_registry as _projects_registry
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
 server._publish = lambda: None
@@ -169,8 +170,8 @@ check("a hub that names nobody has nothing to check against", "(note:" not in r,
 completed = create("projects/example", "harbor-ops").split()[1]; server._update(completed, status="completed", sender="harbor-ops", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
 check("get on a completed item shows no creator line", "keeper of record" not in server.stackshot_get(completed))
 nm = A.names()
-check("keeper: a folded page with no keeper of its own is kept by the hub's keeper (its builder, not the retired name-line session)", server._keeper("ops/bare", U["harbor-ops"]) == "falcon-maintainer", server._keeper("ops/bare", U["harbor-ops"]))
-check("keeper: a page's own top-level keeper otherwise", server._keeper("projects/other/x", U["harbor-ops"]) == "home-other")
+check("keeper: a folded page with no keeper of its own is kept by the hub's keeper (its builder, not the retired name-line session)", telling.project_keeper("ops/bare", U["harbor-ops"]) == "falcon-maintainer", telling.project_keeper("ops/bare", U["harbor-ops"]))
+check("keeper: a page's own top-level keeper otherwise", telling.project_keeper("projects/other/x", U["harbor-ops"]) == "home-other")
 
 # ---- 2b. roles.json, the `roles` read, the sessions tool's role
 import time as _t, inspect
@@ -201,7 +202,7 @@ from stackshot.fleet import client as _client
 check("client.py knows the read", "roles" in _client.READS)
 check("the server's own gates keep session_roles: a one-session project's keeper may be named in needs, takes messages unmarked, "
       "and is no front agent for its notices", gates.gate_needs_session("harbor-ops", "projects/ops", "falcon-main") == "harbor-ops"
-      and server._front_keeper("harbor-ops", "projects/ops") == (False, "") and server._gate_front("harbor-ops", "a plain note", server._sessions_index()) is None)
+      and telling.front_keeper("harbor-ops", "projects/ops") == (False, "") and server._gate_front("harbor-ops", "a plain note", server._sessions_index()) is None)
 ls = server._sessions_listing("").split("\n")
 row = lambda n: next((l for l in ls if l.startswith(f"- {n} — ")), "")
 check("sessions tool: each session's role and project", row("falcon-anchors").endswith(" · testbox · front agent of projects/example")
