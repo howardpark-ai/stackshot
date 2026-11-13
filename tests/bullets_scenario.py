@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
@@ -457,7 +458,7 @@ long_subject_item(65, "[home] done check")
 d65 = json.loads((T / "store/a/65.json").read_text()); d65["metadata"]["check"] = "item_closed a67"; (T / "store/a/65.json").write_text(json.dumps(d65))
 was_label = server._check_label; server._check_label = lambda c: "label " * 60
 try:
-    it65 = server._load("a65"); telling.tell_check_closed = lambda *a, **k: None; server._release_after = lambda *a, **k: None
+    it65 = server._load("a65"); telling.tell_check_closed = lambda *a, **k: None; wakes_svc.release_after = lambda *a, **k: None
     server._check_close("a65", it65, "item_closed a67", time.time())
 finally:
     server._check_label = was_label

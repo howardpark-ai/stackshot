@@ -57,6 +57,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -150,7 +151,7 @@ def sig_of(g, b, a, told):
 def tick(epoch):
     """{id: what the tick did} for the ids a tick at `epoch` acted on (a file rewritten, or a message that names the item); the store is put back after."""
     before = snapshot(); sent.clear()
-    server._wake_pass(_dtm.datetime.fromtimestamp(epoch, server._cfg.tz()))
+    wakes_svc.wake_pass(_dtm.datetime.fromtimestamp(epoch, server._cfg.tz()))
     after = snapshot()
     notes = {}
     for entry in sent:

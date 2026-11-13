@@ -200,6 +200,7 @@ check("…and the tag is gone after the call", GB.current() == "", GB.current())
 
 # ---- 5. the server's three callers on one pull request, through their own paths
 from stackshot.web import server
+from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -216,7 +217,7 @@ PRN = 21
 F.put(PRN, "open")
 put_item(1, "home-builder: keep going", check=f"pr_merged o/r#{PRN}")                                              # the done check
 put_item(2, f"home-builder: merge https://github.com/o/r/pull/{PRN}")                                              # the step proof (a URL counts anywhere)
-PS.reset(); server._EVW_GH.clear(); server._EVW_POLLED.clear()
+PS.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear()
 for f in (T / "state/checks.json", T / "state/step-proof.json"): f.unlink(missing_ok=True)
 server._CHECK_LAST[0] = 0.0
 F.log.clear(); b0 = dict(by()); t0 = time.time()
@@ -229,7 +230,7 @@ check("one window, the three callers on one pull request: one request to GitHub,
 check("…counted once in the ledger, under the first reader's tag (event_wait)", delta(b0, b1, "event_wait") == 1 and delta(b0, b1, "done_check") == 0 and delta(b0, b1, "step_proof") == 0, (b0, b1))
 chk = json.loads((T / "state/checks.json").read_text()); pf = json.loads((T / "state/step-proof.json").read_text())
 check("…each caller still keeps the record in its own file (checks.json, step-proof.json) and in the event waits' memory",
-      chk["github"][f"o/r#{PRN}"]["merged"] is False and pf["github"][f"o/r#{PRN}"]["merged"] is False and server._EVW_GH[f"o/r#{PRN}"]["merged"] is False, (chk, pf, server._EVW_GH))
+      chk["github"][f"o/r#{PRN}"]["merged"] is False and pf["github"][f"o/r#{PRN}"]["merged"] is False and evwaits_svc.EVW_GH[f"o/r#{PRN}"]["merged"] is False, (chk, pf, evwaits_svc.EVW_GH))
 check("…the open pull request ticks nothing and closes nothing", rows == [] and json.loads((T / "store/a/1.json").read_text())["status"] == "open", rows)
 F.put(PRN, "merged"); F.log.clear(); b1 = dict(by())
 t1 = PS.known(f"o/r#{PRN}")["next"] + 5                          # five seconds past the stored pace, however long the runner stalled since t0

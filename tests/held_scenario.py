@@ -76,6 +76,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import held; from stackshot.fleet import client
 from stackshot.router import router as _router; from stackshot.router import router_live as _live
 from stackshot.web import server
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import message as _wt_message
@@ -193,13 +194,13 @@ check("3j negative: …and a reopen is pushed to it", len(reach(X, n0)) == 1, pu
 # queue: a wake that leaves the item still after an open item
 item(8, after=["a9"], owner=X)
 fresh(); n0 = len(pushes()); it = server._load("a8")
-server._wake_tell(X, [("a8", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
+wakes_svc.wake_tell(X, [("a8", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
 check("3k: a wake that leaves the builder's item still after an open item (its place in the queue) is held (queue), not pushed", reach(X, n0) == [] and held.count(X) == 1 and len(logged("queue")) == 1, (pushes()[n0:], held.count(X)))
 fresh(); n0 = len(pushes()); it = server._load("a1")
-server._wake_tell(X, [("a1", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
+wakes_svc.wake_tell(X, [("a1", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
 check("3l negative: a wake that puts the item back in its lane is pushed", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
 fresh(); n0 = len(pushes()); it = server._load("a8")
-server._wake_tell(X, [("a8", it, "reminder", "as its keeper of record", True)]); settle()
+wakes_svc.wake_tell(X, [("a8", it, "reminder", "as its keeper of record", True)]); settle()
 check("3m negative: a reminder (an active item the owner is asked to close or refresh) is pushed even when the item has an after", len(reach(X, n0)) == 1, pushes()[n0:])
 
 # page-owed: the keeper that is a background agent

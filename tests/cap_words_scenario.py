@@ -73,6 +73,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import text as _wt_text
@@ -262,7 +263,7 @@ check("B: a wake 300 days out with its date inside the window is accepted (the l
 # the server fires the wake: the basis goes with it
 d = rd(65); d["metadata"].pop("until", None); d["metadata"]["hold"] = True; d["metadata"]["wake"] = day(-1); d["metadata"]["wait_basis"]["wake"] = day(-1); (T / "store/a/65.json").write_text(json.dumps(d))
 check("B: before the pass: the item is on hold with a basis for its (past) wake", hd_(rd(65)["metadata"]) and W.basis_of(rd(65)["metadata"]), rd(65)["metadata"])
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 check("B: _wake_pass firing the wake drops the basis with the hold and the wake", "a65" in woke and "wait_basis" not in rd(65)["metadata"] and "wake" not in rd(65)["metadata"] and "hold" not in rd(65)["metadata"], (woke, rd(65)["metadata"]))
 
 # going with the wake

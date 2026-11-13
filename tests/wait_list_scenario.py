@@ -63,6 +63,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
+from stackshot.service import wakes as wakes_svc, watching as watching_svc, event_waits as evwaits_svc
 from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -106,7 +107,7 @@ def lst(i, waits, mode="all", until=None, **extra):
     item(i, **base)
 def close(g, outcome="done", **more):
     it = rd(g); it["status"] = "completed"; it["metadata"].update(outcome=outcome, reason="r", **more); put(g, it)
-    return server._release_after(f"a{g}", outcome, more.get("superseded_by", ""), "home-front")
+    return wakes_svc.release_after(f"a{g}", outcome, more.get("superseded_by", ""), "home-front")
 def arrived_of(i): return [bool(ln.get("arrived")) for ln in mt(i)["waits"]]
 GONE = ("waits", "wait_mode", "wait_kind", "until", "post_wake_mover")
 
@@ -278,26 +279,26 @@ lst(105, [Tm(day(3)), It("a901")], mode="any")
 # ================================================================ time lines: the clock marks them, the group decides
 reset()
 lst(110, [Tm(day(-1)), Tm(day(4))], mode="all")
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 check("time (all): a line whose date has passed is marked arrived, the other is not; the item still waits and nobody is told", "a110" not in woke and arrived_of(110) == [True, False] and mt(110).get("wait_kind") == "list" and not mt(110).get("mover") and not sent("watch"), mt(110))
 check("time (all): …with a History line `arrived: <what> (1 of 2)` and the item's own clock moved, not its state clock", notes_of("a110") == [f"arrived: its date {day(-1)} came (1 of 2)"] and rd(110)["state_updated"] < now0 - 9 * DAY and rd(110)["updated"] >= now0, notes_of("a110"))
 check("time (all): …the model reads the item as still waiting on a list, one line arrived", mod_of(110).state == "waiting" and mod_of(110).waits[0].arrived and not mod_of(110).waits[1].arrived and mod_of(110).waits[0].arrived_what == f"its date {day(-1)} came", mod_of(110).waits)
-b110 = raw(110); reset(); server._wake_pass()
+b110 = raw(110); reset(); wakes_svc.wake_pass()
 check("time (all): the next pass changes nothing (the marked line keeps its first time)", raw(110) == b110 and not NOTES and not sent(), notes_of("a110"))
 check("time (all): the next moment is the line still open (the arrived one is no moment)", wk.next_moment(mt(110)) == wk.day_epoch(day(4)), wk.next_moment(mt(110)))
 d = rd(110); d["metadata"]["waits"][1]["until"] = day(-1); put(110, d)
-reset(); woke = server._wake_pass(); m = mt(110)
+reset(); woke = wakes_svc.wake_pass(); m = mt(110)
 check("time (all): the last line's date passing turns the item alive with the post-wake mover, on the cause of the completing line", "a110" in woke and m.get("mover") == BACK and m.get("needs") == [BACK] and "all 2 arrived" in m["woke"]["what"]
       and m["woke"]["what"].count(f"its date {day(-1)} came") == 2 and m["woke"]["to"] == BACK, m)
 check("time (all): …the wait's fields are gone with the wait: the list, its mode, the kind, the backstop and the post-wake mover", all(k not in m for k in GONE) and "watch" not in m or all(k not in m.get("watch", {}) for k in ("asked", "was")), m)
 check("time (all): …the mover is told in one line what arrived", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "is yours now: all 2 arrived:" in sent("watch")[0][2] and "\n" not in sent("watch")[0][2], sent())
 check("time (all): …the History line says the item woke, with what arrived", any(n.startswith("woke: all 2 arrived:") and n.endswith(f"→ {BACK}") for n in notes_of("a110")), notes_of("a110"))
 check("time (all): …the model reads it as alive, no conflicts, and nothing is left to watch", mod_of(110).state == "alive" and mod_of(110).mover == BACK and not mod_of(110).conflicts and not wk.watches(rd(110)), mod_of(110))
-reset(); server._wake_pass(); check("time (all): …a later pass tells nobody again", not sent() and not notes_of("a110"), sent())
+reset(); wakes_svc.wake_pass(); check("time (all): …a later pass tells nobody again", not sent() and not notes_of("a110"), sent())
 # any
 reset()
 lst(111, [Tm(day(-1)), Tm(day(6)), It("a901")], mode="any")
-woke = server._wake_pass(); m = mt(111)
+woke = wakes_svc.wake_pass(); m = mt(111)
 check("time (any): the first line to arrive ends the group: alive with the post-wake mover, what arrived and what was not needed", "a111" in woke and m.get("mover") == BACK and m["woke"]["what"] == f"any of 3 arrived: its date {day(-1)} came; not needed: the date {day(6)}; the close of {server._gh.shown('a901')}", m)
 check("time (any): …the wait's fields are gone", all(k not in m for k in GONE), m)
 check("time (any): …the message to the mover carries it", len(sent("watch")) == 1 and "any of 3 arrived:" in sent("watch")[0][2] and "; not needed: " in sent("watch")[0][2], sent())
@@ -313,7 +314,7 @@ b120 = raw(120); reset(); close(121)
 check("item: the same close delivered again changes nothing (idempotent), writes nothing", raw(120) == b120 and not NOTES and not sent(), notes_of("a120"))
 close(122)
 check("item (all): the second close marks the second line; the time line is still open, so the item waits on", arrived_of(120) == [True, True, False] and mt(120).get("wait_kind") == "list" and not sent("watch"), mt(120))
-d = rd(120); d["metadata"]["waits"][2]["until"] = day(-1); put(120, d); reset(); woke = server._wake_pass()
+d = rd(120); d["metadata"]["waits"][2]["until"] = day(-1); put(120, d); reset(); woke = wakes_svc.wake_pass()
 check("item (all): the last arrival (the clock, here) turns it with all three in the words", "a120" in woke and mt(120).get("mover") == BACK and mt(120)["woke"]["what"].startswith("all 3 arrived:") and "closed (done)" in mt(120)["woke"]["what"], mt(120))
 # any, one close
 reset()
@@ -331,7 +332,7 @@ check("item: two lines on one item are both marked by one close", arrived_of(125
 reset()
 lst(128, [It("a129"), Re("x")], mode="any"); item(129, subject="[home] old"); item(130, subject="[home] the replacement")
 it = rd(129); it["status"] = "completed"; it["metadata"].update(outcome="superseded", reason="r", superseded_by="a130"); put(129, it)
-server._release_after("a129", "superseded", "a130", "home-front")
+wakes_svc.release_after("a129", "superseded", "a130", "home-front")
 check("item: a superseded item is followed to its open replacement: the id in the line is replaced and the line has not arrived; the item waits on", mt(128)["waits"][0]["after"] == "a130" and arrived_of(128) == [False, False] and mt(128).get("wait_kind") == "list" and not sent("watch")
       and notes_of("a128") == [f"{server._gh.ref('a129')} was superseded, followed to {server._gh.ref('a130')}"], (mt(128), notes_of("a128")))
 close(130)
@@ -340,19 +341,19 @@ check("item: …and the replacement's close then ends it", mt(128).get("mover") 
 reset()
 lst(131, [It("a132"), Re("x")], mode="any"); item(132, subject="[home] old two"); item(133, status="completed", outcome="done", reason="r", needs=[], subject="[home] a replacement already closed")
 it = rd(132); it["status"] = "completed"; it["metadata"].update(outcome="superseded", reason="r", superseded_by="a133"); put(132, it)
-server._release_after("a132", "superseded", "a133", "home-front")
+wakes_svc.release_after("a132", "superseded", "a133", "home-front")
 check("item: a superseded item whose replacement is closed too marks the line (nothing to follow)", mt(131).get("mover") == BACK and "was superseded by" in mt(131)["woke"]["what"] and "closed too" in mt(131)["woke"]["what"], mt(131).get("woke"))
 # a close nobody saw, a missing file
 reset()
 lst(134, [It("a135"), It("a999"), Re("x")], mode="all"); item(135, status="completed", outcome="done", reason="r", needs=[], subject="[home] closed before")
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 check("item: a close nobody saw (the item is already closed) and an item with no file both count as closed: the clock's pass marks both lines", arrived_of(134) == [True, True, False] and mt(134).get("wait_kind") == "list" and "a134" not in woke, (arrived_of(134), mt(134)))
 check("item: …(the relay line is still open)", len(notes_of("a134")) == 1 and notes_of("a134")[0].count("arrived:") == 2 and "(2 of 3)" in notes_of("a134")[0], notes_of("a134"))
-lst(136, [It("a135"), Tm(day(5))], mode="any"); reset(); woke = server._wake_pass()
+lst(136, [It("a135"), Tm(day(5))], mode="any"); reset(); woke = wakes_svc.wake_pass()
 check("item (any): a catch-up finds the close and ends the group", "a136" in woke and mt(136).get("mover") == BACK, mt(136))
 # a closed superseded item found by the clock is followed too
 lst(137, [It("a138"), Re("x")], mode="any"); item(138, status="completed", outcome="superseded", superseded_by="a139", reason="r", needs=[], subject="[home] superseded, found later"); item(139, subject="[home] open replacement")
-server._wake_pass()
+wakes_svc.wake_pass()
 check("item: the clock's catch-up follows a superseded item to its open replacement too", mt(137)["waits"][0]["after"] == "a139" and arrived_of(137) == [False, False] and mt(137).get("wait_kind") == "list", mt(137))
 
 # ================================================================ anchor lines
@@ -360,36 +361,36 @@ reset()
 lst(140, [An(AURL, "PR merged"), An(AURL2, "a reply")], mode="all", project="projects/alpha")
 lst(141, [An(AURL, "PR merged"), Tm(day(7))], mode="any", project="projects/beta")
 lst(142, [An(AURL, "a reply"), An("github:o/r#5", "a review"), Re("x")], mode="all")
-server._anchor_release("projects/alpha", notice("old comment", ts=now0 - 20 * DAY))
+wakes_svc.anchor_release("projects/alpha", notice("old comment", ts=now0 - 20 * DAY))
 check("anchor: a notice older than the wait does not count", arrived_of(140) == [False, False] and arrived_of(142) == [False, False, False], mt(140))
-server._anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
+wakes_svc.anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
 check("anchor: a routine line of the fleet's own PR does not end a line that waits for a merge (as for a single wait); a line waiting for a reply counts it", arrived_of(140) == [False, False] and arrived_of(142) == [True, True, False], (arrived_of(140), arrived_of(142)))
 reset()
-server._anchor_release("projects/alpha", notice("dropped by the keeper", ruling="dropped"))
+wakes_svc.anchor_release("projects/alpha", notice("dropped by the keeper", ruling="dropped"))
 check("anchor: a notice the keeper dropped does not count", arrived_of(140) == [False, False], None)
-rel = server._anchor_release("projects/alpha", notice("PR #5 merged: the work landed"), by="home-stew")
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged: the work landed"), by="home-stew")
 check("anchor (all): a notice the keeper passed marks the line that answers it; another anchor's line and another project's item are not touched; nobody is told yet", arrived_of(140) == [True, False] and mt(140).get("wait_kind") == "list" and arrived_of(141) == [False, False] and "a140" not in rel and not sent("watch")
       and f"(1 of 2)" in notes_of("a140")[0] and "github:o/r#5" in notes_of("a140")[0] and "PR #5 merged" in notes_of("a140")[0], (arrived_of(140), notes_of("a140")))
 check("anchor: two lines on one anchor (the same anchor written two ways) are both marked by one notice", arrived_of(142) == [True, True, False], None)
 b140 = raw(140); reset()
-server._anchor_release("projects/alpha", notice("PR #5 merged again", ts=now0 + 5, ruled_at=now0 + 5))
+wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged again", ts=now0 + 5, ruled_at=now0 + 5))
 check("anchor: a second notice on an anchor whose line has arrived changes nothing", raw(140) == b140 and not NOTES, notes_of("a140"))
-rel = server._anchor_release("projects/alpha", notice("PR #6 merged", anchor="github:o/r#6"), by="home-stew")
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #6 merged", anchor="github:o/r#6"), by="home-stew")
 m = mt(140)
 check("anchor (all): the last line's notice turns it alive with the post-wake mover, the cause the anchor", rel == ["a140"] and m.get("mover") == BACK and m["woke"]["what"].startswith("all 2 arrived:") and "PR #5 merged" in m["woke"]["what"] and "PR #6 merged" in m["woke"]["what"] and all(k not in m for k in GONE), (rel, m))
 check("anchor: …and the mover is told", len(sent("watch")) == 1 and sent("watch")[0][1] == UB, sent())
 reset()
-rel = server._anchor_release("projects/beta", notice("PR #5 merged", ruling=None, to="", live=True), by="")
+rel = wakes_svc.anchor_release("projects/beta", notice("PR #5 merged", ruling=None, to="", live=True), by="")
 check("anchor (any): in a project nobody rules, a notice that arrived ends an `any` list on it at once", "a141" in rel and mt(141).get("mover") == BACK and "any of 2 arrived:" in mt(141)["woke"]["what"], (rel, mt(141)))
 # the minute pass finds a notice in the routing log
 lst(143, [An(AURL, "a reply"), Re("x")], mode="any")
 server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="a reply on the PR", anchor="github:o/r#5", pilot=True)
 nid = server._routing.read("projects/alpha", since=now0 - 60)[-1]["id"]
 server._routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
-time.sleep(0.01); out = server._anchor_pass()
+time.sleep(0.01); out = wakes_svc.anchor_pass()
 check("anchor: the minute pass finds a keeper-passed notice in the routing log for an item whose list waits on the anchor", "a143" in out and mt(143).get("mover") == BACK, (out, mt(143)))
 lst(144, [An(AURL2, "a reply"), Re("x")], mode="any", watch={})
-server._anchor_pass()
+wakes_svc.anchor_pass()
 check("anchor: …and gives a list that has no stamp one (a notice from the days it already waited through is not its arrival)", mt(144).get("watch", {}).get("set_at", 0) >= now0 and arrived_of(144) == [False, False], mt(144))
 
 # ================================================================ event lines
@@ -397,52 +398,52 @@ reset()
 lst(150, [Ev("job_run nightly"), Ev("recycle"), It("a901")], mode="all")
 lst(151, [Ev("job_run nightly"), Re("x")], mode="any")
 rep = lambda **kw: EW.event(**kw)
-got = server._evwait_report(EW.event("job_run", name="other"))
+got = evwaits_svc.evwait_report(EW.event("job_run", name="other"))
 check("event: an event no line answers marks nothing", got == [] and arrived_of(150) == [False, False, False] and arrived_of(151) == [False, False], None)
-got = server._evwait_report(EW.event("job_run", name="nightly", what="the nightly job ran"))
+got = evwaits_svc.evwait_report(EW.event("job_run", name="nightly", what="the nightly job ran"))
 check("event (any): an event that answers a line ends an `any` list; (all) it marks the line and waits for the rest", got == ["a151"] and mt(151).get("mover") == BACK and "any of 2 arrived: the nightly job ran" in mt(151)["woke"]["what"]
       and arrived_of(150) == [True, False, False] and mt(150).get("wait_kind") == "list" and len(notes_of("a150")) == 1 and "(1 of 3)" in notes_of("a150")[0], (got, mt(151), arrived_of(150)))
-b150 = raw(150); reset(); got = server._evwait_report(EW.event("job_run", name="nightly"))
+b150 = raw(150); reset(); got = evwaits_svc.evwait_report(EW.event("job_run", name="nightly"))
 check("event: the same event reported again changes nothing", got == [] and raw(150) == b150 and not NOTES, notes_of("a150"))
-server._evwait_report(EW.event("recycle", machine="testbox")); close(901)
+evwaits_svc.evwait_report(EW.event("recycle", machine="testbox")); close(901)
 check("event + item (all): every line arrived (an event, an event, a close): the group ends on the last, of mixed kinds", mt(150).get("mover") == BACK and mt(150)["woke"]["what"].startswith("all 3 arrived:") and "the close of" not in mt(150)["woke"]["what"], mt(150))
 # an old reported event is not a wait's arrival
 lst(152, [Ev("fleet_op many"), Re("x")], mode="any", state_updated=None)
 d = rd(152); d["state_updated"] = now0 + 3600; put(152, d)
-check("event: a reported event older than the wait (the item's last move) is not an arrival", server._evwait_report(EW.event("fleet_op", verb="lane", sessions=3)) == [] and arrived_of(152) == [False, False], mt(152))
+check("event: a reported event older than the wait (the item's last move) is not an arrival", evwaits_svc.evwait_report(EW.event("fleet_op", verb="lane", sessions=3)) == [] and arrived_of(152) == [False, False], mt(152))
 # the pollers look for event lines as they do for an event wait
 lst(153, [Ev("box_online testbox"), Ev("pr_merged o/r#77"), Re("x")], mode="any")
-specs = server._event_specs(rd(153) | {"gid": "a153"})
+specs = evwaits_svc.event_specs(rd(153) | {"gid": "a153"})
 check("event: the catch-up pollers find the event lines of a list (the machine and the pull request), and an arrived line is no longer looked for", [(s.kind, s.key or s.machine) for s in specs] == [("box_online", "testbox"), ("pr_merged", "o/r#77")]
-      and [s.kind for s in server._event_specs({**rd(153), "metadata": {**mt(153), "waits": [{**mt(153)["waits"][0], "arrived": {"at": 1, "what": "x"}}, *mt(153)["waits"][1:]]}})] == ["pr_merged"]
-      and [s.kind for s in server._event_specs({**rd(100), "gid": "a100"})] == [] and server._event_specs({**rd(10), "gid": "a10"} if (T / "store/a/10.json").exists() else {"metadata": {}}) == [], specs)
+      and [s.kind for s in evwaits_svc.event_specs({**rd(153), "metadata": {**mt(153), "waits": [{**mt(153)["waits"][0], "arrived": {"at": 1, "what": "x"}}, *mt(153)["waits"][1:]]}})] == ["pr_merged"]
+      and [s.kind for s in evwaits_svc.event_specs({**rd(100), "gid": "a100"})] == [] and evwaits_svc.event_specs({**rd(10), "gid": "a10"} if (T / "store/a/10.json").exists() else {"metadata": {}}) == [], specs)
 
 # ================================================================ relay lines and the write path's mark
 reset()
 lst(160, [Re("the lease"), It("a901x")], mode="all"); item("901x", subject="[home] a blocker for the relay list")
 d = rd(160); d["metadata"]["waits"][1]["after"] = "a901x"; put(160, d)
-check("relay: a relay line has no detector: nothing the server sees marks it", server._evwait_report(EW.event("recycle")) == [] and server._wake_pass() == [] and arrived_of(160) == [False, False], None)
+check("relay: a relay line has no detector: nothing the server sees marks it", evwaits_svc.evwait_report(EW.event("recycle")) == [] and wakes_svc.wake_pass() == [] and arrived_of(160) == [False, False], None)
 out_ = {}
-turned = server._watch_mark("a160", "relay", time.time(), out_, lambda m_: WL.lines_by_kind(m_, "relay"), "the owner relayed the lease")
+turned = watching_svc.watch_mark("a160", "relay", time.time(), out_, lambda m_: WL.lines_by_kind(m_, "relay"), "the owner relayed the lease")
 check("relay: the write path marks it (watchers' seam: a line, the words, the cause); under `all` the item waits on", turned is False and arrived_of(160) == [True, False] and mt(160).get("wait_kind") == "list" and not out_, (turned, mt(160)))
 close("901x")
 check("relay: …and the last line arriving ends the group on the cause of that line", mt(160).get("mover") == BACK and mt(160)["woke"]["what"].startswith("all 2 arrived: the owner relayed the lease;"), mt(160))
 lst(161, [Re("the lease"), Tm(day(6))], mode="any"); out_ = {}
-check("relay (any): the relay line arriving is an arrival, not a question: the item goes to its post-wake mover", server._watch_mark("a161", "relay", time.time(), out_, lambda m_: WL.lines_by_kind(m_, "relay"), "the owner relayed the lease") is True
+check("relay (any): the relay line arriving is an arrival, not a question: the item goes to its post-wake mover", watching_svc.watch_mark("a161", "relay", time.time(), out_, lambda m_: WL.lines_by_kind(m_, "relay"), "the owner relayed the lease") is True
       and mt(161).get("mover") == BACK and mt(161).get("needs") == [BACK] and "ask" not in mt(161) and [x for rows in out_.values() for x in rows], mt(161))
-check("relay: a second delivery of the same mark changes nothing, and an item already turned is not turned again", server._watch_mark("a161", "relay", time.time(), {}, lambda m_: [0], "again") is False, None)
+check("relay: a second delivery of the same mark changes nothing, and an item already turned is not turned again", watching_svc.watch_mark("a161", "relay", time.time(), {}, lambda m_: [0], "again") is False, None)
 
 # ================================================================ mixed kinds, the group ends on the last
 reset()
 lst(170, [Tm(day(-1)), It("a171"), An(AURL2, "a reply"), Ev("job_run weekly"), Re("x")], mode="all")
 item(171, subject="[home] a blocker in a mixed list")
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 check("mixed: five lines, five kinds: the clock marks the time line", arrived_of(170) == [True, False, False, False, False], None)
 close(171)
-server._anchor_release("projects/alpha", notice("a reply came", anchor="github:o/r#6"), by="home-stew")
-server._evwait_report(EW.event("job_run", name="weekly"))
+wakes_svc.anchor_release("projects/alpha", notice("a reply came", anchor="github:o/r#6"), by="home-stew")
+evwaits_svc.evwait_report(EW.event("job_run", name="weekly"))
 check("mixed: …an item, an anchor and an event each mark their line; the item still waits, nobody is told", arrived_of(170) == [True, True, True, True, False] and mt(170).get("wait_kind") == "list" and not sent("watch"), arrived_of(170))
-server._watch_mark("a170", "relay", time.time(), {}, lambda m_: WL.lines_by_kind(m_, "relay"), "he relayed x")
+watching_svc.watch_mark("a170", "relay", time.time(), {}, lambda m_: WL.lines_by_kind(m_, "relay"), "he relayed x")
 check("mixed: …the relay line, the last, ends it", mt(170).get("mover") == BACK and mt(170)["woke"]["what"].startswith("all 5 arrived:") and all(k not in mt(170) for k in GONE) and "hold" not in mt(170), mt(170))
 
 # the marks are made, and the group ended, on the item as it stands under the lock: an item that no longer stores a list, an event older than the wait, and a group that is not due are left as they are
@@ -451,26 +452,26 @@ lst(172, [Ev("job_run weekly"), Re("x")], mode="any"); item(173, subject="[home]
 lst(174, [Tm(day(5)), Re("y")], mode="all")
 b172, b173, b174 = raw(172), raw(173), raw(174)
 old_ev = EW.event("job_run", name="weekly")
-check("under the lock: an event dated before the wait was set (its floor) marks no line", server._watch_mark("a172", "event", now0 - 7200, {}, lambda m_: WL.lines_by_kind(m_, "event"), "weekly ran", ev=old_ev) is False and raw(172) == b172, mt(172))
-check("under the lock: …an item that no longer stores a list (a single wait now) marks nothing and is not touched", server._watch_mark("a173", "relay", now0, {}, lambda m_: [0], "x") is False and raw(173) == b173, mt(173))
-check("under the lock: …a group that is not due is not ended (the wait is read again: its cause is not the one the caller saw)", server._watch_fire("a174", "time", now0, {}, recheck=True) is False and raw(174) == b174, mt(174))
-check("under the lock: …the same event dated after the wait was set marks its line and, in an `any` list, ends it", server._watch_mark("a172", "event", now0, {}, lambda m_: WL.lines_by_kind(m_, "event"), "weekly ran", ev=old_ev) is True and mt(172).get("mover") == BACK, mt(172))
+check("under the lock: an event dated before the wait was set (its floor) marks no line", watching_svc.watch_mark("a172", "event", now0 - 7200, {}, lambda m_: WL.lines_by_kind(m_, "event"), "weekly ran", ev=old_ev) is False and raw(172) == b172, mt(172))
+check("under the lock: …an item that no longer stores a list (a single wait now) marks nothing and is not touched", watching_svc.watch_mark("a173", "relay", now0, {}, lambda m_: [0], "x") is False and raw(173) == b173, mt(173))
+check("under the lock: …a group that is not due is not ended (the wait is read again: its cause is not the one the caller saw)", watching_svc.watch_fire("a174", "time", now0, {}, recheck=True) is False and raw(174) == b174, mt(174))
+check("under the lock: …the same event dated after the wait was set marks its line and, in an `any` list, ends it", watching_svc.watch_mark("a172", "event", now0, {}, lambda m_: WL.lines_by_kind(m_, "event"), "weekly ran", ev=old_ev) is True and mt(172).get("mover") == BACK, mt(172))
 
 # ================================================================ the backstop day
 reset()
 lst(180, [Tm(day(5)), It("a181"), An(AURL, "x")], mode="all", until=day(-1)); item(181, subject="[home] never closes")
-woke = server._wake_pass(); m = mt(180)
+woke = wakes_svc.wake_pass(); m = mt(180)
 check("backstop (no relay line): the backstop day turns the item alive to the post-wake mover whatever has arrived, saying what had and what is still open", "a180" in woke and m.get("mover") == BACK and m["woke"]["what"].startswith(f"backstop day {day(-1)}: nothing had arrived; still open: ") and "the close of" in m["woke"]["what"]
       and all(k not in m for k in GONE) and "ask" not in m, m)
 check("backstop: …the mover is told", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "backstop day" in sent("watch")[0][2], sent())
 reset()
 lst(182, [It("a183"), Tm(day(-3)), An(AURL, "x")], mode="all", until=day(-1)); item(183, status="completed", outcome="done", reason="r", needs=[], subject="[home] closed")
-server._wake_pass(); m = mt(182)
+wakes_svc.wake_pass(); m = mt(182)
 check("backstop: lines that arrived are said as arrived (the item and time lines here), the anchor line is still open", m.get("mover") == BACK and "arrived" in m["woke"]["what"] and "still open: a notice at " + AURL in m["woke"]["what"] and m["woke"]["what"].startswith(f"backstop day {day(-1)}:"), m.get("woke"))
 # with an open relay line
 reset()
 lst(184, [Tm(day(-2)), Re("the lease"), It("a185")], mode="all", until=day(-1), then="home-other"); item(185, subject="[home] open")
-woke = server._wake_pass(); m = mt(184)
+woke = wakes_svc.wake_pass(); m = mt(184)
 check("backstop (open relay line): the owner is asked, as a relay's ask-by day asks: the fixed question about the relay line's event, three options, the post-wake mover as `then`", "a184" in woke and m.get("needs") == ["decision"]
       and m.get("ask") == "Decide: has the lease arrived? · Options: arrived / not yet, ask again on <date> / drop" and [o["label"] for o in m["options"]] == ["arrived", "not yet, ask again on <date>", "drop"] and m.get("then") == BACK and "mover" not in m, m)
 check("backstop (open relay line): …the words of what arrived and what did not are on the item, nobody is messaged, and the wait is put by", m["woke"]["to"] == OWN and m["woke"]["what"].startswith(f"backstop day {day(-1)}: arrived ") and "still open" in m["woke"]["what"] and not sent("watch")
@@ -482,87 +483,87 @@ check("backstop (open relay line): `not yet` with a date puts the list back: its
       and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and WL.valid(m) and mod_of(184).wait.kind == "list", (out, m))
 check("backstop (open relay line): …and it is watched again (the next moment is that day)", wk.watches(rd(184)) and wk.next_moment(m) == wk.day_epoch(day(10)), None)
 # the owner says arrived / drop
-lst(186, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); server._wake_pass(); reset()
+lst(186, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); wakes_svc.wake_pass(); reset()
 server._answer("a186", "arrived", "", "answer"); m = mt(186)
 check("backstop (open relay line): `arrived` puts the item with the post-wake mover, alive; the wait's fields are gone", m.get("mover") == BACK and "ask" not in m and all(k not in m for k in GONE), m)
-lst(187, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); server._wake_pass()
+lst(187, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); wakes_svc.wake_pass()
 server._answer("a187", "drop", "", "answer"); m = mt(187)
 check("backstop (open relay line): `drop` closes it as not planned and the list goes with the rest of the wait", rd(187)["status"] == "completed" and m.get("outcome") == "dropped" and all(k not in m for k in GONE) and "ask" not in m, m)
 # an open relay line that has arrived does not ask
 reset()
 lst(188, [Re("the lease"), Tm(day(6))], mode="all", until=day(-1)); d = rd(188); d["metadata"]["waits"][0]["arrived"] = {"at": now0 - 100, "what": "he relayed it"}; put(188, d)
-server._wake_pass(); m = mt(188)
+wakes_svc.wake_pass(); m = mt(188)
 check("backstop: a relay line that has arrived is not an open one: the item goes to its post-wake mover, no question", m.get("mover") == BACK and "ask" not in m and "decision" not in (m.get("needs") or []), m)
 
 # ================================================================ races, edits and the other mechanisms
 # a list edited so that the group is over is found by the next pass
 reset()
 lst(190, [Tm(day(-1)), It("a191"), Re("x")], mode="all"); item(191)
-server._wake_pass(); d = rd(190); d["metadata"]["waits"][1]["arrived"] = {"at": now0, "what": "a191 closed"}; put(190, d)        # two of three arrived
+wakes_svc.wake_pass(); d = rd(190); d["metadata"]["waits"][1]["arrived"] = {"at": now0, "what": "a191 closed"}; put(190, d)        # two of three arrived
 check("edit: two of three lines have arrived: the item waits on", mt(190).get("wait_kind") == "list" and not WL.done(mt(190)), mt(190))
 d = rd(190); d["metadata"]["waits"] = d["metadata"]["waits"][:2]; put(190, d)                                                      # …and the open line is removed from the list
-check("edit: …the line that was open is removed: every line left has arrived, so the group is over and the scheduler sees it is due now", WL.done(mt(190)) and server._next_wake() is not None and server._next_wake() <= server._pages.zone_now(), server._next_wake())
-reset(); woke = server._minute_wake_pass() or server._wake_pass()
+check("edit: …the line that was open is removed: every line left has arrived, so the group is over and the scheduler sees it is due now", WL.done(mt(190)) and wakes_svc.next_wake() is not None and wakes_svc.next_wake() <= server._pages.zone_now(), wakes_svc.next_wake())
+reset(); woke = wakes_svc.minute_wake_pass() or wakes_svc.wake_pass()
 check("edit: …and the next pass turns it", mt(190).get("mover") == BACK and mt(190)["woke"]["what"].startswith("all 2 arrived:"), mt(190))
 # a list that does not hold is a single wait: it ends as one
 reset()
 lst(192, [Tm(day(5))], mode="all", until=day(-1))
-woke = server._wake_pass(); m = mt(192)
+woke = wakes_svc.wake_pass(); m = mt(192)
 check("malformed: an item that stores wait_kind=list with a list that does not hold ends as the date alone: its backstop day comes, the mover has it, the stray fields go with the wait", "a192" in woke and m.get("mover") == BACK
       and "its until" in m["woke"]["what"] and all(k not in m for k in GONE), m)
 # the legacy paths: with the watchers off nothing marks a line, and only the backstop day ends a list
 reset()
 lst(193, [Tm(day(9)), It("a194")], mode="all", until=day(9)); item(194)
 cfg(watchers=False)
-b193 = raw(193); woke = server._wake_pass(); server._release_after("a194", "done", "", "home-front"); server._anchor_release("projects/alpha", notice("a notice"), by="home-stew")
+b193 = raw(193); woke = wakes_svc.wake_pass(); wakes_svc.release_after("a194", "done", "", "home-front"); wakes_svc.anchor_release("projects/alpha", notice("a notice"), by="home-stew")
 check("legacy: with the watchers off nothing marks a line or ends a list before its backstop day (the wake pass, the `after` release and the held-anchor release leave it as it is)", raw(193) == b193 and "a193" not in woke, (woke, mt(193)))
-check("legacy: …the scheduler looks at its backstop day alone (one moment, the day's start)", [at for g, *_, at in server._wakes() if g == "a193"] == [server._wake_at(day(9))], [(g, at) for g, *_, at in server._wakes()])
+check("legacy: …the scheduler looks at its backstop day alone (one moment, the day's start)", [at for g, *_, at in wakes_svc.wake_rows() if g == "a193"] == [wakes_svc.wake_at(day(9))], [(g, at) for g, *_, at in wakes_svc.wake_rows()])
 # (d) the backstop day ends a list with the watchers off
 reset()
 lst(205, [Tm(day(9)), It("a206"), Ev("job_run weekly")], mode="all", until=day(-1)); item(206, subject="[home] the blocker of a list with the watchers off")
-woke = server._wake_pass(); m = mt(205)
+woke = wakes_svc.wake_pass(); m = mt(205)
 check("legacy (watchers off): a list whose backstop day has passed ends: the post-wake mover has it, alive, with the watchers' words (nothing arrived, every line still open)", "a205" in woke and m.get("mover") == BACK and m.get("needs") == [BACK]
       and m["woke"]["what"] == f"backstop day {day(-1)}: nothing had arrived; still open: the date {day(9)}; the close of {server._gh.shown('a206')}; a fleet event (job_run weekly)", m)
 check("legacy (watchers off): …through end_wait: the whole wait group goes (the list, its mode, the kind, the backstop, the post-wake mover) and the hold", all(k not in m for k in GONE) and all(k not in m for k in model.WAIT_GROUP) and "hold" not in m and "ask" not in m, m)
 check("legacy (watchers off): …the mover is told in one line and the History says the item woke", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "backstop day" in sent("watch")[0][2] and any(n.startswith("woke: backstop day ") for n in notes_of("a205")), (sent(), notes_of("a205")))
-reset(); server._wake_pass()
+reset(); wakes_svc.wake_pass()
 check("legacy (watchers off): …a later pass tells nobody again", not sent() and not notes_of("a205"), sent())
 reset()
-lst(207, [Re("the lease"), Tm(day(9))], mode="all", until=day(-1), then="home-other"); server._wake_pass(); m = mt(207)
+lst(207, [Re("the lease"), Tm(day(9))], mode="all", until=day(-1), then="home-other"); wakes_svc.wake_pass(); m = mt(207)
 check("legacy (watchers off): with a relay line still open the owner is asked, as the watchers ask (the same question, three options, the post-wake mover as `then`), nobody is messaged", m.get("needs") == ["decision"] and m.get("ask") == "Decide: has the lease arrived? · Options: arrived / not yet, ask again on <date> / drop"
       and m.get("then") == BACK and "mover" not in m and m["woke"]["what"].startswith(f"backstop day {day(-1)}: nothing had arrived; still open: news of the lease; ") and all(k not in m for k in GONE) and not sent("watch"), m)
 lst(209, [Re("x"), Tm(day(9))], mode="any", until=day(-1)); d = rd(209); d["metadata"]["waits"][1]["arrived"] = {"at": now0 - 100, "what": "the date came"}; put(209, d)
-reset(); server._wake_pass()
+reset(); wakes_svc.wake_pass()
 check("legacy (watchers off): a list that is already over by what has arrived (edited by hand) ends with the words of the arrival, not the backstop's", mt(209).get("mover") == BACK and mt(209)["woke"]["what"] == "any of 2 arrived: the date came; not needed: news of x", mt(209))
 item(213, wait_kind="time", hold=True, wake=day(-1), needs=[], post_wake_mover=BACK, subject="[home] a single wait with the watchers off")
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 check("legacy (watchers off): a single wait is released by the old pass as it always was (wake, no list words)", "a213" in woke and "hold" not in mt(213) and "woke" not in mt(213) and any(n.startswith("woke (wake ") for n in notes_of("a213")), (mt(213), notes_of("a213")))
 lst(214, [Tm(day(9)), It("a206")], mode="all", until=day(-1)); d = rd(214); d["metadata"]["waits"] = d["metadata"]["waits"][:1]; put(214, d)
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 check("legacy (watchers off): a stored list that does not hold ends as the date alone, as it did (the old pass's own words, no list words)", "a214" in woke and "woke" not in mt(214) and any(n.startswith("woke (wake ") for n in notes_of("a214"))
       and not any("backstop day" in n for n in notes_of("a214")) and "until" not in mt(214), (mt(214), notes_of("a214")))
 cfg(watchers=True)
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 check("legacy: …and with the watchers on they end a list the same way (the backstop day)", "a193" not in woke and mt(193).get("wait_kind") == "list", (woke, mt(193)))
-lst(215, [Tm(day(9)), It("a206"), Ev("job_run weekly")], mode="all", until=day(-1)); reset(); woke = server._wake_pass()
+lst(215, [Tm(day(9)), It("a206"), Ev("job_run weekly")], mode="all", until=day(-1)); reset(); woke = wakes_svc.wake_pass()
 check("legacy: …(watchers on: the same words as with them off)", "a215" in woke and mt(215)["woke"]["what"] == mt(205)["woke"]["what"], (mt(215).get("woke"), mt(205).get("woke")))
 # pause
 reset()
 lst(195, [Tm(day(-1)), Re("x")], mode="any", until=day(-1)); lst(196, [It("a197"), Re("x")], mode="any"); item(197)
-cfg(pause=True); b195 = raw(195); woke = server._wake_pass(); close(197)
+cfg(pause=True); b195 = raw(195); woke = wakes_svc.wake_pass(); close(197)
 check("pause: nothing is marked or ended while paused (the clock's pass, a close)", raw(195) == b195 and woke == [] and arrived_of(196) == [False, False] and not sent(), (woke, mt(196)))
-cfg(pause=False); woke = server._wake_pass()
+cfg(pause=False); woke = wakes_svc.wake_pass()
 check("pause: …when it lifts the clock's pass finds the arrivals and ends them", "a195" in woke and "a196" in woke and mt(196).get("mover") == BACK and mt(195).get("mover") == BACK, (woke, mt(196)))
 check("pause: …each recipient hears one message for the two items", len(sent("watch")) == 1 and "2 items are yours now" in sent("watch")[0][2], sent())
 # a failed turn is backed off, not retried hot
 lst(198, [Tm(day(-1)), Re("x")], mode="any")
-orig_fire = server._watch_fire
+orig_fire = watching_svc.watch_fire
 def boom(*a, **k): raise RuntimeError("disk")
-server._watch_fire = boom
+watching_svc.watch_fire = boom
 try:
-    server._wake_pass()
+    wakes_svc.wake_pass()
 finally:
-    server._watch_fire = orig_fire
+    watching_svc.watch_fire = orig_fire
 check("backstop: a turn that cannot be made is backed off (noted on the item), the arrival stays recorded", mt(198).get("watch", {}).get("failed_at", 0) > 0 and arrived_of(198)[0] is True and mt(198).get("wait_kind") == "list", mt(198))
 check("backstop: …and the scheduler looks at it again after the back-off, not at once", wk.next_moment(mt(198)) >= mt(198)["watch"]["failed_at"] + wk.BACKOFF - 1, wk.next_moment(mt(198)))
 # a closed item drops the list with the rest
@@ -578,7 +579,7 @@ check("clear_wait: it drops the list with the rest of the wait", all(k not in mt
 reset()
 lst(220, [Re("the first quote"), Re("the second quote"), Tm(day(9))], mode="all", until=day(-1)); d = rd(220); d["metadata"]["waits"][0]["arrived"] = {"at": now0 - 100, "what": "the first quote was relayed"}; put(220, d)
 check("relay_event: the first OPEN relay line's event (an arrived one is not asked about)", WL.relay_event(mt(220)) == "the second quote" and WL.relay_event({**GOOD, "waits": [Re("a"), Re("b")]}) == "a", WL.relay_event(mt(220)))
-server._wake_pass(); m = mt(220)
+wakes_svc.wake_pass(); m = mt(220)
 check("backstop (two relay lines, the first arrived): the owner is asked about the OPEN one", m.get("ask") == "Decide: has the second quote arrived? · Options: arrived / not yet, ask again on <date> / drop" and m.get("needs") == ["decision"]
       and "the first quote was relayed" in m["woke"]["what"] and "still open: news of the second quote" in m["woke"]["what"], m)
 # (b) an arrived line is still found by the close (open_only=False): the item is one the close is for, not a mention
@@ -604,11 +605,11 @@ check("stamp: …a write that leaves the list as it is keeps the stamp", nm_["wa
 # (5) an unstamped list: the first mark stamps the floor it had, so a second notice dated before that save still counts
 reset()
 lst(223, [An(AURL, "a reply"), An(AURL2, "a reply"), Re("x")], mode="all", watch={}); item_ = rd(223)
-check("stamp: an unstamped list reads its last write as the floor", "set_at" not in mt(223).get("watch", {}) and server._watch_floor(item_) == max(item_["state_updated"], item_["updated"]), mt(223))
-server._anchor_release("projects/alpha", notice("first reply", anchor="github:o/r#5", ts=now0 - 3600, ruled_at=now0 - 3600, ruling="passed"), by="home-stew")
+check("stamp: an unstamped list reads its last write as the floor", "set_at" not in mt(223).get("watch", {}) and watching_svc.watch_floor(item_) == max(item_["state_updated"], item_["updated"]), mt(223))
+wakes_svc.anchor_release("projects/alpha", notice("first reply", anchor="github:o/r#5", ts=now0 - 3600, ruled_at=now0 - 3600, ruling="passed"), by="home-stew")
 m = mt(223)
 check("stamp: the first mark stamps the floor the list had (the old last write), not now", arrived_of(223) == [True, False, False] and abs(m["watch"]["set_at"] - item_["updated"]) < 1 and rd(223)["updated"] >= now0, (m.get("watch"), item_["updated"]))
-server._anchor_release("projects/alpha", notice("second reply", anchor="github:o/r#6", ts=now0 - 1800, ruled_at=now0 - 1800, ruling="passed"), by="home-stew")
+wakes_svc.anchor_release("projects/alpha", notice("second reply", anchor="github:o/r#6", ts=now0 - 1800, ruled_at=now0 - 1800, ruling="passed"), by="home-stew")
 check("stamp: …so a second notice dated before the first mark's save still counts", arrived_of(223) == [True, True, False], (arrived_of(223), mt(223).get("watch")))
 # (e) a bool is no time; free text is clipped; the History note is clipped
 check("shape: a bool is no arrival time (float(True) is 1.0): the line is a line that has not arrived", not WL.arrived(WL.lines({**GOOD, "waits": [{**Tm("2026-11-20"), "arrived": {"at": True, "what": "x"}}, It("a1")]})[0])
@@ -618,7 +619,7 @@ cl = WL.lines({**GOOD, "waits": [An("https://x/" + "a" * 400, LONG), Ev(LONG), R
 check("shape: an anchor, an event and the words of an arrival are clipped to LINE_MAX (300); nothing else is", WL.LINE_MAX == 300 and len(cl[0]["anchor"]) == 300 and len(cl[0]["event"]) == 300 and len(cl[1]["event"]) == 300 and len(cl[2]["event"]) == 300
       and len(cl[3]["arrived_what"]) == 300 and cl[3]["until"] == "2026-11-20", [len(cl[0]["anchor"]), len(cl[0]["event"]), len(cl[3]["arrived_what"])])
 lst(224, [Re("the lease"), Tm(day(7))], mode="all"); out_ = {}
-server._watch_mark("a224", "relay", time.time(), out_, lambda m_: WL.lines_by_kind(m_, "relay"), "he relayed: " + LONG)
+watching_svc.watch_mark("a224", "relay", time.time(), out_, lambda m_: WL.lines_by_kind(m_, "relay"), "he relayed: " + LONG)
 check("shape: the History note of an arrival clips its words too (one line's worth), and the stored words keep to LINE_MAX", len(notes_of("a224")) == 1 and len(notes_of("a224")[0]) < 340 and notes_of("a224")[0].endswith("(1 of 2)") and len(mt(224)["waits"][0]["arrived"]["what"]) <= 300, [len(n) for n in notes_of("a224")])
 # (4) a list that does not hold is read as the date alone by every reader of the kind
 BADL = {"wait_kind": "list", "wait_mode": "all", "until": "2026-12-01", "waits": [Tm("2026-11-20")]}
@@ -637,14 +638,14 @@ def flaky(gid, *a, **k):
     calls_.append(gid)
     if gid == "a231": raise RuntimeError("disk")
     return orig_fire(gid, *a, **k)
-server._watch_fire = flaky
+watching_svc.watch_fire = flaky
 try:
-    woke = server._wake_pass()
+    woke = wakes_svc.wake_pass()
     first_calls = list(calls_); calls_.clear()
-    woke2 = server._wake_pass()
-    next_231 = [at for g, *_, at in server._wakes() if g == "a231"]
+    woke2 = wakes_svc.wake_pass()
+    next_231 = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
 finally:
-    server._watch_fire = orig_fire; server._WATCH_BACKOFF.pop("a231", None)
+    watching_svc.watch_fire = orig_fire; watching_svc.WATCH_BACKOFF.pop("a231", None)
 check("legacy (watchers off): a list whose end raises is skipped and noted, and the lists after it (and before it) are still ended", "a231" not in woke and all(g in woke for g in ("a230", "a232", "a233"))
       and all(mt(i_).get("mover") == BACK and "wait_kind" not in mt(i_) for i_ in (230, 232, 233)) and mt(231).get("wait_kind") == "list", (woke, first_calls))
 check("legacy (watchers off): …the failed one is backed off (noted on the item, as the watchers' pass notes it) and is not tried again by the next pass", mt(231).get("watch", {}).get("failed_at", 0) > 0 and "a231" in first_calls and "a231" not in calls_ and woke2 == [], (first_calls, calls_, mt(231).get("watch")))
@@ -653,7 +654,7 @@ cfg(watchers=True)
 # `_watch_fire(legacy=True)` ends a list that is open and nothing else: a closed item that still stores a list is left alone
 lst(234, [Tm(day(9)), It("a206")], mode="all", until=day(-1)); d_ = rd(234); d_["status"] = "completed"; put(234, d_)
 cfg(watchers=False); b234 = raw(234); out_ = {}
-try: got_ = server._watch_fire("a234", "backstop", time.time(), out_, legacy=True); why_ = ""
+try: got_ = watching_svc.watch_fire("a234", "backstop", time.time(), out_, legacy=True); why_ = ""
 except Exception as e_: got_, why_ = None, f"{e_.__class__.__name__}: {e_}"
 cfg(watchers=True)
 check("legacy: _watch_fire(legacy=True) on a closed item that stores a list does nothing (False, no message, no save, the item as it was)", got_ is False and not out_ and raw(234) == b234, (got_, why_, out_))

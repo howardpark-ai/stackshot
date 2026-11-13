@@ -55,6 +55,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import create as create_svc
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
@@ -214,7 +215,7 @@ check("6 the GitHub mirror's body and text are the same with and without the fie
 # (the step-proof saves are driven in tests/step_proof_scenario.py, which has the checkout and pull-request fixtures they need)
 telling.tell_woken = lambda *a, **k: None
 telling.tell_comment = lambda *a, **k: []
-server._release_after = lambda *a, **k: None
+wakes_svc.release_after = lambda *a, **k: None
 for i in range(20, 36): item(i)
 t7 = time.time()
 # the done check's close and its "met, waits for the decision" save

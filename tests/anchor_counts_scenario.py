@@ -90,6 +90,7 @@ check("completion_due: the same anchor on two pages is asked about on each (each
 
 # ---- the readers built on it
 from stackshot.web import server
+from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
@@ -150,7 +151,7 @@ def item2(i, project, status="open", mover="mv-alpha", **meta):
 held_meta = dict(state="parked", hold=True, needs=["external"], wake="2099-01-01", next="mv-alpha: look again")
 def is_held(g): return bool(json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())["metadata"].get("hold"))
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-woke = []; server._wake_notify = lambda g, it, what, *a, **k: woke.append((g, what))
+woke = []; wakes_svc.wake_notify = lambda g, it, what, *a, **k: woke.append((g, what))
 URL_B = "https://acme.slack.com/archives/D0000000009"       # held by beta only
 URL_C = "https://github.com/o/r/pull/4"                    # held by gamma only (a keeper there)
 item2(20, A, **held_meta); item2(21, A, **held_meta)
@@ -158,27 +159,27 @@ item2(20, A, **held_meta); item2(21, A, **held_meta)
 
 # _anchor_pass: a held item of alpha whose anchor only beta holds is released by the notice in beta's log (beta has no keeper), not by one in alpha's
 check("the pass reads the page that holds the anchor: a notice in the item's own page's log, where the anchor is not held, releases nothing",
-      (routing.record(A, kind="anchor", to="x", label="Slack", who="hub", text="in the wrong log", target="for mv-alpha", anchor=URL_B), server._anchor_pass())[1] == [] and is_held("a20"))
-routing.record(B, kind="anchor", to="x", label="Slack", who="hub", text="Kim wrote", target="", anchor=URL_B)
-rel = server._anchor_pass()
+      (routing.record(A, kind="anchor", to="x", label="Slack", who="watcher", text="in the wrong log", target="for mv-alpha", anchor=URL_B), wakes_svc.anchor_pass())[1] == [] and is_held("a20"))
+routing.record(B, kind="anchor", to="x", label="Slack", who="watcher", text="Kim wrote", target="", anchor=URL_B)
+rel = wakes_svc.anchor_pass()
 check("...a notice in the log of the keeperless page that holds it releases the held item of another project", rel == ["a20"] and not is_held("a20") and [g for g, _w in woke] == ["a20"]
       and "arrived (nobody rules this project's notices)" in woke[0][1], (rel, woke))
-check("...once", server._anchor_pass() == [] and len(woke) == 1)
+check("...once", wakes_svc.anchor_pass() == [] and len(woke) == 1)
 
 # a page with a keeper: the keeper's ruling releases (_route calls _anchor_release with the page that holds the anchor), the pass only a line the hub ruled itself
-n_k = routing.record(C, kind="anchor", to="keep-gamma", label="PR 4", who="hub", text="merged", target="for mv-alpha", anchor=URL_C)
+n_k = routing.record(C, kind="anchor", to="keep-gamma", label="PR 4", who="watcher", text="merged", target="for mv-alpha", anchor=URL_C)
 with open(routing._file(C), "a", encoding="utf-8") as f:
     f.write(json.dumps({"id": n_k, "ruling": "passed", "to": "mv-alpha", "reason": "theirs", "by": "keep-gamma", "ts": time.time()}) + "\n")
-check("the pass leaves a held item whose anchor's page has a keeper to the keeper's ruling", server._anchor_pass() == [] and is_held("a21"))
-rel = server._anchor_release(C, next(n for n in routing.read(C) if n["id"] == n_k), by="keep-gamma")
+check("the pass leaves a held item whose anchor's page has a keeper to the keeper's ruling", wakes_svc.anchor_pass() == [] and is_held("a21"))
+rel = wakes_svc.anchor_release(C, next(n for n in routing.read(C) if n["id"] == n_k), by="keep-gamma")
 check("...and the keeper's passed ruling, given the page that holds the anchor, releases the item of another project", rel == ["a21"] and not is_held("a21"), rel)
 item2(21, A, **held_meta)
 time.sleep(0.05); routing.record_auto(C, "merged", "a routine event on the fleet's own pull request", kind="anchor", label="PR 4", who="CI", text="CI passed", target="for mv-alpha", anchor=URL_C)
-check("...and a line the hub ruled itself (a routine event) releases it from the pass, whatever project the item is of", server._anchor_pass() == ["a21"] and not is_held("a21"))
+check("...and a line the watcher ruled itself (a routine event) releases it from the pass, whatever project the item is of", wakes_svc.anchor_pass() == ["a21"] and not is_held("a21"))
 item2(21, A, **held_meta)
 check("...and an anchor scoped to nobody held releases nothing (a project-wide anchor is for no item)", (
-    (T / "store/anchors.json").write_text(json.dumps({A: [], B: [{"url": URL_B, "items": None, "added": 5, "by": "t"}], C: []})), routing.record(B, kind="anchor", to="x", label="Slack", who="hub", text="again", target="", anchor=URL_B),
-    server._anchor_pass())[2] == [] and is_held("a21"))
+    (T / "store/anchors.json").write_text(json.dumps({A: [], B: [{"url": URL_B, "items": None, "added": 5, "by": "t"}], C: []})), routing.record(B, kind="anchor", to="x", label="Slack", who="watcher", text="again", target="", anchor=URL_B),
+    wakes_svc.anchor_pass())[2] == [] and is_held("a21"))
 
 # _watch_anchor_seen: an anchor any page holds is watched (no "add it" warning), the log of the page that holds it is read; one no page holds is the warning
 (T / "store/anchors.json").write_text(json.dumps({A: [], B: [{"url": URL_B, "items": ["a20"], "added": 5, "by": "t"}], C: []}))
@@ -188,11 +189,11 @@ unheld = server._watch_anchor_seen(A, "https://example.invalid/nobody", 0.0)
 check("...an anchor no page holds is still the warning, saying how to add it", "anchor-hub does not watch https://example.invalid/nobody for projects/alpha" in unheld and 'add=["https://example.invalid/nobody"]' in unheld, unheld)
 
 # _watch_anchor_notice: an item of another project whose stored wait is on an anchor a keeperless page holds is turned by that page's notice, even if the item's own page has a keeper
-told = []; server._watch_tell = lambda sid, rows: told.append((sid, [r[0] for r in rows]))
+told = []; watching_svc.watch_tell = lambda sid, rows: told.append((sid, [r[0] for r in rows]))
 item2(40, A, wait_kind="anchor", wait_anchor=URL_B, wait_event="a reply", ask_by="2099-01-01", post_wake_mover="mv-alpha", needs=[], next="mv-alpha: read it", watch={"set_at": 1.0})
 item2(41, A, wait_kind="anchor", wait_anchor="https://example.invalid/not-held-anywhere", wait_event="a reply", ask_by="2099-01-01", post_wake_mover="mv-alpha", needs=[], next="mv-alpha: read it", watch={"set_at": 1.0})
 n_w = {"id": "w1", "ts": time.time(), "kind": "anchor", "label": "Slack", "who": "hub", "text": "Kim answered", "to": "x", "target": "", "anchor": URL_B}
-rel = server._anchor_release(B, n_w)
+rel = wakes_svc.anchor_release(B, n_w)
 m40 = json.loads((T / "store/a/40.json").read_text())["metadata"]
 check("watch: a stored anchor wait of an item of alpha (which has a keeper) on a URL keeperless beta also holds is turned by beta's notice", rel == ["a40"] and "wait_kind" not in m40 and m40.get("mover") == "mv-alpha", (rel, m40))
 check("...an item waiting on an anchor no page holds is not touched by it", json.loads((T / "store/a/41.json").read_text())["metadata"].get("wait_kind") == "anchor")

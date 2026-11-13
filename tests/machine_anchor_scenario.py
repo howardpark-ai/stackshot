@@ -1,4 +1,4 @@
-"""Scenario test for the machine anchor (machine_anchor.py, server._machine_anchor_poll, _machine_note, the anchors tool's `machine:<name>`) — fixture data, no live store, no network, no server socket.
+"""Scenario test for the machine anchor (machine_anchor.py, evwaits_svc.machine_anchor_poll, _machine_note, the anchors tool's `machine:<name>`) — fixture data, no live store, no network, no server socket.
 
 An item that needs a machine of the fleet used to sit on a dated backstop after the machine was back; only a `box_online <machine>` event wait turned an item. A machine anchor is the standing form: the
 anchors tool takes `machine:<name>`, and the mover of each item the anchor counts for is told, once, each time that machine checks in again. Covered:
@@ -75,6 +75,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import route as _wt_route; from stackshot.anchors import machine_anchor as MA; from stackshot.anchors import anchors as ANC; from stackshot.service import create as create_svc
+from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -92,7 +93,7 @@ CFG.update(guards=False, watchers=True, pause=False)
 def reset(): SENT.clear()
 R = server._gh.shown
 def anchors(**kw): return _wt_anchors._anchors("projects/alpha", who=BACK, **kw)
-def tick(): return server._evwait_poll(time.time())
+def tick(): return evwaits_svc.evwait_poll(time.time())
 def mstore(): return json.loads((T / "store/machine-anchors.json").read_text()) if (T / "store/machine-anchors.json").exists() else {}
 def notices(): return [x for x in SENT if x[3] == "watch"]
 
@@ -254,7 +255,7 @@ import threading
 reset()
 go_offline("host-b"); tick(); reset()
 checkin("host-b")
-since_b = server._machine_state("box-b")[1]
+since_b = evwaits_svc.machine_state("box-b")[1]
 raised = since_b + 5000.0
 with MA.LOCK:
     th = threading.Thread(target=tick, daemon=True); th.start()

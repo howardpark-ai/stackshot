@@ -4,7 +4,7 @@ A notice to a BACKGROUND agent (a `background:` entry of a page's agents map) th
 held here and handed over with the agent's next turn, whatever caused that turn. Held kinds (KINDS):
   closed      an item the agent moves or observes was closed or completed by another session (telling.tell_owner, tell_observers, tell_owner_change)
   changed     another session changed an item the agent neither moves nor is named on: its next, needs, check or after (tell_owner_change)
-  queue       a wake that leaves an item still after an open item: its place in the queue, nothing to do yet (_wake_tell)
+  queue       a wake that leaves an item still after an open item: its place in the queue, nothing to do yet (wake_tell in service/wakes.py)
   page-owed   the keeper's "the page update is owed" notice (pilot_relay, pilot_relay_many; also what the router passes of such a notice)
   fyi         a message its sender marked fyi (the message tool's `fyi`)
 Everything else wakes the agent as before: a notice that names it in needs, hands it an item (mover, hand-off), ends its wait, carries

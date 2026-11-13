@@ -72,6 +72,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import owner_steps as HS; from stackshot.web import itempage as IP; from stackshot.model import next_backfill as NB
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import update as _wt_update
@@ -279,7 +280,7 @@ _w = (_dt.date.today() + _dt.timedelta(days=3)).isoformat()
 r = upd(11, hold=True, wake=_w, wait_basis=f"the vendor ships the part {_w}")
 b = rd(11)
 check("(setup) a held item in an agent's hands has no step of his", b["metadata"].get("until") and his(11) == [], st(11))
-server._wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
+wakes_svc.wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
 a = rd(11)
 check("a wake pass over a held item makes no step of his and ticks none", not a["metadata"].get("hold") and his(11) == [], (his(11), told[-1:] if told else None))
 check("the router and its live pass never write an item (no save, no update call in either)", not re.search(r"\b_save\(|stackshot_update\(|update_unlocked\(|update_item\(",pathlib.Path(STACK, "stackshot/router/router.py").read_text() + pathlib.Path(STACK, "stackshot/router/router_live.py").read_text()))

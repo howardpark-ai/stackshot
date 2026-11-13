@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.core import runner as R
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -56,11 +57,11 @@ EXPECT = ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick"
           "roles_sync_safe", "clients_tick", "pilot_fallback_tick", "stall_tick", "handback_tick", "fleet_publish"]
 TEN = ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"]          # the ten-minute set: right after the minute set in the round that finds it due
 ORDER = EXPECT + TEN
-SERVER_FNS = {"wake_pass": "_minute_wake_pass", "anchor_pass": "_minute_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick",
+SERVER_FNS = {"wake_pass": "minute_wake_pass", "anchor_pass": "minute_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick",
               "balance_tick": "_balance_tick", "handoff_tick": "_handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick",
               "pilot_fallback_tick": "_pilot_fallback_tick", "stall_tick": "_stall_tick",
-              "handback_tick": "handback_tick", "fleet_publish": "fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return {"handback_tick": telling, "fleet_publish": runner_svc}.get(fn, server)       # the owner of a tick function: the hand-back tick is the telling's, the publish step is the runner's, the rest are the server's
+              "handback_tick": "handback_tick", "fleet_publish": "fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
+def own(fn): return {"handback_tick": telling, "fleet_publish": runner_svc, "minute_wake_pass": wakes_svc, "minute_anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc}.get(fn, server)       # the owner of a tick function: the hand-back tick is the telling's, the publish step is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the rest are the server's
 clk = Clock()
 log: list[tuple[str, float]] = []
 saved = {}
@@ -73,14 +74,14 @@ def install():
             if boom_in["name"] == label: raise RuntimeError(f"{label} broke")
             return []
         setattr(own(fn), fn, f)
-    saved["_next_wake"] = server._next_wake
-    server._next_wake = lambda: None
+    saved["next_wake"] = wakes_svc.next_wake
+    wakes_svc.next_wake = lambda: None
 def restore():
     for fn, orig in saved.items(): setattr(own(fn), fn, orig)
 
 def new_runner(pace=None):
     kw = {} if pace is None else {"pace": pace}
-    return R.Runner(runner_svc.ticks(), holding=lambda: False, wake_wait=server._minute_wake_wait, event=threading.Event(), clock=clk, **kw)
+    return R.Runner(runner_svc.ticks(), holding=lambda: False, wake_wait=wakes_svc.minute_wake_wait, event=threading.Event(), clock=clk, **kw)
 
 def rounds_of(entries):
     """The log cut into rounds: a run of ticks ends when the table starts over (a name at or before the previous one in the table's order)."""

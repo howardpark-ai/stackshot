@@ -133,6 +133,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 from stackshot.tools import migrate_model as MM
@@ -297,7 +298,7 @@ _spied_runner().run_round(event=True); held_calls = list(_calls)
 wk.release(); _spied_runner().run_round(event=True); free_calls = list(_calls); wk.hold(BY, 600, begin=True)
 check("begin: every clock that reads or notifies about items stands still while it is held (the ladder, the checks, the answer escalation, the hand-off pass, the For you look, the filing pass); the registry sync, the clients' tick, the two wake passes (which check for themselves) and the fleet publish go on",
       held_calls == ["wake_pass", "anchor_pass", "roles_sync_safe", "clients_tick", "fleet_publish"] and free_calls == _all_ticks, (held_calls, free_calls))
-check("begin: the wake pass and the watchers do nothing while it is held", server._wake_pass() == [] and server._watch_pass() == [] and not SENT, SENT)
+check("begin: the wake pass and the watchers do nothing while it is held", wakes_svc.wake_pass() == [] and watching_svc.watch_pass() == [] and not SENT, SENT)
 check("apply: a field the migration may not set, and a batch that is too big, are refused", "may not set" in call("apply", writes=[{"item": "board#2", "set": {"subject": "x"}}])["results"][0]["why"]
       and "list of 1 to" in call("apply", writes=[{}] * 61).get("error", ""), None)
 res1 = call("apply", writes=[x.as_body() for x in all_writes])
@@ -336,7 +337,7 @@ item(60, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=BACK, cap_ok
 item(61, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=BACK, cap_ok={"wake": day(-1), "quote": "park until yesterday", "by": "x"}, needs=[], subject="[home] due 2")
 item(62, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=OTHER, cap_ok={"wake": day(-1), "quote": "park until yesterday", "by": "x"}, needs=[], subject="[home] due 3")
 SENT.clear()
-check("end-before: with the pause held three items past their wake stay as they are and nothing is sent", server._wake_pass() == [] and mt(60).get("wait_kind") == "time" and not SENT, SENT)
+check("end-before: with the pause held three items past their wake stay as they are and nothing is sent", wakes_svc.wake_pass() == [] and mt(60).get("wait_kind") == "time" and not SENT, SENT)
 e = call("end")
 check("end: the pass's hold is lifted, and everything that came due fires in one pass", e.get("held") is False and {M.shown("g60"), M.shown("g61"), M.shown("g62")} <= set(e.get("fired", [])) and not wk.paused(), e)
 check("end: …one message per recipient listing its items", len([x for x in sent("watch") if x[1] == UB]) == 1 and len([x for x in sent("watch") if x[1] == U[OTHER]]) == 1, [(x[1][-1:], x[2][:50]) for x in SENT])
@@ -742,13 +743,13 @@ check("S2: a push that fails is reported `sent: false` with its reason, the owne
       and MM.ledger_of(runs3) >= {MM.row_key(r) for r in rows_g1 if r["item"] in ("board#95", "board#97")}, (rc_f, direct_f, owners_f, led_f, rc_ok, len(sent("migration"))))
 
 # ---- the anchor pass stands still with the pass held
-_rd, _rel = server._routing.read, server._anchor_release
+_rd, _rel = server._routing.read, wakes_svc.anchor_release
 RC: list = []
-server._routing.read = lambda *a, **k: (RC.append(a), _rd(*a, **k))[1]; server._anchor_release = lambda *a, **k: []
+server._routing.read = lambda *a, **k: (RC.append(a), _rd(*a, **k))[1]; wakes_svc.anchor_release = lambda *a, **k: []
 try:
-    wk.hold(BY, 600, begin=True); held_r = server._anchor_pass(); n_held = len(RC); wk.release(); server._anchor_pass(); n_free = len(RC)
+    wk.hold(BY, 600, begin=True); held_r = wakes_svc.anchor_pass(); n_held = len(RC); wk.release(); wakes_svc.anchor_pass(); n_free = len(RC)
 finally:
-    server._routing.read, server._anchor_release = _rd, _rel; wk.release()
+    server._routing.read, wakes_svc.anchor_release = _rd, _rel; wk.release()
 check("anchor pass: it releases nothing and reads no notice while the pass holds the board; free, it reads the log", held_r == [] and n_held == 0 and n_free > 0, (held_r, n_held, n_free))
 
 # ---- the mirror on: an item with an issue gets its one job, an item with none gets none (a job for it would create an issue)

@@ -248,7 +248,7 @@ def held_by(item: dict[str, Any], was: dict[str, Any] | None = None) -> tuple[st
             if mod.state == _model.ALIVE:
                 cands = [(mod.mover, "mover"), (mod.then, "then")]
             elif mod.wait:      # a waiting item: the post-wake mover when the writer named one, else the stored mover / `then` (it relays), else the model's default for who takes it after the wait.
-                # The order is the one the hand-over writers (_hand_stored_then, _decision_hand_over, _release_after) still use: they hand to the stored `then`, so the reader must find the same session.
+                # The order is the one the hand-over writers (_hand_stored_then, _decision_hand_over, release_after in service/wakes.py) still use: they hand to the stored `then`, so the reader must find the same session.
                 cands = [(_model.norm_who(meta.get("post_wake_mover")), "then"), (_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then"), (mod.wait.mover, "then")]
     except Exception:  # noqa: BLE001  — a notice's addressee is never worth failing a write over
         cands = []
@@ -1403,7 +1403,7 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
     cause = f"{me} {_clip_line(closed.get('subject') or '', 100)} closed ({how}" + (f": {why}" if why else "") + f"){' by ' + _session_label(writer) if writer else ''}"
     for sid, rows in by_sid.items():
         keep: list[tuple[str, dict[str, Any]]] = []
-        for g, it in rows:         # the path of _wake_tell: a recipient the router holds the project for gets the notice through the routing log, the router passes it on
+        for g, it in rows:         # the path of wake_tell in service/wakes.py: a recipient the router holds the project for gets the notice through the routing log, the router passes it on
             m_ = it.get("metadata") or {}
             project, owner = str(m_.get("project") or ""), holder(it)
             if not _router_live.holds(project, sid):      # the recipient is the item's mover, so there is no "its own item" to tell directly

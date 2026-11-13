@@ -58,6 +58,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.web.tools import update as _wt_update
@@ -181,13 +182,13 @@ check("2 fallback_date: the earliest date after today and within the cap in the 
 item(20, needs=[BACK], until=w(-1))
 item(21, needs=[BACK], until=w(-1), wait_kind="time", post_wake_mover=BACK)
 item(22, needs=[BACK], hold=True, wake=w(-1), wait_kind="time", post_wake_mover=BACK)             # stored by the old fields: the pass leaves its kind as it did
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 check("3 the wake pass: a past until ends the wait, and until goes (with the kind when it stood beside it)", "a20" in woke and "a21" in woke and not W.stored_until(mt(20)) and not W.stored_until(mt(21)) and "wait_kind" not in mt(21), (woke, mt(20), mt(21)))
 check("3 …an item that stores the old fields is released as it was: wake and hold go", "a22" in woke and "wake" not in mt(22) and "hold" not in mt(22), mt(22))
 item(23, needs=[BACK], until=w(4), wait_kind="item", after=["a24"], post_wake_mover=BACK)
 item(24, needs=[BACK])
 p24 = rd(24); p24["status"] = "completed"; p24["outcome"] = "done"; (T / "store/a/24.json").write_text(json.dumps(p24))
-rel = server._release_after("a24", "done", "", "home-other")
+rel = wakes_svc.release_after("a24", "done", "", "home-other")
 check("3 the release of an after link: the wait is over, until, after and the kind go", "a23" in rel and not W.stored_until(mt(23)) and "after" not in mt(23) and "wait_kind" not in mt(23), (rel, mt(23)))
 item(25, needs=[BACK], until=w(4), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
 bupd(25, clear_wait=True)
@@ -252,12 +253,12 @@ item(56, needs=["external"], until=w(1))
 item(57, needs=[BACK], until=w(1), after=["a53"], wait_kind="item")
 for g in (56,):
     d = rd(g); d["metadata"]["until"] = w(-1); (T / f"store/a/{g}.json").write_text(json.dumps(d))
-server._watch_pass()
+watching_svc.watch_pass()
 check("5.4 a date-only wait that ends keeps needs=external (the item goes back to others, not to a session)", W.stored_until(mt(56)) is None or not W.stored_until(mt(56)), mt(56))
 check("5.4 …and needs stays external, with the arrival recorded", mt(56).get("needs") == ["external"] and mt(56).get("woke"), mt(56))
 item(58, needs=[BACK], until=w(1), after=["a53"])
 d = rd(58); d["metadata"]["until"] = w(-1); (T / "store/a/58.json").write_text(json.dumps(d))
-server._watch_pass()
+watching_svc.watch_pass()
 check("5.4 a date that passes never drops an open after link", mt(58).get("after") == ["a53"], mt(58))
 
 # 5.5 update matches create: a date beside an after link with no kind is the item wait's backstop
