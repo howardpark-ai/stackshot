@@ -40,6 +40,7 @@ from stackshot.model import steps as _steps
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_sessions
 from stackshot.projects import pages as _pages
 from stackshot.service import gates as _gates
+from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path, _shown_ids
 from stackshot.waits import until_write as _uw
@@ -102,7 +103,6 @@ class Hooks:
     gate_recommend_stance: Callable[..., Any]
     gate_recycle_item: Callable[..., Any]
     gate_subject: Callable[..., Any]
-    handoff_notify: Callable[..., Any]
     lift_ask: Callable[..., Any]
     machine_note: Callable[..., Any]
     model_guards_on: Callable[..., Any]
@@ -113,8 +113,6 @@ class Hooks:
     owner_then_default: Callable[..., Any]
     parse_check: Callable[..., Any]
     parse_wake: Callable[..., Any]
-    pilot_charge: Callable[..., Any]
-    pilot_relay: Callable[..., Any]
     project_subject_prefix: Callable[..., Any]
     publish: Callable[..., Any]
     record_fixes: Callable[..., Any]
@@ -123,14 +121,9 @@ class Hooks:
     session_id: Callable[..., Any]
     similar_note: Callable[..., Any]
     step_proof_set: Callable[..., Any]
-    tell_needed: Callable[..., Any]
     wait_alias_gate: Callable[..., Any]
     wake_at: Callable[..., Any]
-    writer_charge: Callable[..., Any]
     writer_owes: Callable[..., Any]
-    session_next: Callable[[], bool]      # the create or update tool's own call (field_gates._SESSION_NEXT): only a session's write is judged by the write checks of Next
-    question: Callable[[], bool]          # a script's question (server._QUESTION): its wording is never judged
-    terminal_row: Callable[[], bool]      # the terminal prompt's and the job-gap routes' row (server._TERMINAL_ROW): it owes no page and no session is told
     ask_none: tuple[str, ...]             # the words that mean no ask, no observers, no check (server._ASK_NONE)
     subject_tagged: Any                   # the compiled pattern of a subject that already carries a tag (field_gates._SUBJECT_TAGGED)
 
@@ -210,7 +203,7 @@ def create_item(
     h.gate_subject(subject)
     h.gate_recycle_item(subject)
     h.gate_description(description)
-    if h.session_next() and not by:      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
+    if _writes.session_next() and not by:      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
         h.gate_goal(description)
     h.gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none)
     ask = "" if ask.strip().lower() in h.ask_none else ask
@@ -277,7 +270,7 @@ def create_item(
     asked = lifted + h.ask_owed(meta)       # needs=decision without an ask: a nag line, or refused from [ask] refuse_after
     h.gate_one_decision(meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written
     h.gate_alternatives(meta, description)  # alternatives named, none listed
-    if not h.question():    # a script's question is never lost on its wording: its Decide is the question as written, and the board may take no options
+    if not _writes.question():    # a script's question is never lost on its wording: its Decide is the question as written, and the board may take no options
         h.gate_open_question(meta)          # an open question with no options: the page would draw Yes / No under it
         h.gate_recommend_stance(meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
     h.gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
@@ -285,12 +278,12 @@ def create_item(
     asked += h.options_note(meta) + h.actor_note(meta)
     desc_note = _gates.gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v))    # the write guards of the item model, every field judged on a create
     h.anchor_wait_gate({}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
-    if h.session_next() and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
+    if _writes.session_next() and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
             and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: h.after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)
         raise ToolError(f"Refused: the new item has no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
-    if not h.terminal_row():      # the terminal prompt's row files "<owner>: open … and answer" and sets its state your-step in the next call (_terminal_state; a create sets no step): its own script, not a session hiding a step
+    if not _writes.terminal_row():      # the terminal prompt's row files "<owner>: open … and answer" and sets its state your-step in the next call (_terminal_state; a create sets no step): its own script, not a session hiding a step
         _gates.gate_owner_step({"status": "open", "subject": subject, "description": description, "metadata": meta}, create=True)     # The owner's step under an agent's state is refused, as on an update
-    if h.session_next() and not by and h.model_guards_on():
+    if _writes.session_next() and not by and h.model_guards_on():
         _gates.gate_front_step("", {"status": "open", "subject": subject, "metadata": meta}, [], _steps.view(meta, keeper=owner), owner)     # a step that opens with a front agent on an item another session moves: nothing could wake it for the step
     if meta.get("mover") or meta.get("then") or _needs_sessions(meta):     # step 2: a hand-off at creation to a session with no pane is refused: an item created with no mover is nobody's hand-off, the project's builder or -main agent takes it (D1)
         _gates.gate_handoff("", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
@@ -329,20 +322,20 @@ def create_item(
     _writes.save(gid, item, writer=writer)
     if request_id:
         _remember_request(request_id, gid)
-    stew, role = h.pilot_charge(meta.get("project", ""), writer)
-    if h.terminal_row():
+    stew, role = _telling.pilot_charge(meta.get("project", ""), writer)
+    if _writes.terminal_row():
         stew, role = "", ""                # a terminal-prompt row owes the page nothing: no one is charged, the router and the keeper are told nothing
     if stew and role == "name" and h.writer_owes() and not by:   # the writer owes it; the keeper only past the grace (a script owes none)
-        told = h.writer_charge(meta.get("project", ""), gid, owner, stew, "created", loose=False)
+        told = _telling.writer_charge(meta.get("project", ""), gid, owner, stew, "created", loose=False)
     else:
         if by and stew and h.session_id(stew) == h.session_id(owner):
             stew = ""                  # a script's filing is never charged to the creator, even when it is also the keeper
         charged = stew if by else (stew or owner)
         if charged:
             h.owed_mark(meta.get("project", ""), charged, gid)  # a new item is a state change; in the pilot the page's keeper accounts for another session's (a script's filing: the keeper's alone)
-        told = h.pilot_relay(meta.get("project", ""), gid, item, "created", writer, stew, role) if stew else ""
-    told += h.tell_needed(gid, item, _needs_sessions(meta), writer)   # a session named in needs gets one notice
-    told += h.handoff_notify(gid, item)     # step 2: the hand-off at creation is told, unless the notice above did
+        told = _telling.pilot_relay(meta.get("project", ""), gid, item, "created", writer, stew, role) if stew else ""
+    told += _telling.tell_needed(gid, item, _needs_sessions(meta), writer)   # a session named in needs gets one notice
+    told += _telling.handoff_notify(gid, item)     # step 2: the hand-off at creation is told, unless the notice above did
     h.publish()
     item["gid"] = gid
     machine_note = h.machine_note(gid, item, owner)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal

@@ -45,6 +45,7 @@ from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import gates as _gates
+from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _shown_ids
 from stackshot.waits import handoff as _ho
@@ -81,7 +82,6 @@ class Hooks:
     cap_ok_drop: Callable[..., Any]
     cap_ok_put: Callable[..., Any]
     check_how: str                    # the forms of a done check (server._CHECK_HOW)
-    close_was_set: Callable[[Any], None]    # remember on this thread the item as it stood before the close being saved (server._CLOSE_WAS.item), None when it ends: the close is told to the mover it dropped
     contact_alive: Callable[..., Any]
     contact_fronts: Callable[..., Any]
     contact_same: Callable[..., Any]
@@ -93,7 +93,6 @@ class Hooks:
     finishes_own_line: Callable[..., Any]
     fmt: Callable[..., Any]
     form_notes: Callable[..., Any]
-    front_sender: Callable[..., Any]
     gate_alternatives: Callable[..., Any]
     gate_ask: Callable[..., Any]
     gate_bare_urls: Callable[..., Any]
@@ -108,20 +107,17 @@ class Hooks:
     gate_own_action: Callable[..., Any]
     gate_recommend_stance: Callable[..., Any]
     gate_subject: Callable[..., Any]
-    handoff_notify: Callable[..., Any]
     handoffs_in: Callable[..., Any]
     handover: Callable[..., Any]
     ho_derive: Callable[..., Any]
     ho_same: Callable[..., Any]
     hold_held_by: Callable[..., Any]
     hold_set: Callable[..., Any]
-    holder: Callable[..., Any]
     is_held: Callable[..., Any]
     lift_ask: Callable[..., Any]
     machine_note: Callable[..., Any]
     main_agent: Callable[..., Any]
     marks_given: Callable[..., Any]
-    mentions_reply: Callable[..., Any]
     model_apply: Callable[..., Any]
     model_guards_on: Callable[..., Any]
     model_of: Callable[..., Any]
@@ -132,20 +128,13 @@ class Hooks:
     options_note: Callable[..., Any]
     owed_mark: Callable[..., Any]
     owner_quote_on: Callable[..., Any]
-    owner_reached: Callable[..., Any]
     owner_state_mover: Callable[..., Any]
     owner_then_default: Callable[..., Any]
     owner_want: Callable[..., Any]
-    page_keeper: Callable[..., Any]
     parse_check: Callable[..., Any]
     parse_wake: Callable[..., Any]
-    pilot_charge: Callable[..., Any]
-    pilot_relay: Callable[..., Any]
     publish: Callable[..., Any]
-    push_noted: Callable[..., Any]
-    quiet: Callable[..., Any]
     record_fixes: Callable[..., Any]
-    reformat: Callable[[], bool]          # the re-bullet route's update (server._REFORMAT): a description in bullets with the same content is a filing edit
     refuse_if_owing: Callable[..., Any]
     release_after: Callable[..., Any]
     render_hold_at: Callable[..., Any]     # web/render.py's hold_at, option_lines, same_ref and when_words (web/ sits above this module)
@@ -156,7 +145,6 @@ class Hooks:
     said_note: Callable[..., Any]
     scoped_anchors: Callable[..., Any]
     session_id: Callable[..., Any]
-    session_next: Callable[[], bool]      # the create or update tool's own call (field_gates._SESSION_NEXT): only a session's write is judged by the write checks of Next
     session_roster: Callable[..., Any]
     state_apply: Callable[..., Any]
     state_end: Callable[..., Any]
@@ -164,14 +152,6 @@ class Hooks:
     step_proof_set: Callable[..., Any]
     store_ref: Callable[..., Any]
     switchover_on: Callable[..., Any]
-    tell_decided: Callable[..., Any]
-    tell_handback: Callable[..., Any]
-    tell_needed: Callable[..., Any]
-    tell_observers: Callable[..., Any]
-    tell_owner: Callable[..., Any]
-    tell_owner_change: Callable[..., Any]
-    tell_owner_close: Callable[..., Any]
-    terminal_row: Callable[[], bool]      # the terminal prompt's and the job-gap routes' row (server._TERMINAL_ROW): it owes no page and no session is told
     update: Callable[..., Any]
     wait_end_sent_back: Callable[..., Any]
     wake_at: Callable[..., Any]
@@ -180,7 +160,6 @@ class Hooks:
     wake_step_note: Callable[..., Any]
     wake_window_note: Callable[..., Any]
     watch_on_write: Callable[..., Any]
-    writer_charge: Callable[..., Any]
     writer_owes: Callable[..., Any]
     zone: Callable[..., Any]               # the board's time zone as server.py holds it (ZONE, read when the reply is made): the confirm reply says when in it
 
@@ -303,7 +282,7 @@ def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[
             chg.append(k)
     if not chg:
         return                                             # nothing it watches changed: no roster or fleet read
-    if not writer or h.session_id(writer) in {h.session_id(h.holder(item_was)), h.session_id(h.holder(item))}:
+    if not writer or h.session_id(writer) in {h.session_id(_telling.holder(item_was)), h.session_id(_telling.holder(item))}:
         return
     if _next_names_session(str(m0.get("next") or ""), writer):
         return
@@ -322,7 +301,7 @@ def _handoff_to(was: dict[str, Any], meta: dict[str, Any], next_: str, writer: s
     nm = _anc.names()
     roster = h.session_roster()
     skip: set[str] = set()
-    for who in (h.holder({"status": "open", "metadata": meta}), h.holder({"status": "open", "metadata": was}), str(writer or "")):
+    for who in (_telling.holder({"status": "open", "metadata": meta}), _telling.holder({"status": "open", "metadata": was}), str(writer or "")):
         if who:
             sid = _anc.canonical(who, nm)
             skip |= {who, sid, str(nm.get(sid) or ""), _session_label(who)}
@@ -519,7 +498,7 @@ def update_unlocked(
     meta.pop("refiled", None)                          # the last refile's record is its History line; only a write that refiles carries it
     was_needs = _needs_of(meta)
     proj_for = project or str(meta.get("project") or "")
-    own_for = owner or h.holder(item)       # the session the item is held by (its mover), which needs may name and which writes step statuses; the creator holds no part
+    own_for = owner or _telling.holder(item)       # the session the item is held by (its mover), which needs may name and which writes step statuses; the creator holds no part
     contact_new = ""
     if contact.strip():                    # the contact: a front agent of the project the item will be filed under; refused before anything is written
         if (status or item.get("status")) == "completed":
@@ -566,7 +545,7 @@ def update_unlocked(
         owner_name = nm.get(owner, "") or ("" if _anc.is_id(raw) else raw)
         if not owner_name:
             meta.pop("owner_name", None)
-    debtor = h.session_id(sender or owner or h.holder(item))     # the writer owes the page; without a sender, the item's mover is the writer by rule
+    debtor = h.session_id(sender or owner or _telling.holder(item))     # the writer owes the page; without a sender, the item's mover is the writer by rule
     keeper_was = str((item_was.get("metadata") or {}).get("owner") or "")      # the creator as it stood: the writer of the legacy lines
     next_writer = keeper_was if keeper_was and (sender.strip() == _ho.COLD or sender.strip().startswith("a script on ")) else debtor      # a line the server writes (the cold call's, a script's) is the keeper's, which a session can replace; a sender label is no session
     # a background agent's first write names it, before any gate on who may write (a step status) reads the needs list
@@ -588,7 +567,7 @@ def update_unlocked(
             raise ToolError(f"Refused: {e}")
         work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
         work_writer = _session_label(h.session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
-        _gates.gate_work_writer(gid, work_writer, h.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
+        _gates.gate_work_writer(gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
         if work_spec.get("agent"):
             work_spec["agent"] = _session_label(h.session_id(work_spec["agent"]))
         work_who = work_spec.get("agent") or work_writer
@@ -615,7 +594,7 @@ def update_unlocked(
                 next = (next.rstrip() + "\n" if next.strip() else (kept_own.rstrip() + "\n" if kept_own.strip() else "")) + work_made
                 next_touch = True
     said_l = _gates.gate_said(said, sender.strip() or own_for, debtor)   # the trailers: his words checked against the transcript; a failed check refuses the write here
-    reformat = bool(description) and bool(h.reformat())   # a re-bullet changes the form of the description, never what it says: the state clock and the confirm stay, no page is owed
+    reformat = bool(description) and bool(_writes.reformat())   # a re-bullet changes the form of the description, never what it says: the state clock and the confirm stay, no page is owed
     rewording = _steps.reword_given(reword)      # reword={position: new text}: an open step's words change; an empty mapping ({} or "{}") is not given
     marks = h.marks_given(done) or h.marks_given(dropped) or rewording or work_tick >= 0      # a step checked, dropped or reworded is a change of next; so is the step a status done ticks
     state_change = bool((description and not reformat) or next_touch or marks or needs_set or clear_needs or status or due or clear_due or wake or clear_wake or hold or clear_hold or after_set or clear_after)   # _STATE_FIELDS (+ the hold and its wake, and after); the rest is filing
@@ -650,7 +629,7 @@ def update_unlocked(
         item["subject"] = subject
     if description:
         h.gate_description(description)
-        if (h.session_next() and not reformat and not sender.strip().startswith("a script on ")
+        if (_writes.session_next() and not reformat and not sender.strip().startswith("a script on ")
                 and description.strip() != str(item_was.get("description") or "").strip()):     # a replacement of the text by a session, not the stored text sent back
             h.gate_goal(description)
         item["description"] = description
@@ -681,7 +660,7 @@ def update_unlocked(
                 raise ToolError(f"Refused: reword: step {i + 1} is {OWNER}'s own step, made by the server from the ask and the step and ticked by his answer; it is never reworded")
             if w and not h.ho_same(w, next_writer):
                 raise ToolError(f"Refused: reword: step {i + 1} is a line of {_session_label(w) or w}, not of this write's sender; only the session that wrote a step rewords it (ask it, or mark the step done or dropped)")
-            if h.session_next() and _nr.grows(_steps.first_line(steps_old[i]["text"]), _steps.first_line(text)):       # N3 holds for a reword as for a rewritten line: the old text plus added words is progress, which goes on the page
+            if _writes.session_next() and _nr.grows(_steps.first_line(steps_old[i]["text"]), _steps.first_line(text)):       # N3 holds for a reword as for a rewritten line: the old text plus added words is progress, which goes on the page
                 raise ToolError(f"Refused: reword: the new text of step {i + 1} is its old text with words added (\"{_clip_line(_steps.first_line(text), 90)}\"): a step is never rewritten to add progress, so progress, results and what was tried go on the project page "
                                 f"(Current state or a timeline line). Reword the step to a different action, or mark it dropped=[{i + 1}] and write the longer one as a new line of next")
             h.gate_next(text, has_ask=True)
@@ -825,7 +804,7 @@ def update_unlocked(
     handed: list[str] = []
     if item.get("status") == "open" and not closing:
         handed = _handoff_to(item.get("metadata") or {}, meta, next, sender.strip() or own_for)
-        if handed and not meta.get("check") and not meta.get("wake") and not h.front_sender(sender):     # a front agent's hand-off asks for neither: the mover's close lands the result, and its own wake or check is refused below
+        if handed and not meta.get("check") and not meta.get("wake") and not _telling.front_sender(sender):     # a front agent's hand-off asks for neither: the mover's close lands the result, and its own wake or check is refused below
             raise ToolError(f"Refused: this update hands {_gh.shown(gid)} to {', '.join(handed)} (a line of next in the form `<session>: <action>`) and nothing "
                             f"would close the item once that work is done. Add check=<what closes it> ({h.check_how}): the server then closes it when the check passes, no session turn spent. "
                             f"Only when no check fits, add a date, wake=YYYY-MM-DD (or until=, YYYY-MM-DDTHH:MM, {_cfg.tz_abbr()}), as the backstop of this hand-off: because the write hands the item on, the date is no wait, the item stays active in the new mover's lane and the hand-off is recorded (the same date with no hand-off is a wait, and the item waits until then). "
@@ -922,7 +901,7 @@ def update_unlocked(
     steps_new = None                                            # the checklist this write leaves (set below when the write touches it): reads it
     if steps_on and not closing and (next_touch or marks):      # the checklist follows next, and next follows a mark: a marked line leaves next with its writer
         marked_text = [steps_old[i]["text"] for i in (*done_ix, *drop_ix)]
-        if h.session_next():                 # N3: nothing leaves the list; a reworded open step is no rewrite of its text to add words to it (a session's write only)
+        if _writes.session_next():                 # N3: nothing leaves the list; a reworded open step is no rewrite of its text to add words to it (a session's write only)
             leaving, arriving = _nr.moves(steps_old, done_ix, drop_ix, h.nl_text_without(meta, marked_text, keeper_was))
             leaving = [(i, t) for i, t in leaving if i not in drop_ix]      # a step marked dropped stays on the list as dropped: the extended line that replaces it is a new action, not a rewrite (reviewer note d)
             if grown := _nr.growths([t for _, t in leaving], arriving):
@@ -993,18 +972,18 @@ def update_unlocked(
                                               ("wait_basis", basis_txt or clear_wait_basis)) if v)
     work_note += hold_note + h.state_apply(meta, str(item.get("status") or ""), state_st, state_given, state_touched, step_withdrawn)   # the state last: it reads the item as every gate above left it
     desc_note = ""
-    mover_named = "mover" in model_set or "mover" in model_drop or filing_only or h.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
+    mover_named = "mover" in model_set or "mover" in model_drop or filing_only or _writes.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)
         item_now = {**item, "metadata": meta}
         if done_ix and steps_on and _model.stood_his(item_now, lambda i_: h.after_open(i_.get("metadata") or {})):      # N4: while the item, as this write leaves it, waits on him, only his answer ticks his step (a call that also ends what asks him is no refusal: it withdraws the ask and the step goes with it)
             _why = _hs.refuse_done(steps_old, done_ix, _hs.recorded(item_was.get("metadata") or {}), h.owner_want(meta))
             if _why:
                 raise ToolError(f"Refused: {_why}")
-        if h.session_next() and steps_new is not None and any(x["status"] == _steps.OPEN for x in steps_old) and not any(x["status"] == _steps.OPEN for x in steps_new) \
+        if _writes.session_next() and steps_new is not None and any(x["status"] == _steps.OPEN for x in steps_old) and not any(x["status"] == _steps.OPEN for x in steps_new) \
                 and not _model.stood_his(item_now, lambda i_: h.after_open(i_.get("metadata") or {})):      # N6: a session's write that takes the last open step off an item that stays open (his server-made step counts; a close is exempt)
             raise ToolError(f"Refused: this write leaves {_gh.shown(gid)} open with no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
         mover_note = h.owner_state_mover(item_now, meta, mover_named, item_was)      # a bookkeeping write (rename, priority, re-bullet) flips nothing; his state makes him the mover: before the guards read the item
-        if not (filing_only or h.reformat()):
+        if not (filing_only or _writes.reformat()):
             mover_note += h.owner_then_default(item_was, meta, str(item.get("status") or ""), sender.strip(), "then" in model_set or "then" in model_drop, mover.strip())      # D9: then defaults to the agent doing the work, not to the front agent that relayed the ask
         wake_changed = bool(wake) and meta.get("wake") != (item_was.get("metadata") or {}).get("wake")      # re-sending the wake the item carries sets nothing
         watch_ok = _gates.gate_sender_watch(gid, item_now, sender.strip(), handed=handed, watch_reason=watch_reason) if wake_changed else ""   # a front agent's own wake or until date on an alive item another session moves
@@ -1013,7 +992,7 @@ def update_unlocked(
         elif wake_changed or not meta.get("wake"):
             meta.pop("watch_reason", None)      # a reason belongs to the wake it was given for: another wake without one, or no wake, drops it
         _gates.gate_decision_again(item_was, meta, was_needs, ask_was, gid)
-        if h.session_next() and h.model_guards_on() and not (reopening or h.reformat()) and item_was.get("status") == "open":
+        if _writes.session_next() and h.model_guards_on() and not (reopening or _writes.reformat()) and item_was.get("status") == "open":
             _gates.gate_clock_renewal(item_was, meta, gid, steps_old, steps_new, description, said_l, sender)      # no clock renewal without progress: a session's write only
         _gates.gate_repark(item_was, item_now, meta, gid, said_l)
         _mark_next_stale(item_was, item_now, meta, debtor, naming_added, next_touch)
@@ -1029,14 +1008,14 @@ def update_unlocked(
         desc_note += mover_note
         h.anchor_wait_gate(item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first
-            if not h.terminal_row():      # the terminal prompt's repair path (a script's own row, orphan case) is exempt as on create
+            if not _writes.terminal_row():      # the terminal prompt's repair path (a script's own row, orphan case) is exempt as on create
                 _gates.gate_owner_step(item_now, gid, sender=next_writer, keeper=keeper_was)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft:      # the draft guard reads a write that sets the state, the step, the mover or the draft, never an unrelated one
             _gates.gate_draft(item_now, gid)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft or description.strip():      # the step guards read the same writes, and a new description
             _gates.gate_step(item_now, gid, item_was.get("description") if description.strip() and _sc.owner_facing(item_was) else None, step_set=bool(state_given.get("step")))      # only an item already his to move (mover the owner, your-step, your-call) keeps the old lines out of the judgement
         _gates.gate_handoff(gid, item_was, item_now, debtor)     # step 2: a hand-off to a session with no pane is refused, the background agent named
-        if h.session_next() and h.model_guards_on() and steps_new is not None and not (filing_only or h.reformat() or sender.strip().startswith("a script on ")):
+        if _writes.session_next() and h.model_guards_on() and steps_new is not None and not (filing_only or _writes.reformat() or sender.strip().startswith("a script on ")):
             _gates.gate_front_step(gid, item_now, steps_before, steps_new, sender.strip() or debtor)     # a new or reworded step that opens with a front agent on an item another session moves: nothing could wake it for the step
     kept_legacy_wake = False
     backstop = False                       # a bare date beside a hand-off, kept as the wake it was (below)
@@ -1074,15 +1053,15 @@ def update_unlocked(
         item["state_updated"] = item["updated"]   # filing edits (owner/project/priority/subject, and the ask line) leave the state clock alone
         item["confirmed"] = item["updated"]       # a state change confirms the item; a filing edit does not
     named = name_commit()                  # every gate has passed: the naming is stored as its own save, then this write's
-    _writes.save(gid, item, writer=debtor, ctx=_writes.QUIET if (filing_only or h.reformat()) else (_writes.NAMED if mover_named else _writes.PLAIN))
+    _writes.save(gid, item, writer=debtor, ctx=_writes.QUIET if (filing_only or _writes.reformat()) else (_writes.NAMED if mover_named else _writes.PLAIN))
     now_held = h.is_held(item)
     now_parked = now_held or h.date_parked(item)
     if wake or clear_wake or hold or clear_hold or item.get("status") != was or now_parked != was_parked:
         h.wake_event_set()         # the minute loop recomputes its next wake now, so a wake set a minute ahead still fires on time
     told = ""
     relayed = False               # this write already went to the project's keeper or router (_pilot_relay): one event makes one inbound there
-    if state_change and not h.terminal_row():     # a terminal-prompt row owes the page nothing: no debt for the script or the keeper, no notice to the router
-        stew, role = h.pilot_charge(meta.get("project", ""), debtor)
+    if state_change and not _writes.terminal_row():     # a terminal-prompt row owes the page nothing: no debt for the script or the keeper, no notice to the router
+        stew, role = _telling.pilot_charge(meta.get("project", ""), debtor)
         moved = bool(stew) and role == "name" and h.writer_owes()     # the writer owes it; the keeper only past the grace
         if not moved:
             h.owed_mark(meta.get("project", ""), stew or debtor, gid)
@@ -1091,70 +1070,70 @@ def update_unlocked(
                     else "changed (" + ", ".join(k for k, v in (("description", description), ("next", next_touch), ("needs", needs_set or clear_needs), ("status", status), ("due", due or clear_due),
                                                                  ("hold", hold or clear_hold), ("wake", wake or clear_wake), ("after", after_set or clear_after)) if v) + ")")
             if not moved:
-                told = h.pilot_relay(meta.get("project", ""), gid, item, what, debtor, stew, role)
+                told = _telling.pilot_relay(meta.get("project", ""), gid, item, what, debtor, stew, role)
                 relayed = bool(told)
             else:
                 loose = not (description or needs_set or clear_needs or status or due or clear_due)   # only next, after, or the hold and its wake
-                told = h.writer_charge(meta.get("project", ""), gid, debtor, stew, what, loose)
+                told = _telling.writer_charge(meta.get("project", ""), gid, debtor, stew, what, loose)
                 if item.get("status") == "completed" and was != "completed" and h.scoped_anchors(meta.get("project", ""), gid):
-                    relayed = bool(h.pilot_relay(meta.get("project", ""), gid, item, what, debtor, stew, role,   # the keeper's anchor bullet keeps its cue
+                    relayed = bool(_telling.pilot_relay(meta.get("project", ""), gid, item, what, debtor, stew, role,   # the keeper's anchor bullet keeps its cue
                                                 tail=f"no page update is owed by you ({_session_label(debtor)} writes it); this notice is for the anchors scoped to {_gh.shown(gid)}"))
     h.publish()
     item["gid"] = gid
     hint = ("\nstill on hold: pass clear_hold=true to release it"
             if status == "open" and was_held and now_held and not (hold or wake) else "")   # a session with the old rulebook in context learns the new form
     heard: list[str] = []         # the mover, when a notice below reached it as mover: its "now needs you" line would double it
-    owner_told = h.owner_reached(named, relayed)   # _tell_owner (the server's naming of the writer above, or a notice below) already told the mover this write: _tell_owner_change then adds nothing
-    h.close_was_set(item_was if closing else None)      # a close is told to the mover, which the close dropped from the item
+    owner_told = _telling.owner_reached(named, relayed)   # _tell_owner (the server's naming of the writer above, or a notice below) already told the mover this write: _tell_owner_change then adds nothing
+    _telling.CLOSE_WAS.item = item_was if closing else None      # a close is told to the mover, which the close dropped from the item
     if closing:                   # the item's mover hears what another session did that it must know
         what_ = f"was completed ({outcome}{' by ' + _gh.shown(superseded_by) if superseded_by else ''}{': ' + reason if reason else ''})"
-        t_ = h.tell_owner(gid, item, what_, debtor, close=True); told += t_; owner_told = owner_told or h.owner_reached(t_, relayed)
-        told += h.tell_observers(gid, item, what_, debtor)                      # observers hear a close
+        t_ = _telling.tell_owner(gid, item, what_, debtor, close=True); told += t_; owner_told = owner_told or _telling.owner_reached(t_, relayed)
+        told += _telling.tell_observers(gid, item, what_, debtor)                      # observers hear a close
         rel = h.release_after(gid, outcome, superseded_by, debtor, reason)      # the items that waited on this one: and the movers of the items that name it
         if rel:
             told += f"\n({', '.join(rel)} waited on {gid} and {'is' if len(rel) == 1 else 'are'} released: the sessions in {'its' if len(rel) == 1 else 'their'} needs, else the page keeper, have been told)"
-        told += h.mentions_reply(gid)
+        told += _telling.mentions_reply(gid)
     elif reopening:
         what_ = "was reopened (next: " + (next.strip().splitlines() or [""])[0][:160] + ")"
-        t_ = h.tell_owner(gid, item, what_, debtor, heard=heard); told += t_; owner_told = owner_told or h.owner_reached(t_, relayed)
-        told += h.tell_observers(gid, item, what_, debtor)                      # observers hear a reopen
+        t_ = _telling.tell_owner(gid, item, what_, debtor, heard=heard); told += t_; owner_told = owner_told or _telling.owner_reached(t_, relayed)
+        told += _telling.tell_observers(gid, item, what_, debtor)                      # observers hear a reopen
     elif "decision" in _needs_kinds(meta) and "decision" not in was_needs and item.get("status") == "open":
-        t_ = h.tell_owner(gid, item, f"now needs {OWNER}'s call" + (f" (ask: {meta['ask']})" if meta.get("ask") else "")
+        t_ = _telling.tell_owner(gid, item, f"now needs {OWNER}'s call" + (f" (ask: {meta['ask']})" if meta.get("ask") else "")
                          + "".join(f"; {ln}" for ln in h.render_option_lines(item)) + ", set", debtor, decision=True, heard=heard)
         told += t_; owner_told = owner_told or bool(t_)    # a move to decision is never pushed to a front agent mover (the board shows it), so its quiet line counts
     if item.get("status") == "open":   # a session newly named in needs gets one notice
         if not (closing or reopening):
             try:
-                told += h.tell_handback(gid, item, was_needs, debtor, heard)   # a front agent mover hears an item handed back to it alone; nothing else wakes it
+                told += _telling.tell_handback(gid, item, was_needs, debtor, heard)   # a front agent mover hears an item handed back to it alone; nothing else wakes it
             except Exception as e:  # noqa: BLE001  — the write is saved and published; a notice that fails is a stderr line, never a failed write
                 print(f"owner: {gid} hand-back not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         new_s = [s for s in _needs_sessions(meta) if h.session_id(s) not in {h.session_id(x) for x in was_needs}]
-        told += h.tell_needed(gid, item, new_s, debtor, heard)
+        told += _telling.tell_needed(gid, item, new_s, debtor, heard)
         if "decision" in [str(x).lower() for x in was_needs] and "decision" not in _needs_kinds(meta):   # he has decided; the sessions still named move now
-            told += h.tell_decided(gid, item, [s for s in _needs_sessions(meta) if s not in new_s], debtor, heard)
+            told += _telling.tell_decided(gid, item, [s for s in _needs_sessions(meta) if s not in new_s], debtor, heard)
     try:
-        step = h.tell_owner_close(gid, item, debtor, closing, heard)   # the front agent mover hears a close by another session at once; a builder's step is never pushed to it
+        step = _telling.tell_owner_close(gid, item, debtor, closing, heard)   # the front agent mover hears a close by another session at once; a builder's step is never pushed to it
     except Exception as e:  # noqa: BLE001  — the write is saved and published; a notice that fails is a stderr line, never a failed write
         print(f"owner: {gid} step not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         step = ""
     if step:
         owner_told = True
-        told, named = told.replace(h.quiet(item), ""), named.replace(h.quiet(item), "")   # the mover was told after all
+        told, named = told.replace(_telling.quiet(item), ""), named.replace(_telling.quiet(item), "")   # the mover was told after all
         told += step
-    if h.session_id(h.holder(item)) in heard:
+    if h.session_id(_telling.holder(item)) in heard:
         owner_told = True
     try:
-        chg = h.tell_owner_change(gid, item, before, debtor, closing, owner_told, relayed, reopening)   # the defect fix: another session's next, needs, check or after change, or its close or reopen
+        chg = _telling.tell_owner_change(gid, item, before, debtor, closing, owner_told, relayed, reopening)   # the defect fix: another session's next, needs, check or after change, or its close or reopen
     except Exception as e:  # noqa: BLE001  — the write is saved and published; a notice that fails is a stderr line, never a failed write
         print(f"owner: {gid} change not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         chg = ""
-    quiet_ = h.quiet(item)
+    quiet_ = _telling.quiet(item)
     if "the notice went to" in chg:       # a front agent mover's "not told" line above was true of the mover, not of the write: the notice went to the page
         told, named = told.replace(quiet_, ""), named.replace(quiet_, "")
     elif chg == quiet_ and quiet_ in told + named:
         chg = ""                          # the reply already says it once
     told += chg
-    told += h.handoff_notify(gid, item)     # step 2: the new mover of a hand-off this write recorded is told, unless a notice above did
+    told += _telling.handoff_notify(gid, item)     # step 2: the new mover of a hand-off this write recorded is told, unless a notice above did
     if done_ix and steps_new is not None and item.get("status") == "open" and not (closing or reopening or needs_set or agent.strip() or "mover" in model_set or "mover" in model_drop):
         told += _handover_by_hand(gid, [_steps.first_line(steps_new[i]["text"]) for i in done_ix])      # a step marked done by hand: the session the next step names is handed the item, as a ticked step does
         item = {**_load(gid), "gid": gid}
@@ -1187,12 +1166,12 @@ def _completion_anchor_prompt(gid: str, item: dict[str, Any]) -> str:
         urls = [e["url"] for p, e in due if p == page]
         text += (f"\n[anchors] {gid} was the last open item these {page} anchors were scoped to:\n" + "\n".join(f"- {u}" for u in urls)
                  + f"\nStill relevant? make one project-wide: anchors(project={page!r}, add=[url]); done with it: anchors(project={page!r}, remove=[url]). Nothing was removed.")
-        stew = h.page_keeper(page)          # the page's keeper: a one-session page's own session, not the general -main agent
-        mine = {h.session_id(h.holder(item))}
+        stew = _telling.page_keeper(page)          # the page's keeper: a one-session page's own session, not the general -main agent
+        mine = {h.session_id(_telling.holder(item))}
         if stew and h.session_id(stew) not in mine:          # a keeper completing its own item is not notified (one identity per pane)
-            note = (f"[stackshot] {_gh.shown(gid)} completed by {_session_label(h.holder(item)) or 'a session'}; {page} anchors scoped to it with no open item left: "
+            note = (f"[stackshot] {_gh.shown(gid)} completed by {_session_label(_telling.holder(item)) or 'a session'}; {page} anchors scoped to it with no open item left: "
                     + ", ".join(urls) + f" — keep one with anchors(project={page!r}, add=[url]) (project-wide) or drop it with remove=[url].")
-            threading.Thread(target=h.push_noted, args=(stew, note), daemon=True).start()
+            threading.Thread(target=_telling.push_noted, args=(stew, note), daemon=True).start()
             text += f"\n(keeper {stew} notified)"
     return text
 
@@ -1223,7 +1202,7 @@ def update_item(*args: Any, **kwargs: Any) -> str:
         try:
             return update_unlocked(*args, **kwargs)
         finally:
-            h.close_was_set(None)
+            _telling.CLOSE_WAS.item = None
 
 
 def complete_item(item_id: str, outcome: str = "", reason: str = "", description: str = "", superseded_by: str = "", sender: str = "", said: list[dict[str, Any]] | str | None = None,
@@ -1250,7 +1229,7 @@ def confirm_item(item_id: str, sender: str = "") -> str:
     item["confirmed"] = time.time()
     # a bare confirm moves `confirmed` only, never `activity`
     # a confirm changes nothing but its clock: no mover is settled and no hand-off record ended by it
-    _writes.save(gid, item, writer=h.session_id(sender) if sender.strip() else h.holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)
+    _writes.save(gid, item, writer=h.session_id(sender) if sender.strip() else _telling.holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)
     h.publish()
     item["gid"] = gid
     at = h.render_when_words(dt.datetime.fromtimestamp(item["confirmed"], h.zone()))
