@@ -12,7 +12,7 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
      goes idle, or the mover is left with one item
   6  the shared reading (silence.reading, which the hourly line, the idle hand-over and the stall pass use) leaves a queued item off the agents as it does a waiting one and still reads the item in hand on agent; the gate off reads both
   7  the hourly audit line (hourly.due, hourly.pass_, server._hourly_tick) writes no line on a queued item and one on the item in hand
-  8  the stall pass (server._stall_tick) takes no step on a queued item and still takes it on the item in hand
+  8  the stall pass (stalltick_svc.stall_tick) takes no step on a queued item and still takes it on the item in hand
   9  the items sheet's list word (server._item_list) says waiting for a queued item
   4b the words: board.md and the brief (the head's waiting lines and the cards) say `queued behind <item>` for a queued item, never `waiting on another item's close`; the item page and the home row say it too;
      the wait a session stored as an item wait keeps its words
@@ -63,6 +63,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server, home
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -81,7 +82,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = stall_svc.time = stalltick_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"; server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
@@ -89,7 +90,7 @@ telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 REAL = {(m, n): getattr(m, n) for m, n in ((handoff_svc, "handoff_status"), (server, "_sessions_index"), (handoff_svc, "_sessions_index"), (hcold_svc, "_sessions_index"))}      # the stall pass below reads the real ones
 handoff_svc.handoff_status = lambda who, idx=None: ("", 0.0)
-server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda: {}
+server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = lambda: {}
 FRONT = {"home-front"}
 REAL_HOOK = Q.front_hook()                                         # what the server installed (`front_keeper`, strict), before the fixture's own answer replaces it
 Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `front_keeper` is replaced by the one front agent of the fixture
@@ -356,14 +357,14 @@ for (_m, _n), _f in REAL.items(): setattr(_m, _n, _f)
 server._cfg.CFG["model"] = {}; server._cfg.CFG["stall"] = {}
 def cli_row(who, status, at): (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def stk(at, gate):
-    server._STALL_LAST[0] = 0.0; server._QUEUE_CACHE.update(at=0.0, map={})
+    stall_svc.STALL_LAST[0] = 0.0; server._QUEUE_CACHE.update(at=0.0, map={})
     (on if gate else off)()
     CLK.t = at
-    try: return server._stall_tick(at)
+    try: return stalltick_svc.stall_tick(at)
     finally: CLK.t = None
 for gate in (False, True):
     for p in (T / "state").glob("stall*.json"): p.unlink()
-    B = stall_rows(); server._stall_since(B)
+    B = stall_rows(); stall_svc.stall_since(B)
     (T / "cli" / f"{os.getpid()}-home-peer.json").unlink(missing_ok=True)
     cli_row("home-peer", "idle", B + 60)
     T1 = B + 60 + 10 * MIN + 1
@@ -435,11 +436,11 @@ with mutate(Q, "overlay", lambda mod, behind: mod):
 check("10 mutation `the board no longer applies the reading` is caught: a2 stays on agent", "a2" in L[AG], L)
 
 with mutate(server, "_queue_map", lambda *a, **k: {}):
-    B = stall_rows(); server._stall_since(B)
+    B = stall_rows(); stall_svc.stall_since(B)
     for p in (T / "state").glob("stall*.json"): p.unlink()
-    B = stall_rows(); server._stall_since(B); cli_row("home-peer", "idle", B + 60)
+    B = stall_rows(); stall_svc.stall_since(B); cli_row("home-peer", "idle", B + 60)
     done = stk(B + 60 + 10 * MIN + 1, True)
 check("10 mutation `the stall pass no longer asks the queue` is caught: the queued item (a2) is chased", "a2" in done, done)
-mine = server._stall_tick
+mine = stalltick_svc.stall_tick
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

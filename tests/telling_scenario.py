@@ -409,7 +409,7 @@ check("6 server.py defines none of the bodies and constants that moved", not (de
 rebound = [a.asname or a.name for n in ast.walk(stree) if isinstance(n, ast.ImportFrom) and n.module == "stackshot.service.telling" for a in n.names]
 check("6 …and re-exports none of them under an old name (no `from stackshot.service.telling import`, no alias assigned)", not rebound and not [n for n in old_names if re.search(rf"^{re.escape(n)}\s*=\s*_?telling\.", SERVER_SRC, re.M)], rebound)
 called = set()
-for f in ("stackshot/service/update.py", "stackshot/service/create.py", "stackshot/service/gates.py", "stackshot/service/wakes.py", "stackshot/service/watching.py", "stackshot/service/event_waits.py", "stackshot/service/handoff.py", "stackshot/service/handoff_cold.py", "stackshot/web/server.py"):
+for f in ("stackshot/service/update.py", "stackshot/service/create.py", "stackshot/service/gates.py", "stackshot/service/wakes.py", "stackshot/service/watching.py", "stackshot/service/event_waits.py", "stackshot/service/handoff.py", "stackshot/service/handoff_cold.py", "stackshot/service/stall.py", "stackshot/service/ladder.py", "stackshot/service/stall_tick.py", "stackshot/web/server.py"):
     for node in ast.walk(ast.parse(pathlib.Path(STACK, f).read_text(encoding="utf-8"))):
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "_telling": called.add(node.attr)
 missing = sorted(n for n in called if not hasattr(telling, n))

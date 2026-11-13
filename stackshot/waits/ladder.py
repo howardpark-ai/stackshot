@@ -14,7 +14,7 @@ Two orders, two records (`metadata.handoff` and the stall pass's entry), and an 
     main     `minutes` after the look, for a live background mover that is still silent: a notice to the project's -main agent (one per -main agent per pass, listing every item due for it), which decides whether the item needs a nudge or a different mover; the
              same notice again every `MAIN_EVERY` (4 hours) while the silence lasts. It is no step of its own (the entry stays on its rung, so the cold call and the builder stay reachable if the pane stops
              being live): the entry's `main_at` is its clock. The same notice also takes an item that is not MOVING, whatever its mover answers: with no step marked done or dropped, no state change and no merge
-             for `[ladder] main_hours` (4), an alive item goes up in the same message (the server's `_ladder_stuck`, clock in model/progress.py), once per stretch of no progress
+             for `[ladder] main_hours` (4), an alive item goes up in the same message (service/ladder.py's `ladder_stuck`, clock in model/progress.py), once per stretch of no progress
     rung 2  cold     `minutes` (10) later, still no turn and no write: one `claude -p` call names who takes it, or closes the item (it never asks the owner)
     rung 3  builder  `minutes` later (at once when the cold call named no taker): the project's builder; when none can take it, ONE message asks the fleet's builder to recover the session (a front-only project, one whose `agents:` map lists no background agent, asks its -main agent instead: `server._recovery_target`). The
                      item stays with its mover and is not put to the owner
@@ -137,7 +137,7 @@ def action(rec: dict[str, Any], status: str, at: float, floor: float, now: float
     busy or showing a background shell, and that says nothing about this item (the server holds the ladder for an item whose own step status shows work in progress, `silence.subagent_running`). `live`: its pane
     is live (running now): the ladder then goes no further than the look on the mover, since the cold call and the builder replace a mover that cannot answer, and one that is live can; a live mover
     that stays silent after the look is handed up instead (`main`, see `_main_due`). The same hand-up also takes an item that is not moving, silent or not: see `model/progress.py` and the server's
-    `_ladder_stuck`, which is that path's second way in and shares its message. A pane that is not live goes on to both, and so does an entry marked `gone` whatever the heartbeat shows. The ask
+    `ladder_stuck` (service/ladder.py), which is that path's second way in and shares its message. A pane that is not live goes on to both, and so does an entry marked `gone` whatever the heartbeat shows. The ask
     of a ladder a pane with no turn running brought still waits for that pane (`background` changes nothing at step 0)."""
     step = int(rec.get("step") or 0)
     if step >= len(RUNGS):
