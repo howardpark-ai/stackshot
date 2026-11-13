@@ -280,6 +280,15 @@ def probe_unreadable():
     return isinstance(tick(), list)
 check("4 an item whose record the board's model cannot read does not raise the pass", probe_unreadable() is True)
 
+def probe_stale_view():
+    wipe(); on(); put(1, act=90); panes["team-back"] = "idle"
+    from stackshot.tools import next_report as nr
+    view = nr.load_all(None)                                                     # the view the pass made: the item idle
+    d = rd(1); d["activity"] = now0 - 1 * MIN; (T / "store/a/1.json").write_text(json.dumps(d))      # its mover wrote to it since
+    return tick(items=view) == [] and mover_of(1) == "home-peer" and sent == []
+rule("4 an item its mover wrote to after the pass read it is read again under the lock and left where it is", probe_stale_view,
+     [(HI, "due", lambda items, gid, now, front=None: {"mover": "home-peer", "project": "projects/alpha", "line_at": 0, "told_none": False})])
+
 # ================================================================ 5. which builder is free
 def first_pick(**setup):
     wipe(); on(); put(1, act=90)
@@ -410,7 +419,7 @@ def probe_torn_log():
     try: got = tick()
     except Exception as e_: return f"raised {e_!r}"
     return got == ["a1"] and mover_of(1) == "team-back"
-check("8 an hourly log holding torn entries does not raise, and the one good idle line is read", probe_torn_log() is True, probe_torn_log())
+rule("8 an hourly log holding torn entries does not raise, and the one good idle line is read", probe_torn_log, [(HL, "_well_formed", lambda x: True)])
 def probe_torn_record():
     wipe(); on(); put(1, act=90, hand_idle={"handed_at": "yesterday", "none_at": float("nan"), "to": 5}); panes["team-back"] = "idle"
     try: got = tick()

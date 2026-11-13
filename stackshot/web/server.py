@@ -6169,12 +6169,17 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     busy = _hi.busy_movers(items, now)
     handed: list[str] = []
     told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
+    builders: dict[str, list[str]] = {}      # per project, read once a pass (the role map is not read again for every item)
+    mains: dict[str, str] = {}
     for gid, row in rows:
         if len(handed) >= _hi.MAX_PER_TICK:
             break
         try:
-            to = _hi.pick_free(_hand_idle_builders(row["project"]), busy, status, dead, _ho_same, row["mover"])
-            main = _main_agent(row["project"])
+            if row["project"] not in builders:
+                builders[row["project"]] = _hand_idle_builders(row["project"])
+                mains[row["project"]] = _main_agent(row["project"])
+            to = _hi.pick_free(builders[row["project"]], busy, status, dead, _ho_same, row["mover"])
+            main = mains[row["project"]]
             if main and _model.is_owner(main):
                 main = ""      # the owner is told nothing by this pass, whatever the page names as -main
             lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
