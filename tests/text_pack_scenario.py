@@ -139,7 +139,7 @@ import yaml
 wf_text = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text(encoding="utf-8")
 wf = yaml.safe_load(wf_text)
 flows = "\n".join(p.read_text(encoding="utf-8") for p in sorted(pathlib.Path(STACK, ".github/workflows").glob("*.yml")))
-check("the tests workflow keeps its deterministic jobs and has no model job", set(wf["jobs"]) == {"shards", "measure", "suites", "tool-text"}, sorted(wf["jobs"]))
+check("the tests workflow keeps its deterministic jobs and has no model job", set(wf["jobs"]) == {"proof", "shards", "measure", "suites", "tool-text"}, sorted(wf["jobs"]))
 check("no workflow signs in to AWS, asks for an OIDC token or reads an AWS or model variable or secret",
       not re.search(r"(?i)aws|bedrock|id-token|TOOL_TEXT_MODEL|SALA_REVIEW|anthropic", flows), sorted(set(re.findall(r"(?i)aws|bedrock|id-token|TOOL_TEXT_MODEL|SALA_REVIEW|anthropic", flows))))
 check("no job needs the removed job, and the required check `suites` is still a job of the workflow", all("tool-text-model" not in str(j.get("needs", "")) for j in wf["jobs"].values()) and "suites" in wf["jobs"])
