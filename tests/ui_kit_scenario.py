@@ -309,8 +309,9 @@ check("home: the page stays where it was sent from: scrollY saved as the form is
       "sessionStorage.setItem(SK,JSON.stringify({y:Math.round(window.scrollY||0),t:Date.now(),p:location.pathname}))" in _hjs and "sessionStorage.removeItem(SK)" in _hjs and "window.scrollTo(0,Y)" in _hjs
       and "S.p===location.pathname" in _hjs and "!location.hash" in _hjs and "Date.now()-S.t<15000" in _hjs and "document.documentElement.scrollHeight-h0" in _hjs and "position:sticky" in _hjs and "addEventListener('load'" in _hjs
       and _hjs.index("sessionStorage.removeItem(SK)") < _hjs.index("window.scrollTo(0,Y)"), _hjs)
-check("home: the page script syncs the cards' Send only on a decision form, never on a step form (form.hstep has no cards: a sync greyed its Send, the empty box that finishes the step included)",
-      "if(window.ssCards&&!f.classList.contains('hstep'))ssCards.sync(f)" in _hjs and "if(window.ssCards)ssCards.sync(f)" not in _hjs, _hjs[_hjs.find("function show"):][:400])
+check("home: the page script syncs every form once its token is in, a step form included: the card script takes a step form (data-step) by its own rule, greying only the Send note button (data-needs-text) while the box is empty and never the Done button, which finishes the step with or without a note",
+      "if(window.ssCards)ssCards.sync(f)" in _hjs and "if(window.ssCards&&!f.classList.contains('hstep'))ssCards.sync(f)" not in _hjs
+      and "if(f.hasAttribute('data-step'))return step(f)" in r2._CARDS_JS and "button[data-needs-text]:not([data-spent])" in r2._CARDS_JS, _hjs[_hjs.find("function show"):][:400])
 check("the stylesheet carries the tokens in light and dark (--t-you reads the page's --orange, which each theme sets; the dark block opens with the tags' own pairs)", "--t-you:" in css and ":root[data-theme=dark]{--t-agent:" in css and DARK["--t-you"] != LIGHT["--t-you"])
 check("rows cannot grow past the page (min-width:0 and wrapping)", "li.irow{" in css and "overflow-wrap:anywhere" in css)
 # ---- the row as a card: the left edge by list, the project's name above the title (the owner's picks on the row format)
@@ -1013,7 +1014,7 @@ check("the home row says 'handed to <session>, not yet taken' for a session, in 
 # the Done button and the notice after Done
 HJ = r2._HOME_JS
 check("home script: a button marked spent stays disabled when the page re-enables the forms, and Done names who takes it from here",
-      "button[disabled]:not([data-spent])" in HJ and "b.setAttribute('data-spent','1')" in HJ and "'js.sent_done'" in HJ and "form.hstep button[value=send]" in HJ and HJ in Bd().html())
+      "button[disabled]:not([data-spent])" in HJ and "b.setAttribute('data-spent','1')" in HJ and "'js.sent_done'" in HJ and "form.hstep button[name=act]" in HJ and "form.hstep button[value=send]" not in HJ and HJ in Bd().html())
 check("the item page's notice after Done names who takes the item on, and without a name says it goes on to its next mover", "Done: alpha-main takes it from here." in Bd().sent_html({"sent": "done"}, "alpha-main")
       and "goes on to its next mover" in Bd().sent_html({"sent": "done"}), Bd().sent_html({"sent": "done"}))
 

@@ -25,6 +25,9 @@ network, no model call, no message sent.
   18 the row never reads "idle over 1 h" between two lines (read through act_parts and band at the worst landing time); the record never goes backwards (a stepped-back clock, a record dated ahead)
   17 the tie to the ITEM: the reader of a session's transcript (running within 90 minutes, quiet to 6 hours, dropped past the cap, clock skew), what each unreadable thing reads as (unknown), the pure tie, the server's reader on the registry
   19 a running subagent tied to no item leaves the mover's items unknown, not idle (and not handed on); a front agent's busy pane still verifies
+  21 an empty or partial fleet index reads the mover unknown, never idle; the lookups by a session id (a transcript id, a neutral heartbeat id) beside the lookups by name
+  22 a role map that cannot be read reads the mover as front (never as a builder) for the hourly line
+  23 a pull request number written alone is the item's own repository's: two items anchored to the same number in two repositories are told apart by the URL or `owner/repo#n`
   20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle, unless the fleet heartbeat holds the session running elsewhere: unknown) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
 
 
@@ -645,17 +648,18 @@ check("17 the pure tie: the id whole, a pull request by its URL or `PR n`/`#n` f
 # end to end: the server's own reader, through a pane's registry row (the isolated HOME), with no subagent view injected
 sess_dir = T / "home/.claude/sessions"
 row_path = sess_dir / f"{os.getpid()}.json"
-def registry(status="busy", sid=SID, kind="interactive"): row_path.write_text(json.dumps({"pid": os.getpid(), "sessionId": sid, "kind": kind, "name": "home-peer", "status": status, "statusUpdatedAt": int(now0 * 1000), "updatedAt": int(now0 * 1000)}))
+OTHER_ROW = {"sess-z9": {"machine": "b", "name": "home-stew", "seen": "2026-01-01T00:00:00Z"}}      # a whole fleet index that holds no row of the mover (neutral fixture ids)
+def registry(status="busy", sid=SID, kind="interactive", name="home-peer"): row_path.write_text(json.dumps({"pid": os.getpid(), "sessionId": sid, "kind": kind, "name": name, "status": status, "statusUpdatedAt": int(now0 * 1000), "updatedAt": int(now0 * 1000)}))
 try:
     registry()
     check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in server._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1", "stale1"], server._mover_subagents("home-peer", {}, now0))
     registry("idle"); a_ = server._mover_subagents("home-peer", {}, now0)
     registry("shell"); b_ = server._mover_subagents("home-peer", {}, now0)
-    check("17 …and none when the pane is idle or showing a shell, or the mover has no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built)", a_ == [] and b_ == [] and server._mover_subagents("home-front", {}, now0) == [], (a_, b_))
+    check("17 …and none when the pane is idle or showing a shell, or the mover has no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built)", a_ == [] and b_ == [] and server._mover_subagents("home-front", OTHER_ROW, now0) == [], (a_, b_))
     import subprocess as _sp
     dead_ = _sp.Popen(["true"]); dead_.wait()
     row_path.write_text(json.dumps({"pid": dead_.pid, "sessionId": SID, "kind": "interactive", "name": "home-peer", "status": "busy"}))
-    check("17 …a row whose process is gone is no row: nothing is claimed, as for a mover with no row", server._mover_subagents("home-peer", {}, now0) == [], server._mover_subagents("home-peer", {}, now0))
+    check("17 …a row whose process is gone is no row: nothing is claimed, as for a mover with no row", server._mover_subagents("home-peer", OTHER_ROW, now0) == [], server._mover_subagents("home-peer", OTHER_ROW, now0))
     odd_ = {}
     registry("busy", kind="headless"); odd_["headless"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
     registry("busy", kind="sdk-cli"); odd_["sdk"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
@@ -810,8 +814,10 @@ try:
     check("20 …and past the cap, tied or not, it is dropped: both read idle", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     # an ABSENT registry row is idle as before; a PRESENT one that is no interactive pane reads unknown
     one_agent("Build part D", "nothing", 60)
-    row_path.unlink(missing_ok=True); k_, t_ = kinds20()
-    check("20 a mover with NO registry row on this box (gone, or elsewhere) reads idle as built: nothing is claimed for it, and the orphan and idle hand-overs may act", k_ == ["audit_idle", "audit_idle"], (k_, t_))
+    row_path.unlink(missing_ok=True); real_idx0 = server._sessions_index; server._sessions_index = lambda: OTHER_ROW      # a whole fleet index that holds no row of the mover
+    try: k_, t_ = kinds20()
+    finally: server._sessions_index = real_idx0
+    check("20 a mover with NO registry row on this box (gone, or elsewhere), in a fleet index that was read whole, reads idle as built: nothing is claimed for it, and the orphan and idle hand-overs may act", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     registry("busy", kind="headless"); k_, t_ = kinds20()
     check("20 a PRESENT registry row that is no interactive pane (headless) reads UNKNOWN, never idle: not idle-marked, so not handed on", k_ == ["audit_unknown", "audit_unknown"] and all("could not be read" in x for x in t_) and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_, t_))
     registry("working"); k_, t_ = kinds20()
@@ -829,16 +835,55 @@ try:
     live_hb = hb(u1=("home-peer", {})); gone_hb = hb(u1=("home-peer", {"gone": "2026-01-01T00:00:00Z"})); other_hb = hb(u1=("home-stew", {}))
     r_live = raises(lambda: server._mover_subagents("home-peer", live_hb, now0), TIE.Unreadable)
     r_gone = server._mover_subagents("home-peer", gone_hb, now0) == []
-    r_none = server._mover_subagents("home-peer", {}, now0) == [] and server._mover_subagents("home-peer", other_hb, now0) == []
+    r_none = server._mover_subagents("home-peer", OTHER_ROW, now0) == [] and server._mover_subagents("home-peer", other_hb, now0) == []
     def no_index(): raise OSError("heartbeat unreadable")
     server_idx_none = raises(lambda: (setattr(server, "_sessions_index", no_index), server._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
     server._sessions_index = real_idx
     check("20 no registry row on this box: the fleet heartbeat holds the session running (on another machine) → Unreadable (unknown); marked gone → none; no row anywhere (or only another session's) → none; the index cannot be read → Unreadable", r_live and r_gone and r_none and server_idx_none, (r_live, r_gone, r_none, server_idx_none))
-    k_live = tick_with_index(live_hb); k_gone = tick_with_index(gone_hb); k_none = tick_with_index({}); k_bad = tick_with_index(no_index)
+    k_live = tick_with_index(live_hb); k_gone = tick_with_index(gone_hb); k_none = tick_with_index(OTHER_ROW); k_bad = tick_with_index(no_index)
     check("20 …through the audit: a mover on another machine (live heartbeat row, no local row) reads UNKNOWN on every item, not idle-marked (so never handed on to a second builder); a gone row, no row anywhere → idle as built; an unreadable index → unknown",
           k_live[0] == ["audit_unknown"] * 2 and k_gone[0] == ["audit_idle"] * 2 and k_none[0] == ["audit_idle"] * 2 and k_bad[0] == ["audit_unknown"] * 2 and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_live, k_gone, k_none, k_bad))
     k_live = tick_with_index(live_hb)
     check("20 …an unknown line of that kind is not handed on", handed_on(now0 + 60) == [], handed_on(now0 + 60))
+    # 21 an EMPTY or PARTIAL fleet index is no proof that the mover is gone: no row in it reads unknown, never idle (fleet.read gives {} for a machine whose sessions.json it cannot read)
+    from stackshot.fleet import fleet as FL, sessions_registry as SR
+    row_path.unlink(missing_ok=True)
+    whole = SR._Index(); whole.update(OTHER_ROW)
+    part = SR._Index(); part.update(OTHER_ROW); part.unreadable = ["b"]
+    r_empty = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable) and raises(lambda: server._mover_subagents("home-peer", SR._Index(), now0), TIE.Unreadable)
+    r_part = raises(lambda: server._mover_subagents("home-peer", part, now0), TIE.Unreadable)
+    r_whole = server._mover_subagents("home-peer", whole, now0) == [] and server._mover_subagents("home-peer", gone_hb, now0) == []
+    check("21 an empty fleet index, and one with a machine whose sessions.json could not be read, give a mover with no row UNKNOWN (Unreadable); a whole index that holds no row of it, or marks it gone, still gives none (the session is gone)", r_empty and r_part and r_whole, (r_empty, r_part, r_whole))
+    k_empty = tick_with_index({}); k_part = tick_with_index(part); k_whole = tick_with_index(whole)
+    check("21 …through the audit: an empty index and a partial one read the mover's items UNKNOWN (kind audit_unknown, nothing stamped, not idle-marked); a whole index without a row of it reads idle as built",
+          k_empty[0] == ["audit_unknown"] * 2 and k_part[0] == ["audit_unknown"] * 2 and k_whole[0] == ["audit_idle"] * 2 and not any("last_activity" in mt(i) for i in (1, 2)), (k_empty, k_part, k_whole))
+    k_empty = tick_with_index({})
+    check("21 …and an unknown line over an empty index is not handed on", not any(HR.idle_marked(mt(i)) for i in (1, 2)) and handed_on(now0 + 60) == [], (k_empty, handed_on(now0 + 60)))
+    # the real index: a machine whose sessions.json is torn or absent is listed, and the index says so
+    (T / "fleet/b").mkdir(exist_ok=True); (T / "fleet/b/machine.json").write_text(json.dumps({"letter": "b", "fleet": "otherbox", "claude": "1.0.0"}))
+    (T / "fleet/b/sessions.json").write_text("{torn")
+    got_torn = (FL.sessions_unreadable(), SR._sessions_index().unreadable)
+    (T / "fleet/b/sessions.json").unlink(); got_absent = FL.sessions_unreadable()
+    (T / "fleet/b/sessions.json").write_text("[]"); got_list = FL.sessions_unreadable()
+    (T / "fleet/b/sessions.json").write_text(json.dumps({"sess-b1": {"name": "home-peer", "machine": "b"}})); got_ok = (FL.sessions_unreadable(), SR._sessions_index().unreadable)
+    for f_ in (T / "fleet/b").glob("*.json"): f_.unlink()
+    (T / "fleet/b").rmdir()
+    check("21 the fleet index lists the machines whose sessions.json is torn, absent or not an object (`.unreadable`), and none when every machine's file reads", got_torn == (["b"], ["b"]) and got_absent == ["b"] and got_list == ["b"] and got_ok == ([], []), (got_torn, got_absent, got_list, got_ok))
+    # 3 lookup by a session ID beside the name lookups: the mover is named by an id (a transcript id, a heartbeat id), not by its name
+    registry("busy", name="home-other"); by_tid = server._handoff_pane_row(SID, OTHER_ROW)
+    by_name_miss = server._handoff_pane_row("home-peer", OTHER_ROW)
+    got_id = [x["id"] for x in server._mover_subagents(SID, OTHER_ROW, now0)]
+    check("21 a pane's registry row is found by its session id when the mover is named by it (the row's own name is another), and not by a name that is none of its names", by_tid is not None and by_tid[1]["sessionId"] == SID and by_name_miss is None and len(got_id) > 0, (by_tid, by_name_miss, got_id))
+    registry("busy", sid="sess-a1", name="home-other")
+    by_fixture_id = server._handoff_pane_row("sess-a1", OTHER_ROW); other_id = server._handoff_pane_row("sess-a2", OTHER_ROW)
+    check("21 …a neutral id (sess-a1) matches the row that carries it as its session id, another id (sess-a2) matches nothing", by_fixture_id is not None and by_fixture_id[1]["sessionId"] == "sess-a1" and other_id is None and server._handoff_registered("sess-a1", OTHER_ROW) and not server._handoff_registered("sess-a2", OTHER_ROW), (by_fixture_id, other_id))
+    row_path.unlink(missing_ok=True)
+    hb_by_id = lambda **extra: {"sess-a1": {"machine": "b", "name": "home-other", "seen": "2026-01-01T00:00:00Z", **extra}, **OTHER_ROW}
+    r_id_live = raises(lambda: server._mover_subagents("sess-a1", hb_by_id(), now0), TIE.Unreadable)
+    r_id_gone = server._mover_subagents("sess-a1", hb_by_id(gone="2026-01-01T00:00:00Z"), now0) == []
+    r_id_none = server._mover_subagents("sess-a2", hb_by_id(), now0) == []
+    check("21 no row on this box, the mover named by a heartbeat id: a live row under that id is on another machine (Unreadable), one marked gone reads none, another id with no row reads none", r_id_live and r_id_gone and r_id_none, (r_id_live, r_id_gone, r_id_none))
+    registry("busy")
     registry("busy")
     # a read error is kept for the pass: one read of a mover's transcripts for all its items, again under the lock for none
     registry("busy")
@@ -873,8 +918,62 @@ env20 = server._silence_env()
 class RaisingFront:
     def __getattr__(self, n): return getattr(env20, n)
     def is_front(self, who, project): raise RuntimeError("keeper lookup failed")
+    def is_front_or_unread(self, who, project): raise RuntimeError("keeper lookup failed")
 with _Err() as e20: got20f = tick(env=RaisingFront())
 check("20 a front test that raises reads as front, not as an error out of the pass: three items on a busy pane are each verified by it (the front rule), none idle, and the pass wrote its lines",
       got20f == ["a1", "a2", "a3"] and all(lines(i)[0]["kind"] == "audit" for i in (1, 2, 3)), (got20f, [lines(i) for i in (1, 2, 3)], e20.text[-300:]))
+
+# ================================================================ 22. a role map that cannot be read reads as front, never as a builder
+from stackshot.audit import audit_run as AR
+reg_path = T / "store/projects.json"; reg_text = reg_path.read_text(encoding="utf-8")
+def two_items_busy():
+    clean_pane(); panes["team-back"] = "busy"
+    for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+    put(1, mover="team-back", act=90); put(2, mover="team-back", act=90)
+try:
+    sane = (server._front_keeper("team-back", "projects/alpha"), server._front_keeper("team-back", "projects/alpha", unread_front=True), server._front_keeper("home-front", "projects/alpha", unread_front=True)[0])
+    two_items_busy(); tick(); k_read = [lines(i)[0]["kind"] for i in (1, 2)]
+    reg_path.write_text("{torn", encoding="utf-8")
+    torn = (server._front_keeper("team-back", "projects/alpha"), server._front_keeper("team-back", "projects/alpha", unread_front=True))
+    env_t = server._silence_env()
+    torn_env = (env_t.is_front("team-back", "projects/alpha"), env_t.is_front_or_unread("team-back", "projects/alpha"), AR.Env(roles={}).is_front_or_unread("team-back", "projects/alpha"))
+    two_items_busy(); tick(); k_torn = [lines(i)[0]["kind"] for i in (1, 2)]; ids_torn = [HR.idle_marked(mt(i)) for i in (1, 2)]
+finally:
+    reg_path.write_text(reg_text, encoding="utf-8")
+check("22 a readable role map answers as before (a background agent is no front agent, the front agent is one), with or without the unread-is-front mode", sane == ((False, ""), (False, ""), True), sane)
+check("22 a project registry that cannot be read (its file torn) reads the mover as no front agent by the plain test and as FRONT by the hourly's (`unread_front`, Env.is_front_or_unread); an Env given a role map of its own is read as given",
+      torn == ((False, ""), (True, "")) and torn_env == (False, True, False), (torn, torn_env))
+check("22 …through the audit: a background agent with two items and a busy pane reads each idle with the registry readable (the pane says nothing of either), and each verified by its pane, none idle-marked, with the registry unreadable",
+      k_read == ["audit_idle", "audit_idle"] and k_torn == ["audit", "audit"] and ids_torn == [False, False], (k_read, k_torn, ids_torn))
+
+# ================================================================ 23. a pull request number written alone is the item's own repository's
+A_, B_ = ("acme/widgets#5", "other/repo#5")
+cand = {"a1": (BID(1), (A_,)), "a2": (BID(2), (B_,))}
+t_both = TIE.tied_to({"description": "Build PR 5", "brief": ""}, cand)
+t_url_b = TIE.tied_to({"description": "Build https://github.com/other/repo/pull/5", "brief": ""}, cand)
+t_full_a = TIE.tied_to({"description": "Build acme/widgets#5", "brief": ""}, cand)
+t_url_then_bare = TIE.tied_to({"description": "Build PR 5 (https://github.com/other/repo/pull/5)", "brief": ""}, cand)
+t_alone = (TIE.tied_to({"description": "Build PR 5", "brief": ""}, {"a1": (BID(1), (A_,))}), TIE.tied_to({"description": "Build #5", "brief": ""}, {"a1": (BID(1), (A_,)), "a2": (BID(2), ("other/repo#6",))}))
+check("23 `PR 5` written alone ties neither of two items anchored to pull request 5 of two repositories; the URL or `owner/repo#n` tells them apart; a bare number with the URL of the other repository's pull request beside it is that one's",
+      t_both == set() and t_url_b == {"a2"} and t_full_a == {"a1"} and t_url_then_bare == {"a2"}, (t_both, t_url_b, t_full_a, t_url_then_bare))
+check("23 …a bare number still ties the one item anchored to it (and a number the other item does not share), as before",
+      t_alone == ({"a1"}, {"a1"}), t_alone)
+check("23 …names_item: a number whose pull request the text gives by URL in another repository is not the item's, and `owner/repo#n` written out is, in the item's own repository only",
+      not TIE.names_item("PR 160 https://github.com/other/repo/pull/160", BID(9), ["acme/widgets#160"]) and TIE.names_item("PR 160 https://github.com/acme/widgets/pull/160", BID(9), ["acme/widgets#160"])
+      and TIE.names_item("see acme/widgets#160", BID(9), ["acme/widgets#160"]) and not TIE.names_item("see other/repo#160", BID(9), ["acme/widgets#160"]) and not TIE.names_item("see acme/widgets#1600", BID(9), ["acme/widgets#160"])
+      and not TIE.names_item("PR 160", BID(9), ["acme/widgets#160"], ["acme/widgets#160"]) and TIE.names_item("PR 160 acme/widgets#160", BID(9), ["acme/widgets#160"], ["acme/widgets#160"]))
+clean_pane()
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+panes["home-peer2"] = "idle"
+put(1, mover="home-peer2", act=90); put(2, mover="home-peer2", act=90)
+ANCH["a1"] = [A_]; ANCH["a2"] = [B_]
+run_on("home-peer2", "Build PR 5")
+tick(); k_amb = [lines(i)[0]["kind"] for i in (1, 2)]
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, mover="home-peer2", act=90); put(2, mover="home-peer2", act=90); SUBS.clear(); run_on("home-peer2", "Build https://github.com/acme/widgets/pull/5")
+tick(); k_url = [lines(i)[0]["kind"] for i in (1, 2)]
+check("23 …through the audit: a subagent whose brief says `PR 5` while two of the mover's items are anchored to pull request 5 of two repositories leaves both UNKNOWN (not idle, not handed on); with the URL of one of them only that item is verified and the other reads idle",
+      k_amb == ["audit_unknown", "audit_unknown"] and k_url == ["audit", "audit_idle"], (k_amb, k_url))
+clean_pane()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

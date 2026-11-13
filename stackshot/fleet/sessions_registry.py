@@ -357,6 +357,7 @@ class _Index(dict):
     """The heartbeat index (transcript UUID → row) that also answers for a permanent session id: a lookup (get, [], in) by an id the registry
     holds finds the row of that session's present transcript (the running one, else the latest seen), its name the registry's. Iteration
     (items, values, keys) is the heartbeat's own and lists each session once, by transcript."""
+    unreadable: list[str] = []      # the machines whose sessions.json could not be read when the index was built (`_sessions_index` sets it): the index is partial then
     def _via(self, k: Any) -> dict[str, Any] | None:
         if not isinstance(k, str) or not is_perm_id(k):
             return None
@@ -381,8 +382,10 @@ class _Index(dict):
 
 def _sessions_index() -> dict[str, dict[str, Any]]:
     """transcript UUID → {name, url, seen, machine} from every machine's live heartbeat (fleet.py; out of git). A permanent session
-    id looks up the same way (see _Index)."""
+    id looks up the same way (see _Index). `.unreadable` on the result lists the machines whose sessions.json could not be read (fleet.sessions_unreadable): the index is partial then, and a session missing from it
+    may be on one of those machines, not gone."""
     out = _Index()
+    out.unreadable = _fleet.sessions_unreadable()
     for L in _fleet.letters():
         for k, v in _fleet.read(L, "sessions").items():
             if isinstance(v, dict) and not dict.__contains__(out, k): out[k] = {"machine": L, **v}

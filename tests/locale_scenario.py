@@ -890,6 +890,18 @@ pg_ = _Attrs(); [pg_.feed(h_) for h_ in q_pages.values()]
 check("…and no element the value tried to open is on the page, nor its raw text in any attribute position", not pg_.ids and all('"><i id="inj">' not in h_ for h_ in q_pages.values()), pg_.ids)
 write_ko(test_locale()); reset_warned()
 
+# ---- the step form's four strings: in the English catalog, and read through the string table (a locale file that overrides them changes the page; the values here are plain ASCII stand-ins, the real Korean lives in the private locale file)
+STEP_KEYS = ("home.step_note", "home.step_note_aria", "home.step_done", "home.step_send_note")
+STEP_OVR = {"home.step_note": "Xnote", "home.step_note_aria": "Xnote-label", "home.step_done": "Xdone", "home.step_send_note": "Xsend-note"}
+check("the step form's four strings are in the English catalog: the optional note box (placeholder and label) and the two buttons", all(k_ in EN for k_ in STEP_KEYS) and [EN[k_] for k_ in STEP_KEYS] == ["Note (optional)", "Note for the next owner (optional)", "Done", "Send note"], [EN.get(k_) for k_ in STEP_KEYS])
+write_ko(test_locale(**STEP_OVR)); set_dir(LOC); reset_warned()
+with i18n.use("ko"):
+    ko_step_pg = r2.Board(f"{tmp}/store").item_html("a240", answer=IPX_BOX)
+check("a locale file's values for them reach the item page of a step item: the note box (placeholder and label), Done (the main button) and Send note, and none of the English labels",
+      'placeholder="Xnote"' in ko_step_pg and ">Xnote-label</label>" in ko_step_pg and 'name="act" value="done">Xdone</button>' in ko_step_pg and 'data-needs-text>Xsend-note</button>' in ko_step_pg
+      and ">Done</button>" not in ko_step_pg and "Send note" not in ko_step_pg and "Note (optional)" not in ko_step_pg, ko_step_pg[ko_step_pg.find('class="iask istep"'):][:900])
+write_ko(test_locale()); reset_warned()
+
 set_dir(None)
 n_bad = len(fails)
 print(f"{len(ran) - n_bad}/{len(ran)} checks passed")

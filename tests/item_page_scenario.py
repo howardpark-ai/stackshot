@@ -386,12 +386,12 @@ check("History: the ask that leaves with the decision is a bullet with the Decid
       '<div class="eb">the ask was: whether to ship<details class="ehold"><summary class="more">the whole ask</summary>' in e22 and "Recommend: ship" in e22.split("the whole ask")[1] and "Recommend: ship" not in re.sub(r"<details.*?</details>", "", e22, flags=re.S), e22[:700])
 ev22 = [x for _t, k, x in bd.item_events(bd.item("a22"))[0] if "the ask was" in x]
 check("…and item_events (the search, the migration comment) takes the bullet alone", ev22 and all("<details" not in x and "Recommend" not in x for x in ev22), ev22)
-# ---- 12. the step of a your-step item: its block, directly under the state line, with the note box and ONE Send (no Done)
+# ---- 12. the step of a your-step item: its block, directly under the state line, with the optional note box and TWO buttons (Done, Send note)
 S20, S21, S22, S23, S24 = (page(f"a{i}", answer=BOX) for i in (30, 31, 32, 33, 34))
 blk = lambda h: (re.search(r'<div class="iask istep">.*?</div></div>', h, re.S) or [""])[0]
-check("a step item shows a Your step block directly after the state line and before Next, the note box and ONE Send in it, no Done",
+check("a step item shows a Your step block directly after the state line and before Next, the optional note box and TWO buttons in it, Done (main) and Send note (needs text)",
       S20.find('class="iask istep"') > S20.find('<div class="istat">') > 0 and S20.find('class="iask istep"') < S20.find("<h2>Next</h2>")
-      and "<b>Your step</b>" in S20 and S20.count('name="act" value="send">Send</button>') == 1 and 'value="done"' not in S20 and 'value="comment"' not in S20 and ">Done<" not in S20 and "A note, or nothing: Send with an empty box finishes the step" in S20 and (lambda f: f.count('<button type="submit"') == 1)(S20[S20.find('<form class="ianswer"'):S20.find('</form>', S20.find('<form class="ianswer"'))])
+      and "<b>Your step</b>" in S20 and S20.count('class="b main" name="act" value="done">Done</button>') == 1 and S20.count('class="b" name="act" value="note" data-needs-text>Send note</button>') == 1 and 'value="send"' not in S20 and 'value="comment"' not in S20 and 'placeholder="Note (optional)"' in S20 and "Send with an empty box finishes the step" not in S20 and "A note, or nothing" not in S20 and "data-step" in S20[S20.find('<form class="ianswer"'):][:60] and (lambda f: f.count('<button type="submit"') == 2)(S20[S20.find('<form class="ianswer"'):S20.find('</form>', S20.find('<form class="ianswer"'))])
       and "<textarea" in S20 and S20.count('<form class="ianswer"') == 1 and 'name="choice"' not in S20, S20[S20.find('class="iask istep"'):][:600])
 check("the step form's note box has the resize wrapper: its textarea inside .abox with the handle, and the page carries the resize script", re.search(r'<div class="abox"><textarea id="atext" name="text".*?</textarea><div class="rsz" role="separator"', S20) is not None and ui_render._ABOX_JS in S20)
 b20 = blk(S20)
@@ -428,7 +428,7 @@ check("a decision with misshaped options has no option cards, so the box is labe
       'name="choice"' not in M37 and '<label for="atext">Write your answer; the agent on it is told</label>' in M37 and "Note (optional)" not in M37
       and '<button type="submit" class="b main" name="act" value="answer">Send</button>' in M37
       and '<label class="anote" for="atext">Note (optional)</label>' in Q30 and '<label class="anote" for="atext">Note (optional)</label>' in Y31, M37[M37.find('<form class="ianswer"'):][:700])
-check(", no page has a Done button now; the step form's one Send posts act=send", all('value="done"' not in page(f"a{i}", answer=BOX) for i in (1, 2, 9, 10, 14, 35, 36)) and 'name="act" value="send"' in S20)
+check(", only the step form has a Done button (act=done) and a Send note (act=note); no page posts act=send any more", all('value="done"' not in page(f"a{i}", answer=BOX) and 'value="note"' not in page(f"a{i}", answer=BOX) for i in (1, 2, 9, 10, 14, 35, 36)) and 'name="act" value="done"' in S20 and 'name="act" value="note"' in S20 and 'value="send"' not in S20)
 check("the decision item keeps today's ask block and form", 'class="iask"' in p1 and '<form class="ianswer"' in p1 and 'name="choice" value="Ship"' in p1 and 'name="act" value="done"' not in p1)
 check("with no answer box (signed out) the step is still on the page, with no form", "<b>Your step</b>" in page("a30") and "<form" not in blk(page("a30")) and 'value="done"' not in page("a30"))
 check("the answer script is on the page only when the page has a form: a step item with the box has it, signed out (the step block alone) has not",
@@ -483,9 +483,9 @@ check("…and open: not one fold wraps it, in every open state (doing, waiting, 
 check("an item he moves has exactly one form with a text box: the decision's, the question's, the step's, never a second comment form",
       all(h.count('<form class="ianswer"') == 1 and CF not in h and h.count("<textarea") == 1 for h in PG_HIS.values()),
       {g: (h.count('<form class="ianswer"'), h.count("<textarea")) for g, h in PG_HIS.items() if h.count('<form class="ianswer"') != 1 or CF in h or h.count("<textarea") != 1})
-check("…its own buttons stay: answer on a decision, send on a step, a plain comment on his item that asks nothing; one button each",
-      all(PG_HIS[g].count('name="act" value="answer"') == 1 for g in ("a1", "a36", "a14")) and all(PG_HIS[g].count('name="act" value="send"') == 1 for g in ("a30", "a23", "a61"))
-      and PG_HIS["a10"].count('name="act" value="comment"') == 1 and all(h.count('name="act"') == 1 for h in PG_HIS.values()), None)
+check("…its own buttons stay: answer on a decision, done and note on a step (two buttons), a plain comment on his item that asks nothing; one button each otherwise",
+      all(PG_HIS[g].count('name="act" value="answer"') == 1 for g in ("a1", "a36", "a14")) and all(PG_HIS[g].count('name="act" value="done"') == 1 and PG_HIS[g].count('name="act" value="note"') == 1 for g in ("a30", "a23", "a61"))
+      and PG_HIS["a10"].count('name="act" value="comment"') == 1 and all(h.count('name="act"') == (2 if g in ("a30", "a23", "a61") else 1) for g, h in PG_HIS.items()), None)
 cm = lambda h: h[h.index('id="comments"'):h.index("</div></div><script>")]
 check("the Comments fold keeps the list: his comment is in it, the count says 1, and it holds no form, a text box or a button; an item with none says so",
       "looks fine to me" in cm(PG_THEIRS["a71"]) and 'ev-comment' in cm(PG_THEIRS["a71"]) and '<span class="count">1</span>' in cm(PG_THEIRS["a71"])

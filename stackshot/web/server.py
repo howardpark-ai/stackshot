@@ -1477,13 +1477,16 @@ def project_ref(x: str) -> dict[str, Any] | None:
     return _prj.ref(x, _registry("projects"))
 
 
-def _front_keeper(who: str, project: str = "", strict: bool = False) -> tuple[bool, str]:
+def _front_keeper(who: str, project: str = "", strict: bool = False, unread_front: bool = False) -> tuple[bool, str]:
     """is `who` (a name or a transcript id) a front agent, by anchors.session_roles() (which roles.json builds on)? → (True, the
     keeper of `project`, else of the project it is front in: notice_name or keeper, as _gate_front finds it; "" when none),
     or (False, "") for a back agent, a keeper or a session with no role, and for the keeper of `project` itself even when
-    session_roles ranks it front for another page. `strict` (the queue rule's: model/queued.py) answers (True, "") for any session whose role is front, the keeper of `project` included, and when the roles cannot be read, where the default answers False."""
+    session_roles ranks it front for another page. `strict` (the queue rule's: model/queued.py) answers (True, "") for any session whose role is front, the keeper of `project` included, and when the roles cannot be read, where the default answers False.
+    `unread_front` (the hourly audit's: audit/hourly.py) keeps the default's answers for a role map that was read, and answers (True, "") when it was not (an error, or no role at all: the registry reads {} when its file cannot be read), so an unreadable registry is no proof that the session is a builder."""
     try:
         roles = _anc.session_roles()
+        if unread_front and not roles:
+            return True, ""
         name = _role_name(roles, who)
         if not name or roles[name]["role"] != "front":
             return False, ""
@@ -1501,7 +1504,7 @@ def _front_keeper(who: str, project: str = "", strict: bool = False) -> tuple[bo
                 return True, stew
         return True, ""
     except Exception:
-        return (True, "") if strict else (False, "")
+        return (True, "") if (strict or unread_front) else (False, "")
 
 
 def _front_sender(who: str) -> bool:
@@ -1528,7 +1531,7 @@ def _front_sender(who: str) -> bool:
 # purpose through the message tool are not touched.
 PRESENCE_MINUTES = 30.0
 _FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
-                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
+                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
                    "owner": "progress", "observer": "progress"}      # news about the item: progress (named here so a new, unmapped tag is a decision the tag-coverage test catches)
 
@@ -4980,7 +4983,7 @@ def _minute_fleet_publish() -> None:
 
 
 def _minute_ticks() -> "list[_minute.Tick]":
-    """The minute set in its order: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass,
+    """The minute set in its order: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the balancer (off by default; an item not started or queued for ten minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass,
     the dates pass, the wake catch-up, the silence pass. Each lambda names its function
     when it runs, so a replaced function is the one called. `board=True`: skipped while the migration's pass holds the board (the registry sync and the
     clients' tick go on; the two wake passes have their own check)."""
@@ -4992,6 +4995,7 @@ def _minute_ticks() -> "list[_minute.Tick]":
         T("evwait_tick", lambda: _evwait_tick(), "settle", board=True),
         T("check_tick", lambda: _check_tick(), "settle", board=True),
         T("proof_tick", lambda: _proof_tick(), "settle", board=True),
+        T("balance_tick", lambda: _balance_tick(), "handoff", board=True),
         T("handoff_tick", lambda: _handoff_tick(), "handoff", board=True),
         T("answer_tick", lambda: _answer_tick(), "answers", board=True),
         T("roles_sync_safe", lambda: _roles_sync_safe(), "fleet"),
@@ -5164,7 +5168,8 @@ def _silence_env() -> Any:
     """The silence pass's environment, built in one place for the pass and its backstop: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`_front_keeper`), which is stricter than the
     role map (a project's keeper is not front for its own project; a transcript id resolves). The backstop must judge a hand-off by the very answer the pass did, or it lists what the pass found and hides what it did not."""
     from stackshot.audit import audit_run as _ar
-    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0], front_strict=lambda who, project: _front_keeper(who, project, True)[0])
+    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0], front_strict=lambda who, project: _front_keeper(who, project, True)[0],
+                    front_or_unread=lambda who, project: _front_keeper(who, project, unread_front=True)[0])
 
 
 _queued.configure(is_front=lambda who, project: _front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
@@ -5236,7 +5241,7 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
     the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
     run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless session), a registry status this server does not know, a pane in a turn whose transcript this box does not hold, or one
     whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover
-    there must not read idle and be handed on), and a sessions index that cannot be read. Only a session with no row anywhere (the heartbeat marks it gone, or holds none) gives []."""
+    there must not read idle and be handed on), a sessions index that cannot be read, one that is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
     from stackshot.audit import subagent_tie as _tie
     try:
         idx = _sessions_index() if idx is None else idx
@@ -5254,7 +5259,11 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
             rows.append(byid)
         if any(_lv.running(r) for r in rows):      # no row on this box, but the fleet's heartbeat holds the session running: it is on another machine (or its row here is not yet written), and its subagents cannot be read from here
             raise _tie.Unreadable("the session runs on another machine, whose subagents this server cannot read")
-        return []      # no row of a live process anywhere (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
+        if not len(idx):      # an empty index says nothing about this session (the heartbeat was not read, or holds nothing yet): "no row" is not "gone" then
+            raise _tie.Unreadable("the fleet's sessions index is empty")
+        if getattr(idx, "unreadable", None):      # a machine's sessions.json that could not be read leaves its sessions out: this one may be on it
+            raise _tie.Unreadable(f"the fleet's sessions index is partial (machine {', '.join(str(x) for x in idx.unreadable)} not read)")
+        return []      # no row of a live process anywhere in a whole index (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
     st = str(row[1].get("status") or "")
     if st in ("idle", "shell"):
         return []      # a pane that is not in a turn has no subagent running (a subagent keeps its pane busy)
@@ -5422,6 +5431,164 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         except Exception as e:  # noqa: BLE001
             print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return handed
+
+
+def _balance_builders(project: str) -> list[str]:
+    """The sessions the balancer may move an item of `project` to, best first: BUILDERS only, the project's own first (the mandate says build, maintain, merge or engineer: `_handoff_ranked` classes them 0 and 1), then those of any other
+    project whose mandate says `build`, as the idle hand-over's fallback reads them (`_hand_idle_builders`). A reviewer or any other background agent is no candidate."""
+    out = [n for c, _o, n in _handoff_ranked(project) if c < 2]
+    try:
+        out += [n for n in _balance_builder_names(True) if not any(_ho_same(n, o) for o in out)]
+    except Exception:  # noqa: BLE001  — with no view of the other projects the item's own project's builders are all there is
+        pass
+    return out
+
+
+def _balance_builder_names(narrow: bool = False) -> list[str]:
+    """Every background agent, of any project, whose mandate says build, maintain, merge or engineer and that is not retired (raises when the registry cannot be read): who counts as a builder whose item may be balanced.
+    With `narrow` only the mandates that say `build` (the idle hand-over's fallback, as `_hand_idle_builders` reads other projects): who qualifies as a target from ANOTHER project."""
+    reg = _anc.registry()
+    rx = re.compile(r"\bbuild", re.I) if narrow else _router._BUILDER
+    return [n for n, r in _anc.session_roles(reg).items()
+            if r.get("role") == "back" and not r.get("retired") and rx.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
+
+
+def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
+                  dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
+    """The balancer (audit/hand_idle.py, `[audit] balance`, off by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
+    untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder with the fewest open
+    items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
+    why. The mover it left is told ONCE, by `_tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
+    subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
+    in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it (another builder than its mover is in the role map and none is usable) the item stays, one History line says so and -main is told once per item per 24 hours, and the pass looks again every minute; with no other builder, or a builder that is no improvement, it is a log line only.
+    Only an item whose mover is itself a builder is balanced, and only to builders. The notice to the mover it left is at-most-once (a crash between the save and the send loses it) and is not sent to a pane that is gone. An item the idle
+    hand-over moved in the last 24 hours is left alone. Stands still while the audit is off (`[audit] enabled`) or runs in agent mode, while the board is paused, with `[model] handoff` off, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
+    from stackshot.audit import hand_idle as _hi
+    from stackshot.tools import next_report as _nr
+    if not _hi.balance_enabled() or not _cfg.audit_enabled() or _cfg.audit_mode() != "script" or _ro.is_read_only() or _handoff_paused() or not _handoff_on():
+        return []
+    now = time.time() if now is None else now
+    items = items if items is not None else _nr.load_all(None)
+    env = env if env is not None else _silence_env()
+    front = getattr(env, "is_front_safe", None) or env.is_front      # a front test that cannot answer counts as front: nothing moves on a guess
+    minutes = _hi.balance_minutes()
+    cells: dict[str, Any] = {}
+
+    def anchors_of(gid: str, item: dict[str, Any]) -> bool:      # an anchor scoped to the item says a build is in flight; an anchor store that cannot be read counts as one
+        try:
+            if "anchors" not in cells:
+                cells["anchors"] = _anc.load()
+            return bool(_scoped_anchors(str((item.get("metadata") or {}).get("project") or ""), gid, cells["anchors"]))
+        except Exception:  # noqa: BLE001
+            return True
+    anchored = anchored or anchors_of
+    try:
+        names = _balance_builder_names()
+    except Exception as e:  # noqa: BLE001  — with no view of who builds, nothing is judged a builder: nothing moves on a guess
+        print(f"balance: builders not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+    is_builder = lambda who: any(_ho_same(who, n) for n in names)      # noqa: E731
+    behind = _hi.balance_queue(items, now, minutes * 60.0, front)
+    rows = _hi.balance_all(items, now, minutes, front, behind, _ho_same, anchored, is_builder)
+    if not rows:
+        return []
+    if status is None or dead is None:
+        idx = _sessions_index()
+        status = status or (lambda who: _handoff_status(who, idx)[0])
+        dead = dead or (lambda who: _handoff_pane(who, idx))
+    load = _hi.load_counts(_hi.busy_movers(items, now), _ho_same)
+    moved: list[str] = []
+    gone: list[tuple[str, str, str]] = []      # (the mover it left, the item, who has it now): the former mover's notice
+    told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
+    builders: dict[str, list[str]] = {}      # per project, read once a pass
+    mains: dict[str, str] = {}
+    for gid, row in rows:
+        if len(moved) >= _hi.BALANCE_MAX_PER_TICK:
+            break
+        try:
+            project = row["project"]
+            if project not in builders:
+                builders[project] = _balance_builders(project)
+                mains[project] = _main_agent(project)
+            main = mains[project]
+            if main and _model.is_owner(main):
+                main = ""      # the owner is told nothing by this pass
+            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({project})"
+            if row["capped"]:
+                with _writes.ITEM_LOCK:
+                    item = _load(gid)
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
+                    if cur is None or not cur["capped"] or not _ho_same(cur["mover"], row["mover"]):
+                        continue
+                    meta = item.setdefault("metadata", {})
+                    _hi.mark_balance_capped(meta, now)
+                    _stall.note(meta, now, f"already moved {_hi.BALANCE_LIFETIME} times by the balancer, so it stays with {_session_label(row['mover'])} and the ladders have it: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _writes.save(gid, item, note="balance: at its lifetime cap")
+                if main:
+                    told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_session_label(row['mover'])} to the ladders"))
+                print(f"balance: {gid} at its lifetime cap", file=sys.stderr, flush=True)
+                continue
+            to = _hi.pick_least(builders[project], load, status, dead, _ho_same, row["mover"], row["tried"], front, project)
+            if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
+                print(f"balance: {gid} stays with {row['mover']}: no builder has few enough open items", file=sys.stderr, flush=True)      # silent otherwise: a spread that is as good as it can be is no news
+            elif to:
+                def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
+                    cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
+                    if cur is None or cur["capped"] or not _ho_same(cur["mover"], st.frm):
+                        return False
+                    _hi.mark_balanced(item.setdefault("metadata", {}), now, st.frm, st.to)
+                    return True
+                st = _ho.Step("move", gid, _hi.balance_why(row["kind"], minutes) + f" (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
+                try:
+                    ok = bool(_handoff_exec([st], now, verify=False, recheck=still))
+                except Exception as e:  # noqa: BLE001  — a send after the save failed: the move itself was made when the item carries this pass's record
+                    print(f"balance: {gid} sending after the move failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+                    ok = (((_load(gid).get("metadata") or {}).get(_hi.BALANCE_KEY) or {}).get("at") == now)
+                if not ok:
+                    continue
+                moved.append(gid)
+                _hi.shift(load, row["mover"], to, _ho_same)
+                gone.append((row["mover"], gid, to))
+                print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
+            elif not _hi.balance_others(builders[project], row["mover"], row["tried"], _ho_same, front, project):
+                print(f"balance: {gid} stays with {row['mover']}: no other builder to move it to", file=sys.stderr, flush=True)      # a mover that is the only builder has nobody to lose: no note, no message
+            else:
+                with _writes.ITEM_LOCK:
+                    item = _load(gid)
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
+                    if cur is None or cur["capped"] or cur["told_none"] or not _ho_same(cur["mover"], row["mover"]):
+                        continue
+                    meta = item.setdefault("metadata", {})
+                    _hi.mark_balance_none(meta, now)
+                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no live builder could take it, so it stays with {_session_label(row['mover'])}: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _writes.save(gid, item, note="balance: no live builder")
+                if main:
+                    told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no live builder could take it, so it stays with {_session_label(row['mover'])}"))
+                print(f"balance: {gid} no live builder", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one item never stops the others
+            print(f"balance: {gid} not balanced: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for frm in dict.fromkeys(f for f, _g, _t in gone):      # the former mover is told once per item it left, in one message however many: only for an item this pass moved
+        try:
+            if _front_keeper(frm, "")[0] or _model.is_owner(frm) or not _ho.is_session_name(frm) or dead(frm):
+                continue      # a front agent is never sent it unmarked; a pane that is gone cannot take it (and a failed send would leave an `undelivered` note on the item that just moved)
+            mine = [(g, t) for f, g, t in gone if f == frm]
+            if len(mine) == 1:
+                text = f"Disregard: {_gh.shown(mine[0][0])} is now with {_session_label(mine[0][1])}. Drop it, stop any work or subagent on it, and write nothing to it. No reply is owed."
+            else:
+                text = (f"Disregard: {len(mine)} items are now with other sessions:\n" + "\n".join(f"- {_gh.shown(g)} is now with {_session_label(t)}" for g, t in mine)
+                        + "\nDrop them, stop any work or subagent on them, and write nothing to them. No reply is owed.")
+            _tell_woken(",".join(g for g, _t in mine), _session_id(frm) or frm, text, tag="balance")
+        except Exception as e:  # noqa: BLE001
+            print(f"balance: {frm} not told to disregard: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for main, pairs in told.items():
+        try:
+            gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
+            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items stay where they are:\n" + "\n".join("- " + x for x in lines)
+            _tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+                        + (_notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+        except Exception as e:  # noqa: BLE001
+            print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return moved
 
 
 _BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
@@ -15360,7 +15527,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     if then:      # a Done: the step he did, then who has the item now and his note
         step = _states.clean(rec.get("step"))
         step = step if len(step) <= 240 else step[:240].rstrip() + " …"
-        note = f" — {_answer_words({'text': rec.get('text')}, 300)}" if rec.get("text") else ""
+        note = f", with his note: “{_answer_words({'text': rec.get('text')}, 300)}”" if rec.get("text") else ""
         line = f"[stackshot] {OWNER} did his step on {_gh.shown(gid)}: {step}. It goes to {_session_label(then)} now{note} → {url}"
     judge = ""
     if then and rec.get("kind") == "step-reply":      # his note on the step, sent with no Done: the session that takes the item judges it (only its own line says so)
@@ -15490,7 +15657,7 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
 
 
 def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
-    """his Send with an empty box (his word that his step is done) checks the open steps of the item's checklist that are his, the lines the Your step block shows
+    """his Done (his word that his step is done; an empty Send from a page loaded earlier is the same) checks the open steps of the item's checklist that are his, the lines the Your step block shows
     (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Send is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
     marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Send finishes all of his open lines."""
@@ -15535,9 +15702,11 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
 
 def _answer(gid: str, choice: str, text: str, act: str) -> str:
     """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
-    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | toolong | nostep | nomover (nothing written). A step form has one button, Send (act=send): with an empty box it is the owner's word that the step is done (`done`: the item goes to
-    its then-mover, recorded as his answer "Done"), with a note it is his note on the step (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step).
-    A page loaded before the release posts act=done (as the empty Send) or act=comment (a comment only, as before: the step stands)."""
+    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | toolong | nostep | nomover (nothing written). A step form has two buttons and an optional note box.
+    Done (act=done) is his word that the step is finished (`done`: the item goes to its then-mover, recorded as his answer "Done"); a note in the box stays on that record (`text`) and goes with the Done to the then-mover,
+    which is told the step is done and shown the note. Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
+    on an item with no step any more it is a comment, and with no text nothing is written (`empty`). A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
+    """
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
     if len(text) > _ANSWER_TEXT_MAX:
         return "toolong"
@@ -15557,11 +15726,18 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
             else:
                 kind = "decision"
-        elif act == "done":             # the button of a your-step row. Only an item that stands in your-step with its step line has one: any other is refused, nothing written
+        elif act == "done":             # the Done button of a step form (his note in the box, if any, stays on the record as `text`). Only an item that stands in your-step with its step line has one: any other is refused, nothing written
             if meta.get("state") != "your-step" or not _states.clean(meta.get("step")):
                 return "nostep"
             kind, choice, stepped = "decision", "Done", True
-        elif act == "send":             # the one button of a step form. Empty box = the step is done; a note = his note on the step, handed to the then-mover to judge. An item that has no step any more: a note is a comment, an empty box nothing
+        elif act == "note":             # the Send note button of a step form: only with text (an empty box is no Done); his note on the step, handed to the then-mover to judge; an item that has no step any more: a comment
+            if not text:
+                return "empty"
+            if meta.get("state") == "your-step" and _states.clean(meta.get("step")):
+                kind, choice, stepped = "step-reply", "", True
+            else:
+                kind = "comment"
+        elif act == "send":             # the one button of a step form before the two-button form (a page loaded earlier posts it). Empty box = the step is done; a note = his note on the step, handed to the then-mover to judge. An item that has no step any more: a note is a comment, an empty box nothing
             if meta.get("state") == "your-step" and _states.clean(meta.get("step")):
                 kind, choice, stepped = ("step-reply", "", True) if text else ("decision", "Done", True)
             elif text:
@@ -15618,7 +15794,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                     rec["applied"] = f"The server read the note as a later time and put the item on hold until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
                 else:
                     _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_owner_want(meta), writer=NAME, add=False)
-                    if said["done"]:        # "ran it": his step is ticked as an empty Send ticks it (every open line of his), the then-mover is told
+                    if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
                         _check_his_step(meta, rec["step"], now)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
             _state_end(meta, "your-step")

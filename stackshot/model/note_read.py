@@ -3,7 +3,7 @@
 The owner's Send box on a step takes a note. Two kinds of note say what the owner did or will do, and the server applies them itself instead of leaving the session that takes the item to
 read them:
 
-  done   the whole note says he did the step ("ran it", "done", "I did it"; "I ran it and will check tomorrow" too, which ticks and holds nothing): his step is ticked as an empty Send ticks it. A
+  done   the whole note says he did the step ("ran it", "done", "I did it"; "I ran it and will check tomorrow" too, which ticks and holds nothing): his step is ticked as a Done ticks it. A
          bare imperative ("run it") is no `done`. A note that goes on to say more ("ran it but it says forbidden"), asks something ("did it work?") or says he did not ("didn't run it") is no `done`:
          it goes to the session to judge, as before.
   until  the note is a first-person future with a later time ("I'll do it tomorrow evening", "I will look at it next week", "I'm going to do it in 3 days", "I'll do it on Friday"): the item goes on hold

@@ -680,7 +680,7 @@ check("the switch is back on", _cfg.ask_leaves_on() is True)
 # ---- 7. the server applies what he said (part 4)
 told.clear()
 res = server._answer("a30", "", "ran it", "send"); m = rd(30)["metadata"]
-check("his note 'ran it' ticks his step as an empty Send does", res == "stepreply" and "step" not in m and "state" not in m and m["answers"][-1].get("applied"), (res, m))
+check("his note 'ran it' ticks his step as a Done does", res == "stepreply" and "step" not in m and "state" not in m and m["answers"][-1].get("applied"), (res, m))
 check("the item goes to the then-mover and the notice says what was applied, not 'judge the note'", m.get("mover") == "home-agent" and told and "Judge the note" not in told[-1][2] and "ticked his step" in told[-1][2], told)
 told.clear()
 tomorrow_ = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")

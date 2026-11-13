@@ -1398,12 +1398,13 @@ form.hanswer[data-cards] .acards{margin-top:0}form.hanswer .acard{padding:8px 10
 """
 _CARDS_JS = r"""<script>(function(){
 function pick(f){return f.querySelector('input[name=choice]:checked')}
-function sync(f){if(!f||f.hasAttribute('aria-busy'))return;var b=f.querySelector('button[name=act]'),t=f.querySelector('textarea'),h=f.querySelector('.ahint'),ok=!!pick(f)||(!!t&&t.value.trim()!=='');
+function step(f){var t=f.querySelector('textarea'),ok=!!t&&t.value.trim()!=='';[].forEach.call(f.querySelectorAll('button[data-needs-text]:not([data-spent])'),function(b){b.disabled=!ok})}
+function sync(f){if(!f||f.hasAttribute('aria-busy'))return;if(f.hasAttribute('data-step'))return step(f);var b=f.querySelector('button[name=act]'),t=f.querySelector('textarea'),h=f.querySelector('.ahint'),ok=!!pick(f)||(!!t&&t.value.trim()!=='');
 if(b)b.disabled=!ok;if(h)h.hidden=ok}
-function all(){[].forEach.call(document.querySelectorAll('form[data-cards]'),function(f){var p=pick(f);f._was=p?p.value:'';sync(f)})}
+function all(){[].forEach.call(document.querySelectorAll('form[data-cards],form[data-step]'),function(f){var p=pick(f);f._was=p?p.value:'';sync(f)})}
 document.addEventListener('click',function(e){var i=e.target;if(!i||!i.matches||!i.matches('form[data-cards] input[name=choice]'))return;var f=i.form;
 if(f._was===i.value){i.checked=false;f._was=''}else f._was=i.value;sync(f)},true);
-document.addEventListener('input',function(e){var t=e.target;if(t&&t.matches&&t.matches('form[data-cards] textarea'))sync(t.form)});
+document.addEventListener('input',function(e){var t=e.target;if(t&&t.matches&&t.matches('form[data-cards] textarea,form[data-step] textarea'))sync(t.form)});
 document.addEventListener('stackshot:swapped',all);window.addEventListener('pageshow',all);window.ssCards={sync:sync,all:all};all()})();</script>"""
 def _card_order(opts):
     """The options in the order the answer box draws them. Three or more are drawn, and lettered, in the order the owner stored them, because a session writes its ask ("Recommend: B, …")
@@ -1480,7 +1481,7 @@ hint();document.addEventListener('stackshot:swapped',hint)})();</script>"""
 _HOME_JS = r"""(function(){var T={},SK='ss-home-scroll';
 function run(){var F=[].slice.call(document.querySelectorAll('form.hanswer[data-gid]'));if(!F.length)return;if(!window.fetch){F.forEach(function(f){f.hidden=true});return}
 var need=F.map(function(f){return f.getAttribute('data-gid')}).filter(function(g,i,a){return !(g in T)&&a.indexOf(g)===i});
-function show(){F.forEach(function(f){var t=T[f.getAttribute('data-gid')],i=f.querySelector('input[name=token]');if(t&&i){i.value=t;f.hidden=false;[].forEach.call(f.querySelectorAll('button[disabled]:not([data-spent])'),function(b){b.disabled=false});if(window.ssCards&&!f.classList.contains('hstep'))ssCards.sync(f)}})}
+function show(){F.forEach(function(f){var t=T[f.getAttribute('data-gid')],i=f.querySelector('input[name=token]');if(t&&i){i.value=t;f.hidden=false;[].forEach.call(f.querySelectorAll('button[disabled]:not([data-spent])'),function(b){b.disabled=false});if(window.ssCards)ssCards.sync(f)}})}
 function giveup(){F.forEach(function(f){var i=f.querySelector('input[name=token]');if(!(i&&i.value))f.hidden=true})}
 if(!need.length){show();giveup();return}
 fetch('@ROOT@/answer-tokens?ids='+encodeURIComponent(need.join(',')),{credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}})
@@ -1493,7 +1494,7 @@ var S=null,h0=document.documentElement.scrollHeight,np=null,Y=0;try{S=JSON.parse
 if(m){var p=document.createElement('p');p.className='isent '+m[0];p.setAttribute('role','status');var id=q.get('item'),nm='',lab='';
 if(id&&/^(?:[a-z]\d+|[1-9]\d*|board-tmp-[a-z0-9-]*[a-z0-9]-[1-9]\d*)$/.test(id)){lab=/^\d+$/.test(id)?(N.getAttribute('data-hash')||'')+id:id;var d=id.match(/^([a-z])(\d+)$/),rw=document.getElementById(d?'task-'+d[1]+'-'+d[2]:/^\d+$/.test(id)?'task-g-'+id:''),g=rw&&rw.querySelector('.hgoal');nm=g?g.textContent:''}
 var th=q.get('then'),ms=m[1];if((k==='done'||k==='stepreply')&&th&&th.length<=80&&[].some.call(document.querySelectorAll('.hwho'),function(x){return x.textContent===th}))ms=SST(k==='done'?'js.sent_done':'js.sent_note',{who:th});
-if((k==='done'||k==='stepreply')&&rw)[].forEach.call(rw.querySelectorAll('form.hstep button[value=send]'),function(b){b.disabled=true;b.setAttribute('data-spent','1')});
+if((k==='done'||k==='stepreply')&&rw)[].forEach.call(rw.querySelectorAll('form.hstep button[name=act]'),function(b){b.disabled=true;b.setAttribute('data-spent','1')});
 p.textContent=(nm?nm+' ('+lab+')':lab)+(nm||lab?' — ':'')+ms;
 var c=document.querySelector('header.top')||document.getElementById('counts')||N;if(c&&c.parentNode){c.parentNode.insertBefore(p,c.nextSibling);np=p}}
 if(S&&S.y>0&&S.p===location.pathname&&!location.hash&&Date.now()-S.t>=0&&Date.now()-S.t<15000){Y=S.y+(document.documentElement.scrollHeight-h0);window.scrollTo(0,Y);
@@ -2852,12 +2853,13 @@ class Board:
         his = (not done) and (mod.owner_moves or "decision" in [x.lower() for x in needs_of(r)])
         if not his: ask_html = ""
         sb_html = ""
-        if his and not asked and answer and _ip.step_block(r):       # a your-step item: the step, directly under the state line, then Done, the note box and Send
+        if his and not asked and answer and _ip.step_block(r):       # a your-step item: the step, directly under the state line, then the note box with Done and Send note
             sb_html = (f'<div class="iask istep"><b>{_t("item.your_step")}</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
-                       f'<form class="ianswer" method="post" action="{e(answer["action"])}"><input type="hidden" name="token" value="{e(answer["token"])}">'
+                       f'<form class="ianswer" data-step method="post" action="{e(answer["action"])}"><input type="hidden" name="token" value="{e(answer["token"])}">'
                        f'<label for="atext">{_t("home.step_note_aria")}</label>'
-                       + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
-                       f'<div class="abtns"><button type="submit" class="b main" name="act" value="send">{_t("home.send")}</button></div>'
+                       + _abox(f'<textarea id="atext" name="text" rows="3" maxlength="4000" placeholder="{e(_t("home.step_note"))}"></textarea>', "atext") +
+                       f'<div class="abtns"><button type="submit" class="b main" name="act" value="done">{_t("home.step_done")}</button>'
+                       f'<button type="submit" class="b" name="act" value="note" data-needs-text>{_t("home.step_send_note")}</button></div>'
                        '<p class="isent warn aerr" role="alert" hidden></p></form>')
         elif his and not asked and _ip.step_block(r):                 # signed out (or no token): the step is still the page's
             sb_html = f'<div class="iask istep"><b>{_t("item.your_step")}</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
@@ -3299,7 +3301,7 @@ li.hrow{padding:10px 12px;min-width:0;font-size:14px;line-height:1.4;scroll-marg
 .hl2{margin-top:4px;min-width:0;font-size:13px;color:var(--mut)}.hnext,.hwait{display:block;min-width:0;overflow-wrap:anywhere;color:var(--fg)}.hwait{color:var(--mut)}.hwait .hon{color:var(--fg)}.hnext.hq{font-weight:500}a.mockup{white-space:nowrap;font-weight:500}
 .hwho{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mut)}.hwho.own{font-family:inherit;font-weight:600;font-size:12px;color:var(--call)}a.hwho:hover{color:var(--acc)}
 .iask .istepbody>b.osub{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600;margin:10px 0 4px}.draft{margin:6px 0 4px}.draft .dhead{margin:0 0 4px}.draft .dlab{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600}.draft button.copy{margin-left:8px;vertical-align:baseline}.draft pre{margin:0;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;color:var(--fg)}.draft pre code{font:inherit;border:0;padding:0;background:none;color:var(--fg)}.hdraft{margin:4px 0 2px;font-size:13px}.hdraft summary{cursor:pointer;color:var(--mut);font-size:12px}.hdraft .dlab{font-size:12px;letter-spacing:0;text-transform:none;font-weight:400;color:var(--mut)}.hdraft pre{margin:4px 0 0;background:var(--bg);font-size:13px;line-height:1.45}.hnote{margin-top:4px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}.hnote .hwho{font-size:12px}li.hrow .cmd{margin:6px 0 2px;color:var(--fg)}ol.stepol{margin:4px 0 6px;padding-left:22px}ol.stepol>li{margin:6px 0;line-height:1.5}p.sp{margin:4px 0}.stepol .cmd{margin:6px 0 2px}
-.hask{margin-top:6px}form.hanswer{margin:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}form.hanswer[hidden]{display:none}form.hanswer .abtns{margin-top:6px}form.hanswer .abtns-opt{margin-top:0}form.hanswer textarea{display:block;box-sizing:border-box;width:100%;min-height:3.2em;margin-top:8px;padding:6px 8px;font:inherit;font-size:14px;color:var(--fg);background:var(--ifill);border:1px solid var(--ibd);border-radius:6px;resize:none}form.hanswer textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.hask{margin-top:6px}form.hanswer{margin:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}form.hanswer[hidden]{display:none}form.hanswer .abtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}form.hanswer .abtns-opt{margin-top:0}form.hanswer textarea{display:block;box-sizing:border-box;width:100%;min-height:3.2em;margin-top:8px;padding:6px 8px;font:inherit;font-size:14px;color:var(--fg);background:var(--ifill);border:1px solid var(--ibd);border-radius:6px;resize:none}form.hanswer textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 ul.hdones li.hdone{display:block;min-width:0}.hdl1{display:flex;flex-wrap:nowrap;align-items:baseline;gap:2px 8px;min-width:0}ul.hdones .isubj{flex:1 1 0;grid-column:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}ul.hdones .badge{flex:none;margin:0;white-space:nowrap}ul.hdones .iage{flex:none;margin-left:auto;font-size:12px;color:var(--mut);white-space:nowrap}.hdl2{margin-top:2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--mut)}ul.hdones a.hnum{flex:none}
 .hl1.hytop{display:flex;flex-wrap:nowrap;align-items:baseline;gap:8px;margin-top:0}.hytop a.hnum{flex:none;max-width:none;overflow:visible;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:inherit;font-weight:600;color:var(--fg)}.hytop a.hnum:hover{color:var(--acc)}.hytop a.hgoal{display:block;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hytop .hage{flex:none;white-space:nowrap}.hytop+.hmeta{margin-top:4px}
 details.fold>summary{list-style:none;cursor:pointer}details.fold>summary::-webkit-details-marker{display:none}details.fold>summary h2::before{content:'▸ ';color:var(--mut)}details.fold[open]>summary h2::before{content:'▾ '}details.fold>summary h3::before{content:'▸ ';color:var(--mut)}details.fold[open]>summary h3::before{content:'▾ '}details.fold>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}.rnote{margin:0 0 10px;padding:5px 12px;border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line));border-left:3px solid var(--warn);border-radius:8px;background:color-mix(in srgb,var(--warn) 7%,var(--card));color:var(--fg);font-size:13px;line-height:1.45;overflow-wrap:anywhere}.rnote .r-ico{color:var(--warn);font-weight:700}.rnote b.r-host{font-weight:600}.rnote .r-off{color:var(--mut)}
@@ -3694,13 +3696,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The home row's draft where no step block holds it (an ask's row, or a row with no step form): right under the detail, collapsed (draft_html)."""
         return self.draft_html(r, self.draft_label((r["metadata"] or {}).get("step"), open_ask(r)), home=True)
     def home_step(self, r):
-        """(the step as the row shows it, its form) for a your-step item of the owner's with no ask: the step itself, then a note box with ONE button, Send (an empty box finishes the step, the item goes to its
-        then-mover as after a Done; a note is his note on the step, handed to the then-mover to judge), drawn hidden for the page script to show with a token, as the decision rows' forms are. The step is
-        drawn as the item page's Your step block draws it (your_step_html): his open steps, numbered, each command with its Copy box. None for any other item."""
+        """(the step as the row shows it, its form) for a your-step item of the owner's with no ask: the step itself, then an optional note box with TWO buttons: Done (the main one: the step is finished, the item goes to its
+        then-mover as after any Done, and a note written in the box goes along to it) and Send note (the step stays open, the note goes to the then-mover as his step-reply; greyed until the box has text), drawn hidden for the page
+        script to show with a token, as the decision rows' forms are. The step is drawn as the item page's Your step block draws it (your_step_html): his open steps, numbered, each command with its Copy box. None for any other item."""
         if open_ask(r) or not _ip.step_block(r): return None
-        form = (f'<form class="hanswer hstep" method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">'
+        form = (f'<form class="hanswer hstep" data-step method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">'
                 + _abox(f'<textarea id="astep-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{esc(_t("home.step_note_aria"))}" placeholder="{esc(_t("home.step_note"))}"></textarea>', f'astep-{esc(r["gid"])}') +
-                f'<div class="abtns"><button type="submit" class="b main" name="act" value="send" disabled>{esc(_t("home.send"))}</button></div></form>')
+                f'<div class="abtns"><button type="submit" class="b main" name="act" value="done" disabled>{esc(_t("home.step_done"))}</button>'
+                f'<button type="submit" class="b" name="act" value="note" data-needs-text disabled>{esc(_t("home.step_send_note"))}</button></div></form>')
         return self.your_step_html(r, home=True), form
     def home_ask(self, r):
         """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none. The question is the ask's Decide part (a watcher's
@@ -3833,7 +3836,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         actions = ""
         if which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">{esc(_t("home.after_wait"))}</span> {nxt}</span>' if step else "")
         elif ask: detail, actions = f'<span class="hnext hq">{ask[0]}</span>{dr}', ask[1]
-        elif stp: detail, actions = f'<span class="hnext">{stp[0]}</span>', stp[1]      # a your-step item: the step itself in place of the next line, with the note box and its one Send
+        elif stp: detail, actions = f'<span class="hnext">{stp[0]}</span>', stp[1]      # a your-step item: the step itself in place of the next line, with the note box and its Done and Send note buttons
         else: detail = f'<span class="hnext">{nxt}</span>{dr}'
         return _ui.row(href=item_href(r), rid=rid(r), title=self.bare(r["subject"]), age_html=age, who_html=" · ".join(x for x in who if x),
                        detail_html=detail + "".join(notes), actions_html=actions, li_id=anchor(r), li_class="hrow",

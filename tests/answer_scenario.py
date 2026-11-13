@@ -114,6 +114,9 @@ item("a", 45, state="your-step", step=STEP, needs=["home-agent"])               
 item("a", 47, state="your-step", step=STEP, needs=["home-agent"])                # Send with a note the server reads as a later time: it holds the item itself
 item("a", 46, state="your-step", step=STEP, needs=["home-agent"])                # a later-time note whose time is past the wait cap
 item("a", 42)                                                              # Send on an item that has no step any more
+item("a", 141, state="your-step", step=STEP, needs=["home-agent"])               # the Send note button: a note on the step, handed to the then-mover
+item("a", 142, state="your-step", step=STEP, needs=["home-agent"])               # the Send note button with an empty box: refused, the step stands
+item("a", 143)                                                             # the Send note button on an item that has no step any more: a comment
 item("a", 43, state="your-step", step=STEP, owner="")                         # Send with a note, nobody to take it
 item("a", 50, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent")              # the decision hand-over: a decision with a stored mover and then (no options: Yes / No)
 item("a", 51, needs=["decision"], ask=ASK, options=OPTS, mover="Oliver", then="home-keeper")   # the decision hand-over: then = a session that is neither the owner nor in needs; an option picked
@@ -528,9 +531,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Done: his words are recorded as his (kind decision, choice Done, his note, via board, the step he did), once",
           [(a["kind"], a["choice"], a["text"], a["via"], a["step"]) for a in m13["answers"]] == [("decision", "Done", "ran it, it said ok", "board", STEP.replace('\"', '"'))], m13["answers"])
     _STEPN = STEP.replace('\\"', '"')
-    check("Done: the then-mover (home-agent, in needs) alone is told, in a line headed as his answer, 'Oliver did his step on <id>: <step>. It's yours now — <note>' (review F5;: the creator is not told)",
+    check("Done: the then-mover (home-agent, in needs) alone is told, in a line headed as his answer, 'Oliver did his step on <id>: <step>. It's yours now, with his note: “<note>”' (review F5;: the creator is not told)",
       sorted((t[1], t[3]) for t in told) == [(AGENT, "answer")]
-      and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver did his step on a13: {_STEPN}. It's yours now — ran it, it said ok → {BOARD}/items/a13", told)
+      and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver did his step on a13: {_STEPN}. It's yours now, with his note: “ran it, it said ok” → {BOARD}/items/a13", told)
     check("Done: the answer is tracked for the escalation like any decision, and no issue comment is queued for it", "a13" in server._answers_load() and not any("comment" in x for x in jobs()), jobs()[-1:])
     r_again = post("/items/a13/answer", {"token": tok("a13"), "act": "done", "text": "again"})
     check("Done twice: the second finds no step any more, nothing more written", r_again.headers["location"] == "/items/a13?sent=nostep" and len(rd("a", 13)["metadata"]["answers"]) == 1)
@@ -543,7 +546,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     # F1: a then-mover that is neither the owner nor in needs is told, and its write settles the pending answer (the keeper is not told "its owner has not written")
     told.clear(); r_19 = post("/items/a19/answer", {"token": tok("a19"), "act": "done", "text": "go on"}); m19 = rd("a", 19)["metadata"]
     check("Done with then = home-keeper (not in needs): the item moves to home-keeper, who alone is told, once", m19.get("mover") == "home-keeper" and sorted(t[1] for t in told) == [STEW]
-          and any(t[1] == STEW and "It's yours now — go on" in t[2] for t in told), (m19, told))
+          and any(t[1] == STEW and "It's yours now, with his note: “go on”" in t[2] for t in told), (m19, told))
     check("…the answer is pending for the then-mover, and its write settles it", sorted(server._answers_load().get("a19", {}).get("told", [])) == [STEW], server._answers_load().get("a19"))
     check("Done on a step item (mover Oliver, then home-keeper, no needs): needs names the then-mover, and the notice goes to it, not the page's keeper",
           m19.get("needs") == [STEW] and server._notice_to(m19) == [(STEW, "as a session named in its needs")]
@@ -663,14 +666,34 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     finally: server._keeper = _kp43
     check("Send with nobody to take the item (note or empty box): sent=nomover, nothing written, nobody told, the step stands",
           r_s43.headers["location"] == "/items/a43?sent=nomover" and r_s43b.headers["location"] == "/items/a43?sent=nomover" and "answers" not in rd("a", 43)["metadata"] and rd("a", 43)["metadata"]["state"] == "your-step" and not told, told)
+    # the Send note button (act=note): a note on the step, never a Done; an empty box is refused; with no step left it is a comment
+    told.clear(); r_n141 = post("/items/a141/answer", {"token": tok("a141"), "act": "note", "text": "which box do I run it on?", "back": "/#task-a-141"}); m141 = rd("a", 141)["metadata"]
+    check("Send note: sent=stepreply with who takes it; recorded as his note on the step (kind step-reply, his words, via board, the step), not as a Done, and the item goes to the then-mover",
+          r_n141.headers["location"] == "/?sent=stepreply&item=a141&then=home-agent#task-a-141" and m141.get("mover") == "home-agent" and "state" not in m141
+          and [(a["kind"], a.get("choice"), a["text"], a["via"], a["step"]) for a in m141["answers"]] == [("step-reply", None, "which box do I run it on?", "board", _STEPN)], (r_n141.headers.get("location"), m141))
+    check("Send note: the then-mover alone is told, with his note and the instruction to judge it, exactly as for an old page's Send with a note",
+          sorted((t[1], t[3]) for t in told) == [(AGENT, "answer")]
+          and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver sent a note on his step on a141: {_STEPN}. It's yours now with his note: “which box do I run it on?”{_judge} → {BOARD}/items/a141", told)
+    told.clear(); r_n142 = post("/items/a142/answer", {"token": tok("a142"), "act": "note", "text": "   ", "back": "/#task-a-142"}); m142 = rd("a", 142)["metadata"]
+    check("Send note with an empty box is no Done and no note: nothing written, nobody told, the step stands",
+          "empty" in r_n142.headers["location"] and "answers" not in m142 and m142.get("state") == "your-step" and m142.get("step") and not told, (r_n142.headers.get("location"), m142, told))
+    r_n143 = post("/items/a143/answer", {"token": tok("a143"), "act": "note", "text": "late note"})
+    check("Send note on an item with no step: a comment, as the Send of an old page", r_n143.headers["location"] == "/items/a143?sent=comment" and [a["kind"] for a in rd("a", 143)["metadata"]["answers"]] == ["comment"], r_n143.headers.get("location"))
+    told.clear(); r_d142 = post("/items/a142/answer", {"token": tok("a142"), "act": "done", "text": "ran it, ok", "back": "/#task-a-142"}); m142 = rd("a", 142)["metadata"]
+    check("Done with a note after a note was refused: the step is ticked (state and step gone, item with the then-mover), the answer is a Done carrying the note, and the notice says the step is done and quotes it",
+          r_d142.headers["location"] == "/?sent=done&item=a142&then=home-agent#task-a-142" and "state" not in m142 and "step" not in m142 and m142.get("mover") == "home-agent"
+          and [(a["kind"], a["choice"], a["text"]) for a in m142["answers"]] == [("decision", "Done", "ran it, ok")]
+          and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver did his step on a142: {_STEPN}. It's yours now, with his note: “ran it, ok” → {BOARD}/items/a142", (r_d142.headers.get("location"), m142, told))
     r_s44 = post("/items/a41/answer", {"token": tok("a41"), "act": "send", "text": "x" * 4001})
     check("a step note over 4000 characters is refused as any answer", r_s44.headers["location"] == "/items/a41?sent=toolong")
     check("an old page's act=done still works (the Done checks above); its act=comment on a step form stays a comment and the step stands (the Send of a page loaded before the release)",
           server._answer("a15", "", "still a comment", "comment") == "comment" and rd("a", 15)["metadata"]["state"] == "your-step")
     # the page and the home row draw their forms, and the notices say who takes it
     pg = page("/items/a16").text; pg_done = page("/items/a13?sent=done").text
-    check("the item page of a step item draws the step, the note box and ONE Send (no Done, no comment button), with the token and the label that says an empty Send finishes the step",
-          'class="iask istep"' in pg and 'name="act" value="send">Send</button>' in pg and 'value="done"' not in pg and 'value="comment"' not in pg and ">Done<" not in pg and "Send with an empty box finishes the step" in pg and 'name="token"' in pg and 'name="choice"' not in pg, pg[pg.find("Your step") - 200:][:400] if "Your step" in pg else pg[:300])
+    check("the item page of a step item draws the step, the optional note box and TWO buttons: Done (the main one, act=done) and Send note (act=note, needs text), no comment button, with the token",
+          'class="iask istep"' in pg and 'name="act" value="done">Done</button>' in pg and 'name="act" value="note" data-needs-text>Send note</button>' in pg and pg.count('name="act"') == 2
+          and 'class="b main" name="act" value="done"' in pg and 'value="send"' not in pg and 'value="comment"' not in pg and 'placeholder="Note (optional)"' in pg
+          and "Note for the next owner (optional)" in pg and "Send with an empty box finishes the step" not in pg and "A note, or nothing to finish the step" not in pg and 'name="token"' in pg and 'name="choice"' not in pg, pg[pg.find("Your step") - 200:][:600] if "Your step" in pg else pg[:300])
     check("after Done the item page's notice names who takes it: Done: home-agent takes it from here.", "Done: home-agent takes it from here." in pg_done, re.findall(r'class="isent[^>]*>.*?</p>', pg_done))
     b_ = ui_render.Board(str(STORE))
     check("after a note on the step the item page's notice names who has it", "Sent: home-agent has your note and decides whether the step is done." in page("/items/a41?sent=stepreply").text
@@ -688,7 +711,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear()
 
     st_ = server._answers_load()
-    for g in ("a13", "a14", "a18", "a19", "a20", "a21", "a22", "a23", "a24", "a25", "a17", "a27", "a40", "a41", "a42", "a45", "a46", "a47"): st_.pop(g, None)
+    for g in ("a13", "a14", "a18", "a19", "a20", "a21", "a22", "a23", "a24", "a25", "a17", "a27", "a40", "a41", "a42", "a45", "a46", "a47", "a141", "a142", "a143"): st_.pop(g, None)
     server._answers_save(st_)
     for p in G.pending(): p.unlink()
     told.clear()

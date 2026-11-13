@@ -335,6 +335,23 @@ def audit_hand_idle() -> bool:
     return get("audit", "hand_idle", default=False) is True
 
 
+AUDIT_BALANCE_MINUTES = 10.0
+
+
+def audit_balance() -> bool:
+    """[audit] balance: an item not started, or queued behind its mover's other item, that has waited `balance_minutes` goes to the builder with the fewest open items, and the mover it left is told to disregard it
+    (audit/hand_idle.py, server._balance_tick). Default false; only a TOML true switches it on, read at use."""
+    return get("audit", "balance", default=False) is True
+
+
+def audit_balance_minutes() -> float:
+    """[audit] balance_minutes: how long an item waits, not started or queued, before the balancer moves it. Default 10, never under 1; a number is taken, anything else (a boolean, text, a non-finite number) reads as the default. Read at use."""
+    v = get("audit", "balance_minutes")
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+        return AUDIT_BALANCE_MINUTES
+    return max(1.0, float(v))
+
+
 def audit_orphan_handover() -> str:
     """[audit] orphan_handover: what the audit does with an open item whose mover is gone (successor.py): "report" (the default for the first week of use) only lists it, "apply" hands it to the closest live agent, "off" makes no check.
     A value that is none of these reads as the default."""
