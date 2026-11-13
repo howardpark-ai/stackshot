@@ -7,6 +7,7 @@ writes the line itself, so the owner never sees an item on an agent idle for ove
   due(items, gid, now, env, pane, same)        the line an item is owed now, None when none: {"text", "verified", "kind"}
   pass_(items, now, env, pane, same)           [(gid, line)] of every open item that is owed one; reads only
   last_line(meta)                              the newest audit line on an item (its log entry), None when it has none
+  stamp_signal(line, now)                      the `audit` signal a line that verified something stamps as the item's last_activity, None for one that did not
 
 An item is owed a line when all of these hold, using the silence pass's own scope (`silence.reading`, `silence.clock`):
 
@@ -26,8 +27,9 @@ What the pass verifies, from data the server already holds, and says in the line
   - a pull request tied to the item had a CI result, a review, a comment by a person or a merge in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
 
 The first two are live states; the third is a recorded event, one the activity record already counts. A line that rests on live states alone says so in its words
-(`… (live state only, nothing recorded on the item)`). No line is stamped as the item's `last_activity`: a pane that is busy all day must not keep every silent item looking fresh, and an event
-that is recorded is in the record already.
+(`… (live state only, nothing recorded on the item)`). A line that verified something is the hourly update the item promises, so it is stamped as the item's `last_activity` (kind `audit`, the words
+`audit verified …`, `stamp_signal`; newest wins, so it never replaces a newer real event) and the On agent row reads its time and words. A line that verified nothing is no update and stamps nothing; a phrase that
+rests on a recorded event alone stamps nothing, since that event is in the record already at its own time. The audit's write still moves no `activity` clock (model/activity.py): only `last_activity`.
 
 No pull request is read from GitHub here: the audit uses recorded data only. A commit or push to a tied pull request is not recorded by anything, so it is not a signal yet. When nothing is
 verified the line reads `Audit hh:mm: idle, nothing verified` and its log entry carries kind `audit_idle`, which audit/hand_idle.py reads to hand the item on.
@@ -94,6 +96,24 @@ def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float,
         out.append(rec["what"])
         recorded.append(rec["what"])
     return out, recorded
+
+
+def stamp_signal(line: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
+    """The `audit` signal a line stamps as the item's `last_activity` (model/last_activity.py), None when it stamps nothing. Only a line that VERIFIED something (kind `audit`) does: it is the hourly update the item
+    promises, so the On agent row reads its time and words (`audit verified ` and the line's phrases). A line that verified nothing (`audit_idle`) is no update and stamps nothing. A line whose phrases all rest on a
+    recorded event stamps nothing either: that event is in the record already, at its own time and kind, and a line stamped at `now` over it would only move it later. Newest wins when it is applied
+    (`last_activity.apply`), so an older line never replaces a newer real event. The words are the live phrases, then the recorded ones that still fit in one short line."""
+    if not line or line.get("kind") != KIND_OK:
+        return None
+    recorded = set(line.get("recorded") or [])
+    live = [w for w in (line.get("verified") or []) if w and w not in recorded]
+    if not live:
+        return None
+    words = "audit verified " + ", ".join(live)
+    for w in (w for w in (line.get("verified") or []) if w in recorded):      # the recorded phrases follow, whole or not at all: the record keeps one short line (last_activity.MAX_WHAT), and a phrase cut in the middle says nothing
+        if len(words) + 2 + len(w) <= _la.MAX_WHAT:
+            words += ", " + w
+    return _la.audit_signal(words, now)
 
 
 def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:

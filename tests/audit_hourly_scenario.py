@@ -3,7 +3,7 @@ History line saying what the audit verified, or that it is idle. Fixture items i
 network, no model call, no message sent.
 
   1  due and verified: the mover's pane is busy, a subagent runs (a status line in progress, the mover's own), a tied pull request had a CI result in the last hour (metadata.last_activity), or several of
-     them: `Audit hh:mm: verified …` in the instance's zone; the entry of the item's own log, metadata.hourly_audit.log (not the stall ladder's metadata.stall.log), has kind `audit`; a line that rests on a busy pane or a subagent alone says `live state only`; no line is stamped as the item's last-activity record; the activity clock, the progress clock, `updated` and the
+     them: `Audit hh:mm: verified …` in the instance's zone; the entry of the item's own log, metadata.hourly_audit.log (not the stall ladder's metadata.stall.log), has kind `audit`; a line that rests on a busy pane or a subagent alone says `live state only`; a line that verified something is stamped as the item's last-activity record (section 16), one that verified nothing or rests on a recorded event alone is not; the activity clock, the progress clock, `updated` and the
      writer are as they were; an idle, shell or unreadable pane, another agent's status line, a done or old one, and a pull request event older than an hour verify nothing
   2  due and nothing verified: `Audit hh:mm: idle, nothing verified`, kind `audit_idle`, `hourly.idle_marked`; the last-activity record is untouched
   3  not due: under an hour of silence (a confirm just now moves nothing), a recent write, an item that just left a hold; the clock the silence pass reads decides
@@ -147,15 +147,17 @@ check("1 a status line in progress on the mover's own step is a subagent running
 check("1 a CI result of a tied pull request in the last hour (metadata.last_activity) is verified, in the record's words, and a line that rests on a recorded event carries no live-state note", L[4][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn, CI failed on PR 5", L[4])
 check("1 …a review likewise", L[5][0]["text"] == f"Audit {hm(now0)}: verified review on PR 9", L[5])
 check("1 …several signals are joined in one line", L[6][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn, a subagent is running on it, CI passing again on PR 7", L[6])
-check("1 no line is stamped as the item's last-activity record: a recorded event is in the record as it was (its own kind and time), a busy pane or a subagent or an idle one adds none",
-      all(mt(i).get("last_activity") == before[i]["metadata"].get("last_activity") for i in range(1, 7)) and mt(4)["last_activity"]["kind"] == "ci_result" and mt(4)["last_activity"]["at"] == now0 - 20 * MIN
-      and all("last_activity" not in mt(i) for i in (1, 2, 3)), [mt(i).get("last_activity") for i in range(1, 7)])
+W1 = {1: "audit verified the mover's pane is in a turn", 3: "audit verified a subagent is running on it", 4: "audit verified the mover's pane is in a turn, CI failed on PR 5",
+      6: "audit verified the mover's pane is in a turn, a subagent is running on it"}      # item 6's recorded phrase (CI passing again on PR 7) does not fit in the 80 characters of one line with the other two, so it is left out whole
+check("1 a line that verified something is stamped as the item's last-activity record (kind audit, the line's phrases), one that verified nothing (item 2) is not, and one that rests on a recorded event alone (item 5) leaves that event as it was, at its own time and kind",
+      all(mt(i).get("last_activity") == {"at": now0, "kind": "audit", "what": W1[i]} for i in (1, 3, 4, 6))
+      and "last_activity" not in mt(2) and mt(5)["last_activity"] == before[5]["metadata"]["last_activity"] == {"at": now0 - 20 * MIN, "kind": "review", "what": "review on PR 9"}, [mt(i).get("last_activity") for i in range(1, 7)])
 check("1 the save is the server's own bookkeeping: the activity clock, the progress clock, `updated`, the confirm and the writer are exactly as they were",
       all(all(rd(i)[k] == before[i][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) for i in range(1, 7)))
 ch = lambda i: {k for k in mt(i) if mt(i)[k] != before[i]["metadata"].get(k)}
 check("1 …the History shows it: the revision's new entries of the item's own log are the line (hourly_log.new_entries), and nothing else changed in the metadata but the log and the phase stamp every save adds",
       [e["text"] for e in HL.new_entries(before[1]["metadata"], before[1]["metadata"])] == [] and [e["text"] for e in HL.new_entries(before[2]["metadata"], rd(2)["metadata"])] == [L[2][0]["text"]]
-      and ch(2) == {"hourly_audit", "phase"} and ch(4) == {"hourly_audit", "phase"}, (ch(2), ch(4)))
+      and ch(2) == {"hourly_audit", "phase"} and ch(4) == {"hourly_audit", "phase", "last_activity"}, (ch(2), ch(4)))
 check("1 nothing is sent to anyone: no message, no notice, no flag", sent == [], sent)
 check("1 the server logs each line on stderr", err.text.count("hourly line: Audit") == 6, err.text)
 # what verifies nothing
@@ -326,7 +328,7 @@ silent_at = lambda t: t - (now0 - 90 * MIN)
 gaps = [b_ - a_ for a_, b_ in zip(stamps, stamps[1:])]
 check("10 a week of silence on a busy pane writes 47 lines (23 in the first day, one an hour from 1.5 hours of silence; then one every 6 hours from 29.5), not 168", len(stamps) == 47, len(stamps))
 check("10 …one an hour for the first 24 hours of silence, then one every 6 hours", gaps[:22] == [H] * 22 and gaps[22:] == [6 * H] * 24 and all(silent_at(a_) < 24 * H for a_ in stamps[:23]) and silent_at(stamps[23]) >= 24 * H, (len(gaps), gaps[20:25]))
-check("10 …the log keeps its last eight and the item's last-activity record is still unset (no line stamps it)", len(lines(1)) == 8 and "last_activity" not in mt(1), (len(lines(1)), mt(1).get("last_activity")))
+check("10 …the log keeps its last eight and the item's last-activity record is the newest line (every line of a busy pane verified something and is stamped)", len(lines(1)) == 8 and mt(1)["last_activity"] == {"at": stamps[-1], "kind": "audit", "what": "audit verified the mover's pane is in a turn"}, (len(lines(1)), mt(1).get("last_activity")))
 # a clock that goes backwards delays the next line and never doubles it
 put(2, act=90); tick(now0 + 5 * H); k0 = len(lines(2))
 back = tick(now0 + 5 * H - 30 * MIN); again = tick(now0 + 5 * H + 20 * MIN); later_ = tick(now0 + 5 * H + 61 * MIN)
@@ -447,6 +449,57 @@ m_b = json.loads(json.dumps(m_a)); HL.note(m_b, 4000.0, "Audit 11:00: verified x
 m_c = json.loads(json.dumps(m_b)); m_c["other"] = 1
 check("9 new_entries: the revision that adds a second line shows only that one; a later revision that changes something else shows none, never the older lines again",
       [e["text"] for e in HL.new_entries(m_a, m_b)] == ["Audit 11:00: verified x"] and HL.new_entries(m_b, m_c) == [] and [e["text"] for e in HL.new_entries(None, m_a)] == ["Audit 10:00: idle, nothing verified"])
+
+# ================================================================ 16. a verified line is the item's last activity (the On agent row reads it)
+import datetime
+from stackshot.model import last_activity_pass as LAP
+from stackshot.web.ui import render as ui_render16
+def board16(at):
+    tz = datetime.timezone(datetime.timedelta(hours=4))      # the instance zone of this test (Asia/Dubai)
+    return ui_render16.Board(str(T / "store"), now=datetime.datetime.fromtimestamp(at, tz))
+def parts(gid, at): b = board16(at); return b.act_parts(b.item(gid))
+def last_words(html): m = re.search(r'<span class="ir-lwhat">([^<]*)</span>', html or ""); return __import__("html").unescape(m.group(1)) if m else None
+clean_pane(); panes["home-peer"] = "busy"; panes["home-peer2"] = "idle"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+OLD = {"at": now0 - 80 * MIN, "kind": "step_done", "what": "step 1 done"}
+put(1, act=90, last_activity=OLD)                                         # silent 90 minutes, its last event 80 minutes ago: the row reads "idle over 1 h"
+put(2, mover="home-peer2", act=90, last_activity=OLD)                       # the same, but the mover's pane is idle: nothing is verified
+put(3, mover="home-peer2", act=90)                                         # idle pane, no record at all
+put(4, act=90, last_activity={"at": now0, "kind": "ci_result", "what": "CI failed on PR 5"})      # a real event at the very time of the line (a pane that is busy besides)
+a1, a2 = parts("a1", now0), parts("a2", now0)
+check("16 before the line: the row of an item whose last event was 80 minutes ago reads idle over 1 h and that event", a1 is not None and 'data-b="bad"' in a1[0] and "idle over 1 h" in a1[1] and last_words(a1[1]) == f"Last: step 1 done at {hm(now0 - 80 * MIN)}", a1)
+snap16 = {i: rd(i) for i in (1, 2, 3, 4)}
+got16 = tick()
+check("16 the pass wrote a line on all four", got16 == ["a1", "a2", "a3", "a4"], got16)
+check("16 verified (a busy pane): the item's last activity is the audit at the line's time, in the line's words; the row reads active, the age <1m and `Last: audit verified … at hh:mm`",
+      mt(1)["last_activity"] == {"at": now0, "kind": "audit", "what": "audit verified the mover's pane is in a turn"}, mt(1).get("last_activity"))
+b1 = parts("a1", now0 + 2 * MIN)
+check("16 …on the home row: the pill is active (green), the words and the clock are the audit's", b1 is not None and 'data-b="ok"' in b1[1] and ">active<" in b1[1] and last_words(b1[1]) == f"Last: audit verified the mover's pane is in a turn at {hm(now0)}", b1)
+check("16 …and the item's own clocks are as they were: the audit's write moves neither `activity` nor `progress` (the silence clock reads the same as before the line), `updated` and the writer too",
+      all(rd(1)[k] == snap16[1][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) and SL.clock(rd(1), "home-peer") == SL.clock(snap16[1], "home-peer") == now0 - 90 * MIN)
+check("16 idle (nothing verified): the record is untouched and the row still reads idle over 1 h and the older event; an item with no record gets none",
+      mt(2)["last_activity"] == OLD and mt(2)["last_activity"] == snap16[2]["metadata"]["last_activity"] and lines(2)[0]["kind"] == "audit_idle" and "last_activity" not in mt(3) and lines(3)[0]["kind"] == "audit_idle"
+      and "idle over 1 h" in parts("a2", now0 + 2 * MIN)[1] and last_words(parts("a2", now0 + 2 * MIN)[1]) == f"Last: step 1 done at {hm(now0 - 80 * MIN)}" and parts("a3", now0) is None, (mt(2).get("last_activity"), lines(2), parts("a2", now0)))
+check("16 an older audit line never replaces a newer real event: a real event at the line's own time stays (newest wins, strictly later), and an audit signal older than the stored event changes nothing",
+      mt(4)["last_activity"] == {"at": now0, "kind": "ci_result", "what": "CI failed on PR 5"} and lines(4)[0]["kind"] == "audit"
+      and LA.apply(rd(4), [LA.audit_signal("audit verified x", now0 - 5 * MIN)], now0) is False and (lambda it: (LA.apply(it, [LA.audit_signal("audit verified x", now0 - 5 * MIN)], now0), it["metadata"]["last_activity"]["kind"])[1])(rd(4)) == "ci_result", mt(4))
+later_real = rd(1); later_real["metadata"]["last_activity"] = {"at": now0 + 30 * MIN, "kind": "comment", "what": "comment on #5"}; (T / "store/a/1.json").write_text(json.dumps(later_real))
+tick(now0 + 61 * MIN)
+check("16 …a real event the hub recorded after the audit line (30 minutes later) is the record until a line later than it is written: the next line, an hour on, is later and takes it (newest wins both ways)",
+      mt(1)["last_activity"] == {"at": now0 + 61 * MIN, "kind": "audit", "what": "audit verified the mover's pane is in a turn, comment on #5"} and len(lines(1)) == 2, (mt(1).get("last_activity"), lines(1)))
+check("16 the backfill does not undo it: an item that carries an audit record has a record (the backfill leaves it alone), and the audit's save is no signal in the History the backfill replays",
+      LAP.has_record(rd(1), now0 + 62 * MIN) and LAP.replay([(now0 - 100 * MIN, snap16[1]), (now0, rd(1))], now0 + 62 * MIN)[0] == LAP.replay([(now0 - 100 * MIN, snap16[1])], now0 + 62 * MIN)[0], LAP.replay([(now0 - 100 * MIN, snap16[1]), (now0, rd(1))], now0 + 62 * MIN))
+# a line of a recorded event alone, and the pure signal
+put(5, mover="home-peer2", act=90, last_activity={"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"}); tick()
+check("16 a line that rests on a recorded event alone leaves that event as it was (its own time and kind), never stamping the audit over it", mt(5)["last_activity"] == {"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"} and "verified CI failed on PR 6" in lines(5)[0]["text"], (mt(5), lines(5)))
+sg = HR.stamp_signal
+check("16 stamp_signal: a verified line gives the audit signal at its time, a line that verified nothing or only a recorded event gives none, a torn or empty line gives none, and the words stay one line of at most 80 characters (a recorded phrase that does not fit is left out whole)",
+      sg({"kind": "audit", "verified": ["the mover's pane is in a turn", "a subagent is running on it", "CI passing again on PR 7"], "recorded": ["CI passing again on PR 7"]}, 50.0)["what"] == "audit verified the mover's pane is in a turn, a subagent is running on it" and
+      sg({"kind": "audit", "verified": ["a subagent is running on it"], "recorded": []}, 50.0) == {"at": 50.0, "kind": "audit", "what": "audit verified a subagent is running on it"}
+      and sg({"kind": "audit", "verified": ["the mover's pane is in a turn", "CI failed on PR 5"], "recorded": ["CI failed on PR 5"]}, 50.0)["what"] == "audit verified the mover's pane is in a turn, CI failed on PR 5"
+      and sg({"kind": "audit_idle", "verified": [], "recorded": []}, 50.0) is None and sg({"kind": "audit", "verified": [], "recorded": []}, 50.0) is None
+      and sg({"kind": "audit", "verified": ["CI failed on PR 5"], "recorded": ["CI failed on PR 5"]}, 50.0) is None and sg(None, 50.0) is None and sg({}, 50.0) is None
+      and len(sg({"kind": "audit", "verified": ["x" * 200], "recorded": []}, 50.0)["what"]) == LA.MAX_WHAT and sg({"kind": "audit", "verified": ["x"], "recorded": []}, "soon") is None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

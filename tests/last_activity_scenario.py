@@ -144,15 +144,15 @@ S_ = lambda at, what="x", kind="comment": {"at": at, "kind": kind, "what": what}
 check("1 apply: stores the record with its kind; the same again, an older one and a torn one change nothing (no write); a later one replaces it",
       LA.apply(item_, [S_(10)]) and item_["metadata"]["last_activity"] == {"at": 10.0, "kind": "comment", "what": "x"} and not LA.apply(item_, [S_(10)]) and not LA.apply(item_, [S_(5, "y")]) and not LA.apply(item_, [None, {"at": "z"}])
       and LA.apply(item_, [S_(11, "y", "review")]) and item_["metadata"]["last_activity"] == {"at": 11.0, "kind": "review", "what": "y"} and not LA.apply({"metadata": "not a dict"}, [S_(1, "z")]), item_)
-check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today",
-      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS - {"update", "audit"}, sorted(LA.KINDS))
+check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today (the audit line since the hourly line stamps it; update is not yet)",
+      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS - {"update"} and "audit" in LA.STAMPED, sorted(LA.KINDS))
 check("1 save_signals: each save signal has its kind: step_done, step_dropped, state_change, pr_merged, and created is a state_change",
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
       and K(base, after(mover="n", merged_seen=["a/b#1"])) == ["state_change", "pr_merged"] and K(base, after(work=[{"id": "x"}])) == [], K(base, after(mover="n", merged_seen=["a/b#1"])))
 check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing), review, comment and pr_merged",
       [(LA.pr_candidate(k, 9, 5, 50) or {}).get("kind") for k in ("ci_failed", "ci_passed", "review", "comment", "merged")] == ["ci_result", "ci_result", "review", "comment", "pr_merged"], None)
-# update and audit: defined and tested, stamped by nothing yet
+# update: defined and tested, stamped by nothing yet; audit: stamped by the hourly line (audit_hourly_scenario)
 check("1 update_signal: a status write whose text differs from the previous one is an update, the words the text itself; the same text again (case and spacing aside), a blank one and a torn time are not",
       LA.update_signal("building the fix", "tests pass, opening the pull request", 40) == {"at": 40.0, "kind": "update", "what": "tests pass, opening the pull request"}
       and LA.update_signal("building the fix", "  Building   the FIX ", 40) is None
