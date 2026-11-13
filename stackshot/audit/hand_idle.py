@@ -51,8 +51,8 @@ An item is moved when all of these hold:
 Which builder: the candidates are the builders only (`server._balance_builders`: the item's project's background agents whose mandate says build, maintain, merge or engineer, then those of any other project) less any whose pane
 is known dead, the item's own mover, every name in the hand-off record's `tried` and any front agent; the pick is the one with the fewest open items (a busy pane only breaks a tie: an idle one first; then the candidates' order).
 The move must improve the spread, the mover's count including the item: an untaken hand-off moves when `to == 0 or to + 1 < from` (a lone item goes to an empty builder; a swap does not happen), a queued item only when
-`to + 1 < from`. At most `BALANCE_MAX_PER_TICK` (3) items are moved in a pass. With NO eligible candidate (no live builder) the item stays, one History line says so and -main is told once per item per 24 hours (`none_at`; while that
-note stands the pass does not look for a builder again); a pick that is no improvement is silent (a log line only).
+`to + 1 < from`. At most `BALANCE_MAX_PER_TICK` (3) items are moved in a pass. With NO eligible candidate (no live builder) the item stays, one History line says so and -main is told once per item per 24 hours (`none_at`; the pass looks again every minute, so a builder that comes back is used at once and its move ends the note) and ONLY when the role map holds another builder than the mover, which is dead or gone (`balance_others`): with no
+other builder, or a pick that is no improvement, it is silent (a log line only). The other projects' candidates are those whose mandate says `build` (as the idle hand-over's fallback), the item's own project's those that build, maintain, merge or engineer.
 
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -315,7 +315,7 @@ def balance_due(items: dict[str, dict[str, Any]], gid: str, now: float, minutes:
     if started_reason(it, mover, now, same, (lambda x: anchored(gid, x)) if anchored is not None else None):
         return None
     if balanced_recently(meta, now) or handed_recently(meta, now):
-        return None      # moved by the balancer, or by the idle hand-over (`metadata.hand_idle`), in the last 24 hours: the two never both move one item inside a day
+        return None      # moved by the balancer, or by the idle hand-over (`metadata.hand_idle`), in the last 24 hours: the balancer never moves an item the idle hand-over moved inside a day (`hand_idle.due` does not read `metadata.balance`)
     capped = balance_count(meta) >= BALANCE_LIFETIME
     if capped and balance_capped_told(meta):
         return None
@@ -379,6 +379,23 @@ def pick_least(candidates: list[str], load: dict[str, int], status: Callable[[st
         if best is None or key < best:
             best, pick = key, c
     return pick
+
+
+def balance_others(candidates: list[str], frm: str, tried: Iterable[str], same: Callable[[Any, Any], bool], front: Callable[[Any, str], bool] | None = None, project: str = "") -> list[str]:
+    """The builders other than the item's own mover that could have taken it but for being unusable: `candidates` less `frm`, any name in `tried` and a front agent. Only when there is one of these and `pick_least` still found none is
+    the item's stay worth a History line and a message to -main ("no live builder"); with a mover that is the only builder there is nobody to be unusable and the pass is silent."""
+    tried = [t for t in tried if t]
+    out = []
+    for c in candidates:
+        if not c or (frm and same(c, frm)) or any(same(c, t) for t in tried):
+            continue
+        try:
+            if front is not None and front(c, project):
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        out.append(c)
+    return out
 
 
 def balance_ok(kind: str, to_load: int, from_load: int) -> bool:

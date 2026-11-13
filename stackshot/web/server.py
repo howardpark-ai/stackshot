@@ -6199,21 +6199,23 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
 
 
 def _balance_builders(project: str) -> list[str]:
-    """The sessions the balancer may move an item of `project` to, best first: BUILDERS only (the mandate says build, maintain, merge or engineer; a reviewer or any other background agent is no candidate), the project's own first,
-    then those of any other project. `_handoff_ranked` classes the project's own (0 builds, 1 maintains, merges or engineers, 2 the rest); the others are read from the role map as `_hand_idle_builders` does."""
+    """The sessions the balancer may move an item of `project` to, best first: BUILDERS only, the project's own first (the mandate says build, maintain, merge or engineer: `_handoff_ranked` classes them 0 and 1), then those of any other
+    project whose mandate says `build`, as the idle hand-over's fallback reads them (`_hand_idle_builders`). A reviewer or any other background agent is no candidate."""
     out = [n for c, _o, n in _handoff_ranked(project) if c < 2]
     try:
-        out += [n for n in _balance_builder_names() if not any(_ho_same(n, o) for o in out)]
+        out += [n for n in _balance_builder_names(True) if not any(_ho_same(n, o) for o in out)]
     except Exception:  # noqa: BLE001  — with no view of the other projects the item's own project's builders are all there is
         pass
     return out
 
 
-def _balance_builder_names() -> list[str]:
-    """Every background agent, of any project, whose mandate says build, maintain, merge or engineer and that is not retired (raises when the registry cannot be read)."""
+def _balance_builder_names(narrow: bool = False) -> list[str]:
+    """Every background agent, of any project, whose mandate says build, maintain, merge or engineer and that is not retired (raises when the registry cannot be read): who counts as a builder whose item may be balanced.
+    With `narrow` only the mandates that say `build` (the idle hand-over's fallback, as `_hand_idle_builders` reads other projects): who qualifies as a target from ANOTHER project."""
     reg = _anc.registry()
+    rx = re.compile(r"\bbuild", re.I) if narrow else _router._BUILDER
     return [n for n, r in _anc.session_roles(reg).items()
-            if r.get("role") == "back" and not r.get("retired") and _router._BUILDER.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
+            if r.get("role") == "back" and not r.get("retired") and rx.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
 
 
 def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
@@ -6223,7 +6225,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
     why. The mover it left is told ONCE, by `_tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
     subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
-    in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it the item stays, one History line says so and -main is told once per item per 24 hours (a builder that is no improvement is a log line only).
+    in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it (another builder than its mover is in the role map and none is usable) the item stays, one History line says so and -main is told once per item per 24 hours, and the pass looks again every minute; with no other builder, or a builder that is no improvement, it is a log line only.
     Only an item whose mover is itself a builder is balanced, and only to builders. The notice to the mover it left is at-most-once (a crash between the save and the send loses it) and is not sent to a pane that is gone. An item the idle
     hand-over moved in the last 24 hours is left alone. Stands still while the audit is off (`[audit] enabled`) or runs in agent mode, while the board is paused, with `[model] handoff` off, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
     from stackshot.audit import hand_idle as _hi
@@ -6291,8 +6293,6 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                     told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_session_label(row['mover'])} to the ladders"))
                 print(f"balance: {gid} at its lifetime cap", file=sys.stderr, flush=True)
                 continue
-            if row["told_none"]:
-                continue      # no live builder was found today and -main was told: the panes are not read again for this item until the day is over
             to = _hi.pick_least(builders[project], load, status, dead, _ho_same, row["mover"], row["tried"], front, project)
             if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
                 print(f"balance: {gid} stays with {row['mover']}: no builder has few enough open items", file=sys.stderr, flush=True)      # silent otherwise: a spread that is as good as it can be is no news
@@ -6315,6 +6315,8 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                 _hi.shift(load, row["mover"], to, _ho_same)
                 gone.append((row["mover"], gid, to))
                 print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
+            elif not _hi.balance_others(builders[project], row["mover"], row["tried"], _ho_same, front, project):
+                print(f"balance: {gid} stays with {row['mover']}: no other builder to move it to", file=sys.stderr, flush=True)      # a mover that is the only builder has nobody to lose: no note, no message
             else:
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
