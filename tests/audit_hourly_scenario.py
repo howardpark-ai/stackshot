@@ -30,6 +30,7 @@ network, no model call, no message sent.
   23 a pull request number written alone is the item's own repository's: two items anchored to the same number in two repositories are told apart by the URL or `owner/repo#n`
   20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle, unless the fleet heartbeat holds the session running elsewhere: unknown) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
 
+  24 a subagent flagged finished still runs while it is parked on a task of its own (started by a result that opens with the start text; a Monitor ends with its lifetime; an end notice that only the session's transcript holds ends it) or resumed (`toolUseResult` of the session's transcript); one with no flag whose last row is an interruption is dead unless resumed; the values of the windows, slacks and bounds are pinned
 
     tests/run-suite audit_hourly       -> exit 0 / 1"""
 import io, json, os, re, sys, pathlib, time, logging
@@ -967,9 +968,11 @@ check("23 …through the audit: a subagent whose brief says `PR 5` while two of 
 SID3 = str(_uuid.UUID("00000000-0000-4000-8000-0000000000cc"))
 sub3 = proj / SID3 / "subagents"; sub3.mkdir(parents=True)
 par3 = proj / f"{SID3}.jsonl"
-BGR = lambda tid: {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": f"Command running in background with ID: {tid}. Output is being written to: /x/{tid}.output. You will be notified when it completes."}]}}
-BGM = lambda tid: {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": f"Command was moved to the background (ID: {tid}) after running for 180s. You will be notified when it completes."}]}}
-MON = lambda tid: {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": f"Monitor started (task {tid}, expires in 30m unless the source ends first)."}]}}
+def _res(text, t=None): return {"type": "user", **({"timestamp": iso(t)} if t is not None else {}), "message": {"role": "user", "content": [{"type": "tool_result", "content": text}]}}
+BGR = lambda tid, t=None: _res(f"Command running in background with ID: {tid}. Output is being written to: /x/{tid}.output. You will be notified when it completes.", t)
+BGM = lambda tid: _res(f"Command was moved to the background (ID: {tid}) after running for 180s. You will be notified when it completes.")
+BGT = lambda tid: _res(f"Command did not complete within its 120s timeout and was moved to the background (ID: {tid}). Output is being written to: /x/{tid}.output")
+MON = lambda tid, life="expires in 30m unless the source ends first; you get one notice at expiry", t=None: _res(f"Monitor started (task {tid}{', ' + life if life else ''}). You will be notified on each event.", t)
 NOTE = lambda tid, status="completed": {"type": "attachment", "attachment": {"type": "queued_command", "prompt": f"<task-notification>\n<task-id>{tid}</task-id>\n<output-file>/x/{tid}.output</output-file>\n<status>{status}</status>\n<summary>done</summary>\n</task-notification>"}}
 EVT = lambda tid: {"type": "attachment", "attachment": {"type": "queued_command", "prompt": f"<task-notification>\n<task-id>{tid}</task-id>\n<summary>Monitor event: \"w\"</summary>\n<event>one more line</event>\n</task-notification>"}}
 STOP = lambda tid: {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "TaskStop", "input": {"task_id": tid}}]}}
@@ -1023,23 +1026,36 @@ check("24 a subagent flagged finished that the session's transcript resumed (`re
       {"res1", "res2", "res7"} <= set(got24b) and not ({"res3", "res4", "res5", "res6"} & set(got24b)), sorted(got24b))
 check("24 …the `quiet` rule is unchanged: a resumed one whose transcript is 100 minutes old is running but quiet, a fresh one is not", got24b["res7"].get("quiet") is True and "quiet" not in got24b["res1"], {k: v.get("quiet") for k, v in got24b.items()})
 check("24 resumes: the newest resume time of each subagent, as epoch seconds", abs(TIE.resumes(par3)["res1"] - (now0 - 300 + 0.25)) < 0.01 and "res4" not in TIE.resumes(par3) and TIE.resumes(par3 / "missing") == {}, TIE.resumes(par3))
-parent(resume_rec("res1", now0 - 600), resume_rec("res3", now0 - 601))       # the resume dated as the meta's write (600 s ago) or one second before it counts (the slack), two seconds before it does not
-parent(resume_rec("res1", now0 - 599), resume_rec("res3", now0 - 603))
-got24c = run3()
-check("24 …a resume dated within a second before the meta's write counts (a clock's grain), one dated two seconds before it does not", "res1" in got24c and "res3" not in got24c, sorted(got24c))
+slack24 = {}
+for rs_, sec_ in (("res1", 599), ("res2", 600), ("res3", 601), ("res4", 602), ("res5", 603)):          # the meta was written 600 s ago; a record's time carries a quarter of a second
+    parent(resume_rec(rs_, now0 - sec_))
+    slack24[sec_] = rs_ in run3()
+check("24 …a resume dated as the meta's write or within a second before it counts (a clock's grain), one dated more than a second before it does not (the slack is one second, no more, no less)",
+      slack24 == {599: True, 600: True, 601: True, 602: False, 603: False}, slack24)
 parent(resume_rec("res1", now0 - 300), filler=64 * 1024); saved_tail = TIE.TAIL_BYTES; TIE.TAIL_BYTES = 4096
 try: got24d = run3()
 finally: TIE.TAIL_BYTES = saved_tail
 check("24 …only the tail of the session's transcript is read: a resume further back than TAIL_BYTES from its end is not seen", "res1" not in got24d, sorted(got24d))
 # the session's transcript is read only when it is needed, once, and never raises
-reads = []; real_resumes = TIE.resumes
-TIE.resumes = lambda tr: (reads.append(tr), real_resumes(tr))[1]
-try:
+reads = []; real_rp = TIE.read_parent
+TIE.read_parent = lambda tr: (reads.append(tr), real_rp(tr))[1]
+def n_reads(*subs):
     for f_ in sub3.glob("agent-*"): f_.unlink()
-    fin("p1", [BGR("bg0020")]); fin("p2", [MON("mon020")]); run3(); n_pending = len(reads)
-    fin("f1"); fin("f2"); fin("f3"); run3(); n_finished = len(reads) - n_pending
-finally: TIE.resumes = real_resumes
-check("24 the session's transcript is not read while every finished subagent is parked on a task of its own, and is read once (not once for each) when some finished subagent has none pending", n_pending == 0 and n_finished == 1, (n_pending, n_finished))
+    for s_ in subs: s_()
+    reads.clear(); run3(); return len(reads)
+try:
+    n24 = (n_reads(), n_reads(lambda: fin("u1", finished=None), lambda: fin("u2", [BGR("bg0021")], finished=None)),
+           n_reads(lambda: fin("p1", [BGR("bg0020")]), lambda: fin("p2", [MON("mon020")])),
+           n_reads(lambda: fin("f1"), lambda: fin("f2"), lambda: fin("f3")),
+           n_reads(lambda: fin("p1", [BGR("bg0020")]), lambda: fin("f1"), lambda: fin("u1", finished=None)),
+           n_reads(lambda: fin("f1", age=int(TIE.QUIET_CAP_S) + 60), lambda: fin("p1", [BGR("bg0020")], age=int(TIE.QUIET_CAP_S) + 60)),
+           n_reads(lambda: fin("i1", [{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]}}], finished=None)),
+           n_reads(lambda: fin("i1", [{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]}}], finished=None), lambda: fin("f1")))
+    for f_ in sub3.glob("agent-*"): f_.unlink()
+    fin("p1", [BGR("bg0020")]); fin("p2", [MON("mon020")]); fin("f1"); fin("f2"); fin("f3")
+finally: TIE.read_parent = real_rp
+check("24 the session's transcript is read once for a call (never once for each subagent), and only when a finished subagent (parked or not) or an interrupted one needs it: not for no subagent, for subagents with no flag, or for ones past the 6-hour cap",
+      n24 == (0, 0, 1, 1, 1, 0, 1, 1), n24)
 par3.unlink(); par3.mkdir()                                                                  # a transcript that cannot be read as a file
 try:
     got24e = run3()
@@ -1053,6 +1069,156 @@ parent({"type": "assistant", "message": {"role": "assistant", "content": "x"}})
 # a parked subagent is tied like any other
 fin("tie1", [BGR("bg0030")], desc=f"Review {BID(1)}", brief="nothing")
 check("24 a parked subagent ties to an item by its description as any other", TIE.tied(list(run3().values()), BID(1)) and not TIE.tied([run3()["tie1"]], BID(2)), None)
+# ---- the second round: what the session's transcript says, a start that is only quoted, a Monitor's lifetime, a subagent that was interrupted, a resume that is only quoted
+ASSIST = {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}}
+def wipe3():
+    for f_ in sub3.glob("agent-*"): f_.unlink()
+check("24 the values the rules rest on are pinned (a window, a cap, a slack or a bound changed in the code is seen here)",
+      (TIE.RUNNING_S, TIE.QUIET_CAP_S, TIE.PARKED_S, TIE.SKEW_S, TIE.RESUME_SLACK_S, TIE.TAIL_BYTES, TIE.TASK_TAIL_BYTES, TIE.LAST_ROW_BYTES)
+      == (5400.0, 21600.0, 5400.0, 300.0, 1.0, 8 * 1024 * 1024, 32 * 1024 * 1024, 16 * 1024), (TIE.RUNNING_S, TIE.QUIET_CAP_S, TIE.PARKED_S, TIE.SKEW_S, TIE.RESUME_SLACK_S, TIE.TAIL_BYTES, TIE.TASK_TAIL_BYTES, TIE.LAST_ROW_BYTES))
+wipe3(); parent(ASSIST)
+fin("w89", [BGR("bgw089")], age=89 * 60); fin("w91", [BGR("bgw091")], age=91 * 60)
+got = run3()
+check("24 …the parked window is 90 minutes: a task pending in a transcript written 89 minutes ago is running, one 91 minutes ago is not", "w89" in got and "w91" not in got, sorted(got))
+
+# 1. the end notice that reached only the session's transcript
+wipe3()
+def PQ(tid, status="completed", event=None, op="enqueue"):
+    """a notice as the session's own transcript keeps it: a queue record"""
+    body = f"<task-notification>\n<task-id>{tid}</task-id>\n<tool-use-id>x</tool-use-id>\n<output-file>/x/{tid}.output</output-file>\n" + (f"<status>{status}</status>\n" if status else "") + f"<summary>done</summary>\n" + (f"<event>{event}</event>\n" if event else "") + "</task-notification>"
+    return {"type": "queue-operation", "operation": op, "timestamp": iso(now0 - 100), "sessionId": "s", "content": body}
+PU = lambda tid, status="failed": {"type": "user", "timestamp": iso(now0 - 100), "message": {"role": "user", "content": f"[SYSTEM NOTIFICATION] <task-notification>\n<task-id>{tid}</task-id>\n<status>{status}</status>\n</task-notification>"}}
+for i_, mk_ in enumerate((BGR, BGR, MON, BGR, BGR, BGR, MON, MON, BGR, BGR, BGR, BGR, BGT), 1): fin(f"n{i_}", [mk_(f"pn{i_:04d}")])
+fin("n6", [BGR("pn0006"), BGR("pn0106")])
+parent(ASSIST,
+       PQ("pn0001"),                                                                                   # n1: a queue record with a status: ended
+       PU("pn0002"),                                                                                   # n2: a user message with a status: ended
+       PQ("pn0003", None, "[Monitor expired after 10m with no events delivered. Re-arm it if you still need the watch.]"),    # n3: a Monitor's expiry event: ended
+       NOTE("pn0004"),                                                                                 # n4: an attachment: ended
+       PQ("pn9999"),                                                                                   # n5: a notice of another task ends nothing
+       PQ("pn0006"),                                                                                   # n6: two tasks, one ended: still parked on the other
+       PQ("pn0007", None, "one more line"),                                                            # n7: a Monitor's per-event notice ends nothing
+       PQ("pn0008", None, "Monitor ended: the source closed"),                                         # n8: ended
+       {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "<task-notification>\n<task-id>pn0009</task-id>\n<status>completed</status>\n</task-notification>"}]}},      # n9: quoted in a command's output: nothing
+       {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "<task-id>pn0010</task-id><status>completed</status>"}]}},      # n10: an assistant record: nothing
+       {"type": "api-request-blob", "message": {"content": [{"type": "text", "text": "<task-notification><task-id>pn0011</task-id><status>completed</status></task-notification>"}]}},      # n11: a request's copy: nothing
+       PQ("pn0013", op="remove"))                                                                      # n13: a removed notice is one too
+got = run3()
+check("24 a finished subagent's task whose end notice only the SESSION's transcript holds (a queue record, a user message, an attachment, a Monitor's expiry or end event) is ended: the subagent is not running",
+      not any(k in got for k in ("n1", "n2", "n3", "n4", "n8", "n13")), sorted(got))
+check("24 …a notice of another task, a Monitor's per-event notice, a task of two of which one ended, and a notice quoted in a tool result, an assistant record or a request's copy of the conversation end nothing: still running",
+      {"n5", "n6", "n7", "n9", "n10", "n11"} <= set(got), sorted(got))
+check("24 read_parent: the ids whose end the session was told, and the resumes", TIE.read_parent(par3)[1] == {"pn0001", "pn0002", "pn0003", "pn0004", "pn9999", "pn0006", "pn0008", "pn0013"} and TIE.read_parent(par3 / "missing") == ({}, set()), TIE.read_parent(par3)[1])
+parent(PQ("pn0012"), filler=64 * 1024); fin("n12", [BGR("pn0012")]); saved_tail = TIE.TAIL_BYTES
+n12_all = "n12" in run3(); TIE.TAIL_BYTES = 4096
+try: n12_cut = "n12" in run3()
+finally: TIE.TAIL_BYTES = saved_tail
+check("24 …only the last TAIL_BYTES of the session's transcript are read for a notice too: one further back is not seen", not n12_all and n12_cut, (n12_all, n12_cut))
+par3.unlink(); par3.mkdir()
+try: n_unread = {k for k in run3() if k.startswith("n")}
+finally: par3.rmdir()
+check("24 …a session transcript that cannot be read ends nothing (every task stays pending), and raises nothing", len(n_unread) == 13, sorted(n_unread))
+wipe3(); parent(ASSIST)
+fin("sub1", [BGR("bgs001")]); (sub3 / "agent-sub1.jsonl").write_text((sub3 / "agent-sub1.jsonl").read_text() + json.dumps(PQ("bgs001")) + "\n")
+check("24 a notice in the subagent's own transcript (a queue record too) still ends its task", "sub1" not in run3(), None)
+
+# 2. a start that is only quoted
+wipe3(); parent(ASSIST)
+UT = lambda c: {"type": "user", "message": {"role": "user", "content": c}}
+fin("q1", [_res("12\nCommand running in background with ID: qq0001. Output is being written to: /x")])      # a command printed it after another line: quoted
+fin("q2", [UT("a message: Monitor started (task qq0002, expires in 30m unless the source ends first).")])
+fin("q3", [{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Command running in background with ID: qq0003."}]}}])
+fin("q4", [{"type": "api-request-blob", "message": {"content": [{"type": "tool_result", "content": "Command running in background with ID: qq0004."}]}}])
+fin("q5", [BGT("qq0005")])                                                                                  # the real form after a timeout
+fin("q6", [_res([{"type": "text", "text": "Command running in background with ID: qq0006. Output is being written to: /x"}])])      # a list of text blocks
+fin("q7", [_res("see Command was moved to the background (ID: qq0007) in the log")])
+fin("q8", [{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "echo Command running in background with ID: qq0008"}}]}}])
+got = run3()
+check("24 a task starts only with a tool result that OPENS with the start text (running in the background, moved there, moved there after its timeout, a Monitor started): text that is only quoted in a result, a message, a request or a command starts none",
+      {"q5", "q6"} <= set(got) and not any(k in got for k in ("q1", "q2", "q3", "q4", "q7", "q8")), sorted(got))
+check("24 pending_tasks reads the real start forms", TIE.pending_tasks(sub3 / "agent-q5.jsonl") == {"qq0005"} and TIE.pending_tasks(sub3 / "agent-q6.jsonl") == {"qq0006"} and TIE.pending_tasks(sub3 / "agent-q1.jsonl") == set(), None)
+saved_tt = TIE.TASK_TAIL_BYTES; fin("tb1", [BGR("tb0001"), {"type": "assistant", "x": "y" * 70000}]); tb_all = "tb1" in run3(); TIE.TASK_TAIL_BYTES = 4096
+try: tb_cut = "tb1" in run3()
+finally: TIE.TASK_TAIL_BYTES = saved_tt
+check("24 …only the last TASK_TAIL_BYTES of the subagent's transcript are read: a start further back is not seen", tb_all and not tb_cut, (tb_all, tb_cut))
+
+# 3. a Monitor's lifetime
+wipe3(); parent(ASSIST)
+def mon_case(aid, life, start_ago, at_ago=None, **kw):
+    fin(aid, [MON(f"mt{aid}", life, t=now0 - start_ago)], age=at_ago if at_ago is not None else start_ago, **kw)
+mon_case("m1", "expires in 10m unless the source ends first", 80 * 60, 79 * 60)           # a 10-minute Monitor, read 80 minutes later, the transcript not written since
+mon_case("m2", "expires in 30m unless the source ends first", 20 * 60, 19 * 60)
+mon_case("m3", "expires in 30m unless the source ends first", 40 * 60)
+mon_case("m4", "expires in 10m unless the source ends first", 601, 600)                    # its end is a second less than the slack ahead: still counts
+mon_case("m5", "expires in 10m unless the source ends first", 602)                         # past it
+mon_case("m6", "expires in 10m unless the source ends first", 3000, 2300)                  # written after its end: the window alone bounds it
+mon_case("m7", "expires in 10m unless the source ends first", 3000, 3000 - 600 - 0.25 - 0.5)      # written half a second after its end: not since (the slack)
+mon_case("m8", "expires in 10m unless the source ends first", 3000, 3000 - 600 - 0.25 - 1.5)      # written a second and a half after its end: since
+fin("m9", [MON("mtm9", None, t=now0 - 80 * 60)], age=79 * 60)                              # a Monitor that gives no lifetime: the window only
+fin("m10", [MON("mtm10", "expires in 10m unless the source ends first")], age=79 * 60)      # a record with no time: no lifetime applies
+fin("m11", [BGR("mtm11", t=now0 - 80 * 60)], age=79 * 60)                                  # a background Bash has no lifetime
+mon_case("m12", "expires in 15m 30s unless the source ends first", 20 * 60, 19 * 60)      # 930 s: ended
+mon_case("m13", "expires in 15m 30s unless the source ends first", 10 * 60, 9 * 60)       # alive
+mon_case("m14", "expires in 45s unless the source ends first", 5 * 60)                     # ended
+mon_case("m15", "expires in 1h unless the source ends first", 30 * 60, 29 * 60)           # alive
+mon_case("m16", "expires in 1h 5m unless the source ends first", 70 * 60, 69 * 60)       # 65 minutes: ended
+mon_case("m17", "timeout 900000ms", 20 * 60, 19 * 60)                                      # the other wording: ended
+mon_case("m18", "timeout 900000ms", 10 * 60, 9 * 60)
+mon_case("m20", "expires in 15m 30s unless the source ends first", 915, 900)                  # 930 s, 915 s gone: alive (the seconds count)
+mon_case("m21", "expires in 45s unless the source ends first", 30)                         # alive
+mon_case("m19", "expires in 10m unless the source ends first", 80 * 60, 79 * 60, finished=None)      # no flag: this reads the finished ones only
+got = run3()
+check("24 a Monitor whose start plus its lifetime is past, with no write since, has ended: a 10-minute Monitor read 80 minutes later is not running, a 30-minute one 40 minutes later neither, one still within its lifetime is",
+      "m1" not in got and "m3" not in got and "m2" in got, sorted(got))
+check("24 …the slack is a second: a Monitor whose end is less than a second ahead of the clock counts, one past it does not; a write after its end (more than the slack) leaves the window alone to bound it, one within the slack does not",
+      "m4" in got and "m5" not in got and "m6" in got and "m7" not in got and "m8" in got, sorted(got))
+check("24 …a Monitor with no lifetime, a start record with no time and a background Bash have none to end: the 90-minute window alone bounds them", {"m9", "m10", "m11"} <= set(got), sorted(got))
+check("24 …the lifetime is read in every wording the start text takes (`15m 30s`, `45s`, `1h`, `1h 5m`, `timeout 900000ms`)",
+      "m12" not in got and "m13" in got and "m14" not in got and "m15" in got and "m20" in got and "m21" in got and "m16" not in got and "m17" not in got and "m18" in got, sorted(got))
+check("24 …a subagent with no flag is untouched by a Monitor's lifetime", "m19" in got, sorted(got))
+check("24 pending_tasks: the lifetime applies only when it is given the clock", TIE.pending_tasks(sub3 / "agent-m1.jsonl") == {"mtm1"} and TIE.pending_tasks(sub3 / "agent-m1.jsonl", now0) == set() and TIE.pending_tasks(sub3 / "agent-m2.jsonl", now0) == {"mtm2"}, None)
+
+# 4. a subagent with no flag whose last row is an interruption
+wipe3()
+INT = lambda txt="[Request interrupted by user]": {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": txt}]}}
+fin("i1", [ASSIST, INT()], finished=None); fin("i2", [ASSIST, INT("[Request interrupted by user for tool use]")], finished=None)
+fin("i3", [INT(), ASSIST], finished=None)                                                   # not the last row
+fin("i4", [ASSIST, INT("do not [Request interrupted by user] again")], finished=None)      # a row that says more
+fin("i5", [ASSIST, {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "[Request interrupted by user]"}]}}], finished=None)
+fin("i6", [INT()], finished=None); fin("i7", [INT()], finished=None); fin("i12", [INT()], finished=None); fin("i13", [INT()], finished=None)
+fin("i8", [INT()], finished=None, age=100 * 60); fin("i9", [ASSIST], finished=None, age=100 * 60)
+fin("i11", [ASSIST, UT("[Request interrupted by user]")], finished=None)                   # the text as a string
+fin("i14", [ASSIST, INT()], finished=True, meta_age=600)                                    # flagged finished: the rule of a finished one
+parent(ASSIST, resume_rec("i6", now0 - 30), resume_rec("i7", now0 - 120), resume_rec("i12", now0 - 61), resume_rec("i13", now0 - 63))
+got = run3()
+check("24 a subagent with no flag whose last row is `[Request interrupted by user]` (or `... for tool use]`) is dead, not quiet: it is not running, even written a minute ago; one whose interruption is not its last row, or that says more, or is an assistant's, is running as ever",
+      not any(k in got for k in ("i1", "i2", "i8", "i11")) and {"i3", "i4", "i5", "i9"} <= set(got), sorted(got))
+check("24 …unless the session's transcript holds a resume of it newer than its last row (a second of slack): then it is running; an older resume is none", "i6" in got and "i7" not in got and "i12" in got and "i13" not in got, sorted(got))
+check("24 …a plain unflagged one 100 minutes old stays running but quiet; a finished one that was interrupted follows the rule of the finished", got["i9"].get("quiet") is True and "i14" not in got, sorted(got))
+check("24 interrupted: the last row only, and nothing raises", TIE.interrupted(sub3 / "agent-i1.jsonl") and TIE.interrupted(sub3 / "agent-i2.jsonl") and TIE.interrupted(sub3 / "agent-i11.jsonl") and not any(TIE.interrupted(sub3 / f"agent-{k}.jsonl") for k in ("i3", "i4", "i5", "i9")) and not TIE.interrupted(sub3 / "agent-none.jsonl"), None)
+saved_lr = TIE.LAST_ROW_BYTES; TIE.LAST_ROW_BYTES = 40
+try: cut_i = TIE.interrupted(sub3 / "agent-i1.jsonl")
+finally: TIE.LAST_ROW_BYTES = saved_lr
+check("24 …a last row longer than LAST_ROW_BYTES is none", cut_i is False, cut_i)
+
+# 5. a resume that is only quoted
+wipe3()
+for k_ in ("rq1", "rq2", "rq3", "rq4", "rq5", "rq6", "rq7", "rq8"): fin(k_, meta_age=600)
+RQ = lambda r: {**r, "timestamp": iso(now0 - 300)}
+parent(ASSIST,
+       RQ({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": json.dumps({"resumedAgentId": "rq1"})}]}}),                       # quoted in a tool result: no top-level key
+       RQ({"type": "user", "message": {"role": "user", "content": "x"}, "toolUseResult": {"result": {"resumedAgentId": "rq2"}}}),                                          # not a top-level key
+       RQ({"type": "user", "message": {"role": "user", "content": "x"}, "toolUseResult": "resumedAgentId\": \"rq3\""}),                                                    # a string
+       RQ({"type": "api-request-blob", "message": {"content": [{"type": "text", "text": json.dumps({"resumedAgentId": "rq4"})}]}, "toolUseResult": {"resumedAgentId": "rq4"}}),   # not a user record
+       RQ({"type": "user", "message": {"role": "user", "content": "x"}, "toolUseResult": {"resumedAgentId": "rq5", "revivedAgentId": "rq5", "success": True}}),         # both keys, one id: the real record
+       RQ({"type": "user", "message": {"role": "user", "content": "typed: \"resumedAgentId\": \"rq6\""}}),                                                                   # a message that quotes it
+       RQ({"type": "user", "message": {"role": "user", "content": "x"}, "toolUseResult": {"resumedAgentId": 7, "revivedAgentId": ""}}),
+       {"type": "user", "message": {"role": "user", "content": "x"}, "toolUseResult": {"resumedAgentId": "rq8"}})                                                                  # a resume with no time says nothing and spoils no other
+got = run3()
+check("24 a resume is the key `resumedAgentId` (or `revivedAgentId`) at the top level of a user record's `toolUseResult`: one quoted inside a tool result, nested deeper, in a string, in a request's copy or in a typed message is none; both keys of one record count once",
+      "rq5" in got and not any(k in got for k in ("rq1", "rq2", "rq3", "rq4", "rq6", "rq7", "rq8")), sorted(got))
+check("24 …resumes: both keys on the one record, the time of the record", set(TIE.resumes(par3)) == {"rq5"} and abs(TIE.resumes(par3)["rq5"] - (now0 - 300 + 0.25)) < 0.01, TIE.resumes(par3))
+wipe3(); parent(ASSIST)
 for f_ in sub3.glob("agent-*"): f_.unlink()
 
 clean_pane()
