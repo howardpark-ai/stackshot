@@ -9,11 +9,11 @@ The order of the table is the order of the work: (1) the events that end a wait,
 minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass, the dates pass, the wake
 catch-up, the silence tick and the archive tick. `board=True` marks a tick that reads items: it is skipped while the migration's pass holds the board.
 
-The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, and the hand-off tick from service/handoff.py, and called directly. What stays in server.py is the other
-tick functions (the phase sweep, the done check, the step proof, the balancer, the answers, the registry sync, the clients, the page-debt fallback, the stall pass, the filing, dates, silence and
+The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, the hand-off tick from service/handoff.py and the stall pass from service/stall_tick.py,
+and called directly. What stays in server.py is the other tick functions (the phase sweep, the done check, the step proof, the balancer, the answers, the registry sync, the clients, the page-debt fallback, the filing, dates, silence and
 archive passes) and the publish. The table calls each of them through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it). A hook is looked
 up when its tick runs, so a suite that replaces the function on server.py is the one called; a suite that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here, and
-one that replaces a wake, event-wait or hand-off function sets it on the module that holds it.
+one that replaces a wake, event-wait, hand-off or stall function sets it on the module that holds it.
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
@@ -33,6 +33,7 @@ from stackshot.projects import pages as _pages
 from stackshot.router import routing as _routing
 from stackshot.service import event_waits as _evwaits
 from stackshot.service import handoff as _handoff
+from stackshot.service import stall_tick as _stalltick
 from stackshot.service import telling as _telling
 from stackshot.service import wakes as _wakes
 from stackshot.waits import watchers as _watch
@@ -49,7 +50,6 @@ class Hooks:
     roles_sync_safe: Callable[[], Any]  # server._roles_sync_safe
     clients_tick: Callable[[], Any]  # server._clients_tick
     pilot_fallback_tick: Callable[[], Any]  # server._pilot_fallback_tick
-    stall_tick: Callable[[], Any]  # server._stall_tick
     filing_tick: Callable[[], Any]  # server._filing_tick
     dates_tick: Callable[[], Any]  # server._dates_tick
     silence_tick: Callable[[], Any]  # server._silence_tick
@@ -114,7 +114,7 @@ def ticks() -> "list[_minute.Tick]":
         T("roles_sync_safe", lambda: _hooks().roles_sync_safe(), "fleet"),
         T("clients_tick", lambda: _hooks().clients_tick(), "fleet"),
         T("pilot_fallback_tick", lambda: _hooks().pilot_fallback_tick(), "fleet", board=True),
-        T("stall_tick", lambda: _hooks().stall_tick(), "fleet", board=True),
+        T("stall_tick", lambda: _stalltick.stall_tick(), "fleet", board=True),
         T("handback_tick", lambda: _telling.handback_tick(), "fleet", board=True),
         T("fleet_publish", lambda: fleet_publish(), "fleet"),
         T("filing_tick", lambda: _hooks().filing_tick(), "tenmin", "tenmin", board=True),

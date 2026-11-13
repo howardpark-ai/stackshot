@@ -86,6 +86,7 @@ def refused(name, f, *want, none=()):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
 from stackshot.service import handoff as handoff_svc, handoff_cold as hcold_svc
+from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -1433,12 +1434,12 @@ for p_ in (T / "store/a").glob("*.json"):
 for p_ in (T / "cli").glob("*.json"): p_.unlink()
 set_cfg(); clear_pushes(); inbox(); failing(); queued(); paused(); cold("no json at all here"); COLD_MSGS.clear()
 server._cfg.CFG["stall"] = {}
-server._stall_since(now0 - 7200)                   # the stall pass first ran before every clock below
+stall_svc.stall_since(now0 - 7200)                   # the stall pass first ran before every clock below
 def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, "main_hours": 10000, **kw}      # main_hours: a value no scenario reaches; the hand-up of an item that has not moved is tests/ladder_progress_scenario.py's
 def stk(at):
     """One stall pass at `at` (its 20-second gate reset), the threads it started finished → the items it acted on."""
-    server._STALL_LAST[0] = 0.0
-    out = server._stall_tick(at); drain()
+    stall_svc.STALL_LAST[0] = 0.0
+    out = stalltick_svc.stall_tick(at); drain()
     return out
 def hot(at, *ids):
     out = tick(at, *ids); drain()
@@ -1660,7 +1661,7 @@ close_(1806)
 del server._cfg.CFG["ladder"]
 item(1807, mover="home-peer", handoff=rec("home-peer")); cli_row("home-peer", "idle", IDLE17)
 done = hot(N0, 1807)
-check("18 G off: with no [ladder] section at all it is the same (the default is off)", done == ["a1807"] and mt(1807)["mover"] == "team-back" and entry(1807) is None and not server._ladder_on(), (done, mt(1807)))
+check("18 G off: with no [ladder] section at all it is the same (the default is off)", done == ["a1807"] and mt(1807)["mover"] == "team-back" and entry(1807) is None and not ladder_svc.ladder_on(), (done, mt(1807)))
 close_(1807)
 ladder_cfg(True)
 item(1808, mover="home-peer", handoff=rec("home-peer")); cli_row("home-peer", "idle", IDLE17)

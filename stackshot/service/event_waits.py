@@ -26,6 +26,7 @@ from stackshot.fleet import liveness as _lv
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model import steps as _steps
+from stackshot.service import stall as _stallsvc
 from stackshot.service import telling as _telling
 from stackshot.service import watching as _watching
 from stackshot.service.store import _legacy_hold, _load
@@ -230,11 +231,11 @@ def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
                 fhit = _hooks().foreign_prs(repo)[1].get(n) if repo != own and _hooks().released_foreign(repo) is not None else None      # a [released.repos] repository: a merge in its checkout's HEAD is live
                 hit = fhit or (evw_merge(rel[0], n) if rel is not None and repo == own else None)
                 if fhit:
-                    fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, repo, n, f"{_hooks().pr_shown(sp.key)} is live: merged at {fhit[0][:7]} on {_hooks().stall_when(fhit[1])}, in the checkout"), now, told)
+                    fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, repo, n, f"{_hooks().pr_shown(sp.key)} is live: merged at {fhit[0][:7]} on {_stallsvc.stall_when(fhit[1])}, in the checkout"), now, told)
                 elif hit and not evw_live_why(hit[0], rel[0], rel[1]):
                     sha, ct = hit
                     EVW_SEEN[0] = None
-                    fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, own, n, f"PR #{n} is live: merged at {sha[:7]} on {_hooks().stall_when(ct)} and passed main's full run"), now, told)
+                    fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, own, n, f"PR #{n} is live: merged at {sha[:7]} on {_stallsvc.stall_when(ct)} and passed main's full run"), now, told)
                 elif not hit:                      # not merged into last-good (yet): a pull request closed without a merge never will be
                     seen.add(_hooks().check_ref(sp.key))
                     with _gb.tag("event_wait"):

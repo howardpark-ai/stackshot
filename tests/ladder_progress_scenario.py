@@ -1,5 +1,5 @@
 """Scenario test for the hand-up of an item that is not moving: with `[ladder] enabled`, an alive item (open, a session moves it, not waiting, not the owner's move) with NO PROGRESS for `[ladder] main_hours`
-(4) goes up to its project's -main agent in the ladder's one notice (`server._ladder_stuck`, `_ladder_main_tell`), whatever its mover answers meanwhile. Progress is the item's own clock (model/progress.py, stamped by
+(4) goes up to its project's -main agent in the ladder's one notice (`ladder_svc.ladder_stuck`, `ladder_main_tell`), whatever its mover answers meanwhile. Progress is the item's own clock (model/progress.py, stamped by
 `writes.save`): a step marked done or dropped, a state change, a pull request merged for the item. A status line, a note, a reply and a confirm are not. Fixture items, panes that are files in a temp folder,
 messages recorded by a fake push, a fake clock (every pass is given its `now`, and the saves are stamped from a fake `time`), no live store, no network, no model call.
 
@@ -78,6 +78,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -118,16 +119,16 @@ def cli_row(who, status, at):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
 handoff_svc.CLI_SESSIONS = T / "cli"
-server._stall_since(B)
+stall_svc.stall_since(B)
 def stk(at, prime=True):
     """One stall pass at `at` (the 20-second gate reset), the threads it started finished → the items it acted on. `prime`: the pass keeps when it first saw each item due (the server's alive record), and a
     scenario that runs one pass at the due time would otherwise see every item as alive just now: an item the record does not know yet is entered as alive long ago, as an item that has been due for days is."""
     if prime:
-        rec_ = server._alive_load()
+        rec_ = ladder_svc.alive_load()
         for f_ in (T / "store/a").glob("*.json"): rec_.setdefault("a" + f_.stem, now0 - 100 * H)
-        server._alive_save(rec_)
-    server._STALL_LAST[0] = 0.0
-    out = server._stall_tick(at); drain()
+        ladder_svc.alive_save(rec_)
+    stall_svc.STALL_LAST[0] = 0.0
+    out = stalltick_svc.stall_tick(at); drain()
     return out
 def log_of(i): return S.log_of(mt(i))
 ROLES = {"home-peer": {"role": "background"}, "home-peer2": {"role": "background"}, "home-peer3": {"role": "background"}, "team-back": {"role": "background"}, "home-front": {"role": "front"}}
@@ -140,7 +141,7 @@ def clear_records():
     for p in (T / "state/audit").glob("*.json"): p.unlink()
     sent.clear()
 def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
-def entry(i): return server._stall_load().get(f"a{i}")
+def entry(i): return stall_svc.stall_load().get(f"a{i}")
 
 from stackshot.model import progress as PG; from stackshot.model import activity as ACT
 def ladder_cfg(enabled=True, **kw):
@@ -154,7 +155,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK; writes.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = stall_svc.time = stalltick_svc.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp the progress clock takes is the one a live write takes."""
     d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts
@@ -302,7 +303,7 @@ put(160, act=30, mover="home-peer"); prog(160, now0)
 ladder_cfg(True, main_hours=2)
 check("9 main_hours = 2: the item goes up after 2 hours, not before, and the notice says it comes again in 2 hours", "a160" not in stk(now0 + 2 * H - 60) and "a160" in stk(now0 + 2 * H) and "again in 2 hours" in up_notices(160)[0][1], pushes_to("home-front", "a160"))
 close(160)
-check("9 main_hours: 4 when it is missing, zero, negative or not a number", all((ladder_cfg(True, **kw) or server._ladder_main_hours() == 4.0) for kw in ({}, {"main_hours": 0}, {"main_hours": -3}, {"main_hours": "x"})) and (ladder_cfg(True, main_hours=6) or server._ladder_main_hours() == 6.0), None)
+check("9 main_hours: 4 when it is missing, zero, negative or not a number", all((ladder_cfg(True, **kw) or ladder_svc.ladder_main_hours() == 4.0) for kw in ({}, {"main_hours": 0}, {"main_hours": -3}, {"main_hours": "x"})) and (ladder_cfg(True, main_hours=6) or ladder_svc.ladder_main_hours() == 6.0), None)
 put(161, act=30, mover="home-peer"); prog(161, now0 - 9 * H); ladder_cfg(False, main_hours=4)
 check("9 the ladder switch off: nothing is handed up (the path is the ladder's)", "a161" not in stk(now0 + 1) and not up_notices(161), pushes_to("home-front", "a161"))
 close(161); ladder_cfg(True, main_hours=4)
@@ -319,7 +320,7 @@ close(170)
 
 # ================================================================ 11. one message, one mark: a silent mover's notice (the stall ladder's own hand-up) counts as the hand-up
 put(180, act=600, mover="home-peer"); prog(180, now0 - 9 * H)
-server._ladder_main("a180", "home-peer", {}, now0)
+ladder_svc.ladder_main("a180", "home-peer", {}, now0)
 drain(); c1 = len(up_notices(180)) + len([p for p in pushes_to("home-front", "a180") if "background mover" in p[1]])
 stk(now0 + 1); stk(now0 + 2 * H)
 check("11 an item the silent-mover notice just handed up is not handed up again for not moving: the mark is shared", c1 == 1 and not up_notices(180) and mt(180).get("progress_up_at") == now0, (pushes_to("home-front", "a180"), mt(180)))
@@ -335,14 +336,14 @@ def sweep_at(t):
 # parked 9 hours ago with a wake 5 hours ahead: the board shows it waiting; the progress clock holds the park time
 put(190, act=9 * 60, mover="home-peer"); prog(190, now0 - 9 * H)
 d_ = rd(190); d_["metadata"].update(hold=True, wake=iso(now0 + 5 * H), phase="waiting", waits_on="time"); (T / "store/a/190.json").write_text(json.dumps(d_))
-check("12 parked and waiting: not handed up however long ago it was parked", "a190" not in stk(now0 + 2 * H, prime=False) and not up_notices(190) and "a190" not in server._alive_load(), (pushes_to("home-front", "a190"), server._alive_load()))
+check("12 parked and waiting: not handed up however long ago it was parked", "a190" not in stk(now0 + 2 * H, prime=False) and not up_notices(190) and "a190" not in ladder_svc.alive_load(), (pushes_to("home-front", "a190"), ladder_svc.alive_load()))
 swept = sweep_at(now0 + 4.5 * H)      # the sweep stores alive before the wake (the board's reading moves ahead of the wake): the two keys only, so the progress clock is the park time still
 check("12 the phase sweep stores alive ahead of the wake and writes the two keys only: the progress clock is the park time still (no write of the item moved it), the item is still held", "a190" in swept and mt(190).get("phase") == "alive" and rd(190)["progress"] == now0 - 9 * H and mt(190).get("hold"), (swept, rd(190)))
 T1 = now0 + 4.5 * H
 stk(T1, prime=False)
-check("12 the pass after it records when the item became alive (the board reads the stored phase), and does not hand it up on the park's age", not up_notices(190) and server._alive_load().get("a190") == T1 and rd(190)["progress"] == now0 - 9 * H, (server._alive_load(), pushes_to("home-front", "a190")))
+check("12 the pass after it records when the item became alive (the board reads the stored phase), and does not hand it up on the park's age", not up_notices(190) and ladder_svc.alive_load().get("a190") == T1 and rd(190)["progress"] == now0 - 9 * H, (ladder_svc.alive_load(), pushes_to("home-front", "a190")))
 save_at(now0 + 5 * H + 60, 190, lambda d: (d["metadata"].pop("hold", None), d["metadata"].pop("wake", None)), writer="")      # the wake passes and the server releases the hold: a save that finds the phase alive already, so it stamps no progress
-check("12 the wake's release moves no progress either (the phase was alive already), and does not restart the alive record", rd(190)["progress"] == now0 - 9 * H and not mt(190).get("hold") and server._alive_load().get("a190") == T1, (rd(190), server._alive_load()))
+check("12 the wake's release moves no progress either (the phase was alive already), and does not restart the alive record", rd(190)["progress"] == now0 - 9 * H and not mt(190).get("hold") and ladder_svc.alive_load().get("a190") == T1, (rd(190), ladder_svc.alive_load()))
 stk(T1 + 60, prime=False); stk(now0 + 5 * H + 120, prime=False); stk(T1 + 4 * H - 60, prime=False)
 check("12 …and it is not handed up until main_hours after it became alive", not up_notices(190) and not mt(190).get("progress_up_at"), pushes_to("home-front", "a190"))
 done = stk(T1 + 4 * H + 60, prime=False)
@@ -352,9 +353,9 @@ close(190)
 put(191, act=9 * 60, mover="home-peer"); prog(191, now0 - 9 * H)
 d_ = rd(191); d_["metadata"].pop("state", None); d_["metadata"].pop("needs", None); d_["metadata"].update(after=["a192"], phase="waiting", waits_on="item"); (T / "store/a/191.json").write_text(json.dumps(d_))
 put(192, act=30, mover="home-peer2"); prog(192, now0)
-check("12 ordered after an open item: not handed up", "a191" not in stk(now0 + 1, prime=False) and "a191" not in server._alive_load(), pushes_to("home-front", "a191"))
+check("12 ordered after an open item: not handed up", "a191" not in stk(now0 + 1, prime=False) and "a191" not in ladder_svc.alive_load(), pushes_to("home-front", "a191"))
 close(192); sweep_at(now0 + 10)
-check("12 the blocker closed: it is alive, and is not handed up at once", mt(191).get("phase") == "alive" and "a191" not in stk(now0 + 10, prime=False) and not up_notices(191), (mt(191), server._alive_load()))
+check("12 the blocker closed: it is alive, and is not handed up at once", mt(191).get("phase") == "alive" and "a191" not in stk(now0 + 10, prime=False) and not up_notices(191), (mt(191), ladder_svc.alive_load()))
 check("12 …nor within the 4 hours after, and then it is", "a191" not in stk(now0 + 10 + 4 * H - 60, prime=False) and "a191" in stk(now0 + 10 + 4 * H + 60, prime=False) and len(up_notices(191)) == 1, pushes_to("home-front", "a191"))
 close(191)
 check("12 progress.due counts from the later of the last progress and when the item became alive", not PG.due({"progress": 0.0 + 100.0}, 100.0 + 5 * H, 4, 0.0, 100.0 + 2 * H) and PG.due({"progress": 100.0}, 100.0 + 6 * H, 4, 0.0, 100.0 + 2 * H), None)

@@ -306,6 +306,7 @@ from stackshot.web import server
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
 from stackshot.service import runner as runner_svc
+from stackshot.service import stall_tick as stalltick_svc
 from stackshot.web.tools import rules as _wt_rules
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -334,8 +335,8 @@ check("3 board: the clocks that read items are marked to stand still while the m
 
 TICK_FUNCS = {"wake_pass": "wake_pass", "anchor_pass": "anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick", "balance_tick": "_balance_tick", "handoff_tick": "handoff_tick",
               "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick", "pilot_fallback_tick": "_pilot_fallback_tick",
-              "stall_tick": "_stall_tick", "handback_tick": "handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return {"handoff_tick": handoff_svc, "handback_tick": telling, "fleet_stamp": runner_svc, "wake_pass": wakes_svc, "anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc}.get(fn, server)       # the owner of a function the spies set: the hand-back tick is the telling's, the fleet stamp is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the rest are the server's
+              "stall_tick": "stall_tick", "handback_tick": "handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
+def own(fn): return {"handoff_tick": handoff_svc, "handback_tick": telling, "fleet_stamp": runner_svc, "wake_pass": wakes_svc, "anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc}.get(fn, server)       # the owner of a function the spies set: the hand-back tick is the telling's, the fleet stamp is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the rest are the server's
 counts: dict[str, int] = {}
 order_seen: list[str] = []
 saved = {}

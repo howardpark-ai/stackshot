@@ -71,6 +71,7 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -113,7 +114,7 @@ server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
 def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
-server._stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
+stall_svc.stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
 COLD_MSGS = []
 def cold(answer, status="ok"):
     def run(msg):
@@ -133,8 +134,8 @@ ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of del
 MIN = 60.0
 def stk(at):
     """One stall pass at `at` (the 20-second gate reset), the threads it started finished → the items it acted on."""
-    server._STALL_LAST[0] = 0.0
-    out = server._stall_tick(at); drain()
+    stall_svc.STALL_LAST[0] = 0.0
+    out = stalltick_svc.stall_tick(at); drain()
     return out
 def log_of(i): return S.log_of(mt(i))
 IDLE0 = B + 60.0                       # the pane went idle then: the first step is due at T1

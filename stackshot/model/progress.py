@@ -1,7 +1,7 @@
 """progress.py — the item's `progress` clock: when the work last moved, as opposed to when anyone last said something about it.
 
 The pure half: no server import, no clock read, no file. service/writes.py's save asks `moved` once per save and stamps the item (`item["progress"]`, epoch seconds, top level beside
-`activity`); the hand-up of an item that is not moving (server._stall_tick, ladder.py) reads `at`.
+`activity`); the hand-up of an item that is not moving (service/stall_tick.py, waits/ladder.py) reads `at`.
 
 Why a clock of its own. `activity` (activity.py) answers "has anyone written to this item": a status line, a note, a reply and a message all move it, which is right for a quiet-time check and
 wrong for a stuck one, since a busy mover that answers "no change" every hour keeps it fresh. `progress` moves only for what is movement:
