@@ -3206,7 +3206,7 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
     save, and the mover's notice) and the caller runs it just before the write's own save, so a write a later gate refuses leaves the item exactly
     as it was, the needs list included. Nothing on a closed item (`was`), on a write that names the agent itself, or without a sender; nothing on a write
     that is not plain work (`plain` false: it sets needs itself, `none` included, parks the item with hold or wake, sets or
-    clears a recycle, or is filing only, _FILING_ONLY: a page rename's update(project=<new key>) did no work on the item), since such a
+    clears a recycle, or is filing only, service/update.py's _FILING_ONLY: a page rename's update(project=<new key>) did no work on the item), since such a
     write says where the move is, or none was made, and naming the agent would undo it or invent it. → the function that stores the naming and returns the reply line, or ""."""
     nothing = lambda: ""
     sender = str(sender or "").strip()

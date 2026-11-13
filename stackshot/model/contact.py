@@ -7,7 +7,7 @@ Who is the contact:
   - an item created by a front agent (a user-facing agent: the sessions the person talks to): that agent;
   - an item created by a background agent: the front agent the creator names, one of the project's front agents (the server lists them with their mandates and refuses any other
     name), else the project's -main agent;
-  - when the contact retires, or the item moves to another project, it falls to the project's -main agent (server.py `_contact_fall_retired`, `_contact_after_move`);
+  - when the contact retires, or the item moves to another project, it falls to the project's -main agent (server.py `_contact_fall_retired`, `_contact_after_move` in service/update.py);
   - every open item without one is given one by `tools/backfill_contact.py` (the creator when that was a front agent, else the project's -main).
 
 Why `contact` and not `owner`: `owner` is a retired term (tests/retired_terms.toml: it once meant the item's mover, then the keeper of record), `metadata.owner` is still the stored
