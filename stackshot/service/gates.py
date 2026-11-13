@@ -382,6 +382,9 @@ def gate_state_args(carry: dict[str, str]) -> tuple[str, dict[str, str], bool]:
     return ("your-step" if "step" in given else "blocked" if "supplies" in given else ""), given, withdraw
 
 
+_NOT_PASSED = ("until", "waits", "wait_mode")      # in the wait group, but not arguments of this call
+
+
 def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict[str, str], set[str]]:
     """The model fields a write passes (model.py): goal, mover, then, wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover → (the fields to set, whitespace
     collapsed and the owner's name and wait_kind normalised, the fields to drop). A value of none, clear or - drops that field; clear_goal, clear_mover, clear_then drop theirs
@@ -400,7 +403,7 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
         if clears.get(flag):
             clash = [k for k in fields if k in setv]
             if clash:
-                raise ToolError(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k != 'until')}; it does not go with a new {', '.join(clash)}")      # `until` is no write field yet: the refusal names the five a caller can pass
+                raise ToolError(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k not in _NOT_PASSED)}; it does not go with a new {', '.join(clash)}")      # `until`, `waits` and `wait_mode` are no write field of this call: the refusal names the five a caller can pass
             drop.update(fields)
     if "wait_kind" in setv:
         setv["wait_kind"] = setv["wait_kind"].lower()
@@ -426,7 +429,7 @@ def gate_ask_on_wait(gid: str, item: dict[str, Any], meta: dict[str, Any], was_n
     asks = _waits_decision(meta) and not _waits_decision({"needs": was_needs})
     if not asks:
         return
-    on = {"anchor": "an anchor event", "item": "another item's close", "relay": f"news only {OWNER} relays", "time": "a time", "event": "a fleet event"}[kind]
+    on = {"anchor": "an anchor event", "item": "another item's close", "relay": f"news only {OWNER} relays", "time": "a time", "event": "a fleet event", "list": "several things"}[kind]
     detail = str(meta.get("wait_event") or meta.get("wait_anchor") or "").strip()
     raise ToolError(f"Refused: {_gh.shown(gid)} still waits on {on}" + (f" ({detail})" if detail else "") + f"; pass clear_wait=true with this update to drop the wait and ask {OWNER}, "
                     f"or keep the wait and do not ask {OWNER}.")
@@ -490,7 +493,14 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
 #   5  next may be stale: another session changed needs, state, hold, wake or after and not next (metadata.next_stale), or next names a date that has passed
 #   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
-_REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")     # the structured fields a re-park may not change (status and hold beside them)
+_REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "waits", "wait_mode")     # the structured fields a re-park may not change (status and hold beside them)
+
+
+def _list_shape(v: Any) -> Any:
+    """A list's lines as a comparable value: the lines without the server's record of what arrived, in no particular order (a line arriving or a reorder is no new shape; a line added, removed or changed is)."""
+    if not isinstance(v, list):
+        return v
+    return sorted(json.dumps({k: x for k, x in w.items() if k != "arrived"}, sort_keys=True, default=str) if isinstance(w, dict) else str(w) for w in v)
 
 
 _REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "hourly_audit", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
@@ -511,7 +521,7 @@ def _substance(item: dict[str, Any]) -> str:
         if isinstance(mq.get("wait_basis"), dict):
             mq["wait_basis"] = " ".join(str(mq["wait_basis"].get("text") or "").split())
         return json.dumps({"s": item.get("subject"), "d": item.get("description"), "t": item.get("status"), "m": mq}, sort_keys=True, default=str)
-    return json.dumps({"t": item.get("status"), "h": bool(m.get("hold")), **{k: m.get(k) for k in _REPARK_FIELDS}}, sort_keys=True, default=str)
+    return json.dumps({"t": item.get("status"), "h": bool(m.get("hold")), **{k: (_list_shape(m.get(k)) if k == "waits" else m.get(k)) for k in _REPARK_FIELDS}}, sort_keys=True, default=str)
 
 
 def gate_owner_step(item: dict[str, Any], gid: str = "", create: bool = False, sender: str = "", keeper: str = "") -> None:
@@ -598,7 +608,7 @@ def gate_repark(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, 
     meta["repark"] = n
 
 
-_WAIT_STRUCTURE = ("wait_kind", "wait_event", "wait_anchor", "after")      # what a wait stands on (the clock fields apart; post_wake_mover is who takes the item after, and the holder rules cover hand-offs)
+_WAIT_STRUCTURE = ("wait_kind", "wait_event", "wait_anchor", "after", "waits", "wait_mode")      # what a wait stands on (the clock fields apart; post_wake_mover is who takes the item after, and the holder rules cover hand-offs; a changed list of waits is a new shape)
 
 
 _STRUCT_KEEP = 5      # earlier signatures of the wait's structure kept in metadata.clock_struct
@@ -612,6 +622,8 @@ def _struct_sig(m: dict[str, Any]) -> str:
     recycle or fleet_op is compared by its verb alone (`recycle <machine>` is `recycle`, `fleet_op <verb> <machine>` is `fleet_op <verb>`): the machine argument is free text to a session, so
     a made-up one would be a new shape each time; a pr_* event keeps its full target."""
     def norm(k: str, v: Any) -> Any:
+        if k == "waits":
+            return _list_shape(v) if isinstance(v, list) else ""
         if isinstance(v, (list, tuple)):
             return sorted(str(x).strip() for x in v if str(x).strip())
         s = " ".join(str(v or "").split())
@@ -619,7 +631,7 @@ def _struct_sig(m: dict[str, Any]) -> str:
             w = s.split(" ")
             s = w[0] if w[0] == "recycle" else " ".join(w[:2]) if w[0] == "fleet_op" else s
         return s
-    return json.dumps([norm(k, m.get(k)) for k in _WAIT_STRUCTURE], sort_keys=True)
+    return json.dumps([norm(k, m.get(k)) for k in _WAIT_STRUCTURE if m.get(k) or k not in ("waits", "wait_mode")], sort_keys=True)      # a single wait's signature is what it always was: the list's two fields count only when stored
 
 
 def _struct_progress(m0: dict[str, Any], meta: dict[str, Any]) -> bool:

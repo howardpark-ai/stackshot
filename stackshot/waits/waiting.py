@@ -108,7 +108,7 @@ def wake_epoch(value: Any) -> float | None:
     return ts if 0 < ts < MAX_EPOCH else None
 
 
-_WAIT_KINDS = ("time", "anchor", "item", "relay", "event")      # the stored wait kinds (the same five as model.WAIT_KINDS; this module is read by model.py, so it cannot import them)
+_WAIT_KINDS = ("time", "anchor", "item", "relay", "event", "list")      # the stored wait kinds (the same six as model.WAIT_KINDS; this module is read by model.py, so it cannot import them)
 
 
 def stored_until(m: dict[str, Any]) -> str:
@@ -122,7 +122,7 @@ def wake_value(m: dict[str, Any]) -> Any:
 
 
 def kind_of(m: dict[str, Any]) -> str:
-    """The kind of wait an item stores: its wait_kind when it is one of the five; with none, "time" when it stores an `until` (a wait on the date alone); else ""."""
+    """The kind of wait an item stores: its wait_kind when it is one of the six; with none, "time" when it stores an `until` (a wait on the date alone); else ""."""
     k = " ".join(str(m.get("wait_kind") or "").split()).lower()
     if k in _WAIT_KINDS:
         return k

@@ -15,6 +15,8 @@ reading of the owner's answer to those asks, the date he gives. The server (serv
   event   the server is told of the fleet event the wait names (event_waits.py: a PR merged or released, a recycle, a fleet op's result, a job's run) → alive, the post-wake mover, with what
           happened; the backstop passes first → alive, the post-wake mover, "the event did not come". The stall pass does not run for it (a waiting item has no mover to nag)
   relay   the ask-by day comes → alive with the owner as mover, a ready question: has <party>'s <event> arrived? arrived / not yet, ask again on <date> / drop
+  list    several waits of any of the kinds above at once (waits/wait_list.py): each line is marked when it arrives, and the item comes back when every line has (`all`) or the first has (`any`) → alive,
+          the post-wake mover, with what arrived and what did not; the backstop day passing first → the same (an open relay line then asks the owner, as a relay's ask-by day does). No chases on a list
 
   Chases (a relay or anchor wait): a follow-up an older item logged is only read (no call logs one now). With two on the item, the wait's next end (the ask-by day or the
   backstop) brings the item to the owner as "drop it?" (drop / keep waiting until <date>) instead of the usual arrival. Reading taken: "after two chases with no reply"
@@ -31,6 +33,7 @@ from typing import Any
 from stackshot.core import config as _cfg
 from stackshot.waits import event_waits as _ew
 from stackshot.model import model as _model
+from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
 
 CHASE_KINDS = ("relay", "anchor")          # the waits a chase goes with
@@ -84,8 +87,11 @@ def paused() -> bool:
 
 
 def stored_kind(meta: dict[str, Any]) -> str:
-    """The wait_kind an item stores ("" when none or not one of the five); an item that stores an `until` and no kind waits on the date alone, so it reads "time"."""
+    """The wait_kind an item stores ("" when none or not one of the six); an item that stores an `until` and no kind waits on the date alone, so it reads "time". A stored `list` is a kind
+    only while the list holds (waits/wait_list.py): one that does not is ignored, as the model ignores it, and the item reads as it would without it."""
     k = _model.clean((meta or {}).get("wait_kind")).lower()
+    if k == _wl.LIST and not _wl.valid(meta or {}):
+        k = ""
     if k in _model.WAIT_KINDS:
         return k
     return "time" if _wt.stored_until(meta or {}) else ""
@@ -114,6 +120,8 @@ def can_end(meta: dict[str, Any]) -> bool:
         return bool(_model.clean(meta.get("wait_anchor")))
     if k == "event":
         return not _ew.problem(meta.get("wait_event")) and backstop_epoch(meta) is not None      # an event that may never come needs a day it comes back anyway; without one the nag keeps the item
+    if k == _wl.LIST:
+        return True                                  # the backstop day is required of a list, so the list always has an end
     return False
 
 
@@ -158,7 +166,7 @@ def next_moment(meta: dict[str, Any]) -> float | None:
     """The moment the scheduler next has to look at this wait (a wake, a relay's ask-by, a backstop), None for none: the runner sleeps until the earliest. An item whose last turn failed
     is looked at again BACKOFF after the failure, not at once."""
     k = stored_kind(meta)
-    ep = time_epoch(meta) if k == "time" else day_epoch(relay_day(meta)) if k == "relay" else backstop_epoch(meta) if k in ("item", "anchor", "event") else None
+    ep = time_epoch(meta) if k == "time" else day_epoch(relay_day(meta)) if k == "relay" else backstop_epoch(meta) if k in ("item", "anchor", "event") else _wl.next_moment(meta) if k == _wl.LIST else None
     fa = failed_at(meta)
     if ep is not None and fa and ep <= fa + BACKOFF:
         ep = fa + BACKOFF
@@ -180,6 +188,11 @@ def due(item: dict[str, Any], now: float, after_open: list[str] | None = None) -
     if k == "relay":
         ep = day_epoch(relay_day(meta))
         return "relay" if ep is not None and ep <= now else ""
+    if k == _wl.LIST:                      # the group is over by what has arrived (the cause is the kind of the line that completed it), or the backstop day has come first
+        if _wl.done(meta):
+            return _wl.completing_kind(meta)
+        ep = backstop_epoch(meta)
+        return "backstop" if ep is not None and ep <= now else ""
     if k == "item":
         if _wt.after_of(meta) and not (after_open or []):
             return "item"
@@ -204,7 +217,7 @@ def chased_out(meta: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------------------------------------------- the asks
 def subject_of(meta: dict[str, Any], clip: int = 110) -> str:
     """What a relay or an anchor wait is for, as the ask names it: "<party>'s <event>" when the item stores a party that the event does not already name, else the event."""
-    event = _model.clean(meta.get("wait_event")) or "the news"
+    event = _model.clean(meta.get("wait_event")) or (_wl.relay_event(meta) if _wl.stored(meta) else "") or "the news"      # a list's open relay line is what the owner is asked about at the backstop day
     party = _model.clean(meta.get("party"))
     text = f"{party}'s {event}" if party and party.lower() not in event.lower() else event
     return text if len(text) <= clip else text[:clip].rstrip() + "…"
@@ -261,7 +274,7 @@ def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list
 
 
 # ---------------------------------------------------------------------------------------------------------------- the wait that turned (the record of what to put back)
-WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "post_wake_mover", "ask_by", "wake", "until", "after", "party", "needs")
+WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "post_wake_mover", "ask_by", "wake", "until", "after", "party", "needs", "waits", "wait_mode")      # waits and wait_mode: a list put back on "not yet" keeps its lines and what had arrived
 
 
 def remember(meta: dict[str, Any], asked: str, now: float) -> None:
@@ -329,7 +342,7 @@ def turn_alive(meta: dict[str, Any], mover: str, what: str, now: float) -> None:
             meta.pop("watch")
 
 
-DATE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle")      # what the end of a wait on the date alone clears
+DATE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle", "waits", "wait_mode")      # what the end of a wait on the date alone clears (the two of a list that did not hold, with it)
 
 
 def end_date(meta: dict[str, Any], what: str, to: str, now: float) -> None:
@@ -598,6 +611,12 @@ def what_event(ev: dict[str, Any]) -> str:
 
 def what_event_silent(phrase: Any, date: str) -> str:
     return f"the event did not come: {_ew.words(phrase)} was not reported by {date}"
+
+
+def what_list(meta: dict[str, Any], cause: str, shown=str) -> str:
+    """A list's arrival: what the list's end says, from the record of what arrived (read before the wait's fields are dropped), the form the message to the mover and the History carry:
+    "all 3 arrived: a; b; c", "a arrived (any of 3); b, c were not needed", "backstop day 2026-11-20: arrived a; still open b, c" (waits/wait_list.outcome_text)."""
+    return _wl.outcome_text(meta, cause, shown)
 
 
 def message(rows: list[tuple[str, str, str, str]]) -> str:

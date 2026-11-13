@@ -118,6 +118,7 @@ from stackshot.model import model_guards as _mg  # noqa: E402  — the item mode
 from stackshot.model import steps as _steps  # noqa: E402  — the checklist behind next: done, dropped and open steps, next derived from it (steps.py)
 from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fleet event (wait_kind=event): the phrase, what matches it (event_waits.py)
 from stackshot.waits import watchers as _watch  # noqa: E402  — the waits' watchers of the item model: what ends a wait, the relay's ask, the chases (watchers.py)
+from stackshot.waits import wait_list as _wl  # noqa: E402  — a wait on a list of waits (wait_kind=list): the lines, what has arrived, when the group is over (wait_list.py; the one reader of `waits`)
 from stackshot.waits import handoff as _ho  # noqa: E402  — the hand-off machinery of the item model: the record, the clock, section 5 (handoff.py)
 from stackshot.waits import successor as _succ  # noqa: E402  — the closest live agent for an open item whose mover is gone: the audit's hand-over (successor.py)
 from stackshot.model import rebullet as _rebullet  # noqa: E402  — the re-bullet pass's checks: a rewrite that lost a link, a number or a quote is refused (rebullet.py)
@@ -2186,6 +2187,8 @@ def _wakes() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
             if ep is not None:
                 out.append((gid, p, it, dt.datetime.fromtimestamp(ep, _pages.zone_now().tzinfo)))
             continue
+        if _wl.valid(meta):                  # a list is the watchers' alone: with them off it waits (the backstop day would otherwise read as a time wait's date and drop half the list)
+            continue
         if not _wt.wake_value(meta):
             continue
         try:
@@ -2406,9 +2409,13 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
         except Exception:
             continue
         meta = dict(it.get("metadata") or {})
-        if it.get("status") != "open" or gid not in _after_of(meta):
+        if it.get("status") != "open" or (gid not in _after_of(meta) and not _wl.lines_for_item(meta, gid, open_only=False)):      # a wait on a list is found by any of its item lines
             continue
         waiting_on.add(g)
+        if _wl.valid(meta):             # a wait on a list is the watchers' alone, never today's release below (two mechanisms must not end the same item)
+            if _watch.watches(it) and _watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
+                released.append(g)
+            continue
         if _watch.watches(it) and not (_wt.stored_until(meta) and not _uw.kind_of(meta) and _after_of(meta)):         # a watched wait is the watchers', not today's release below (a date with an after link and no kind is a park on the closing, released below)
             if _watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
                 released.append(g)
@@ -2526,6 +2533,20 @@ def _auto_line(n: dict[str, Any]) -> bool:
     return bool(n.get("log_only")) and n.get("ruled_by") == AUTO_RULER and n.get("ruling") in ("passed", "merged")
 
 
+def _watched_anchors(it: dict[str, Any]) -> list[str]:
+    """The anchors a watched wait of this open item stands on: an anchor wait's wait_anchor, or the anchors of the anchor lines of a wait on a list that have not arrived; [] for anything else."""
+    wm = it.get("metadata") or {}
+    if not _watch.watches(it):
+        return []
+    k = _watch.stored_kind(wm)
+    if k == "anchor":
+        return [str(wm["wait_anchor"])]
+    if k == _wl.LIST:
+        ls = _wl.lines(wm)
+        return [ls[i]["anchor"] for i in _wl.lines_by_kind(wm, "anchor")]
+    return []
+
+
 def _anchor_pass() -> list[str]:
     """The minute loop's half of the anchor wait: in a project with no keeper nobody rules, so a held item scoped to an
     anchor is released by any notice from it that came after the park. In a project with a keeper the keeper's ruling
@@ -2552,15 +2573,17 @@ def _anchor_pass() -> list[str]:
             continue
         wm = it.get("metadata") or {}
         proj = str(wm.get("project") or "")
-        if _watch.watches(it) and _watch.stored_kind(wm) == "anchor":
+        urls = _watched_anchors(it)
+        if urls:
             try:
                 _watch_stamp(gid)              # a wait stored before this deploy has no stamp: it gets one now, and no older notice is its arrival
             except Exception as e:  # noqa: BLE001  — one bad stamp does not stop the pass (the floor falls back to the item's last write)
                 print(f"watch: {gid} not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
             floor = _watch_floor(_load(gid))
-            for page in dict.fromkeys([proj, *_ascope.holders(store, str(wm["wait_anchor"]), _same_anchor)]):
-                watched.setdefault(page, set()).add(_anchor_key(str(wm["wait_anchor"])))
-                floors[page] = min(floors.get(page, float("inf")), floor)
+            for u in urls:                     # an anchor wait's one anchor, or every open anchor line of a wait on a list
+                for page in dict.fromkeys([proj, *_ascope.holders(store, u, _same_anchor)]):
+                    watched.setdefault(page, set()).add(_anchor_key(u))
+                    floors[page] = min(floors.get(page, float("inf")), floor)
         elif _is_held(it):
             for e in _ascope.anchor_scope(store, gid, proj):
                 for page in e["pages"]:
@@ -2684,7 +2707,9 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
         until = _watch.backstop_epoch(meta)
         date = (dt.datetime.fromtimestamp(until, ZONE).strftime("%Y-%m-%d") if until else "")
         url = str(meta.get("wait_anchor") or "")
-        if cause == "time":
+        if kind == _wl.LIST:                            # what arrived and what did not, from the record the wait's fields carry (read before they are dropped below)
+            what = _watch.what_list(meta, cause, _gh.shown)
+        elif cause == "time":
             what = detail.get("what") or (_watch.what_until(_wt.stored_until(meta)) if _wt.stored_until(meta) else _watch.what_time(str(meta.get("wake"))) if meta.get("wake") else f"its end date {meta.get('end')} came")
         elif cause == "item":
             what = detail.get("what") or f"every item it waited on has closed ({', '.join(_gh.shown(g) for g in _after_of(meta))})"
@@ -2701,13 +2726,14 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
         else:
             what = f"its ask-by day {_watch.relay_day(meta)} came"
         chased = _watch.chased_out(meta)
-        ask_him = cause == "relay" or (cause == "backstop" and chased)
+        list_relay = kind == _wl.LIST and cause == "backstop" and bool(_wl.lines_by_kind(meta, "relay"))      # the backstop day with a relay line still open asks the owner, as a relay's ask-by day does
+        ask_him = (cause == "relay" and kind != _wl.LIST) or (cause == "backstop" and chased) or list_relay      # a relay LINE that arrived (the owner relayed it) is an arrival, not a question
         if ask_him:
             asked = "dropit" if chased else "relay"
             ask = _watch.drop_ask(meta) if chased else _watch.relay_ask(meta)
             opts = _watch.drop_options() if chased else _watch.relay_options()
             _watch.remember(meta, asked, now)
-            _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if chased else f"{_watch.subject_of(meta)} is due: its ask-by day {_watch.relay_day(meta)} came", now)
+            _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if (chased or kind == _wl.LIST) else f"{_watch.subject_of(meta)} is due: its ask-by day {_watch.relay_day(meta)} came", now)
             mover = OWNER
         elif _model.is_owner(post):
             ask, opts = _watch_ask(gid, meta, what)
@@ -2769,6 +2795,11 @@ def _watch_pass(now: float | None = None, wout: dict[str, list[tuple[str, dict[s
             if not _watch.watches(it):
                 continue
             meta = it.get("metadata") or {}
+            if _wl.valid(meta):                       # a wait on a list: the lines the clock ends (a date that came, an item that closed unseen) are marked first, then the group is judged
+                if _watch_list_clock(gid, now, out):
+                    moved.append(gid)
+                    _WATCH_BACKOFF.pop(gid, None)
+                continue
             cause = _watch.due(it, now, _after_open(meta))
             if cause and _watch_fire(gid, cause, now, out, recheck=True):
                 moved.append(gid)
@@ -2789,6 +2820,8 @@ def _watch_item_closed(g: str, it: dict[str, Any], closed: str, outcome: str, re
     with _writes.ITEM_LOCK:
         it = _load(g)
         meta = dict(it.get("metadata") or {})
+        if _wl.valid(meta):
+            return _watch_list_item_closed(g, closed, outcome, rep, writer, wout, superseded_by)
         if _watch.stored_kind(meta) != "item":
             return False
         after = _after_of(meta)
@@ -2811,6 +2844,117 @@ def _watch_item_closed(g: str, it: dict[str, Any], closed: str, outcome: str, re
             return False
 
 
+def _wl_mark_save(gid: str, it: dict[str, Any], meta: dict[str, Any], marks: list[tuple[int, str]], now: float, notes: list[str] | None = None) -> bool:
+    """Mark the lines of a wait on a list that arrived (`marks` = [(line index, the words of its arrival)]) on `meta` and save the item, under the item lock the caller holds: a filing save of the item's own
+    clock (the state clock and the confirm stay: the item is still waiting), with a History line `arrived: <what> (<k> of <n>)` for each line marked and `notes` (a followed replacement) before them.
+    Idempotent: a line that has arrived is left as it was and costs no write. → True when something was written."""
+    said = list(notes or [])
+    for i, what in marks:
+        if _wl.mark_arrived(meta, i, what, now):
+            said.append(f"arrived: {what} ({len(_wl.arrived_lines(meta))} of {len(_wl.lines(meta))})")
+    if not said:
+        return False
+    it["metadata"] = meta
+    it["updated"] = now
+    _writes.save(gid, it, note="; ".join(said))
+    print(f"watch: {gid} list: {'; '.join(said)}", file=sys.stderr, flush=True)
+    return True
+
+
+def _watch_mark(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]], pick: Callable[[dict[str, Any]], list[int]], what: str, ev: dict[str, Any] | None = None) -> bool:
+    """A line of the wait on a list that `gid` stands in arrived (`cause`: the kind of that line: time | item | anchor | relay | event): mark the lines `pick` finds in the list as it stands UNDER THE ITEM LOCK
+    (so an arrival delivered twice, or one another path has just recorded, marks nothing and changes nothing) and save the item; when the group is then over (`any`: this arrival; `all`: every line has arrived)
+    turn the item (_watch_fire, which reads the item again under the same lock), else it stays waiting and nothing is sent. `ev`: a reported event (recycle, fleet op, job run) counts only when it is newer
+    than the wait, as for a single event wait. Nothing while paused or switched off: the clock's pass finds the arrival then. → True when the item turned."""
+    if not _watch.enabled() or _watch.paused():
+        return False
+    with _writes.ITEM_LOCK:
+        it = _load(gid)
+        if not _watch.watches(it) or _watch.stored_kind(it.get("metadata") or {}) != _wl.LIST:
+            return False
+        if ev is not None and ev.get("kind") in _ew.REPORTED and now <= _watch_floor(it):
+            return False
+        meta = dict(it.get("metadata") or {})
+        if not _wl_mark_save(gid, it, meta, [(i, what) for i in pick(meta)], now):
+            return False
+        if not _wl.done(meta):
+            return False
+        try:
+            return _watch_fire(gid, cause, now, out, recheck=True)
+        except _WatchStuck as e:
+            print(f"watch: {e}", file=sys.stderr, flush=True)
+            _watch_failed(gid, now)
+            return False
+
+
+def _wl_item_closed(meta: dict[str, Any], closed: str, outcome: str, rep: str, writer: str, g: str, superseded_by: str = "") -> tuple[list[tuple[int, str]], list[str]]:
+    """The lines of a wait on a list that wait on `closed`, which just closed (or is found closed): a superseded one is followed to its open replacement `rep` (the id in the line becomes the replacement's and the
+    line has not arrived: the list waits on that now), any other closing marks the line. Done on `meta` in place; → ([(index, words) of the lines to mark], History notes of the lines followed)."""
+    marks: list[tuple[int, str]] = []
+    notes: list[str] = []
+    how = ("was dropped" if outcome == "dropped" else f"was superseded by {_gh.shown(rep or superseded_by)}, which is closed too" if outcome == "superseded" else "closed (done)") + (f" by {_session_label(writer)}" if writer else "")
+    for i in _wl.lines_for_item(meta, closed):
+        if rep and rep != g:
+            raw = [dict(r) for r in meta["waits"]]
+            raw[i]["after"] = rep
+            meta["waits"] = raw
+            notes.append(f"{_gh.ref(closed)} was superseded, followed to {_gh.ref(rep)}")
+        else:
+            marks.append((i, f"{_gh.shown(closed)} {how}"))
+    return marks, notes
+
+
+def _watch_list_item_closed(g: str, closed: str, outcome: str, rep: str, writer: str, wout: dict[str, list[tuple[str, dict[str, Any], str]]], superseded_by: str = "") -> bool:
+    """`closed` just closed and the item `g`, which waits on a list, has an item line on it (_release_after, under the item lock): a superseded one is followed to its open replacement (the id in the line is
+    replaced), any other close marks every line that waits on it (two lines on one item are both marked) and the group is judged (_watch_mark). While paused the follow is made and the marks wait: the clock's
+    pass finds a closed item. → True when the item turned."""
+    now = time.time()
+    with _writes.ITEM_LOCK:
+        it = _load(g)
+        meta = dict(it.get("metadata") or {})
+        marks, notes = _wl_item_closed(meta, closed, outcome, rep, writer, g, superseded_by)
+        if notes:
+            _wl_mark_save(g, it, meta, [], now, notes)
+        if not marks:
+            return False
+        return _watch_mark(g, "item", now, wout, lambda m: [i for i, _w in marks if i in _wl.lines_for_item(m, closed)], marks[0][1])
+
+
+def _watch_list_clock(gid: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]]) -> bool:
+    """The clock's half of a wait on a list (_watch_pass): a time line whose date has come arrives, and an item line whose item closed while nobody saw (a missing item file counts as closed, as for an item
+    wait) arrives, a superseded item being followed to its open replacement first; then the group is judged: over by what has arrived (the cause is the kind of the line that completed it), or the backstop
+    day has come (cause backstop, whatever has arrived). → True when the item turned."""
+    with _writes.ITEM_LOCK:
+        it = _load(gid)
+        if not _watch.watches(it):
+            return False
+        meta = dict(it.get("metadata") or {})
+        if not _wl.valid(meta):
+            return False
+        marks = [(i, f"its date {_wl.lines(meta)[i]['until']} came") for i in _wl.lines_for_time(meta, now)]
+        notes: list[str] = []
+        for i in _wl.lines_by_kind(meta, "item"):
+            after = _wl.lines(meta)[i]["after"]
+            if after not in _after_open({"after": [after]}):        # closed, or no file: closed as the wait treats it
+                c = (_load_or_none(after) or {}).get("metadata") or {}
+                outcome = str(c.get("outcome") or "done")
+                rp = _follow_superseded(str(c.get("superseded_by") or "")) if outcome == "superseded" and c.get("superseded_by") else ""
+                m_, n_ = _wl_item_closed(meta, after, outcome, rp if rp and (_load_or_none(rp) or {}).get("status") == "open" else "", "", gid, str(c.get("superseded_by") or ""))
+                marks += m_
+                notes += n_
+        _wl_mark_save(gid, it, meta, marks, now, notes)
+        it = _load(gid)
+        cause = _watch.due(it, now, _after_open(it.get("metadata") or {}))
+        if not cause:
+            return False
+        try:
+            return _watch_fire(gid, cause, now, out, recheck=True)
+        except _WatchStuck as e:
+            print(f"watch: {e}", file=sys.stderr, flush=True)
+            _watch_failed(gid, now)
+            return False
+
+
 def _watch_anchor_notice(project: str, url: str, n: dict[str, Any], at: float, how: str) -> list[str]:
     """A notice for `url` reached the server (_anchor_release: the keeper passed or merged it, or nobody rules the project, or it is the fleet's own routine line): every open item of the project
     whose stored wait is an anchor event on that anchor turns, with the notice's gist on it. Only a notice newer than the item's last move and than its wait counts; the router keeps ruling
@@ -2827,6 +2971,14 @@ def _watch_anchor_notice(project: str, url: str, n: dict[str, Any], at: float, h
         try:
             it = _load(gid)
             m = it.get("metadata") or {}
+            if _watch.watches(it) and _watch.stored_kind(m) == _wl.LIST:          # a wait on a list: every open anchor line on this anchor that the notice answers is marked (a notice that does not answer the line's event, as for a single wait, is not its arrival)
+                if not _wl.lines_for_anchor(m, url, _same_anchor) or (str(m.get("project") or "") != project and project not in held_by) or at <= _watch_floor(it):
+                    continue
+                answers = lambda meta: [i for i in _wl.lines_for_anchor(meta, url, _same_anchor) if _watch.anchor_hit(_wl.lines(meta)[i]["event"], n.get("text"), _auto_line(n))]
+                if answers(m) and _watch_mark(gid, "anchor", time.time(), out, answers, _watch.what_anchor(url, str(n.get("text") or ""), how)):
+                    fired.append(gid)
+                    print(f"anchor wait: {gid} turned ({project}, notice {n.get('id')})", file=sys.stderr, flush=True)
+                continue
             if not _watch.watches(it) or _watch.stored_kind(m) != "anchor" or not _same_anchor(str(m.get("wait_anchor") or ""), url):
                 continue
             if str(m.get("project") or "") != project and project not in held_by:
@@ -3044,6 +3196,12 @@ def _evwait_report(ev: dict[str, Any], now: float | None = None, told: dict[str,
         try:
             it = _load(gid)
             m = it.get("metadata") or {}
+            if _watch.stored_kind(m) == _wl.LIST and _watch.watches(it):          # a wait on a list: every open event line this event answers is marked
+                hits = lambda meta: _wl.lines_for_event(meta, lambda ph: _ew.matches(_evw_spec(ph), ev))
+                if hits(m) and not (ev.get("kind") in _ew.REPORTED and now <= _watch_floor(it)) and _watch_mark(gid, "event", now, out, hits, _ew.arrival(ev), ev=ev):
+                    fired.append(gid)
+                    print(f"event wait: {gid} turned ({_ew.arrival(ev)})", file=sys.stderr, flush=True)
+                continue
             if _watch.stored_kind(m) != "event" or not _watch.watches(it):
                 continue
             try:
@@ -3072,6 +3230,26 @@ def _evwait_pr_event(kind: str, repo: str, n: int, what: str = "") -> dict[str, 
     return _ew.event(kind, f"{_cfg.canon_repo(repo)}#{n}", what=what)
 
 
+def _event_specs(it: dict[str, Any]) -> "list[_ew.Spec]":
+    """The event specs a watched wait of this open item stands on: an event wait's one, or those of the event lines of a wait on a list that have not arrived (a line whose phrase is no event is left out).
+    [] for any other wait. The pollers (a machine coming online, a pull request's merge or release) look for these."""
+    m = it.get("metadata") or {}
+    if not _watch.watches(it):
+        return []
+    k = _watch.stored_kind(m)
+    if k == "event":
+        return [_evw_spec(m.get("wait_event"))]
+    out = []
+    if k == _wl.LIST:
+        ls = _wl.lines(m)
+        for i in _wl.lines_by_kind(m, "event"):
+            try:
+                out.append(_evw_spec(ls[i]["event"]))
+            except _ew.EventWaitError:
+                continue
+    return out
+
+
 def _evwait_box_poll(now: float, told: dict[str, str], turned: set[tuple[str, str]] | None = None) -> list[str]:
     """The pass for box_online waits, which are a state like a pull request's merge: each open wait whose machine is online now (its puller checked in within [client] online_minutes) turns its item to
     its post-wake mover, with the machine named (`turned`, when given, collects (gid, lower-cased fleet name) of each wait that turned: the machine anchors skip exactly those pairs). A wait set while the machine was online is refused at the write, so a wait that is open and finds its machine online means the machine came back. → the gids turned."""
@@ -3080,11 +3258,9 @@ def _evwait_box_poll(now: float, told: dict[str, str], turned: set[tuple[str, st
         try:
             it = _load(gid)
             m = it.get("metadata") or {}
-            if _watch.stored_kind(m) != "event" or not _watch.watches(it):
-                continue
-            sp = _evw_spec(m.get("wait_event"))
-            if sp.kind == _ew.BOX_ONLINE:
-                waits.append((gid, sp))
+            for sp in _event_specs(it):
+                if sp.kind == _ew.BOX_ONLINE:
+                    waits.append((gid, sp))
         except Exception:  # noqa: BLE001
             continue
     fired: list[str] = []
@@ -3125,11 +3301,9 @@ def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
         try:
             it = _load(gid)
             m = it.get("metadata") or {}
-            if _watch.stored_kind(m) != "event" or not _watch.watches(it):
-                continue
-            sp = _evw_spec(m.get("wait_event"))
-            if sp.kind in _ew.PR_KINDS:
-                waits.append((gid, sp))
+            for sp in _event_specs(it):
+                if sp.kind in _ew.PR_KINDS:
+                    waits.append((gid, sp))
         except Exception:  # noqa: BLE001
             continue
     if not waits:
@@ -3382,7 +3556,7 @@ def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], mo
             meta["watch"] = w
             if not w:
                 meta.pop("watch")
-    elif any(meta.get(k) != old.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "until", "post_wake_mover")):
+    elif any(meta.get(k) != old.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "until", "post_wake_mover", "waits", "wait_mode")):
         w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
         w["set_at"] = time.time()
         meta["watch"] = w
@@ -9358,7 +9532,7 @@ def _migrate_one(w: dict[str, Any]) -> dict[str, Any]:
 
 
 _WAKE_HEAD = "[stackshot] The item model migration pass finished."
-_WAKE_FIELD_KEYS = ("wait_anchor", "wait_event", "after", "wake", "ask_by", "post_wake_mover")
+_WAKE_FIELD_KEYS = ("wait_anchor", "wait_event", "after", "wake", "ask_by", "post_wake_mover", "waits", "wait_mode")
 
 
 _WAKE_KINDS = frozenset({"wait_input", "no_end", "post_wake", "default_end", "anchor_seen"})
