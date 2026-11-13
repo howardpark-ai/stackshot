@@ -325,6 +325,11 @@ def audit_hourly_line() -> bool:
     return get("audit", "hourly_line", default=False) is True
 
 
+def model_queued_behind() -> bool:
+    """[model] queued_behind: a mover busy on another item reads waiting, queued behind that item, not on agent (model/queued.py). Default false; only a TOML true switches it on, read at use."""
+    return get("model", "queued_behind", default=False) is True
+
+
 def audit_hand_idle() -> bool:
     """[audit] hand_idle: an item the hourly audit marked idle (nothing verified) goes to a free builder and the project's -main agent is told (audit/hand_idle.py). Default false; only a TOML true switches it on."""
     return get("audit", "hand_idle", default=False) is True

@@ -629,6 +629,8 @@ def ipx_pages():
     finally: r2.issue_url = _iu
     bd_.item_log = lambda r, merge=True: ([], 0)          # an item whose store has no version of it yet: no History
     out[(201, "nolog")] = bd_.item_html("a201")
+    bq_ = r2.Board(f"{tmp}/store"); bq_.queue_map = lambda: {"a201": "a202"}          # an item queued behind its mover's other item (`[model] queued_behind`; the queue is the board's own, given here)
+    out[(201, "queued")] = bq_.item_html("a201")
     return out
 # item-page fixture end
 import html
@@ -642,9 +644,10 @@ with i18n.use("ko"):
 IPX_NEW = sorted(k for k in EN if re.match(r"^(item|wait|answer|watch|more|link)\.", k))
 IPX_KO_ALL = "\n".join(ipx_ko.values()); IPX_KO_U = html.unescape(IPX_KO_ALL)
 check("the item page has strings in the table (the areas item, wait, answer, watch, more and link)", len(IPX_NEW) > 150, len(IPX_NEW))
-check("every fixture page rendered in both languages", len(ipx_en) == len(ipx_ko) == len(IPX_IDS) * 6 + 4 and all("<html" in h for h in ipx_en.values()), (len(ipx_en), len(ipx_ko)))
+check("every fixture page rendered in both languages", len(ipx_en) == len(ipx_ko) == len(IPX_IDS) * 6 + 5 and all("<html" in h for h in ipx_en.values()), (len(ipx_en), len(ipx_ko)))
 check("the item pages in English carry no marker and keep <html lang=\"en\"> (apply_lang rewrites it per person)", all("[x:" not in h and '<html lang="en">' in h for h in ipx_en.values()),
       [k for k, h in ipx_en.items() if "[x:" in h][:5])
+check("a queued item's page says why it waits, in English and marked in the test locale", "its mover is working on that item first" in ipx_en[(201, "queued")] and MARK(EN["wait.queued_note"]) in ipx_ko[(201, "queued")] and 'href="/items/a202"' in ipx_en[(201, "queued")], re.findall(r"Waits on.{0,300}", ipx_en[(201, "queued")])[:1])
 check("the item pages in the test locale carry markers", all("[x:" in h for h in ipx_ko.values()), [k for k, h in ipx_ko.items() if "[x:" not in h][:5])
 
 def _ipx_pat(v):
@@ -652,7 +655,7 @@ def _ipx_pat(v):
     return re.compile(r"\[x:" + ".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)) + r"\]", re.S)
 # keys no item-page render reaches (the home page or a direct call uses them): the direct calls below mark them
 IPX_DIRECT = {
-              "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.news_from", "wait.what.outside_news",
+              "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.queued", "wait.what.news_from", "wait.what.outside_news",
               "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
               "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more"}
 check("every name in the direct-call list is a key of the table's item-page areas (a stale name cannot hide in it)", IPX_DIRECT <= set(IPX_NEW), sorted(IPX_DIRECT - set(IPX_NEW)))
@@ -726,7 +729,7 @@ from stackshot.model import model as _mm
 cl_ = _cfg.CFG.setdefault("client", {}); had_hosts = "mockup_hosts" in cl_; cfg_old = cl_.get("mockup_hosts")
 with i18n.use("ko"):
     W = lambda kind, **k: _mm.Wait(kind=kind, kind_explicit=True, **k)
-    d_wait = [ipg.wait_what(W("item", after=("a1", "a2"))), ipg.wait_what(W("item")), ipg.wait_what(W("anchor")), ipg.wait_what(W("anchor", event="the review lands")), ipg.wait_what(W("event")),
+    d_wait = [ipg.wait_what(W("item", after=("a1", "a2"))), ipg.wait_what(W("item")), ipg.wait_what(W("item", after=("a1",), queued=True)), ipg.wait_what(W("anchor")), ipg.wait_what(W("anchor", event="the review lands")), ipg.wait_what(W("event")),
               ipg.wait_what(W("relay", event="the contract"), party="Acme"), ipg.wait_what(W("relay"), party="Acme"), ipg.wait_what(W("relay")), ipg.wait_what(W("relay", event="the contract from Acme"), party="Acme"),
               ipg.wait_what(W("time")), ipg.wait_what(W("time"), words="the shop's holiday")]
     d_end = [ipg.wait_end_label(W("time")), ipg.wait_end_label(W("relay")), ipg.wait_end_label(W("anchor")), ipg.wait_end_label(W("item", until="2099-01-01"))]
@@ -738,7 +741,7 @@ with i18n.use("ko"):
     finally:
         if had_hosts: cl_["mockup_hosts"] = cfg_old
         else: cl_.pop("mockup_hosts", None)
-check("wait_what in the test locale: every kind, with and without its parts", d_wait == [_m("wait.what.close_of", items="a1, a2"), _m("wait.what.close_of", items=_m("wait.what.an_item")), _m("wait.what.anchor_event"), "the review lands", _m("wait.what.fleet_event"),
+check("wait_what in the test locale: every kind, with and without its parts", d_wait == [_m("wait.what.close_of", items="a1, a2"), _m("wait.what.close_of", items=_m("wait.what.an_item")), _m("wait.what.queued", items="a1"), _m("wait.what.anchor_event"), "the review lands", _m("wait.what.fleet_event"),
       _m("wait.what.event_from", event="the contract", party="Acme"), _m("wait.what.news_from", party="Acme"), _m("wait.what.outside_news"), "the contract from Acme", _m("wait.a_date"), "the shop's holiday"], d_wait)
 check("wait_end_label in the test locale", d_end == [_m("wait.end.until"), _m("wait.end.ask_by"), _m("wait.end.backstop"), _m("wait.end.until")], d_end)
 check("age_words and stale_tip in the test locale", d_age == [_m("more.age_min", n=10), _m("more.age_hour", n=3), _m("more.age_day", n=3)]
