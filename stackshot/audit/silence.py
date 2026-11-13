@@ -214,7 +214,7 @@ def findings(items: dict[str, dict[str, Any]], now: float, env: Any = None, skip
         if items[gid].get("status") != "open":
             continue
         it, meta, after_open, mover = _ac._item_view(items, gid)
-        s = silent(it, meta, mover, after_open, now, front, line.get(gid, ""))
+        s = silent(it, meta, mover, after_open, now, front, behind=line[gid]) if gid in line else silent(it, meta, mover, after_open, now, front)      # the queue is passed only for an item in it: a caller that replaces `silent` keeps its old arguments
         if not s:
             continue
         if skip is not None:
