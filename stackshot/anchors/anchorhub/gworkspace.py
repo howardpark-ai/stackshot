@@ -7,8 +7,11 @@ GDIR = str(_cfg.secrets("anchor-hub", "google"))
 ROUTES = ("/hook/drive", "/hook/gmail")   # the webhooks this receiver registers in run(); anchor-hub answers them 503, not 404, while its start is being retried
 HISTORY_PAGE = 500    # records asked of Gmail's history.list per call (its largest page)
 HISTORY_PAGES = 10    # calls per mailbox per poll: 5000 records; a busier mailbox is read on in the next poll from where this one stopped
-MESSAGE_GETS = 200    # messages.get calls per mailbox per poll: a poll that reaches it stops after the last history record it handled whole, and the next poll goes on from there
+MESSAGE_GETS = 200    # messages.get calls per mailbox per poll: a poll that reaches it stops after the last history record it handled whole, and the next poll goes on from there; one record is never split,
+                      # so a single record that names more mails than this is read whole in one poll (the cap is checked between records, never inside one)
 SENT_KEEP = 1000      # message ids remembered per mailbox as handled (saved with the cursor): the mail a repeated history record names is not delivered twice
+GET_TRIES = 3         # messages.get attempts for one mail in all, the first included: a get that fails is tried again at a later poll, and given up on (with a log line) after this many
+RETRY_KEEP = 500      # failed gets kept per mailbox (saved with the cursor) for the next polls; past it the oldest is given up on, with a log line
 GPOLL = 5   # s; fallback only — used while push for that account is unavailable
 def _gmail_poll() -> int: return int(_cfg.get("anchor_hub", "gmail_poll_seconds") or 300)  # s; a mailbox whose watch Google refuses is polled for good (an account with no Pub/Sub topic
                                                                          # to push to), so not at the fallback's pace
@@ -25,6 +28,21 @@ def http_status(e) -> int | None:
         try: return int(v)
         except (TypeError, ValueError): continue
     return None
+def saved_hist(v) -> str | None:
+    """A Gmail history id from the saved state: Gmail's are strings of digits; anything else (a number, an empty string, a list, None) is no position."""
+    return v if isinstance(v, str) and v.isascii() and v.isdigit() else None
+def saved_page(v) -> str | None:
+    """A Drive page token from the saved state: a non-empty string; anything else is no position."""
+    return v if isinstance(v, str) and v else None
+def saved_sent(v) -> list:
+    """The handled mail ids from the saved state, the last SENT_KEEP: a list of strings, else (a dict, a number, None, a list holding anything but strings) none at all."""
+    return list(v[-SENT_KEEP:]) if isinstance(v, list) and all(isinstance(x, str) for x in v) else []
+def saved_retry(v) -> list:
+    """The failed gets from the saved state, [id, thread id, tries so far] each, the last RETRY_KEEP: an entry of any other shape (or one with no tries left) is dropped, the rest kept."""
+    if not isinstance(v, list): return []
+    ok = [[e[0], e[1], e[2]] for e in v if isinstance(e, list) and len(e) == 3 and isinstance(e[0], str) and e[0] and isinstance(e[1], str) and e[1]
+          and isinstance(e[2], int) and not isinstance(e[2], bool) and 0 < e[2] < GET_TRIES]
+    return ok[-RETRY_KEEP:]
 def query_hits(q_anchors, address: str, hdr: dict, boxes: dict) -> list:
     """The Gmail query anchors (`gmail:q:` and `gmail:q@…:` ids) that a mail with the headers `hdr`, which arrived in the mailbox at `address`, matches: the mailbox must
     be one the anchor reads (all of them when it names none), and its terms must match."""
@@ -62,13 +80,20 @@ def run(hub: Hub):
         gmail = build("gmail", "v1", credentials=creds, cache_discovery=False)
         page = drive.changes().getStartPageToken(supportsAllDrives=True).execute()["startPageToken"]
         hist = gmail.users().getProfile(userId="me").execute()["historyId"] if (not gmail_only or email in gmail_only) else None
-        sv = (hub.saved.get("google") or {}).get(email) or {}
-        if sv.get("page"): page = sv["page"]                    # resume from the saved cursor, so a downtime's changes replay
-        if hist and sv.get("hist"): hist = sv["hist"]           # (a Gmail history id older than about a week 404s → resync, as before)
-        accounts.append({"email": email, "drive": drive, "gmail": gmail if (not gmail_only or email in gmail_only) else None, "page": page, "hist": hist, "sent": [str(x) for x in (sv.get("sent") or [])][-SENT_KEEP:], "parents": {}})
+        saved_all = hub.saved.get("google") if isinstance(hub.saved, dict) else None
+        sv = saved_all.get(email) if isinstance(saved_all, dict) else None
+        if not isinstance(sv, dict): sv = {}                    # a saved state of another shape is no saved state
+        resume = set()                                          # the kinds whose saved cursor this start keeps: the first pass leaves it alone instead of resetting it to now
+        if saved_page(sv.get("page")): page = sv["page"]; resume.add("drive")                  # resume from the saved cursor, so a downtime's changes replay
+        if hist and saved_hist(sv.get("hist")): hist = sv["hist"]; resume.add("gmail")         # (a Gmail history id older than about a week 404s → resync to now)
+        accounts.append({"email": email, "drive": drive, "gmail": gmail if (not gmail_only or email in gmail_only) else None, "page": page, "hist": hist, "sent": saved_sent(sv.get("sent")), "retry": saved_retry(sv.get("retry")),
+                         "resume": resume, "parents": {}})
         log.info("google: %s ready (drive cursor %s, gmail history %s)", email, page, hist)
     if not accounts: log.warning("google: no tokens in %s — run anchor-hub-google-auth.py", GDIR); return
-    hub.savers["google"] = lambda: {a["email"]: {"page": a["page"], "hist": a["hist"], "sent": a["sent"]} for a in accounts}
+    state = {"active": set(), "first": True, "last_health": 0.0, "last_fallback": {"drive": 0.0, "gmail": 0.0}}       # defined before the saver: the saver reads it
+    def kept(kind): return state["first"] or kind in state["active"]
+    # A cursor is saved while its kind is bound (and, until the first pass has seen what is bound, as loaded): a kind with no anchor stops being read, so its cursor goes stale, and a later start must not resume it.
+    hub.savers["google"] = lambda: {a["email"]: {"page": a["page"] if kept("drive") else None, "hist": a["hist"] if kept("gmail") else None, "sent": a["sent"], "retry": a["retry"]} for a in accounts}
     def drive_seen(a, fid, f):
         """Newest change by someone else: a folder's newest child (direct children only — Drive cannot query deeper),
         else the file itself, reaching back through its revisions when the owner made the last edit."""
@@ -134,8 +159,13 @@ def run(hub: Hub):
         return out
 
     def poll_drive(a):
-        r = a["drive"].changes().list(pageToken=a["page"], spaces="drive", supportsAllDrives=True, includeItemsFromAllDrives=True, pageSize=100,
-            fields="newStartPageToken,nextPageToken,changes(fileId,removed,time,file(name,mimeType,webViewLink,createdTime,modifiedTime,lastModifyingUser(displayName,emailAddress)))").execute()
+        try:
+            r = a["drive"].changes().list(pageToken=a["page"], spaces="drive", supportsAllDrives=True, includeItemsFromAllDrives=True, pageSize=100,
+                fields="newStartPageToken,nextPageToken,changes(fileId,removed,time,file(name,mimeType,webViewLink,createdTime,modifiedTime,lastModifyingUser(displayName,emailAddress)))").execute()
+        except Exception as e:
+            if http_status(e) != 404: raise     # as for Gmail: only Google's own 404 says the saved position is gone; any other failure leaves it, and the next poll tries again
+            a["page"] = a["drive"].changes().getStartPageToken(supportsAllDrives=True).execute()["startPageToken"]      # a saved page token Google no longer knows → from now
+            return
         for c in r.get("changes", []):
             f = c.get("file") or {}
             who = (f.get("lastModifyingUser") or {})
@@ -180,31 +210,50 @@ def run(hub: Hub):
         bx = boxes()
         readers = [k for k in bound if _anc.gmail_query(k) is not None and _anc.gmail_reads(k, a["email"], bx)]     # the query anchors that read this mailbox: a mail in a mailbox nobody reads costs no get
         keys = set(bound)
-        sent = list(a["sent"]); known = set(sent)        # the mail already handled in this mailbox (an inclusive startHistoryId repeats the last record)
-        seen, gets, stopped = set(), 0, None
+        sent = list(a["sent"]); known = set(sent)        # the mail already handled in this mailbox (an inclusive startHistoryId repeats the last record); a mail given up on counts as handled
+        seen, gets, stopped, failed = set(), 0, None, []     # failed: the gets of this poll that failed, [mail id, thread id, tries so far], tried again at later polls
+        def wanted(tid): return bool(readers) or f"gmail:{tid}" in keys
+        def fetch(mid, tid):
+            """Get one mail and deliver it to the anchors that read it. False when the get failed: nothing was delivered, and the mail is not marked as handled."""
+            try: msg = a["gmail"].users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "To", "Cc"]).execute()
+            except Exception as e: log.warning("gmail %s: get of mail %s failed: %s", a["email"], mid, str(e)[:120]); return False
+            sent.append(mid); known.add(mid)
+            if "SENT" in msg.get("labelIds", []) or "DRAFT" in msg.get("labelIds", []): return True   # self-suppression
+            hdr = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
+            url = f"https://mail.google.com/mail/u/0/#all/{tid}"
+            summ = {"title": f"\"{hdr.get('subject', '(no subject)')[:60]}\"", "who": hdr.get("from", "?").split("<")[0].strip(' "'),
+                    "text": (msg.get("snippet") or "")[:140], "url": url, "ts": msg.get("internalDate")}
+            if f"gmail:{tid}" in keys: hub.event(f"gmail:{tid}", summ, kind="gmail")
+            for qa in query_hits(readers, a["email"], hdr, bx): hub.event(qa, summ, kind="gmail")
+            return True
+        def give_up(mid, why):
+            log.warning("gmail %s: gave up on mail %s (%s)", a["email"], mid, why)
+            sent.append(mid); known.add(mid)       # handled: a repeated history record must not start its tries over
+        for mid, tid, tries in a["retry"]:      # the gets that failed at an earlier poll, before any new mail; they count against MESSAGE_GETS
+            seen.add(mid)
+            if mid in known or not wanted(tid): continue
+            gets += 1
+            if fetch(mid, tid): continue
+            if tries + 1 >= GET_TRIES: give_up(mid, f"{GET_TRIES} gets failed")
+            else: failed.append([mid, tid, tries + 1])
         for i, h in enumerate(history):
-            todo = []
+            todo, fresh = [], set()
             for m in h.get("messagesAdded", []):
                 mid = m["message"]["id"]; tid = m["message"]["threadId"]
-                if mid in seen or mid in known: continue
-                todo.append((mid, tid, bool(readers) or f"gmail:{tid}" in keys))
-            need = sum(1 for _m, _t, wanted in todo if wanted)
+                if mid in seen or mid in known or mid in fresh: continue      # a mail is handled once: not again after an earlier record, an earlier poll, or twice in one record
+                fresh.add(mid)
+                todo.append((mid, tid, wanted(tid)))
+            need = sum(1 for _m, _t, want in todo if want)
             if gets and gets + need > MESSAGE_GETS: stopped = i; break      # the cap on gets in one poll: the records before this one were handled whole, the rest waits for the next poll
-            for mid, tid, wanted in todo:
+            for mid, tid, want in todo:
                 seen.add(mid)
-                if not wanted: continue
+                if not want: continue
                 gets += 1
-                try: msg = a["gmail"].users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "To", "Cc"]).execute()
-                except Exception: continue
-                sent.append(mid)
-                if "SENT" in msg.get("labelIds", []) or "DRAFT" in msg.get("labelIds", []): continue   # self-suppression
-                hdr = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
-                url = f"https://mail.google.com/mail/u/0/#all/{tid}"
-                summ = {"title": f"\"{hdr.get('subject', '(no subject)')[:60]}\"", "who": hdr.get("from", "?").split("<")[0].strip(' "'),
-                        "text": (msg.get("snippet") or "")[:140], "url": url, "ts": msg.get("internalDate")}
-                if f"gmail:{tid}" in keys: hub.event(f"gmail:{tid}", summ, kind="gmail")
-                for qa in query_hits(readers, a["email"], hdr, bx): hub.event(qa, summ, kind="gmail")
+                if not fetch(mid, tid): failed.append([mid, tid, 1])
+        if len(failed) > RETRY_KEEP:
+            for mid, _tid, _n in failed[:-RETRY_KEEP]: give_up(mid, f"more than {RETRY_KEEP} failed gets waiting")
         a["sent"] = sent[-SENT_KEEP:]
+        a["retry"] = failed[-RETRY_KEEP:]
         def last_id(upto):      # the id of the last record before `upto` that has one (Gmail gives every record one)
             return next((x["id"] for x in reversed(history[:upto]) if x.get("id")), None)
         if stopped is not None:     # the get cap: go on from the last record handled whole, and read the rest at once
@@ -296,19 +345,24 @@ def run(hub: Hub):
                 if hub.stopping.wait(wait): raise
         return poll(a)
 
-    state = {"active": set(), "last_health": 0.0, "last_fallback": {"drive": 0.0, "gmail": 0.0}}
     def one_pass():
         active = state["active"]; last_health = state["last_health"]; last_fallback = state["last_fallback"]
         with hub.lock: kinds = {k.split(":", 1)[0] for k in hub.bindings} & {"drive", "gmail"}
-        for kind in kinds - active:                     # source just became bound → cursor from now, then register push
-            for a in accounts:
+        first = state["first"]
+        for kind in kinds - active:                     # source just became bound → cursor from now, then register push; at the start of the process the kinds bound already are not new:
+            for a in accounts:                          # a kind with a saved cursor keeps it (what arrived while the service was stopped is read from it), one with none starts from now
                 try:
-                    if kind == "drive": a["page"] = a["drive"].changes().getStartPageToken(supportsAllDrives=True).execute()["startPageToken"]; drive_watch(a)
-                    if kind == "gmail" and a["gmail"] is not None: a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]; gmail_watch(a)
+                    if kind == "drive":
+                        if not (first and "drive" in a["resume"]): a["page"] = a["drive"].changes().getStartPageToken(supportsAllDrives=True).execute()["startPageToken"]
+                        drive_watch(a)
+                    if kind == "gmail" and a["gmail"] is not None:
+                        if not (first and "gmail" in a["resume"]): a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]
+                        gmail_watch(a)
                 except Exception as e: log.warning("google %s cursor reset %s: %s", a["email"], kind, str(e)[:120])
             try: hub.write_status()
             except Exception as e: log.warning("google status write after binding %s: %s", kind, str(e)[:120])   # a failed write must not leave the kind unbound: the cursors would be reset and the push channels registered again on every pass
         active = state["active"] = kinds
+        state["first"] = False                          # a kind bound from here on is new, whatever was saved: its saved cursor is as old as the last time it was read
         due: set[tuple[str, str]] = set()
         try:
             while True: due.add(hub.triggers.get(timeout=1))
