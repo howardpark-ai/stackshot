@@ -307,7 +307,7 @@ def create_item(
     if _writes.session_next() and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
             and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: h.after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)
         raise ToolError(f"Refused: the new item has no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
-    if not _writes.terminal_row():      # the terminal prompt's row files "<owner>: open … and answer" and sets its state your-step in the next call (_terminal_state; a create sets no step): its own script, not a session hiding a step
+    if not _writes.terminal_row():      # the terminal prompt's row files "<owner>: open … and answer" and sets its state your-step in the next call (service/terminal_prompt.py `_terminal_state`; a create sets no step): its own script, not a session hiding a step
         _gates.gate_owner_step({"status": "open", "subject": subject, "description": description, "metadata": meta}, create=True)     # The owner's step under an agent's state is refused, as on an update
     if _writes.session_next() and not by and h.model_guards_on():
         _gates.gate_front_step("", {"status": "open", "subject": subject, "metadata": meta}, [], _steps.view(meta, keeper=owner), owner)     # a step that opens with a front agent on an item another session moves: nothing could wake it for the step

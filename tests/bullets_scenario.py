@@ -40,7 +40,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids; from stackshot.service import question as question_svc
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
@@ -179,10 +179,10 @@ refused("config: without the keys the defaults hold (120)", lambda: create(bulle
 passes("config: …and 200 for next", lambda: create(next=n_ok))
 
 # ---- 6. the script question route writes bullets and goes through the full gate (the HTTP-level cases are in question_scenario)
-d, why = server._question_text("The retry failed twice.\nShould it go on?", "box", "q-script")
+d, why = question_svc._question_text("The retry failed twice.\nShould it go on?", "box", "q-script")
 check("the question route's text becomes bullets, then the Filed by bullet", why == "" and d == "- The retry failed twice.\n- Should it go on?\n- Filed by q-script (a script on box)", (d, why))
 passes("…and that text passes the gate as it is", lambda: _fg._gate_description(d))
-d2, _ = server._question_text("x" * 300, "box", "q-script")
+d2, _ = question_svc._question_text("x" * 300, "box", "q-script")
 check("a line over the limit is clipped to it, with an ellipsis", d2.splitlines()[0].endswith(" …") and len(d2.splitlines()[0]) <= 120, d2)
 passes("…and the clipped text passes the gate", lambda: _fg._gate_description(d2))
 writes.QUESTION.on = True
@@ -242,19 +242,19 @@ check("bullets: more than max_lines: the last kept line says how many more, with
       BT.bullets("\n".join(f"l{i}" for i in range(1, 11)), 6, 120).splitlines() == [f"- l{i}" for i in range(1, 6)] + ["- …and 5 more"])
 check("bullets: a numbered list, \"e.g.\" and \"Dr.\" are kept as written (no sentence split)",
       BT.bullets("1. First step, e.g. this one.\n2) Dr. Kim signs it.", 8, 120) == "- First step, e.g. this one.\n- Dr. Kim signs it.")
-check("question: the clipped bullets pass the gate", all(_ok for _ok in [not _fg._gate_description(server._question_text("a " * 200 + "\n- " + LK + " " + "b " * 100, "box", "q")[0])]))
+check("question: the clipped bullets pass the gate", all(_ok for _ok in [not _fg._gate_description(question_svc._question_text("a " * 200 + "\n- " + LK + " " + "b " * 100, "box", "q")[0])]))
 
 # ---- 6e. the question route: empty lines, a long sender
-d3, why3 = server._question_text("- \n...\n---\nReal line\n* \n", "box", "q")
+d3, why3 = question_svc._question_text("- \n...\n---\nReal line\n* \n", "box", "q")
 check("question: a line that is empty after its marker (or only digits and punctuation) is skipped, not written as an empty bullet", why3 == "" and d3 == "- Real line\n- Filed by q (a script on box)", (d3, why3))
-d3b, why3b = server._question_text("- \n…\n", "box", "q")
+d3b, why3b = question_svc._question_text("- \n…\n", "box", "q")
 check("question: a text with no line of words is refused", d3b == "" and "no line of words" in why3b, (d3b, why3b))
-d4, why4 = server._question_text("Real line", "box", "s" * 300)
+d4, why4 = question_svc._question_text("Real line", "box", "s" * 300)
 check("question: a long sender is clipped like any bullet, so the text still passes the gate (never a 400)", why4 == "" and d4.splitlines()[-1].endswith(" …") and all(len(l) <= 120 for l in d4.splitlines()), (d4, why4))
 passes("…and the gate takes it", lambda: _fg._gate_description(d4))
-d5, why5 = server._question_text("Real line", "m" * 300, "q")
+d5, why5 = question_svc._question_text("Real line", "m" * 300, "q")
 check("question: a long machine name too", why5 == "" and all(len(l) <= 120 for l in d5.splitlines()), d5)
-d6, why6 = server._question_text("\n".join(f"line {i}" for i in range(1, 9)), "box", "q")
+d6, why6 = question_svc._question_text("\n".join(f"line {i}" for i in range(1, 9)), "box", "q")
 check("question: more lines than max_lines less one stay refused (not 'and N more')", d6 == "" and "at most 7" in why6, (d6, why6))
 
 # ---- 6f. work stays linear on a 40,000-character line
@@ -399,12 +399,12 @@ d_cfg["require_bullets"] = False
 LONGN = "home-other: " + "word " * 60
 passes("require_bullets = false: a next line over 200 characters is taken again", lambda: _fg._gate_next(LONGN))
 check("…and read as the old note", "a line over 200 characters" in _notes_tool._report_note(LONGN), _notes_tool._report_note(LONGN))
-dq, whyq = server._question_text("Real line one\n1. numbered\n" + "z " * 100, "box", "q")
+dq, whyq = question_svc._question_text("Real line one\n1. numbered\n" + "z " * 100, "box", "q")
 check("require_bullets = false: the question route keeps its old form (lines as written, then a blank line and the plain provenance line)",
       whyq == "" and dq.endswith("\n\nFiled by q (a script on box)") and dq.startswith("Real line one\n1. numbered\n"), (dq[-80:], whyq))
 d_cfg.pop("require_bullets")
 refused("…and back on by default: the next line is refused again", lambda: _fg._gate_next(LONGN), "a line of next is")
-check("…and the question route bullets again", server._question_text("Real line one", "box", "q")[0].startswith("- Real line one"))
+check("…and the question route bullets again", question_svc._question_text("Real line one", "box", "q")[0].startswith("- Real line one"))
 was_next = n_cfg.get("line_max")
 n_cfg["line_max"] = 0
 passes("[metadata.next] line_max = 0 means off: a long next line is taken", lambda: _fg._gate_next(LONGN))

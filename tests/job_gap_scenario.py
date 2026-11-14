@@ -56,7 +56,7 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids; from stackshot.service import job_gap as job_gap_svc
 import subprocess
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -85,7 +85,7 @@ def jg(action, timer="sala-foo.timer", code="no-lane", repo="acme/alpha", sender
     b = {"action": action, "timer": timer, "code": code, "repo": repo, "sender": sender}
     b.update(kw)
     return server._client_post(machine or me, "job-gap", {k: v for k, v in b.items() if v is not None})
-def open_for(timer, code): return server._jobgap_open_items(f"{timer}: {code}")
+def open_for(timer, code): return job_gap_svc._jobgap_open_items(f"{timer}: {code}")
 # the repo map of this instance: the test repos over the defaults
 _cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/nobuild": "projects/nobuild", "acme/gamma": "projects/gamma", "acme/ghost": "projects/ghost", "Acme/Mixed-Case": "projects/alpha"}}
 n0 = len(items())
@@ -203,7 +203,7 @@ st, e = jg("open", timer="sala-g.timer", repo="acme/ghost")
 check("a repo mapped to a page that is not in the registry: 409 that says to fix the map", st == 409 and "projects/ghost" in e["error"] and "no project page" in e["error"], (st, e))
 # the defaults: no [job_gap] section at all -> the fleet's three repos
 _cfg.CFG.pop("job_gap", None)
-check("the defaults (no [job_gap.repos]): no repo is listed (the code names none)", server._jobgap_repos() == {}, server._jobgap_repos())
+check("the defaults (no [job_gap.repos]): no repo is listed (the code names none)", job_gap_svc._jobgap_repos() == {}, job_gap_svc._jobgap_repos())
 _cfg.CFG["job_gap"] = {"repos": {"example-owner/ops-hub": "ops/general", "example-org/fleet-tool": "projects/fleet-tool", "example-org/board": "projects/board"}}   # the example-owner instance's table
 pushed.clear()
 st, o = jg("open", timer="sala-hub.timer", repo="example-owner/ops-hub", code="not-git")
@@ -216,7 +216,7 @@ _cfg.CFG["job_gap"] = {"repos": "not a table"}
 st, e = jg("open", repo="acme/alpha")
 check("a [job_gap] repos that is not a table lists no repo: 400 'none is listed'", st == 400 and "none is listed" in e["error"], (st, e))
 _cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/odd": 7}}
-check("…an entry that is not text is skipped", server._jobgap_repos() == {"acme/alpha": "projects/alpha"}, server._jobgap_repos())
+check("…an entry that is not text is skipped", job_gap_svc._jobgap_repos() == {"acme/alpha": "projects/alpha"}, job_gap_svc._jobgap_repos())
 
 # ---- 5. the sender gate: the terminal prompt's (a label of at most 80 characters on one line, never the owner's name); none given is client.py
 n4 = len(items())
