@@ -11,7 +11,7 @@ nothing a save does depends on what else the thread did before it. The per-write
 with `.on` around a write (`session_write` is the create and update tools' own); they are read by the create and update tools and the gates, never by this save. The flags of the telling (`CLOSE_WAS`, `FRONT_HINT`,
 `MENTIONED`, `HO_STATE`) are on service/telling.py.
 
-The steps that still read server.py's own code (the mover's settling, his step, the ask record, the three hand-off steps, the phase, the For you and Landed lists, the search index, the
+The steps that still read server.py's own code (the mover's settling, his step, the ask record, the three hand-off steps, the phase, the search index, the
 hand-back line, the pending answer) are reached through `Steps`, which server.py fills once with `install`: this module cannot import server.py (the surface sits above it), and each of those
 functions leaves `Steps` when its area moves under service/. Steps are looked up when a save runs, so a suite that replaces one on server.py still reaches the save.
 
@@ -39,6 +39,7 @@ from stackshot.model import last_activity as _lastact
 from stackshot.model import migration as _mig
 from stackshot.model import model as _model
 from stackshot.router import routing as _routing
+from stackshot.service import foryou_events as _fyev
 from stackshot.service.store import _path
 
 ITEM_LOCK = threading.RLock()      # a session's update and a failed delivery's record read, change and save an item under it
@@ -131,8 +132,6 @@ class Steps:
     handoff_his_over: Callable[[str, dict[str, Any], "tuple[str, str] | None", bool], Any]
     handoff_follow: Callable[[str, "dict[str, Any] | None", dict[str, Any], str, "tuple[str, str] | None", bool], Any]
     phase_stamp: Callable[[str, dict[str, Any]], Any]
-    foryou_on_save: Callable[[str, "dict[str, Any] | None", dict[str, Any], str, bool], Any]
-    landed_on_save: Callable[[str, "dict[str, Any] | None", dict[str, Any], str, bool], Any]
     search_touch: Callable[[str], Any]
     handback_drop: Callable[[str, str], Any]
     answer_ack: Callable[[str, str], Any]
@@ -276,11 +275,11 @@ def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", autho
     _ip.stamp(item.get("metadata"))      # and the project's permanent id beside the page it is filed on (a key that names a project sets it)
     _cstore._write_item(p, item)
     try:
-        steps.foryou_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
+        _fyev._foryou_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
     except Exception as e:  # noqa: BLE001  — the list never fails a write
         print(f"for-you: {gid} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
-        steps.landed_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
+        _fyev._landed_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
     except Exception as e:  # noqa: BLE001  — the list never fails a write
         print(f"landed: {gid} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     steps.search_touch(gid)                       # step 3: the search index takes the item a moment later, in its own thread (never in this write's time)

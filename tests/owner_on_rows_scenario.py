@@ -68,7 +68,7 @@ item(9, "[home] no project, an owner", project="", contact=LIVE)                
 item(10, "[home] filed on a sub-page", project="projects/alpha/sub-work", contact=LIVE)                                                                                          # a sub-page of Alpha, with an owner
 item(11, "[home] closed, filed on a sub-page", project="projects/alpha/sub-work", status="completed", age=1 * H, outcome="done", reason="shipped", contact=GONE)                   # New and Last 14 days
 logging.disable(logging.INFO)
-from stackshot.web import landed
+from stackshot.service import landed
 landed.record("a6", now - 2 * H, "done", by="team-back", project="projects/alpha")
 landed.record("a11", now - 1 * H, "done", by="team-back", project="projects/alpha/sub-work")
 

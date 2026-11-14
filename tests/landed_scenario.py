@@ -1,4 +1,4 @@
-"""Scenario test for the Landed list (landed.py, the header count and the page in render.py, GET /landed and POST /landed/clear in server.py) — fixture data, the routes through Starlette's test client, no live store, no network.
+"""Scenario test for the Landed list (notify/landed.py and service/landed.py, the header count and the page in render.py, GET /landed and POST /landed/clear in server.py) — fixture data, the routes through Starlette's test client, no live store, no network.
 
 Covers:
   * the set: a close by an agent to done or dropped is a record (a session's close through the complete tool, and the server's own close on a done check); Oliver's own close
@@ -70,7 +70,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-from stackshot.core import config as _cfg; from stackshot.web import landed as ld; from stackshot.web import foryou as fy
+from stackshot.core import config as _cfg; from stackshot.service import landed as ld; from stackshot.service import foryou as fy; from stackshot.notify import landed as ld_rules
 from stackshot.web import server
 from stackshot.service import checks as checks_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -107,10 +107,10 @@ K = int(now0) - 5000
 check("a record needs an outcome that lands: done and dropped do, superseded and unrecorded do not", ld.record("a34", K, "done") and ld.record("a11", K + 1, "dropped", by="x", project="p")
       and not ld.record("a16", K + 2, "superseded") and not ld.record("a17", K + 3, "unrecorded") and sorted(r["gid"] for r in ld.records(now=K + 500)) == ["a11", "a34"])
 check("…the same close recorded twice makes no second record; a later close of the item replaces the record, uncleared", not ld.record("a34", K, "done")
-      and ld.clear([ld.key("a34", K)], now=K + 100) == 1 and [r["gid"] for r in ld.records(now=K + 500)] == ["a11"] and ld.record("a34", K + 1000, "done") and [r["cleared"] for r in ld.records(now=K + 2500) if r["gid"] == "a34"] == [0])
-check("a cleared close recorded again (the same close, twice) stays cleared: the record is kept so it cannot come back", ld.clear([ld.key("a11", K + 1)], now=K + 2000) == 1
+      and ld.clear([ld_rules.key("a34", K)], now=K + 100) == 1 and [r["gid"] for r in ld.records(now=K + 500)] == ["a11"] and ld.record("a34", K + 1000, "done") and [r["cleared"] for r in ld.records(now=K + 2500) if r["gid"] == "a34"] == [0])
+check("a cleared close recorded again (the same close, twice) stays cleared: the record is kept so it cannot come back", ld.clear([ld_rules.key("a11", K + 1)], now=K + 2000) == 1
       and not ld.record("a11", K + 1, "dropped", by="x", project="p") and "a11" not in {r["gid"] for r in ld.records(now=K + 2500)})
-check("clear names a close by its item and clock: the old key clears nothing once the item closed again", ld.clear([ld.key("a34", K)], now=K + 2100) == 0 and ld.clear([ld.key("a34", K + 1000)], now=K + 2100) == 1)
+check("clear names a close by its item and clock: the old key clears nothing once the item closed again", ld.clear([ld_rules.key("a34", K)], now=K + 2100) == 0 and ld.clear([ld_rules.key("a34", K + 1000)], now=K + 2100) == 1)
 ld.record("a18", K + 5, "done"); ld.record("a28", K + 6, "done")
 check("…None clears every uncleared record; the file is written whole (no tmp file beside it)", ld.clear(None, now=K + 3000) == 2 and ld.records(now=K + 3500) == []
       and not list(ld.path().parent.glob(".landed.json*")))
@@ -160,9 +160,9 @@ check("un-clear restores a cleared record whose key matches, and says how many",
 check("…an uncleared record, an unknown key, a key of another close of the same item, and no key at all restore nothing",
       ld.unclear(["u1:%d" % (int(now0) - 100)]) == 0 and ld.unclear(["nope:1"]) == 0 and ld.unclear(["u2:%d" % (int(now0) - 201)]) == 0 and ld.unclear([]) == 0 and ld.unclear([""]) == 0)
 ld.clear(["u2:%d" % (int(now0) - 200)]); d_ = ld._load(); d_["u2"]["ts"] = int(now0 - 61 * DAY); ld._save(d_)
-check("…a cleared record past the 60 days is not restored (it would not be listed)", ld.unclear([ld.key("u2", now0 - 61 * DAY)], now=now0) == 0 and ld._load()["u2"]["cleared"] > 0)
+check("…a cleared record past the 60 days is not restored (it would not be listed)", ld.unclear([ld_rules.key("u2", now0 - 61 * DAY)], now=now0) == 0 and ld._load()["u2"]["cleared"] > 0)
 d_ = ld._load(); d_["u2"]["ts"] = int(now0 - 59 * DAY); ld._save(d_)
-check("…one at 59 days is", ld.unclear([ld.key("u2", now0 - 59 * DAY)], now=now0) == 1 and ld._load()["u2"]["cleared"] == 0)
+check("…one at 59 days is", ld.unclear([ld_rules.key("u2", now0 - 59 * DAY)], now=now0) == 1 and ld._load()["u2"]["cleared"] == 0)
 ld.forget("u1"); ld.forget("u2")
 
 # ---- 2. the set: whose closes land
@@ -230,7 +230,7 @@ for g in ("a1", "a2", "a6", "a9"): ld.forget(g)
 def closed(i, su, project, subject, outcome="done", by=X, cleared=0.0, reason="r"):
     item(i, owner=A if project.endswith("alpha") else B, status="completed", su=su, project=project, subject=subject, outcome=outcome, reason=reason)
     ld.record(f"a{i}", su, outcome, by=by, project=project)
-    if cleared: ld.clear([ld.key(f"a{i}", su)], now=cleared)
+    if cleared: ld.clear([ld_rules.key(f"a{i}", su)], now=cleared)
 t0 = int(now0) - 3600
 ZONE_HOURS = 4; ABBR = f"+{ZONE_HOURS:02d}"       # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST) and its own abbreviation
 WHY = "PR 80 is live and the nightly run is green, so nothing is left to do here; a long reason that the home Completed rows would cut with an ellipsis too"
@@ -277,7 +277,7 @@ check("…the long reason is whole in the line, escaped; one with quotes and tag
       and '<div class="ir-det">a &quot;quoted&quot; &lt;b&gt;reason&lt;/b&gt; &amp; more</div>' in ph and "<b>reason</b>" not in ph)
 check("the subject is escaped on the page", "&lt;b&gt;escaped&lt;/b&gt; &amp;" in ph and "<b>escaped</b>" not in ph)
 check("there is no per-line `new` tag and no seen state on the page any more", "Mark all seen" not in ph and ">new<" not in ph and not re.search(r'<li class="[^"]*\bnew\b', ph))
-KEYS = {ld.key(f"a{i}", ts) for i, ts in ((20, t0 - 100), (21, t0 - 7200), (22, t0 - 50), (23, t0 - 9000), (24, t0 - 3 * 3600), (25, t0 - 20 * DAY))}
+KEYS = {ld_rules.key(f"a{i}", ts) for i, ts in ((20, t0 - 100), (21, t0 - 7200), (22, t0 - 50), (23, t0 - 9000), (24, t0 - 3 * 3600), (25, t0 - 20 * DAY))}
 top = re.search(r'<form class="lmark" method="post" action="/landed/clear"><input type="hidden" name="keys" value="([^"]*)"><button type="submit" class="b">Clear all</button></form>', ph)
 check("Clear all is at the top, above the list: after the note, before the first subsection; its form carries the keys of the lines on the page (and no more)",
       top and set(top.group(1).split(",")) == KEYS and ph.index('class="lnote"') < ph.index('class="lmark"') < ph.index('class="fold sfold hscope"') and ph.count('class="lmark"') == 1, ph[:200])
@@ -344,7 +344,7 @@ check("the page script updates a subsection's count from its live lines (details
       "#new details.hscope" in render._LANDED_JS and "section.lgroup" not in render._LANDED_JS and "section.lscope" not in render._LANDED_JS)
 # the board item: clearing a line never moves a subsection and an Undo puts the same page back
 def shape(h): return [(sc, ids) for sc, _n, ids in scope_tree(h)]
-orig = shape(pm); KEY9 = {f"a{i}": ld.key(f"a{i}", r["ts"]) for i, r in ((int(g[1:]), r) for g, r in recs().items())}
+orig = shape(pm); KEY9 = {f"a{i}": ld_rules.key(f"a{i}", r["ts"]) for i, r in ((int(g[1:]), r) for g, r in recs().items())}
 moved = []
 for gid_, k_ in sorted(KEY9.items()):
     n_ = ld.clear([k_]); got_ = shape(board().landed_html())
@@ -364,7 +364,7 @@ check("the headings stay readable at 360 px: the subsection heading wraps anywhe
       "overflow-wrap:anywhere" in hs and "nowrap" not in hs and "lscopehd" not in b._css() and "section.lgroup" not in b._css())
 WORK4 = ((20, t0 - 100), (21, t0 - 7200), (24, t0 - 3 * 3600), (25, t0 - 20 * DAY))
 check("a scope with no close is left out (no empty heading): clearing work's four leaves home and ops",
-      (ld.clear([ld.key(f"a{i}", ts) for i, ts in WORK4], now=now0), [sc for sc, _n, _p in scope_tree(board().landed_html())])[1] == ["home", "ops"])
+      (ld.clear([ld_rules.key(f"a{i}", ts) for i, ts in WORK4], now=now0), [sc for sc, _n, _p in scope_tree(board().landed_html())])[1] == ["home", "ops"])
 for i in MIX: ld.forget(f"a{i}"); (T / f"store/a/{i}.json").unlink()
 for i, ts in WORK4: d_ = ld._load(); d_[f"a{i}"]["cleared"] = 0.0; ld._save(d_)
 check("(cleanup of the mixed-scope fixtures) the page is back to the six lines: work's four and home's two", page_lines() == 6 and [(sc, n) for sc, n, _p in scope_tree(board().landed_html())] == [("work", 4), ("home", 2)])
@@ -395,19 +395,19 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("opening it again, and again: the same six lines, the same count", page_lines(g2.text) == 6 and board().landed_count() == 6 and pub[0] == p0)
     agree("after opening the page three times", 6)
     # a single Clear
-    ev = post("/landed/clear", {"keys": ld.key("a22", t0 - 50)}, headers={"Origin": "https://evil.example.net"})
+    ev = post("/landed/clear", {"keys": ld_rules.key("a22", t0 - 50)}, headers={"Origin": "https://evil.example.net"})
     check("Clear from a foreign origin is refused (403); nothing is cleared", ev.status_code == 403 and board().landed_count() == 6)
     p1 = pub[0]
-    one = post("/landed/clear", {"keys": ld.key("a22", t0 - 50)})
+    one = post("/landed/clear", {"keys": ld_rules.key("a22", t0 - 50)})
     check("Clear on one line: 303 back to /landed, that one entry is gone from the page and the count (5), the board is republished", one.status_code == 303 and one.headers["location"] == "/closed"
           and board().landed_count() == 5 and "a22" not in {r["gid"] for r, _ in board().landed_rows()} and "beta newest overall" not in newsec(board().landed_html()) and pub[0] == p1 + 1, (one.status_code, board().landed_count()))
-    check("…the header reads 5 and the Clear all form no longer carries the cleared key", cards() == base(5) and ld.key("a22", t0 - 50) not in re.search(r'class="lmark".*?value="([^"]*)"', board().landed_html()).group(1))
+    check("…the header reads 5 and the Clear all form no longer carries the cleared key", cards() == base(5) and ld_rules.key("a22", t0 - 50) not in re.search(r'class="lmark".*?value="([^"]*)"', board().landed_html()).group(1))
     agree("after a single Clear", 5)
-    again = post("/landed/clear", {"keys": ld.key("a22", t0 - 50)})
+    again = post("/landed/clear", {"keys": ld_rules.key("a22", t0 - 50)})
     check("…clearing it again clears nothing and republishes nothing", again.status_code == 303 and board().landed_count() == 5 and pub[0] == p1 + 1)
 
     # Undo, the page's fetch path (Accept: application/json), and the gates on the new route
-    JS = {**SAME, "Accept": "application/json"}; k22 = ld.key("a22", t0 - 50); k20 = ld.key("a20", t0 - 100)
+    JS = {**SAME, "Accept": "application/json"}; k22 = ld_rules.key("a22", t0 - 50); k20 = ld_rules.key("a20", t0 - 100)
     ids_all = [i.lstrip("a") for i in ids_of(ph)]
     ids_now = [i.lstrip("a") for i in ids_of(board().landed_html())]
     check("the cleared line left the page and every other line kept its place (the order is the earlier one minus a22)", ids_now == [i for i in ids_all if i != "22"], (ids_all, ids_now))
@@ -428,12 +428,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Undo through the page's script: 200 JSON changed 1, the count is 6 again, republished", j2.status_code == 200 and j2.json() == {"ok": True, "changed": 1} and board().landed_count() == 6 and pub[0] == pu0 + 3, (j2.status_code, j2.text))
     agree("after an Undo through the script", 6)
     pu1 = pub[0]
-    nops = [post("/landed/unclear", {"keys": k}, headers=JS) for k in (k20, "nope:1", "", ld.key("a20", t0 - 99), "a20")]
+    nops = [post("/landed/unclear", {"keys": k}, headers=JS) for k in (k20, "nope:1", "", ld_rules.key("a20", t0 - 99), "a20")]
     check("Undo of a line that is not cleared, of an unknown key, of no key, of another close of the item, of a bare id: changed 0 each, nothing republished, the count is still 6",
           all(r.status_code == 200 and r.json() == {"ok": True, "changed": 0} for r in nops) and pub[0] == pu1 and board().landed_count() == 6, [r.text for r in nops])
     # a cleared close older than the 60 days is not restored
     d_ = ld._load(); d_["a25"]["ts"] = int(time.time() - 61 * DAY); d_["a25"]["cleared"] = time.time() - 5; ld._save(d_)
-    old_ = post("/landed/unclear", {"keys": ld.key("a25", d_["a25"]["ts"])}, headers=JS)
+    old_ = post("/landed/unclear", {"keys": ld_rules.key("a25", d_["a25"]["ts"])}, headers=JS)
     check("Undo of a cleared close past the 60 days restores nothing (changed 0, still cleared)", old_.json() == {"ok": True, "changed": 0} and ld._load()["a25"]["cleared"] > 0 and pub[0] == pu1, old_.text)
     d_ = ld._load(); d_["a25"]["ts"] = t0 - 20 * DAY; d_["a25"]["cleared"] = 0.0; ld._save(d_)
     # Clear all, then Undo of each line: the same page
@@ -483,7 +483,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     none_ = post("/landed/clear", {"keys": ""})
     check("…no keys clears nothing (it is not a clear-everything button)", none_.status_code == 303)
     # the old route still clears
-    cl(7, sender="work-osprey-x", reason="old route"); k1 = ld.key("a7", recs()["a7"]["ts"])
+    cl(7, sender="work-osprey-x", reason="old route"); k1 = ld_rules.key("a7", recs()["a7"]["ts"])
     check("a new close is on the list again", board().landed_count() == 1)
     old = post("/landed/seen", {"keys": k1})
     check("the old /landed/seen route (a page open from before) still works: it clears the keys it carries", old.status_code == 303 and old.headers["location"] == "/closed" and board().landed_count() == 0)

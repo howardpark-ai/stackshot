@@ -159,8 +159,7 @@ from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line
 from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
 from stackshot.waits import reports as _reports  # noqa: E402  — does a background agent's message to a front agent ask for anything: a report goes onto the item it names instead (reports.py)
-from stackshot.web import foryou as _fy  # noqa: E402  — the owner's For you list: rows for what he should see, in place of messages to a front agent (foryou.py)
-from stackshot.web import foryou_slack as _fyslack  # noqa: E402,F401  — the For you list's Slack hook, its queue and its worker thread; the suites stub the hook and read its switch on this module (foryou_slack.py)
+from stackshot.service import foryou as _fy  # noqa: E402  — the For you list's file: the board's route that serves it to the fleet tool reads its payload (service/foryou.py)
 from stackshot.model import draft as _draft  # noqa: E402  — an item's draft: the verbatim text the owner pastes elsewhere, its size cap and the write guard (draft.py)
 from stackshot.web import runners as _runners  # noqa: E402  — the Runners page: each CI runner by machine and repo, idle, running or offline with the CI switch's reason (runners.py)
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
@@ -549,8 +548,6 @@ _writes.install(_writes.Steps(
     handoff_his_over=lambda gid, item, author, quiet: _handoff.handoff_his_over(gid, item, author, quiet),
     handoff_follow=lambda gid, before, item, writer, author, quiet: _handoff.handoff_follow(gid, before, item, writer, author, quiet),
     phase_stamp=lambda gid, item: _phase_stamp(gid, item),
-    foryou_on_save=lambda gid, before, item, writer, own: _foryou_on_save(gid, before, item, writer, own),
-    landed_on_save=lambda gid, before, item, writer, own: _landed_on_save(gid, before, item, writer, own),
     search_touch=lambda gid: _search.touch(gid),
     handback_drop=lambda gid, why: _telling.handback_drop(gid, why),
     answer_ack=lambda gid, writer: _answer_ack(gid, writer),
@@ -1337,8 +1334,8 @@ from stackshot.model.ids import _item_url  # noqa: E402  — an item's page on t
 from stackshot.model.said import _owner_words  # noqa: E402  — what shows the owner's own words are on an item (model/said.py)
 from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe  # noqa: E402  — a registry file of the store, and roles.json with projects.json beside it (projects/project_registry.py)
 from stackshot.web.publish import _publish, _publish_every, _publish_if_idle, _publish_now  # noqa: E402  — the debounced publish, its pace and its idle test; the timer is `stackshot.web.publish._PUB_TIMER` (web/publish.py)
-from stackshot.web import foryou_events as _fyev  # noqa: E402,F401  — the rows the For you list makes from a change of an item: whether he watches it, the row a save makes, the Landed record beside it, the due-date pass; a suite that stubs the publish for that pass sets it here (foryou_events.py)
-from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `writes.save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
+from stackshot.service import foryou_events as _fyev  # noqa: E402  — the rows the For you list makes from a change of an item and its due-date pass: the dates pass opens the pass's gate and runs it (service/foryou_events.py)
+from stackshot.service import foryou_hooks as _foryou_hooks  # noqa: E402  — what those rows still reach on this module (service/foryou_hooks.py)
 from stackshot.web import project_form as _pform  # noqa: E402,F401  — the New session form's calls that make and list projects and register their agents, with the one lock they share and the page store they write through; a suite sets `PAGE_IO` on this module (project_form.py)
 from stackshot.web.project_form import _FORM_MACHINES, _FORM_SENDERS, _PROJECT_LOCK, _RENAME_NOT_FORM, _RENAMING, _RETIRE_NOT_FORM, _cfg_names, _form_call, _new_project, _page_io, _project_agent, _project_agent_mandate, _project_agent_rename_checks, _project_agent_rename_write, _project_agent_retire_checks, _project_agent_retire_write, _project_list, _projects_list  # noqa: E402,F401  — kept on this module as well: the client API's routes, the archive sweep and the hand-off read them, the two wrappers that stay here call the checks and the writes, and the suites read `server._form_call`, `server._PROJECT_LOCK` and `server._RENAMING` (project_form.py)
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
@@ -2028,8 +2025,8 @@ def _dates_tick() -> "list[str]":
     made: list[str] = []
     failed: Exception | None = None
     try:
-        _FORYOU_LAST[0] = 0.0
-        made = _foryou_tick()
+        _fyev._FORYOU_LAST[0] = 0.0
+        made = _fyev._foryou_tick()
     except Exception as e:  # noqa: BLE001  — the expected-time look still runs; the runner records this error after it
         failed = e
     try:
@@ -2527,7 +2524,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     return moved
 
 
-# The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are foryou_events.py's; its names are imported from the owners above.
+# The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are service/foryou_events.py's; the dates pass above runs the due-date look on that module.
 
 
 # ----------------------------------------------------------------------------- pane liveness and the park fallback
@@ -4027,7 +4024,7 @@ def _late(name: str) -> Callable[..., Any]:
 
 
 # What the telling still reaches (service/telling.py tells the sessions a write concerns): the hand-off record's own functions (service/handoff.py imports the telling, so the telling cannot import it back: each
-# is looked up on that module when it runs), the page keepers of a project's agents, the For you list's rows, the page debt's marks and the time zone. A hook leaves this table when the area that holds it
+# is looked up on that module when it runs), the page keepers of a project's agents, the page debt's marks and the time zone. A hook leaves this table when the area that holds it
 # moves under service/ and does not import the telling.
 _telling.install(_telling.Hooks(
     back_agent=_late("_back_agent"),
@@ -4035,11 +4032,7 @@ _telling.install(_telling.Hooks(
     check_changed=lambda *a, **k: _checks.check_changed(*a, **k),
     check_lane_shown=lambda *a, **k: _checks.check_lane_shown(*a, **k),
     debt_mover=_late("_debt_mover"),
-    foryou_failed=lambda: _FORYOU_FAILED,
-    foryou_key=_late("_foryou_key"),
     front_handed_by_peer=lambda *a, **k: _handoff.front_handed_by_peer(*a, **k),
-    fy_flag=lambda *a, **k: _fy.flag(*a, **k),
-    fy_has_key=lambda *a, **k: _fy.has_key(*a, **k),
     grace_min=_late("_grace_min"),
     handoff_builder=lambda *a, **k: _handoff.handoff_builder(*a, **k),
     handoff_on=lambda *a, **k: _handoff.handoff_on(*a, **k),
@@ -4224,6 +4217,14 @@ _passes_hooks.install(_passes_hooks.Hooks(
     switchover_on=_late("_switchover_on"),
     watch_on_write=_late("_watch_on_write"),
     zone=lambda: ZONE,
+))
+
+# What the For you rows still reach on this module (service/foryou_events.py): the debounced publish of the board, the page's parser of an ask line and the words for a date. A hook leaves this table when the
+# area that holds it moves under service/.
+_foryou_hooks.install(_foryou_hooks.Hooks(
+    parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
+    publish=_late("_publish"),
+    when_words=lambda *a, **k: _rmod.when_words(*a, **k),
 ))
 
 

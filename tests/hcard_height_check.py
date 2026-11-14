@@ -80,7 +80,7 @@ for _ in range(100):
     except OSError: time.sleep(0.1)
 else: raise SystemExit("the app did not start")
 
-from stackshot.web import landed as ld
+from stackshot.service import landed as ld
 SHOTS = os.environ.get("HCARD_HEIGHT_SHOTS", "")
 if SHOTS: pathlib.Path(SHOTS).mkdir(parents=True, exist_ok=True)
 def shot(pg, name):

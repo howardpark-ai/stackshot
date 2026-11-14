@@ -879,7 +879,7 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
       wake          a board wake notice ("woke") for the mover of the item it is about: dropped, the mover is the one reminded.
       close-words   a board notice that an item was closed and carries the `words` mark (the owner's own words are on the item:
                     a `said` entry or a quoted attribution). The server no longer records one: such a close
-                    is a row on the owner's For you list (foryou.py, server._foryou_on_save, made in foryou_events.py), never a pass to a front agent. The rule
+                    is a row on the owner's For you list (notify/foryou.py, made by `_foryou_on_save` in service/foryou_events.py), never a pass to a front agent. The rule
                     stays only to settle a notice recorded before that: merged, with the reason.
       hand-back     a board notice that an item was handed back to its mover alone and carries the `handback` mark (a session other than the
                     mover left the item's needs naming only the mover, a front agent, who is never woken by item notices otherwise,
@@ -956,7 +956,7 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
         from stackshot.router import router_live as _live        # at call time: router_live imports this module
         owner = cx.agent_of(m.group(1).strip(), _live.agent_root(root, cx.reg)) if m else ""      # a hub component's owner is listed on its hub's page (as router_live._act marks it)
         named = cx.items_named(n.get("label"), root)
-        if owner:       # Such a close is a row on the owner's For you list now (server._foryou_on_save, made in foryou_events.py), no longer a pass to the front agent; this settles one recorded before that
+        if owner:       # Such a close is a row on the owner's For you list now (`_foryou_on_save` in service/foryou_events.py), no longer a pass to the front agent; this settles one recorded before that
             return _line(n, key, root, source="code", rule="close-words", ruling="merged", item=shown(named[0]["gid"]) if len(named) == 1 else "",
                          reason=f"the owner's own words are on the closed item ({n['words']}): it is a row on his For you list, not a message to its mover {owner}")
     if kind == "board" and n.get("handback") and re.match(r"hand-back\b", str(n.get("label") or ""), re.I) and re.match(r"handed back\b", str(n.get("text") or ""), re.I):

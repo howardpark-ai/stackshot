@@ -225,7 +225,7 @@ check("2 …and it is sent then", len(sent) == 1 and dsent().count("board#") >= 
 
 # ---- 3. the server's tick
 clear_state()
-from stackshot.web import server
+from stackshot.web import server; from stackshot.service import foryou_events as fyev
 for k, v in pass_items.items(): (T / f"store/a/{k[1:]}.json").write_text(json.dumps(v))
 msgs = []
 real_msg = server._message
@@ -235,31 +235,31 @@ check("3 the expected-time look stands still while the audit is off", server._da
 server._cfg.CFG["audit"]["enabled"] = True; server._cfg.CFG["audit"]["mode"] = "agent"
 check("3 …and in agent mode (the rollback)", server._dates_expected_tick() is None and msgs == [])
 server._cfg.CFG["audit"]["mode"] = "script"
-server._FORYOU_LAST[0] = time.time() + 1e6              # the For-you look's own gate is shut …
+fyev._FORYOU_LAST[0] = time.time() + 1e6              # the For-you look's own gate is shut …
 res = server._dates_tick()
-check("3 the dates pass still opens the For-you look's gate, so the look runs every ten minutes", server._FORYOU_LAST[0] < time.time() + 1000 and res == [], server._FORYOU_LAST[0])
+check("3 the dates pass still opens the For-you look's gate, so the look runs every ten minutes", fyev._FORYOU_LAST[0] < time.time() + 1000 and res == [], fyev._FORYOU_LAST[0])
 check("3 …and its expected-time look sends through the server's own message function, as the audit's sender, from a script (not as a session)",
       msgs and all(m[2] == "stackshot audit" and m[3] == "server" and m[4] == os.uname().nodename and m[5] is False for m in msgs) and any("board#1 · stale" in m[1] for m in msgs), msgs[:1])
 check("3 …the findings it sent are on the record", fp.exists() and {f["id"] for f in json.loads(fp.read_text())["findings"]} >= {"board#1", "board#9013"})
 msgs.clear()
 server._dates_tick()
 check("3 the next tick sends nothing new", msgs == [])
-real_fy, real_ex = server._foryou_tick, server._dates_expected_tick
+real_fy, real_ex = fyev._foryou_tick, server._dates_expected_tick
 ran_log = []
-server._foryou_tick = lambda *a, **k: (ran_log.append("foryou"), ["a1"])[1]
+fyev._foryou_tick = lambda *a, **k: (ran_log.append("foryou"), ["a1"])[1]
 server._dates_expected_tick = lambda: ran_log.append("expected")
 check("3 the tick returns the For-you look's gids and runs both looks", server._dates_tick() == ["a1"] and ran_log == ["foryou", "expected"], ran_log)
 def boom(*a, **k): ran_log.append("foryou"); raise RuntimeError("for-you broke")
-server._foryou_tick = boom; ran_log.clear()
+fyev._foryou_tick = boom; ran_log.clear()
 try: server._dates_tick(); err = None
 except RuntimeError as e: err = str(e)
 check("3 an error in the For-you look does not stop the expected-time look, and is raised after it (the runner records it)", ran_log == ["foryou", "expected"] and err == "for-you broke", (ran_log, err))
 def boom2(): ran_log.append("expected"); raise RuntimeError("dates broke")
-server._foryou_tick = lambda *a, **k: (ran_log.append("foryou"), [])[1]; server._dates_expected_tick = boom2; ran_log.clear()
+fyev._foryou_tick = lambda *a, **k: (ran_log.append("foryou"), [])[1]; server._dates_expected_tick = boom2; ran_log.clear()
 try: server._dates_tick(); err = None
 except RuntimeError as e: err = str(e)
 check("3 …and an error in the expected-time look is raised too, after the For-you look has run", ran_log == ["foryou", "expected"] and err == "dates broke", (ran_log, err))
-server._foryou_tick, server._dates_expected_tick = real_fy, real_ex
+fyev._foryou_tick, server._dates_expected_tick = real_fy, real_ex
 server._message = real_msg
 
 if fails:

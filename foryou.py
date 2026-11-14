@@ -1,10 +1,10 @@
-"""Forwarder: this program moved to stackshot/web/foryou.py (module stackshot.web.foryou). The old path stays so that units, hooks, allow rules and scripts
-that name it keep working until 2026-11-22; callers import `stackshot.web.foryou`. No code lives here."""
+"""Forwarder: this program moved to stackshot/notify/foryou.py (module stackshot.notify.foryou). The old path stays so that units, hooks, allow rules and scripts
+that name it keep working until 2026-11-22; callers import `stackshot.notify.foryou`. No code lives here."""
 import importlib
 import os
 import sys
 
-_TARGET = "stackshot.web.foryou"
+_TARGET = "stackshot.notify.foryou"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)

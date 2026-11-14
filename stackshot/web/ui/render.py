@@ -42,8 +42,9 @@ from stackshot.web import whatschanged as _wc  # what changed in the tools in th
 from stackshot.web import uiprefs as _up   # the signed-in person's panel order (uiprefs.py): the default order, normalize
 from stackshot.web import i18n as _i18n   # the string table: a page's words in the person's language, the English ones when it has none (i18n.py)
 from stackshot.web.i18n import t as _t
-from stackshot.web import foryou as _fy  # the For you list: rows for what the owner should see, newest first (foryou.py)
-from stackshot.web import landed as _ld  # the Landed list: the closes of agents that the owner did not make, and which he has seen (landed.py)
+from stackshot.service import foryou as _fy  # the For you list's file: rows for what the owner should see, newest first (service/foryou.py)
+from stackshot.service import landed as _ldsvc  # the Landed list's file: the closes of agents that the owner did not make, and which he has cleared (service/landed.py)
+from stackshot.notify import landed as _ld  # the Landed list's rules: its outcomes, its keys and how long a record is kept (notify/landed.py)
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id (item_project.py)
 from stackshot.projects import projects as _prj   # the project record: an agent registered there whose page line is still owed (with_pending)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
@@ -60,7 +61,7 @@ from stackshot.web import runners as _runners   # the side panel's Runners secti
 _OWNER = str(_cfg.get("instance", "owner") or "the owner")   # whom a Next line addresses with "<owner>:"
 # The board page does not show the For you section: it is hidden until its redesign, because as it stands it is nearly unusable.
 # Display only: the rows are still recorded
-# (foryou.py, for-you.json), the server's routes and `client.py get for-you` are unchanged, and for_you_html() / _FORYOU_JS stay below. True brings
+# (notify/foryou.py, for-you.json), the server's routes and `client.py get for-you` are unchanged, and for_you_html() / _FORYOU_JS stay below. True brings
 # the section back, in the page, the in-place block set and the seen script. Read only where the board page is assembled (Board.html / _page).
 _SHOW_FOR_YOU = False
 
@@ -3996,10 +3997,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
     def landed_rows(self):
         """The closes on the Closed page's New section AND in the Closed card's "N new" badge, newest first: [(record, item)]. The one function both read: every close he has not cleared, of the last _ld.KEEP_DAYS (60) days,
         of the items the store still holds as completed with an outcome that lands (done or dropped). The item is looked up among all the board's rows, not only self.done (the last 14 days), so a close older than 14 days
-        stays New, with its own title, outcome and reason, until he clears it or landed.py drops it; the card's separate Closed number and the Last 14 days section stay on the 14-day window. Once per Board."""
+        stays New, with its own title, outcome and reason, until he clears it or notify/landed.py drops it; the card's separate Closed number and the Last 14 days section stay on the 14-day window. Once per Board."""
         if getattr(self, "_landed", None) is None:
             by = {r["gid"]: r for r in self.rows}
-            self._landed = [(rec, by[rec["gid"]]) for rec in _ld.records(self.now.timestamp())
+            self._landed = [(rec, by[rec["gid"]]) for rec in _ldsvc.records(self.now.timestamp())
                             if rec["gid"] in by and by[rec["gid"]].get("status") == "completed" and outcome_of(by[rec["gid"]])[0] in _ld.OUTCOMES]
         return self._landed
     def landed_count(self):

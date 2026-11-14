@@ -302,7 +302,7 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
-from stackshot.web import server
+from stackshot.web import server; from stackshot.service import foryou_events as fyev
 from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
@@ -403,19 +403,19 @@ r3f = R.Runner(ten_table(), clock=clk3f, ten_pace=600.0, pace=20.0, wake_wait=la
 r3f._pace_end = clk3f.t; r3f._ten_at = None             # the state start() leaves
 clk3f.advance(20.0)
 check("3b the first paced round after a start runs the ten-minute set, and the next one is ten minutes on", r3f.run_round() == ["m", "t1", "t2"] and r3f._ten_at == 7020.0 + 600.0, r3f._ten_at)
-server._FORYOU_LAST[0] = time.time() + 1e6              # the look's own gate is shut …
+fyev._FORYOU_LAST[0] = time.time() + 1e6              # the look's own gate is shut …
 server._dates_tick()                                    # … and the dates pass opens it, since the ten-minute set's pace is the gate there
-check("3b the dates pass opens the For-you look's gate, so the runner's set runs it every ten minutes", server._FORYOU_LAST[0] < time.time() + 1000, server._FORYOU_LAST[0])
+check("3b the dates pass opens the For-you look's gate, so the runner's set runs it every ten minutes", fyev._FORYOU_LAST[0] < time.time() + 1000, fyev._FORYOU_LAST[0])
 # the look keeps its own gate of five minutes for a caller that is not the dates pass
 t0f = time.time()
-server._FORYOU_LAST[0] = t0f - 299.0; server._foryou_tick(t0f)
-check("3b a look 299 s ago is not repeated (the look's own gate stands) …", server._FORYOU_LAST[0] == t0f - 299.0, server._FORYOU_LAST[0])
-server._foryou_tick(t0f + 2.0)
-check("3b … and one 301 s ago is (the gate opens at five minutes)", server._FORYOU_LAST[0] == t0f + 2.0, server._FORYOU_LAST[0])
-server._FORYOU_LAST[0] = t0f; server._foryou_tick(t0f + 1.0)
-check("3b a look just made is not repeated at the next call", server._FORYOU_LAST[0] == t0f, server._FORYOU_LAST[0])
-server._FORYOU_LAST[0] = t0f; server._dates_tick()
-check("3b the dates pass runs the look at once whatever the look's own gate says", server._FORYOU_LAST[0] != t0f and server._FORYOU_LAST[0] >= t0f, server._FORYOU_LAST[0])
+fyev._FORYOU_LAST[0] = t0f - 299.0; fyev._foryou_tick(t0f)
+check("3b a look 299 s ago is not repeated (the look's own gate stands) …", fyev._FORYOU_LAST[0] == t0f - 299.0, fyev._FORYOU_LAST[0])
+fyev._foryou_tick(t0f + 2.0)
+check("3b … and one 301 s ago is (the gate opens at five minutes)", fyev._FORYOU_LAST[0] == t0f + 2.0, fyev._FORYOU_LAST[0])
+fyev._FORYOU_LAST[0] = t0f; fyev._foryou_tick(t0f + 1.0)
+check("3b a look just made is not repeated at the next call", fyev._FORYOU_LAST[0] == t0f, fyev._FORYOU_LAST[0])
+fyev._FORYOU_LAST[0] = t0f; server._dates_tick()
+check("3b the dates pass runs the look at once whatever the look's own gate says", fyev._FORYOU_LAST[0] != t0f and fyev._FORYOU_LAST[0] >= t0f, fyev._FORYOU_LAST[0])
 _cfg.CFG["audit"] = {**(_cfg.CFG.get("audit") or {}), "enabled": False}
 check("3b the filing tick stands still while the audit is off", server._filing_tick() is None)
 

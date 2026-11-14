@@ -34,7 +34,7 @@ def check(name, cond, got=None):
 from stackshot.core import readonly as ro, store as cstore
 from stackshot.github import ghsync as gh
 from stackshot.model import item_project as ip
-from stackshot.service import writes
+from stackshot.service import foryou_events as fyev, writes
 cstore.STORE = T / "store"
 
 LOG = []                                    # what the save did, in order: (name, detail)
@@ -52,9 +52,10 @@ def fake_steps():
     return writes.Steps(
         settle_mover=step("settle_mover"), owner_steps=step("owner_steps"), ask_stamp=step("ask_stamp"), handoff_on_save=step("handoff_on_save"),
         handoff_his_over=step("handoff_his_over"), handoff_follow=step("handoff_follow"), phase_stamp=step("phase_stamp", set_phase),
-        foryou_on_save=step("foryou_on_save"), landed_on_save=step("landed_on_save"), search_touch=step("search_touch"),
+        search_touch=step("search_touch"),
         handback_drop=step("handback_drop"), answer_ack=step("answer_ack"))
 writes.install(fake_steps())
+fyev._foryou_on_save = step("foryou_on_save"); fyev._landed_on_save = step("landed_on_save")      # the For you and Landed lists are service/foryou_events.py's: a save calls them there
 
 real = {n: getattr(writes, n) for n in ("record_writer", "_stamp_activity", "_stamp_last_activity")}
 real_guard, real_ip_stamp, real_write_item = ro.guard, ip.stamp, cstore._write_item

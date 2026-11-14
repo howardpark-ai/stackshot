@@ -4,7 +4,7 @@ The package has four layers (CONTRIBUTING.md, *Layout and dependencies*) and imp
 
     surface   web/
     service   service/                                                             (sits between the surface and the domain)
-    domain    model/ waits/ projects/ router/ anchors/ fleet/ github/ notify/      (notify/ not yet existing)
+    domain    model/ waits/ projects/ router/ anchors/ fleet/ github/ notify/
     core      core/
 
 audit/, tools/ and the command line (cli.py, __main__.py) sit outside the layers: they may import any layer, and nothing below the surface imports them
@@ -34,7 +34,7 @@ def check(name, ok, detail=""):
 # the layers, top to bottom: a module may import a module of its own layer or a lower one, never a higher one
 LAYERS = [("surface", ("web",)),
           ("service", ("service",)),
-          ("domain", ("model", "waits", "projects", "router", "anchors", "fleet", "github", "notify")),      # notify/ not yet existing
+          ("domain", ("model", "waits", "projects", "router", "anchors", "fleet", "github", "notify")),
           ("core", ("core",))]
 RANK = {area: len(LAYERS) - i for i, (_, areas) in enumerate(LAYERS) for area in areas}      # higher number = higher layer
 LAYER = {area: name for name, areas in LAYERS for area in areas}

@@ -74,7 +74,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
 from stackshot.service import migrations as migsvc
-from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff as handoff_svc, foryou_events as fyev
 from stackshot.service import telling
 from stackshot.core import store as _core_store
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -192,7 +192,7 @@ for i, name, *_ in CASES:
 for n in (51, 52, 53):
     put(n, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5)) if n != 53 else put(n, needs=[BACK], state="doing")
 calls = []
-real = {(m, k): getattr(m, k) for m, k in ((server, "_foryou_on_save"), (server, "_landed_on_save"), (handoff_svc, "handoff_on_save"))}; real_tw = telling.tell_woken
+real = {(m, k): getattr(m, k) for m, k in ((fyev, "_foryou_on_save"), (fyev, "_landed_on_save"), (handoff_svc, "handoff_on_save"))}; real_tw = telling.tell_woken
 real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name); return None

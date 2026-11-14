@@ -13,13 +13,13 @@ from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model.ids import _GID, _ITEM_KEY, _item_gid
+from stackshot.service import foryou as _fy
+from stackshot.service.foryou_events import _foryou_watched
 from stackshot.service.store import _load, _path
-from stackshot.web import foryou as _fy
 from stackshot.web.answers import _ANSWER_BODY_MAX, _answer_same_origin, _answer_token
 from stackshot.web.auth import signin as _signin
 from stackshot.web.auth.signin import _ui_guard, _ui_key, _ui_open
 from stackshot.web.board_home import _board_home_drop
-from stackshot.web.foryou_events import _foryou_watched
 from stackshot.web.publish import _publish
 
 
