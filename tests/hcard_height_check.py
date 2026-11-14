@@ -13,9 +13,9 @@ local port from fixture data (no live store, no network) and measures the five c
     new count of one to four digits each way, and again with a long invented stand-in for the word (the catalog's home.new_word), the Closed card shows the word whole (not display:none, not clipped, nothing over it), the badge inside the card
     and clear of the number and the label, every card 60 px tall; HCARD_ONLY_NEWWORD=1 runs this part alone;
   - nothing runs past the screen's width;
-  - the header and panel layout of every page (home, an item, a project, Projects, Closed, Search, runners), at 1280, 1010, 1000 and 390 px (1010: with a classic scrollbar a pinned panel's column is under 680 px and a closed one's over it), with the panel pinned and closed, without and with a classic
+  - the header and panel layout of every page (home, an item, a project, Projects, Closed, Search, runners, Audits, the probe page), at 1280, 1010, 1000 and 390 px (1010: with a classic scrollbar a pinned panel's column is under 680 px and a closed one's over it), with the panel pinned and closed, without and with a classic
     15 px scrollbar (a taller page in a browser that keeps its scrollbars): the cards' column, every card's width and the third card's wording are the same pinned and closed; the title (the h1) of every page
-    but home starts 32 px under the header, as home's first section does; the panel's left border is drawn from the top of the page (the pixels at the panel's left edge, from y = 0 down, are the line's colour:
+    but home starts 32 px under the header, as home's first section does, and that gap is the same number on every page (it is the header's own bottom margin; no CSS rule keys on the element under the header); the panel's left border is drawn from the top of the page (the pixels at the panel's left edge, from y = 0 down, are the line's colour:
     a 1 px line 56 px tall continues it through the buttons' band) and the drawer on a phone starts at y = 0; scrolled 1000 px down a taller page at 1280 px the panel and the line, the sticky header,
     the reload and Back to top buttons keep their place in the window (the root element is a size container; a layout-contained box would become the containing block of fixed boxes);
   - a long page and a short one keep the same width: in a browser that keeps its classic scrollbars, at 1280 px with the panel open and closed, the cards' column, the main column, the header, the title and the panel have the same left edge and width on both
@@ -262,11 +262,11 @@ try:
     fixture(40, 3)
     (T / "store/a/41.json").write_text(json.dumps({"id": "41", "subject": "[work] An open piece of work", "description": "- do it", "status": "open", "updated": time.time() - 900, "state_updated": time.time() - 900, "confirmed": time.time() - 900,
                                                   "metadata": {"owner": A, "project": "projects/alpha", "next": "the next step"}})); _wapp._board_home_drop()
-    PAGES = {"home": "/", "item": "/items/a41", "project": "/projects/alpha", "Projects": "/projects", "Closed": "/closed", "Search": "/search?q=piece", "runners": "/runners"}
+    PAGES = {"home": "/", "item": "/items/a41", "project": "/projects/alpha", "Projects": "/projects", "Closed": "/closed", "Search": "/search?q=piece", "runners": "/runners", "Audits": "/audits", "Probe": "/probe/sala-link"}
     LAYOUT = """() => {
       const R = e => e.getBoundingClientRect(), q = s => document.querySelector(s), nav = q('nav#counts'), cs = [...nav.querySelectorAll('a.hcard')], pn = q('#panel'), hd = q('header.top');
-      const first = q('main > header.top + h1, main > header.top + p.pjback') || q('main > section[id], main > details.fold[id]'), pb = getComputedStyle(document.body, '::after'), more = cs[2].querySelector('.more');
-      return {navw: R(nav).width, edges: [R(q('main')).left, R(q('main')).right, R(nav).left, R(nav).right, R(cs[0]).left, R(cs[4]).right, R(q('header.top .sbox')).left, R(q('header.top .sbox')).right, R(q('main > header.top + h1, main > h1') || q('main > section[id], main > details.fold[id]')).left], cardw: cs.map(a => R(a).width), short: more.getBoundingClientRect().width <= 1, gap: R(first).top - R(hd).bottom, h1: first.tagName === 'H1' || first.matches('p.pjback'), sb: innerWidth - document.documentElement.clientWidth,
+      const first = (function () { let e = hd.nextElementSibling; while (e && R(e).height === 0) e = e.nextElementSibling; return e })(), pb = getComputedStyle(document.body, '::after'), more = cs[2].querySelector('.more');
+      return {navw: R(nav).width, edges: [R(q('main')).left, R(q('main')).right, R(nav).left, R(nav).right, R(cs[0]).left, R(cs[4]).right, R(q('header.top .sbox')).left, R(q('header.top .sbox')).right, R(q('main > h1') || q('main > .atop > h1') || q('main > section[id], main > details.fold[id]')).left], cardw: cs.map(a => R(a).width), short: more.getBoundingClientRect().width <= 1, gap: R(first).top - R(hd).bottom, h1: first.tagName === 'H1' || first.matches('p.pjback') || !!first.querySelector('h1'), sheetRules: [...document.styleSheets].flatMap(sh => { try { return [...sh.cssRules] } catch (e) { return [] } }).filter(r => /header(?:[.]top)?[ ]*[+~]/.test(r.cssText)).map(r => r.cssText.slice(0, 80)), sb: innerWidth - document.documentElement.clientWidth,
               panelLeft: R(pn).left, panelTop: R(pn).top, panelVis: getComputedStyle(pn).visibility, vw: document.documentElement.clientWidth, sw: document.documentElement.scrollWidth,
               line: {display: pb.display, position: pb.position, top: pb.top, right: pb.right, width: pb.width, height: pb.height, z: pb.zIndex, bg: pb.backgroundColor}};
     }"""
@@ -285,7 +285,7 @@ try:
                     elif w < 800 and panel == "open": pg.click("#panel-open"); settle(pg, 400)
                     m = pg.evaluate(LAYOUT); seenL[(sbar, w, name, panel)] = m
                     check(f"{tag}: the browser shows {'a classic scrollbar' if sbar != 'no scrollbar' else 'no scrollbar'} ({m['sb']} px)", (m["sb"] > 0) == (sbar != "no scrollbar"), m["sb"])
-                    check(f"{tag}: the title starts 32 px under the header ({'the h1' if name != 'home' else 'the first section'})", abs(m["gap"] - 32) < 0.6 and m["h1"] == (name != "home"), (m["gap"], m["h1"]))
+                    check(f"{tag}: the title starts 32 px under the header ({'the h1' if name != 'home' else 'the first section'}): the gap is the header's own bottom margin, no rule keys on the element under it", abs(m["gap"] - 32) < 0.6 and m["h1"] == (name != "home") and not m["sheetRules"], (m["gap"], m["h1"], m["sheetRules"]))
                     check(f"{tag}: nothing runs past the screen's width", m["sw"] <= m["vw"], (m["sw"], m["vw"]))
                     if panel == "open":
                         ys = [0, 5, 30, 55, 56, 100, 400]; x = round(m["panelLeft"]); shotp = T / f"lay-{len(seenL)}.png"; pg.screenshot(path=str(shotp))
@@ -299,6 +299,12 @@ try:
                         else:
                             check(f"{tag}: the drawer starts at the top of the page and carries no line of its own", abs(m["panelTop"]) < 0.6 and m["line"]["display"] != "block" and m["line"]["position"] != "fixed", (m["panelTop"], m["line"]))
                     ctx.close()
+    # one gap on every page: at each width, scrollbar state and panel state the gap under the header is the same number on every page kind (home, item, project, Projects, Closed, Search, runners, Audits, the probe page)
+    for sbar in ("no scrollbar", "classic scrollbar"):
+        for w in (1280, 1010, 1000, 390):
+            for panel in ("open", "closed"):
+                gaps = {name: round(seenL[(sbar, w, name, panel)]["gap"], 1) for name in PAGES}
+                check(f"layout gap {w} px, {sbar}, panel {panel}: the gap under the header is 32 px on every page, the Audits page too", set(gaps.values()) == {32.0} and "Audits" in gaps, gaps)
     for sbar in ("no scrollbar", "classic scrollbar"):
         for w in (1280, 1010, 1000):
             for name in PAGES:
