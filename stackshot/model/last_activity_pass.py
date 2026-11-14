@@ -19,7 +19,7 @@ The refused class (`CLASS_HISTORY`): the History cannot be read (the store is ou
 jumped; a time inside it is read as now, as everywhere). Those items are refused, named in the output with the reason, and left as they are: the record is not guessed from a History that cannot be trusted. A hub log
 line stamped more than SKEW_S ahead is dropped as the live pass drops it (a torn line), and says nothing against the item.
 
-Pure functions of dicts and the git store, and `one` / `undo_one` / `write_op`, which take `S`, the server module (the item lock, the file helpers and the refusal shape are the migration route's own)."""
+Pure functions of dicts and the git store, and `one` / `undo_one` / `write_op`, which take `S`, the server module (the running server passes `stamp.PassHost`; the item lock, the file helpers and the refusal shape are the migration route's own)."""
 from __future__ import annotations
 
 import json

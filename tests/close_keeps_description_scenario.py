@@ -8,7 +8,7 @@ Covers: a close (complete, or update with status=completed) keeps the descriptio
 whose words are on a close are read from the outcome text and the reason, not the kept description; an outcome text is held to the bullet form and
 length of a description but may say what was resolved; the description of a closed item can still be edited by an update, and the outcome text stays; reopening drops the outcome text
 and leaves the description. The item page: a closed item with an outcome text shows an Outcome block under the state line and above Background, Background shows the original
-description; an open item, and a closed one with no outcome text, show none. The repair (close_repair.py, server._close_description_repair, tools/restore_close_descriptions.py)
+description; an open item, and a closed one with no outcome text, show none. The repair (close_repair.py, migsvc._close_description_repair, tools/restore_close_descriptions.py)
 puts back, from the store's git, the description held before the close for items closed in the window, moves the close's text into the outcome text, leaves an item closed
 before the window, one that already has an outcome text (counted), one whose close did not rewrite the description, one edited after the close, one with no earlier revision and an open one, changes nothing but the
 description and the outcome text, is idempotent, and `--live --apply` is refused unless the unit's ActiveState is inactive or failed (active, activating, deactivating, or systemd unable to say, are refused).
@@ -80,6 +80,7 @@ try:
     def mt(i): return rd(i)["metadata"]
 
     from stackshot.web import server
+    from stackshot.service import migrations as migsvc
     from stackshot.service import update as _update_svc
     from fastmcp.exceptions import ToolError
     from stackshot.core import instance as _core_instance
@@ -166,7 +167,7 @@ try:
 
     # ---- 5. the repair, dry: what it would restore, and nothing written
     before_files = {i: (T / f"store/a/{i}.json").read_text() for i in (11, 12, 13, 14, 15, 16, 17, 21, 22)}
-    rows, skipped = server._close_description_repair(apply=False)
+    rows, skipped = migsvc._close_description_repair(apply=False)
     by = {r["gid"]: r for r in rows}
     check("dry run: the closed items whose close rewrote the description and left no outcome text are listed (a11, a21, a22) and no other", sorted(by) == ["a11", "a21", "a22"], sorted(by))
     check("…each row has the description now, the one before the close and the outcome text it would get", by["a11"]["before"] == OLD_END and by["a11"]["after"] == DESC and by["a11"]["outcome_text"] == OLD_END, by.get("a11"))
@@ -216,7 +217,7 @@ try:
           all(rd(i).get("activity") == max(json.loads(before_files[i])["updated"], json.loads(before_files[i]).get("state_updated") or 0) for i in (11, 21, 22)), [(i, rd(i).get("activity")) for i in (11, 21, 22)])
     check("the items it left are exactly as they were: a12 (old), a13 (kept), a14 (edited after), a15 (has outcome text), a16 (open), a17 (no history)", all((T / f"store/a/{i}.json").read_text() == before_files[i] for i in (12, 13, 14, 15, 16, 17)))
     check("a14 keeps the edit made after the close", rd(14)["description"] == EDITED, rd(14)["description"])
-    rows2, skipped2 = server._close_description_repair(apply=False)
+    rows2, skipped2 = migsvc._close_description_repair(apply=False)
     check("idempotent: a second look finds nothing to restore", rows2 == [], rows2)
     r = tool(str(T / "bin-inactive"), "--live", "--apply")
     check("…and a second --apply (the unit inactive) restores nothing and exits 0", r.returncode == 0 and "0 item(s) restored" in r.stdout, (r.returncode, r.stdout[-300:]))

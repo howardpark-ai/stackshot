@@ -47,6 +47,7 @@ def put(i, status="open", project="projects/alpha", creator=MAIN, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": creator, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import migrations as migsvc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
@@ -91,20 +92,20 @@ put(6, needs=["decision"], ask="Decide: a or b · Recommend: a · Stakes: none �
 put(7, mover=REVIEW)                           # a stored mover
 put(8, status="completed", outcome="done")      # closed
 before = {i: (T / f"store/a/{i}.json").read_bytes() for i in range(1, 9)}
-rows = server._mover_backfill_pass(apply=False)
+rows = migsvc._mover_backfill_pass(apply=False)
 check("start pass, dry run: lists the items that would get a mover (alpha's, beta's, gamma's), and none of the ones that have a mover, wait, are his or are closed",
       {"a1", "a2", "a3"} <= {r["gid"] for r in rows} and not {f"a{i}" for i in range(4, 9)} & {r["gid"] for r in rows}, rows)
 check("start pass, dry run: the builder, the -main agent, nobody for gamma; the creator is never the mover", {r["gid"]: r["mover"] for r in rows}["a1"] == BUILD and {r["gid"]: r["mover"] for r in rows}["a2"] == BMAIN
       and all(r["mover"] != r["creator"] for r in rows), rows)
 check("start pass, dry run: writes nothing", all((T / f"store/a/{i}.json").read_bytes() == before[i] for i in range(1, 9)))
-rows = server._mover_backfill_pass(apply=True)
+rows = migsvc._mover_backfill_pass(apply=True)
 check("start pass: stores the builder / the -main agent as the mover; the creator never", rd(1)["metadata"].get("mover") == BUILD and rd(2)["metadata"].get("mover") == BMAIN and rd(2)["metadata"].get("owner") == REVIEW, (rd(1)["metadata"], rd(2)["metadata"]))
 check("start pass: a project naming no agent leaves the item alone: no mover stored, the item's mover reads empty and is never its creator (BMAIN)", "mover" not in rd(3)["metadata"]
       and {r["gid"]: r["mover"] for r in rows}.get("a3", "") == "" and _item_read._model_of({**rd(3), "gid": "a3"}).mover == "" and telling.holder(rd(3)) == "" and rd(3)["metadata"].get("owner") == BMAIN,
       (rd(3)["metadata"], telling.holder(rd(3)), [r for r in rows if r["gid"] == "a3"]))
 check("start pass: needs, a hold, Oliver's call, a stored mover and a closed item are untouched", all((T / f"store/a/{i}.json").read_bytes() == before[i] for i in range(4, 9)))
 check("start pass: the clocks stay (a filing edit)", rd(1)["state_updated"] == now0 - 60 and rd(2)["state_updated"] == now0 - 60, (rd(1), rd(2)))
-again = server._mover_backfill_pass(apply=True)
+again = migsvc._mover_backfill_pass(apply=True)
 check("start pass: idempotent: a second run writes nothing for the ones that got a mover", not [r for r in again if r["gid"] in ("a1", "a2")], again)
 
 # ---- 3. D2: every notice goes to the mover alone

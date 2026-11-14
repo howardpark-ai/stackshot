@@ -21,11 +21,11 @@ optional and all in the item's metadata:
                     alone, kind time); with a kind it is the date the wait comes back anyway (the backstop), for a relay the day it turns into a question. Read first, the legacy wake and ask_by after
   post_wake_mover   the old name of a waiting item's `mover`; while it is stored it wins over a stored `mover` when read, and a write that sets a different `mover` on a waiting item drops it
   (the wait's other inputs are fields an item already had: wake for a time, after for an item; for an anchor or an item wait a wake is its backstop)
-  phase             alive | waiting, what the board SHOWS the open item as, written by every save of an open item (server._phase_stamp, the one place) and kept true as the clock moves by the
-                    minute set's phase sweep (server._phase_sweep: a dated wait's wake coming within the hour, local midnight (instance timezone), an `after` item closing). The readers (view) take the alive-or-waiting
+  phase             alive | waiting, what the board SHOWS the open item as, written by every save of an open item (stamp._phase_stamp, the one place) and kept true as the clock moves by the
+                    minute set's phase sweep (stamp._phase_sweep: a dated wait's wake coming within the hour, local midnight (instance timezone), an `after` item closing). The readers (view) take the alive-or-waiting
                     decision and the kind of the wait from this stored pair and from nothing else; the fields give the details of the item (its mover, the wake, the anchor), never the decision. Only
                     the writer (view with check=False) works the pair out from the fields
-  waits_on          time | anchor | item | relay | event | list, the kind of the wait the board SHOWS a waiting open item as (shown_pair), stored beside `phase` by the same stamp (server._phase_stamp), absent for an
+  waits_on          time | anchor | item | relay | event | list, the kind of the wait the board SHOWS a waiting open item as (shown_pair), stored beside `phase` by the same stamp (stamp._phase_stamp), absent for an
                     alive item and dropped by a close. It is NOT `wait_kind`: that field is a behaviour switch (a stored one hands the item to the watchers), this one is a label
 
 Where nothing is stored, today's fields decide (design section 2: today's states map onto the three) and section 3's defaults give the mover. Pure
@@ -389,12 +389,12 @@ def _list_of(m: dict[str, Any], kind: str) -> tuple[tuple[WaitLine, ...], str]:
 def view(item: dict[str, Any], mod: Model, now: float | None = None, after_open: Callable[[dict[str, Any]], Any] | None = None, check: bool = True) -> Model:
     """The model as the board DISPLAYS it. `mod` is derive's reading of the fields; this takes from the item's stored pair (`phase`, `waits_on`) whether it is alive or waiting and the kind of its wait, and keeps
     derive's details (the mover, the wake, the anchor, the post-wake mover) wherever they fit that decision. The stored pair is the only source of the decision: nothing is checked against the fields, no
-    disagreement is counted, there is no switch. The sweep (server._phase_sweep) keeps the pair true to the minute, so a pair the clock has just outdated shows for up to a minute until it is restamped.
+    disagreement is counted, there is no switch. The sweep (stamp._phase_sweep) keeps the pair true to the minute, so a pair the clock has just outdated shows for up to a minute until it is restamped.
 
     An open item that stores no usable pair (a new one not yet saved, or a half-written pair: a phase waiting with no kind) is shown as the writer would store it, and UNSTAMPED counts the read (/audit/status);
     the next save or sweep stores the pair.
 
-    `check` False is the writer that is about to store the pair (server._stamp_values, and the audit's own readings): it works the pair out from the fields, `_shown`, which reads a doing item whose wake is
+    `check` False is the writer that is about to store the pair (stamp._stamp_values, and the audit's own readings): it works the pair out from the fields, `_shown`, which reads a doing item whose wake is
     more than an hour out while every open step is dated for that day or later (dated_wait.py) as waiting on a time, as it does one stored as doing and put on hold with a wake more than that hour out, and one whose
     still-future wake carries a wait_basis. Doing is work in hand and carries no expected time; an item held there for days is a wait that was stored as work. `derive` itself is unchanged (the guards, the router and
     the hand-off read it as stored)."""
@@ -494,7 +494,7 @@ def stored_waits_on(item: dict[str, Any]) -> str:
 
 def stamp_values(item: dict[str, Any], shown: Model) -> tuple[str, str]:
     """(phase, waits_on) an item stores for the model the board shows (`shown`, model.view of derive): ("alive", "") for an alive open item, ("waiting", <the wait's kind>) for a waiting one, ("", "") for a closed
-    item (it is dead and stores neither). "" = the key is absent. The one place the two stored values are worked out: the save's stamp (server._phase_stamp) and the stamp pass (server._stamp_one) both call it."""
+    item (it is dead and stores neither). "" = the key is absent. The one place the two stored values are worked out: the save's stamp (stamp._phase_stamp) and the stamp pass (stamp._stamp_one) both call it."""
     if item.get("status") != "open":
         return "", ""
     phase, kind = shown_pair(shown)

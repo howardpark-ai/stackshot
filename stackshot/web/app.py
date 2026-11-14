@@ -164,7 +164,6 @@ def build(
     watch_label,
     evw_boxes,
     machine_state,
-    rules_text,
     main_agent,
     client_get,
     client_post,
@@ -210,7 +209,7 @@ def build(
     _tool_message.register(mcp, inbox_flag_minutes=inbox_flag_minutes, message=message)
     _tool_route.register(mcp, anchor_release=anchor_release, watch_label=watch_label)
     _tool_anchors.register(mcp, evw_boxes=evw_boxes, machine_state=machine_state)
-    _tool_rules.register(mcp, rules_text=rules_text)
+    _tool_rules.register(mcp)
     _signin.register(mcp)
     _routes_client_api.register(mcp, client_get=client_get, client_post=client_post, recycle_wanted_tokens=recycle_wanted_tokens)
     _routes_answers.register(mcp, answer=answer)

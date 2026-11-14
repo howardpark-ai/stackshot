@@ -1,4 +1,4 @@
-"""Scenario test for the retire pass: the stored state words and their carry fields taken out of the open items (retire_fields.py, server._retire_one / _unretire_one, the retire and unretire ops of the
+"""Scenario test for the retire pass: the stored state words and their carry fields taken out of the open items (retire_fields.py, retire_svc._retire_one / _unretire_one, the retire and unretire ops of the
 migration route, tools/retire_fields_report.py) — fixture data, no live store written, no network, no server socket.
 
 An open item once stored one of seven state words and the fields a state carried (party, chase, end, proof, supplies, step). The readers already derive the word from the item's other fields, and the carry fields

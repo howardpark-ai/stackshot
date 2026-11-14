@@ -79,6 +79,7 @@ def dry_run(a: argparse.Namespace) -> int:
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         from stackshot.web import server  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        from stackshot.service import stamp as _stamp  # noqa: PLC0415
         from stackshot.github import ghsync as _gh  # noqa: PLC0415
         from stackshot.model import item_project as _ip  # noqa: PLC0415
         _web_publish._publish = lambda: None
@@ -88,9 +89,9 @@ def dry_run(a: argparse.Namespace) -> int:
         ids = sorted(items, key=SP.num)
         opens = [g for g in ids if items[g].get("status") == "open"]
         before = readers(server, d, now)
-        planned = {g: server._pid_one(g, dry=True) for g in ids}
-        wrote = {g: server._pid_one(g) for g in ids}
-        again = {g: server._pid_one(g) for g in ids}
+        planned = {g: _stamp._pid_one(g, dry=True) for g in ids}
+        wrote = {g: _stamp._pid_one(g) for g in ids}
+        again = {g: _stamp._pid_one(g) for g in ids}
         after_items = SP.load_dir(d)
         after = readers(server, d, now)
         by_plan = collections.Counter(r["action"] for r in planned.values())

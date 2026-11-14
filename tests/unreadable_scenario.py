@@ -134,7 +134,7 @@ state["drive"] = "refused"; st = json.load(open(core.STATUS))["anchors"]
 hub.bindings = core.load_bindings(); hub.event(dr, {"title": '"Deck"', "who": "Dana", "text": 'changed "Deck"', "url": DR, "ts": "1"}, kind="drive")
 check("an event from it: asked again at the next pass", hub.status["anchors"][dr]["unreadable"]["next"] == 0, hub.status["anchors"][dr])
 
-# ---- 9. the rulebook's import line (server._rules_source)
+# ---- 9. the rulebook's import line (_wt_rules._rules_source)
 from stackshot.web import server
 from stackshot.core import config as _cfg
 from stackshot.web.tools import rules as _wt_rules
@@ -142,27 +142,27 @@ R = T / "rules"; R.mkdir()
 (R / "A.md").write_text("<!-- header -->\n# Rules\n\n## One\n\n- a rule\n\n@B.md\n@missing.md\nnot an @import.md line\n", encoding="utf-8")
 (R / "B.md").write_text("# Agent rules\n\nOne sentence.\n\n<!-- surface: cli -->\n## CLI only\n\n- hidden from Cowork\n\n## Two\n\n- another rule\n- a cli bullet <!-- cli -->\n@C.md\n", encoding="utf-8")
 (R / "C.md").write_text("never reached\n", encoding="utf-8")
-src = server._rules_source(R / "A.md")
+src = _wt_rules._rules_source(R / "A.md")
 check("rules: an import line is replaced by the file next to it", "## Two\n\n- another rule" in src and "@B.md" not in src, src)
 check("rules: a missing file leaves its line, other text is untouched, one level only", "@missing.md\nnot an @import.md line\n" in src and "@C.md" in src and "never reached" not in src and src.endswith("line\n"), src)
 (R / "plain.md").write_text("# Rules\n\n- a rule\n", encoding="utf-8")
-check("rules: a file with no import reads back byte for byte", server._rules_source(R / "plain.md") == "# Rules\n\n- a rule\n")
+check("rules: a file with no import reads back byte for byte", _wt_rules._rules_source(R / "plain.md") == "# Rules\n\n- a rule\n")
 _real_cfg_path = _cfg.path; _cfg.path = lambda *k: (R / "A.md") if k == ("paths", "rules") else _real_cfg_path(*k)
-cw = server._rules_text("cowork"); full = server._rules_text("full")
+cw = _wt_rules._rules_text("cowork"); full = _wt_rules._rules_text("full")
 check("rules: the Cowork filter runs on the expanded text", "- another rule" in cw and "hidden from Cowork" not in cw and "a cli bullet" not in cw and "<!-- header -->" not in cw, cw[-400:])
 check("rules: profile full is the whole expanded text", "hidden from Cowork" in full and "- another rule" in full and "@B.md" not in full, full)
 # a second person's RULES.md: plain markdown, no surface markers, no import, no header comment: served whole, both profiles
 body = "# Our rules\n\n## Board\n\n- one item per deliverable\n- a page per project\n\n## Pages\n\n- edit the file, commit and push\n"
 (R / "nomarkers.md").write_text(body, encoding="utf-8")
 _cfg.path = lambda *k: (R / "nomarkers.md") if k == ("paths", "rules") else _real_cfg_path(*k)
-cw2 = server._rules_text("cowork"); full2 = server._rules_text("full")
-_pre = server._cowork_preamble()
+cw2 = _wt_rules._rules_text("cowork"); full2 = _wt_rules._rules_text("full")
+_pre = _wt_rules._cowork_preamble()
 check("rules: the Cowork preamble sends a page edit to edit_page, put_page only for a whole rewrite",
       "then `edit_page` with `expected_revision` and `edits: [{old_text, new_text}]`; `put_page` only for a whole rewrite" in _pre
       and "`get_page` then `put_page`" not in _pre, _pre[-1200:])
 check("rules: the Cowork preamble names no retired page script and no push override",
       "example-page.sh" not in _pre and "EXAMPLE_PAGE_PUSH" not in _pre, _pre[-1200:])
-check("rules: a marker-less file is served whole (cowork: after the preamble)", cw2.startswith(server._cowork_preamble()) and cw2.endswith(body.strip() + "\n"), cw2[-300:])
+check("rules: a marker-less file is served whole (cowork: after the preamble)", cw2.startswith(_wt_rules._cowork_preamble()) and cw2.endswith(body.strip() + "\n"), cw2[-300:])
 check("rules: a marker-less file under profile full is the file itself", full2 == body, full2)
 tool = getattr(_wt_rules.stackshot_rules, "fn", _wt_rules.stackshot_rules)        # the decorated tool's own function
 check("rules: the rules tool serves it, both profiles", tool() == cw2 and tool("full") == body, tool()[-200:])
@@ -174,30 +174,30 @@ P1.write_text("---\nname: write-well\ndescription: how to write\n---\n\n# Writin
 P2.write_text("# No frontmatter\n\n- second part\n", encoding="utf-8")
 _parts = [P1]
 _real_cfg_paths = _cfg.paths; _cfg.paths = lambda *k: list(_parts) if k == ("paths", "rules_parts") else _real_cfg_paths(*k)
-cw3 = server._rules_text("cowork"); full3 = server._rules_text("full")
+cw3 = _wt_rules._rules_text("cowork"); full3 = _wt_rules._rules_text("full")
 check("rules parts: appended after the body under their name, frontmatter gone", cw3.startswith(cw2) and "\n## Part: write-well\n\n# Writing\n" in cw3 and "description: how to write" not in cw3 and "name: write-well" not in cw3, cw3[-500:])
 check("rules parts: the dated note is stripped in cowork, kept in full", "(2026-10-20" not in cw3 and "- be plain\n" in cw3 and "- be plain (2026-10-20, an incident)" in full3, cw3[-500:])
 check("rules parts: a CLI-only section and bullet are dropped in cowork", "hidden from Cowork" not in cw3 and "a cli bullet" not in cw3 and "- a visible rule" in cw3, cw3[-500:])
 check("rules parts: profile full keeps the whole part (markers and all) after the file", full3.startswith(body) and "## Part: write-well" in full3 and "hidden from Cowork" in full3 and "description:" not in full3, full3[-600:])
 check("rules parts: the rules tool serves them too", tool() == cw3 and tool("full") == full3)
 _parts = [P1, PM]
-cw4 = server._rules_text("cowork"); full4 = server._rules_text("full")
+cw4 = _wt_rules._rules_text("cowork"); full4 = _wt_rules._rules_text("full")
 check("rules parts: an unreadable part adds one not-readable line, in both profiles", cw4.count("(rulebook part gone/SKILL.md not readable:") == 1 and full4.count("(rulebook part gone/SKILL.md not readable:") == 1 and "## Part: write-well" in cw4, cw4[-300:])
 _parts = [P2, P1]
-cw5 = server._rules_text("cowork")
+cw5 = _wt_rules._rules_text("cowork")
 check("rules parts: the list order is kept; a part with no frontmatter is named by its folder", cw5.index("## Part: two") < cw5.index("## Part: write-well") and "- second part" in cw5, cw5[-500:])
 # the config value is not a list of strings: [] from config.paths, the rulebook is still served
 _cfg.paths = _real_cfg_paths; _cfg_get = _cfg.get
 for label, val in (("an int", 5), ("a bool", True), ("a dict", {str(P1): 1}), ("a list with non-strings", [5, None, str(P2), ""])):
     _cfg.get = lambda *k, _v=val, **kw: _v if k == ("paths", "rules_parts") else _cfg_get(*k, **kw)
     got = _cfg.paths("paths", "rules_parts")
-    cw6 = server._rules_text("cowork")
+    cw6 = _wt_rules._rules_text("cowork")
     want = [P2] if label.startswith("a list") else []
     check(f"rules parts: rules_parts as {label} reads as {len(want)} path(s) and the rulebook is served", got == want and cw6.startswith(cw2) and ("not readable" not in cw6) and len(tool("full")) >= len(body), (got, cw6[-200:]))
 _cfg.get = _cfg_get
 def _boom(*k): raise TypeError("boom")
 _cfg.paths = _boom
-cw7 = server._rules_text("cowork"); full7 = server._rules_text("full")
+cw7 = _wt_rules._rules_text("cowork"); full7 = _wt_rules._rules_text("full")
 check("rules parts: a failing config read adds one note line, the rulebook is still served", cw7.startswith(cw2) and cw7.count("(rulebook parts not readable: boom)") == 1 and full7.startswith(body) and full7.count("(rulebook parts not readable: boom)") == 1, cw7[-200:])
 # a BOM, an empty name, a quoted name
 PB, PE, PQ = R / "bom" / "SKILL.md", R / "empty" / "SKILL.md", R / "quoted" / "SKILL.md"
@@ -206,7 +206,7 @@ PB.write_bytes(b"\xef\xbb\xbf---\nname: bommed\n---\n\n- bom body\n")
 PE.write_text("---\nname:   \ndescription: x\n---\n\n- empty name body\n", encoding="utf-8")
 PQ.write_text("---\nname: \"it's quoted\"\n---\n\n- quoted body\n", encoding="utf-8")
 _cfg.paths = lambda *k: [PB, PE, PQ] if k == ("paths", "rules_parts") else _real_cfg_paths(*k)
-cw8 = server._rules_text("cowork")
+cw8 = _wt_rules._rules_text("cowork")
 check("rules parts: a BOM file's frontmatter is stripped and its name used", "## Part: bommed\n\n- bom body" in cw8 and "---" not in cw8.split("## Part: bommed")[1], cw8[-400:])
 check("rules parts: an empty name falls back to the folder name", "## Part: empty\n\n- empty name body" in cw8, cw8[-400:])
 check("rules parts: only a matching pair of quotes is stripped", "## Part: it's quoted\n\n- quoted body" in cw8, cw8[-400:])

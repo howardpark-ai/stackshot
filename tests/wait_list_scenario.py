@@ -63,6 +63,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
+from stackshot.service import stamp as stamp_svc
 from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -273,17 +274,17 @@ check("model: …nor an item wait that stores a `waits` it does not use", mod_of
 check("model: the stored kind of a stamped item accepts list (a waits_on outside the six is half a pair, as before)", model.stored_waits_on({"status": "open", "metadata": {"waits_on": "list"}}) == "list"
       and model.stored_waits_on({"status": "open", "metadata": {"waits_on": "soon"}}) == "", None)
 # the stamp
-it = rd(100); server._phase_stamp("a100", it)
+it = rd(100); stamp_svc._phase_stamp("a100", it)
 check("stamp: the save's stamp writes phase waiting and waits_on list", it["metadata"].get("phase") == "waiting" and it["metadata"].get("waits_on") == "list", it["metadata"])
 v1 = model.view({**it, "gid": "a100"}, mod_of(100), after_open=lambda i_: [])
 check("stamp: …and the board's reading of the stamped item is the list, with its lines", v1.wait.kind == "list" and len(v1.waits) == 3 and model.shown_pair(v1) == ("waiting", "list"), v1)
 check("stamp: …a stored list the fields no longer hold is not drawn as a list with no lines", model.view({**it, "metadata": {**it["metadata"], "waits": [Tm(day(3))]}, "gid": "a100"}, model.derive({**it, "metadata": {**it["metadata"], "waits": [Tm(day(3))]}}), after_open=lambda i_: []).wait.kind == "time", None)
 lst(105, [Tm(day(3)), It("a901")], mode="any"); put(105, {**rd(105)})
-sw = server._phase_sweep()
-check("stamp: the sweep stamps every open list item waiting on a list, and a second sweep changes nothing", "a105" in sw and mt(105).get("phase") == "waiting" and mt(105).get("waits_on") == "list" and mt(100).get("waits_on") == "list" and server._phase_sweep() == [], (sw, mt(105)))
+sw = stamp_svc._phase_sweep()
+check("stamp: the sweep stamps every open list item waiting on a list, and a second sweep changes nothing", "a105" in sw and mt(105).get("phase") == "waiting" and mt(105).get("waits_on") == "list" and mt(100).get("waits_on") == "list" and stamp_svc._phase_sweep() == [], (sw, mt(105)))
 check("stamp: …the stamped pair is what the board reads (stored first), and a sweep restamps a list edited down to one line", model.stored_waits_on(rd(105)) == "list", None)
 d5 = rd(105); d5["metadata"]["waits"] = d5["metadata"]["waits"][:1]; put(105, d5)
-check("stamp: …(the one line does not hold: the sweep finds the stored list outdated and restamps the date alone)", "a105" in server._phase_sweep() and mt(105).get("waits_on") == "time", mt(105))
+check("stamp: …(the one line does not hold: the sweep finds the stored list outdated and restamps the date alone)", "a105" in stamp_svc._phase_sweep() and mt(105).get("waits_on") == "time", mt(105))
 lst(105, [Tm(day(3)), It("a901")], mode="any")
 
 # ================================================================ time lines: the clock marks them, the group decides

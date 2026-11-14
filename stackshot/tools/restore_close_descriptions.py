@@ -125,8 +125,9 @@ def main(argv: list[str]) -> int:
         point_at_copy(a.store)
     elif not a.apply:
         os.environ.setdefault("STACKSHOT_AUTH", "off")
-    from stackshot.web import server  # noqa: PLC0415
-    rows, skipped = server._close_description_repair(apply=a.apply, days=a.days)
+    from stackshot.web import server  # noqa: PLC0415,F401  — the migrations are imported through the server, as at its start
+    from stackshot.service import migrations as _migrations  # noqa: PLC0415
+    rows, skipped = _migrations._close_description_repair(apply=a.apply, days=a.days)
     if a.json:
         print(json.dumps({"rows": rows, "skipped": skipped}, indent=1, default=str, ensure_ascii=False))
         return 0

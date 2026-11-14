@@ -72,6 +72,9 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
 from stackshot.service import merge_progress as mprog_svc
+from stackshot.service import stamp as stamp_svc
+from stackshot.service import retire_passes as retire_svc
+HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc, mprog_svc)   # the `S` of last_activity_pass: the server module, then the stamp and retire modules that own the names it reads
 from stackshot.anchors import anchors as _anc
 from stackshot.model import merge_tie as _mtie
 from stackshot.core import config as _cfg
@@ -204,13 +207,13 @@ check("2 …a merge recorded is a pr_merged signal naming the pull request", (dr
 
 # ---- 3. the write
 orig = {i: raw(i) for i in OPEN}; orig_bytes = {i: bytes_of(i) for i in OPEN}
-held = []; orig_sw = server._stamp_write
+held = []; orig_sw = stamp_svc._stamp_write
 def spying_write(*a, **k):
     held.append(writes.ITEM_LOCK._is_owned()); return orig_sw(*a, **k)
-server._stamp_write = spying_write
+stamp_svc._stamp_write = spying_write
 PID = "20260101-000000-abcdef"
 st_, d_ = call(op="lastact", items=[f"g{i}" for i in OPEN], pass_id=PID)
-server._stamp_write = orig_sw
+stamp_svc._stamp_write = orig_sw
 res = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 else {}
 check("3 the pass fills the eight, leaves the one with a record, and refuses the two whose History does not read and the one dated ahead", [res[i]["action"] for i in (11, 12, 13, 14, 16, 19, 20, 22)] == ["set"] * 8
       and res[15]["action"] == "same" and [res[i]["action"] for i in (17, 18)] == ["refused"] * 2, {i: res[i]["action"] for i in res})
@@ -229,9 +232,9 @@ check("3 every record reads (last_activity.read) and none is dated after the clo
 check("4 an item with a torn version in its History is refused with the reason, the class, and is left as it is", res[18]["action"] == "refused" and res[18]["class"] == LP.CLASS_HISTORY and "does not read as JSON" in res[18]["why"] and "last_activity" not in mt(18), res[18])
 check("4 an item with a version dated two days ahead is refused for it, and nothing is guessed", res[17]["action"] == "refused" and res[17]["class"] == LP.CLASS_HISTORY and "ahead of the clock" in res[17]["why"] and "last_activity" not in mt(17), res[17])
 plain = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-nogit-"))
-nogit = LP.one(server, "g13", dry=True, git_store=plain)
+nogit = LP.one(HOST, "g13", dry=True, git_store=plain)
 write_file(23, version(now0 - 3 * HR, now0 - 3 * HR))
-nogit2 = LP.one(server, "g23", dry=True, git_store=plain)
+nogit2 = LP.one(HOST, "g23", dry=True, git_store=plain)
 check("4 a store outside git is the same class: the History cannot be read (an item that has a record is not read at all)", nogit["action"] == "same" and nogit2["action"] == "refused" and nogit2["class"] == LP.CLASS_HISTORY and "git did not answer" in nogit2["why"], (nogit, nogit2))
 (T / "store/g/23.json").unlink()
 st_, d_ = call(op="lastact", items=["g21", "g404", "nonsense"])
@@ -249,7 +252,7 @@ check("5 the pass states it too: a time it found ahead of the clock is never wri
 check("6 every write was made with the item lock held", held and all(held) and len(held) == 8, held)
 write_file(24, version(now0 - 4 * HR, now0 - 4 * HR)); subprocess.run(["git", "-C", str(T / "store"), "add", "-A"], env=GENV); git("commit", "-q", "-m", "24", ct=now0 - 4 * HR)
 done = []
-def runner(): done.append(LP.one(server, "g24", dry=True))
+def runner(): done.append(LP.one(HOST, "g24", dry=True))
 writes.ITEM_LOCK.acquire()
 th = threading.Thread(target=runner); th.start(); th.join(0.5)
 waited = not done
@@ -274,15 +277,15 @@ reset_files = lambda: [write_file(i, {k: v for k, v in json.loads(orig_bytes[i])
 reset_files()      # the eight as the History left them (no record), for the events to be the newest signal
 orig_tied = mprog_svc._merge_tied
 mprog_svc._merge_tied = lambda rows, now: [(r, f"{r['repo']}#{r['n']}", {"g19": "anchored"}) for r in rows if r["n"] == 9]      # the live tie is merge_tie's, covered by its own suite; here the lines are tied to one item
-rows_, probs_ = LP.pr_rows(server, now0)
+rows_, probs_ = LP.pr_rows(HOST, now0)
 check("8 the two logs are read whole, each line on its own (a merge-log line is a merge)", not probs_ and sorted((r["kind"], r["n"]) for r in rows_) == [("ci_failed", 99), ("comment", 9), ("merged", 9), ("review", 9)], (rows_, probs_))
-tied, tie_why = LP.ties(server, now0)
+tied, tie_why = LP.ties(HOST, now0)
 check("8 …the ties read without a problem", tie_why == "", tie_why)
 check("8 a tied event is a signal at the time the hub saw it, of its kind; a line stamped days ahead of the clock is dropped", [(s["kind"], s["what"], s["at"]) for s in tied.get("g19", [])] == [("pr_merged", "PR 9 merged", now0 - 3 * HR), ("comment", "comment on #9", newer)], tied)
-r19 = LP.one(server, "g19", dry=True, tied=tied, now=now0)
+r19 = LP.one(HOST, "g19", dry=True, tied=tied, now=now0)
 check("8 …the newest of the History and the events is the record (a comment 20 minutes ago over a creation 8 hours ago)", r19["action"] == "would_set" and (r19["kind"], r19["at"]) == ("comment", newer), r19)
 mprog_svc._merge_tied = orig_tied
-r19b = LP.one(server, "g19", dry=True, tied={}, now=now0)
+r19b = LP.one(HOST, "g19", dry=True, tied={}, now=now0)
 check("8 …without the tie the record is the History's alone (created 8 hours ago)", (r19b["kind"], r19b["what"], r19b["at"]) == ("state_change", "created", now0 - 8 * HR), r19b)
 
 # ---- 9. the script
@@ -397,24 +400,24 @@ check("11 …every item is byte for byte as it was before the apply, and the fil
 
 # ---- 12. the `moved` path: a writer that takes no lock lands between the read and the replace
 reset(); snapM = snapshot(); writer = {}; HM = head()
-orig_sw2 = server._stamp_write
+orig_sw2 = stamp_svc._stamp_write
 def racing_write(p_, raw_, h0_, edits_):
     if p_.name == "11.json" and not writer:
         d_w = json.loads(p_.read_bytes()); d_w["description"] = "- Edited by a writer that takes no lock"
         p_.write_text(json.dumps(d_w, ensure_ascii=False, indent=1), encoding="utf-8"); writer["bytes"] = p_.read_bytes()
     return orig_sw2(p_, raw_, h0_, edits_)
-server._stamp_write = racing_write
-try: r_m = LP.one(server, "g11")
-finally: server._stamp_write = orig_sw2
+stamp_svc._stamp_write = racing_write
+try: r_m = LP.one(HOST, "g11")
+finally: stamp_svc._stamp_write = orig_sw2
 check("12 a write that lands between the read and the replace: the item is `moved`, the writer's file stands byte for byte, nothing of the pass is in it, no temp file is left", r_m["action"] == "moved" and bytes_of(11) == writer["bytes"]
       and "last_activity" not in mt(11) and not list((T / "store/g").glob(".*tmp")) and head() == HM, (r_m["action"], r_m["why"], bytes_of(11) == writer["bytes"], head() == HM))
-r_m2 = LP.one(server, "g11")
+r_m2 = LP.one(HOST, "g11")
 check("12 …the next run fills it from its History and keeps the writer's text", r_m2["action"] == "set" and rec_of(11) is not None and raw(11)["description"] == "- Edited by a writer that takes no lock", r_m2)
 reset(); writer.clear()
 RUN3 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run3-"))
-server._stamp_write = racing_write
+stamp_svc._stamp_write = racing_write
 try: rcM, outM, errM = cli(BF.apply, run_dir=str(RUN3))
-finally: server._stamp_write = orig_sw2
+finally: stamp_svc._stamp_write = orig_sw2
 check("12 through the script: seven filled, the one moved is named to run again and its entry is `moved`, the exit is 3 (not a failure), and the writer's file stands", rcM == 3 and outM["results"] == {"set": 7, "moved": 1} and outM["moved_run_again_for_these"] == [BOARD + "11"]
       and bytes_of(11) == writer["bytes"] and [e["result"] for e in json.loads(pathlib.Path(outM["undo"]).read_text())["items"]].count("moved") == 1, (rcM, outM))
 rcM2, outM2, _e = cli(BF.apply, run_dir=str(RUN3))
@@ -440,8 +443,8 @@ check("13 the store's log from a subdirectory of the repository holds only the f
 vs_, why2_ = LP.git_versions(SUB, "g/11.json")
 check("13 …its versions are the three of the item, at their commit times, oldest first", why2_ == "" and [t for t, _v in vs_] == [float(int(t)) for t, _v in V11], (why2_, [t for t, _v in vs_]))
 reset()
-in_sub = LP.one(server, "g11", dry=True, git_store=SUB, now=now0)
-in_flat = LP.one(server, "g11", dry=True, git_store=T / "store", now=now0)
+in_sub = LP.one(HOST, "g11", dry=True, git_store=SUB, now=now0)
+in_flat = LP.one(HOST, "g11", dry=True, git_store=T / "store", now=now0)
 check("13 …and the pass over the subdirectory store gives the record the flat store gives (step 1 done at the real write), not the newer file of the sibling folders", in_sub["action"] == "would_set" and (in_sub["kind"], in_sub["what"], in_sub["at"]) == ("step_done", "step 1 done", now0 - 3 * HR)
       and (in_sub["kind"], in_sub["what"], in_sub["at"]) == (in_flat["kind"], in_flat["what"], in_flat["at"]), (in_sub, in_flat))
 deeper = LP.store_log(T2 / "board-data" / "g")
@@ -477,7 +480,7 @@ def broken_read(*a, **k): raise RuntimeError("the log cannot be read")
 MLOG.read = broken_read
 RUN5 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run5-"))
 try:
-    tied_x, why_x = LP.ties(server, now0)
+    tied_x, why_x = LP.ties(HOST, now0)
     st_dry, d_dry = call(op="lastact", items=["g11"], dry=True)
     st_real, d_real = call(op="lastact", items=["g11"], pass_id="20260101-000000-abcdea")
     rcT, outT, errT = cli(BF.apply, run_dir=str(RUN5))
@@ -523,7 +526,7 @@ for label, owner_, attr, raises in (("the anchors file", _anc, "load", True), ("
     try:
         try: res_tied, raised = mprog_svc._merge_tied(sample, now0), False
         except RuntimeError: res_tied, raised = None, True
-        tied_a, why_a = LP.ties(server, now0)
+        tied_a, why_a = LP.ties(HOST, now0)
         st_dry, d_dry = call(op="lastact", items=["g11"], dry=True)
         st_real, d_real = call(op="lastact", items=["g11"], pass_id="20260101-000000-abcdeb")
         rcA, outA, errA = cli(BF.apply, run_dir=str(RUNA))
@@ -603,7 +606,7 @@ commit(25, version(now0 - 6 * HR, now0 - 6 * HR), now0 - 6 * HR)
 assert git("rm", "-q", "g/25.json").returncode == 0 and git("commit", "-q", "-m", "delete 25", ct=now0 - 5 * HR).returncode == 0
 commit(25, version(now0 - 4 * HR, now0 - 4 * HR, mover=BACK), now0 - 4 * HR)
 vs25, why25 = LP.git_versions(T / "store", "g/25.json")
-r25 = LP.one(server, "g25", dry=True, now=now0)
+r25 = LP.one(HOST, "g25", dry=True, now=now0)
 check("20 an item file git saw deleted and then added back has no readable History: the version at the deleting commit is missing", vs25 == [] and "missing from the store's git" in why25, (vs25, why25))
 check("20 …so the pass refuses the item with the History class and the reason, and the file is left as it is", r25["action"] == "refused" and r25["class"] == LP.CLASS_HISTORY and "missing from the store's git" in r25["why"] and "last_activity" not in mt(25), r25)
 CFGM["migration"] = True
