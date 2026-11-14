@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live
 from stackshot.web import server
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
 from stackshot.web import render as _rmod
 from stackshot.web import publish as _web_publish
@@ -191,13 +192,13 @@ check("9: read still folds rulings: the passed notice carries its ruling, and ro
 
 # ---- 10. the client's read
 check("10: client.py knows the read", "notice" in client.READS)
-st, ctype, body = server._client_get("notice", {"key": id_drop})
+st, ctype, body = client_reads_svc._client_get("notice", {"key": id_drop})
 check("10: get notice <id> answers the lines get shows (200)", st == 200 and body == t_drop, (st, body))
-st, _c, body = server._client_get("notice", {"key": "deadbe"})
+st, _c, body = client_reads_svc._client_get("notice", {"key": "deadbe"})
 check("10: an unknown notice id is a 404 with the no-notice line", st == 404 and body.startswith("no notice deadbe"), (st, body))
-st, _c, body = server._client_get("notice", {"key": ""})
+st, _c, body = client_reads_svc._client_get("notice", {"key": ""})
 check("10: no id is a 400 that says what an id is", st == 400 and "six hex characters" in body, (st, body))
-st, _c, body = server._client_get("notice", {"key": f"board#{BID_A}"})
+st, _c, body = client_reads_svc._client_get("notice", {"key": f"board#{BID_A}"})
 check("10: an item id is a 400, not a notice", st == 400, (st, body))
 
 # ---- 11. the tool text says it

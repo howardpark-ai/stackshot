@@ -23,9 +23,9 @@ class Hooks:
     hand_stored_then: Callable[..., Any]  # service.answer_handover._hand_stored_then
     hold_flag: Callable[..., Any]  # holders._hold_flag
     is_held: Callable[..., Any]  # holders._is_held
-    item_mover_model: Callable[..., Any]  # server._item_mover_model
+    item_mover_model: Callable[..., Any]  # service/client_reads._item_mover_model
     load_or_none: Callable[..., Any]  # item_read._load_or_none
-    merge_progress_tick: Callable[..., Any]  # server._merge_progress_tick
+    merge_progress_tick: Callable[..., Any]  # service/merge_progress._merge_progress_tick
     model_of: Callable[..., Any]  # item_read._model_of
     old_wait_off: Callable[..., Any]  # item_read._old_wait_off
     own_repo: Callable[..., Any]  # service.released._own_repo

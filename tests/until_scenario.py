@@ -48,6 +48,7 @@ from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import recycle as recycle_svc
 from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -296,7 +297,7 @@ for kind, extra in (("anchor", {"wait_anchor": "https://example.test/x"}), ("eve
 hu, hw, hn = ({"status": "open", "metadata": {"hold": True, **kw}} for kw in ({"until": day(3)}, {"wake": day(3)}, {}))
 check("held_only_for_recycle (both renderers): a hold that stands on an until is not released by a recycle, as one that stands on a wake is not",
       all(not mod_.held_only_for_recycle(hu, []) and not mod_.held_only_for_recycle(hw, []) and mod_.held_only_for_recycle(hn, []) and not mod_.held_only_for_recycle(hn, ["a9"]) for mod_ in (RR, UR)))
-check("server._held_only_for_recycle: the same through the server, from the files", not server._held_only_for_recycle(hu) and server._held_only_for_recycle(hn))
+check("recycle_svc._held_only_for_recycle: the same through the server, from the files", not recycle_svc._held_only_for_recycle(hu) and recycle_svc._held_only_for_recycle(hn))
 vf = lambda **kw: {"status": "open", "metadata": {"state": "verifying", "end": day(2), "needs": [BACK], "project": "projects/quill", **kw}}
 check("waits_on_end (both renderers): a verifying item waits on its end date only when it stores no until", all(mod_.waits_on_end(vf()) and not mod_.waits_on_end(vf(until=day(3))) for mod_ in (RR, UR)))
 

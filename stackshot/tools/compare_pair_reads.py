@@ -96,8 +96,8 @@ def rows_at(server: Any, store: Path, now: float, label: str) -> list[dict[str, 
             fields = model.view(probe, mod, now, ao, check=False)
             stored = model.view(probe, mod, now, ao)
             with SP.fields_only(server):
-                list_fields = server._item_list(probe)
-            list_stored = server._item_list(probe)
+                list_fields = server._client_reads._item_list(probe)
+            list_stored = server._client_reads._item_list(probe)
         meta = it.get("metadata") or {}
         out.append({"item": _gh.shown(g), "gid": g, "at": label, "stored": {"phase": meta.get("phase"), "waits_on": meta.get("waits_on")},
                     "fields": list(model.shown_pair(fields)), "shown": list(model.shown_pair(stored)), "list_fields": list_fields, "list_shown": list_stored,

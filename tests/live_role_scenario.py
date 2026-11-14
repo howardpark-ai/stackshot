@@ -45,6 +45,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
@@ -63,10 +64,10 @@ item(5, "home-other", mover="home-other")                       # no role for ei
 item(8, "home-owner", needs=["team-back"], state="parked", wake=time.strftime("%Y-%m-%d", time.gmtime(now0 + 20 * DAY)), post_wake_mover="team-back")   # waiting: team-back is named in needs and takes it after the wait
 item(9, "home-owner", state="parked", wake=time.strftime("%Y-%m-%d", time.gmtime(now0 + 20 * DAY)), post_wake_mover="team-back")   # waiting: team-back takes it after the wait and is named nowhere
 item(6, "home-owner", mover="home-front")                       # created by another session, moved by the asking session and named nowhere: a hand-back whose needs were cleared
-rows = {x["shown"]: x for x in json.loads(server._client_items(U["home-front"])[2])["items"]}
+rows = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["home-front"])[2])["items"]}
 check("1: the items read lists the items the session moves, and not the ones it only created or another session moves", sorted(rows) == ["a1", "a4", "a6"], sorted(rows))
 check("1: …each reads mover, and no item row carries a keeper role any more", all(rows[k]["roles"] == ["mover"] and "role" not in rows[k] for k in rows), {k: (v.get("roles"), v.get("role")) for k, v in rows.items()})
-back = {x["shown"]: x for x in json.loads(server._client_items(U["team-back"])[2])["items"]}
+back = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["team-back"])[2])["items"]}
 check("1: …the background agent reads 'needs' where it is named in needs (with the old role marker kept), 'mover' where it moves the item, and 'then' where it takes the item after a wait (a9, named nowhere)",
       sorted(back) == ["a2", "a3", "a4", "a8", "a9"] and back["a3"]["roles"] == ["mover"] and "role" not in back["a3"] and back["a2"]["roles"] == ["mover", "needs"] and back["a4"]["roles"] == ["needs"]
       and back["a8"]["roles"] == ["then", "needs"] and back["a9"]["roles"] == ["then"] and back["a2"].get("role") == "agent" and back["a4"].get("role") == "agent", {k: (v.get("roles"), v.get("role")) for k, v in back.items()})
@@ -96,7 +97,7 @@ legacy = [{k: v for k, v in rows["a1"].items() if k != "roles"}]
 # a closed item is never listed
 item(7, "home-owner", mover="home-front")
 d7 = json.loads((T / "store/a/7.json").read_text()); d7["status"] = "completed"; (T / "store/a/7.json").write_text(json.dumps(d7))
-check("1: …a closed item the session moved is not listed", "a7" not in {x["shown"] for x in json.loads(server._client_items(U["home-front"])[2])["items"]}, None)
+check("1: …a closed item the session moved is not listed", "a7" not in {x["shown"] for x in json.loads(client_reads_svc._client_items(U["home-front"])[2])["items"]}, None)
 check("1: a row from a server that sends no roles reads as it did", 'a1 "[home] item 1" (next: step one of a1)' in pg.board_ask(["a write"], legacy) and pg.role_note(legacy[0]) == "", pg.board_ask(["a write"], legacy))
 
 # --- 2: the server logs why a call was refused ---

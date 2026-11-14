@@ -6,7 +6,7 @@ agent through `audit/busy_tell.py`, and a live background mover's silence throug
 
   counts   a step marked done or dropped, a state change (the item's status, its phase, the kind of its wait, its mover, its state or its needs), a pull request merged for the item
            (the "merged <ref>" entry of `metadata.released_told` the server adds when the merge settles the item; and a key of `metadata.merged_seen`, which the server adds when the
-           hub saw a pull request tied to the item merge: scoped to it by an anchor, its body naming the item, or the item's own words naming it; `server._merge_progress_tick`, the hub's
+           hub saw a pull request tied to the item merge: scoped to it by an anchor, its body naming the item, or the item's own words naming it; `service/merge_progress.py`'s `_merge_progress_tick`, the hub's
            merge log), the item being created
   does not a status line (`work`), a note, a reply, a message, a bare confirm, a new or reworded step, a description edit; and a save that is no one's write about the work (an audit's, a migration's,
            the server's own bookkeeping) moves the item only by a status or phase change (a wake, a close), never by a step mark, a merge note, a mover, a state or needs"""

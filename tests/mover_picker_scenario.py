@@ -56,6 +56,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk; from stackshot.web import render
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import item_read as _item_read
 from stackshot.core import config as _cfg
 from stackshot.service import store as _service_store
@@ -157,7 +158,7 @@ check("get: …with the owner as picker, the then is shown", f"mover: {OWN} (pic
 check("get: …the model line says so, and no model-conflict line is printed for a mover on a waiting item", any(x.startswith("model: waiting") and x.endswith("· mover zed-helper") for x in g1) and not any("model conflict" in x for x in g1), g1)
 check("get: …two different pickers stored: one conflict line", sum("model conflict" in x for x in g4) == 1, g4)
 check("get: an alive item an agent moves shows no then line and no conflict", "mover: zed-helper" in g5 and not any(x.startswith("then:") for x in g5) and not any("model conflict" in x for x in g5), g5)
-check("roles: a waiting item's picker has the role then; with him as picker, the then beside him", server._then_label_raw({**rd(1), "gid": "a1"}) == HELP and server._then_label_raw({**rd(3), "gid": "a3"}) == HELP and server._then_label_raw({**rd(5), "gid": "a5"}) == "", None)
+check("roles: a waiting item's picker has the role then; with him as picker, the then beside him", client_reads_svc._then_label_raw({**rd(1), "gid": "a1"}) == HELP and client_reads_svc._then_label_raw({**rd(3), "gid": "a3"}) == HELP and client_reads_svc._then_label_raw({**rd(5), "gid": "a5"}) == "", None)
 check("then label: the notice's then names the picker of a waiting item", telling.then_label({**rd(1), "gid": "a1"}) != "" and telling.then_label({**rd(5), "gid": "a5"}) == "", None)
 
 # ================================================================ the renderer's who line

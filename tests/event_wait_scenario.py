@@ -66,6 +66,7 @@ def refused(name, f, *want):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import recycle as recycle_svc
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -236,7 +237,7 @@ item(31, wait_kind="event", wait_event="recycle othermachine", ask_by=day(5), po
 item(32, wait_kind="event", wait_event="fleet_op many", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a many-session op")
 item(33, wait_kind="event", wait_event="fleet_op recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a recycle op")
 reset()
-server._recycled("testbox", "recycle", started=now0 - 120, result="ok", skipped=[], flag_at=now0 - 120)
+recycle_svc._recycled("testbox", "recycle", started=now0 - 120, result="ok", skipped=[], flag_at=now0 - 120)
 check("recycle: the end-of-recycle hook turns a recycle wait (any machine) and a fleet op wait for that verb; another machine's recycle wait and a many-session wait are not touched (the hook does not know the count)",
       mt(30).get("mover") == BACK and "a recycle finished on testbox" in mt(30)["woke"]["what"] and mt(33).get("mover") == BACK and mt(31).get("wait_kind") == "event" and mt(32).get("wait_kind") == "event", (mt(30), mt(31), mt(32), mt(33)))
 check("recycle: …each woken item's mover is told (several items in one pass are one message)", {g for x in sent("watch") for g in x[0].split(",")} >= {"a30", "a33"} and all(x[1] == UB for x in sent("watch")), sent())
@@ -290,7 +291,7 @@ check("backstop: …told in one line", [x[0] for x in sent("watch")] == ["a40"] 
 item(50, wait_kind="event", wait_event="recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], recycle=True, recycle_at=now0, mover=BACK, subject="[home] waits for the next recycle")
 item(51, mover=BACK, recycle=True, recycle_at=now0, subject="[home] asks for a recycle")
 item(52, wait_kind="event", wait_event="recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], mover=BACK, recycle_at=now0, subject="[home] only waits for the next recycle")
-wanted = server._recycle_wanted("testbox")
+wanted = recycle_svc._recycle_wanted("testbox")
 check("recycle-wanted: an item that asks for a recycle is counted, an event wait that carries the recycle flag too asks the same, one that only waits for the next recycle (no flag) is not",
       "a51" in wanted and "a50" in wanted and "a52" not in wanted, wanted)
 

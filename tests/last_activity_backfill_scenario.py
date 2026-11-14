@@ -16,7 +16,7 @@ item lock, an undo file and a backup written before the first write, a refused c
   9  script          tools/last_activity_backfill.py: --apply plans first, backs up every touched file byte for byte and writes the undo file before the first write, ends 3 for the refused items; a second apply writes nothing;
                      --undo puts the records back (the key goes when it had none) and keeps one a later save changed; twice is a no-op; the dry run over a copy writes nothing live
   15 logs            the hub's logs, or the anchors that tie them, cannot be read: the dry run warns and the real pass refuses
-  16 anchors         `server._merge_tied` reports an anchors-read error as a problem of the answer (the live passes still tie the rest); the ties come back as a problem, the route refuses, apply writes nothing
+  16 anchors         `mprog_svc._merge_tied` reports an anchors-read error as a problem of the answer (the live passes still tie the rest); the ties come back as a problem, the route refuses, apply writes nothing
   17 plan read twice the plan read twice is the same plan; --apply reads it twice, right before the write
   18 dry run exit 1 a dry run whose second pass on the copy would still change something exits 1 (a refusal in the History is exit 0)
   19 renames         the store's log is made with --no-renames: a moved file shows under both names, and the new one holds only its own History
@@ -71,6 +71,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.service import merge_progress as mprog_svc
 from stackshot.anchors import anchors as _anc
 from stackshot.model import merge_tie as _mtie
 from stackshot.core import config as _cfg
@@ -271,8 +272,8 @@ for p_, rows in ((MLOG.path(), [{"ts": now0 - 3 * HR, "repo": "owner/repo", "n":
     p_.parent.mkdir(parents=True, exist_ok=True); p_.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 reset_files = lambda: [write_file(i, {k: v for k, v in json.loads(orig_bytes[i]).items() if k != "id"}) for i in (11, 12, 13, 14, 16, 19, 20, 22)]
 reset_files()      # the eight as the History left them (no record), for the events to be the newest signal
-orig_tied = server._merge_tied
-server._merge_tied = lambda rows, now: [(r, f"{r['repo']}#{r['n']}", {"g19": "anchored"}) for r in rows if r["n"] == 9]      # the live tie is merge_tie's, covered by its own suite; here the lines are tied to one item
+orig_tied = mprog_svc._merge_tied
+mprog_svc._merge_tied = lambda rows, now: [(r, f"{r['repo']}#{r['n']}", {"g19": "anchored"}) for r in rows if r["n"] == 9]      # the live tie is merge_tie's, covered by its own suite; here the lines are tied to one item
 rows_, probs_ = LP.pr_rows(server, now0)
 check("8 the two logs are read whole, each line on its own (a merge-log line is a merge)", not probs_ and sorted((r["kind"], r["n"]) for r in rows_) == [("ci_failed", 99), ("comment", 9), ("merged", 9), ("review", 9)], (rows_, probs_))
 tied, tie_why = LP.ties(server, now0)
@@ -280,7 +281,7 @@ check("8 …the ties read without a problem", tie_why == "", tie_why)
 check("8 a tied event is a signal at the time the hub saw it, of its kind; a line stamped days ahead of the clock is dropped", [(s["kind"], s["what"], s["at"]) for s in tied.get("g19", [])] == [("pr_merged", "PR 9 merged", now0 - 3 * HR), ("comment", "comment on #9", newer)], tied)
 r19 = LP.one(server, "g19", dry=True, tied=tied, now=now0)
 check("8 …the newest of the History and the events is the record (a comment 20 minutes ago over a creation 8 hours ago)", r19["action"] == "would_set" and (r19["kind"], r19["at"]) == ("comment", newer), r19)
-server._merge_tied = orig_tied
+mprog_svc._merge_tied = orig_tied
 r19b = LP.one(server, "g19", dry=True, tied={}, now=now0)
 check("8 …without the tie the record is the History's alone (created 8 hours ago)", (r19b["kind"], r19b["what"], r19b["at"]) == ("state_change", "created", now0 - 8 * HR), r19b)
 
@@ -453,7 +454,7 @@ check("14 the plan's signature carries each item's time and kind: a different ti
 check("14 …except a time that is `now` (clamped), which moves with the clock by itself", BF.signature([{**rowA, "clamped": True, "at": 5.0}]) == BF.signature([{**rowA, "clamped": True, "at": 9.0}]) and BF.signature([{**rowA, "clamped": True}]) != BF.signature([rowA]), None)
 check("14 the pass marks a record that is `now` as clamped (the version ten minutes ahead) and no other", dry[20]["clamped"] is True and all(dry[i]["clamped"] is False for i in (11, 12, 13, 14, 16, 19, 22)), {i: dry[i].get("clamped") for i in dry})
 reset(); snapQ = snapshot()
-server._merge_tied = lambda rows, now: [(r, f"{r['repo']}#{r['n']}", {"g19": "anchored"}) for r in rows if r["n"] == 9]
+mprog_svc._merge_tied = lambda rows, now: [(r, f"{r['repo']}#{r['n']}", {"g19": "anchored"}) for r in rows if r["n"] == 9]
 st_, d_ = call(op="lastact", items=[f"g{i}" for i in OPEN], dry=True)
 planf = T / "lactfill-plan.json"; planf.write_text(json.dumps(d_["results"], default=str), encoding="utf-8")
 RUN4 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run4-"))
@@ -467,7 +468,7 @@ check("14 an event that arrived after the dry run changes an item's time: the ap
       and len([x for x in RUN4.iterdir() if UM.PASS_DIR_RX.fullmatch(x.name)]) == 1, (rcQ, errQ[-400:]))
 rcQ2, outQ2, errQ2 = cli(BF.apply, run_dir=str(RUN4), plan=str(planf), allow_changed_plan=True)
 check("14 …and --allow-changed-plan applies it, with the newer time", rcQ2 == 3 and rec_of(19)["at"] == now0 - 2 * MIN, (rcQ2, errQ2[-300:], rec_of(19)))
-ELOG.path().write_text(elog_before, encoding="utf-8"); server._merge_tied = orig_tied; reset()
+ELOG.path().write_text(elog_before, encoding="utf-8"); mprog_svc._merge_tied = orig_tied; reset()
 
 # ---- 15. the hub's logs cannot be read: the dry run warns and the real pass refuses
 snapT = snapshot()
@@ -520,7 +521,7 @@ for label, owner_, attr, raises in (("the anchors file", _anc, "load", True), ("
     RUNA = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-runa-"))
     setattr(owner_, attr, broken)
     try:
-        try: res_tied, raised = server._merge_tied(sample, now0), False
+        try: res_tied, raised = mprog_svc._merge_tied(sample, now0), False
         except RuntimeError: res_tied, raised = None, True
         tied_a, why_a = LP.ties(server, now0)
         st_dry, d_dry = call(op="lastact", items=["g11"], dry=True)
@@ -534,7 +535,7 @@ for label, owner_, attr, raises in (("the anchors file", _anc, "load", True), ("
           and st_real == 400 and "could not be read" in d_real["error"] and snapshot() == snapA, (st_dry, d_dry.get("ties_problem"), st_real, d_real))
     check(f"16 …--apply refuses before it backs anything up or writes: exit 1, no pass folder, no file changed, {label}", rcA == 1 and "plan is refused" in errA and snapshot() == snapA
           and not [x for x in RUNA.iterdir() if UM.PASS_DIR_RX.fullmatch(x.name)], (rcA, errA[-400:]))
-check("16 with the anchors readable `_merge_tied` has no problem, and the same call is served", getattr(server._merge_tied(sample, now0), "problem", None) == "" and call(op="lastact", items=["g11"], dry=True)[1].get("ties_problem") is None, None)
+check("16 with the anchors readable `_merge_tied` has no problem, and the same call is served", getattr(mprog_svc._merge_tied(sample, now0), "problem", None) == "" and call(op="lastact", items=["g11"], dry=True)[1].get("ties_problem") is None, None)
 
 # ---- 17. the plan read twice is the same plan
 reset(); snapR = snapshot()

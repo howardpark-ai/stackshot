@@ -53,6 +53,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.service import mover_steps as _mover_steps; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.github import ghsync as G
 from stackshot.web import page_debts as _pdebts
 from stackshot.service import store as _service_store
@@ -262,30 +263,30 @@ def TS(i): return 1_800_000_000 + 100 * i
 def put_answers(shown, *answers):
     gid = _model_ids._norm_id(shown); it = _service_store._load(gid)
     it["metadata"]["answers"] = [{"ts": TS(i), "via": "board", **a} for i, a in enumerate(answers)]; writes.save(gid, it)
-st, ct, body = server._client_get("answer", {"key": out["item"]})
+st, ct, body = client_reads_svc._client_get("answer", {"key": out["item"]})
 check("get answer: an empty body before he answers", st == 200 and body == "", (st, body))
 put_answers(out["item"], {"kind": "decision", "choice": "Cut", "text": "Yes, cut it.\nTell Pat."})
-st, ct, body = server._client_get("answer", {"key": out["item"]})
+st, ct, body = client_reads_svc._client_get("answer", {"key": out["item"]})
 check("get answer: the kind (decision), the option's label, his text and when, tab-separated on one line", st == 200 and body == f"decision\tCut\tYes, cut it. / Tell Pat.\t{W(TS(0))}\n", (st, body))
 put_answers(out["item"], {"kind": "decision", "choice": "Keep", "text": ""}, {"kind": "comment", "text": "wait, make that\ttwo."})
-st, ct, body = server._client_get("answer", {"key": out["item"]})
+st, ct, body = client_reads_svc._client_get("answer", {"key": out["item"]})
 check("get answer: a decision followed by a later comment returns the decision (the comment does not hide it)", body == f"decision\tKeep\t\t{W(TS(0))}\n", repr(body))
 put_answers(out["item"], {"kind": "comment", "text": "first thought\tone"}, {"kind": "comment", "text": "wait, make that\ttwo."})
-check("get answer: comments alone return the newest comment (kind comment, no label, a tab in the text a space)", server._client_get("answer", {"key": out["item"]})[2] == f"comment\t\twait, make that two.\t{W(TS(1))}\n", server._client_get("answer", {"key": out["item"]})[2])
+check("get answer: comments alone return the newest comment (kind comment, no label, a tab in the text a space)", client_reads_svc._client_get("answer", {"key": out["item"]})[2] == f"comment\t\twait, make that two.\t{W(TS(1))}\n", client_reads_svc._client_get("answer", {"key": out["item"]})[2])
 put_answers(out["item"], {"kind": "decision", "choice": "Cut", "text": "early"}, {"kind": "comment", "text": "hm"}, {"kind": "decision", "choice": "Keep", "text": ""}, {"kind": "comment", "text": "and another"})
-check("get answer: the newest of several decisions wins over comments before and after it; a choice with no text", server._client_get("answer", {"key": out["item"]})[2] == f"decision\tKeep\t\t{W(TS(2))}\n", server._client_get("answer", {"key": out["item"]})[2])
+check("get answer: the newest of several decisions wins over comments before and after it; a choice with no text", client_reads_svc._client_get("answer", {"key": out["item"]})[2] == f"decision\tKeep\t\t{W(TS(2))}\n", client_reads_svc._client_get("answer", {"key": out["item"]})[2])
 put_answers(out["item"], {"kind": "comment", "text": "c"}, {"kind": "decision", "text": "Neither: do the smaller fix."})
-check("get answer: a decision in words (no option) after a comment", server._client_get("answer", {"key": out["item"]})[2] == f"decision\t\tNeither: do the smaller fix.\t{W(TS(1))}\n")
+check("get answer: a decision in words (no option) after a comment", client_reads_svc._client_get("answer", {"key": out["item"]})[2] == f"decision\t\tNeither: do the smaller fix.\t{W(TS(1))}\n")
 put_answers(out["item"], {"kind": "decision", "choice": "Keep", "text": ""})
 (T / "store/a/64.json").write_text(json.dumps({"id": "64", "subject": "[home] an old item", "description": "Old. Here. Done.", "status": "open", "metadata": {"owner": "home-sparrow-main", "project": "projects/alpha",
       "answers": [{"ts": 1.0, "kind": "decision", "choice": "Go", "text": "ok", "via": "board"}]}}))
 for form in ("a64", "A64"):
-    check(f"get answer: an older item's id ({form}) is read as the tools read it", server._client_get("answer", {"key": form}) == (200, "text/plain; charset=utf-8", f"decision\tGo\tok\t{W(1.0)}\n"), server._client_get("answer", {"key": form}))
+    check(f"get answer: an older item's id ({form}) is read as the tools read it", client_reads_svc._client_get("answer", {"key": form}) == (200, "text/plain; charset=utf-8", f"decision\tGo\tok\t{W(1.0)}\n"), client_reads_svc._client_get("answer", {"key": form}))
 sid_new = _model_ids._norm_id(out["item"])
-check("get answer: the store form of a new item's id (s<n>) works as well as the form shown", server._client_get("answer", {"key": sid_new})[2] == server._client_get("answer", {"key": out["item"]})[2], sid_new)
-st, ct, body = server._client_get("answer", {"key": f"board#{BID_A}"}); check("get answer: an item that does not exist is 404", st == 404, (st, body))
-st, ct, body = server._client_get("answer", {"key": "nonsense"}); check("get answer: a malformed id is 404", st == 404, (st, body))
-st, ct, body = server._client_get("answer", {}); check("get answer: no key is 400", st == 400, (st, body))
+check("get answer: the store form of a new item's id (s<n>) works as well as the form shown", client_reads_svc._client_get("answer", {"key": sid_new})[2] == client_reads_svc._client_get("answer", {"key": out["item"]})[2], sid_new)
+st, ct, body = client_reads_svc._client_get("answer", {"key": f"board#{BID_A}"}); check("get answer: an item that does not exist is 404", st == 404, (st, body))
+st, ct, body = client_reads_svc._client_get("answer", {"key": "nonsense"}); check("get answer: a malformed id is 404", st == 404, (st, body))
+st, ct, body = client_reads_svc._client_get("answer", {}); check("get answer: no key is 400", st == 400, (st, body))
 
 # ---- 5. over HTTP and through client.py
 app = server.mcp.http_app()
@@ -420,7 +421,7 @@ readme = _docs.page("client-contract")
 check("the docs' client contract documents POST /client/question and GET /client/answer", "POST /client/question" in readme and "GET /client/answer" in readme and "fresh item per question" in readme
       and "A caller resumes only on `decision`" in readme and "**the fleet tool passes one per parked question**" in readme and "Filed by <sender> (a script on" in readme and "GitHub issue comment" not in readme and "the keeper is the owner itself" in readme and "never reads the project record" in readme and "newest `decision`" in readme)
 check("the pilot_charge docstring says a script's filing is never charged to the owner, the keeper being the owner included", "the owner itself" in telling.pilot_charge.__doc__)
-check("the 404 lists of the client API name the new entries", "question" in server._client_post(me, "nope", {})[1]["error"] and "answer?key=" in server._client_get("nope", {})[2])
+check("the 404 lists of the client API name the new entries", "question" in server._client_post(me, "nope", {})[1]["error"] and "answer?key=" in client_reads_svc._client_get("nope", {})[2])
 
 # ---- a script's subject is cut to the subject limit, never refused (a script's item must not be lost on a 400)
 LONG_SUBJ = "[home] " + " ".join(f"Cut the retry of step {i}?" for i in range(1, 8))       # about 170 characters

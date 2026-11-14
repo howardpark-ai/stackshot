@@ -84,6 +84,7 @@ from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.web.tools import notes as _notes_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import store as _service_store
 from stackshot.core import readonly as _ro
@@ -116,7 +117,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK; writes.time = CLK
+CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first."""
     d_ = _service_store._load(f"a{i}"); mutate(d_); CLK.t = ts
@@ -400,12 +401,12 @@ try:
     with _Err() as e_: out = server._event_activity_tick(now0 + 63 * MIN)
 finally: EL.read = real_read
 check("5 a failure of the read is logged and the pass returns, raising nothing", out == [] and "pass failed" in e_.text, e_.text[:200])
-real_tied = server._merge_tied
-server._merge_tied = lambda rows, now: (_ for _ in ()).throw(RuntimeError("items unreadable"))
+real_tied = mprog_svc._merge_tied
+mprog_svc._merge_tied = lambda rows, now: (_ for _ in ()).throw(RuntimeError("items unreadable"))
 off_ = EL.load_offset()
 try:
     with _Err() as e_: out = ev_pass(now0 + 64 * MIN)
-finally: server._merge_tied = real_tied
+finally: mprog_svc._merge_tied = real_tied
 check("5 items that cannot be read at all: nothing is saved and the offset stays, so the lines are read again", out == [] and EL.load_offset() == off_ and "items not read" in e_.text, (out, EL.load_offset(), off_))
 saved = ev_pass(now0 + 65 * MIN)
 check("5 …and the next pass applies them", sorted(saved) == ["a420", "a421"] and la(420) == {"at": now0 + 62 * MIN, "what": "review on PR 60"}, (saved, la(420)))
@@ -429,7 +430,7 @@ put(430, mover="home-peer")
 ML.append({"ts": now0 + 80 * MIN, "repo": "acme/widgets", "n": 70, "refs": []}); emit(70, "pr_merged", "alice", 80 * MIN)
 CLK.t = now0 + 81 * MIN
 gh_ = _cfg.CFG.setdefault("github", {}); gh_["issues_letter"] = "a"
-try: moved = server._merge_progress_tick(now0 + 81 * MIN)
+try: moved = mprog_svc._merge_progress_tick(now0 + 81 * MIN)
 finally: CLK.t = None
 check("5 the merge pass is as before: it records the merge in merged_seen and moves activity, and the record says which pull request merged", moved == ["a430"] and mt(430).get("merged_seen") == ["acme/widgets#70"] and rd(430)["activity"] == now0 + 81 * MIN
       and la(430) == {"at": now0 + 81 * MIN, "what": "PR 70 merged"}, (moved, la(430), rd(430).get("activity")))
@@ -587,7 +588,7 @@ check("8 last_activity: with a clock given, a stored time after it is ignored; w
       LA.apply(dict(ahead, metadata=dict(ahead["metadata"])), [S_(50)], now=100) and not LA.apply(dict(ahead, metadata=dict(ahead["metadata"])), [S_(50)])
       and LA.record(ahead, [S_(50)], 100)["at"] == 50.0 and LA.record(ahead, [S_(50)])["at"] == 900.0, None)
 # the item is read again under the lock: closed, held or begun to wait between the tie and the save
-real_tied = server._merge_tied
+real_tied = mprog_svc._merge_tied
 def tie_then(mutate):
     def f(rows, now):
         out = real_tied(rows, now); mutate(); return out
@@ -600,9 +601,9 @@ def wait_it():
     d_ = rd(474); d_["metadata"].update(wake="2999-01-01T00:00", phase="waiting", waits_on="time"); wr(474, d_)
 for n_, i_, fn_, what_ in ((102, 472, close_it, "closed"), (103, 473, hold_it, "put on hold"), (104, 474, wait_it, "begun to wait")):
     emit(n_, "comment", "alice", 121 * MIN)
-    server._merge_tied = tie_then(fn_)
+    mprog_svc._merge_tied = tie_then(fn_)
     try: saved = ev_pass(t8 + 22 * MIN)
-    finally: server._merge_tied = real_tied
+    finally: mprog_svc._merge_tied = real_tied
     after_ = rd(i_)
     check(f"8 an item {what_} between the tie and the save is not stamped", saved == [] and "last_activity" not in after_["metadata"], (saved, after_["metadata"].get("last_activity")))
 # a bot by its type: the payload says Bot, the login has no suffix
@@ -907,7 +908,7 @@ check("14 …the pass credits the item the anchor is scoped to (pr_merged at the
       sorted(saved) == ["a600", "a603"] and lk(600) == "pr_merged" and la(600)["what"] == "PR 90 merged" and abs(la(600)["at"] - (t13 - 2 * H)) < 5 and abs(la(603)["at"] - (t13 - 20 * H)) < 5
       and la(601) is None and la(604) is None, (saved, la(600), la(603), la(601), la(604)))
 (T / "state/merge-progress.json").unlink(missing_ok=True); gh_["issues_letter"] = "a"; CLK.t = time.time() + 5
-try: done13 = server._merge_progress_tick(time.time() + 5)
+try: done13 = mprog_svc._merge_progress_tick(time.time() + 5)
 finally: CLK.t = None
 check("14 …and the merge pass records the 2-hour merge on its item but not the 20-hour one, which is past its floor (credited as activity by the event pass)",
       done13 == ["a600"] and "acme/widgets#90" in (mt(600).get("merged_seen") or []) and not mt(603).get("merged_seen"), (done13, mt(600).get("merged_seen"), mt(603).get("merged_seen")))
