@@ -200,6 +200,14 @@ setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": "PR #83 up", "stat
 check("1 …a status line in any state but done counts", RELWORDS(gate(rel_live(units=(83,)))))
 reset()
 
+setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": "PR #83 in the merge queue", "state": "in progress"}})
+check("1 a status line naming a pull request whose unit does not run is not counted although that pull request's log is fresh (only a unit proves it)", ok(gate(rel_live(units=(99,), logs={83: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))), gate(rel_live(units=(99,), logs={83: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)})))
+setsteps({"text": OPENSTEP, "status": "open"}, {"text": f"{BACK}: land it", "status": "done", "tag": {"text": "PR #83 in the merge queue", "state": "in progress"}})
+check("1 the status line a DONE step still carries (its state left at in progress) ties nothing: only an open step's line is read", ok(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
+setsteps({"text": OPENSTEP, "status": "open"}, {"text": f"{BACK}: try it", "status": "dropped", "tag": {"text": "PR #83 in review", "state": "in progress"}})
+check("1 …nor a dropped step's", ok(gate(rel_live(units=(83,)))))
+reset()
+
 # the description, a done step, a dropped step and any other free text never tie (a refusal is never a wrong one)
 setdesc(1, "- Fixes the export in PR 83, see PR #83 and https://github.com/%s/pull/83" % OWN)
 check("2 a description that names `PR 83`, `PR #83` and its URL while PR 83 is released under another item ties nothing: the hold passes", ok(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
