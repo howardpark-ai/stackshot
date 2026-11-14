@@ -2,7 +2,7 @@
 
 An open item now stores alive or waiting directly (the item model, model.py), and no call sets or clears a state word any more: the inputs state, clear_state, party, chase, end and proof of update are
 retired (retired_inputs.py, which refuses a call that passes one). This module stays as the reader of what older items still store: a stored state word and the fields a state carried, validated, derived and worded
-as before. The only writers left are update(step=...) (stores your-step) and update(supplies=...) (stores blocked); a write that leaves an item unable to stand in its stored state drops the word (server._state_apply).
+as before. The only writers left are update(step=...) (stores your-step) and update(supplies=...) (stores blocked); a write that leaves an item unable to stand in its stored state drops the word (mover_steps._state_apply).
 
 The seven words, as an older item stored them:
 

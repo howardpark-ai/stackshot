@@ -20,7 +20,7 @@ from stackshot.model import model as _model
 from stackshot.model import steps as _steps
 
 NEAR = 5.0                      # seconds: a done step of his this close to an answer's time is that answer's step
-NONE_TEXT = "answer the ask on the item"      # server._OWNER_STEP_NONE, the step of an item that asked with no ask line
+NONE_TEXT = "answer the ask on the item"      # holders._OWNER_STEP_NONE, the step of an item that asked with no ask line
 
 
 def _base(rec: dict[str, Any]) -> str:

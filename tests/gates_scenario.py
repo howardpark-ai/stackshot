@@ -78,7 +78,9 @@ def patched(owner, **kv):
         for k, v in old.items(): setattr(mod, name(k), v)
 from stackshot.service import item_read as _item_read
 from stackshot.model import holders as _holders
-_SRV_MOVED = {"_model_guards_on": _item_read, "_role_of": _holders}                    # the hook names that left the server: their owner modules
+from stackshot.service import mover_steps as _mover_steps
+from stackshot.service import owner_words as _owner_words
+_SRV_MOVED = {"_model_guards_on": _item_read, "_role_of": _holders, "_eff_state": _mover_steps}                    # the hook names that left the server: their owner modules
 @contextlib.contextmanager
 def srv(**kv):                    # what the hooks look up on the server (or on the owner of a moved name) when a gate runs
     with contextlib.ExitStack() as st:
@@ -446,7 +448,7 @@ check("4 install replaces the table (the last one installed is the one the gates
 with srv(_model_guards_on=lambda: False):
     check("4 a hook that is a function is looked up on the server when the gate runs: a patched _model_guards_on reaches gate_draft", gates._hooks().model_guards_on() is False)
 check("4 the hand-off functions the gates use are the hand-off module's own, not hooks (a patched one is set on service/handoff.py)", not hasattr(gates._hooks(), "handoff_pane") and not hasattr(gates._hooks(), "ho_same") and gates._handoff is handoff_svc)
-check("4 a value hook is the server's own value (the sentence a refused close ends with, the close rule, the outcomes)", gates._hooks().relaunch == server._RELAUNCH and gates._hooks().close_refusal == _wt_text._CLOSE_REFUSAL and gates._hooks().outcomes == server.OUTCOMES)
+check("4 a value hook is the server's own value (the sentence a refused close ends with, the close rule, the outcomes)", gates._hooks().relaunch == _owner_words._RELAUNCH and gates._hooks().close_refusal == _wt_text._CLOSE_REFUSAL and gates._hooks().outcomes == _owner_words.OUTCOMES)
 
 # ---------------------------------------------------------------- 5. shape
 GATES_SRC = pathlib.Path(STACK, "stackshot/service/gates.py").read_text(encoding="utf-8")

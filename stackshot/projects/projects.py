@@ -365,7 +365,7 @@ def ref(x, reg: dict | None = None):
     return r[0] if r else None
 
 
-project_ref = ref       # the name the design gives it: `projects.project_ref(x)`; the server has the same, `server.project_ref(x)`
+project_ref = ref       # the name the design gives it: `projects.project_ref(x)`; the save steps have the same, `mover_steps.project_ref(x)`
 
 
 # ---------------------------------------------------------------------------- the read-through for scripts: the record first, the page's lines for what it does not hold

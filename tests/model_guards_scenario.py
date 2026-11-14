@@ -76,7 +76,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.service import gates; from stackshot.web import server; from stackshot.service import owner_words as _owner_words; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.github import ghsync as _gh
@@ -440,7 +440,7 @@ upd(187, priority="p2"); upd(187, subject="[home] item 187 renamed"); upd(187, p
 check("6d owner mover: …a rename, a priority and a project write still pass", mt(187).get("priority") == "p2" and rd(187)["subject"].endswith("renamed"), mt(187))
 item(42, needs=[BACK], state="doing", mover=OWN, expected_by=day(2), next=f"{BACK}: keep going", desc="- The thing is a long one with a long first line and another thing after it\n- It lives here and a lot more of it\n- Done when it is done")
 d_rb = rd(42)["description"]
-r_rb = server._rebullet_write({"item": "a42", "sender": "rebullet-pass", "old": d_rb, "description": "- The thing is a long one\n- It has a long first line and another thing after it\n- It lives here and a lot more of it\n- Done when it is done"}, "box-a")
+r_rb = _owner_words._rebullet_write({"item": "a42", "sender": "rebullet-pass", "old": d_rb, "description": "- The thing is a long one\n- It has a long first line and another thing after it\n- It lives here and a lot more of it\n- Done when it is done"}, "box-a")
 check("6d owner mover: …and the re-bullet route (it sets no state)", r_rb["action"] == "set" and rd(42)["description"] != d_rb and mt(42)["mover"] == OWN, (r_rb, rd(42)["description"]))
 upd(187, step=STEP)
 check("6d owner mover: …and with the switchover on the fix still goes through", mt(187)["state"] == "your-step", mt(187))
@@ -532,10 +532,11 @@ finally:
 check("6c migration: it posts nothing to GitHub (mirror off), though it rewrote items", len(done) >= 5 and mig_calls == [], (done, mig_calls))
 check("6c migration: it rewrites the items that need it, and no other", sorted(g for g in done if g in {f"a{n}" for n in [*range(28, 37), 49, 50]}) == ["a34", "a35", "a36", "a49", "a50"], done)
 check("6c migration: an old answer followed by a deliberate mover=Oliver (with a later record, or no record) is left byte for byte", all(raw(n) == before_mig[n] for n in (158, 159)), None)
-check("6c migration: a waiting item loses only its mover: then=Oliver (the post-wake mover) stays as stored, and the stale hand-off line ends",
-      "mover" not in mt(36) and mt(36)["then"] == OWN and isinstance(mt(36)["handoff"]["taken_at"], float), mt(36))
+check("6c migration: a waiting item keeps its stored mover=Oliver (where he picks it up when the wait ends is written) and its then, and the stale hand-off line ends",
+      mt(36)["mover"] == OWN and mt(36)["then"] == OWN and isinstance(mt(36)["handoff"]["taken_at"], float), mt(36))
 check("6c settle: …the same through model.settle (a waiting item: only the mover, no then key; a hand-back to an agent: the agent mover and then cleared as Done does)",
-      model.settle(rd(36), True) is None and model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True) == {"mover": ""}
+      model.settle(rd(36), True) is None and model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True) is None
+      and model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True, waiting=True) == {"mover": ""}
       and model.settle({**rd(143), "metadata": {**mt(143), "mover": OWN, "then": BACK}}, True) == {"mover": BACK, "then": ""}, model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True))
 check("6c migration: an agent mover on an item that waits on him becomes he, the agent in then", mt(49)["mover"] == OWN and mt(49)["then"] == BACK, mt(49))
 check("6c migration: the mover he held in an agent's state with a then goes back to the agent", mt(50)["mover"] == BACK and "then" not in mt(50), mt(50))
@@ -558,7 +559,7 @@ it_d = _service_store._load("a40"); it_d["metadata"]["needs"] = ["decision", BAC
 writes.save("a40", it_d)
 it_d = _service_store._load("a40"); it_d["metadata"].update(needs=[BACK], wait_kind="relay", wait_event="Robin relays the quote", ask_by=day(5)); it_d["metadata"].pop("ask")
 writes.save("a40", it_d)
-check("6c mover: a save where a wait replaces his state makes the agent in then the mover who picks it up, and then goes", mt(40).get("mover") == BACK and "then" not in mt(40), mt(40))
+check("6c mover: a save where a wait replaces his state leaves his stored mover alone (the on-save backstop does not settle a waiting item: he picks it up when the wait ends), then beside him", mt(40).get("mover") == OWN and mt(40).get("then") == BACK, mt(40))
 set_cfg(guards=False, handoff=False)
 item(157, needs=["decision", BACK], mover=BACK, ask=ASK)
 check("6c migration: [model] guards = false and handoff = false: nothing to do", migsvc.migrate_owner_mover() == [], None)

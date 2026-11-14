@@ -85,7 +85,7 @@ class Hooks:
     ask_none: tuple[str, ...]      # the words that mean no ask, no observers, no check (server._ASK_NONE)
     ask_owed: Callable[..., Any]
     basis_put: Callable[..., Any]
-    basis_words: str                  # how the wait_basis gate names what a park waits on (server._BASIS_WORDS)
+    basis_words: str                  # how the wait_basis gate names what a park waits on (owner_words._BASIS_WORDS)
     cap_ok_drop: Callable[..., Any]
     cap_ok_put: Callable[..., Any]
     contact_alive: Callable[..., Any]

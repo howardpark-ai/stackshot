@@ -7,7 +7,7 @@ post_wake_mover, is still read, and while it is stored (not yet moved into mover
     post_wake_mover wins and one conflict line says so; the item's own `mover` stays empty while it waits; no conflict is named for a mover on a waiting item or a `then` beside an agent.
   * `then`: read beside the owner (alive, or the waiting item he picks up), not beside an agent, not stored-and-ignored into a conflict.
   * model.words: `· mover X`, `· mover <owner> (then Y)`; the derived tail still names post_wake_mover.
-  * model.settle: a wait that replaces his state makes the agent in `then` the picker; a stored agent mover on a waiting item is never dropped; with a post_wake_mover stored only his mover goes.
+  * model.settle (waiting=True, the update path's call): a wait that replaces his state makes the agent in `then` the picker; a stored agent mover on a waiting item is never dropped; with a post_wake_mover stored only his mover goes.
   * the server readers: `held_by`, get's mover and then lines, the model-conflict lines.
   * the watchers: a wake the owner picks up keeps the stored `then`; "not yet" keeps the picker (mover) the wait had; a record of the wait written under the old name is still read.
   * the renderer's who line.
@@ -131,7 +131,7 @@ check("words: …a mover the item does not store is named in the derived tail", 
 check("words: an alive item an agent moves shows no then", W_(D(needs=[BACK], mover=HELP, then=BACK)) == "model: alive · mover zed-helper", W_(D(needs=[BACK], mover=HELP, then=BACK)))
 
 # ================================================================ settle
-def S(meta, was_his=True): return model.settle({"status": "open", "metadata": {"project": "projects/zedwork", **meta}}, was_his)
+def S(meta, was_his=True, waiting=True): return model.settle({"status": "open", "metadata": {"project": "projects/zedwork", **meta}}, was_his, waiting=waiting)      # a waiting item settles only from the update path (waiting=True)
 check("settle: a wait replaces his state (mover him, an agent in then): the agent picks it up, then goes", S({"mover": OWN, "then": BACK, "hold": True, "wake": FUT, "wait_kind": "time"}) == {"mover": BACK, "then": ""}, S({"mover": OWN, "then": BACK, "hold": True, "wake": FUT, "wait_kind": "time"}))
 check("settle: …with no agent in then only the stale mover goes", S({"mover": OWN, "hold": True, "wake": FUT, "wait_kind": "time"}) == {"mover": ""}, None)
 check("settle: …a post_wake_mover stored beside his mover and an agent in then: only the mover goes, then and the old name stay as stored",

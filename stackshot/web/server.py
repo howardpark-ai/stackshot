@@ -103,7 +103,6 @@ from stackshot.model import states as _states  # noqa: E402  — an open item's 
 from stackshot.model import item_project as _ip  # noqa: E402  — an item's project by its permanent id: the id an item stores and the page key every reader reads through it (item_project.py)
 from stackshot.model import item_project_pass as _ipp  # noqa: E402  — the project-id pass: the ids stored on the items already there, and put back (item_project_pass.py)
 from stackshot.model import retire_fields as _retire  # noqa: E402  — the data change that takes the stored state words and carry fields out of storage: the plan and the undo entry (retire_fields.py)
-from stackshot.core import retired_inputs as _retired  # noqa: E402  — the old item-state inputs of create and update, and the refusal naming what to pass instead (retired_inputs.py)
 from stackshot.waits import waiting as _wt  # noqa: E402  — what an item waits on and whose move it is (waiting.py)
 from stackshot.model import model as _model  # noqa: E402  — the item model of the redesign: dead | alive | waiting, the mover and the wait, derived from the fields (model.py)
 from stackshot.model import queued as _queued  # noqa: E402  — a mover busy on another item: the rule that reads its other on-agent items as waiting, queued behind it (queued.py; `[model] queued_behind`)
@@ -113,14 +112,11 @@ from stackshot.model import model_guards as _mg  # noqa: E402  — the item mode
 from stackshot.model import steps as _steps  # noqa: E402  — the checklist behind next: done, dropped and open steps, next derived from it (steps.py)
 from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fleet event (wait_kind=event): the phrase, what matches it (event_waits.py)
 from stackshot.waits import watchers as _watch  # noqa: E402  — the waits' watchers of the item model: what ends a wait, the relay's ask, the chases (watchers.py)
-from stackshot.waits import wait_list as _wl  # noqa: E402  — a wait on a list of waits (wait_kind=list): the lines, what has arrived, when the group is over (wait_list.py; the one reader of `waits`)
 from stackshot.waits import handoff as _ho  # noqa: E402  — the hand-off machinery of the item model: the record, the clock, section 5 (handoff.py)
-from stackshot.model import rebullet as _rebullet  # noqa: E402  — the re-bullet pass's checks: a rewrite that lost a link, a number or a quote is refused (rebullet.py)
 from stackshot.model import migration as _mig  # noqa: E402  — the migration onto the item model: the planner; the server applies its writes (_migrations.migrate_write)
 from stackshot.model import nextlines as _nl  # noqa: E402  — whose lines are in an item's next: update replaces only the sender's, clear_next wipes all (nextlines.py)
 from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on the checklist: the server makes `<owner>: <what to decide>` for an ask or a your-step, ticks it with his answer, and a session cannot (owner_steps.py)
 from stackshot.model import step_proof as _sp  # noqa: E402  — a step that names the event which completes it: the patterns for its words and the explicit form (step_proof.py)
-from stackshot.waits import builderless as _bl  # noqa: E402  — a project with no builder: whom an answered step goes to, and a front agent handing an item to another front agent of its project (builderless.py)
 from stackshot.model import next_rules as _nr  # noqa: E402  — the write checks of Next: a line names who takes it (N1), a reworded step is no rewrite (N3), an open item keeps an open step (N6) (next_rules.py)
 from stackshot.model import bullet_text as _bt  # noqa: E402  — how a line reads and how a text becomes `- ` bullets, for the gates, the cold call's close and the question route (bullet_text.py)
 from stackshot.model import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
@@ -196,6 +192,10 @@ from stackshot.service import item_read as _item_read  # noqa: E402  — reading
 from stackshot.service import agents as _agents  # noqa: E402  — a project's -main agent and builder, the names a hand-off could name, the reader of many items' movers (service/agents.py)
 from stackshot.service import contacts as _contacts  # noqa: E402  — an item's contact: the readers, the write, what follows a retired or renamed agent, the backfill (service/contacts.py)
 from stackshot.service import pane_recovery as _pane_recovery  # noqa: E402  — pane liveness, a session or a machine down, the recovery request of a quiet mover and the park fallback (service/pane_recovery.py)
+from stackshot.service import mover_steps as _mover_steps  # noqa: E402  — the steps of a save that keep whose move an item is: the stored state, the mover settle, the owner's step on the checklist, the notes a read carries (service/mover_steps.py)
+from stackshot.service import owner_words as _owner_words  # noqa: E402  — the owner's words behind a write and who wrote it: the sender check, the said note, the cap-words and re-bullet writers (service/owner_words.py)
+from stackshot.service.owner_words import _BASIS_WORDS, _RELAUNCH, OUTCOMES  # noqa: E402  — the three values of the write path that the hook tables capture by value (service/owner_words.py)
+from stackshot.service import save_hooks as _save_hooks  # noqa: E402  — what the save steps and the owner's words still reach in the surface (service/save_hooks.py)
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
@@ -488,8 +488,8 @@ def _phase_stamp(gid: str, item: dict[str, Any]) -> None:
 # The steps of a save whose code is still on this module (service/writes.py runs them in its order). Each is looked up when a save runs, so a suite that replaces one on this module reaches the save;
 # one leaves this table when the area that holds it moves under service/.
 _writes.install(_writes.Steps(
-    settle_mover=lambda item, before: _settle_mover_on_save(item, before),
-    owner_steps=lambda item, before, writer, author: _owner_steps_on_save(item, before, writer, author),
+    settle_mover=lambda item, before: _mover_steps._settle_mover_on_save(item, before),
+    owner_steps=lambda item, before, writer, author: _mover_steps._owner_steps_on_save(item, before, writer, author),
     ask_stamp=lambda item, before, writer: _ask_stamp(item, before, writer),
     handoff_on_save=lambda gid, before, item, writer, author: _handoff.handoff_on_save(gid, before, item, writer, author),
     handoff_his_over=lambda gid, item, author, quiet: _handoff.handoff_his_over(gid, item, author, quiet),
@@ -590,333 +590,10 @@ from stackshot.web.page_debts import (  # noqa: E402,F401
 )
 
 
-# ----------------------------------------------------------------------------- how an item relates to sessions (the linked agent before it)
+# ----------------------------------------------------------------------------- the default mover
 
 
 _wt.FALLBACK_MOVER = _telling.fallback_mover        # model.derive and waiting.mover_of read the default mover through this (the server alone can read the project registry)
-
-
-def _builderless_answer_to(meta: dict[str, Any], project: str) -> str:
-    """Who takes an item of a front-only project (anchors.front_only) when the owner's step is answered and the item stores no `then` (builderless.answer_target): the session its next open step names, else its
-    contact; "" when the project has a background agent, neither names a session, or a read fails (the caller then keeps the project's keeper, as before)."""
-    try:
-        if not project or not _anc.front_only(project):
-            return ""
-        nm = _anc.names()
-        def usable(who: str) -> bool:      # a front agent of this item's project, as mover= may name one (a step line does no more)
-            roles, key = _holders._role_of(who, nm)
-            return bool(key) and _bl.front_of(roles[key], project)
-        return _bl.answer_target(meta, usable)
-    except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the old fallback
-        print(f"answer: next session of {project} not read ({e.__class__.__name__}: {e}); the keeper takes it", file=sys.stderr, flush=True)
-        return ""
-
-
-def _finishes_own_line(work: Any, meta: dict[str, Any], writer: str, open_item: bool = True) -> bool:
-    """Does this `work` argument only finish the writer's own step (state done, no other change)? Such a write is the writer closing out its own part: it is no new work on the item, so it
-    names the writer in no needs (update_unlocked in service/update.py). Only on an open item; the spec carries no other session (`agent` is the writer or absent) and no remove; the writer has an open step
-    (the first open step that opens with its name is the one the write ticks)."""
-    if not open_item or not writer or work is None or (isinstance(work, str) and not work.strip()):
-        return False
-    try:
-        spec = _work.parse(work)
-    except ValueError:
-        return False
-    if spec["state"] != "done" or spec["remove"]:
-        return False
-    nm = _anc.names()
-    same = lambda x, y: bool(x) and bool(y) and (x == y or _anc.canonical(x, nm) == _anc.canonical(y, nm))
-    if spec["agent"] and not same(spec["agent"], writer):      # another session's step is not the writer's own part
-        return False
-    return _work.step_of(_steps.view(meta, keeper=str(meta.get("owner") or "")), writer, same) >= 0
-
-
-def _follow_superseded(gid: str, seen: set[str] | None = None) -> str:
-    """An item id → itself, or, when it closed as superseded, the item that replaced it (followed through a chain)."""
-    seen = set() if seen is None else seen
-    try:
-        m = _svcstore._load(gid).get("metadata") or {}
-    except ToolError:
-        return gid
-    rep = str(m.get("superseded_by") or "")
-    if m.get("outcome") == "superseded" and rep and rep not in seen and _path(rep).exists():
-        seen.add(gid)
-        return _follow_superseded(rep, seen)
-    return gid
-
-
-def _after_reaches(start: list[str], target: str, seen: set[str] | None = None) -> bool:
-    """Does `target` sit in the wait chain of any of `start` (open items only)? The loop test. An item waits on what its `after` names and on the item lines of its list of waits that have not arrived
-    (wait_list.item_ids): the one place the wait graph is walked, so a list's item lines count as links in every write that asks."""
-    seen = set() if seen is None else seen
-    for g in start:
-        if g == target:
-            return True
-        if g in seen:
-            continue
-        seen.add(g)
-        try:
-            it = _svcstore._load(g)
-        except ToolError:
-            continue
-        if it.get("status") == "open" and _after_reaches(_after_of(it.get("metadata") or {}) + _wl.item_ids(it.get("metadata") or {}), target, seen):
-            return True
-    return False
-
-
-_STATE_STANDS_ON = {"your-call": "needs decision and the ask", "blocked": "after, and supplies",
-                    "parked": "the wake and the owner's words or the wait_basis", "doing": "", "your-step": "", "outside": "", "verifying": ""}
-
-
-def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, str], touched: frozenset[str] = frozenset(), withdraw: bool = False) -> str:
-    """Keep the stored state `meta` holds true, or set the one a step or supplies stands on (the metadata as this write leaves it; the caller has run every other gate) → a note for the reply.
-    No call names a state any more: an item stores alive or waiting directly, and a state word an older item still holds is only read (states.py). A step passed sets your-step and supplies blocked
-    (`st`, from gates.gate_state_args), each needing what its state carries in the item as it is stored once this write is applied; the carry fields of the state it replaces go. A write that
-    leaves a stored state alone and touches a field the state stands on (`touched`, against states.STANDS_ON) so that the item can no longer stand in it drops the state (the item reads from its
-    fields, as a hold always did), never refuses: no call can move or clear it. The fields of the retired inputs (party, chase, end, proof) are left as they are: readers still take them.
-    `withdraw` (step="none"): the item's stored step goes, and the your-step state with it; the mover he held goes back to `then` (_owner_state_mover) and his open step line leaves the checklist
-    (_owner_steps_on_save), both on the same save. A closed item has no state."""
-    was = meta.get("state") if isinstance(meta.get("state"), str) and meta.get("state") in _states.STATES else ""
-    if status == "completed":
-        if st or withdraw:
-            raise ToolError("Refused: a completed item has no step or supplies (its outcome is its record); they go with an open item")
-        for k in _states.DROP_ON_CLOSE:
-            meta.pop(k, None)
-        return ""
-    if withdraw:
-        if was != "your-step" and not meta.get("step"):
-            raise ToolError("Refused: step=\"none\" withdraws a step, and this item stores none (its state is " + (was or "not stored") + "). Nothing was written")
-        for k in ("step", *(["state"] if was == "your-step" else [])):
-            meta.pop(k, None)
-        return "\n(step withdrawn: the item is no longer in his step" + ("; its state your-step is gone" if was == "your-step" else "") + ")"
-    today = _pages.zone_now().date()
-    new = st or was
-    if not new:
-        for k in _states.CARRY_FIELDS:                    # a leftover field with no state to own it (the retired inputs' fields stay for the readers)
-            if k not in _states.RETIRED_INPUT_FIELDS:
-                meta.pop(k, None)
-        return ""
-    if not st and not given and not (set(touched) & set(_states.STANDS_ON[new])):
-        return ""                                        # the state stays as stored; nothing this write touched can unseat it
-    own = _states.CARRY[new]
-    dropped = [k for k in _states.CARRY_FIELDS if k not in own and k not in _states.RETIRED_INPUT_FIELDS and meta.get(k) is not None] if new != was else []
-    for k in _states.CARRY_FIELDS:
-        if k not in _states.RETIRED_INPUT_FIELDS and (k not in own or new != was):
-            meta.pop(k, None)
-    for k, v in given.items():
-        meta[k] = v
-    meta["state"] = new
-    probs = _states.problems(meta, new, today, check_dates=bool(st) and new != was)
-    if probs:
-        if st:
-            raise ToolError(f"Refused: {'step' if st == 'your-step' else 'supplies'} needs {'; '.join(probs)}. Add {'it' if len(probs) == 1 else 'them'} to this write")
-        for k in ("state", *[x for x in own if x not in _states.RETIRED_INPUT_FIELDS]):      # party, chase, end and proof stay for the readers
-            meta.pop(k, None)
-        return f"\n(stored state {new} dropped: the item no longer stands on {_STATE_STANDS_ON[new] or 'what it was written for'}; it reads from its fields)"
-    if new != was:
-        return f"\n(state {was + ' → ' if was else ''}{new}" + (f"; dropped {', '.join(dropped)} of the old state" if dropped else "") + ")"
-    return ""
-
-
-def _model_apply(meta: dict[str, Any], status: str, setv: dict[str, str], drop: set[str]) -> None:
-    """Store or drop the model fields on `meta` (the metadata as this write leaves it). A completed item has no mover and waits on nothing: only its goal can be set."""
-    if status == "completed":
-        late = [k for k in setv if k != "goal"]
-        if late:
-            raise ToolError(f"Refused: a completed item has no mover and waits on nothing; {', '.join(late)} go with an open item (goal alone can be set)")
-    for k in drop:
-        meta.pop(k, None)
-    meta.update(setv)
-
-
-def _owner_then(project: str, mover_before: str, sender: str, next_text: str, needs: list[str]) -> str:
-    """Who takes an item after the owner's answer when nobody named it, as an item goes to him. Not the front agent that relayed the
-    ask: the agent that does the work. In order: (1) the mover before his step when it is a background agent; (2) the project's builder when it moves the item (a session in needs) or when
-    next names it as the one building (a line `<builder>: …`); (3) the sender when it is a background agent (a builder that files or edits its own decision item is its own then). "" when
-    none (the model's own default then stands: the first session in needs, else nobody, and his answer hands the item to the project's builder, else its -main agent)."""
-    if _holders._is_background(mover_before, project):
-        return mover_before
-    b = _agents._builder_for(project)
-    if b:
-        bid = _session_id(b)
-        named = any(_session_id(x) == bid for x in needs)
-        if not named and next_text:
-            named = bool(re.search(r"(?mi)^\s*(?:[-*]\s+|\d+[.)]\s+)?" + re.escape(b) + r"\s*:", next_text))
-        if named:
-            return b
-    if _holders._is_background(sender, project):
-        return sender
-    return ""
-
-
-def _owner_then_default(item_was: dict[str, Any] | None, meta: dict[str, Any], status: str, sender: str, given: bool, mover_arg: str = "") -> str:
-    """The write leaves an open item on the owner's move (needs decision, your-call, your-step) that was not his before, with no `then` stored or passed: store the default (_owner_then) as
-    `then`. → the reply note ("" when nothing was stored). A stored `then`, a `then` or clear_then in this call, and an item already his before the write are left alone."""
-    if given or status != "open" or _model.norm_who(meta.get("then")):
-        return ""
-    try:
-        now_item = {"status": "open", "metadata": meta}
-        mod = _item_read._model_of(now_item)
-        if mod.state != _model.ALIVE or not _model.is_owner(mod.mover):
-            return ""
-        after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
-        if item_was and _model.stood_his(item_was, after):
-            return ""
-        before = ""
-        if mover_arg and not _model.is_owner(mover_arg):
-            before = mover_arg
-        elif item_was and item_was.get("status") == "open":
-            wm = _item_read._model_of({**item_was, "gid": ""})
-            before = wm.mover if wm.state == _model.ALIVE else ""
-        project = str(meta.get("project") or "")
-        who = _owner_then(project, before, sender, str(meta.get("next") or ""), _needs_sessions(meta))
-    except Exception as e:  # noqa: BLE001  — a default is never worth failing a write
-        print(f"model: then default not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return ""
-    if not who:
-        return ""
-    meta["then"] = who
-    return f"\n(then {_sr._session_label(who) or who}: the agent doing the work takes it after {OWNER}'s answer or step; pass then=<session> to name another)"
-
-
-def _settle_apply(meta: dict[str, Any], ch: dict[str, str]) -> None:
-    """Store what model.settle decided on `meta`: a value stores, "" drops the field."""
-    for k, v in ch.items():
-        if v:
-            meta[k] = v
-        else:
-            meta.pop(k, None)
-
-
-def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bool, item_was: dict[str, Any] | None = None) -> str:
-    """A write that leaves an open item in his state (your-step, your-call, needs decision) and does not name a mover makes him the mover
-    (an agent's update set a step and left itself as the stored mover, and the item read as both). `meta` is changed in place:
-    mover = he; `then` stays if stored, else the stored agent mover becomes `then`, so his answer or Done hands the item back to whoever had it (the same `then` _answer and Done
-    read). A mover the write names itself is not touched here: the guard (model_guards mover_state) refuses it with the fix, and the mirror (owner_mover: the owner as mover with the item in none of his states) refuses him as mover beside an agent's state. `named` is also true for a bookkeeping write (filing_only, the re-bullet): it flips nothing with nobody told.
-    The way back: when the item stood in his state before this write (`item_was`) and no longer does (his decision out of needs, the state moved on), the mover he held goes back to `then` (the
-    agent that had it), or to the model's default when none is stored; a wait that replaces his state drops it. → the note for the reply ("" when nothing moved).
-    [model] guards = false, a filing write and a close are left alone."""
-    if named or not _item_read._model_guards_on() or item_now.get("status") != "open":
-        return ""
-    after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
-    try:
-        ch = _model.settle(item_now, _model.stood_his(item_was, after), after)
-    except Exception as e:  # noqa: BLE001  — a reading that fails changes nothing
-        print(f"model: mover not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return ""
-    if not ch:
-        return ""
-    mover_s, h = _model.norm_who(meta.get("mover")), _model.owner_display()
-    if ch.get("mover") == h and not _model.norm_who(meta.get("then")) and ch.get("then") == mover_s and not _holders._is_background(mover_s, str(meta.get("project") or "")):
-        better = _owner_then(str(meta.get("project") or ""), mover_s, "", str(meta.get("next") or ""), _needs_sessions(meta))      # D9: a front agent that relayed the ask is not its then when a builder does the work
-        if better:
-            ch = {**ch, "then": better}
-    _settle_apply(meta, ch)
-    if ch["mover"] == h:
-        keep = ch["then"]
-        back = "" if keep == mover_s else f" (to have it come back to you instead, set then=<you>)"
-        return f"\n(mover: {_sr._session_label(mover_s) or mover_s} → {h}: the item is in his state ({_eff_state(item_now)}), so he moves it; then {_sr._session_label(keep) or keep} takes it after his answer or Done){back}"
-    to = ch["mover"]
-    return (f"\n(mover: {h} → {_sr._session_label(to) or to}: the item is out of his hands, so {_sr._session_label(to) or to} moves it again)" if to
-            else f"\n(mover: {h} dropped: the item is out of his hands, so its default mover moves it)")
-
-
-def _settle_mover_on_save(item: dict[str, Any], before: dict[str, Any] | None) -> bool:
-    """The backstop of the same rule for every save that is not an update's own: the server's moves (a wake, his answer on the board, a create). An open item
-    whose stored mover disagrees with the side of his state it stands on is settled in place (model.settle): an agent mover on an item that waits on him becomes he, the agent in `then`; the mover he
-    held goes back to `then` when the item leaves his state. Runs before the hand-off record, so a move to him is a hand-off to him and the way back needs none. A filing write and
-    [model] guards = false leave it. Never fails a save. → True when it changed the item."""
-    if not _item_read._model_guards_on() or item.get("status") != "open":
-        return False
-    try:
-        after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
-        ch = _model.settle(item, _model.stood_his(before, after), after)
-        if not ch:
-            return False
-        meta = item.get("metadata")
-        if not isinstance(meta, dict):
-            return False
-        _settle_apply(meta, ch)
-        return True
-    except Exception as e:  # noqa: BLE001
-        print(f"model: mover not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return False
-
-
-_OWNER_STEP_NONE = "answer the ask on the item"      # his step's text when the item waits on him with no ask line and no step summary (the cold call writes the same words)
-
-
-def _owner_want(meta: dict[str, Any]) -> str:
-    """What the item waits on him for, as his step reads: the step's one line for a your-step, else the Decide part of the ask, else the step summary, else the plain words."""
-    step, ask = _states.clean(meta.get("step")), _states.clean(meta.get("ask"))
-    if meta.get("state") == "your-step" and step:
-        return step
-    return _hs.decide_of(ask) or step or _OWNER_STEP_NONE
-
-
-def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, writer: str, author: tuple[str, str] | None) -> bool:
-    """N5 for his part, on every save (the consistency step: the stored fields (needs, ask, state, step) stay what decides whether the item waits on him, and the checklist is made to agree with them):
-      the item waits on him (alive, your-call or your-step or needs decision) → his open step is on the checklist: added at the end when none stands, adopted when a `<owner>:` line is there already, reworded
-        (old dropped, new added) when the ask changed (owner_steps.ensure); a `<owner>:` line of a session about something else is left alone, and the server's step added beside it
-      it stood on him before this write (or the server's step is still recorded open) and does not now, and the write is not his own answer → a session withdrew the ask or the step, or the item
-        went on to wait for something else: the server's step is dropped, by the writer (owner_steps.drop_open); his own
-        answer ticks the step itself (_answer), and a note on a step leaves it open for the session that judges it
-    A closed item (its checklist is the record), a filing write and [model] guards = false leave it. Never fails a save. → True when it changed the checklist."""
-    if not _item_read._model_guards_on() or item.get("status") != "open":
-        return False
-    try:
-        meta = item.get("metadata")
-        if not isinstance(meta, dict):
-            return False
-        after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
-        keeper, now, was = str(meta.get("owner") or ""), time.time(), (meta.get("steps"), meta.get("next"), _hs.recorded(meta))
-        if _model.stood_his(item, after):
-            _hs.ensure(meta, _owner_want(meta), keeper, NAME, now, NAME)
-        elif (_model.stood_his(before, after) or _hs.recorded(meta)) and not (author and author[1] == "board"):    # it stood on him before this write, or the server's step is still recorded open (the item stopped waiting on him by a wait earlier, and the step stayed): either way no ask or step of his stands now
-            _hs.drop_open(meta, keeper, _sr._session_label(writer) or writer or NAME, now, also=_owner_want((before or {}).get("metadata") or {}) if _model.stood_his(before, after) else "")
-        else:
-            _hs.forget_closed(meta, keeper)
-        return was != (meta.get("steps"), meta.get("next"), _hs.recorded(meta))
-    except Exception as e:  # noqa: BLE001
-        print(f"owner-steps: {item.get('gid') or item.get('id')}: not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return False
-
-
-def _eff_state(item: dict[str, Any]) -> str:
-    """The item's state, stored else derived, as the brief shows it."""
-    return _states.of(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))[0]
-
-
-def _state_check_notes(item: dict[str, Any]) -> list[str]:
-    """The lines get, the brief and a write's reply carry for an open item (the owner-step and stale-next checks): next names the owner while the state is an agent's; next may be stale."""
-    if item.get("status") != "open":
-        return []
-    m = item.get("metadata") or {}
-    out = []
-    who = _states.next_names_owner(m.get("next"), OWNER)
-    if who:
-        s = _eff_state(item)
-        if s in _states.AGENT_STATES:
-            out.append(f"note: next names {who} but the state is {s}: pass step=… (or needs=decision with an ask)")
-    _hits, broad = _ac.wait_words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))
-    if broad:
-        out.append(f"(flag: next uses {', '.join(broad)}, words that can hide a wait: if it waits, set the wait; the auditor reads this)")
-    ns = m.get("next_stale")
-    if isinstance(ns, dict) and ns.get("fields"):
-        try:
-            when = " " + _rmod.when_words(dt.datetime.fromtimestamp(float(ns["at"]), _wttext.ZONE))
-        except (KeyError, TypeError, ValueError, OverflowError, OSError):
-            when = ""
-        out.append(f"(next may be stale: {ns.get('by') or 'another session'} changed {', '.join(str(x) for x in ns['fields'])}{when})")
-    gone = _states.passed_dates(m.get("next"), _pages.zone_now().date())
-    if gone:
-        out.append(f"(next may be stale: it names {gone[0][0]}, which has passed)")
-    return out
-
-
-def project_ref(x: str) -> dict[str, Any] | None:
-    """A project's record by id, full page key or bare slug (projects.ref, on the registry this server reads); None when it names none."""
-    return _prj.ref(x, _registry("projects"))
 
 
 # ----------------------------------------------------------------------------- the server names the working background agent
@@ -1718,13 +1395,13 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
     what = _watch.subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})
     do = eff["do"]
     if do == "arrived":
-        was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
+        was_post = _watch.was_picker(w.get("was"))
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
         _watch.turn_alive(meta, post, f"{OWNER} says {what} arrived", now)
         meta.pop("chases", None)
         return f"arrived → {_watching.watch_label(post)}"
     if do == "words":     # his words with no button: never an arrival or a drop; the post-wake mover has the item, the wait's record (watch.was) and his words, and judges
-        was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
+        was_post = _watch.was_picker(w.get("was"))
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))
         keep = w.get("was")
         _watch.turn_alive(meta, post, f'{OWNER} answered in words: "{_clip_line(eff.get("text") or "", 300)}"', now)
@@ -2455,7 +2132,7 @@ mcp = _app.build(
     notice_asked=lambda *a, **k: _notice_asked(*a, **k),
     notice_report=lambda *a, **k: _notice_report(*a, **k),
     evwait_preread=lambda *a, **k: _evwait_preread(*a, **k),
-    sender_not_owner=lambda *a, **k: _sender_not_owner(*a, **k),
+    sender_not_owner=lambda *a, **k: _owner_words._sender_not_owner(*a, **k),
     ask_after_write=lambda *a, **k: _ask_after_write(*a, **k),
     update=lambda *a, **k: _update_svc._update(*a, **k),
     wait_alias_gate=lambda *a, **k: _wait_alias_gate(*a, **k),
@@ -2669,11 +2346,11 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
             return {"parked": False, "why": str(e)[:200]}
         meta["hold"] = True
         _hold_set(meta, NAME, now)
-        _cap_ok_drop(meta, "wake")
+        _owner_words._cap_ok_drop(meta, "wake")
         if meta.get("state") in _states.STATES and meta["state"] != "parked":      # a hold makes the item read parked: the stored state of another kind goes, as in the write's own park
             _holders._state_end(meta)
-        _state_apply(meta, "open", "", {}, frozenset({"wake", "hold", "wait_basis"}))
-        _basis_put(meta, basis_ok, wake, NAME)
+        _mover_steps._state_apply(meta, "open", "", {}, frozenset({"wake", "hold", "wait_basis"}))
+        _owner_words._basis_put(meta, basis_ok, wake, NAME)
         _sf.record(meta, _sf.WAKE_PARK, wake, _wake_park_line(wake, basis_ok), now)
         _writes.save(gid, item, note="wake parked")
         return {"parked": True, "wake": wake, "why": ""}
@@ -3106,7 +2783,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         if _draft.of(item):                          # the verbatim text the owner pastes elsewhere, as stored (many lines); the brief, which loads into every session, only says it is there
             d_ = _draft.of(item)
             out.append(f"draft: {len(d_.splitlines())} lines, {len(d_)} characters (get shows it)" if brief else "draft:\n" + d_)
-        out.extend(_state_check_notes(item))            # next names the owner under an agent's state; next may be stale (the owner-step and stale-next checks)
+        out.extend(_mover_steps._state_check_notes(item))            # next names the owner under an agent's state; next may be stale (the owner-step and stale-next checks)
     out.extend(_model_lines(item, brief))                   # dead, alive or waiting, with the mover and the wait
     if not brief:
         out.extend(_handoff.handoff_lines(item))                    # step 2: handed to X, not yet taken | taken | returned
@@ -3438,7 +3115,7 @@ _runner.install(_runner.Hooks(
 _wake_hooks.install(_wake_hooks.Hooks(
     after_open=_late_in(_item_read, "_after_open"),
     event_activity_tick=_late("_event_activity_tick"),
-    follow_superseded=_late("_follow_superseded"),
+    follow_superseded=_late_in(_mover_steps, "_follow_superseded"),
     hand_stored_then=_late("_hand_stored_then"),
     hold_flag=_late_in(_holders, "_hold_flag"),
     is_held=_late_in(_holders, "_is_held"),
@@ -3562,11 +3239,11 @@ _passes_hooks.install(_passes_hooks.Hooks(
     publish=_late_in(_pubmod, "_publish"),
     retire_write_op=_late("_retire_write_op"),
     scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
-    script_sender=_late("_script_sender"),
-    sender_not_owner=_late("_sender_not_owner"),
+    script_sender=_late_in(_owner_words, "_script_sender"),
+    sender_not_owner=_late_in(_owner_words, "_sender_not_owner"),
     server_module=lambda: sys.modules[__name__],
     session_id=_late("_session_id"),
-    settle_apply=_late("_settle_apply"),
+    settle_apply=_late_in(_holders, "_settle_apply"),
     shown_needs=_late("_shown_needs"),
     stamp_write_op=_late("_stamp_write_op"),
     switchover_on=_late_in(_item_read, "_switchover_on"),
@@ -3580,6 +3257,16 @@ _foryou_hooks.install(_foryou_hooks.Hooks(
     parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
+))
+
+# What the save steps and the owner's words still reach outside service/ (service/mover_steps.py and service/owner_words.py): the debounced publish of the board, the session id of a name, the audit's broad wait words, the words
+# for a time and the time zone. A hook leaves this table when the area that holds it moves under service/.
+_save_hooks.install(_save_hooks.Hooks(
+    publish=_late_in(_pubmod, "_publish"),
+    session_id=_late("_session_id"),
+    wait_words=lambda *a, **k: _ac.wait_words(*a, **k),
+    when_words=lambda *a, **k: _rmod.when_words(*a, **k),
+    zone=lambda: _wttext.ZONE,
 ))
 
 
@@ -3602,273 +3289,18 @@ _create_svc.install(_create_svc.Hooks(
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     next_put=_late("_next_put"),
     owed_mark=_late("_owed_mark"),
-    owner_then_default=_late("_owner_then_default"),
+    owner_then_default=_late_in(_mover_steps, "_owner_then_default"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
     record_fixes=_late("_record_fixes"),
     refuse_if_owing=_late_in(_pdebts, "_refuse_if_owing"),
-    said_note=_late("_said_note"),
+    said_note=_late_in(_owner_words, "_said_note"),
     session_id=_late("_session_id"),
     wait_alias_gate=_late("_wait_alias_gate"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     writer_owes=_late_in(_pdebts, "_writer_owes"),
     ask_none=_ASK_NONE,
 ))
-
-
-# A close carries how the item ended, like an issue tracker's closed issue. Before, a completed
-# item kept its state from just before the close (its next, ask and whose move), which read as live work.
-OUTCOMES = ("done", "dropped", "superseded")
-
-# claude.ai caches a connector's tool list for about a day and a relaunch does not refresh it (claude-ai-mcp#45, #1044),
-# so a session whose cached complete predates the close fields closes through the portal's Code Mode, which reads the live schema.
-_RELAUNCH = (" If this tool shows no outcome, reason, outcome_text or superseded_by parameter, this session's cached tool list predates them: claude.ai "
-             "refreshes it on its own within about a day, and a relaunch does not. Meanwhile close through the MCP Portal: "
-             "portal_codemode_execute with codemode.stackshot_complete({item_id, outcome, reason, outcome_text, superseded_by}).")
-
-
-def _sender_not_owner(sender: str) -> None:
-    """only the server writes as the owner ([instance] owner, the owner). His own answer comes from the board's sign-in
-    (POST /items/<n>/answer) and is headed `[author: the owner · board]`; a session that names itself the owner as the sender of an
-    update, complete or confirm is refused, so no session's write can pass for his. The check reads the name as given and the
-    session's name behind an id."""
-    s = str(sender or "").strip()
-    if not s:
-        return
-    norm = lambda x: re.sub(r"[^0-9a-z]+", " ", str(x or "").lower()).strip()
-    o = norm(OWNER)
-    if o and {norm(s), norm(_sr._session_label(s))} & {o, o + " board"}:
-        raise ToolError(f"Refused: sender names {OWNER}. Only the board writes as {OWNER} (his answer from the item's page); "
-                        f"pass sender=<your own session name or id>. When you write down what {OWNER} said, you are its author.")
-
-
-def _said_note(entries: list[dict[str, Any]]) -> str:
-    """The reply's lines on what the write recorded: checked against which transcript, or stored unchecked and why."""
-    out = ""
-    for e in entries:
-        label = _sr._session_label(str(e.get("session") or "")) or "the sender"
-        what = f"{e['tag']} (kind acted: proof he did a step, not his words)" if e.get("kind") == _said.ACTED else e["tag"]
-        out += f"\n(said: {what} " + (f"checked against {label}'s transcript" if e.get("checked") else f"stored unchecked: {e.get('why') or 'the transcript could not be read'}") + ")"
-    return out
-
-
-def _owner_words_on(item: dict[str, Any], said_l: list[dict[str, Any]], within_days: float) -> str:
-    """What shows the owner's own words behind a long wait (waiting.py's cap): a said entry in this very call tagged Acked-by,
-    checked against a real transcript, of a message no older than `within_days` ("a checked said entry"), else a board answer of his
-    (a decision or a comment with text or a choice) given on this item since its last state change ("a board answer"); "" when
-    none. An unchecked entry (a transcript this box cannot read) is not enough: the words behind a long wait must be provable, so
-    that case asks him to answer on the item."""
-    return _owner_quote_on(item, said_l, within_days)[0]
-
-
-def _owner_quote_on(item: dict[str, Any], said_l: list[dict[str, Any]], within_days: float) -> tuple[str, str, str]:
-    """_owner_words_on with the words themselves → (what shows them, his sentence, where it is from); ("", "", "") when none. The sentence is the said entry's quote or the board
-    answer's text (an option's line when the answer was a button): the quote a time wait carries as its reason (the snooze guard)."""
-    now = time.time()
-    said_hits: list[tuple[str, str, str]] = []
-    for e in said_l:
-        try:
-            if e.get("checked") and e.get("tag") == "Acked-by" and float(e.get("ts") or 0) >= now - within_days * 86400.0:
-                said_hits.append(("a checked said entry", " ".join(str(e.get("quote") or "").split()), f"{OWNER}'s words, an Acked-by said entry checked against a transcript"))
-        except (TypeError, ValueError):
-            continue
-    answers = (item.get("metadata") or {}).get("answers")
-    clock = _wt.clock_of(item, now) if item else 0.0
-    ans_hits: list[tuple[str, str, str]] = []
-    for a in answers if isinstance(answers, list) else []:
-        try:
-            if isinstance(a, dict) and (a.get("text") or a.get("choice")) and float(a.get("ts") or 0) >= clock - 0.5:
-                via = "the board" if a.get("via") == "board" else "GitHub"
-                ans_hits.append(("a board answer", " ".join(str(a.get("text") or a.get("choice_line") or "").split()), f"{OWNER}'s {'answer' if a.get('kind') == 'decision' else 'note on his step' if a.get('kind') == 'step-reply' else 'comment'} on {via}"))
-        except (TypeError, ValueError):
-            continue
-    hits = said_hits + ans_hits
-    if not hits:
-        return "", "", ""
-    best = next((h for h in reversed(hits) if _mg.has_wait_words(h[1])), hits[-1])    # the latest whose words park, wait or name a date (the one a time wait can stand on), else the latest
-    return hits[0][0], best[1], best[2]              # what shows them is the first kind, a said entry before a board answer, as it always was
-
-
-def _cap_ok_put(meta: dict[str, Any], key: str, value: str, by: str, quote: str = "", source: str = "") -> None:
-    """Record that the owner's words stand behind this wake or due date (metadata.cap_ok: wake + by, due + due_by); waiting.py honours
-    the record only for that very date. `quote` and `source` (his sentence as the store holds it, and where from: the answer or comment
-    and the commit) are kept beside it for the wake, so a person can see on what the long wait stands (get and the item page show them)."""
-    co = dict(meta["cap_ok"]) if isinstance(meta.get("cap_ok"), dict) else {}
-    co[key] = value
-    co["by" if key == "wake" else "due_by"] = by
-    if key == "wake":
-        for k, v in (("quote", quote), ("source", source)):
-            if v:
-                co[k] = v
-            else:
-                co.pop(k, None)
-    meta["cap_ok"] = co
-
-
-def _cap_ok_drop(meta: dict[str, Any], key: str) -> None:
-    """Drop the record for a wake or due date that goes, changes or was accepted without his words; the record goes when it holds neither."""
-    co = meta.get("cap_ok")
-    if isinstance(co, dict):
-        co = {k: v for k, v in co.items() if k not in (key, "by" if key == "wake" else "due_by", *(("quote", "source") if key == "wake" else ()))}
-        if co.get("wake") or co.get("due"):
-            meta["cap_ok"] = co
-            return
-    meta.pop("cap_ok", None)
-
-
-_BASIS_WORDS = "a real-world date"
-
-
-def _basis_put(meta: dict[str, Any], text: str, wake: str, by: str) -> None:
-    """metadata.wait_basis for this very wake: {text, wake, by, at}."""
-    meta["wait_basis"] = {"text": text, "wake": wake, "by": by, "at": time.time()}
-
-
-def _no_ping(text: str) -> str:
-    """Text bound for a GitHub comment with every @ broken by a zero-width space, so that a mention in an item's text or in his words pings no one."""
-    return str(text).replace("@", "@\u200b")
-
-
-def _script_sender(body: dict[str, Any], machine: str) -> str:
-    """The `sender` of a cap-words call (required: the session that ran the job, as every client call's sender is its own word; the machine token proves
-    the machine) → "<sender> via a script on <machine>", which the record keeps as who recorded it."""
-    sender = " ".join(str(body.get("sender") or "").split())
-    if not sender or len(sender) > 80:
-        raise ToolError("Refused: sender is required, the name of the session that runs this job (at most 80 characters)")
-    return f"{sender} via a script on {machine}"
-
-
-def _cap_words_entry(gid: str, spec: dict[str, Any], item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """The gates of _record_cap_words that read the item alone (no history): it is open, it has a wake, the entry the caller names stands in
-    metadata.answers, it is his own words (kind decision or comment, via board or github, a GitHub one with its comment id and url; the words are what
-    he typed, else the option he pressed and its line: waiting.answer_words), and it reads as a park (what he typed: waiting.park_words; a button: park_words or a
-    "wait" word, waiting.answer_parks, which the migration's park_quote takes too). → (the wake, the entry). Run once before the store's history is read and again under the item lock."""
-    meta = item.get("metadata") or {}
-    if item.get("status") != "open":
-        raise ToolError(f"Refused: {_gh.shown(gid)} is not open; words are recorded for an open item's wake")
-    wake = str(_wt.wake_value(meta) or "")
-    if not wake:
-        raise ToolError(f"Refused: {_gh.shown(gid)} has no wake date for his words to cover")
-    entries = [a for a in meta.get("answers") or [] if isinstance(a, dict)]
-    ts, cid = spec.get("ts"), spec.get("comment_id")
-    hit = None
-    for a in entries:
-        try:
-            if (ts is not None and abs(float(a.get("ts") or 0) - float(ts)) < 1e-6) or (cid is not None and a.get("comment_id") is not None and int(a["comment_id"]) == int(cid)):
-                hit = a
-                break
-        except (TypeError, ValueError):
-            continue
-    if hit is None:
-        raise ToolError(f"Refused: {_gh.shown(gid)} holds no answer or comment of his with {'ts ' + str(ts) if ts is not None else 'comment_id ' + str(cid)}; only entries in its metadata.answers count")
-    text = _wt.answer_words(hit)
-    if hit.get("kind") not in ("decision", "comment") or hit.get("via") not in ("board", "github") or not text:
-        raise ToolError(f"Refused: that entry is not {OWNER}'s own words with text (kind decision or comment, via board or github)")
-    if hit.get("via") == "github" and not (hit.get("comment_id") is not None and str(hit.get("url") or "").strip()):
-        raise ToolError(f"Refused: a GitHub entry counts only with its comment id and url (the reader's mark that {OWNER} wrote it by hand)")
-    if not _wt.answer_parks(hit):
-        if not str(hit.get("text") or "").strip():
-            raise ToolError(f"Refused: that button is not {OWNER}'s own words that park or wait ({_clip_line(text, 80)!r}); a button counts when its option and line park or wait")
-        raise ToolError(f"Refused: {OWNER}'s words on {_gh.shown(gid)} do not park or postpone it ({_clip_line(text, 80)!r}); only words that do can stand behind a long wait")
-    return wake, hit
-
-
-def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
-    """One-time job of the quick fix for items the owner himself parked whose answer was never saved as his words: record, as
-    metadata.cap_ok for the item's current wake, a sentence of his that the store already holds. Only text the store attributes to him is taken,
-    never a quote the caller gives: the caller names the entry, `{"ts": the answer's time}` or `{"comment_id": n}`, as it stands in metadata.answers
-    (written only by the board's answer form with his sign-in, kind decision or comment, via board, and by the GitHub reader for his own hand-written
-    comments, via github with the comment's id and url; no session's tool writes there), and the server copies the quote from that entry. The entry must
-    read as a park (waiting.park_words: "Approve" or "sent" is his but no park), must stand behind the current wake (waiting.entry_pairs: given since the move that set it, or the last thing before it, no state move between them by the store's git history, else within 24 hours), the item must be open with a wake, and `quote`, when the caller sends
-    it, must be the entry's text (a stale pick is refused). `commit` (the store commit that first held the entry) is kept as provenance. The record
-    is a filing edit made under the item lock through `writes.save`: no clock moves, History gets one line (the store's git, render.Board.item_log). → {"item", "wake", "quote", "source", "action": set | already}; refusals raise ToolError."""
-    by = _script_sender(spec, machine)
-    gid = _norm_id(str(spec.get("item") or ""))
-    # The cheap gates first, on a read taken before the lock: the entry must be his and read as a park. Only then the store's history is read (a
-    # subprocess that can take seconds, never while holding the item lock, which every other write waits on); the result is checked again under the lock.
-    item0 = _svcstore._load(gid)
-    wake0, hit0 = _cap_words_entry(gid, spec, item0)
-    read_prior = not _wt.entry_current(item0, hit0.get("ts"), time.time())
-    prior = _wt.prior_state_ts(gid, wake0) if read_prior else None
-    with _writes.ITEM_LOCK:
-        item = _svcstore._load(gid)
-        meta = dict(item.get("metadata") or {})
-        wake, hit = _cap_words_entry(gid, spec, item)
-        text = _wt.answer_words(hit)
-        now_t = time.time()      # as _owner_words_on, but his answer usually comes just BEFORE the session's move on it: waiting.entry_pairs
-        current = _wt.entry_current(item, hit.get("ts"), now_t)
-        if wake != wake0 or item.get("state_updated") != item0.get("state_updated") or (not current and not read_prior):
-            raise ToolError(f"Refused: {_gh.shown(gid)} moved while its history was being read (its wake or state changed); run the job again")
-        ok, how = _wt.entry_pairs(item, hit.get("ts"), now_t, None if current else prior)
-        if not ok:
-            raise ToolError(f"Refused: that entry of {OWNER}'s does not stand behind {_gh.shown(gid)}'s current wake or hold: {how}"
-                            + ("" if how == _wt.UNREADABLE_WHY else f". Ask {OWNER} to answer on the item again"))
-        quote = str(spec.get("quote") or "")
-        if quote and " ".join(quote.split()) != " ".join(text.split()):
-            raise ToolError(f"Refused: the quote is not what the entry says ({_clip_line(text, 80)!r}); the server records the entry's own text")
-        when = _rmod.when_words(dt.datetime.fromtimestamp(float(hit.get("ts") or 0), _wttext.ZONE))
-        kind = "comment" if hit.get("kind") == "comment" else "answer"
-        src = f"{OWNER}'s {kind} on {'the board' if hit.get('via') == 'board' else 'GitHub'}, {when}" + (f" (comment {hit['comment_id']}, {str(hit.get('url') or '').strip()})" if hit.get("comment_id") is not None else "")
-        commit = re.sub(r"[^0-9a-f]", "", str(spec.get("commit") or "").lower())[:12]
-        if commit:
-            src += f"; first in store commit {commit}"
-        co = meta.get("cap_ok") if isinstance(meta.get("cap_ok"), dict) else {}
-        if co.get("wake") == wake and co.get("quote") == text:
-            return {"item": _gh.shown(gid), "wake": wake, "quote": text, "source": str(co.get("source") or src), "action": "already"}
-        _cap_ok_put(meta, "wake", wake, by, quote=text, source=src)
-        item["metadata"] = meta
-        item["updated"] = time.time()          # the item's own clock; the state clock and the confirm stay (a filing edit): the cap runs from the last move, and his words lift it
-        # Bookkeeping, not activity (no kind, no writer): this copies words the store already holds from his entry in metadata.answers, which moved the clock when it arrived; a script's filing edit that
-        # moved no clock, so counting it would make an old answer read as new work whenever the job runs.
-        _writes.save(gid, item, note=f"his words recorded for the wake {wake}: {_no_ping(_clip_line(text, 200))} ({_no_ping(src)}), by {_no_ping(by)}")
-        _pubmod._publish()
-    return {"item": _gh.shown(gid), "wake": wake, "quote": text, "source": src, "action": "set"}
-
-
-def _rebullet_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
-    """tools/rebullet_descriptions.py: one open item's description rewritten as short bullets, through the update path (its gates, its History line, the
-    the search), under the item lock, as the author `rebullet`. The body: item, sender, old (the description the rewrite was made from) and description
-    (the rewrite). This is the only writer of the pass: the caller's token must be a machine in [model] rebullet_machines (default: the server box); the item must be open and its
-    description still the `old` the rewrite was made from (a session's edit since then wins and the rewrite is dropped); and rebullet.verdict judges the rewrite here too,
-    so a lossy one (a link, a number, a date or a quote gone) is refused whoever sends it. The write is a filing edit (REFORMAT): the item's state clock and its confirm stay (its `updated` time does move), no page
-    is owed and no one is told. `sender` must not name a session. → {"item", "action": set | already, "result"}; refusals raise ToolError."""
-    allowed = _cfg.get("model", "rebullet_machines", default=[])
-    allowed = [allowed] if isinstance(allowed, str) else [str(x) for x in allowed] if isinstance(allowed, list) else []
-    if not machine or machine not in allowed:
-        raise ToolError("Refused: the re-bullet pass writes only from the server box (a machine in [model] rebullet_machines; none is set when the list is empty)")
-    by = _script_sender(spec, machine)
-    if " ".join(str(spec.get("sender") or "").split()).casefold() in _mg.Ctx().roster():
-        raise ToolError("Refused: sender names a session; the pass writes as itself (rebullet), never as a session")
-    gid = _norm_id(str(spec.get("item") or ""))
-    old, new = spec.get("old"), spec.get("description")
-    if not isinstance(old, str) or not isinstance(new, str) or not new.strip():
-        raise ToolError("Refused: old (the description the rewrite was made from) and description (the rewrite) are required strings")
-    with _writes.ITEM_LOCK:
-        item = _svcstore._load(gid)
-        if item.get("status") != "open":
-            raise ToolError(f"Refused: {_gh.shown(gid)} is not open; a closed item is left alone")
-        cur = str(item.get("description") or "")
-        if cur.strip() == new.strip():
-            return {"item": _gh.shown(gid), "action": "already", "result": ""}
-        if cur.strip() != old.strip():
-            raise ToolError(f"Refused: the description of {_gh.shown(gid)} changed since the rewrite was made from it; nothing was written")
-        why = _rebullet.verdict(cur, new, max_lines=int(_cfg.CFG["description"].get("max_lines", 8)), line_max=_description_limits()[1], strict=_bullets_on(), forbid=list(_cfg.CFG["description"].get("forbid_tokens", [])),
-                                  subject=str(item.get("subject") or ""))
-        if why:
-            raise ToolError(f"Refused: {why}")
-        _writes.REFORMAT.on = True
-        try:
-            out = _update_svc._update(gid, description=new, sender=by)
-        finally:
-            _writes.REFORMAT.on = False
-    return {"item": _gh.shown(gid), "action": "set", "result": out.splitlines()[0] if out else ""}
-
-
-def _state_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
-    """POST /client/state: retired, an item stores alive or waiting directly now, so the route has no state to set or clear (retired_inputs.client_refusal). It still answers, with the refusal that names the
-    fields to pass through update, and writes nothing; its caller's token is checked first as for any client route. A refusal raises ToolError (the route answers 400)."""
-    _script_sender(spec, machine)
-    raise ToolError(_retired.client_refusal(OWNER))
 
 
 # ---------------------------------------------------------------------------------------------------------------- the stamp pass: phase and waits_on on the open items
@@ -4304,7 +3736,7 @@ def _front_held(*a: Any, **k: Any) -> Any:
 # the anchors scoped to an item), the checks that sit in web/ and the per-write flags. A hook leaves this table when the area that holds it moves under service/.
 _gates.install(_gates.Hooks(
     after_open=_late_in(_item_read, "_after_open"),
-    after_reaches=_late("_after_reaches"),
+    after_reaches=_late_in(_mover_steps, "_after_reaches"),
     answers_of=lambda *a, **k: _rmod.answers_of(*a, **k),
     ask_none=_ASK_NONE,
     ask_stands=_late("_ask_stands"),
@@ -4313,8 +3745,8 @@ _gates.install(_gates.Hooks(
     contact_alive=_late_in(_contacts, "_contact_alive"),
     contact_fronts=_late_in(_contacts, "_contact_fronts"),
     contact_same=_late_in(_contacts, "_contact_same"),
-    eff_state=_late("_eff_state"),
-    follow_superseded=_late("_follow_superseded"),
+    eff_state=_late_in(_mover_steps, "_eff_state"),
+    follow_superseded=_late_in(_mover_steps, "_follow_superseded"),
     front_held=_late("_front_held"),
     front_pair_ok=_late_in(_holders, "_front_pair_ok"),
     handoffs_in=_late_in(_agents, "_handoffs_in"),
@@ -4327,7 +3759,7 @@ _gates.install(_gates.Hooks(
     open_item_named=_late_in(_item_read, "_open_item_named"),
     outcomes=OUTCOMES,
     own_repo=_late("_own_repo"),
-    owner_words_on=_late("_owner_words_on"),
+    owner_words_on=_late_in(_owner_words, "_owner_words_on"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     relaunch=_RELAUNCH,
     role_of=_late_in(_holders, "_role_of"),
@@ -4350,20 +3782,20 @@ _update_svc.install(_update_svc.Hooks(
     anchor_wait_gate=_late("_anchor_wait_gate"),
     ask_none=_ASK_NONE,
     ask_owed=_late("_ask_owed"),
-    basis_put=_late("_basis_put"),
+    basis_put=_late_in(_owner_words, "_basis_put"),
     basis_words=_BASIS_WORDS,
-    cap_ok_drop=_late("_cap_ok_drop"),
-    cap_ok_put=_late("_cap_ok_put"),
+    cap_ok_drop=_late_in(_owner_words, "_cap_ok_drop"),
+    cap_ok_put=_late_in(_owner_words, "_cap_ok_put"),
     contact_alive=_late_in(_contacts, "_contact_alive"),
     contact_fronts=_late_in(_contacts, "_contact_fronts"),
     contact_same=_late_in(_contacts, "_contact_same"),
     date_only_wait=_late("_date_only_wait"),
     date_parked=_late_in(_item_read, "_date_parked"),
-    eff_state=_late("_eff_state"),
+    eff_state=_late_in(_mover_steps, "_eff_state"),
     evwait_gate=_late("_evwait_gate"),
     evwait_preread=_late("_evwait_preread"),
     fallback_wait_date=_late("_fallback_wait_date"),
-    finishes_own_line=_late("_finishes_own_line"),
+    finishes_own_line=_late_in(_holders, "_finishes_own_line"),
     fmt=_late("_fmt"),
     form_notes=_late("_form_notes"),
     gate_ask=_late("_gate_ask"),
@@ -4375,17 +3807,17 @@ _update_svc.install(_update_svc.Hooks(
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
     main_agent=_late_in(_agents, "_main_agent"),
-    model_apply=_late("_model_apply"),
+    model_apply=_late_in(_holders, "_model_apply"),
     model_guards_on=_late_in(_item_read, "_model_guards_on"),
     model_of=_late_in(_item_read, "_model_of"),
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     name_on_write=_late("_name_on_write"),
     next_put=_late("_next_put"),
     owed_mark=_late("_owed_mark"),
-    owner_quote_on=_late("_owner_quote_on"),
-    owner_state_mover=_late("_owner_state_mover"),
-    owner_then_default=_late("_owner_then_default"),
-    owner_want=_late("_owner_want"),
+    owner_quote_on=_late_in(_owner_words, "_owner_quote_on"),
+    owner_state_mover=_late_in(_mover_steps, "_owner_state_mover"),
+    owner_then_default=_late_in(_mover_steps, "_owner_then_default"),
+    owner_want=_late_in(_holders, "_owner_want"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
     record_fixes=_late("_record_fixes"),
@@ -4395,11 +3827,11 @@ _update_svc.install(_update_svc.Hooks(
     render_option_lines=lambda *a, **k: _rmod.option_lines(*a, **k),
     render_same_ref=lambda *a, **k: _rmod.same_ref(*a, **k),
     render_when_words=lambda *a, **k: _rmod.when_words(*a, **k),
-    said_note=_late("_said_note"),
+    said_note=_late_in(_owner_words, "_said_note"),
     scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
     session_id=_late("_session_id"),
     session_roster=_late_in(_agents, "_session_roster"),
-    state_apply=_late("_state_apply"),
+    state_apply=_late_in(_mover_steps, "_state_apply"),
     state_end=_late_in(_holders, "_state_end"),
     store_ref=_late_in(_sr, "_store_ref"),
     switchover_on=_late_in(_item_read, "_switchover_on"),
@@ -5724,7 +5156,7 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     if len(sender) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in sender):
         return 400, {"error": "sender = the script's own label: one line of at most 80 characters (nightly-job, size-watch)"}
     try:
-        _sender_not_owner(sender)
+        _owner_words._sender_not_owner(sender)
     except ToolError as e:
         return 400, {"error": str(e)}
     try:
@@ -5868,7 +5300,7 @@ def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str,
     if not sender or len(sender) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in sender):
         return 400, {"error": "sender = the script's own label: required, one line of at most 80 characters (permission-hook)"}
     try:
-        _sender_not_owner(sender)
+        _owner_words._sender_not_owner(sender)
     except ToolError as e:
         return 400, {"error": str(e)}
     question = question.strip()
@@ -6038,10 +5470,10 @@ def _jobgap_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any
     if len(sender) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in sender):
         return 400, {"error": "sender = the script's own label: one line of at most 80 characters (unit-gaps)"}
     try:
-        _sender_not_owner(sender)
+        _owner_words._sender_not_owner(sender)
     except ToolError as e:
         return 400, {"error": str(e)}
-    sender = _no_ping(sender)        # the label goes into the description and the creator's name, which the GitHub mirror shows: an @name in it would ping that user
+    sender = _owner_words._no_ping(sender)        # the label goes into the description and the creator's name, which the GitHub mirror shows: an @name in it would ping that user
     mark, by = _jobgap_mark(timer, code), f"{sender} via a script on {machine}"
     rec: dict[str, Any] = {}
     if action == "open":
@@ -6102,7 +5534,7 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
     fix = _JOBGAP_FIX.get(code, _JOBGAP_FIX_OTHER).format(unit=timer, repo=repo)
     lines = [f"{timer} {what} (found by sala's job-gap watcher on {machine})", f"Fix: {fix}", f"{repo} is {key}'s repo; the unit lives there with X-Model-Lane= so every job has a lane"]
     if detail:
-        lines.insert(1, _no_ping(" ".join(detail.split())))      # the watcher's text may carry an @name (a path, a mail address): broken so the mirror pings no one
+        lines.insert(1, _owner_words._no_ping(" ".join(detail.split())))      # the watcher's text may carry an @name (a path, a mail address): broken so the mirror pings no one
     if not builder:
         lines.append(f"{key} lists no builder, so this is with {owner}, its front agent")
     lines.append(f"Opened by {sender} (a script on {machine}); it closes when the watcher finds the gap fixed")
@@ -6165,7 +5597,7 @@ def _itemopen_lines(raw: Any) -> tuple[list[str], str]:
         return [], "description is bullets: a list of lines, or one text of lines"
     if any((ord(c) < 32 and c not in "\n\t") or ord(c) == 127 for c in raw):
         return [], "description holds a control character"
-    lines = [_no_ping(" ".join(t.split())) for t in _bt.clean_lines(raw)]
+    lines = [_owner_words._no_ping(" ".join(t.split())) for t in _bt.clean_lines(raw)]
     max_lines, line_max = _description_limits()
     if not lines:
         return [], "description has no line of words: send the item's background as short lines, one fact each"
@@ -6207,7 +5639,7 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     if not _ITEMOPEN_SENDER.fullmatch(sender):
         return 400, {"error": "sender = the script's own label: one word of letters, digits and _ . - (at most 60 characters), no spaces or markup"}
     try:
-        _sender_not_owner(sender)
+        _owner_words._sender_not_owner(sender)
     except ToolError as e:
         return 400, {"error": str(e)}
     lines, why = _itemopen_lines(body.get("description"))
@@ -6432,21 +5864,21 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
     if what == "cap-words":     # tools/cap_words.py --apply: his park words already in the store, or a long wait's real-world date, recorded through the normal write path
         try:
             if "basis" in body:
-                by = _script_sender(body, machine)
+                by = _owner_words._script_sender(body, machine)
                 gid = _norm_id(str(body.get("item") or ""))
                 out = _update_svc._update(gid, wait_basis=str(body.get("basis") or ""), sender=by)
                 return 200, {"item": _gh.shown(gid), "action": "set", "result": out.splitlines()[0] if out else ""}
-            return 200, _record_cap_words(body, machine)
+            return 200, _owner_words._record_cap_words(body, machine)
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "rebullet":      # tools/rebullet_descriptions.py: an open item's description rewritten as short bullets, checked for loss, through the normal write path
         try:
-            return 200, _rebullet_write(body, machine)
+            return 200, _owner_words._rebullet_write(body, machine)
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "state":         # retired: the route answers 400 with the refusal naming what update takes instead (client.py post state sends nothing any more)
         try:
-            return 200, _state_write(body, machine)
+            return 200, _owner_words._state_write(body, machine)
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "migrate":       # tools/migrate_model.py: the migration onto the item model, planned by the script, applied here through the normal save path (begin | apply | end)
@@ -6811,7 +6243,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _pm = dict(meta); _watch.end_wait(_pm)      # who takes it is read with any leftover wait already ended (a stored wait would make the item read as waiting, with no then)
             then = _model.derive({**item, "metadata": _pm}).then
             if not then or _model.is_owner(then):      # no default mover and no session in needs: a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
-                then = _builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
+                then = _holders._builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
@@ -6822,7 +6254,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                     until = said["until"]
                     rec["applied"] = f"The server read the note as a later time and put the item on hold until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
                 else:
-                    _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_owner_want(meta), writer=NAME, add=False)
+                    _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_holders._owner_want(meta), writer=NAME, add=False)
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
                         _check_his_step(meta, rec["step"], now)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
@@ -6836,12 +6268,12 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
                 until = _wakes.parse_wake(until)
                 meta["until"] = until           # the one date the wait ends on (until_write.py); no hold and no wake are stored
-                _cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")
+                _owner_words._cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")
             item["state_updated"] = item["confirmed"] = now
         if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
             mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
             beside = meta.get("state") == "your-step" and bool(_states.clean(meta.get("step")))      # the ask stands beside a your-step: his answer to it is not his word that the step is done
-            _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words(choice, text), make=(_hs.decide_of(meta.get("ask")) or _OWNER_STEP_NONE) if beside else _owner_want(meta), writer=NAME, apart=beside)      # N4: his answer ticks his step, shown on it (`→ the option`); an item that asked before the server made his steps gets the step now, done
+            _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words(choice, text), make=(_hs.decide_of(meta.get("ask")) or _holders._OWNER_STEP_NONE) if beside else _holders._owner_want(meta), writer=NAME, apart=beside)      # N4: his answer ticks his step, shown on it (`→ the option`); an item that asked before the server made his steps gets the step now, done
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
             if meta.get("ask"):
                 rec["ask"] = str(meta["ask"])   # the ask he answered stays with his answer: the item drops it, and a decision asked again within an hour with that same ask is refused (gates.gate_decision_again)
@@ -6854,7 +6286,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             if parked:                  # on hold until that day, as update(hold=true, until=…) would leave it; "Owner acts now" leaves it on agent
                 _holders._state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
                 meta["until"] = parked          # the one date the wait ends on (until_write.py); no hold and no wake are stored
-                _cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
+                _owner_words._cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
                             source=f"{OWNER}'s answer on the board, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")   # "Park until <date>" is his own word for that date
             item["state_updated"] = item["confirmed"] = now
             effect = _watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop

@@ -206,7 +206,9 @@ def fallback_mover(project: str) -> str:
 
 def mover_of(m: dict[str, Any]) -> dict[str, str]:
     """Whose move it is by the item's own needs: {"kind": "owner" | "outside" | "session", "who"} (the items API names the owner's kind by [items_api] owner_mover_kind: see server._wait_fields). Decision first, then external,
-    then the first session needs names, else the stored post_wake_mover (the old name of a waiting item's mover, which wins while it is stored) or the stored mover, else the project's builder, else its -main agent (never the item's creator)."""
+    then the first session needs names, else the stored picker (model.stored_picker: the stored post_wake_mover, the old name of a waiting item's mover, which wins while it is stored, else the stored mover), else the project's builder,
+    else its -main agent (never the item's creator)."""
+    from stackshot.model import model as _model  # noqa: PLC0415  (lazy: model imports this module)
     ns = needs_of(m)
     low = [x.lower() for x in ns]
     if "decision" in low:
@@ -214,7 +216,10 @@ def mover_of(m: dict[str, Any]) -> dict[str, str]:
     if "external" in low:
         return {"kind": "outside", "who": "an outside party"}
     named = [s for s in ns if s.lower() not in _KINDS]
-    stored = next((v for v in (str(m.get("post_wake_mover") or "").strip(), str(m.get("mover") or "").strip()) if v and v.lower() != _owner_name().strip().lower()), "")
+    picker = _model.stored_picker(m)
+    if _model.is_owner(picker):      # the owner is no session to name here: a stored mover beside an owner post-wake mover still is
+        picker = _model.pick_who(m.get("mover"))
+    stored = "" if _model.is_owner(picker) else picker
     who = (named or [stored or fallback_mover(str(m.get("project") or ""))])[0]
     return {"kind": "session", "who": who}
 
