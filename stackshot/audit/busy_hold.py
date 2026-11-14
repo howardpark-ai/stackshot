@@ -29,7 +29,7 @@ from stackshot.core import config as _cfg
 from stackshot.model import steps as _steps
 
 DESC_MAX = 80      # characters of a subagent's description the refusal quotes
-RELEASE_WORDS = "your release of PR #"      # what the words of a running release begin with: service/gates.py `BUSY_RELEASE_PREFIX` is the same string (the gate picks the release refusal by it; gates.py imports no audit/ module, so each side holds it and the suite compares them)
+RELEASE_WORDS = "a release of PR #"      # what the words of a running release begin with: service/gates.py `BUSY_RELEASE_PREFIX` is the same string (the gate picks the release refusal by it; gates.py imports no audit/ module, so each side holds it and the suite compares them)
 RELEASE_FRESH_S = 15 * 60.0      # a release unit counts while its log was written within this long: a release in mode off writes at least every 5 minutes (the longest gap seen was 13), so an older log is a stuck release
 LOG_TAIL_BYTES = 8192      # of a release's log at most this much of its end is read for the stage
 STAGE_LINES = 4      # the stage is read from the newest of this many timestamped lines of the log that names one
@@ -173,10 +173,10 @@ def _since(age: float) -> str:
 def live_release(gid: str, *, units: Callable[[], Any], anchored: Callable[[], dict[str, Any]], item: Callable[[str], dict[str, Any]], own_repo: Callable[[], str],
                  canon: Callable[[str], str], step_prs: Callable[[dict[str, Any]], Any], log: Callable[[int], "tuple[float, str] | None"],
                  now: Callable[[], float]) -> str:
-    """The words for a release of a pull request tied to item `gid` that is running ("your release of PR #12 is running on it (unit stackshot-release-12.service, its log written 3 min ago, in the merge queue (QUEUED position 1))"),
+    """The words for a release of a pull request tied to item `gid` that is running ("a release of PR #12 tied to this item is running (unit stackshot-release-12.service, its log written 3 min ago, in the merge queue (QUEUED position 1))"),
     "" when none is or none can be told. Running = the unit `stackshot-release-<n>.service` is active (`units()`, web/ui/releasing.py `release_units`: one systemctl call, an empty set on any failure) AND its log was written within
     `RELEASE_FRESH_S` (a unit whose log is older, or missing, is stuck or unknown: the mover is not held for it). The pull request is tied to the item by `tied_releases`; the stage is the log's own words when its last lines
-    name one (`stage_of`). Nothing runs on a box with no unit (a failover box has none), and then no log is read at all. With several, the one written to most recently is named. The units carry no owner, so the proof is of the item, not of its mover.
+    name one (`stage_of`). Nothing runs on a box with no unit (a failover box has none), and then no log is read at all. With several, the one written to most recently is named. The units carry no owner, so the proof is of the item, never of the mover: the words say a release tied to this item runs, not that it is the mover's own.
     Every input is passed in, so a suite gives fakes. Unknown (a failure of any input) is "", never a refusal."""
     try:
         running = {int(n) for n in (units() or ())}
@@ -201,6 +201,6 @@ def live_release(gid: str, *, units: Callable[[], Any], anchored: Callable[[], d
             return ""
         age, n, stage = best
         read = f"unit stackshot-release-{n}.service, its log written {_since(age)}" + (f", {stage}" if stage else "")
-        return f"{RELEASE_WORDS}{n} is running on it ({read})"
+        return f"{RELEASE_WORDS}{n} tied to this item is running ({read})"
     except Exception:  # noqa: BLE001  — unknown is never a refusal
         return ""

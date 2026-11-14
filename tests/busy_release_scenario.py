@@ -154,18 +154,18 @@ def gtext(live, **kw):
     """The words of the refusal a gate answers with, \"\" when it did not refuse."""
     got = gate(live, **kw)
     return got[1] if got[0] == "refused" else ""
-RELWORDS = lambda got: got[0] == "refused" and got[1].startswith("Refused: this item is being moved now: your release of PR #")
+RELWORDS = lambda got: got[0] == "refused" and got[1].startswith("Refused: this item is being moved now: a release of PR #")
 def reset(): put(1, mover=BACK)
 def setdesc(i, text):
     """The item's own description (put() puts keyword arguments in the metadata)."""
     it = read(i); it["description"] = text; (T / f"store/a/{i}.json").write_text(json.dumps(it), encoding="utf-8")
 
 # ---------------------------------------------------------------- 1. refuses
-want = ("Refused: this item is being moved now: your release of PR #77 is running on it (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1)), so it is not paused. "
-        "Keep it in hand and write where its step stands (work=<one line>, state in progress), or wait on it by name (wait_event pr_released or pr_merged). Park it with a hold only once nothing of yours is running on it.")
+want = ("Refused: this item is being moved now: a release of PR #77 tied to this item is running (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1)), so it is not paused. "
+        "Keep it in hand and write where its step stands (work=<one line>, state in progress), or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, post_wake_mover=<who takes it then>). Park it with a hold only once nothing is running on it.")
 got = gate(rel_live(anch=A77))
 check("1 a running release of a pull request anchored to the item refuses the mover's hold, in exactly the words of the refusal", got == ("refused", want), got)
-check("1 …the same text is the constant, formatted", gates.BUSY_RELEASE_REFUSAL.format(live="your release of PR #77 is running on it (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1))") == want)
+check("1 …the same text is the constant, formatted", gates.BUSY_RELEASE_REFUSAL.format(live="a release of PR #77 tied to this item is running (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1))") == want)
 check("1 …the subagent's refusal keeps its own text (no wait_event clause), so the two are told apart", gates.BUSY_HOLD_REFUSAL.format(live="x") != want and "pr_released" not in gates.BUSY_HOLD_REFUSAL)
 check("1 …the refusal names no item of the board", not re.search(r"\b(?:" + BOARD + r"\d+|a\d+)\b", got[1]), got)
 check("1 …and a date alone (a wake or an until the write turns into a hold) is refused as a hold is", RELWORDS(gate(rel_live(anch=A77), hold=False, wake=FUT)) and RELWORDS(gate(rel_live(anch=A77), wake=FUT)), gate(rel_live(anch=A77), hold=False, wake=FUT))
@@ -178,7 +178,7 @@ check("1 the anchor of another spelling of this repository (an old name through 
 put(1, mover=BACK, next=f"{BACK}: release https://github.com/{OWN}/pull/78 once the checks are green")
 check("1 (fixture) the open step's URL is read by releasing.step_prs as this repository's pull request 78", _rel.step_prs(read(1)["metadata"]) == {78}, _rel.step_prs(read(1)["metadata"]))
 got = gate(rel_live(units=(78,)))
-check("1 a running release of the pull request an open step links by URL refuses (no anchor needed)", RELWORDS(got) and "PR #78 is running on it (unit stackshot-release-78.service" in got[1], got)
+check("1 a running release of the pull request an open step links by URL refuses (no anchor needed)", RELWORDS(got) and "PR #78 tied to this item is running (unit stackshot-release-78.service" in got[1], got)
 put(1, mover=BACK, next=f"{BACK}: release PR #79 and watch main")
 check("1 (fixture) `PR #79` in an open step reads as this repository's pull request 79", _rel.step_prs(read(1)["metadata"]) == {79}, _rel.step_prs(read(1)["metadata"]))
 check("1 a running release of the pull request an open step names as `PR #79` refuses", RELWORDS(gate(rel_live(units=(79,)))), gate(rel_live(units=(79,))))
@@ -232,6 +232,11 @@ put(1, mover=BACK, next=f"{BACK}: open the follow-up to PR #83")
 check("2 …and passes when no unit of PR 83 runs (the mover has none)", ok(gate(rel_live(units=(99,)))), gate(rel_live(units=(99,))))
 put(1, mover=BACK, next=f"{BACK}: open the follow-up to PR #83")
 check("2 …and when the unit's log is quiet", ok(gate(rel_live(units=(83,), logs={83: (NOW - 1200.0, QUEUED)}))))
+for _txt in ("GH-PR #83 in the merge queue", "foo/PR #83 up", "x#PR #83 up", "XPR #83 up", "my.PR #83 up"):
+    setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": _txt, "state": "in progress"}})
+    check(f"2 a status line `{_txt}` (the PR word glued to another word, a path or a name) ties nothing: the lookbehind", ok(gate(rel_live(units=(83,)))) and busy_hold.named_prs(_txt, OWN, _cfg.canon_repo) == set(), (gate(rel_live(units=(83,))), busy_hold.named_prs(_txt, OWN, _cfg.canon_repo)))
+setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": "(PR #83) in the merge queue", "state": "in progress"}})
+check("2 …while `(PR #83)` and `see PR #83` and a line that begins with it still tie", RELWORDS(gate(rel_live(units=(83,)))) and busy_hold.named_prs("see PR #83", OWN, _cfg.canon_repo) == {83} and busy_hold.named_prs("PR #83", OWN, _cfg.canon_repo) == {83} and busy_hold.named_prs("pull request #83", OWN, _cfg.canon_repo) == {83})
 put(1, mover=BACK, next=f"{BACK}: read {OTHERREPO} PR #83")
 check("2 …another repository's `other/repo PR #83` in an open step ties nothing", ok(gate(rel_live(units=(83,)))))
 reset()
@@ -265,8 +270,8 @@ check("1 a log that is only a torn line, or not text, names no stage and still r
 check("1 the stage function on its own: a line is read after its words are collapsed to one line", busy_hold.stage_of("in   the merge queue\t(QUEUED position 3)") == "in the merge queue (QUEUED position 3)" and busy_hold.stage_of(None) == "" and busy_hold.stage_of("") == "")
 check("1 the age is told in minutes, and under a minute as such", "log written under a minute ago" in gtext(rel_live(anch=A77, logs={77: (NOW - 20.0, QUEUED)})) and "log written 1 min ago" in gtext(rel_live(anch=A77, logs={77: (NOW - 90.0, QUEUED)})) and "log written 14 min ago" in gtext(rel_live(anch=A77, logs={77: (NOW - 14 * 60.0 - 30.0, QUEUED)})))
 two = gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: (NOW - 600.0, QUEUED), 91: (NOW - 60.0, tail("deploying b1"))}))
-check("1 with two releases tied and running, the one written to most recently is named", RELWORDS(two) and "PR #91 is running on it" in two[1] and "deploying" in two[1], two)
-check("1 …a tied release with a stuck log beside a fresh one: the fresh one is named", "PR #77 is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 5000.0, QUEUED)})))
+check("1 with two releases tied and running, the one written to most recently is named", RELWORDS(two) and "PR #91 tied to this item is running" in two[1] and "deploying" in two[1], two)
+check("1 …a tied release with a stuck log beside a fresh one: the fresh one is named", "PR #77 tied to this item is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 5000.0, QUEUED)})))
 
 # ---------------------------------------------------------------- 2. what does not tie
 reset()
@@ -313,11 +318,11 @@ direct = lambda **kw: rel_live(**kw)("a1", BACK)
 check("3 the proof answers \"\" itself, never raising, when the unit list raises, the anchors raise, the item raises, the log raises or the repository cannot be named",
       direct(anch=A77, raises=OSError("x")) == "" and direct(anch=A77, logs={77: OSError("denied")}) == "" and direct(anch=A77, item=lambda g: 1 / 0) == "" and direct(anch=A77, own="") == ""
       and busy_hold.live_release("a1", units=lambda: {77}, anchored=lambda: 1 / 0, item=server._svcstore._load, own_repo=lambda: OWN, canon=_cfg.canon_repo, step_prs=_rel.step_prs, log=lambda n: (NOW, QUEUED), now=lambda: NOW) == "")
-check("3 …and its words, when it can tell, are the refusal's start", direct(anch=A77).startswith("your release of PR #77 is running on it (unit stackshot-release-77.service"), direct(anch=A77))
+check("3 …and its words, when it can tell, are the refusal's start", direct(anch=A77).startswith("a release of PR #77 tied to this item is running (unit stackshot-release-77.service"), direct(anch=A77))
 check("3 an anchored pull request that is not running is not counted although its log is fresh (only a unit proves it)", ok(gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))), gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)})))
 check("3 a step's pull request that is not running is not counted although its log is fresh", ok(gate(rel_live(units=(99,), step_prs=lambda m: {78}, logs={78: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))))
-check("3 two tied releases, one with no log and one fresh: the fresh one refuses (a missing log is skipped, not fatal)", "PR #91 is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})), gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})))
-check("3 …and with the log of one unreadable the other still speaks", "PR #91 is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: OSError("x"), 91: (NOW - 60.0, QUEUED)})))
+check("3 two tied releases, one with no log and one fresh: the fresh one refuses (a missing log is skipped, not fatal)", "PR #91 tied to this item is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})), gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})))
+check("3 …and with the log of one unreadable the other still speaks", "PR #91 tied to this item is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: OSError("x"), 91: (NOW - 60.0, QUEUED)})))
 # the early exits are the subagent proof's own
 L77 = rel_live(anch=A77)
 check("3 (the live proof refuses before the exits below)", RELWORDS(gate(L77)))
@@ -342,7 +347,7 @@ reset()
 # ---------------------------------------------------------------- 4. both arms
 SUB1 = [sub("Build @1: the export fix")]
 got = gate(both_for(SUB1, anch=A77))
-check("4 a subagent live and a release live: the subagent is named (its proof comes first), with its own refusal", refused(got) and 'your subagent "' in got[1] and "your release" not in got[1] and "pr_released" not in got[1], got)
+check("4 a subagent live and a release live: the subagent is named (its proof comes first), with its own refusal", refused(got) and 'your subagent "' in got[1] and "a release of PR" not in got[1] and "pr_released" not in got[1], got)
 check("4 a release live and no subagent: the release is named, with its own refusal", RELWORDS(gate(both_for([], anch=A77))))
 check("4 a subagent live and no release: the subagent is named", 'your subagent "' in gtext(both_for(SUB1, anch=A77, units=())))
 check("4 neither passes", ok(gate(both_for([], anch=A77, units=()))))
@@ -368,7 +373,7 @@ with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server
     UNITS_OUT["v"] = units_text(77); logfile(77, QUEUED, age=120.0)
     before = json.dumps(read(1), sort_keys=True)
     got = update(1, **HOLD)
-    check("5 a hold while the release of the item's anchored pull request runs is refused through the real tool, naming the release, its unit, its log and its stage", RELWORDS(got) and "PR #77 is running on it (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1))" in got[1], got)
+    check("5 a hold while the release of the item's anchored pull request runs is refused through the real tool, naming the release, its unit, its log and its stage", RELWORDS(got) and "PR #77 tied to this item is running (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1))" in got[1], got)
     check("5 …and the refused write stores nothing", json.dumps(read(1), sort_keys=True) == before and not read(1)["metadata"].get("until") and not read(1)["metadata"].get("hold"))
     got = update(1, until=FUT, next=f"{BACK}: do it", wait_basis=f"the soak window ends {FUT}")
     check("5 …an until alone (a date the write turns into a hold) is refused as a hold is", RELWORDS(got), got)
@@ -401,7 +406,7 @@ with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server
     reset()
     SUBS[:] = [sub("Build @1: the export fix")]
     got = update(1, **HOLD)
-    check("5 both live through the tool: the subagent is named, with its own text", refused(got) and X('your subagent "Build @1: the export fix"') in got[1] and "your release" not in got[1], got)
+    check("5 both live through the tool: the subagent is named, with its own text", refused(got) and X('your subagent "Build @1: the export fix"') in got[1] and "a release of PR" not in got[1], got)
     reset(); SUBS[:] = []
     # the units cannot be listed at all: a box with no systemd, the failover box
     def no_systemd(argv): raise FileNotFoundError("systemctl")
@@ -425,7 +430,7 @@ check("5 a stale log with no unit (the failover box's stale copies) is never rea
 # the real proof, nothing but the unit list replaced
 UNITS_OUT["v"] = units_text(77)
 with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
-    check("5 server._busy_live answers the words of the release for an item whose anchored pull request is released now", server._busy_live("a1", BACK).startswith("your release of PR #77 is running on it (unit stackshot-release-77.service"), server._busy_live("a1", BACK))
+    check("5 server._busy_live answers the words of the release for an item whose anchored pull request is released now", server._busy_live("a1", BACK).startswith("a release of PR #77 tied to this item is running (unit stackshot-release-77.service"), server._busy_live("a1", BACK))
     check("5 …and \"\" for another item of the mover", server._busy_live("a2", BACK) == "")
 UNITS_OUT["v"] = ""
 
@@ -473,9 +478,14 @@ calls.clear()
 check("6 an own-repository that cannot be named reads no item and no log", ok(gate(rel_live(anch=A77, own="", calls=calls))) and calls == ["units"], calls)
 gsrc = pathlib.Path(STACK, "stackshot/service/gates.py").read_text(encoding="utf-8")
 check("6 gates.py names no audit/ module (the proof is handed in as a callable)", "stackshot.audit" not in gsrc and "from stackshot import audit" not in gsrc)
-check("6 the gate chooses the release refusal by the words' own prefix, and that prefix is what live_release writes", gates.BUSY_RELEASE_PREFIX == busy_hold.RELEASE_WORDS == "your release of PR #" and gtext(rel_live(anch=A77)).count(gates.BUSY_RELEASE_PREFIX + "77 is running on it") == 1)
+check("6 the gate chooses the release refusal by the words' own prefix, and that prefix is what live_release writes", gates.BUSY_RELEASE_PREFIX == busy_hold.RELEASE_WORDS == "a release of PR #" and gtext(rel_live(anch=A77)).count(gates.BUSY_RELEASE_PREFIX + "77 tied to this item is running") == 1)
 check("6 the units are the release script's own (stackshot-release-<n>.service), listed by the board's own reader", "stackshot-release-" in pathlib.Path(STACK, "stackshot/web/ui/releasing.py").read_text(encoding="utf-8") and busy_hold.RELEASE_FRESH_S == 15 * 60.0)
 check("6 the refusal names wait_event kinds that exist: pr_released and pr_merged are in the tools' shared text", all(k in " ".join(pathlib.Path(STACK, "stackshot/web/tools/text/shared.md").read_text(encoding="utf-8").split()) for k in ("pr_released", "pr_merged")))
+_shared = " ".join(pathlib.Path(STACK, "stackshot/web/tools/text/shared.md").read_text(encoding="utf-8").split())
+check("6 the refusal's wait form is the one the tools' shared text gives: wait_kind=\"event\", wait_event=\"pr_released <n>\", ask_by (required), post_wake_mover", 'update(wait_kind="event", wait_event="pr_released <n>"' in _shared and "ask_by=<the day it comes back anyway, required>" in _shared and "post_wake_mover=<who takes it then>" in _shared
+      and all(k in gates.BUSY_RELEASE_REFUSAL for k in ('wait_kind="event"', 'wait_event="pr_released <n>"', "ask_by=<the day it comes back anyway, required>", "post_wake_mover=<who takes it then>")))
+check("6 …and the update tool takes those parameters", all(f"{k}:" in pathlib.Path(STACK, "stackshot/web/tools/update.py").read_text(encoding="utf-8") for k in ("wait_kind", "wait_event", "ask_by", "post_wake_mover")))
+check("6 the words say a release tied to this item runs, never that it is the mover's own", "your" not in gate(rel_live(anch=A77))[1].split("so it is not paused")[0] and "tied to this item is running" in gate(rel_live(anch=A77))[1])
 check("6 the log's end is read through a bounded tail, a unit's number through int", busy_hold.LOG_TAIL_BYTES <= 64 * 1024 and busy_hold.STAGE_LINES == 4)
 big = RELDIR / "pr-95.log"; big.write_text("x" * 200000 + "\n" + tail("deploying b1"), encoding="utf-8")
 got = busy_hold.release_log(95)
