@@ -391,7 +391,7 @@ for wl, kw in (("relay", dict(ask_by=day(9))), ("relay", dict(post_wake_mover=BA
     m_ = mt(n7)
     check(f"7 {wl} wait, an update of {sorted(kw)[0]}: the wait is new, so its clock is stamped and its chases start over (as on main)", "chases" not in m_ and (m_.get("watch") or {}).get("set_at", 0) > SET_AT, m_)
 
-# the old parameter naming the very session the old key already holds (the same text, another letter case, the session's id) is nothing new for the wait
+# the old parameter written with the very value the old key already holds is no change to the wait (as on main); the same session in another spelling (another letter case, its id) is a different text there, so it is a change, as on main
 for wl, wmeta in WAITS.items():
     for stored, given in ((HELP, HELP), (HELP, HELP.upper()), (HELP.upper(), HELP), (HELP, U[HELP])):
         n7 += 1
@@ -401,7 +401,9 @@ for wl, wmeta in WAITS.items():
         except Exception as e:  # noqa: BLE001
             err = str(e)[:200]
         m_ = mt(n7)
-        check(f"7 {wl} wait, old key {stored!r}, the old parameter names it again as {given!r}: the chases and the wait's clock stay{(' (refused: ' + err + ')') if err else ''}", not err and m_.get("chases") == CHASES and (m_.get("watch") or {}).get("set_at") == SET_AT, (m_, err))
+        stays = stored == given
+        check(f"7 {wl} wait, old key {stored!r}, the old parameter written as {given!r}: the chases and the wait's clock {'stay' if stays else 'start over, as on main'}{(' (refused: ' + err + ')') if err else ''}",
+              not err and (m_.get("chases") == CHASES and (m_.get("watch") or {}).get("set_at") == SET_AT) == stays, (m_, err))
 n7 += 1
 item(n7, subject=f"[zed] clock {n7}", needs=[BACK], watch={"set_at": SET_AT}, chases=CHASES, **WAITS["relay"], **{LEG: HELP})
 try:

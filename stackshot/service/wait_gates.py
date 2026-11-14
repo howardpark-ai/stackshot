@@ -320,8 +320,6 @@ def _old_key_changed(old: dict[str, Any], meta: dict[str, Any], model_set: dict[
     k = _model.LEGACY_PICKER_KEY
     if meta.get(k) == old.get(k):
         return False
-    if _anc.same_session(meta.get(k), old.get(k)):
-        return False      # the same session again (another letter case, or its id for its name): nothing new for the wait to wait on
     return k in model_set or k in model_drop      # named by the write (set or cleared): on purpose; gone without being named: the save rule dropped it
 
 
