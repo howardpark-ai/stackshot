@@ -52,7 +52,7 @@ def put(i, status="open", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": status,
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
-from stackshot.web import server
+from stackshot.web import server; from stackshot.service import projects as _psvc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import create as _wt_create
@@ -199,14 +199,14 @@ class PageIO:
         s.pages[slug] = text; s.revs[slug] += 1; return "ok", "{}"
 DELTA_PAGE = (f"---\ntype: project\ntitle: Delta\norg: home\ndisplay-name: home-delta\nagents:\n  {MAIN}: talks to the owner about the delta project\n  {SIDE}: answers questions at the side desk\n"
               f"  background:\n    {BUILD}: builds it\n    {REVIEW}: reviews it\nstatus: active\n---\n# Delta\n")
-server._pform.PAGE_IO = PageIO({"projects/delta": DELTA_PAGE})
+_psvc.PAGE_IO = PageIO({"projects/delta": DELTA_PAGE})
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 for p_ in (T / "store").glob("?/*.json"): p_.unlink()
 put(50, contact=SIDE); put(51, contact=SIDE, project="projects/delta/sub"); put(52, contact=MAIN); put(53, status="completed", contact=SIDE, outcome="done", reason="done")
 told.clear()
 st, out = server._client_post("box-a", "project-agent-retire", {"project": "projects/delta", "name": SIDE, "sender": "sala-retire"})
 check("endpoint retire: the page's line is removed (200) and the answer lists the items whose contact fell", st == 200 and out.get("result") == "line removed" and sorted(out.get("contact_moved", [])) == [sh("a50"), sh("a51")], (st, out))
-check("endpoint retire: …to the project's -main agent; another contact and a closed item stay", ct(50) == MAIN and ct(51) == MAIN and ct(52) == MAIN and ct(53) == SIDE and SIDE not in server._pform.PAGE_IO.pages["projects/delta"], (rd(50)["metadata"], rd(53)["metadata"]))
+check("endpoint retire: …to the project's -main agent; another contact and a closed item stay", ct(50) == MAIN and ct(51) == MAIN and ct(52) == MAIN and ct(53) == SIDE and SIDE not in _psvc.PAGE_IO.pages["projects/delta"], (rd(50)["metadata"], rd(53)["metadata"]))
 check("endpoint retire: nobody is told, and the filing write keeps both clocks", told == [] and rd(50)["state_updated"] == now0 - 60 and rd(50)["updated"] == now0 - 60, (told, rd(50)))
 put(54, contact=MAIN)
 st, out = server._client_post("box-a", "project-agent-rename", {"project": "projects/delta", "old": MAIN, "new": "delta-lead", "sender": "fleet-web"})
@@ -214,7 +214,7 @@ check("endpoint rename: the page's key is renamed (200) and the answer lists the
 check("endpoint rename: the contact stored as the old plain name is the new name; nobody is told", rd(54)["metadata"]["contact"] == "delta-lead" and told == [], (rd(54)["metadata"], told))
 st, out = server._client_post("box-a", "project-agent-retire", {"project": "projects/delta", "name": "home-delta-nobody", "sender": "sala-retire"})
 check("endpoint retire: a name on no page → 200 'not listed', no contact_moved in the answer", st == 200 and out.get("result") == "not listed" and "contact_moved" not in out, (st, out))
-server._pform.PAGE_IO = None
+_psvc.PAGE_IO = None
 (T / "store" / "project-record.json").unlink(missing_ok=True)       # the endpoints above wrote the RECORD (an entry for projects/delta made from the page, then its renamed agents); the sections below read the REG fixture, so the record goes with the fake page
 
 # ---- reading: a stored contact that is no front agent any more reads as the project's -main agent; get shows the line, the brief does not
