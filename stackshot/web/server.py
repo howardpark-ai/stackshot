@@ -932,7 +932,7 @@ def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bo
         return ""
     after = lambda i_: _after_open(i_.get("metadata") or {})
     try:
-        ch = _model.settle(item_now, _model.stood_his(item_was, after), after)
+        ch = _model.settle(item_now, _model.stood_his(item_was, after), after, waiting=True)      # the one caller that settles a waiting item: an update write that did not name a mover
     except Exception as e:  # noqa: BLE001  — a reading that fails changes nothing
         print(f"model: mover not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
@@ -1850,13 +1850,13 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
     what = _watch.subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})
     do = eff["do"]
     if do == "arrived":
-        was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
+        was_post = _watch.was_picker(w.get("was"))
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
         _watch.turn_alive(meta, post, f"{OWNER} says {what} arrived", now)
         meta.pop("chases", None)
         return f"arrived → {_watching.watch_label(post)}"
     if do == "words":     # his words with no button: never an arrival or a drop; the post-wake mover has the item, the wait's record (watch.was) and his words, and judges
-        was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
+        was_post = _watch.was_picker(w.get("was"))
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))
         keep = w.get("was")
         _watch.turn_alive(meta, post, f'{OWNER} answered in words: "{_clip_line(eff.get("text") or "", 300)}"', now)

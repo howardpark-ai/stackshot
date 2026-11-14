@@ -531,10 +531,11 @@ finally:
 check("6c migration: it posts nothing to GitHub (mirror off), though it rewrote items", len(done) >= 5 and mig_calls == [], (done, mig_calls))
 check("6c migration: it rewrites the items that need it, and no other", sorted(g for g in done if g in {f"a{n}" for n in [*range(28, 37), 49, 50]}) == ["a34", "a35", "a36", "a49", "a50"], done)
 check("6c migration: an old answer followed by a deliberate mover=Oliver (with a later record, or no record) is left byte for byte", all(raw(n) == before_mig[n] for n in (158, 159)), None)
-check("6c migration: a waiting item loses only its mover: then=Oliver (the post-wake mover) stays as stored, and the stale hand-off line ends",
-      "mover" not in mt(36) and mt(36)["then"] == OWN and isinstance(mt(36)["handoff"]["taken_at"], float), mt(36))
+check("6c migration: a waiting item keeps its stored mover=Oliver (where he picks it up when the wait ends is written) and its then, and the stale hand-off line ends",
+      mt(36)["mover"] == OWN and mt(36)["then"] == OWN and isinstance(mt(36)["handoff"]["taken_at"], float), mt(36))
 check("6c settle: …the same through model.settle (a waiting item: only the mover, no then key; a hand-back to an agent: the agent mover and then cleared as Done does)",
-      model.settle(rd(36), True) is None and model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True) == {"mover": ""}
+      model.settle(rd(36), True) is None and model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True) is None
+      and model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True, waiting=True) == {"mover": ""}
       and model.settle({**rd(143), "metadata": {**mt(143), "mover": OWN, "then": BACK}}, True) == {"mover": BACK, "then": ""}, model.settle({**rd(36), "metadata": {**mt(36), "mover": OWN}}, True))
 check("6c migration: an agent mover on an item that waits on him becomes he, the agent in then", mt(49)["mover"] == OWN and mt(49)["then"] == BACK, mt(49))
 check("6c migration: the mover he held in an agent's state with a then goes back to the agent", mt(50)["mover"] == BACK and "then" not in mt(50), mt(50))
@@ -557,7 +558,7 @@ it_d = _service_store._load("a40"); it_d["metadata"]["needs"] = ["decision", BAC
 writes.save("a40", it_d)
 it_d = _service_store._load("a40"); it_d["metadata"].update(needs=[BACK], wait_kind="relay", wait_event="Robin relays the quote", ask_by=day(5)); it_d["metadata"].pop("ask")
 writes.save("a40", it_d)
-check("6c mover: a save where a wait replaces his state makes the agent in then the mover who picks it up, and then goes", mt(40).get("mover") == BACK and "then" not in mt(40), mt(40))
+check("6c mover: a save where a wait replaces his state leaves his stored mover alone (the on-save backstop does not settle a waiting item: he picks it up when the wait ends), then beside him", mt(40).get("mover") == OWN and mt(40).get("then") == BACK, mt(40))
 set_cfg(guards=False, handoff=False)
 item(157, needs=["decision", BACK], mover=BACK, ask=ASK)
 check("6c migration: [model] guards = false and handoff = false: nothing to do", migsvc.migrate_owner_mover() == [], None)

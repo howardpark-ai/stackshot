@@ -172,7 +172,7 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             ask, opts = watch_ask(gid, meta, what)
             _watch.turn_to_owner(meta, mod.then, ask, opts, what, now)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
-        elif cause == "time" and not str(meta.get("wait_kind") or "").strip() and not str(meta.get("post_wake_mover") or "").strip():
+        elif cause == "time" and not str(meta.get("wait_kind") or "").strip() and not mod.wait.mover_explicit:
             _watch.end_date(meta, what, post, now)       # a wait on the date alone ends with the date: needs, the open after link and the mover stay as stored
             mover = post
         else:
