@@ -115,6 +115,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
 from stackshot.waits import waiting as _wt
 from stackshot.core import config as _cfg
@@ -490,7 +491,7 @@ check("the PR's state is pruned once no open item names it", "o/r#7" not in st()
 F.merged[39] = False; item(80, check="pr_merged o/r#39", next="team-back: merge it"); F.log.clear()
 tick(1)
 check("6a: the done check's pass reads PR 39 once", len(gets(39)) == 1 and st()["github"]["o/r#39"]["merged"] is False, (F.log, st()))
-server._evwait_preread("event", "pr_merged o/r#39")
+wait_gates_svc._evwait_preread("event", "pr_merged o/r#39")
 check("6a: the event wait's early read of the same PR inside the pace makes no GET, and its own memory holds the record the check pass kept",
       len(gets(39)) == 1 and evwaits_svc.EVW_GH.get("o/r#39", {}).get("merged") is False and evwaits_svc.EVW_GH["o/r#39"] == st()["github"]["o/r#39"], (F.log, evwaits_svc.EVW_GH))
 proof_gh = {}

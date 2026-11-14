@@ -1,5 +1,5 @@
 """Scenario test for an ask that is wrong leaving the owner's move, a dropped dependency reminding its author, and the server applying what he said (ask_leaves.py, note_read.py;
-server._ask_after_write, _ask_leave, _answer). Fixture data, direct calls to the update tool and the board's answer, no live store, no network.
+asks_svc._ask_after_write, _ask_leave, _answer). Fixture data, direct calls to the update tool and the board's answer, no live store, no network.
 
 Covers: (2) a write while an ask stands on an item its author moves or wrote ends with a one-line reminder (not for another session, not once the ask is cleared); (3a) a write that
 sets an ask shows the owner's comments and notes since the item's last ask; (3b) the author's own plain sentence, alone as the whole new text of a write of that item ("The ask is wrong.",
@@ -103,6 +103,7 @@ def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
+from stackshot.service import asks as asks_svc
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
@@ -359,9 +360,9 @@ r = upd("a61", priority="p2", description=DW("The ask is wrong."))
 check("the same description re-sent with a later write does not take the NEW ask off", stood(61) and "took the ask off" not in r, r)
 # a write with no sender is nobody's own word: it takes nothing off (the update tool refuses an empty sender; the tail itself is checked here)
 item(50, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-r = server._ask_after_write(gates.ask_pre("a50"), "", "", False, ["the ask is wrong"])
+r = asks_svc._ask_after_write(gates.ask_pre("a50"), "", "", False, ["the ask is wrong"])
 check("a sender-less write never takes the ask off, though its text says the ask is wrong, and gets no reminder", stood(50) and r == "", r)
-check("the same words from the ask's author do", "took the ask off" in server._ask_after_write(gates.ask_pre("a50"), "home-agent", "", False, ["the ask is wrong"]) and not stood(50))
+check("the same words from the ask's author do", "took the ask off" in asks_svc._ask_after_write(gates.ask_pre("a50"), "home-agent", "", False, ["the ask is wrong"]) and not stood(50))
 
 # the real shape: the owner is the stored mover while a decision stands, and a `then` is stored; the item goes back to the ask's author
 item(51, mover="Oliver", then="home-agent", needs=["decision"], ask=ASK, state="your-call", ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
@@ -500,11 +501,11 @@ rs3 = [upd(f"a{k}", priority="p2") for k in (86, 87, 88, 89, 90)]
 check("an ask on a superseded cycle, a superseded item with no replacement named, a missing replacement, a reopened item and one reopened with a stale outcome stands and its reminder names nothing",
       all(stood(k) for k in (86, 87, 88, 89, 90)) and not any("which this ask waits on" in r or "took the ask off" in r for r in rs3), rs3)
 check("... and the lookup gives up on each of them (a cycle ends nowhere, a missing replacement is unread, an open item is not closed)",
-      server._ask_lookup("80") is None and server._ask_lookup("82") is None and server._ask_lookup("83") is None and server._ask_lookup("84")[0] == "open" and server._ask_lookup("85")[0] == "open",
-      [server._ask_lookup(n) for n in ("80", "82", "83", "84", "85")])
+      asks_svc._ask_lookup("80") is None and asks_svc._ask_lookup("82") is None and asks_svc._ask_lookup("83") is None and asks_svc._ask_lookup("84")[0] == "open" and asks_svc._ask_lookup("85")[0] == "open",
+      [asks_svc._ask_lookup(n) for n in ("80", "82", "83", "84", "85")])
 check("the lookup follows a superseded item to the end of its chain (and gives up on a chain it cannot read)",
-      server._ask_lookup("72")[:2] == ("completed", "dropped") and server._ask_lookup("70")[:2] == ("open", "") and server._ask_lookup("21") is None and server._ask_lookup("20")[:2] == ("completed", "dropped"),
-      [server._ask_lookup(n) for n in ("72", "70", "21", "20")])
+      asks_svc._ask_lookup("72")[:2] == ("completed", "dropped") and asks_svc._ask_lookup("70")[:2] == ("open", "") and asks_svc._ask_lookup("21") is None and asks_svc._ask_lookup("20")[:2] == ("completed", "dropped"),
+      [asks_svc._ask_lookup(n) for n in ("72", "70", "21", "20")])
 # an ask stored before the record was kept has no time to compare a drop with: its reminder names nothing
 item(160, mover="home-agent", needs=["decision"], ask=X("Decide: approve the export once {B}47 lands · Recommend: approve" + SEP))
 item(161, mover="home-agent", needs=["decision"], ask=X("Decide: approve the export once {B}20 and {B}47 land · Recommend: approve" + SEP))
@@ -520,11 +521,11 @@ item(712, rec_at=now - 7200, mover="home-agent", needs=["decision"], after=["g20
 r = upd("a712", priority="p2")
 check("an ask that names no id stands and names no dependency though the item's stored after names the dropped item", stood(712) and "which this ask waits on" not in r, r)
 check("a close seen as superseded or as done leaves asks alone too (the close path has no ask step any more)",
-      server._ask_lookup("22")[:2] == ("completed", "done") and stood(711) and stood(712), None)
+      asks_svc._ask_lookup("22")[:2] == ("completed", "done") and stood(711) and stood(712), None)
 
 # the author's word, on the write's new text: the plain sentence counts, anything around it stands (every stand-case of the pure reader, through the server's own tail)
 item(500, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-tail = lambda texts, k=500: server._ask_after_write(gates.ask_pre(f"a{k}"), "home-agent", "", False, texts)
+tail = lambda texts, k=500: asks_svc._ask_after_write(gates.ask_pre(f"a{k}"), "home-agent", "", False, texts)
 STAND_W = [[t] for t in NOT_WORD] + [w for t in ("The ask is wrong.", "- My question is moot.", "This ask is no longer needed.") for e in EXTRAS for w in around(t, e)]
 bad = [t for t in STAND_W if "took the ask off" in tail(t) or not stood(500)]
 check("the author's word on a write (%d inputs): a hedge, a clause, a question, a label, a quote, a name and a colon, another sentence or line before or after, a disagreement, Korean, 'Pat to decide', a second text: the ask stands" % len(STAND_W), not bad, bad[:5])
@@ -533,7 +534,7 @@ for k, t in zip((501, 502, 503, 504, 505), ("The ask is wrong.", "My question is
     r = tail([t], k)
     check(f"the author's word on a write: {t!r} alone takes the ask off", not stood(k) and "took the ask off" in r, r)
 item(506, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-r = server._ask_after_write(gates.ask_pre("a506"), "home-other", "", False, ["The ask is wrong."])
+r = asks_svc._ask_after_write(gates.ask_pre("a506"), "home-other", "", False, ["The ask is wrong."])
 check("the same plain sentence from a session that is not the ask's author takes nothing off", stood(506) and "took the ask off" not in r, r)
 
 # (round 11, M1) through the update tool: a hedge inside a longer old line rides along with the sentence and the ask stands; a hedge held as a whole old line is not new, so the sentence alone removes the ask
@@ -641,11 +642,11 @@ _label0 = _fleet_sessions_registry._session_label
 _fleet_sessions_registry._session_label = _wt_route._session_label = lambda w: (labels.append(w), _label0(w))[1]
 try:
     it0 = rd(1000); before0 = json.loads(json.dumps(it0))
-    server._ask_stamp(it0, before0, "home-agent"); n_same = len(labels)
+    asks_svc._ask_stamp(it0, before0, "home-agent"); n_same = len(labels)
     it1 = json.loads(json.dumps(it0)); it1["metadata"]["ask"] = ASK2
-    server._ask_stamp(it1, before0, "home-agent"); n_changed = len(labels) - n_same
+    asks_svc._ask_stamp(it1, before0, "home-agent"); n_changed = len(labels) - n_same
     it2 = json.loads(json.dumps(it0)); it2["metadata"].pop("ask", None)
-    server._ask_stamp(it2, before0, "home-agent"); n_gone = len(labels) - n_same - n_changed
+    asks_svc._ask_stamp(it2, before0, "home-agent"); n_gone = len(labels) - n_same - n_changed
 finally:
     _fleet_sessions_registry._session_label = _wt_route._session_label = _label0
 check("a save that leaves the ask as it was, or removes it, does not look the writer up; one that changes it does, once, and records who wrote it",

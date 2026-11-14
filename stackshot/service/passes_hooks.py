@@ -41,7 +41,7 @@ class Hooks:
     shown_needs: Callable[..., Any]  # server._shown_needs
     stamp_write_op: Callable[..., Any]  # server._stamp_write_op
     switchover_on: Callable[..., Any]  # item_read._switchover_on
-    watch_on_write: Callable[..., Any]  # server._watch_on_write
+    watch_on_write: Callable[..., Any]  # service.wait_gates._watch_on_write
     zone: Callable[[], Any]  # server.ZONE
 
 _hooks_: Hooks | None = None

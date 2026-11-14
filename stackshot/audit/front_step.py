@@ -2,7 +2,7 @@
 
 A stuck-elsewhere finding about a front agent's step (or a retired session's) goes to the project's page key, never to the front agent (audit_run.recipient), and is sent once; nothing in it
 changes the board, so such a step could stay open for as long as the item does. The ten-minute filing pass (audit_run.front_step_pass) now keeps a clock for it and, past the threshold,
-rewords the step so it opens with the item's mover. This module is the part that reads and decides; the item is written by the server (server._front_step_mark, server._front_step_move),
+rewords the step so it opens with the item's mover. This module is the part that reads and decides; the item is written by the server (service/wait_gates.py `_front_step_mark`, `_front_step_move`),
 which the pass reaches through two members of audit_run.Env, so a run without the server (the command line) changes nothing.
 
   hours()                           [audit] front_step_move_hours (default 3; 0 = off)

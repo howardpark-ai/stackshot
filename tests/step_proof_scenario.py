@@ -177,8 +177,8 @@ def raw(i): return (T / f"store/a/{i}.json").read_text()
 def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._OWN_REPO[:] = [REPO]
-server._HERE = rlive_svc.HERE = T / "repo"
+released_svc._OWN_REPO[:] = [REPO]
+rlive_svc.HERE = T / "repo"
 GH = {key(39): ("merged", ""), key(40): ("dead", ""), key(41): ("err", "GitHub refused the read (404)"), key(7, OTHER): ("merged", "")}
 GH_CALLS = []; GH_TAGS = []
 from stackshot.core import ghbudget as _gbud

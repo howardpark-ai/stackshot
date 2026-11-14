@@ -68,6 +68,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, released as released_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.web import answers as _web_answers
@@ -217,7 +218,7 @@ item(42, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/6", wait_e
 reset()
 wakes_svc.anchor_release("projects/alpha", notice("old comment", ts=now0 - 20 * DAY))
 check("anchor: a notice older than the item's last move does not count", mt(40).get("wait_kind") == "anchor", mt(40))
-wakes_svc.anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
+wakes_svc.anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=released_svc.AUTO_RULER, ruling="merged", to=""))
 check("anchor: a routine line of the fleet's own PR (CI passing) does not end a wait for a merge", mt(40).get("wait_kind") == "anchor", mt(40))
 wakes_svc.anchor_release("projects/alpha", notice("dropped by the keeper", ruling="dropped"))
 check("anchor: a notice the keeper dropped does not count (as for today's anchor wait)", mt(40).get("wait_kind") == "anchor", mt(40))
@@ -229,7 +230,7 @@ check("anchor: another project's item and another anchor's item are not touched"
 check("anchor: a notice again does nothing (the item is alive now)", wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged again")) == [], None)
 item(43, wait_kind="anchor", wait_anchor=AURL, wait_event="PR merged", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] anchor wait, merged routine line")
 reset()
-rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged by home-front", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged by home-front", log_only=True, ruled_by=released_svc.AUTO_RULER, ruling="merged", to=""))
 check("anchor: …but a routine line that says merged does", "a43" in rel and mt(43).get("mover") == BACK, (rel, mt(43)))
 item(44, wait_kind="anchor", wait_anchor=AURL, wait_event="a reply", ask_by=day(5), post_wake_mover=BACK, needs=[], project="projects/beta", subject="[home] no keeper")
 rel = wakes_svc.anchor_release("projects/beta", notice("someone replied", ruling=None, to="", live=True), by="")
@@ -255,7 +256,7 @@ check("anchor: at wait-set the reply says what anchor-hub already recorded on th
 check("anchor: …and the wait is stamped (a notice older than it is not its arrival)", mt(47).get("watch", {}).get("set_at", 0) >= now0 and mt(47).get("wait_kind") == "anchor", mt(47))
 item(48, subject="[home] quiet anchor", su=now0 - 3600, needs=[BACK])
 refused("anchor: an anchor that is not on the project's list cannot be set as the wait (anchor_wait_refusal has the rest)", lambda: _update_svc._update("a48", sender=FRONT, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"), "anchors list", "anchors(project=\"projects/alpha\"")
-out = server._watch_anchor_seen("projects/alpha", "https://github.com/o/r/pull/9", now0 - 3600)
+out = wait_gates_svc._watch_anchor_seen("projects/alpha", "https://github.com/o/r/pull/9", now0 - 3600)
 check("anchor: …the report for a stored wait, nothing recorded, says so, and an anchor anchor-hub does not watch for the project is named", "recorded nothing" in out and "does not watch" in out and "anchors(project=\"projects/alpha\"" in out, out)
 out = _update_svc._update("a47", sender=FRONT, ask_by=day(8))
 check("anchor: moving the awaited date (ask_by) resets the backstop's stamp, and says nothing more of the anchor", mt(47)["watch"]["set_at"] >= now0 and "anchor-hub already" not in out, out)
@@ -682,14 +683,14 @@ check("review 2nd: one bad stamp does not abort the minute pass: the other waits
 
 # --- 11. the exemption for a watcher's ask holds only while the item's watch says it is up
 RA = "Decide: has the parcel arrived? · Options: arrived / not yet, ask again on <date> / drop"
-check("review 11: a needs=decision item whose ask only looks like a watcher's is nagged for the ask's shape", server._ask_owed({"needs": ["decision"], "ask": RA}) != "", server._ask_owed({"needs": ["decision"], "ask": RA}))
-check("review 11: …one the watchers put up is not", server._ask_owed({"needs": ["decision"], "ask": RA, "watch": {"asked": "relay"}}) == "", None)
+check("review 11: a needs=decision item whose ask only looks like a watcher's is nagged for the ask's shape", asks_svc._ask_owed({"needs": ["decision"], "ask": RA}) != "", asks_svc._ask_owed({"needs": ["decision"], "ask": RA}))
+check("review 11: …one the watchers put up is not", asks_svc._ask_owed({"needs": ["decision"], "ask": RA, "watch": {"asked": "relay"}}) == "", None)
 LINE = "Decide: ship it · Recommend: yes · Stakes: low · By: Mon Nov 2nd"
 mm = {"needs": ["decision"], "ask": RA, "next": LINE + "\nteam-back: details"}
-note = server._lift_ask(mm)
+note = asks_svc._lift_ask(mm)
 check("review 11: _lift_ask on a look-alike ask takes the ask-shaped first line of next as the ask", mm.get("ask") == LINE and note != "", (mm, note))
 mm = {"needs": ["decision"], "ask": RA, "watch": {"asked": "relay"}, "next": LINE + "\nteam-back: details"}
-check("review 11: …and leaves a watcher's own ask up", server._lift_ask(mm) == "" and mm.get("ask") == RA, mm)
+check("review 11: …and leaves a watcher's own ask up", asks_svc._lift_ask(mm) == "" and mm.get("ask") == RA, mm)
 
 # --- 12. smaller
 item(190, wait_kind="item", after=["a37"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] waits on a superseded blocker")

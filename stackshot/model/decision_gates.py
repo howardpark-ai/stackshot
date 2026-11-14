@@ -3,8 +3,8 @@ question with no options, a mockup linked outside the ask, several decisions in 
 (the Recommend part that names no option; an option label or line that says I, you, we, us or me, and an ask line that says I, you or me, without naming who acts).
 
 Each is a pure function of the item's metadata (and the description) that raises ToolError with the refusal, or returns the note; none reads the store or changes anything. The create and update writes
-(`service/create.py`, `service/update.py`) call them on this module, and the suites that stub one set it here. `_gate_options`, the shape of options=[...], stays in
-`web/server.py`: it also reads `_shown_ids`, which looks an item up in the store."""
+(`service/create.py`, `service/update.py`) call them on this module, and the suites that stub one set it here. `_gate_options`, the shape of options=[...], is in
+`service/wait_gates.py`: it also turns the shown form of an id back to the stored one (a save hook), which looks an item up in the store."""
 from __future__ import annotations
 
 import re
