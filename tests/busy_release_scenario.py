@@ -267,6 +267,16 @@ check("3 an item that cannot be read passes", ok(gate(rel_live(anch=A77, item=la
 check("3 an unreadable step reader passes", ok(gate(rel_live(anch=A77, step_prs=lambda m: 1 / 0))))
 check("3 a pull request the unit list gives that is no number is no unit", ok(gate(rel_live(units=("x",), anch=A77))))
 check("3 a `live` that raises passes the write, and no `live` at all passes", ok(gate(lambda g, w: 1 / 0)) and ok(gate(None)))
+# the proof itself answers "" for anything it cannot tell (the gate would also catch a raise, so the callable is asked directly)
+direct = lambda **kw: rel_live(**kw)("a1", BACK)
+check("3 the proof answers \"\" itself, never raising, when the unit list raises, the anchors raise, the item raises, the log raises or the repository cannot be named",
+      direct(anch=A77, raises=OSError("x")) == "" and direct(anch=A77, logs={77: OSError("denied")}) == "" and direct(anch=A77, item=lambda g: 1 / 0) == "" and direct(anch=A77, own="") == ""
+      and busy_hold.live_release("a1", units=lambda: {77}, anchored=lambda: 1 / 0, item=server._svcstore._load, own_repo=lambda: OWN, canon=_cfg.canon_repo, step_prs=_rel.step_prs, pages=lambda: {}, log=lambda n: (NOW, QUEUED), now=lambda: NOW) == "")
+check("3 …and its words, when it can tell, are the refusal's start", direct(anch=A77).startswith("your release of PR #77 is running on it (unit stackshot-release-77.service"), direct(anch=A77))
+check("3 an anchored pull request that is not running is not counted although its log is fresh (only a unit proves it)", ok(gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))), gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)})))
+check("3 a step's pull request that is not running is not counted although its log is fresh", ok(gate(rel_live(units=(99,), step_prs=lambda m: {78}, logs={78: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))))
+check("3 two tied releases, one with no log and one fresh: the fresh one refuses (a missing log is skipped, not fatal)", "PR #91 is running" in gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)}))[1], gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})))
+check("3 …and with the log of one unreadable the other still speaks", "PR #91 is running" in gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: OSError("x"), 91: (NOW - 60.0, QUEUED)}))[1])
 # the early exits are the subagent proof's own
 L77 = rel_live(anch=A77)
 check("3 (the live proof refuses before the exits below)", RELWORDS(gate(L77)))

@@ -175,7 +175,10 @@ def live_release(gid: str, *, units: Callable[[], Any], anchored: Callable[[], d
         t_now = now()
         best: "tuple[float, int, str] | None" = None
         for n in sorted(tied):
-            got = log(n)
+            try:
+                got = log(n)
+            except Exception:  # noqa: BLE001  — a log that cannot be read is unknown: another tied release may still be told
+                continue
             if not got:
                 continue
             age = t_now - float(got[0])
