@@ -634,6 +634,9 @@ queued_behind = false                               # true: a session that moves
                                                     # activity for an hour reads WAITING, "queued behind <item>" (an item wait), and the hourly audit line, the idle hand-over and the stall ladder leave it alone as they do a waiting item.
                                                     # Derived when the board is read, never stored: it ends when the mover moves the item, the item it waits behind closes or goes quiet for an hour, or the mover has one item left.
                                                     # A front agent's items are never queued. Off by default. Live (read at use)
+busy_hold_guard = true                              # true (the default): an update by an item's mover that parks it (hold=true, or a date alone) is refused while a running subagent of that mover is tied to the item (a description
+                                                    # or brief that names the item or a pull request anchored to it, as the hourly audit reads it): an item being moved is kept in hand, never paused. Anything that cannot be
+                                                    # read passes the write. false: no such refusal. Live
 rebullet_machines = []                              # the machines whose token may write through /client/rebullet, e.g. ["myhost"]; [] = none, the call is refused (stackshot/tools/rebullet_descriptions.py --apply: an open item's description
                                                     # rewritten as bullets, as the author `rebullet`, with nothing lost; the state clock and confirm stay). The server box only. Live
                                                     #

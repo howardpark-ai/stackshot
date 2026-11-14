@@ -45,11 +45,11 @@ wake and either his recorded words for it (cap_ok) or a wait_basis (the end of a
 wake past the cap); a wait on someone outside is wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>,
 post_wake_mover and needs=["external"]. Work in hand needs next and its mover, carries no expected time (the item
 shows how long it has run), and expected_by and expected_reason, which older calls pass, are accepted and not kept
-(the reply says so). Work in hand is not a wait: a wait (a date, a timer, another release, someone else's step) is
+(the reply says so). Work in hand is not a wait: a wait (a date, a timer, someone else's step or release) is
 parked in the turn it starts, with update(hold=true, until="YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", wait_basis="<what it
 waits for, with its date YYYY-MM-DD>"), update(after=["board#N"]) for another item, or the relay wait above for
-someone outside (a write that leaves an item with wait wording in its next, such as overnight, in the morning, once
-the run finishes, gets a note saying to park it). No clock renewal without progress: a write that moves a wake or
+someone outside (a write that leaves wait wording in next, such as overnight, in the morning or once the vendor
+replies, gets a note saying to park it). No clock renewal without progress: a write that moves a wake or
 ask_by to a later time while the item's reason (description, wait_basis text) and its open steps are as they were is
 refused (a wait_reason does not count: it is not stored); in the same write mark a step done or dropped, write the
 next step or state the new reason (or send {{OWNER}}'s own words in said), or change what the wait stands on to a
@@ -253,7 +253,7 @@ are. An item whose needs hold decision is never on hold: a write to one drops it
 parks an item on his call). {{OWNER}} parks on his word. A hold always names what it waits for: {{OWNER}}'s words, the
 items that must close first (after), a notice from an anchor scoped to the item, a pane recycle (recycle=true), or the
 end of a window the work itself needs; an unconditional or indefinite park is refused. Work moving in real time stays
-on agent however long it takes (a build, tests, a review, a release, a run in progress): do not park it. A session
+on agent however long it takes (a build, tests, a review, a release or its queue, a run or subagent of yours): do not park it: its mover's hold is refused while its subagent runs on it. A session
 parks its own item when the work itself needs a wait-and-see window (a soak, a log or data collection window, a trial
 week, a timer it started): hold=true, until=<when the window ends>, wait_basis="<what the window collects> ends
 <YYYY-MM-DD>" (update(item_id="board#N", sender="my-x", hold=true, until="<YYYY-MM-DD, a future day>",
