@@ -77,6 +77,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import owner_words as _owner_words; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.service import answer as answer_svc
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
@@ -477,7 +478,7 @@ check("6c mover: …and when his wait ends in the server's own save, the agent h
 # his answer on the board
 item(30, needs=[BACK], mover=BACK)
 upd(30, needs=["decision"], ask=ASK)
-check("6c mover: his decision on the board (a save with an author) is taken", server._answer("a30", "Yes", "", "answer") == "decision", mt(30))
+check("6c mover: his decision on the board (a save with an author) is taken", answer_svc._answer("a30", "Yes", "", "answer") == "decision", mt(30))
 check("6c mover: …and leaves the agent as the mover again, no stored then, no model conflict", mt(30)["mover"] == BACK and "then" not in mt(30) and "model conflict" not in _wt_get.stackshot_get("a30"), mt(30))
 # a create
 out_c2 = _wt_create._create(subject="[home] his call, no mover named", description=DESC, project="projects/alpha", owner="home-front", next="Oliver: decide", needs=["decision"], ask=ASK)

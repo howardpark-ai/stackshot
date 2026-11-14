@@ -57,6 +57,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -93,7 +94,7 @@ telling.tell_woken = lambda gid, owner, note, tag="wake": sent.append((gid, owne
 
 import datetime as _dtm, itertools, random
 CFGM["migration"] = True
-call = lambda **body: server._client_post("box-a", "migrate", {"sender": SENDER, **body})
+call = lambda **body: _rt_client._client_post("box-a", "migrate", {"sender": SENDER, **body})
 put(31, needs=[BACK]); put(32, status="completed", needs=[BACK], outcome="done")
 DATES = {"past": day(-30), "soon": day(2), "later": day(10), "soon, spaced": day(2) + "  09:30", "later, spaced": day(10) + "  09:30"}      # a hand-edited store can hold a date with a double space inside it: the old readers took it for no date
 KINDS = [("", {}), ("time", {"wait_kind": "time"}), ("item", {"wait_kind": "item"}), ("relay", {"wait_kind": "relay", "wait_event": "the vendor's reply"}),

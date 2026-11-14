@@ -88,6 +88,7 @@ for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
 from stackshot.web import server; from stackshot.service import mover_steps as _mover_steps; from stackshot.service import projects as _psvc; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
 from stackshot.anchors import anchors as _A
@@ -184,7 +185,7 @@ check("a write that fails is logged, not raised", "projects.json:" in logged or 
 # ---- 5. post project-agent
 def post(project, name, sender, role="triage", front=True, mandate="sorts the incoming", raw=False):
     """sender: a session's name from the fixtures is sent as its transcript id (what $CLAUDE_CODE_SESSION_ID holds); raw=True sends it as written."""
-    return server._client_post("box-c", "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender if raw else U.get(sender, sender)})
+    return _rt_client._client_post("box-c", "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender if raw else U.get(sender, sender)})
 def agents_of(pid): return prj.ref(pid)["agents"]
 st, out = post(A_ID, "home-sparrow-triage", "home-sparrow")
 check("the keeper may list an agent (project by id, the keeper by its transcript id): 200, listed in the record (nothing owed: the page's agents block is written from it)", st == 200 and out["page_owed"] is False and out["key"] == "projects/alpha" and out["project"] == A_ID
@@ -247,7 +248,7 @@ st, out = post(A_ID, "home alpha bad", "home-sparrow"); check("a name with space
 st, out = post(A_ID, "home-sparrow-n", "home-sparrow", mandate="two\nlines"); check("a mandate with a line break is refused", st == 400, (st, out))
 st, out = post(A_ID, "home-sparrow-n", "home-sparrow", role="bad role"); check("a role with a space is refused", st == 400, (st, out))
 st, out = post(A_ID, "home-sparrow-n", "home-sparrow", mandate=""); check("an empty mandate is refused", st == 400, (st, out))
-st, out = server._client_post("box-c", "project-agent", {"project": A_ID, "name": "home-sparrow-n", "role": "n", "mandate": "m", "sender": U["home-sparrow"]}); check("front missing: 400", st == 400, (st, out))
+st, out = _rt_client._client_post("box-c", "project-agent", {"project": A_ID, "name": "home-sparrow-n", "role": "n", "mandate": "m", "sender": U["home-sparrow"]}); check("front missing: 400", st == 400, (st, out))
 st, out = post(A_ID, "home-sparrow-main", "home-sparrow", role="main", mandate="talks to Oliver")
 check("a name the page lists, said again as it is: 200, nothing owed, nothing changed", st == 200 and out["page_owed"] is False and "nothing changed" in out["note"] and "page_owed" not in agents_of(A_ID)["home-sparrow-main"], (st, out))
 st, out = post(A_ID, "home-sparrow-main", "home-sparrow", role="main", mandate="something else")
@@ -477,9 +478,9 @@ NS = reg()["projects/noname"]["id"]
 check("(setup) a page with no name line has no keeper, and its listed front agent is the one who may add", prj.ref(NS)["keeper"] == "" and "noname-main" in prj.ref(NS)["agents"])
 (T / "fleet/a/sessions.json").write_text(json.dumps({**{u: {"name": n, "machine": "a", "url": "", "seen": "x"} for n, u in U.items()}, "00000000-0000-4000-8000-0000000000aa": {"name": "noname-main", "machine": "a", "url": "", "seen": "x"}}))
 NSM = "00000000-0000-4000-8000-0000000000aa"
-st, out = server._client_post("box-c", "project-agent", {"project": NS, "name": "other-name", "role": "x", "front": True, "mandate": "m", "sender": NSM})
+st, out = _rt_client._client_post("box-c", "project-agent", {"project": NS, "name": "other-name", "role": "x", "front": True, "mandate": "m", "sender": NSM})
 check("a page with no name line still requires <slug>-<role> (here noname-<role>)", st == 400 and "noname-<role>" in out["error"], (st, out))
-st, out = server._client_post("box-c", "project-agent", {"project": NS, "name": "noname-docs", "role": "docs", "front": True, "mandate": "keeps docs", "sender": NSM})
+st, out = _rt_client._client_post("box-c", "project-agent", {"project": NS, "name": "noname-docs", "role": "docs", "front": True, "mandate": "keeps docs", "sender": NSM})
 check("…and a name that follows the slug is accepted", st == 200 and out["page_owed"] is False, (st, out))
 st, out = post(A_ID, "home-sparrow-claimed", "home-sparrow", role="one", mandate="first claim")
 st2, out2 = post(A_ID, "home-sparrow-claimed", "home-sparrow-docs", role="two", mandate="a different claim")

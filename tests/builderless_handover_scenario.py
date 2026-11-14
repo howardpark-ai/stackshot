@@ -48,6 +48,7 @@ def put(i, project="projects/sigma", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": SMAIN, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import answer as answer_svc
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -85,54 +86,54 @@ def put_step(i, project="projects/sigma", next_text=None, post=SMAIN, **meta):
 # ---- 1. the answer to the owner's step
 put_step(1, contact=SDESK)
 told.clear()
-res = server._answer("a1", "", "", "send"); m = rd(1)["metadata"]
+res = answer_svc._answer("a1", "", "", "send"); m = rd(1)["metadata"]
 check("1.1 the incident: the answered step goes to the session the next open step names, not to -main", res == "done" and held(1) == SDESK and m.get("mover") == SDESK, (res, held(1), m.get("mover")))
 check("1.2 the wait and the owner's step are over, and the session is told it is its item now", "wait_kind" not in m and not m.get("hold") and "state" not in m and any(t[1] == U[SDESK] and "It goes to" not in t[2] and "yours now" in t[2] for t in told), (m, told))
 check("1.3 -main is not the mover", held(1) != SMAIN and SMAIN not in json.dumps(m.get("needs") or []), m.get("needs"))
 
 put_step(2, contact=SDESK, next_text=f"{OWNER}: {STEP}")      # no other step: the stored contact
-res = server._answer("a2", "", "", "send")
+res = answer_svc._answer("a2", "", "", "send")
 check("1.4 with no further named step, the item's stored contact takes it", res == "done" and held(2) == SDESK, (res, held(2)))
 
 put_step(3, next_text=f"{OWNER}: {STEP}")      # neither a step nor a contact: -main keeps it as before
-res = server._answer("a3", "", "", "send")
+res = answer_svc._answer("a3", "", "", "send")
 check("1.5 with neither a next step nor a contact, -main takes it as before", res == "done" and held(3) == SMAIN, (res, held(3)))
 
 put_step(4, contact=SDESK, next_text=f"{OWNER}: {STEP}\n{LONER}: unknown session step")
-res = server._answer("a4", "", "", "send")
+res = answer_svc._answer("a4", "", "", "send")
 check("1.6 a next step that names no usable session falls to the contact", res == "done" and held(4) == SDESK, (res, held(4)))
 
 put_step(5, then=SDESK, next_text=f"{OWNER}: {STEP}\n{SMAIN}: carry on", contact=SMAIN)
-res = server._answer("a5", "", "", "send")
+res = answer_svc._answer("a5", "", "", "send")
 check("1.7 a stored `then` still wins over the step and the contact", res == "done" and held(5) == SDESK, (res, held(5)))
 
 put_step(6, project="projects/delta", post=DMAIN, contact=DDESK, next_text=f"{OWNER}: {STEP}\n{DDESK}: check the result")
-res = server._answer("a6", "", "", "send")
+res = answer_svc._answer("a6", "", "", "send")
 check("1.8 a project that has a builder hands the answer to its builder, as before", res == "done" and held(6) == DBUILD, (res, held(6)))
 
 put_step(7, next_text=f"{OWNER}: {STEP}\n{OWNER}: and then sign it\n{SDESK}: finish")      # the owner's own later line is skipped
-res = server._answer("a7", "", "", "send")
+res = answer_svc._answer("a7", "", "", "send")
 check("1.9 another line of the owner's is not an owner of the answer: the first named session step is", res == "done" and held(7) == SDESK, (res, held(7)))
 
 put_step(8, contact=SDESK)
-res = server._answer("a8", "", "which box do I run it on?", "send")
+res = answer_svc._answer("a8", "", "which box do I run it on?", "send")
 check("1.10 his note on the step (not a Done) goes the same way", res == "stepreply" and held(8) == SDESK, (res, held(8)))
 
 # a step line does no more than mover= would: only a live front agent of the item's own project is named
 put_step(20, contact=SDESK, next_text=f"{OWNER}: {STEP}\n{EMAIN}: review it")      # another project's front agent
-res = server._answer("a20", "", "", "send")
+res = answer_svc._answer("a20", "", "", "send")
 check("1.11 a next step naming another project's front agent falls to the contact", res == "done" and held(20) == SDESK, (res, held(20)))
 put_step(21, next_text=f"{OWNER}: {STEP}\n{EMAIN}: review it")      # ... and with no contact, to the old fallback
-res = server._answer("a21", "", "", "send")
+res = answer_svc._answer("a21", "", "", "send")
 check("1.12 with no contact it falls to -main, not to another project's front agent", res == "done" and held(21) == SMAIN, (res, held(21)))
 put_step(22, next_text=f"{OWNER}: {STEP}\n{DBUILD}: take it over")      # another project's builder
-res = server._answer("a22", "", "", "send")
+res = answer_svc._answer("a22", "", "", "send")
 check("1.13 a next step naming another project's builder is not followed either", res == "done" and held(22) == SMAIN, (res, held(22)))
 put_step(23, contact=EMAIN, next_text=f"{OWNER}: {STEP}")      # a contact that is another project's front agent is not followed
-res = server._answer("a23", "", "", "send")
+res = answer_svc._answer("a23", "", "", "send")
 check("1.14 a stored contact that is another project's front agent is not followed", res == "done" and held(23) == SMAIN, (res, held(23)))
 put_step(24, project="projects/sigma/sub", contact=SDESK, next_text=f"{OWNER}: {STEP}\n{SDESK}: finish")      # a page under the project counts as the project
-res = server._answer("a24", "", "", "send")
+res = answer_svc._answer("a24", "", "", "send")
 check("1.15 an item filed under a page of the project follows its front agent's step", res == "done" and held(24) == SDESK, (res, held(24)))
 
 # ---- 2. one front agent hands an item to another front agent of the same project with no builder

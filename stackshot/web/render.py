@@ -357,7 +357,7 @@ def yesno_options(r):
     """(the owner): an open decision whose owner stored no options gets two choices of its own, Yes (recommended, first) and No, as
     choices with the box beside them. [] for any other item: one with stored options shows only those (never Yes/No, Approve or
     Decline added to them; nor to a hand-edited list that broke the shape), and so does one that asks no decision or is closed. The server takes the same two labels on the same test
-    (server._answer), so an answer to an ask that has since gained options, or left the decision, reads as stale."""
+    (`_answer` of service/answer.py), so an answer to an ask that has since gained options, or left the decision, reads as stale."""
     if r.get("status") == "completed" or "decision" not in [x.lower() for x in needs_of(r)] or (r.get("metadata") or {}).get("options"): return []
     return [dict(o) for o in YESNO_OPTIONS]
 def option_lines(r):

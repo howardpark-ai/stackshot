@@ -134,6 +134,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import owner_words as _owner_words
@@ -459,25 +460,25 @@ wk.release()
 CFGM = _cfg.CFG["model"]
 GB = lambda **kw: {"op": "begin", "sender": "falcon-redesign-engineer", **kw}
 check("gate: [model] migration is off by default", migsvc.migration_on() is False, None)
-st_, d_ = server._client_post("box-a", "migrate", GB())
+st_, d_ = _rt_client._client_post("box-a", "migrate", GB())
 check("gate: the route answers 403 while it is off, whoever asks, and holds nothing", st_ == 403 and "off" in d_["error"] and not wk.holding(), (st_, d_))
 cfg(migration=True)
-st_, d_ = server._client_post("box-a", "migrate", GB(sender="somebody-else"))
+st_, d_ = _rt_client._client_post("box-a", "migrate", GB(sender="somebody-else"))
 check("gate: on, a sender outside [model] migration_senders is refused", st_ == 403 and "migration_senders" in d_["error"] and not wk.holding(), (st_, d_))
-st_, d_ = server._client_post("home-evil", "migrate", GB())
+st_, d_ = _rt_client._client_post("home-evil", "migrate", GB())
 check("gate: …and a token from a machine outside migration_machines (a label alone proves nothing)", st_ == 403 and not wk.holding(), (st_, d_))
-st_, d_ = server._client_post("box-a", "migrate", {"op": "begin"})
+st_, d_ = _rt_client._client_post("box-a", "migrate", {"op": "begin"})
 check("gate: …and a call with no sender", st_ == 403, (st_, d_))
 cfg(migration_senders=["somebody-else"], migration_machines=["home-evil"])
-st_, d_ = server._client_post("home-evil", "migrate", GB(sender="somebody-else"))
+st_, d_ = _rt_client._client_post("home-evil", "migrate", GB(sender="somebody-else"))
 check("gate: the allowlists are the config's own (the senders and machines it names are the ones that pass)", st_ == 200 and d_.get("held") is True, (st_, d_))
 wk.release(); CFGM.pop("migration_senders"); CFGM.pop("migration_machines")
-st_, d_ = server._client_post("box-a", "migrate", GB())
+st_, d_ = _rt_client._client_post("box-a", "migrate", GB())
 check("gate: with neither list set nobody may run the pass (the code names no session and no machine)", st_ == 403 and "migration_senders" in d_["error"] and not wk.holding(), (st_, d_))
 cfg(migration_senders=["falcon-redesign-engineer", "falcon-engineer"], migration_machines=["box-a"])
-st_, d_ = server._client_post("box-a", "migrate", GB())
+st_, d_ = _rt_client._client_post("box-a", "migrate", GB())
 check("gate: on, the named sender from the named machine begins the pass", st_ == 200 and d_.get("held") is True and wk.holder().startswith("falcon-redesign-engineer via a script on box-a"), (st_, d_))
-st_, d_ = server._client_post("box-a", "migrate", {"op": "end", "sender": "falcon-redesign-engineer"})
+st_, d_ = _rt_client._client_post("box-a", "migrate", {"op": "end", "sender": "falcon-redesign-engineer"})
 check("gate: …and ends it by the route", st_ == 200 and d_.get("held") is False and not wk.holding(), (st_, d_))
 CFGM.pop("migration")
 

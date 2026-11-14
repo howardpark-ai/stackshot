@@ -42,6 +42,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import sessions as _wt_sessions; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import successor as S; from stackshot.model import model as M; from stackshot.waits import handoff as H; from stackshot.waits import stall as ST; from stackshot.audit import audit_run  # noqa: E402
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.projects import projects as _prj
 from stackshot.github import ghsync as _gh
@@ -311,7 +312,7 @@ check("10 ceiling: more than a quarter of the open items trips the same stop (no
 handoff_svc.ORPHAN_CEILING = 10
 
 # the audit's own side, at the seam: the HTTP route answers what the function does
-status, ans = server._client_post("a", "orphan-handover", {"apply": False})
+status, ans = _rt_client._client_post("a", "orphan-handover", {"apply": False})
 check("the route `orphan-handover` answers 200 with the check (a dry run unless the body says apply)", status == 200 and ans["checked"] and not ans["applied"], (status, ans))
 check("the audit run reads the same fields the server writes (orphan_stage over the route's answer)", audit_run.orphan_stage(audit_run.Env(roles={}, fallback=lambda p: "", builder=lambda p: "", page_of=lambda p: ("", None), orphans=lambda apply: ans), apply=False)["checked"], ans)
 

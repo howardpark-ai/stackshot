@@ -61,6 +61,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb; from stackshot.model import ids as _model_ids
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -477,7 +478,7 @@ told = []
 for mod, fn in ((telling, "pilot_relay"), (server, "_owed_mark"), (telling, "tell_owner")):
     orig = getattr(mod, fn)
     setattr(mod, fn, (lambda o, f: (lambda *a, **k: (told.append(f), o(*a, **k))[1]))(orig, fn))
-post = lambda what, body, timeout: server._client_post(SERVER_BOX, what, body)
+post = lambda what, body, timeout: _rt_client._client_post(SERVER_BOX, what, body)
 calls.clear()
 apply_json = T / "approved-apply.json"
 buf = io.StringIO()
@@ -527,7 +528,7 @@ with contextlib.redirect_stdout(buf):
 check("5 from: --only narrows the file's rewrites too; the one already written is no longer the old text, so it is left alone, not rewritten", rc == 1 and "left alone board#9007: its description changed" in buf.getvalue() and "9016" not in buf.getvalue() and "1 item(s) tried" in buf.getvalue(), buf.getvalue())
 
 # ================================================================ 6. the one writer
-def route(body, machine=SERVER_BOX): return server._client_post(machine, "rebullet", body)
+def route(body, machine=SERVER_BOX): return _rt_client._client_post(machine, "rebullet", body)
 item(9027, letter="g", desc=THICK, su=now0 - 9 * DAY); item(9032, letter="g", status="completed", desc=THICK)
 B = {"item": "board#9027", "sender": "rebullet", "old": THICK, "description": GOOD}
 was = raw(9027, "g")
@@ -556,7 +557,7 @@ st, d = route(B)
 check("6 route: the rewrite is written, the reply names the item", st == 200 and d["action"] == "set" and d["item"] == "board#9027" and rd(9027, "g")["description"] == GOOD, (st, d))
 st, d = route(B)
 check("6 route: the same rewrite again is already, nothing changes", st == 200 and d["action"] == "already" and rd(9027, "g")["description"] == GOOD, (st, d))
-st, d = server._client_post(SERVER_BOX, "nosuch", {})
+st, d = _rt_client._client_post(SERVER_BOX, "nosuch", {})
 check("6 route: the list of writes in the 404 names rebullet", st == 404 and "rebullet" in d["error"], d)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

@@ -57,6 +57,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk
+from stackshot.service import answer as answer_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.service import mover_steps as _mover_steps
 from stackshot.waits import handoff as _ho
@@ -325,7 +326,7 @@ check("4 _watch_answer (arrived): the agent has it, alive, no stray mover=he", m
 item(43, needs=["decision"], mover=OWN, then=BACK, ask="Decide: whether to go ahead \u00b7 Recommend: go \u00b7 Stakes: a day either way \u00b7 By: no date",
      options=[{"label": "Approve", "line": "Go ahead as proposed", "recommended": True}, {"label": "Decline", "line": "Do not go ahead", "recommended": False}],
      hold=True, wake=day(30), hold_set={"by": "t", "at": now0}, subject="[zed] a decision on a parked item")
-r = server._answer("a43", "Approve", "", "")
+r = answer_svc._answer("a43", "Approve", "", "")
 check("4 the board's answer on a parked decision: the stored mover=he does not survive his answer, the agent in then is the picker through the wait", r == "decision" and "mover" not in mt(43) and "decision" not in (mt(43).get("needs") or [])
       and model.derive(rd(43), now0).state == "waiting" and model.derive(rd(43), now0).wait.mover == BACK, (r, mt(43)))
 

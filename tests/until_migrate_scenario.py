@@ -66,6 +66,7 @@ from stackshot.web import server; from stackshot.web.tools import anchors as _wt
 from stackshot.service import stamp as stamp_svc
 from stackshot.service import retire_passes as retire_svc
 HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc)   # the `S` of until_pass: the server module, then the stamp and retire modules that own the names it reads
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import item_read as _item_read
 import stackshot.core.config as _cfg_
 from stackshot.service import store as _service_store
@@ -140,7 +141,7 @@ check("1 a hold that waits on an anchor or a pane recycle keeps its flag and sta
 
 # ---- 2. the dry run
 CFGM["migration"] = True
-call = lambda machine="box-a", **body: server._client_post(machine, "migrate", {"sender": SENDER, **body})
+call = lambda machine="box-a", **body: _rt_client._client_post(machine, "migrate", {"sender": SENDER, **body})
 snap0 = snapshot()
 orig = {i: raw(i) for i in OPEN}
 st_, d_ = call(op="until", items=[f"g{i}" for i in OPEN], dry=True)
@@ -200,7 +201,7 @@ class DirectApp:
     def __init__(self): self.log = []
     def call(self, body):
         self.log.append(body["op"] + ("-dry" if body.get("dry") else ""))
-        return server._client_post("box-a", "migrate", {**body, "sender": SENDER})
+        return _rt_client._client_post("box-a", "migrate", {**body, "sender": SENDER})
 for i in OPEN:
     put(i, **CASES[i][1])
 snapS0 = snapshot()

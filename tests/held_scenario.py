@@ -76,6 +76,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import held; from stackshot.fleet import client
 from stackshot.router import router as _router; from stackshot.router import router_live as _live
 from stackshot.web import server
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import messaging as _messaging
 from stackshot.service import store as _service_store
 from stackshot.fleet import clients as _clients
@@ -373,26 +374,26 @@ held.add(held.key_of(X), "closed", "board#1 closed by home-beta", sender="home-b
 held.add(held.key_of(X), "page-owed", "board#3 page update owed", sender="home-beta", now=time.time() - 60)
 n0 = len(pushes()); telling.tell_woken("a1", X, "[stackshot] a1 is yours now", tag="handoff"); settle()
 check("7a: a waking notice is pushed as now and takes none of the held lines with it (they wait for the turn start)", len(reach(X, n0)) == 1 and "held for you" not in json.dumps(pushes()[n0:]) and held.count(X) == 2)
-st, body_ = server._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-x"})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-x"})
 txt = body_.get("text", ""); ids7 = body_.get("ids", [])
 check("7b: the client endpoint hands them over at the turn start, oldest first, one line each, with the kind, and the ids to acknowledge",
       st == 200 and txt.count("\n- ") == 2 and txt.index("board#1 closed") < txt.index("board#3 page") and " · closed · " in txt and " · page-owed · " in txt and len(ids7) == 2, (st, body_))
-st, body_ = server._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-x"})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-x"})
 check("7c: a second ask inside the lease is not handed the same lines again, and they are not lost yet (still stored until acknowledged)", st == 200 and body_ == {"text": "", "ids": []} and held.count(X) == 2, (body_, held.count(X)))
-st, body_ = server._client_post(MACH, "held", {"uuid": X, "ack": ids7})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": X, "ack": ids7})
 check("7c2: the acknowledgement removes exactly those lines", st == 200 and body_ == {"removed": 2} and held.count(X) == 0, (body_, held.count(X)))
-st, body_ = server._client_post(MACH, "held", {"uuid": A, "name": "work-osprey-main"})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": A, "name": "work-osprey-main"})
 check("7d: a front agent's session gets nothing (nothing is ever held for it)", st == 200 and body_ == {"text": "", "ids": []}, body_)
-st, body_ = server._client_post(MACH, "held", {"uuid": "nope", "name": ""})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": "nope", "name": ""})
 check("7e: a body without a transcript id is refused", st == 400, (st, body_))
 held.add(held.key_of(X), "fyi", "kept across a restart", sender="home-beta", now=time.time())
 held = importlib.reload(held)
-st, body_ = server._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-x"})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-x"})
 check("7f: a held line survives a restart of the server (the module reloaded; the files are the state)", "kept across a restart" in body_.get("text", ""), body_)
 held.ack(X, ids=body_.get("ids"))
 held.add(held.key_of(X), "closed", "via the client", sender="home-beta", now=time.time())
 _real_post = client.post
-client.post = lambda what, body, timeout=20.0: server._client_post(MACH, what, body)
+client.post = lambda what, body, timeout=20.0: _rt_client._client_post(MACH, what, body)
 try:
     got, gids = client.held_for(X, "work-osprey-x"); again = client.held_for(X, "work-osprey-x"); none = client.held_for("", "")
     acked = client.held_ack(X, gids)
@@ -428,18 +429,18 @@ check("7m: take() is lease and acknowledge in one step (each line once)", (held.
 
 # the endpoint checks the session as drain does: the machine must hold it, and the name is the server's record
 fresh(); held.add(held.key_of(X), "closed", "for the builder", now=time.time()); held.add(held.key_of(D), "closed", "for the page keeper", now=time.time())
-st, body_ = server._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-docs"})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": X, "name": "work-osprey-docs"})
 check("7n security: the name in the request is ignored: the session's lines are found by the server's record of it (a forged name draws the page keeper's lines to nobody)",
       st == 200 and "for the builder" in body_["text"] and "for the page keeper" not in body_["text"], body_)
 held.ack(X, ids=body_["ids"])
-st, body_ = server._client_post("home-other", "held", {"uuid": D, "name": "work-osprey-docs"})
+st, body_ = _rt_client._client_post("home-other", "held", {"uuid": D, "name": "work-osprey-docs"})
 check("7o security: another machine's token gets nothing for a session the server holds for home-test", st == 200 and body_ == {"text": "", "ids": []} and held.count(D) == 1, (st, body_))
-st, body_ = server._client_post("home-other", "held", {"uuid": D, "ack": []})
-st2, body2_ = server._client_post("home-other", "held", {"uuid": D, "ack": [r["id"] for r in held._read(held._file(held.key_of(D)))]})
+st, body_ = _rt_client._client_post("home-other", "held", {"uuid": D, "ack": []})
+st2, body2_ = _rt_client._client_post("home-other", "held", {"uuid": D, "ack": [r["id"] for r in held._read(held._file(held.key_of(D)))]})
 check("7p security: …nor can it acknowledge (remove) them", held.count(D) == 1 and body2_ == {"text": "", "ids": []}, (body_, body2_, held.count(D)))
-st, body_ = server._client_post(MACH, "held", {"uuid": "99999999-9999-4999-8999-999999999999", "name": "work-osprey-x"})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": "99999999-9999-4999-8999-999999999999", "name": "work-osprey-x"})
 check("7q security: a transcript id the server does not hold for the machine gets nothing, and is not registered by the call", body_ == {"text": "", "ids": []} and "99999999-9999-4999-8999-999999999999" not in _clients.sessions_on(MACH), body_)
-st, body_ = server._client_post(MACH, "held", {"uuid": D, "ack": "all"})
+st, body_ = _rt_client._client_post(MACH, "held", {"uuid": D, "ack": "all"})
 check("7r: a malformed ack is refused", st == 400, (st, body_))
 
 # the owner's mark comes from the instance, and a drop leaves a trace

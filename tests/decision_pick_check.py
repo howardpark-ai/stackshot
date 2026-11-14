@@ -54,6 +54,7 @@ git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 import uvicorn; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import render; from stackshot.web import board_home
+from stackshot.service import answer as answer_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.routes import board_pages as _rt_board
@@ -62,7 +63,7 @@ from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
-server._answer_deliver = lambda *a, **k: []
+answer_svc._answer_deliver = lambda *a, **k: []
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def last(i): return ((rd(i).get("metadata") or {}).get("answers") or [{}])[-1]
 

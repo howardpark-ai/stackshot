@@ -60,6 +60,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids; from stackshot.service import item_open as item_open_svc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.service import store as _service_store
@@ -89,7 +90,7 @@ def io_(marker="test_trim:alpha", **kw):
     b = {"marker": marker, "project": "projects/alpha", "subject": "Deep-scan the alpha suites", "mover": "home-sparrow-builder", "step": "home-sparrow-builder: deep-scan the suites, delete what is obsolete, report",
          "description": ["- Repo alpha tripped max_suites: 120 > 100", "- A deep scan for duplicate or obsolete suites is the first step"], "sender": "test-trim-job"}
     b.update(kw)
-    return server._client_post(me, "item-open", {k: v for k, v in b.items() if v is not None})
+    return _rt_client._client_post(me, "item-open", {k: v for k, v in b.items() if v is not None})
 def open_for(marker, project="projects/alpha"): return [g for g, m_ in item_open_svc._itemopen_open_items(project) if m_ == marker]
 def close(shown):
     _update_svc._update(_model_ids._norm_id(shown), outcome_text="- done", status="completed", outcome="done", reason="the deep scan is done", sender="home-sparrow-builder")
@@ -211,7 +212,7 @@ st, o = io_(marker="test_trim:s60", sender="s" * 60, description=["- a fact"])
 oi = item(o["item"]) if st == 200 else {"description": ""}
 check("a sender of exactly 60 characters is taken and its attribution line is whole (not clipped by the line limit)", st == 200 and oi["description"].splitlines()[-1] == "- Opened by " + "s" * 60 + " (a script on a client machine)"
       and "…" not in oi["description"], (st, oi["description"])); close(o["item"]) if st == 200 else None
-st, e = server._client_post(me, "no-such-write", {})
+st, e = _rt_client._client_post(me, "no-such-write", {})
 check("the 404 for an unknown write lists item-open", st == 404 and "item-open" in e["error"] and "job-gap" in e["error"], (st, e))
 st, o = io_(marker="test_trim:longsubj", subject="x" * 90)
 check("a subject over the limit is refused by the create tool's own gate, nothing filed", st == 400 and "Refused" in o["error"] and open_for("test_trim:longsubj") == [], (st, o))

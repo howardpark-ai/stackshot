@@ -103,6 +103,7 @@ def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
+from stackshot.service import answer as answer_svc
 from stackshot.service import asks as asks_svc
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.core import instance as _core_instance
@@ -283,12 +284,12 @@ check("History says what the server did and why; the reply says so; the ask and 
       and m.get("ask_left", {}).get("ask") == ASK and m["ask_left"].get("options") and m["ask_left"].get("how") == "word", (history(3), r, m.get("ask_left")))
 check("the write's own description is kept as written (the server altered no words)", "The ask is wrong." in rd(3)["description"], rd(3)["description"])
 before_answers = len(m.get("answers") or [])
-res = server._answer("a3", "Ship", "", "answer")
+res = answer_svc._answer("a3", "Ship", "", "answer")
 m = rd(3)["metadata"]
 check("his late option click is kept as a comment, applies nothing and is not stale-refused",
       res == "comment" and len(m.get("answers", [])) == before_answers + 1 and m["answers"][-1]["kind"] == "comment" and "late" in m["answers"][-1]["text"] and "Ship" in m["answers"][-1]["text"]
       and rd(3)["status"] == "open" and not stood(3), (res, m.get("answers")))
-res = server._answer("a3", "", "actually ship it", "answer")
+res = answer_svc._answer("a3", "", "actually ship it", "answer")
 check("his late note is a comment too (a stale tab's Send as an answer)", res == "comment" and rd(3)["metadata"]["answers"][-1]["kind"] == "comment", res)
 
 # the same on the three plain sentences, the bullet in next, and a step; everything around the sentence leaves the ask standing
@@ -384,9 +385,9 @@ check("the ask taken off is kept as ask_left", rd(51)["metadata"].get("ask_left"
 upd("a51", ask=ASK2, needs=["decision"], options=OPTS)
 check("a new ask drops ask_left", "ask_left" not in rd(51)["metadata"] and stood(51), rd(51)["metadata"])
 upd("a52", ask=ASK2, needs=["decision"], options=OPTS)
-res = server._answer("a52", "Ship", "", "answer")
+res = answer_svc._answer("a52", "Ship", "", "answer")
 check("his answer to the new ask is applied (a decision) and leaves no ask_left", res != "stale" and "ask_left" not in rd(52)["metadata"] and rd(52)["metadata"]["answers"][-1]["kind"] == "decision", (res, rd(52)["metadata"].get("answers")))
-res = server._answer("a52", "Wait", "", "answer")
+res = answer_svc._answer("a52", "Wait", "", "answer")
 check("a pick on an ask that is gone and was not taken off by the server reads stale", res == "stale", res)
 
 # ---- 4. a dependency dropped: the ask STANDS and its author is reminded (the server removes nothing on the record)
@@ -685,24 +686,24 @@ check("the switch is back on", _cfg.ask_leaves_on() is True)
 
 # ---- 7. the server applies what he said (part 4)
 told.clear()
-res = server._answer("a30", "", "ran it", "send"); m = rd(30)["metadata"]
+res = answer_svc._answer("a30", "", "ran it", "send"); m = rd(30)["metadata"]
 check("his note 'ran it' ticks his step as a Done does", res == "stepreply" and "step" not in m and "state" not in m and m["answers"][-1].get("applied"), (res, m))
 check("the item goes to the then-mover and the notice says what was applied, not 'judge the note'", m.get("mover") == "home-agent" and told and "Judge the note" not in told[-1][2] and "ticked his step" in told[-1][2], told)
 told.clear()
 tomorrow_ = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
 runner_svc.WAKE_EVENT.clear()
-res = server._answer("a31", "", "I'll do it tomorrow evening", "send"); m = rd(31)["metadata"]
+res = answer_svc._answer("a31", "", "I'll do it tomorrow evening", "send"); m = rd(31)["metadata"]
 check("his note 'tomorrow evening' wakes the minute loop and stores the one until date, with no hold and no old wake", runner_svc.WAKE_EVENT.is_set() and m.get("until") == f"{tomorrow_}T19:00" and "hold" not in m and "wake" not in m, (runner_svc.WAKE_EVENT.is_set(), m))
 tomorrow = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
 check("his note 'tomorrow evening' holds the item until then: hold, wake, his words behind the wake", hd_(m) is True and str(wk_(m)) == f"{tomorrow}T19:00" and (m.get("cap_ok") or {}).get("quote") == "I'll do it tomorrow evening", (hd_(m), wk_(m), m.get("cap_ok")))
 check("the notice names the hold and the time, and asks nothing before then", told and "Judge the note" not in told[-1][2] and f"on hold until {tomorrow}T19:00" in told[-1][2] and "nothing is asked of you before then" in told[-1][2], told)
 told.clear()
-res = server._answer("a32", "", "can I do it tomorrow evening?", "send"); m = rd(32)["metadata"]
+res = answer_svc._answer("a32", "", "can I do it tomorrow evening?", "send"); m = rd(32)["metadata"]
 check("a question naming a time is neither a tick nor a hold: it goes to the session to judge", res == "stepreply" and not hd_(m) and not wk_(m) and not (m["answers"][-1].get("applied")) and told and "Judge the note" in told[-1][2], (m, told))
 told.clear()
-res = server._answer("a33", "", "ran it but it says forbidden", "send"); m = rd(33)["metadata"]
+res = answer_svc._answer("a33", "", "ran it but it says forbidden", "send"); m = rd(33)["metadata"]
 check("a longer note that goes on is not a tick", not m["answers"][-1].get("applied") and told and "Judge the note" in told[-1][2], (m, told))
-res = server._answer("a34", "", "", "done")
+res = answer_svc._answer("a34", "", "", "done")
 check("Done with an empty box still finishes the step as before", res == "done" and "step" not in rd(34)["metadata"], res)
 
 # ---- 8. the texts agents learn it from

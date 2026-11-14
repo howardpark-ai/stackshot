@@ -18,12 +18,9 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
 
-import datetime as dt
 import importlib
 import logging
-import math
 import os
-import re
 import signal
 import sys
 import threading
@@ -37,7 +34,6 @@ _EARLY_HUP: list[int] = []
 if __name__ == "__main__":      # a reload signal before the loop's handler is up (the imports below take seconds) is kept, never fatal
     signal.signal(signal.SIGHUP, lambda *_: _EARLY_HUP.append(1))
 
-from fastmcp.exceptions import ToolError
 
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg  # noqa: E402  — stackshot.toml: every path, identity, rule and label of this instance
@@ -93,17 +89,12 @@ if __name__ == "__main__":
 
 from stackshot.github import ghsync as _gh  # noqa: E402  — the GitHub mirror and the id switch, both off unless [github] says so
 from stackshot.web import whatschanged as _wc  # noqa: E402  — the brief's what-changed lines for 7 days after a release that changes a tool
-from stackshot.model import states as _states  # noqa: E402  — an open item's stored state, what each state carries, and the derived one (states.py)
 from stackshot.waits import waiting as _wt  # noqa: E402  — what an item waits on and whose move it is (waiting.py)
 from stackshot.model import model as _model  # noqa: E402  — the item model of the redesign: dead | alive | waiting, the mover and the wait, derived from the fields (model.py)
 from stackshot.model import queued as _queued  # noqa: E402  — a mover busy on another item: the rule that reads its other on-agent items as waiting, queued behind it (queued.py; `[model] queued_behind`)
 from stackshot.web import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
-from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fleet event (wait_kind=event): the phrase, what matches it (event_waits.py)
 from stackshot.waits import watchers as _watch  # noqa: E402  — the waits' watchers of the item model: what ends a wait, the relay's ask, the chases (watchers.py)
 from stackshot.waits import handoff as _ho  # noqa: E402  — the hand-off machinery of the item model: the record, the clock, section 5 (handoff.py)
-from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on the checklist: the server makes `<owner>: <what to decide>` for an ask or a your-step, ticks it with his answer, and a session cannot (owner_steps.py)
-from stackshot.model import ask_leaves as _askl  # noqa: E402  — a wrong or moot ask leaves the owner's move on its own: the pure half (ask_leaves.py)
-from stackshot.model import note_read as _noteread  # noqa: E402  — what the owner's note on his step says: done, or a later time (note_read.py)
 from stackshot.service import runner as _runner  # noqa: E402  — the minute tick table, the wake event and the background threads (service/runner.py)
 from stackshot.service import wakes as _wakes  # noqa: E402  — the wake pass, the anchor pass, the item and anchor release and the minute tick bodies of the wake passes (service/wakes.py)
 from stackshot.service import watching as _watching  # noqa: E402  — the waits' watchers: a wait that ends turns its item; anchor ids and the routine-line test (service/watching.py)
@@ -129,19 +120,15 @@ from stackshot.service import passes_hooks as _passes_hooks  # noqa: E402  — w
 from stackshot.service import client_reads as _client_reads  # noqa: E402  — the reads of the client API and the item facts they carry: an item's mover, its then, its wait and its list (service/client_reads.py)
 from stackshot.service import recycle as _recycle_svc  # noqa: E402  — the recycle bookkeeping: what waits for one, what one cleared and the script's request for one (service/recycle.py)
 from stackshot.service import merge_progress as _merge_progress  # noqa: E402  — a merged pull request is progress for the item it is tied to: the pass and the tie (service/merge_progress.py)
-from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
 from stackshot.web import runners as _runners  # noqa: E402  — the Runners page: each CI runner by machine and repo, idle, running or offline with the CI switch's reason (runners.py)
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
 # every other setting is read where it is used, so a reload (SIGHUP) is live at once.
-from stackshot.core.instance import NAME, OWNER  # noqa: E402  — NAME and OWNER: the one read of [instance] (core/instance.py)
-from stackshot.model.bullet_text import _clip_line  # noqa: E402  — free text as one line of a notice (model/bullet_text.py)
-from stackshot.model.ids import _norm_id  # noqa: E402  — item ids and where they are read (model/ids.py)
-from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store  # noqa: E402  — needs, after and observers (model/needs.py)
+from stackshot.core.instance import NAME  # noqa: E402  — NAME: the one read of [instance] (core/instance.py)
 from stackshot.web.tools import get as _tool_get  # noqa: E402  — the item as `get` and the brief show it, the notice's ruling (web/tools/get.py)
 from stackshot.web.tools import notes as _tool_notes  # noqa: E402  — the notes a reply carries: form notes, the model lines, the guard report, the holds report (web/tools/notes.py)
 from stackshot.web.tools import text as _wttext  # noqa: E402  — the words and limits the tools state, and the board's time zone (`ZONE`, read on this module when a line says a time, so a suite that pins it sets it there; web/tools/text.py)
-from stackshot.web.tools.text import _ANCHOR_SHAPES, _ASK_NONE, _CLOSE_REFUSAL, _FOR_OWNER, _GMAIL_TERMS, _MODEL_PAGE  # noqa: E402  — the words and limits the tools state (web/tools/text.py), which this module's passes read too
+from stackshot.web.tools.text import _ANCHOR_SHAPES, _ASK_NONE, _CLOSE_REFUSAL, _GMAIL_TERMS, _MODEL_PAGE  # noqa: E402  — the words and limits the tools state (web/tools/text.py), which this module's passes read too
 from stackshot.web.tools import rules as _rules_tool  # noqa: E402  — the rulebook's text and the rules tool (web/tools/rules.py)
 from stackshot.web.middleware import _unlink_ids  # noqa: E402, F401  — the save hooks look it up here at call time (`_late("_unlink_ids")`)
 from stackshot.core import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import), its item files, the next id and the file write (core/store.py); `STORE` is read and set on that module, never here
@@ -168,6 +155,8 @@ from stackshot.service import wait_fixes as _wait_fixes  # noqa: E402  — the w
 from stackshot.service import wait_gates as _wait_gates  # noqa: E402  — the write guards of event, anchor and front-step waits, the decision options' gate, and what an update owes the watchers (service/wait_gates.py)
 from stackshot.service import audit_ticks as _audit_ticks  # noqa: E402  — the ten-minute audit ticks (the filing, dates, archive and audit-line passes), the balancer and the queue map they read (service/audit_ticks.py)
 from stackshot.service import answer_handover as _handover  # noqa: E402  — where an item goes after the owner's answer, a Done or the end of a wait: the hand-over helpers and the answer line (service/answer_handover.py)
+from stackshot.service import answer as _answer_svc  # noqa: E402  — the owner's answer from the board: its record, its delivery, the settle of a pending one and the escalation (service/answer.py)
+from stackshot.web import answers as _answers_mod  # noqa: E402  — the answer form's lock, limits, pending file and words (web/answers.py): the save hooks hand the module to service/answer.py, which reads them on it each time, so a suite that puts a spy in place of `_ANSWER_LOCK` sets it there
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
@@ -204,14 +193,14 @@ _writes.install(_writes.Steps(
     phase_stamp=lambda gid, item: _stamp_svc._phase_stamp(gid, item),
     search_touch=lambda gid: _search.touch(gid),
     handback_drop=lambda gid, why: _telling.handback_drop(gid, why),
-    answer_ack=lambda gid, writer: _answer_ack(gid, writer),
+    answer_ack=lambda gid, writer: _answer_svc._answer_ack(gid, writer),
 ))
 
 
 _gh.on_rekey = _github_events._rekeyed
 
 
-# _clip_line is model/bullet_text.py's, OWNER and NAME core/instance.py's (imported near the top of this module).
+# NAME is core/instance.py's (imported near the top of this module).
 
 
 _gh.on_comment = _github_events._github_comment
@@ -249,22 +238,16 @@ from stackshot.anchors import merge_log as _mlog  # noqa: E402,F401  — the hub
 from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's record of the other activity on pull requests (CI results, comments, reviews, merges): read by the last-activity pass (event_log.py)
 from stackshot.web import render as _rmod  # noqa: E402
 from stackshot.model import ask_read as _ar  # noqa: E402  — how an ask and its options are read (open question, alternatives, Yes/No pair, Recommend), shared with the audit (ask_read.py)
-from stackshot.router import page_debt as _page_debt  # noqa: E402  — the page-debt call (router step 3b): settings, prompt, checked edit, page read and write ([router] page_debt)
 from stackshot.router import router_live as _router_live  # noqa: E402  — the router: holds every project's notices for itself, rules them and delivers the passes
 from stackshot.projects import pages as _pages  # noqa: E402  — the pane gate's module: page freshness, the item settle test, the registry (one copy since an earlier change)
 from stackshot.projects import projects as _prj  # noqa: E402  — the project record: a permanent id per page, the lookup by id or key, projects.json
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
-from stackshot.model.ids import _item_url  # noqa: E402  — an item's page on the board (model/ids.py)
 from stackshot.projects.project_registry import _registry, _roles_sync_safe  # noqa: E402  — a registry file of the store, and roles.json with projects.json beside it (projects/project_registry.py)
 from stackshot.web import publish as _pubmod  # noqa: E402  — the debounced publish: the writes here call `_pubmod._publish()` and the hook tables look its functions up on that module, so a suite that replaces one sets it on `stackshot.web.publish` (the timer is `_PUB_TIMER` there)
 from stackshot.web.publish import _publish_if_idle  # noqa: E402  — the idle test the board's runner rebuild asks (`_runners.ON_CHANGE` in __main__)
 from stackshot.service import foryou_hooks as _foryou_hooks  # noqa: E402  — what those rows still reach on this module (service/foryou_hooks.py)
-from stackshot.service.projects import _new_project, _page_io, _project_agent, _project_agent_mandate, _project_agent_rename, _project_agent_retire, _project_list, _projects_list  # noqa: E402,F401  — the client API's routes, the archive sweep and the hand-off read them (service/projects.py)
+from stackshot.service.projects import _page_io  # noqa: E402  — the page store the hook tables look up (service/projects.py)
 from stackshot.service import event_activity as _event_activity  # noqa: E402  — the last-activity pass on a tied pull request's events (the wake table's `event_activity_tick`)
-from stackshot.service import question as _question_svc  # noqa: E402  — `post question` (service/question.py)
-from stackshot.service import terminal_prompt as _terminal_prompt_svc  # noqa: E402  — `post terminal-prompt` (service/terminal_prompt.py)
-from stackshot.service import job_gap as _job_gap  # noqa: E402  — `post job-gap` (service/job_gap.py)
-from stackshot.service import item_open as _item_open  # noqa: E402  — `post item-open` (service/item_open.py)
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
 from stackshot.audit import audit_checks as _ac  # noqa: E402  — the audit's code checks: the filing pass, and the broad wait words of an alive item's next
 
@@ -334,9 +317,8 @@ mcp = _app.build(
     machine_state=lambda *a, **k: _evwaits.machine_state(*a, **k),
     main_agent=lambda *a, **k: _agents._main_agent(*a, **k),
     client_get=lambda *a, **k: _client_reads._client_get(*a, **k),
-    client_post=lambda *a, **k: _client_post(*a, **k),
     recycle_wanted_tokens=lambda *a, **k: _recycle_svc._recycle_wanted_tokens(*a, **k),
-    answer=lambda *a, **k: _answer(*a, **k),
+    answer=lambda *a, **k: _answer_svc._answer(*a, **k),
     contact_label=lambda *a, **k: _contacts._contact_label(*a, **k),
     runner_status=lambda *a, **k: _runner.status(*a, **k),
     phase_sweep_status=lambda *a, **k: _stamp_svc._phase_sweep_status(*a, **k),
@@ -401,7 +383,7 @@ _telling.install(_telling.Hooks(
 _runner.install(_runner.Hooks(
     phase_tick=_late_in(_stamp_svc, "_phase_tick"),
     balance_tick=_late_in(_audit_ticks, "_balance_tick"),
-    answer_tick=_late("_answer_tick"),
+    answer_tick=_late_in(_answer_svc, "_answer_tick"),
     roles_sync_safe=_late("_roles_sync_safe"),
     pilot_fallback_tick=_late_in(_pdsvc, "_pilot_fallback_tick"),
     filing_tick=_late_in(_audit_ticks, "_filing_tick"),
@@ -585,8 +567,9 @@ _foryou_hooks.install(_foryou_hooks.Hooks(
 # for a time and the time zone. A hook leaves this table when the area that holds it moves under service/.
 _save_hooks.install(_save_hooks.Hooks(
     anchor_shapes=lambda: _ANCHOR_SHAPES,
-    answer_deliver=_late("_answer_deliver"),
-    answer_note=_late("_answer_note"),
+    answer_deliver=_late_in(_answer_svc, "_answer_deliver"),
+    answer_note=_late_in(_answers_mod, "_answer_note"),
+    answers_mod=lambda: _answers_mod,
     answers_of=lambda *a, **k: _rmod.answers_of(*a, **k),
     ask_form=lambda: _rmod.ASK_FORM,
     ask_max=lambda: _rmod.ASK_MAX,
@@ -606,6 +589,7 @@ _save_hooks.install(_save_hooks.Hooks(
     unlink_ids=_late("_unlink_ids"),
     wait_words=lambda *a, **k: _ac.wait_words(*a, **k),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
+    yesno_options=lambda *a, **k: _rmod.yesno_options(*a, **k),
     zone=lambda: _wttext.ZONE,
 ))
 
@@ -765,491 +749,6 @@ _update_svc.install(_update_svc.Hooks(
 ))
 
 
-
-
-from stackshot.fleet import clients as _clients  # noqa: E402  — the server's own state of machines and sessions (steps b and d)
-from stackshot.fleet import inbox as _inbox      # noqa: E402  — the server-side inbox a machine's puller fetches from (step c)
-
-
-def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """One write of the client API → (status, JSON). `machine` is the token's, never the body's."""
-    if what == "recycled":      # the fleet tool's end-of-recycle hook: the waits-for-recycle field comes off what the recycle covered
-        sk = body.get("skipped") or []
-        sk = sk.split() if isinstance(sk, str) else sk
-        if not isinstance(sk, list):
-            return 400, {"error": "skipped is a list of session names (or one space-separated string)"}
-        try:
-            started = float(body.get("started") or 0)
-        except (TypeError, ValueError):
-            return 400, {"error": "started is an epoch in seconds"}
-        kind = str(body.get("kind") or "recycle")
-        if kind not in ("recycle", "reboot"):
-            return 400, {"error": "kind = recycle | reboot"}
-        try:
-            flag_at = float(body.get("flag_at") or 0)
-        except (TypeError, ValueError):
-            return 400, {"error": "flag_at is an epoch in seconds"}
-        return 200, _recycle_svc._recycled(machine, kind, started, str(body.get("result") or "ok"), [str(x) for x in sk], flag_at)
-    if what == "recycle-due":   # a script marks a recycle as due on an item (client.py recycle-due)
-        try:
-            return 200, _recycle_svc._recycle_due(machine, str(body.get("item") or ""), str(body.get("pr") or ""))
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "released":      # release.sh: main's tests passed on a released merge, so the items built for that PR are settled (client.py released)
-        try:
-            return 200, _relsvc.released(str(body.get("pr") or ""), str(body.get("sha") or ""), bool(body.get("dry_run")))
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "event":         # a machine reports a fleet event an event wait may wait on: a recycle, a fleet op's end, a job's run (client.py event)
-        try:
-            ev = _ew.event_from_report({**body, "machine": body.get("machine") or machine})
-        except _ew.EventWaitError as e:
-            return 400, {"error": str(e)}
-        woken = _evwaits.evwait_report(ev)
-        return 200, {"event": _ew.arrival(ev), "woken": [_gh.shown(g) for g in woken]}
-    if what == "sweep-released":   # the same rule for the PRs the running server already holds (client.py sweep-released [--dry-run])
-        try:
-            return 200, _relsvc.sweep_released(bool(body.get("dry_run")))
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "sweep-step-proof":   # every open step whose proof (a PR merged or released) already happened is settled (client.py sweep-step-proof [--dry-run])
-        try:
-            return 200, _proofs.sweep_proofs(bool(body.get("dry_run")))
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "page-debt":      # the audit run's pages stage (audit_run.py): the page-debt pass for that run, made here because the debt ledger and the page writes are this process's
-        run = body.get("run")
-        if not isinstance(run, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{6}", run):     # the shape audit_run._stamp_of writes
-            return 400, {"error": "run = the audit run's start stamp, YYYY-MM-DD-HHMMSS"}
-        try:
-            deadline = float(body["deadline"]) if body.get("deadline") not in (None, "") else None
-            if deadline is not None and not math.isfinite(deadline):
-                raise ValueError(deadline)
-        except (TypeError, ValueError):
-            return 400, {"error": "deadline = an epoch in seconds (the end of the run's time budget), or left out"}
-        enabled = _page_debt.enabled()
-        return 200, {"enabled": enabled, "mode": _page_debt.mode() if enabled else "", "counts": _pdsvc.page_debt_pass(run=run, deadline=deadline)}
-    if what == "orphan-handover":   # the audit run's hand-over of open items whose mover is gone (audit_run.py); a dry run unless the body says apply
-        try:
-            return 200, _handoff.orphan_handover(apply=body.get("apply") is True)
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "backfill-contact":   # every open item without a live contact gets one (client.py backfill-contact [--dry-run]); a dry run unless the body says apply
-        try:
-            return 200, _contacts._contact_backfill(dry=body.get("apply") is not True)
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "message":       # a script sends a message the way a session's `message` tool does
-        to, text, sender = (str(body.get(k) or "") for k in ("to", "text", "sender"))
-        if str(body.get("release") or "") == "green" and text.strip() and sender.strip():   # release.sh's green result: log-only (the turn rule's second build)
-            try:
-                res = _relsvc._release_green(to, text, sender.strip(), machine, str(body.get("pr") or ""))
-            except Exception as e:  # noqa: BLE001  — what the log-only path cannot do is delivered as before, never lost
-                print(f"release: log-only failed, delivering instead: {e}", file=sys.stderr, flush=True)
-                res = None
-            if res is not None:
-                return 200, {"result": res}
-        # No For you row for a failed release: release.sh's raw text told him nothing he could act on and stayed after the fix.
-        # The builder gets the message below; he hears of a failure through the item it serves.
-        try:
-            return 200, {"result": _messaging._message(to, text, sender, f"machine:{machine}", machine, **({"fyi": True} if body.get("fyi") is True else {}))}
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "handover":      # a box's PostToolUse hook saw a SendMessage to a background agent that names an item (pages.py touch)
-        to, text, sender = (str(body.get(k) or "").strip() for k in ("to", "text", "sender"))
-        if not (to and text and sender):
-            return 400, {"error": "to, text and sender are required: the recipient, the message and the sending session"}
-        try:
-            return 200, {"result": _agent_names._name_on_handover(to, text, sender, via=f"SendMessage on {machine}").strip()}
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "project-agent":     # phase A: a front agent or the keeper lists a new agent of the project (client.py post project-agent)
-        try:
-            return _project_agent(machine, body)
-        except ValueError as e:         # the id file is damaged (projects.py raises, mints nothing and writes nothing): not recorded, say so
-            return 503, {"error": f"the project record cannot be read or written right now, nothing was recorded: {e}"}
-    if what == "project-agent-mandate":     # the keeper or a front agent changes the mandate line of a listed agent (client.py post project-agent-mandate)
-        try:
-            return _project_agent_mandate(machine, body)
-        except ValueError as e:         # the id file is damaged (projects.py raises): nothing was changed
-            return 503, {"error": f"the project record cannot be read right now, nothing was changed: {e}"}
-    if what == "project-agent-rename":      # the form renames an agent's entry on the project's page, in place (client.py post project-agent-rename)
-        try:
-            return _project_agent_rename(machine, body)
-        except ValueError as e:         # the id file is damaged (projects.py raises): nothing was written
-            return 503, {"error": f"the project record cannot be read right now, nothing was changed: {e}"}
-    if what == "project-agent-retire":      # sala retired a session; the form removes its line from the page's agents map with a timeline line, or drops its pending agent (client.py post project-agent-retire)
-        try:
-            return _project_agent_retire(machine, body)
-        except ValueError as e:         # the id file is damaged (projects.py raises): nothing was changed
-            return 503, {"error": f"the project record cannot be read right now, nothing was changed: {e}"}
-    if what == "project":       # the fleet tool's New session form makes a project and its gbrain page (client.py post project)
-        return _new_project(machine, body)
-    if what == "project-list":  # ... and lists a hidden one again (client.py post project-list)
-        return _project_list(machine, body)
-    if what == "question":      # a script files a question for the owner as a needs=decision item (client.py post question)
-        return _question_svc._question(machine, body)
-    if what == "terminal-prompt":   # sala: a pane waiting in its terminal is a row in the owner's Your move list (client.py post terminal-prompt open | clear)
-        return _terminal_prompt_svc._terminal_prompt(machine, body)
-    if what == "job-gap":       # sala: a gap in a scheduled job is one item per (timer, code), moved by the owning repo's builder (client.py post job-gap open | clear)
-        return _job_gap._jobgap_post(machine, body)
-    if what == "item-open":     # a script opens one board item for a background agent of a project, once per marker while it is open (client.py post item-open)
-        return _item_open._itemopen_post(machine, body)
-    if what == "cap-words":     # tools/cap_words.py --apply: his park words already in the store, or a long wait's real-world date, recorded through the normal write path
-        try:
-            if "basis" in body:
-                by = _owner_words._script_sender(body, machine)
-                gid = _norm_id(str(body.get("item") or ""))
-                out = _update_svc._update(gid, wait_basis=str(body.get("basis") or ""), sender=by)
-                return 200, {"item": _gh.shown(gid), "action": "set", "result": out.splitlines()[0] if out else ""}
-            return 200, _owner_words._record_cap_words(body, machine)
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "rebullet":      # tools/rebullet_descriptions.py: an open item's description rewritten as short bullets, checked for loss, through the normal write path
-        try:
-            return 200, _owner_words._rebullet_write(body, machine)
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "state":         # retired: the route answers 400 with the refusal naming what update takes instead (client.py post state sends nothing any more)
-        try:
-            return 200, _owner_words._state_write(body, machine)
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "migrate":       # tools/migrate_model.py: the migration onto the item model, planned by the script, applied here through the normal save path (begin | apply | end)
-        gate = _migrations.migration_gate(machine, body)       # off by default ([model] migration), and only the named sessions on the named machines
-        if gate is not None:
-            return gate
-        try:
-            return 200, _migrations.migrate_write(body, machine)
-        except ToolError as e:
-            return 400, {"error": str(e)}
-    if what == "register":      # a session says it exists (its SessionStart hook)
-        try:
-            s = _clients.register(machine, body)
-        except ValueError as e:
-            return 400, {"error": str(e)}
-        return 200, {"ok": True, "name": s.get("name") or "", "machine": s.get("machine")}
-    if what == "setup-result":  # a PC's own provisioning run ended (client.py setup-result): kept per machine, drawn on its Machines column
-        ok = body.get("ok")
-        if not isinstance(ok, bool):
-            return 400, {"error": "ok = true (the run succeeded) or false (it failed at step, for reason)"}
-        try:
-            rec = _clients.setup_result(machine, ok, str(body.get("step") or ""), str(body.get("reason") or ""))
-        except ValueError as e:
-            return 400, {"error": str(e)}
-        return 200, {"machine": machine, "setup": rec}
-    if what == "seen":          # a sign of life from a registered session (its Stop hook)
-        return 200, {"ok": _clients.seen(machine, str(body.get("uuid") or ""))}
-    if what == "ack":           # a puller confirms what it delivered and what it could not
-        d, f = body.get("delivered") or [], body.get("failed") or []
-        if not (isinstance(d, list) and isinstance(f, list)):
-            return 400, {"error": "delivered and failed are lists of line ids"}
-        acked = _inbox.peek([str(x) for x in d])           # step 2: the lines are gone once acked; a hand-off notice among them is the delivery of its hand-off
-        removed = _inbox.ack([str(x) for x in d], [str(x) for x in f])
-        if acked:
-            _handoff.handoff_acked(acked)
-        return 200, {"removed": removed}
-    if what == "held":          # a session's UserPromptSubmit hook fetches the notices held for it while it was busy (held.py); handed over once
-        uuid = str(body.get("uuid") or "").lower()
-        if not _clients.UUID.match(uuid):
-            return 400, {"error": "uuid = the session's transcript id"}
-        rec = _clients.sessions_on(machine).get(uuid)       # as drain: only a session the server holds for THIS machine, and its name is the server's record, never the request's
-        if rec is None:
-            return 200, {"text": "", "ids": []}
-        name = str(rec.get("name") or "")
-        if "ack" in body:       # the hook printed these lines: they go (until then they are leased, and offered again when the lease runs out)
-            ids = body.get("ack")
-            if not (isinstance(ids, list) and all(isinstance(x, str) for x in ids)):
-                return 400, {"error": "ack = the list of line ids the hook printed"}
-            return 200, {"removed": _held.ack(uuid, name, ids=ids)}
-        _held.mark_client(uuid, name)       # this session's hook fetches held lines: from now on a notice that asks nothing of it is held (the rollout gate)
-        text, ids = _held.lease(uuid, name)
-        return 200, {"text": text, "ids": ids}
-    if what == "drain":         # no puller on the machine: a session's own hook fetches what waits for it, at its next prompt
-        uuid = str(body.get("uuid") or "").lower()
-        if not _clients.UUID.match(uuid):
-            return 400, {"error": "uuid = the session's transcript id"}
-        rec = _clients.sessions_on(machine).get(uuid)
-        if rec is None:
-            try:
-                rec = _clients.register(machine, {"uuid": uuid, "name": str(body.get("name") or "")})
-            except ValueError as e:
-                return 400, {"error": str(e)}
-        else:
-            _clients.seen(machine, uuid)
-        return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
-    return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
-
-
-# The answer form's helpers (answers.py), the names this module's own code uses. A suite or a script that reads or sets one of the others reaches it on answers.py. Private names nobody here reads stay in that module:
-# _origin_of, _LETTERED_CHOICE, _choice_words, _answers_path.
-from stackshot.web import answers as _answers_mod  # noqa: E402  — the answer lock is taken on this module (`_ANSWER_LOCK`), so a suite that puts a spy in its place sets it there
-from stackshot.web.answers import (  # noqa: E402,F401
-    _ANSWER_ESCALATE_S,
-    _ANSWER_TEXT_MAX,
-    _answer_note,
-    _answer_words,
-    _answers_load,
-    _answers_save,
-    _option_forms,
-    _split_letter,
-)
-
-
-def _answer_ack(gid: str, writer: str) -> None:
-    """A session's write to an item settles the decision answer pending on it when that session was told of the answer (its
-    mover, or a session named in its needs): the keeper is then not told."""
-    with _answers_mod._ANSWER_LOCK:
-        st = _answers_load()
-        e = st.get(gid)
-        if not e or _session_id(writer) not in (e.get("told") or []):
-            return
-        st.pop(gid, None)
-        _answers_save(st)
-
-
-def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "") -> list[str]:
-    """Push the answer to the item's mover (holder, never the creator) and to every session named in its needs, one line each, through the owner-notice
-    path (tell_woken). A front-agent mover's line carries the mark a front agent takes. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
-    in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". → the session ids told."""
-    meta = item.get("metadata") or {}
-    owner, project = _telling.holder(item), str(meta.get("project") or "")
-    verb = "answered" if rec.get("kind") == "decision" else "commented on"
-    url = _item_url(gid) or _telling.notice_link(gid)
-    done = f"; on hold with a wake on {rec['parked']}, set by the server" if rec.get("parked") else ""   # a stored raise's park, applied
-    line = f"[stackshot] {OWNER} {verb} {_gh.shown(gid)} on the board: {_answer_words(rec)}{done} → {url}"
-    thenid = _session_id(then or handed) if (then or handed) else ""
-    if then:      # a Done: the step he did, then who has the item now and his note
-        step = _states.clean(rec.get("step"))
-        step = step if len(step) <= 240 else step[:240].rstrip() + " …"
-        note = f", with his note: “{_answer_words({'text': rec.get('text')}, 300)}”" if rec.get("text") else ""
-        line = f"[stackshot] {OWNER} did his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now{note} → {url}"
-    judge = ""
-    if then and rec.get("kind") == "step-reply":      # his note on the step, sent with no Done: the session that takes the item judges it (only its own line says so)
-        line = (f"[stackshot] {OWNER} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now with his note: "
-                f"“{_answer_words({'text': rec.get('text')}, 300)}” → {url}")
-        judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {OWNER} "
-                 f"with a new step (step=…); if it says he will do the step at a later time, put the item on hold until then "
-                 f"(update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
-                 f"leave his step open and hand no new step back.")
-    yours = ("" if _answer_words(rec).rstrip()[-1:] in (".", "!", "?", ")") else ".") + " It's yours now" if handed and not then else ""      # a decision handed over: the mover's line plus the tail
-    to_then = lambda t: t.replace(f"It goes to {_sr._session_label(then)} now", "It's yours now", 1).replace(f" → {url}", f"{yours}{judge} → {url}", 1)      # the then-mover's own line: "It's yours now", and for a note the instruction to judge it
-    told: list[str] = []
-    if judge and rec.get("applied"):      # the server read his note and applied it (note_read.py): the then-mover is told what was done instead of being asked to judge the note
-        judge = ". " + str(rec["applied"])
-    def tell(sid: str, text: str) -> None:
-        _telling.tell_woken(gid, sid, text, tag="answer")
-        told.append(sid)
-    if owner:
-        oid = _session_id(owner)
-        front = _telling.front_keeper(owner, project)[0]
-        mine = oid == thenid
-        base = to_then(line) if mine else line
-        tell(oid, f"{_FOR_OWNER} {base}" if front else base)
-    for s in _needs_sessions(meta):
-        sid = _session_id(s)
-        if sid and sid not in told:
-            tell(sid, to_then(line) if sid == thenid else line)
-    if thenid and thenid not in told:          # the then-mover is neither the mover nor in needs (a stored `then`): it is told, and its write settles the answer
-        tell(thenid, to_then(line))
-    if not told:
-        print(f"answer: {gid} has no mover and names no session to tell", file=sys.stderr, flush=True)
-    return told
-
-
-def _answer(gid: str, choice: str, text: str, act: str) -> str:
-    """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
-    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover (nothing written; `emptynote` is a Send note on a blank box). A step form has two buttons and an optional note box.
-    Done (act=done) is his word that the step is finished (`done`: the item goes to its then-mover, recorded as his answer "Done"); a note in the box stays on that record (`text`) and goes with the Done to the then-mover,
-    which is told the step is done and shown the note (`donenote`: the same, and the notice says the note went along). Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
-    on an item with no step any more it is a comment, and with no text nothing is written (`emptynote`). A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
-    """
-    choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
-    if len(text) > _ANSWER_TEXT_MAX:
-        return "toolong"
-    with _writes.ITEM_LOCK, _answers_mod._ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
-        item = _svcstore._load(gid)
-        if item.get("status") != "open":
-            return _handover._keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
-        meta = dict(item.get("metadata") or {})
-        stepped, then, handed, letter, until = False, "", "", "", ""
-        if choice:
-            choice, letter = _split_letter(item, choice)      # the board's box posts "B · <label>": the label is the choice, the letter is kept beside it
-        if choice:                      # an option's button: only while the item needs his decision, and only one of the item's stored options (Approve and Decline are no fallback); with none stored, Yes or No (the same two the page draws)
-            valid = [f[0] for f in _option_forms(item)] or [o["label"] for o in _rmod.yesno_options(item)]
-            if "decision" not in _needs_kinds(meta) or choice not in valid:
-                if "decision" in _needs_kinds(meta) or not isinstance(meta.get(_askl.LEFT), dict):
-                    return _handover._keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this") if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
-                text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
-            else:
-                kind = "decision"
-        elif act == "done":             # the Done button of a step form (his note in the box, if any, stays on the record as `text`). Only an item that stands in your-step with its step line has one: any other is refused, nothing written
-            if meta.get("state") != "your-step" or not _states.clean(meta.get("step")):
-                return "nostep"
-            kind, choice, stepped = "decision", "Done", True
-        elif act == "note":             # the Send note button of a step form: only with text (an empty box is no Done); his note on the step, handed to the then-mover to judge; an item that has no step any more: a comment
-            if not text:
-                return "emptynote"
-            if meta.get("state") == "your-step" and _states.clean(meta.get("step")):
-                kind, choice, stepped = "step-reply", "", True
-            else:
-                kind = "comment"
-        elif act == "send":             # the one button of a step form before the two-button form (a page loaded earlier posts it). Empty box = the step is done; a note = his note on the step, handed to the then-mover to judge. An item that has no step any more: a note is a comment, an empty box nothing
-            if meta.get("state") == "your-step" and _states.clean(meta.get("step")):
-                kind, choice, stepped = ("step-reply", "", True) if text else ("decision", "Done", True)
-            elif text:
-                kind = "comment"
-            else:
-                return "nostep"
-        elif act in ("answer", "comment") and text:
-            kind = "decision" if act == "answer" and "decision" in _needs_kinds(meta) else "comment"      # a stale tab's Send as an answer, after the decision is gone, is a comment: nothing he wrote is lost
-        else:
-            return "empty"
-        eff = _watch.answer_effect(meta, choice, text, _pages.zone_now().date()) if kind == "decision" and not stepped else {"do": ""}     # a pick on a watcher ask, or his words in the box, acts on the item
-        askback = eff["do"] == _watch.NEEDS_DATE      # a date button, and no date he gave can be read: the answer and the note are kept below, and the item asks him back with dates
-        if askback:
-            asked_note, kind, text, choice, eff = text, "comment", text or f"(pressed: {choice})", "", {"do": ""}      # `asked_note`: the note as he wrote it
-        now = time.time()
-        rec: dict[str, Any] = {"ts": now, "kind": kind}
-        if choice:
-            rec["choice"] = choice
-        if text:
-            rec["text"] = text
-        rec["via"] = "board"
-        forms = _option_forms(item)         # the item's valid options, as the page drew them: (the name a pick is stored under, the label shown, the label stored)
-        names = [f[0] for f in forms]
-        if choice and not stepped and choice in names:      # the option picked, by the name it is stored under (the list is valid, so its places are the stored list's)
-            picked = meta["options"][names.index(choice)]
-        else:
-            picked = next((o for o in meta.get("options") or [] if isinstance(o, dict) and str(o.get("label") or "").strip() == choice), {}) if choice and not stepped else {}     # a Done is no option: a stale option named Done (with a wake) is not his pick
-        matched = bool(choice) and not stepped and choice in names   # his pick is one of the item's (valid) options, by label
-        if kind == "decision" and not stepped and forms:      # the options he was shown stay on his answer (the History lists them whole, the picked one marked, though a pick takes them off the item); as stored, the card's letter is dropped again on read
-            rec["options"] = _rmod.options_of(item, raw=True)
-        if matched:                     # the record keeps what he chose: the clear below takes the options off the item
-            rec["choice_line"] = str(picked.get("line") or "").strip()
-            if letter:
-                rec["letter"] = letter      # the letter the box drew beside it (three or more options): a note that names a letter still reads right later
-        parked = ""                     # an option that carries a wake (a stored raise's "Park until …"): the server applies his choice itself
-        if kind == "decision" and picked.get("wake"):
-            parked = rec["parked"] = _pane_recovery._idle_park_at(str(picked["wake"]), text)
-        prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
-        meta["answers"] = [*prior, rec]
-        if stepped:                     # the step is done: the state and its step go, and the item moves to its then-mover with his words (the answer) on it, recorded as his
-            rec["step"] = _states.clean(meta.get("step"))
-            _pm = dict(meta); _watch.end_wait(_pm)      # who takes it is read with any leftover wait already ended (a stored wait would make the item read as waiting, with no then)
-            then = _model.derive({**item, "metadata": _pm}).then
-            if not then or _model.is_owner(then):      # no default mover and no session in needs: a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
-                then = _holders._builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
-            if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
-                return "nomover"
-            if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
-                _handover._check_his_step(meta, rec["step"], now)
-            else:                           # N4: his note on the step is his answer too: the server's step is ticked with his words (`→ "…"`); the lines a session wrote stay open for the session that judges them
-                said = _noteread.read(text, _pages.zone_now(), _watch.parse_date)      # what the note says, applied by the server (note_read.py): a note that says he did it, or names a later time
-                if said["until"]:           # "tomorrow evening": his step stays open and the item waits until then, on his words (the park path below); the then-mover is told it is held
-                    until = said["until"]
-                    rec["applied"] = f"The server read the note as a later time and put the item on hold until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
-                else:
-                    _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_holders._owner_want(meta), writer=NAME, add=False)
-                    if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
-                        _handover._check_his_step(meta, rec["step"], now)
-                        rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
-            _holders._state_end(meta, "your-step")
-            meta.pop("draft", None)         # the step is done: the text he was to post is posted
-            meta.pop("mover", None); meta.pop("then", None)
-            _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; the owner's words for the wake go with it)
-            _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))      # a needs that named him would read the item as his call again
-            if then and not _model.is_owner(then):
-                _handover._hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else notice_to falls back to the page's keeper)
-            if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
-                until = _wakes.parse_wake(until)
-                meta["until"] = until           # the one date the wait ends on (until_write.py); no hold and no wake are stored
-                _owner_words._cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")
-            item["state_updated"] = item["confirmed"] = now
-        if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
-            mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
-            beside = meta.get("state") == "your-step" and bool(_states.clean(meta.get("step")))      # the ask stands beside a your-step: his answer to it is not his word that the step is done
-            _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words(choice, text), make=(_hs.decide_of(meta.get("ask")) or _holders._OWNER_STEP_NONE) if beside else _holders._owner_want(meta), writer=NAME, apart=beside)      # N4: his answer ticks his step, shown on it (`→ the option`); an item that asked before the server made his steps gets the step now, done
-            _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
-            if meta.get("ask"):
-                rec["ask"] = str(meta["ask"])   # the ask he answered stays with his answer: the item drops it, and a decision asked again within an hour with that same ask is refused (gates.gate_decision_again)
-            meta.pop("ask", None)
-            meta.pop(_askl.LEFT, None)      # an answered ask leaves no "taken off" record: a late pick on an older ask reads stale
-            _holders._state_end(meta, "your-call")   # the call is made: a stored your-call no longer stands (a park picked below reads as derived)
-            if matched:                 # a pick among the options settles the question: ask and options go, his answer keeps the label and line
-                meta.pop("options", None)
-            meta.pop("idle", None)
-            if parked:                  # on hold until that day, as update(hold=true, until=…) would leave it; "Owner acts now" leaves it on agent
-                _holders._state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
-                meta["until"] = parked          # the one date the wait ends on (until_write.py); no hold and no wake are stored
-                _owner_words._cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
-                            source=f"{OWNER}'s answer on the board, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")   # "Park until <date>" is his own word for that date
-            item["state_updated"] = item["confirmed"] = now
-            effect = _wait_gates._watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop
-            if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
-                handed = _handover._decision_hand_over(meta, mover_in, then_in, parked=bool(parked),
-                                    waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
-        if askback:                     # the question put back: three days to pick from (watchers.ask_back); the item stays his, needs still names his decision
-            meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())
-        item["metadata"] = meta
-        item["updated"] = now
-        _writes.save(gid, item, note=_answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(OWNER, "board"))
-        if parked or until or (kind == "decision" and eff["do"] == "wait"):
-            _runner.WAKE_EVENT.set()           # the minute loop takes the new wake in
-        if kind == "decision" and eff["do"] == "drop":
-            try:
-                _wakes.release_after(gid, "dropped", "", "")      # the items that waited on this one
-            except Exception as e:  # noqa: BLE001
-                print(f"answer: {gid} dropped but its after releases failed: {e}", file=sys.stderr, flush=True)
-        item["gid"] = gid
-        told = [t for t in _answer_deliver(gid, item, rec, then if stepped else "", handed) if t]
-        if kind in ("decision", "step-reply") and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
-            st = _answers_load()
-            st[gid] = {"ts": now, "owner": _session_id(_telling.holder(item)), "project": str(meta.get("project") or ""),
-                       "told": told, "words": _answer_words(rec, 300)}
-            _answers_save(st)
-    kind = ("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
-    print(f"answer: {gid} {kind} from the board" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
-    _pubmod._publish()
-    return "askedback" if askback else kind
-
-
-def _answer_tick(now: float | None = None) -> list[str]:
-    """The escalation pass (on the runner): a decision answer that no session it was sent to has followed with a write to
-    the item within _ANSWER_ESCALATE_S goes to the project's keeper (page_keeper: the project's keeper), once; then it is dropped. A closed
-    or missing item drops it silently, and so does a keeper that is the mover itself. → the gids escalated."""
-    now = time.time() if now is None else now
-    out: list[str] = []
-    with _answers_mod._ANSWER_LOCK:
-        st = _answers_load()
-        due = [g for g, e in st.items() if now - float(e.get("ts") or 0) >= _ANSWER_ESCALATE_S]
-        if not due:
-            return out
-        for gid in due:
-            e = st.pop(gid)
-            try:
-                it = _svcstore._load(gid)
-            except ToolError:
-                continue
-            if it.get("status") != "open":
-                continue
-            meta = it.get("metadata") or {}
-            owner, project = _telling.holder(it), str(e.get("project") or meta.get("project") or "")
-            stew = _telling.page_keeper(project) or _telling.project_keeper(project)
-            sid = _session_id(stew) if stew else ""
-            if not sid or sid == _session_id(owner):
-                print(f"answer: {gid} unacted after {_ANSWER_ESCALATE_S / 60:g} min, but no keeper other than its mover to tell", file=sys.stderr, flush=True)
-                continue
-            at = _rmod.when_words(dt.datetime.fromtimestamp(float(e.get("ts") or now), _wttext.ZONE))
-            olabel = _sr._session_label(owner) if owner else "none"
-            _telling.tell_woken(gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
-                                  f"in {_ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: see that his answer is acted on "
-                                  f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}", tag="answer")
-            out.append(gid)
-        _answers_save(st)
-    for gid in out:
-        print(f"answer: {gid} unacted after {_ANSWER_ESCALATE_S / 60:g} min, its keeper told", file=sys.stderr, flush=True)
-    return out
 
 
 # ----------------------------------------------------------------------------- the access log keeps no sign-in secrets

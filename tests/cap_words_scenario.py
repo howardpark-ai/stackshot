@@ -74,6 +74,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import owner_words as _owner_words; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.service import store as _service_store
@@ -354,14 +355,14 @@ os.remove(T / "store/a/70.json"); os.remove(T / "store/a/71.json")
 
 # ================================================================ the client API (what tools/cap_words.py --apply sends)
 item(36, hold=True, wake=day(30), answers=[park])
-st, d = server._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a36", "ts": TS})
+st, d = _rt_client._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a36", "ts": TS})
 check("API: cap-words with an entry records his words", st == 200 and d["action"] == "set" and rd(36)["metadata"]["cap_ok"]["quote"] == park["text"], (st, d))
 item(37, hold=True, wake=day(30))
-st, d = server._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a37", "basis": B(33)})
+st, d = _rt_client._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a37", "basis": B(33)})
 check("API: cap-words with a basis goes through the update path", st == 200 and d["action"] == "set" and W.basis_of(rd(37)["metadata"]) == B(33) and rd(37)["metadata"]["wait_basis"]["by"] == "home-test via a script on testbox", (st, d, rd(37)["metadata"]))
-st, d = server._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a37", "basis": "no date here at all"})
+st, d = _rt_client._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a37", "basis": "no date here at all"})
 check("API: a refusal is a 400 with the reason", st == 400 and "YYYY-MM-DD" in d["error"], (st, d))
-st, d = server._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a58", "ts": TB+1})
+st, d = _rt_client._client_post("testbox", "cap-words", {"sender": "home-test", "item": "a58", "ts": TB+1})
 check("API: an agent's entry is a 400", st == 400 and "own words" in d["error"], (st, d))
 
 # the only writers of metadata.answers are the board's answer form and the GitHub reader: not create, update or said
@@ -434,7 +435,7 @@ with contextlib.redirect_stdout(buf):
 check("tool: the dry run (the default) writes nothing and says so", rc == 0 and snap() == h0 and "DRY RUN" in buf.getvalue() and "nothing was written" in buf.getvalue(), buf.getvalue()[-300:])
 from stackshot.fleet import client as _client
 real_post = _client.post
-_client.post = lambda what, body, timeout=20.0: server._client_post("testbox", what, body)
+_client.post = lambda what, body, timeout=20.0: _rt_client._client_post("testbox", what, body)
 try:
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

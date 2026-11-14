@@ -92,6 +92,7 @@ def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.service import answer as answer_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
@@ -229,17 +230,17 @@ check("…and 'step dropped: …' for one dropped", "step dropped: home-agent: t
 check("a step that left next with nobody marking it is no step event (the next line says it)", S.changes({"next": L4}, {"next": "home-agent: test it"}) == [])
 
 # ---- 10. Oliver's Done and Send note (the two buttons of the step form)
-r = server._answer("a10", "", "", "done")
+r = answer_svc._answer("a10", "", "", "done")
 m10 = mt(10)
 check("Done with an empty box: the item goes on, and his open step (the line that is his) is checked, by Oliver and now; the rest of next stays",
       r == "done" and [x["status"] for x in m10["steps"]] == ["open", "done", "open"] and m10["steps"][1]["by"] == "Oliver" and abs(m10["steps"][1]["at"] - time.time()) < 60
       and m10["next"] == "home-agent: prepare it\nhome-agent: verify it" and "state" not in m10, (r, m10))
-r = server._answer("a11", "", "which box?", "note")
+r = answer_svc._answer("a11", "", "which box?", "note")
 m11 = mt(11)
 check("Send note leaves his step open: the session that takes the item marks it", r == "stepreply" and "steps" not in m11 and m11["next"] == "home-agent: prepare it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: verify it", (r, m11))
-r = server._answer("a12", "", "", "done")
+r = answer_svc._answer("a12", "", "", "done")
 check("a step that is not a line of next (no line of his) checks nothing; the item still goes on", r == "done" and "steps" not in mt(12) and mt(12)["next"] == "home-agent: look at it", (r, mt(12)))
-r = server._answer("a13", "", "", "done")
+r = answer_svc._answer("a13", "", "", "done")
 check("with two lines of his, both are checked (the Your step block shows both; his Done finishes the step), the agent's line stays", st(13) == [("done", "Oliver: look at the page first"), ("done", "Oliver: In PowerShell run `ssh -t box-a 'ls'` on the box"), OPEN("home-agent: verify it")]
       and mt(13)["next"] == "home-agent: verify it" and mt(13)["next_by"] == [[OWNER, NL.key_of("home-agent: verify it")]], (st(13), mt(13)))
 snap()
@@ -303,7 +304,7 @@ check("Next stays whole: every step of the checklist, his and the agent's, open,
 p22, p23 = bd.item_html("a22", answer={**BOX, "action": "/items/a22/answer"}), bd.item_html("a23", answer={**BOX, "action": "/items/a23/answer"})
 check("with no line of his in next the block has no list; an unnamed line is his",
       'class="istepnext"' not in p22 and 'class="iask istep"' in p22 and '<div class="istepnext"><ol' in p23 and "run the command below and say so" in p23, p23[p23.find("istepnext") - 40:][:400])
-r = server._answer("a21", "", "", "done")
+r = answer_svc._answer("a21", "", "", "done")
 m21 = mt(21)
 p21b = ui_render.Board(str(STORE)).item_html("a21", answer=BOX)
 check("his Done checks his three open steps: checked, by Oliver and now; the agent's stay open; the item goes on",

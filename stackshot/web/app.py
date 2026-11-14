@@ -166,7 +166,6 @@ def build(
     machine_state,
     main_agent,
     client_get,
-    client_post,
     recycle_wanted_tokens,
     answer,
     contact_label,
@@ -211,7 +210,7 @@ def build(
     _tool_anchors.register(mcp, evw_boxes=evw_boxes, machine_state=machine_state)
     _tool_rules.register(mcp)
     _signin.register(mcp)
-    _routes_client_api.register(mcp, client_get=client_get, client_post=client_post, recycle_wanted_tokens=recycle_wanted_tokens)
+    _routes_client_api.register(mcp, client_get=client_get, recycle_wanted_tokens=recycle_wanted_tokens)
     _routes_answers.register(mcp, answer=answer)
     _routes_ui_api.register(mcp, contact_label=contact_label, runner_status=runner_status, phase_sweep_status=phase_sweep_status)
     _routes_board_pages.register(mcp, contact_label=contact_label)

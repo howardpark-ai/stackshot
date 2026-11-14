@@ -61,6 +61,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import states
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import update as _update_svc
 from stackshot.model import model as _model
@@ -391,7 +392,7 @@ check("legacy: a stored value that is no time breaks nothing: get still reads th
 # ================================================================ 8. the routes and the text
 item(60, needs=[BACK])
 b60 = raw(60)
-st, d = server._client_post("testbox", "state", {"sender": "home-test", "item": "a60", "state": "doing", "expected_by": stamp(now0 + 10 * HOUR), "expected_reason": "the builder runs the review and the suites"})
+st, d = _rt_client._client_post("testbox", "state", {"sender": "home-test", "item": "a60", "state": "doing", "expected_by": stamp(now0 + 10 * HOUR), "expected_reason": "the builder runs the review and the suites"})
 check("route: POST /client/state is retired (its own refusal is in tests/retired_inputs_scenario.py): a call that passes expected_by with it is refused too and nothing is stored", st == 400 and raw(60) == b60, (st, d))
 item(62, needs=[BACK], state="doing")
 rows62 = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["team-back"])[2])["items"]}

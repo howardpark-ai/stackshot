@@ -64,6 +64,7 @@ def mt(i): return rd(i)["metadata"]
 def digest(): return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((T / "store").glob("*/*.json"))}
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_backfill as NB; from stackshot.model import owner_steps as HS; from stackshot.model import migration as M
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -144,9 +145,9 @@ CFGM.pop("migration"); CFGM.pop("migration_senders"); CFGM.pop("migration_machin
 # ---- 5. the gate off: a backfill write is refused as a whole and nothing is written
 d8 = digest()
 it8 = rd(8)
-st_, d_ = server._client_post("testbox", "migrate", {"op": "apply", "sender": "falcon-engineer", "writes": [{"item": "a8", "backfill": "owner_steps", "expect": it8["updated"], "expect_sig": M.activity_sig(it8, 0)}]})
+st_, d_ = _rt_client._client_post("testbox", "migrate", {"op": "apply", "sender": "falcon-engineer", "writes": [{"item": "a8", "backfill": "owner_steps", "expect": it8["updated"], "expect_sig": M.activity_sig(it8, 0)}]})
 check("gate off: a backfill write answers 403 and writes nothing", st_ == 403 and "error" in d_ and "results" not in d_ and digest() == d8 and not any(x["status"] == "done" for x in S.view(mt(8), keeper=OWNER)), (st_, d_))
-st_, d_ = server._client_post("testbox", "migrate", {"op": "apply", "sender": "somebody-else", "writes": [{"item": "a8", "backfill": "owner_steps"}]})
+st_, d_ = _rt_client._client_post("testbox", "migrate", {"op": "apply", "sender": "somebody-else", "writes": [{"item": "a8", "backfill": "owner_steps"}]})
 check("…and so does one from a sender that is not named", st_ == 403 and digest() == d8, (st_, d_))
 
 print(("ok" if not fails else "FAILED") + f": next_backfill scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -72,6 +72,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import owner_steps as HS; from stackshot.web import itempage as IP; from stackshot.model import next_backfill as NB
+from stackshot.service import answer as answer_svc
 from stackshot.service import store as _service_store
 from stackshot.core import instance as _core_instance
 from fastmcp.exceptions import ToolError
@@ -122,7 +123,7 @@ check("a step= (the your-step state) gets `Oliver: <the step>`", his(2) == [OPEN
 r = upd(3, next="home-agent: build it\nOliver: pick the release path")
 r = upd(3, needs="decision", ask=ASK, options=OPTS)
 check("a `Oliver:` line a session wrote about something else stays the session's: the server adds its step beside it", his(3) == [OPEN("Oliver: pick the release path"), OPEN(H1)] and mt(3).get("owner_step") == H1, st(3))
-r = server._answer("a3", "Ship", "", "")
+r = answer_svc._answer("a3", "Ship", "", "")
 check("…and his answer ticks the server's step only; the session's line stays open", r == "decision" and his(3) == [OPEN("Oliver: pick the release path"), ("done", f"{H1} → Ship")], his(3))
 
 # a session's line that says what the ask says is adopted: recorded as the server's step, none beside it
@@ -143,7 +144,7 @@ check("…and a later save leaves it as it is (no reword to the step's summary)"
 r = upd(16, next="home-agent: build it\nOliver: review PR 12 when you can")
 r = upd(16, needs="decision", ask=ASK, options=OPTS)
 check("a session's `Oliver: review PR 12` line then an ask: the server adds its own step beside it", his(16) == [OPEN("Oliver: review PR 12 when you can"), OPEN(H1)] and mt(16).get("owner_step") == H1, st(16))
-r = server._answer("a16", "Ship", "", "")
+r = answer_svc._answer("a16", "Ship", "", "")
 check("…his answer ticks the server's step, never the PR 12 line", r == "decision" and his(16) == [OPEN("Oliver: review PR 12 when you can"), ("done", f"{H1} → Ship")], his(16))
 r = upd(17, next="home-agent: build it\nOliver: run uptime")
 r = upd(17, step=STEP)
@@ -161,49 +162,49 @@ check("…the drop is the server's, with a time", mt(4)["steps"][[x["text"] for 
 
 # ---- 4. N4: his answer ticks, shown on the step
 t0 = time.time()
-r = server._answer("a1", "Ship", "", "")
+r = answer_svc._answer("a1", "Ship", "", "")
 s1 = [x for x in mt(1)["steps"] if x["text"].startswith("Oliver:")]
 check("his option answer ticks his step: done by Oliver, at the answer's time, the picked label after an arrow", r == "decision" and len(s1) == 1 and s1[0]["status"] == "done" and s1[0]["by"] == "Oliver"
       and t0 - 1 <= s1[0]["at"] <= time.time() + 1 and s1[0]["text"] == f"{H1} → Ship", s1)
 check("…the step has left next (next holds the open lines only), the server's record of it is gone", H1 not in mt(1)["next"] and "owner_step" not in mt(1), mt(1))
 check("…and the item no longer waits on him", "decision" not in (mt(1).get("needs") or []) and "ask" not in mt(1), mt(1))
-r2 = server._answer("a1", "Ship", "", "")
+r2 = answer_svc._answer("a1", "Ship", "", "")
 check("a second answer is stale and adds nothing", r2 == "stale" and rd(1) == rd(1) and len(his(1)) == 1, (r2, his(1)))
 b1 = rd(1)
 upd(1, next="home-agent: look at the result", dropped=["home-agent: build it, then test it"])
 check("a later session write adds no step of his (the item does not wait on him)", his(1) == [("done", f"{H1} → Ship")] and rd(1)["metadata"]["steps"][-1]["status"] in ("open",), his(1))
 
 r = upd(5, needs="decision", ask=ASK, options=OPTS)
-r = server._answer("a5", "", "ship it after lunch, not before the demo today and not on a Friday either, please keep that in mind", "answer")
+r = answer_svc._answer("a5", "", "ship it after lunch, not before the demo today and not on a Friday either, please keep that in mind", "answer")
 check("a text answer ticks the step with his words quoted after the arrow, cut at 60 characters", r == "decision" and his(5)[0][0] == "done" and re.fullmatch(rf'{re.escape(H1)} → "ship it after lunch.{{40,70}}…"', his(5)[0][1]), his(5))
 
-r = server._answer("a20", "Wait", "", "")
+r = answer_svc._answer("a20", "Wait", "", "")
 check("an item that asked before the server made his steps gets the step now, done, with his answer", r == "decision" and his(20) == [("done", f"{H1} → Wait")] and mt(20)["steps"][-1]["by"] == "Oliver", (his(20), mt(20).get("steps")))
 
-r = server._answer("a21", "Ship", "", "")
+r = answer_svc._answer("a21", "Ship", "", "")
 check("a `Oliver:` line a session wrote about something else, on a stored ask: his answer adds the server's step and ticks it, the session's line stays open", r == "decision" and his(21) == [OPEN("Oliver: pick the release path"), ("done", f"{H1} → Ship")], his(21))
 
 # ---- 5. Done on a your-step
-r = server._answer("a2", "", "", "done")
+r = answer_svc._answer("a2", "", "", "done")
 check("Done on a your-step ticks his step (the path that is there): done by Oliver, no arrow", r == "done" and his(2) == [("done", f"Oliver: {STEP}")] and mt(2)["steps"][-1]["by"] == "Oliver", (r, his(2)))
-r = server._answer("a22", "", "", "done")
+r = answer_svc._answer("a22", "", "", "done")
 check("Done on a your-step stored before the server made his steps leaves the list as it was (nothing to tick)", r == "done" and his(22) == [] , (r, st(22)))
 
 # ---- 5b. an answer to an ask ticks the ask's step, never the step of a your-step that stands beside it (only his Done or a note on the step does that)
 r = upd(33, needs="decision", ask=ASK, options=OPTS)
 HC = f"Oliver: {CMD}"
 check("(setup) a your-step with a command, then an ask beside it: his step is the command's, one line", (HC in [t for _, t in his(33)]) and [s for s, t in his(33) if t == HC] == ["open"], st(33))
-r = server._answer("a33", "Ship", "", "")
+r = answer_svc._answer("a33", "Ship", "", "")
 check("his plain answer to the ask is recorded and the ask leaves", r == "decision" and "ask" not in mt(33) and "decision" not in (mt(33).get("needs") or []), (r, mt(33)))
 check("…but it does not tick the step that tells him to run the command: that line stays open, once, and the answer is its own done line",
       [(s, t) for s, t in his(33) if s == "open"] == [OPEN(HC)] and ("done", f"{H1} → Ship") in his(33) and HC not in [t for s, t in his(33) if s == "done"], his(33))
 check("…the your-step stands, the recorded step is still the command's, and nothing was added a second time", mt(33).get("state") == "your-step" and mt(33).get("owner_step") == HC and mt(33)["next"].count(HC) == 1, mt(33))
 upd(33, priority="p1")
 check("…a later session write adds no fresh copy of it", [t for s, t in his(33) if s == "open"] == [HC], st(33))
-r = server._answer("a33", "", "", "send")
+r = answer_svc._answer("a33", "", "", "send")
 check("only his Done ticks the command's step (done by him, no arrow)", r == "done" and (("done", HC) in his(33)) and not [1 for s, _ in his(33) if s == "open"], (r, his(33)))
 upd(34, needs="decision", ask=ASK, options=OPTS)
-r = server._answer("a34", "", "yes please, go on", "answer")
+r = answer_svc._answer("a34", "", "yes please, go on", "answer")
 check("a free-text answer to the ask leaves the command's step open too", r == "decision" and [t for s, t in his(34) if s == "open"] == [HC], (r, his(34)))
 
 # ---- 6. N4: a session cannot tick his step; it may withdraw
@@ -213,7 +214,7 @@ refused("…by its exact text too", lambda: upd(6, done=[H1]), "only his answer"
 check("…the step is still open and the ask stands", his(6) == [OPEN(H1)] and mt(6)["needs"] == ["decision"] and mt(6)["ask"] == ASK, st(6))
 r = upd(6, clear_ask=True, clear_options=True, needs="home-agent")
 check("withdrawing the ask drops his open step, by the session that withdrew it", [s for s, _ in his(6)] == ["dropped"] and mt(6)["steps"][-1]["by"] == "home-agent" and H1 not in mt(6)["next"] and "owner_step" not in mt(6), (st(6), mt(6)))
-r = server._answer("a6", "Ship", "", "")
+r = answer_svc._answer("a6", "Ship", "", "")
 check("…and an answer that comes after is stale: nothing ticks", r == "stale" and [s for s, _ in his(6)] == ["dropped"], (r, his(6)))
 
 # ---- 6b. withdrawing the ask with the clear flags (clear_ask, clear_options, clear_needs) leaves no open step of his; an answered step stays done; a replaced ask drops the old step and adds the new
@@ -222,7 +223,7 @@ r = upd(26, clear_ask=True, clear_options=True, clear_needs=True)
 check("clear_ask with clear_options and clear_needs drops his open step, by the session, and the record of it goes", "ask" not in mt(26) and [s for s, _ in his(26)] == ["dropped"] and mt(26)["steps"][-1]["by"] == "home-agent"
       and H1 not in mt(26).get("next", "") and "owner_step" not in mt(26) and all(s != "open" for s, _ in his(26)), (st(26), mt(26)))
 r = upd(27, needs="decision", ask=ASK, options=OPTS)
-r = server._answer("a27", "Ship", "", "")
+r = answer_svc._answer("a27", "Ship", "", "")
 r = upd(27, clear_ask=True, clear_options=True, clear_needs=True)
 check("a step he answered stays done when a later update clears the ask", his(27) == [("done", f"{H1} → Ship")], (r, st(27)))
 r = upd(28, needs="decision", ask=ASK, options=OPTS)
@@ -262,7 +263,7 @@ check("a done on his step in the same call that withdraws the ask is no refusal:
 
 # his note on a your-step ticks the server's step with his words (step-reply)
 r = upd(23, step=STEP)
-r = server._answer("a23", "", "the box answers, port 22 is open", "send")
+r = answer_svc._answer("a23", "", "the box answers, port 22 is open", "send")
 check("his note on a your-step ticks the server's step with his words after the arrow, and the record of it goes", r == "stepreply" and his(23) == [("done", f'Oliver: {STEP} → "the box answers, port 22 is open"')] and "owner_step" not in mt(23) and [x["by"] for x in mt(23)["steps"] if x["text"].startswith("Oliver:")] == ["Oliver"], (r, st(23), mt(23)))
 check("…the lines the session wrote stay open for it to judge", ("open", "home-agent: build it") in st(23), st(23))
 
@@ -305,7 +306,7 @@ check("…so the shown line is the same for the text with the name and without i
 ASK_NAMED = "Decide: Oliver: whether to ship it now · Recommend: ship · Stakes: a day either way · By: no date"
 r = upd(61, needs="decision", ask=ASK_NAMED, options=OPTS)
 check("an ask whose Decide part opens with his name makes `Oliver: <the Decide part>` once, the same line as the ask without the name", his(61) == [OPEN(H1)] and mt(61).get("owner_step") == H1, (st(61), mt(61)))
-r = server._answer("a61", "Ship", "", "")
+r = answer_svc._answer("a61", "Ship", "", "")
 check("…and his answer ticks it with the option after the arrow", r == "decision" and his(61) == [("done", f"{H1} → Ship")], his(61))
 
 # a step stored with his name twice (before the server stopped doubling it): later saves keep it as the one step, a session's done cannot tick it by any spelling, his answer ticks it
@@ -326,7 +327,7 @@ r = upd(62, step=f"Oliver: {STEP}, then say so")
 check("a reworded step= drops the step stored twice and adds the new one with his name once", [s for s, _ in his(62)] == ["dropped", "open"] and his(62)[1][1] == f"{ONE}, then say so" and mt(62)["owner_step"] == f"{ONE}, then say so", st(62))
 r = upd(63, step="none")
 check("withdrawing the step stored twice drops it", [s for s, _ in his(63)] == ["dropped"] and "owner_step" not in mt(63), (st(63), mt(63)))
-r = server._answer("a64", "", "", "done")
+r = answer_svc._answer("a64", "", "", "done")
 check("Done on the step stored twice ticks that step, once, and makes none beside it", r == "done" and his(64) == [("done", DBL)] and mt(64)["steps"][-1]["by"] == "Oliver", (r, st(64)))
 
 # a session's own line of his, stored with his name twice or once: done and dropped find it by position or exact first line, with the name, without it, or written twice
