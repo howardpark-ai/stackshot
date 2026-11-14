@@ -1,7 +1,7 @@
 """Scenario test for liveness.py — one clock and one answer for "is this session or machine up, unreachable, idle-live" — fixture data, no live store, no network.
 
 liveness.py replaced the separate readings in clients.py (is a puller online, is a hook-registered session past its TTL, is a gone record past the horizon), fleet.py (running,
-gone for how long, present within the grace, dead after how long), server.py (_idle_live, _machine_unreachable, _session_down, _pane_dead), mover_state.py (what a pane's
+gone for how long, present within the grace, dead after how long), server.py and service/messaging.py (_idle_live, _machine_unreachable, _session_down, _pane_dead), mover_state.py (what a pane's
 registry row says, how long it has been idle), stall.py (the idle test) and the two inbox readers (push.inbox_serves, inbox.alive / inbox._present). It is a pure consolidation:
 this suite holds a frozen copy of each old reader (the code as it stood before) and asserts, over a table of cases per reader, that the old copy and the live name give the same
 answer: a session that runs, is gone a second, ten minutes, an hour, a month, or on a stamp nobody can read; a machine online, silent, silent for exactly the grace, never
@@ -34,6 +34,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.core import config as cfg; from stackshot.fleet import fleet; from stackshot.fleet import clients; from stackshot.waits import mover_state; from stackshot.waits import stall; from stackshot.fleet import inbox; from stackshot.fleet import push; from stackshot.fleet import liveness as LV; from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.anchors import anchors as _anc
 NOW = float(int(time.time()))        # whole seconds: the stamps below are second-granular, so an edge case lands exactly on the edge
@@ -79,7 +80,7 @@ def o_session_down(who, nm, idx, stuck, started, now=None):                     
         off = o_machine_unreachable(rec.get("machine"), started, now)
         return f"is unreachable ({off})" if off else ""
     return "" if o_present(rec) else "is not running (its pane is gone)"
-def o_pane_dead(rec, now=None):                                                                     # server._pane_dead
+def o_pane_dead(rec, now=None):                                                                     # _messaging._pane_dead
     gone = o_gone_for(rec, now)
     if gone < o_dead_after(): return ""
     on = fleet.read(str((rec or {}).get("machine") or ""), "machine").get("online")
@@ -139,7 +140,7 @@ check("alias: fleet presence names are liveness.py's", all(getattr(fleet, n) is 
 check("alias: clients.online and clients._ts are liveness.py's", clients.online is LV.puller_online and clients._ts is LV.ts and clients._online is LV.online_window)
 check("alias: mover_state's pane names are liveness.py's", all(getattr(mover_state, n) is getattr(LV, n) for n in ("pane_row", "status", "is_idle", "idle_since", "idle_seconds", "idle_for", "IDLE")))
 src = lambda f: __import__("inspect").getsource(f)
-check("the four readers are one call into liveness.py each", all(f"_lv.{call}(" in src(getattr(server if fn == "_pane_dead" else _pane_recovery, fn)) for fn, call in
+check("the four readers are one call into liveness.py each", all(f"_lv.{call}(" in src(getattr(_messaging if fn == "_pane_dead" else _pane_recovery, fn)) for fn, call in
       (("_idle_live", "idle_live"), ("_machine_unreachable", "machine_unreachable"), ("_session_down", "session_down"), ("_pane_dead", "pane_dead"))))
 check("stall: the idle test is liveness.py's", "_lv.is_idle(" in src(stall.action) and not hasattr(stall, "_mover_state"))
 
@@ -242,7 +243,7 @@ check("literal: a cloud session or an unknown name is never down", down("cse_012
 # two readers on the SAME row, kept apart by the window each reads (see the module docstring): a session gone 30 minutes
 r30 = idx[UG2]
 check("disagreement kept: gone 30 min is not present (grace 10), is down for session_down, and is still a pane for pane_dead (dead_after 60) and for _reachable's presence test",
-      not LV.present(r30, NOW) and down(UG2) != "" and LV.pane_dead(r30, NOW) == "" and server._reachable(UG2, idx) is False, (LV.present(r30, NOW), down(UG2), LV.pane_dead(r30, NOW)))
+      not LV.present(r30, NOW) and down(UG2) != "" and LV.pane_dead(r30, NOW) == "" and _messaging._reachable(UG2, idx) is False, (LV.present(r30, NOW), down(UG2), LV.pane_dead(r30, NOW)))
 check("disagreement kept: gone a month on an online machine is dead to pane_dead, on a silent one it is not (cannot tell it from a pane that is away)",
       LV.pane_dead(idx[UG3], NOW) != "" and LV.pane_dead({**idx[UG3], "machine": "b"}, NOW) == "")
 

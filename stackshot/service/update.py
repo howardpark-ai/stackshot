@@ -351,14 +351,16 @@ def _contact_after_move(meta: dict[str, Any], new_project: str) -> str:
     return h.store_ref(main) if main else ""
 
 
-def _doing_wait_note(meta: dict[str, Any], next_: str = "") -> str:
+def _doing_wait_note(meta: dict[str, Any], next_: str = "", busy: str | None = None) -> str:
     """A valid reason to wait on an item does not warrant marking it as on agent and letting it sit there for hours: it should be marked waiting.
     A note on the reply (never a refusal) when the item ends the write in the stored state doing, not on hold, and a line of next this write set reads as a wait on a time or an event
-    rather than work in hand (model_guards.reads_as_wait)."""
+    rather than work in hand (model_guards.reads_as_wait). Not when `busy` (the words for what of the holder's own runs on the item, asked by the update tool before the lock: gates.busy_note_answer, audit/busy_hold.py)
+    is not empty: a running subagent of the holder is tied to the item, so the wait wording is about its own run, which is work in hand, and the note's advice to park would be the hold the update refuses. None or
+    "" (nothing running, or nothing could be told) leaves the note as it is."""
     if meta.get("state") != "doing" or meta.get("hold"):
         return ""
     found = _mg.reads_as_wait(next_) if next_ else ""
-    if not found:
+    if not found or busy:
         return ""
     return (f"\n(note: this item is doing, but its next reads as a wait ({found}), not work in hand; a doing item that waits shows as on an agent while nobody works it. "
             "Park it this turn with update(hold=true, until=\"<the time it waits for>\", wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\"))")
@@ -483,12 +485,13 @@ def update_unlocked(
     until_wait: bool = False,
     waits: list[dict[str, Any]] | str | None = None,
     wait_mode: str = "",
+    busy_note: str | None = None,
 ) -> str:
     """The update tool; its description is _UPDATE_DESC (+ _WAIT_FORM). The caller checks the identity (_who): the update and
     complete tools do, the client API's recycle-due write is proved by its machine token instead."""
     if not _steps.reword_given(reword):
         reword = None             # {} and "{}" name no step: the call is as if it passed none
-    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
+    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait", "busy_note") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
     h = _hooks()
     filing_only = bool(given) and set(given) <= _FILING_ONLY      # a bookkeeping write (a page rename's update(project=<new key>)): no work was done, so no agent is named for it
     subject, description, next, ask, reason, outcome_text = (_shown_ids(x) for x in (subject, description, next, ask, reason, outcome_text))   # g7 →
@@ -1257,7 +1260,7 @@ def update_unlocked(
                  + (f"; its date {_wt.wake_value(meta)} stays, and no date parks an item on his call" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + named + told + h.nag(debtor))
 
 

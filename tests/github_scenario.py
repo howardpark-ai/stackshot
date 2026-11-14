@@ -244,6 +244,8 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.service import messaging as _messaging
+from stackshot.service import agent_names as _agent_names
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.waits import waiting as _wt
@@ -1399,13 +1401,13 @@ check("complete: g<n> in the reason and in the outcome text is stored as board#<
       dw["metadata"]["reason"] == f"closed with {nk}" and dw["metadata"]["outcome_text"] == f"- Ended with {nk}\n- It lived here\n- It worked"
       and dw["description"].startswith(f"- Now waits on {nk}") and gk not in json.dumps(dw["metadata"]["outcome_text"]), dw)
 (T / "fakepush_g.py").write_text(f"import json, sys\nopen({str(T / 'push_g.json')!r}, 'w').write(json.dumps(sys.argv[1:]))\nprint('delivered')\n")
-_push, _gf, _hand = telling.PUSH, server._gate_front, server._name_on_handover
-telling.PUSH = [sys.executable, str(T / "fakepush_g.py")]; server._gate_front = lambda *a, **k: None; server._name_on_handover = lambda *a, **k: ""
+_push, _gf, _hand = telling.PUSH, _messaging._gate_front, _agent_names._name_on_handover
+telling.PUSH = [sys.executable, str(T / "fakepush_g.py")]; _messaging._gate_front = lambda *a, **k: None; _agent_names._name_on_handover = lambda *a, **k: ""
 try:
-    server._message("home-here", f"about {gk}, not `{gk}` nor g999", "home-other")
+    _messaging._message("home-here", f"about {gk}, not `{gk}` nor g999", "home-other")
     env_ = json.loads((T / "push_g.json").read_text())[-1]
 finally:
-    telling.PUSH, server._gate_front, server._name_on_handover = _push, _gf, _hand
+    telling.PUSH, _messaging._gate_front, _agent_names._name_on_handover = _push, _gf, _hand
 check("message: a bare g<n> in the text is delivered as board#<n>; code and an unknown id stay", f"about {nk}, not `{gk}` nor g999" in env_, env_[:300])
 
 # ---- the rewrite never changes what a message names (the keeper, before merge): the handover's naming reads the text as the sender
@@ -1416,43 +1418,43 @@ _open_g = sorted((f"g{q.stem}" for q in (STORE / "g").glob("*.json") if q.stem.i
 (gb, gc, gd) = _open_g[:3]; nc0 = rd("g", gc[1:])["metadata"].get("needs")
 check("the fixture: three open issue-numbered targets", all(g[0] == "g" and rd(g[0], g[1:])["status"] == "open" for g in (gb, gc, gd)), (gb, gc, gd))
 seen_txt = []
-_push, _gf, _ba, _to, _hand = telling.PUSH, server._gate_front, server._back_agent, telling.tell_owner, server._name_on_handover
-telling.PUSH = [sys.executable, str(T / "fakepush_g.py")]; server._gate_front = lambda *a, **k: None
-server._back_agent = lambda who, idx=None: "ops-alpha-bg" if who == "home-here" else ""; telling.tell_owner = lambda *a, **k: ""
-server._name_on_handover = lambda to, text, *a, **k: (seen_txt.append(text), _hand(to, text, *a, **k))[1]
+_push, _gf, _ba, _to, _hand = telling.PUSH, _messaging._gate_front, _agent_names._back_agent, telling.tell_owner, _agent_names._name_on_handover
+telling.PUSH = [sys.executable, str(T / "fakepush_g.py")]; _messaging._gate_front = lambda *a, **k: None
+_agent_names._back_agent = lambda who, idx=None: "ops-alpha-bg" if who == "home-here" else ""; telling.tell_owner = lambda *a, **k: ""
+_agent_names._name_on_handover = lambda to, text, *a, **k: (seen_txt.append(text), _hand(to, text, *a, **k))[1]
 def _needs(g): return rd(g[0], g[1:])["metadata"].get("needs")
 try:
     txt_b = f"Take {gb} from here."
-    before_b = server._item_refs(txt_b)                       # what the naming scan finds in this text, as it ran before the change
-    out_b = server._message("home-here", txt_b, "home-other")
+    before_b = _agent_names._item_refs(txt_b)                       # what the naming scan finds in this text, as it ran before the change
+    out_b = _messaging._message("home-here", txt_b, "home-other")
     env_b = json.loads((T / "push_g.json").read_text())[-1]
     check("handover (a): a bare g<n> names exactly what it named before: the scan of the original text, never of the rewritten one",
           seen_txt[-1] == txt_b and before_b == [gb] and ("ops-alpha-bg" in str(_needs(gb))) == (gb in before_b), (seen_txt, before_b, _needs(gb), out_b))
     check("handover (a): the delivered text still carries board#<n>", f"Take {G.shown(gb)} from here." in env_b, env_b[:300])
     txt_c = f"Context only: `{gc}`."
-    server._message("home-here", txt_c, "home-other")
-    check("handover (a): a g<n> in backticks leaves the item's needs as they were, before and after", server._item_refs(txt_c) == [] and _needs(gc) == nc0, (_needs(gc), nc0))
+    _messaging._message("home-here", txt_c, "home-other")
+    check("handover (a): a g<n> in backticks leaves the item's needs as they were, before and after", _agent_names._item_refs(txt_c) == [] and _needs(gc) == nc0, (_needs(gc), nc0))
     txt_d = f"Take {G.shown(gd)} from here."
-    server._message("home-here", txt_d, "home-other")
-    check("handover (b): a plain board#<n> still names the agent in the item's needs, as before", server._item_refs(txt_d) == [gd] and "ops-alpha-bg" in str(_needs(gd)), _needs(gd))
+    _messaging._message("home-here", txt_d, "home-other")
+    check("handover (b): a plain board#<n> still names the agent in the item's needs, as before", _agent_names._item_refs(txt_d) == [gd] and "ops-alpha-bg" in str(_needs(gd)), _needs(gd))
     # a release log line carries the merge queue's group number ("group g<n>", "[g<n>]"), which is not an item though g<n> is also a store id
     (ge, gf) = _open_g[3:5]; ne0 = _needs(ge)
     check("the fixture: two more open issue-numbered targets", all(g[0] == "g" and rd(g[0], g[1:])["status"] == "open" for g in (ge, gf)), (ge, gf))
     txt_e = f"PR 7 failed: required check suites failed in group {ge} [{ge}]"
-    out_e = server._message("home-here", txt_e, "home-other")
+    out_e = _messaging._message("home-here", txt_e, "home-other")
     env_e = json.loads((T / "push_g.json").read_text())[-1]
     check("handover (c): a release line's merge-queue group number (group g<n>, [g<n>]) names no item, and the line is delivered as written",
-          server._item_refs(txt_e) == [] and _needs(ge) == ne0 and txt_e in env_e and G.shown(ge) not in env_e, (server._item_refs(txt_e), _needs(ge), ne0, env_e[:300], out_e))
+          _agent_names._item_refs(txt_e) == [] and _needs(ge) == ne0 and txt_e in env_e and G.shown(ge) not in env_e, (_agent_names._item_refs(txt_e), _needs(ge), ne0, env_e[:300], out_e))
     txt_f = f"{txt_e}; take {G.shown(gf)} from here."
-    server._message("home-here", txt_f, "home-other")
-    check("handover (c): a board#<n> in the same text still names its item, and the group's item stays unnamed", server._item_refs(txt_f) == [gf] and "ops-alpha-bg" in str(_needs(gf)) and _needs(ge) == ne0, (server._item_refs(txt_f), _needs(gf), _needs(ge)))
+    _messaging._message("home-here", txt_f, "home-other")
+    check("handover (c): a board#<n> in the same text still names its item, and the group's item stays unnamed", _agent_names._item_refs(txt_f) == [gf] and "ops-alpha-bg" in str(_needs(gf)) and _needs(ge) == ne0, (_agent_names._item_refs(txt_f), _needs(gf), _needs(ge)))
     txt_g = f"PR 7 failed on its own (group {ge}, split from {gf})"
     check("handover (c): the driver's 'group g<n>, split from g<n>' form and an upper-case G name no item either, and nothing in them is rewritten",
-          server._item_refs(txt_g) == [] and _service_store._shown_ids(txt_g) == txt_g and server._item_refs(f"group {ge.upper()} [{gf.upper()}]") == [], (server._item_refs(txt_g), _service_store._shown_ids(txt_g)))
+          _agent_names._item_refs(txt_g) == [] and _service_store._shown_ids(txt_g) == txt_g and _agent_names._item_refs(f"group {ge.upper()} [{gf.upper()}]") == [], (_agent_names._item_refs(txt_g), _service_store._shown_ids(txt_g)))
     check("handover (c): a bare g<n>, a g<n> link and a g<n> beside a group number still name; only the two release forms are skipped",
-          server._item_refs(f"take {ge}") == [ge] and server._item_refs(f"[{ge}]({_core_instance.BOARD_URL}/items/{ge[1:]})") == [ge] and server._item_refs(f"group {ge} [{ge}] and {gf}") == [gf], (server._item_refs(f"group {ge} [{ge}] and {gf}"),))
+          _agent_names._item_refs(f"take {ge}") == [ge] and _agent_names._item_refs(f"[{ge}]({_core_instance.BOARD_URL}/items/{ge[1:]})") == [ge] and _agent_names._item_refs(f"group {ge} [{ge}] and {gf}") == [gf], (_agent_names._item_refs(f"group {ge} [{ge}] and {gf}"),))
 finally:
-    telling.PUSH, server._gate_front, server._back_agent, telling.tell_owner, server._name_on_handover = _push, _gf, _ba, _to, _hand
+    telling.PUSH, _messaging._gate_front, _agent_names._back_agent, telling.tell_owner, _agent_names._name_on_handover = _push, _gf, _ba, _to, _hand
 
 # ---- 8. the board item: one capped queue. The updates of an existing issue are merged over [github] merge_seconds into one
 # PATCH (no comment goes with it any more); a create and a close or reopening go at once; the host's one ledger

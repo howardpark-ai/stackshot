@@ -78,6 +78,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.fleet import sessions_registry as SR24
 from stackshot.service import writes as WR24
 from stackshot.core import readonly as _ro
@@ -117,7 +118,7 @@ CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = hand
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
-server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
+_messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
 telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 fleetev.inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 panes = {}                                                         # mover -> the pane's registry status; "boom" = unreadable

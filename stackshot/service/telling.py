@@ -55,7 +55,7 @@ from stackshot.waits import handoff as _ho, held as _held, quiet as _frontq
 class Hooks:
     """What the telling still reaches in server.py (the hand-off record's functions, the page keepers of a project's agents, the page debt's marks and the time zone), in the names they have
     there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
-    back_agent: Callable[..., Any]  # server._back_agent
+    back_agent: Callable[..., Any]  # service/agent_names.py _back_agent
     builder_for: Callable[..., Any]  # agents._builder_for
     check_changed: Callable[..., Any]  # server lambda to checks.check_changed
     check_lane_shown: Callable[..., Any]  # server lambda to checks.check_lane_shown

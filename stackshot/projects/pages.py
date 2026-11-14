@@ -897,7 +897,7 @@ def other_write(payload, inbound=None):
 
 # ---------- a handover by SendMessage ----------
 # A message to a background agent that names an item is a handover the server records: it names that agent in the item's needs (unless
-# that would leave the item with a second mover: then it names nobody and says so), as its own message tool does (server._name_on_handover). On a box whose PostToolUse hook watches SendMessage (the touch matcher), the
+# that would leave the item with a second mover: then it names nobody and says so), as its own message tool does (service/agent_names.py `_name_on_handover`). On a box whose PostToolUse hook watches SendMessage (the touch matcher), the
 # hook reports the recipient, the text and the sending session through the client API with the machine's token (POST
 # /client/handover); the server decides who is a background agent and which items are named, so this side only skips a text that
 # names no id at all (no network call for the ordinary message). Never blocks and never fails the hook: a server out of reach means

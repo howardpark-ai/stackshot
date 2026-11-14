@@ -326,6 +326,12 @@ def audit_hourly_line() -> bool:
     return get("audit", "hourly_line", default=True) is True
 
 
+def model_busy_hold_guard() -> bool:
+    """[model] busy_hold_guard (default true): the refusal of a hold an item's mover sets while one of its own running subagents is tied to that item (gates.gate_busy_hold). false = the check never runs. Read live, as `wait_guard_on` is."""
+    v = get("model", "busy_hold_guard")
+    return True if v is None else (v not in (False, 0) and str(v).strip().lower() not in ("false", "no", "off", "0"))
+
+
 def model_queued_behind() -> bool:
     """[model] queued_behind: a mover busy on another item reads waiting, queued behind that item, not on agent (model/queued.py). Default false; only a TOML true switches it on, read at use."""
     return get("model", "queued_behind", default=False) is True

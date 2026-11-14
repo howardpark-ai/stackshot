@@ -2,7 +2,7 @@
 
 the owner's rule: a front agent (a session he talks to) is woken by a message only when it has something to do or to tell him. A builder's
 `[for <owner>]` message that only reports done work on a board item wakes the pane for nothing: the item already carries the state. So
-the message tool (server._builder_report) writes such a message onto the item it names and delivers it to nobody.
+the message tool (service/messaging.py `_builder_report`) writes such a message onto the item it names and delivers it to nobody.
 
 A list of ask words always misses some ("awaits your merge", "Take X", a fact he must know that has no ask word in it), so the test
 is turned around: **only what clearly reads as a status report is held back; everything else is delivered.** A text is a

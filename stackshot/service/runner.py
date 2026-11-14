@@ -49,7 +49,7 @@ class Hooks:
     balance_tick: Callable[[], Any]  # server._balance_tick
     answer_tick: Callable[[], Any]  # server._answer_tick
     roles_sync_safe: Callable[[], Any]  # server._roles_sync_safe
-    pilot_fallback_tick: Callable[[], Any]  # server._pilot_fallback_tick
+    pilot_fallback_tick: Callable[[], Any]  # service/page_debt.py _pilot_fallback_tick
     filing_tick: Callable[[], Any]  # server._filing_tick
     dates_tick: Callable[[], Any]  # server._dates_tick
     silence_tick: Callable[[], Any]  # server._silence_tick

@@ -76,6 +76,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import held; from stackshot.fleet import client
 from stackshot.router import router as _router; from stackshot.router import router_live as _live
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import store as _service_store
 from stackshot.fleet import clients as _clients
 from fastmcp.exceptions import ToolError
@@ -264,7 +265,7 @@ check("3z: can_fetch is false for a session never seen asking, and for a cloud s
 fresh(); n0 = len(pushes()); it = _service_store._load("a1")
 telling.tell_owner("a1", it, "was completed (done)", B, close=True); settle()
 check("3z1 gate: a completion to a background agent whose hook does not fetch held lines is pushed as today, nothing is stranded", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
-fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
 check("3z2 gate: an fyi to it is delivered as an ordinary message", out.startswith("delivered") and len(reach(X, n0)) == 1 and held.count(X) == 0, out)
 check("3z3 gate: held.decide with a target that cannot fetch delivers; without a target it decides on the kind alone", held.decide("closed", is_background=True, target="work-osprey-x") == "" and held.decide("closed", is_background=True) == "closed")
 gate_open()
@@ -339,31 +340,31 @@ check("6a: the message tool takes fyi (default false) and its text says what it 
       and inspect.signature(_wt_message.stackshot_message).parameters["fyi"].default is False)
 desc = next(t for t in server.mcp._tool_manager._tools.values() if t.name == "message").description if hasattr(server.mcp, "_tool_manager") else ""
 check("…the description names fyi and its effect on a background agent, a project and a front agent", not desc or ("fyi=true" in desc and "next turn" in desc and "front agent it changes nothing" in desc), desc[-400:])
-fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
 check("6b: an fyi to a background agent is held: the reply says so, nothing is pushed, the line waits", out.startswith("held for work-osprey-x's next turn") and reach(X, n0) == [] and held.count(X) == 1 and len(logged("fyi")) == 1, (out, pushes()[n0:]))
-check("…and the message log records it as an fyi that was not delivered", any(json.loads(l).get("fyi") and "held" in json.loads(l)["outcome"] for l in server.MSG_LOG.read_text().splitlines()))
-fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta"); settle()
+check("…and the message log records it as an fyi that was not delivered", any(json.loads(l).get("fyi") and "held" in json.loads(l)["outcome"] for l in _messaging.MSG_LOG.read_text().splitlines()))
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta"); settle()
 check("6c negative: the same message without fyi is delivered", out.startswith("delivered") and len(reach(X, n0)) == 1 and held.count(X) == 0, out)
-fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "[for Oliver] the PR is merged, a decision for you", "home-beta", fyi=True); settle()
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "[for Oliver] the PR is merged, a decision for you", "home-beta", fyi=True); settle()
 check("6d negative: an fyi that carries [for Oliver] is delivered", out.startswith("delivered") and len(reach(X, n0)) == 1 and held.count(X) == 0, out)
-fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "go on with a1", "Oliver", fyi=True); settle()
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "go on with a1", "Oliver", fyi=True); settle()
 check("6e negative: an fyi from Oliver himself is an ordinary message", out.startswith("delivered") and len(reach(X, n0)) >= 1 and held.count(X) == 0, out)
-item(11); fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "FYI done with a11", "home-beta", fyi=True); settle()
+item(11); fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "FYI done with a11", "home-beta", fyi=True); settle()
 check("6f: an fyi names the builder in no item's needs (it asked nothing), where the same words without fyi do", out.startswith("held") and "work-osprey-x" not in str(rd(11)["metadata"].get("needs")) and "named" not in out, out)
-fresh(); out = server._message("work-osprey-x", "done with a11", "home-beta"); settle()
+fresh(); out = _messaging._message("work-osprey-x", "done with a11", "home-beta"); settle()
 check("…(the control: without fyi the plain item id names it)", "work-osprey-x" in str(rd(11)["metadata"].get("needs")), rd(11)["metadata"])
-fresh(); n0 = len(pushes()); out = why(lambda: server._message("work-osprey-main", "the PR is merged", "home-beta", fyi=True))
+fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-main", "the PR is merged", "home-beta", fyi=True))
 check("6g: an fyi to a FRONT agent without the mark is refused by the same gate as without the flag", out.startswith("Refused") and "front agent" in out and reach(A, n0) == [], out)
-fresh(); n0 = len(pushes()); out = server._message("work-osprey-main", "[for Oliver] pick a or b", "home-beta", fyi=True); settle()
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "[for Oliver] pick a or b", "home-beta", fyi=True); settle()
 check("6h: …and a marked one is delivered to it as it would be without the flag", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, out)
-fresh(); n0 = len(pushes()); out = server._message(KEY, "the release is live", "home-beta", fyi=True)
+fresh(); n0 = len(pushes()); out = _messaging._message(KEY, "the release is live", "home-beta", fyi=True)
 nn = [x for x in routing.read(KEY) if x.get("kind") == "message" and x.get("text", "").endswith("the release is live")]
 check("6i: an fyi to a project is recorded with the mark for the router (and is held for the router as any message to a project)", out.startswith("held for the router") and nn and nn[-1].get("hold") == "fyi" and reach(X, n0) == [], (out, nn))
 res = act(nn[-1], "work-osprey-x", rule="message-item")
 check("6j: the router, passing it to a background agent, holds it (fyi)", res["ruling"] == "held" and held.count(X) == 1 and len(logged("fyi")) >= 1, res)
 fresh(); n0 = len(pushes()); res = act(nn[-1], "work-osprey-main", rule="message-item")
 check("6k negative: …and passing it to a front agent delivers it as today", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, res)
-fresh(); out = server._message(KEY, "the release is live", "home-beta"); nn2 = [x for x in routing.read(KEY) if x.get("kind") == "message" and x.get("text", "").endswith("the release is live")][-1]
+fresh(); out = _messaging._message(KEY, "the release is live", "home-beta"); nn2 = [x for x in routing.read(KEY) if x.get("kind") == "message" and x.get("text", "").endswith("the release is live")][-1]
 check("6l: a message to a project without fyi carries no mark", "hold" not in nn2, nn2)
 
 # ---- 7. the hand-over at a turn start

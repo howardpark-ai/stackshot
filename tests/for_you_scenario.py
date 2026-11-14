@@ -90,6 +90,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.service import foryou as fy, foryou_events as fyev, foryou_slack as fyslack; from stackshot.notify import foryou as fy_rules
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.waits import waiting as _wt
@@ -319,8 +320,8 @@ check("a due row he marked seen does not come back for the same due date", made4
 # ---- 6. a failed release makes no row: the message still goes on to the project
 slack.clear(); n_before = len(rows()); pub1 = pub[0]
 rel = "[release] PR #16 FAILED at the restart: stackshot.service did not come back"
-delivered = []; real_message = server._message
-server._message = lambda to, text, sender, *a, **k: delivered.append((to, text, sender)) or "delivered"
+delivered = []; real_message = _messaging._message
+_messaging._message = lambda to, text, sender, *a, **k: delivered.append((to, text, sender)) or "delivered"
 try:
     with TestClient(server.mcp.http_app(), base_url=BOARD) as c0:
         tok0 = open(__import__("stackshot.fleet.client", fromlist=["_"]).mint(socket.gethostname())).read().strip()
@@ -332,7 +333,7 @@ try:
         c0.post("/client/message", json={"to": "projects/example", "text": rel.replace("231", "233"), "sender": "home-beta"}, headers=H0)
         check("a release that went well and a failure told by another sender: no row either, both delivered", len(rows()) == n_before and len(delivered) == 3, (rows(), delivered))
 finally:
-    server._message = real_message
+    _messaging._message = real_message
 check("release_failed is no longer a kind, and the helper that made its rows is gone", "release_failed" not in fy_rules.KINDS and not hasattr(server, "_foryou_release_failed"))
 try: fy.add(key="rf:new", kind="release_failed", what="x"); check("foryou.add refuses the retired kind", False)
 except ValueError: check("foryou.add refuses the retired kind", True)

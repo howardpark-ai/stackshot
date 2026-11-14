@@ -61,6 +61,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server, home
+from stackshot.service import messaging as _messaging
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
@@ -97,7 +98,7 @@ class _Clock:
 CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"; _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
-server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
+_messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
 telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 fleetev.inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 REAL = {(m, n): getattr(m, n) for m, n in ((handoff_svc, "handoff_status"), (_fleet_sessions_registry, "_sessions_index"), (handoff_svc, "_sessions_index"), (hcold_svc, "_sessions_index"))}      # the stall pass below reads the real ones

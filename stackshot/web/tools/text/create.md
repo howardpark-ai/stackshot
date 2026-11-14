@@ -12,8 +12,8 @@ words. A due date is a deadline and is accepted as it is.
 
 ## text AGENT_DUE_FORM lead trail
 Agent work carries no expected time: a create sets none, and the item shows how long its work has run. Doing is work
-in hand (a session building, running tests, reviewing, a release running); a wait on a date, a timer, another release
-or someone else's step is not doing: park it with update(until="YYYY-MM-DD" or "YYYY-MM-DDTHH:MM"), adding
+in hand (a session building, running tests, reviewing, a release running); a wait on a date, a timer, someone else's
+step or release is not doing: park it with update(until="YYYY-MM-DD" or "YYYY-MM-DDTHH:MM"), adding
 wait_basis="<what it waits for, with its date YYYY-MM-DD>" when the date is past the cap, or after=["board#N"], or
 wait_kind="relay" with wait_event, ask_by and needs=["external"]. A bare date (until, or its old name wake) is a wait
 until then and the board lists the item as waiting; the exception is a write that hands the item to another session,

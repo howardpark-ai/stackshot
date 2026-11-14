@@ -55,6 +55,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import create as create_svc
+from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -246,10 +247,10 @@ check("7 …a backlog comment older than the item's last update leaves the clock
 # a background agent's report onto the item it names, and the same report sent by the audit
 ROLES = {"team-back": {"role": "back"}, AUDIT_AGENT: {"role": "back"}, "home-front": {"role": "front"}}
 IDX = {"team-back": {"name": "team-back"}, AUDIT_AGENT: {"name": AUDIT_AGENT}}
-rep = server._builder_report("home-front", "a30: PR 9 is live and the suites pass. The step is merged.", "team-back", IDX, ROLES)
+rep = _messaging._builder_report("home-front", "a30: PR 9 is live and the suites pass. The step is merged.", "team-back", IDX, ROLES)
 check("7 a builder's plain report is written onto the item (not delivered)", rep.startswith("Not delivered: written onto"), rep)
 check("7 …and a message about the work moves the clock", (act(30) or 0) >= t7, act(30))
-rep = server._builder_report("home-front", "a31: PR 9 is live and the suites pass. The step is merged.", AUDIT_AGENT, IDX, ROLES)
+rep = _messaging._builder_report("home-front", "a31: PR 9 is live and the suites pass. The step is merged.", AUDIT_AGENT, IDX, ROLES)
 check("7 the audit's report is written onto the item too", rep.startswith("Not delivered: written onto"), rep)
 check("7 …but is not activity: the clock stays at the item's last update", abs((act(31) or 0) - OLD) < 1, (act(31), OLD))
 # the owner's recorded words for a wake: settle bookkeeping, not activity

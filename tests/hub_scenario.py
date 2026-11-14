@@ -109,6 +109,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 # ---- 2. the server's note
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.core import config as _cfg
@@ -215,7 +216,7 @@ from stackshot.fleet import client as _client
 check("client.py knows the read", "roles" in _client.READS)
 check("the server's own gates keep session_roles: a one-session project's keeper may be named in needs, takes messages unmarked, "
       "and is no front agent for its notices", gates.gate_needs_session("harbor-ops", "projects/ops", "falcon-main") == "harbor-ops"
-      and telling.front_keeper("harbor-ops", "projects/ops") == (False, "") and server._gate_front("harbor-ops", "a plain note", _fleet_sessions_registry._sessions_index()) is None)
+      and telling.front_keeper("harbor-ops", "projects/ops") == (False, "") and _messaging._gate_front("harbor-ops", "a plain note", _fleet_sessions_registry._sessions_index()) is None)
 ls = _wt_sessions._sessions_listing("").split("\n")
 row = lambda n: next((l for l in ls if l.startswith(f"- {n} — ")), "")
 check("sessions tool: each session's role and project", row("falcon-anchors").endswith(" · testbox · front agent of projects/example")

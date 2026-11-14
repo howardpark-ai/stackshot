@@ -161,6 +161,7 @@ def build(
     ask_after_write,
     update,
     wait_alias_gate,
+    busy_live,
     fleet_names,
     inbox_flag_minutes,
     message,
@@ -208,7 +209,7 @@ def build(
     _tool_brief.register(mcp, fmt=fmt, handoff_brief=handoff_brief, is_parked=is_parked, model_report_line=model_report_line)
     _tool_get.register(mcp, fmt=fmt, notice_asked=notice_asked, notice_report=notice_report)
     _tool_create.register(mcp, evwait_preread=evwait_preread, sender_not_owner=sender_not_owner)
-    _tool_update.register(mcp, ask_after_write=ask_after_write, sender_not_owner=sender_not_owner, update=update, wait_alias_gate=wait_alias_gate)
+    _tool_update.register(mcp, ask_after_write=ask_after_write, sender_not_owner=sender_not_owner, update=update, wait_alias_gate=wait_alias_gate, busy_live=busy_live)
     _tool_complete.register(mcp, sender_not_owner=sender_not_owner)
     _tool_sessions.register(mcp, fleet_names=fleet_names)
     _tool_message.register(mcp, inbox_flag_minutes=inbox_flag_minutes, message=message)
