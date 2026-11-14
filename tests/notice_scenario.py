@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.web import render as _rmod
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
@@ -87,15 +88,15 @@ ZONE = dt.timezone(dt.timedelta(hours=4))   # the pinned instance timezone, Asia
 
 # ---- 1. the reply of a send names the call
 LONG = "please look at the quote from the vendor " + "and the terms they attached, which differ from last year's in three places; " * 4 + "thanks"
-r1 = server._message("projects/alpha", LONG, "home-beta"); id_pass = nid_of(r1)
+r1 = _messaging._message("projects/alpha", LONG, "home-beta"); id_pass = nid_of(r1)
 check("1: a message to a project is held for the router and its reply ends by naming the call: get(item_id=\"<id>\") shows its ruling",
       r1.startswith(f"held for the router — the router rules notice {id_pass} within about ") and r1.endswith(f'get(item_id="{id_pass}") shows its ruling') and "a reply, if any" in r1 and "client.py" not in r1, r1)
-r1b = server._message("projects/alpha", "the nightly backup finished: 10 files copied, 2 skipped on Mon Jan 5th, the run took 40 s and wrote 80 MB to the archive disk, all good", "nightly-backup", origin="box-far")
+r1b = _messaging._message("projects/alpha", "the nightly backup finished: 10 files copied, 2 skipped on Mon Jan 5th, the run took 40 s and wrote 80 MB to the archive disk, all good", "nightly-backup", origin="box-far")
 id_base = nid_of(r1b)
 check("1: a script's message to a project ends with the same call, and names the client's read before it",
       r1b.endswith(f'get(item_id="{id_base}") shows its ruling') and f"client.py get notice {id_base}" in r1b, r1b)
-r1c = server._message("projects/alpha", "the vendor's reply is short: yes to the new terms, call on Friday", "home-beta"); id_held = nid_of(r1c)
-r1d = server._message("projects/alpha", "ack", "home-beta"); id_drop = nid_of(r1d)
+r1c = _messaging._message("projects/alpha", "the vendor's reply is short: yes to the new terms, call on Friday", "home-beta"); id_held = nid_of(r1c)
+r1d = _messaging._message("projects/alpha", "ack", "home-beta"); id_drop = nid_of(r1d)
 
 # ---- 2. not ruled yet: still held, when the router expects to rule it
 t_wait = get(id_pass)
@@ -125,7 +126,7 @@ check("3: merged: the ruling says merged into a digest", (field(t_mer, "ruling")
 check("3: a notice that is ruled no longer says it is waiting", all(field(t, "expected") is None for t in (t_pass, t_held, t_drop, t_mer)))
 
 # ---- 4. a repeat the rule in code drops names the notice it repeats
-r4 = server._message("projects/alpha", "the nightly backup finished: 10 files copied, 4 skipped on Tue Jan 6th, the run took 50 s and wrote 90 MB to the archive disk, all good", "nightly-backup", origin="box-far")
+r4 = _messaging._message("projects/alpha", "the nightly backup finished: 10 files copied, 4 skipped on Tue Jan 6th, the run took 50 s and wrote 90 MB to the archive disk, all good", "nightly-backup", origin="box-far")
 id_rep = nid_of(r4); fake("[]"); live.tick(); settle()
 t_rep = get(id_rep)
 check("4: a repeat dropped by the rule in code: ruling dropped, the reason and a line naming the notice it repeats, the rule and that code ruled it",
@@ -133,7 +134,7 @@ check("4: a repeat dropped by the rule in code: ruling dropped, the reason and a
       and field(t_rep, "rule") == "repeat (code)" and field(t_rep, "ruled by") == "stackshot (router)", t_rep)
 
 # ---- 5. a rule in code that puts a message onto an item: the item line
-r5 = server._message("projects/alpha", "a2 needs a look: the vendor replied and the date moved", "home-beta"); id_item = nid_of(r5); fake("[]"); live.tick(); settle()
+r5 = _messaging._message("projects/alpha", "a2 needs a look: the vendor replied and the date moved", "home-beta"); id_item = nid_of(r5); fake("[]"); live.tick(); settle()
 t_item = get(id_item)
 check("5: a notice a rule in code put onto an item names it", field(t_item, "rule") == "message-item (code)" and field(t_item, "item") == "a2" and (field(t_item, "ruling") or "").startswith("passed to "), t_item)
 

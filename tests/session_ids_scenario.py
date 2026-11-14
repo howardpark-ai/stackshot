@@ -75,6 +75,7 @@ from stackshot.fleet import sessions_registry as sr; from stackshot.anchors impo
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.service import store as _service_store
@@ -267,11 +268,11 @@ def fake_run(argv, *a, **k):
     return real_run(argv, *a, **k)
 subprocess.run = fake_run
 try:
-    out = server._message(S["main"], _wt_text._FOR_OWNER + " hello", "home-sparrow-docs")
+    out = _messaging._message(S["main"], _wt_text._FOR_OWNER + " hello", "home-sparrow-docs")
     to_arg = sent[-1][sent[-1].index("--from") + 2]
     check("message to a sala id: push.py is handed the sala id as written (the inbox stores the permanent id; push.py turns it into the session's name as the address)", to_arg == S["main"] and out.startswith("delivered"), (sent[-1][:5], out))
     sent.clear()
-    out = server._message("home-sparrow-docs", _wt_text._FOR_OWNER + " hello back", S["main"])
+    out = _messaging._message("home-sparrow-docs", _wt_text._FOR_OWNER + " hello back", S["main"])
     check("message from a sala id: accepted as the sender, labelled by name", out.startswith("delivered") and "home-sparrow-main" in sent[-1][sent[-1].index("--from") + 1], (sent, out))
 finally:
     subprocess.run = real_run

@@ -88,6 +88,7 @@ for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
 from stackshot.web import server; from stackshot.service import mover_steps as _mover_steps; from stackshot.service import projects as _psvc; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.service import messaging as _messaging
 from stackshot.anchors import anchors as _A
 from stackshot.service import store as _service_store
 from fastmcp.exceptions import ToolError
@@ -347,12 +348,12 @@ pushlog = T / "push.log"
 (T / "fakepush.py").write_text("import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\n"
                                f"open({str(pushlog)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-r7 = server._message(A_ID, "hello alpha, by id", "home-outsider")
+r7 = _messaging._message(A_ID, "hello alpha, by id", "home-outsider")
 pushes = [json.loads(l) for l in pushlog.read_text().splitlines()] if pushlog.exists() else []
 from stackshot.router import routing
 check("message: to = the project's id is held for the router as to its key (every project is the router's), delivered to no session, the keeper's name included", r7.startswith("held for the router") and not pushes, (r7, pushes[-1:]))
 check("message: …and it is on the project's routing log under the key, with no recipient", any(n.get("label") == "message to projects/alpha" and n.get("live") is True and not n.get("to") for n in routing.read("projects/alpha")), routing.read("projects/alpha")[-1:])
-try: server._message("prj_00000000", "x", "home-outsider"); r8 = ""
+try: _messaging._message("prj_00000000", "x", "home-outsider"); r8 = ""
 except ToolError as e: r8 = str(e)
 check("message: an unknown id is refused like an unknown session", r8.startswith("Refused"), r8)
 check("the client API: items?key= is a session's, not a project's — unchanged (a project id is no session)", server._client_get("items", {"key": "home-sparrow-main"})[0] == 200

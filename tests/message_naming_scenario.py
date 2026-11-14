@@ -58,6 +58,8 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.fleet import client
+from stackshot.service import messaging as _messaging
+from stackshot.service import agent_names as _agent_names
 from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.core import config as _cfg
@@ -91,7 +93,7 @@ def needs(i):
     return [x if x in ("decision", "external") else sr._session_label(x) for x in v] if isinstance(v, list) else v
 def set_cfg(**kw): _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py); a suite that sets [model] whole keeps it
 set_cfg()
-def send(to, text, sender=MAIN): return server._name_on_handover(to, text, sender)
+def send(to, text, sender=MAIN): return _agent_names._name_on_handover(to, text, sender)
 def write_ok(i, sender, **kw):
     """The mover's next write on the item: (True, "") when it lands, (False, the refusal) when it is refused."""
     try:
@@ -211,10 +213,10 @@ st, res = server._client_post("testbox", "handover", {"to": GBUILD, "text": "Sen
 check("71 …and where it can name, the line it always had", st == 200 and res["result"].startswith(f"(named {GBUILD} in a71's needs: handover message from {MAIN} (SendMessage on testbox))") and needs(71) == [GBUILD], (st, res))
 item(72, needs=[BBUILD])
 settle(); pushed.clear()
-out = server._message(GBUILD, "a72: build the export", MAIN)
+out = _messaging._message(GBUILD, "a72: build the export", MAIN)
 check("72 the message tool: delivered, and the reply ends with the line", out.startswith("delivered") and "did not name" in out and needs(72) == [BBUILD] and len([x for x in pushed if x[0] == GBUILD and "a72: build" in x[1]]) == 1, (out, needs(72), pushed))
 item(73, needs=[])
-out = server._message(GBUILD, "a73: build the export", MAIN)
+out = _messaging._message(GBUILD, "a73: build the export", MAIN)
 check("73 the message tool where it names: the reply says named, as before", out.startswith("delivered") and f"(named {GBUILD} in a73's needs" in out and needs(73) == [GBUILD], (out, needs(73)))
 
 # ---- 9. the way the line points works: the sender hands the item over with update(mover=<agent>)

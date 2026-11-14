@@ -86,6 +86,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.service import agent_names as _agent_names
 from stackshot.service import item_read as _item_read
 from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import update as _update_svc
@@ -1136,7 +1137,7 @@ item(104, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); hando
 check("15 told: …a failed one marks nothing (the notice senders retry)", not ho(104).get("delivered_at") and not ho(104).get("queued"), ho(104))
 item(105, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); handoff_svc.handoff_told_text("home-peer2", f"a{105}", "delivered → x")
 check("15 told: …to someone else marks nothing", not ho(105).get("delivered_at"), ho(105))
-item(106, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); got_ab = server._router_delivered("home-peer", f"a{106} was ruled → {telling.notice_link(f'a{106}')}", "delivered → x")
+item(106, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); got_ab = _agent_names._router_delivered("home-peer", f"a{106} was ruled → {telling.notice_link(f'a{106}')}", "delivered → x")
 check("15 told: the router's delivery hook marks the record and returns the outcome unchanged", got_ab == "delivered → x" and isinstance(ho(106).get("delivered_at"), float), (got_ab, ho(106)))
 item(107, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); telling.push_noted("home-peer", f"[stackshot] a{107} owes its page → {telling.notice_link(f'a{107}')}")
 check("15 told: the keeper batch and anchors prompt send (push_noted) marks the record of an item the note names", isinstance(ho(107).get("delivered_at"), float), ho(107))
@@ -1196,7 +1197,7 @@ check("15 undelivered: …and a notice that does reach the mover marks it delive
 # 15.13 the router push and the keeper batch mark an item delivered only on its own notice link; the message path takes a citation
 item(122, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); item(123, mover="home-peer", handoff=rec("home-peer", delivered_at=None))
 batch_text = f"- a{122} needs a look → {telling.notice_link(f'a{122}')}\n- a{122} follows a{123} in the subject, which this line has no link for"
-server._router_delivered("home-peer", batch_text, "delivered → x")
+_agent_names._router_delivered("home-peer", batch_text, "delivered → x")
 check("15 told: a batch notice citing another item in a subject does not mark that item delivered on the router push (only the item whose own link it carries)",
       isinstance(ho(122).get("delivered_at"), float) and not ho(123).get("delivered_at"), (ho(122), ho(123)))
 item(124, mover="home-peer", handoff=rec("home-peer", delivered_at=None))

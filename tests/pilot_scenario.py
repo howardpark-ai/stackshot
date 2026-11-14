@@ -101,6 +101,9 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
+from stackshot.service import agent_names as _agent_names
+from stackshot.service import page_debt as _page_debt_svc
 from stackshot.service import agents as _agents
 from stackshot.model import holders as _holders
 from stackshot.service import item_read as _item_read
@@ -182,7 +185,7 @@ check("completion on a sub-page: charged to the root's keeper", list(_web_page_d
 from stackshot.router import router_live as _rl
 def msg(*a, **k):
     general(True)
-    try: return server._message(*a, **k)
+    try: return _messaging._message(*a, **k)
     finally: general(False)
 res = msg("projects/alpha", "who owns the Gmail thread?", "home-beta"); p = wait_push(2)
 nid_m = routing.read("projects/alpha")[-1]["id"]; n_m = routing.read("projects/alpha")[-1]
@@ -191,15 +194,15 @@ check("…and the envelope the router will deliver is kept whole, with the page 
 res = msg("projects/alpha/sub", "about the sub-page", "home-beta"); p = wait_push(2)
 check("message to a sub-page → held for the router too (the root's)", res.startswith("held for the router") and len(p) == 2 and routing.read("projects/alpha/sub")[-1]["live"] is True, (res, p[2:]))
 res = msg("projects/beta", "hello beta", "work-osprey"); p = wait_push(2)
-check("a message to a page whose scope has no general -main agent and that lists none is refused, not sent to its keeper", refused(lambda: server._message("projects/beta", "x", "work-osprey")) and len(wait_push(2)) == 2)
+check("a message to a page whose scope has no general -main agent and that lists none is refused, not sent to its keeper", refused(lambda: _messaging._message("projects/beta", "x", "work-osprey")) and len(wait_push(2)) == 2)
 check("message to a page with a single session (beta) → held for the router too, not delivered to the page's session", res.startswith("held for the router") and len(p) == 2 and routing.read("projects/beta")[-1]["live"] is True and routing.read("projects/beta")[-1]["to"] == "", (res, p[2:]))
-check("message to a page that does not exist is refused", refused(lambda: server._message("projects/nope", "x", "home-beta")))
-check("message to an id no machine reports and no pane here ever had is refused, not queued", refused(lambda: server._message("99999999-9999-4999-8999-999999999999", "x", "home-beta")))
-res = server._message("home-beta", "plain", "work-osprey"); p = wait_push(3); check("a message to a session is as before", p[2][0] == "home-beta" and " · to " not in p[2][1].split("\n")[0], p[2:])
-res = server._message("home-beta", "from the car", "cse_voice_oliver"); p = wait_push(4); check("a sender that cannot be reached is named as such", "will not reach it" in p[3][1] and "Reply with the message tool" not in p[3][1], p[3:])
+check("message to a page that does not exist is refused", refused(lambda: _messaging._message("projects/nope", "x", "home-beta")))
+check("message to an id no machine reports and no pane here ever had is refused, not queued", refused(lambda: _messaging._message("99999999-9999-4999-8999-999999999999", "x", "home-beta")))
+res = _messaging._message("home-beta", "plain", "work-osprey"); p = wait_push(3); check("a message to a session is as before", p[2][0] == "home-beta" and " · to " not in p[2][1].split("\n")[0], p[2:])
+res = _messaging._message("home-beta", "from the car", "cse_voice_oliver"); p = wait_push(4); check("a sender that cannot be reached is named as such", "will not reach it" in p[3][1] and "Reply with the message tool" not in p[3][1], p[3:])
 check("…and a reachable sender keeps the reply hint", "Reply with the message tool (to='work-osprey'" in p[2][1], p[2:])
-res = server._message("home-beta", "from the car", "cse_voice"); p = wait_push(5); check("a sender label that only looks like a cloud id (cse_voice) is named as unreachable", "will not reach it" in p[4][1] and "Reply with the message tool" not in p[4][1], p[4][1][-300:])
-check("…and a message to it is refused, not queued", refused(lambda: server._message("cse_voice", "hello", "home-beta")))
+res = _messaging._message("home-beta", "from the car", "cse_voice"); p = wait_push(5); check("a sender label that only looks like a cloud id (cse_voice) is named as unreachable", "will not reach it" in p[4][1] and "Reply with the message tool" not in p[4][1], p[4][1][-300:])
+check("…and a message to it is refused, not queued", refused(lambda: _messaging._message("cse_voice", "hello", "home-beta")))
 
 # ---- 5b. a message to a retired or stopped session is refused, naming where to send it instead; a live pane, a relaunching pane,
 # a pane on a machine that is asleep, a cloud id and a page key are as before. The fixtures and the push log are put back after it.
@@ -232,7 +235,7 @@ PJ.write_text(json.dumps(_pj))
 (T / "fleet/b/machine.json").write_text(json.dumps({"letter": "b", "fleet": "laptop", "claude": "1.0.0", "online": {"ok": False, "since": gone_iso(99999)}}))      # asleep
 (T / "fleet/b/sessions.json").write_text(json.dumps({"99999999-bbbb-4bbb-8bbb-999999999999": {"name": "laptop-gone", "machine": "b", "url": "", "seen": "x", "gone": gone_iso(86400)}}))
 def refusal(to):
-    try: server._message(to, "hello there", "home-beta"); return ""
+    try: _messaging._message(to, "hello there", "home-beta"); return ""
     except ToolError as x: return str(x)
 n_a = len(wait_push(0))
 e = refusal("work-osprey-old")
@@ -253,7 +256,7 @@ e = refusal("home-beta-nope")
 check("retired-agent: …an unknown name the same, and the heartbeat-miss branch names that page as the one it is an agent of", "if it is an agent of projects/mmm-two" in e and "aaa-none" not in e, e)
 e = refusal("home-beta-listed")
 check("retired-agent: …a name that one page's agents map lists wins over the page with more agents (it is a front agent there: the gate names that page)", "projects/zzz-one" in e and "mmm-two" not in e, e)
-check("retired-agent: …and with no roles to go by, the exact listing is found among the pages of the prefix (home-beta-listed → zzz-one, not mmm-two with more agents)", server._project_of_name("home-beta-listed", {}, _fleet_sessions_registry._sessions_index()) == "projects/zzz-one", server._project_of_name("home-beta-listed", {}, _fleet_sessions_registry._sessions_index()))
+check("retired-agent: …and with no roles to go by, the exact listing is found among the pages of the prefix (home-beta-listed → zzz-one, not mmm-two with more agents)", _messaging._project_of_name("home-beta-listed", {}, _fleet_sessions_registry._sessions_index()) == "projects/zzz-one", _messaging._project_of_name("home-beta-listed", {}, _fleet_sessions_registry._sessions_index()))
 e = refusal("home-gamma-dead")
 check("retired-agent: …a top-level page whose key slug is the name's last part (home-gamma → gamma) wins over a sub-page with more agents and a page with none", "message(to='projects/gamma'" in e and "gamma/sub" not in e and "aaa-g" not in e, e)
 e = refusal("home-gamma-nope")
@@ -265,26 +268,26 @@ check("retired-agent: the window is 60 minutes: a pane gone 61 is refused", e.st
 e = refusal("work-osprey-garbage")
 check("retired-agent: an unreadable gone stamp is refused as gone for a time not known, not a failed call", e.startswith("Refused: 'work-osprey-garbage' cannot receive this") and "a time not known" in e, e)
 p = wait_push(0); check("retired-agent: none of those refusals queued anything", len(p) == n_a, p[n_a:])
-res = server._message("home-beta", "still live", "work-osprey"); p = wait_push(n_a + 1)
+res = _messaging._message("home-beta", "still live", "work-osprey"); p = wait_push(n_a + 1)
 check("retired-agent: a live pane is delivered as before (an old gone namesake does not block it)", res.startswith("delivered") and p[-1][0] == "home-beta", (res, p[n_a:]))
-res = server._message("work-osprey-relaunch", "being relaunched", "home-beta"); p = wait_push(n_a + 2)
+res = _messaging._message("work-osprey-relaunch", "being relaunched", "home-beta"); p = wait_push(n_a + 2)
 check("retired-agent: a pane gone for less than the grace (a relaunch) is still addressed", res.startswith("delivered") and p[-1][0] == "work-osprey-relaunch", (res, p[n_a:]))
-res = server._message("work-osprey-w59", "coming back after a reboot", "home-beta"); p = wait_push(n_a + 3)
+res = _messaging._message("work-osprey-w59", "coming back after a reboot", "home-beta"); p = wait_push(n_a + 3)
 check("retired-agent: …and one gone 59 minutes (panes come back slowly after a reboot) is too", res.startswith("delivered") and p[-1][0] == "work-osprey-w59", (res, p[n_a:]))
-res = server._message("laptop-gone", "to the laptop, long away", "home-beta"); p = wait_push(n_a + 4)
+res = _messaging._message("laptop-gone", "to the laptop, long away", "home-beta"); p = wait_push(n_a + 4)
 check("retired-agent: a pane marked gone on a machine that is asleep is still sent to: there a dead pane cannot be told from one that is away", res.startswith("delivered") and p[-1][0] == "laptop-gone", (res, p[n_a:]))
-res = server._message("cse_example0000000000001", "to a cloud session", "home-beta"); p = wait_push(n_a + 5)
+res = _messaging._message("cse_example0000000000001", "to a cloud session", "home-beta"); p = wait_push(n_a + 5)
 check("retired-agent: a cse_ id is accepted as before", res.startswith("delivered") and p[-1][0] == "cse_example0000000000001", (res, p[n_a:]))
 general(True)
-res = server._message("projects/zz", "to a page whose keeper's pane is gone", "home-beta"); p = wait_push(0)
+res = _messaging._message("projects/zz", "to a page whose keeper's pane is gone", "home-beta"); p = wait_push(0)
 general(False)
 check("retired-agent: a page key is never refused for its keeper's pane: the router takes the message, held for its ruling and delivered to nobody here (release.sh sends to projects/example)", res.startswith("held for the router") and len(p) == n_a + 5, (res, p[n_a:]))
-_pd = server._project_of_name; server._project_of_name = lambda *a, **k: 1 / 0
-try: res = server._message("work-osprey-old", "the check itself fails", "home-beta"); p = wait_push(n_a + 6)
-finally: server._project_of_name = _pd
+_pd = _messaging._project_of_name; _messaging._project_of_name = lambda *a, **k: 1 / 0
+try: res = _messaging._message("work-osprey-old", "the check itself fails", "home-beta"); p = wait_push(n_a + 6)
+finally: _messaging._project_of_name = _pd
 check("retired-agent: a failure inside the check falls back to today's behaviour: the message is sent, the call does not fail", res.startswith("delivered") and p[-1][0] == "work-osprey-old", (res, p[n_a:]))
 MJ.write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
-res = server._message("work-osprey-old", "machine unknown", "home-beta"); p = wait_push(n_a + 7)
+res = _messaging._message("work-osprey-old", "machine unknown", "home-beta"); p = wait_push(n_a + 7)
 check("retired-agent: with no sign of the machine's puller (online unknown) a gone session is not refused: it cannot be told from one that is away", res.startswith("delivered") and p[-1][0] == "work-osprey-old", (res, p[n_a:]))
 PJ.write_text(PJ0); FJ.write_text(FJ0); MJ.write_text(MJ0); push_log.write_text(PL0)            # the fixtures and the push log as they were: the checks below count pushes from the start
 import shutil; shutil.rmtree(T / "fleet/b")
@@ -304,7 +307,7 @@ check("a script's message to a project is held for the router with a notice id; 
 check("…is recorded in the routing log as pending, under the script's label", last["kind"] == "message" and last["who"] == "nightly-job (a script on testbox)" and last["pilot"] and not last.get("ruling"), last)
 check("…and the envelope says it is a script's, not a session's, and cannot be answered", "from a script that runs for" in env and "It cannot be replied to." in env and "Reply with the message tool" not in env and "another Claude session" not in env, env)
 check("…and the sender is told it was held for the router, with no reply hint", res.startswith("held for the router") and "a reply, if any" in res, res)
-try: server._message("projects/alpha", "x", "", origin="testbox"); ok = False
+try: _messaging._message("projects/alpha", "x", "", origin="testbox"); ok = False
 except Exception as e: ok = "sender is required" in str(e)
 check("a script must still name itself", ok)
 
@@ -2742,9 +2745,9 @@ check("a Current-state edit settles it", "projects/alpha" not in _web_page_debts
 _web_page_debts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
 # the fallback: still missing past the grace → the keeper's, with today's notice saying who left it
 _update_svc._update("a1", next="one more step", sender="work-osprey-main")
-check("inside the grace nothing moves", server._pilot_fallback_tick() == 0)
+check("inside the grace nothing moves", _page_debt_svc._pilot_fallback_tick() == 0)
 d = _web_page_debts._owed_load(); d["projects/alpha"][A]["ts"] -= 31 * 60; _web_page_debts._owed_save(d); n0 = len(wait_push(0))
-check("past the grace it moves", server._pilot_fallback_tick() == 1)
+check("past the grace it moves", _page_debt_svc._pilot_fallback_tick() == 1)
 e = _web_page_debts._owed_load().get("projects/alpha", {}); p = wait_push(n0 + 1)
 check("re-marked to the keeper, dropped from the writer", list(e) == [S] and "moves" not in e[S] and e[S].get("settle") == "any", e)
 check("the keeper gets the board notice, saying who left it undone",
@@ -2752,7 +2755,7 @@ check("the keeper gets the board notice, saying who left it undone",
 check("and the routing log has the line, linked to the item page, never the card's store-id anchor",
       sum(1 for x in routing.read("projects/alpha") if x["kind"] == "board" and x.get("label") == "board a1" and x.get("url") == "https://stackshot.example.com/items/a1") >= 2
       and not any("#task-" in str(x.get("url")) for x in routing.read("projects/alpha")))
-check("nothing moves twice", server._pilot_fallback_tick() == 0)
+check("nothing moves twice", _page_debt_svc._pilot_fallback_tick() == 0)
 # the turn rule: the debts that move to one keeper in the same tick go in one message, each with its
 # own notice; a debt still moves at the first tick past the grace (the keeper's condition: a digest never holds one past 30 min)
 _web_page_debts._owed_save({}); t5 = time.time()
@@ -2761,7 +2764,7 @@ _web_page_debts._owed_save({"projects/alpha": {A: {"ts": t5 - 31 * 60, "item": "
                    "projects/alpha/sub": {A: {"ts": t5 - 29 * 60, "item": "a2", "settle": "any", "moves": S, "what": "changed (next)"}},
                    "projects/beta": {X: {"ts": t5 - 40 * 60, "item": "a3", "settle": "any", "moves": B, "what": "changed (next)"}}})
 n0 = len(wait_push(0))
-k = server._pilot_fallback_tick(now=t5); p = wait_push(n0 + 2); new = p[n0:]
+k = _page_debt_svc._pilot_fallback_tick(now=t5); p = wait_push(n0 + 2); new = p[n0:]
 mS = [m[1] for m in new if m[0] == S]; mB = [m[1] for m in new if m[0] == B]
 check("debt digest: three debts past the grace move in one tick; the keeper gets its two in one message, the other keeper its own",
       k == 3 and len(new) == 2 and len(mS) == 1 and len(mB) == 1, new)
@@ -2779,7 +2782,7 @@ check("debt digest: each debt has its own routing-log line, the two sharing one 
 rb5 = [n for n in routing.read("projects/beta") if mB and n["id"] in re.findall(r"notice ([0-9a-f]{6})", mB[0])]
 check("debt digest: the other keeper's notice, sent alone, carries no batch id", len(rb5) == 1 and "batch" not in rb5[0] and _turns(rd5 + rb5) == 2, rb5)
 n0 = len(wait_push(0))
-k = server._pilot_fallback_tick(now=t5 + 61); p = wait_push(n0 + 1)
+k = _page_debt_svc._pilot_fallback_tick(now=t5 + 61); p = wait_push(n0 + 1)
 check("debt digest: …and at its own first tick past 30 min it moves, alone, in its old text",
       k == 1 and len(p) == n0 + 1 and p[-1][0] == S and p[-1][1].startswith("[board] a2 changed (next) by work-osprey-main") and "so it is yours as its keeper · notice" in p[-1][1]
       and A not in _web_page_debts._owed_load().get("projects/alpha/sub", {}), p[n0:])
@@ -2841,39 +2844,39 @@ def why(fn):
     try: fn(); return ""
     except ToolError as e: return str(e)
 n0 = len(wait_push(0)); MK = _wt_text._FOR_OWNER
-r = why(lambda: server._message("work-osprey-main", "can you look at the vendor thread?", "home-beta"))
+r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "home-beta"))
 check("an unmarked message to a front agent is refused, naming the mark and the project, where the router rules it",
       r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and it takes a message only when the message's first line "
            f"carries {MK}. Put {MK} on the first line if this is for {_core_instance.OWNER}; anything else goes to the project, where the router rules it (to='projects/alpha') instead.", r)
-check("…by its transcript id too, and nothing was delivered", why(lambda: server._message(A, "unmarked", "home-beta")).startswith("Refused: work-osprey-main is a front agent")
+check("…by its transcript id too, and nothing was delivered", why(lambda: _messaging._message(A, "unmarked", "home-beta")).startswith("Refused: work-osprey-main is a front agent")
       and len(wait_push(0)) == n0)
-check("…and the mark below the first line does not count", why(lambda: server._message("work-osprey-main", f"a status line\n{MK} decide this", "home-beta")).startswith("Refused:"))
-check("…nor does a script's message get past it", why(lambda: server._message("work-osprey-main", "run finished", "nightly-job", origin="testbox")).startswith("Refused:"))
-res = server._message("work-osprey-main", f"\n  \n{MK} vendor A or B? the keeper recommends A", "home-beta"); pp = wait_push(n0 + 1)
+check("…and the mark below the first line does not count", why(lambda: _messaging._message("work-osprey-main", f"a status line\n{MK} decide this", "home-beta")).startswith("Refused:"))
+check("…nor does a script's message get past it", why(lambda: _messaging._message("work-osprey-main", "run finished", "nightly-job", origin="testbox")).startswith("Refused:"))
+res = _messaging._message("work-osprey-main", f"\n  \n{MK} vendor A or B? the keeper recommends A", "home-beta"); pp = wait_push(n0 + 1)
 check("a marked message (first non-empty line) to a front agent is delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-main" and MK in pp[-1][1], pp[-1:])
-res = server._message("work-osprey-x", "sweep the inbox", "home-beta"); pp = wait_push(n0 + 2)
+res = _messaging._message("work-osprey-x", "sweep the inbox", "home-beta"); pp = wait_push(n0 + 2)
 check("a message to a background agent is unaffected", res.startswith("delivered") and pp[-1][0] == "work-osprey-x", pp[-1:])
-res = server._message("work-osprey", "a plain line for the keeper", "home-beta"); pp = wait_push(n0 + 3)
+res = _messaging._message("work-osprey", "a plain line for the keeper", "home-beta"); pp = wait_push(n0 + 3)
 check("a message to the keeper by name is unaffected", res.startswith("delivered") and pp[-1][0] == "work-osprey", pp[-1:])
-res = server._message("projects/alpha", "a plain line for the project", "home-beta"); pp = wait_push(n0 + 3)
+res = _messaging._message("projects/alpha", "a plain line for the project", "home-beta"); pp = wait_push(n0 + 3)
 check("a message to the project page is held for the router, unaffected: nobody is messaged", res.startswith("held for the router") and len(pp) == n0 + 3, (res, pp[-1:]))
 # a marked message that says nothing is needed from him is refused too, and sent to the keeper
-n0 = len(wait_push(0)); NOT = server._NOT_FOR_OWNER
+n0 = len(wait_push(0)); NOT = _messaging._NOT_FOR_OWNER
 check("gate: the phrase list is short and fixed", NOT == (f"nothing needed from {_core_instance.OWNER}", f"nothing for {_core_instance.OWNER}", "no action needed", f"no action for {_core_instance.OWNER}",
                                                        "no decision needed", "nothing to decide", "FYI", "for your information", "for the record", "no reply needed"), NOT)
 for ph in NOT:
-    r = why(lambda: server._message("work-osprey-main", f"{MK} the build is live. {ph}, the rest is on the page.", "home-beta"))
+    r = why(lambda: _messaging._message("work-osprey-main", f"{MK} the build is live. {ph}, the rest is on the page.", "home-beta"))
     check(f"gate: a marked message to a front agent that says {ph!r} is refused, naming the phrase and the project",
           r.startswith(f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and {MK} marks only what {_core_instance.OWNER} has to do; "
                        f"this message says nothing is needed from him ({ph!r}). A hand-back, a result or an FYI goes to the project, where the router rules it (to='projects/alpha') instead"), r)
-r = why(lambda: server._message(A, f"{MK} the release\nis live: NO ACTION NEEDED.", "home-beta"))
+r = why(lambda: _messaging._message(A, f"{MK} the release\nis live: NO ACTION NEEDED.", "home-beta"))
 check("gate: …without regard to case, on a later line, and by its transcript id", r.startswith("Refused: work-osprey-main is a front agent") and "('NO ACTION NEEDED')" in r, r)
 check("gate: nothing was delivered by the refusals", len(wait_push(0)) == n0)
-res = server._message("work-osprey-main", f"{MK} Decide: is the satisfying option A or B? · Recommend: A · Stakes: a month · By: Fri", "home-beta"); pp = wait_push(n0 + 1)
+res = _messaging._message("work-osprey-main", f"{MK} Decide: is the satisfying option A or B? · Recommend: A · Stakes: a month · By: Fri", "home-beta"); pp = wait_push(n0 + 1)
 check("gate: a marked message with something to decide is delivered (a phrase inside a word does not count)", res.startswith("delivered") and pp[-1][0] == "work-osprey-main", (res, pp[-1:]))
-res = server._message("work-osprey-x", "the build is live, no action needed", "home-beta"); pp = wait_push(n0 + 2)
+res = _messaging._message("work-osprey-x", "the build is live, no action needed", "home-beta"); pp = wait_push(n0 + 2)
 check("gate: the same words to a background agent are delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-x", pp[-1:])
-res = server._message("work-osprey", f"{MK} FYI the build is live, nothing for {_core_instance.OWNER}", "home-beta"); pp = wait_push(n0 + 3)
+res = _messaging._message("work-osprey", f"{MK} FYI the build is live, nothing for {_core_instance.OWNER}", "home-beta"); pp = wait_push(n0 + 3)
 check("gate: …and to the keeper, marked or not", res.startswith("delivered") and pp[-1][0] == "work-osprey", pp[-1:])
 (T / "store/projects.json").write_text(_reg_a)
 
@@ -3047,14 +3050,14 @@ def mk46(**kw):                      # a create on the pilot project relays to t
 needs46 = lambda g: rd(g)["metadata"].get("needs")
 # moment 1: a handover by the message tool
 h1 = mk46(); n0 = len(wait_push(0))
-res = server._message("work-osprey-x", f"please take {h1}: build the thing", "work-osprey-main"); wait_push(n0 + 1); time.sleep(0.4); p = wait_push(0)
+res = _messaging._message("work-osprey-x", f"please take {h1}: build the thing", "work-osprey-main"); wait_push(n0 + 1); time.sleep(0.4); p = wait_push(0)
 check("auto-name: a message to a background agent that names an item names the agent in its needs; the sender's reply says so",
       needs46(h1) == ["work-osprey-x"] and f"(named work-osprey-x in {h1}'s needs: handover message from work-osprey-main)" in res, (needs46(h1), res))
 check("auto-name: …the owner handed it over itself, so only the message went out (no owner line, no 'now needs you')", [m[0] for m in p[n0:]] == ["work-osprey-x"] and "now needs you" not in p[n0][1], p[n0:])
-res = server._message("work-osprey-x", f"again about {h1}", "work-osprey-main"); time.sleep(0.3)
+res = _messaging._message("work-osprey-x", f"again about {h1}", "work-osprey-main"); time.sleep(0.3)
 check("auto-name: never twice", needs46(h1) == ["work-osprey-x"] and "(named" not in res, (needs46(h1), res))
 h2, h3 = mk46(), mk46(); n0 = len(wait_push(0))
-res = server._message("work-osprey-x", f"two of them: {_core_instance.BOARD_URL}/items/{h2} and {h3.upper()}, plus p1 which is no item", "home-beta"); p = wait_push(n0 + 3)
+res = _messaging._message("work-osprey-x", f"two of them: {_core_instance.BOARD_URL}/items/{h2} and {h3.upper()}, plus p1 which is no item", "home-beta"); p = wait_push(n0 + 3)
 check("auto-name: an item page link and an upper-case id count, an id that names no item is skipped, each item is named",
       needs46(h2) == ["work-osprey-x"] and needs46(h3) == ["work-osprey-x"] and res.count("(named work-osprey-x") == 2, (needs46(h2), needs46(h3), res))
 ow = [m for m in p[n0:] if m[0] == "work-osprey-bld"]
@@ -3062,12 +3065,12 @@ check("auto-name: a handover by another session tells the owner once per item, t
       len(ow) == 2 and all(re.match(r"\[stackshot\] [a-z]\d+ \(mover work-osprey-main, a front agent\) now names work-osprey-x in its needs, handed over by home-beta: \[home\] auto-name test", m[1]) for m in ow)
       and "its keeper work-osprey-bld has been told instead" in res, (ow, res))
 h4 = mk46(); n0 = len(wait_push(0))
-server._message("work-osprey-main", f"{MK} {h4} needs your look", "home-beta"); server._message("work-osprey", f"{h4} for the keeper", "home-beta"); server._message("projects/alpha", f"{h4} for the project", "home-beta"); wait_push(n0 + 3)
-server._message("work-osprey-x", f"{h4} failed its run", "cron", auth="machine:testbox", origin="testbox"); wait_push(n0 + 4); time.sleep(0.3)
+_messaging._message("work-osprey-main", f"{MK} {h4} needs your look", "home-beta"); _messaging._message("work-osprey", f"{h4} for the keeper", "home-beta"); _messaging._message("projects/alpha", f"{h4} for the project", "home-beta"); wait_push(n0 + 3)
+_messaging._message("work-osprey-x", f"{h4} failed its run", "cron", auth="machine:testbox", origin="testbox"); wait_push(n0 + 4); time.sleep(0.3)
 check("auto-name: a message to a front agent, to the keeper or to the project page names nobody; nor does a script's message", "needs" not in rd(h4)["metadata"], rd(h4)["metadata"])
 d1 = mk46(owner="home-beta"); n0 = len(wait_push(0))
 _d1 = rd(d1); _d1["metadata"]["project"] = "projects/alpha"; writes.save(d1, _d1)   # home-beta's create is refiled to projects/beta ("Refile itself"): an item filed before the rule
-res = server._message("work-osprey-x", f"take {d1}", "work-osprey-main"); p = wait_push(n0 + 2)
+res = _messaging._message("work-osprey-x", f"take {d1}", "work-osprey-main"); p = wait_push(n0 + 2)
 ow = [m for m in p[n0:] if m[0] == B]
 check("auto-name: a plain first naming tells the owner in one line (an owner that is not a front agent, directly)", needs46(d1) == ["work-osprey-x"] and len(ow) == 1
       and ow[0][1].startswith(f"[stackshot] {d1} now names work-osprey-x in its needs, handed over by work-osprey-main: [home] auto-name test") and "(its mover home-beta has been told)" in res, (ow, res))
@@ -3075,7 +3078,7 @@ check("auto-name: a plain first naming tells the owner in one line (an owner tha
 # "a close by …"; a format example "1 g9191@1791800000"; a sala handover's context line): not in code, not in quotes, nothing glued on
 q1, q2, q3 = mk46(), mk46(), mk46()
 def _missed(forms, want):            # the forms whose ids _item_refs reads otherwise than `want`
-    return [(t, got) for t in forms for got in [server._item_refs(t)] if got != want]
+    return [(t, got) for t in forms for got in [_agent_names._item_refs(t)] if got != want]
 _m = _missed([f"`{q1}`", f"the test `{q1}_scenario` failed", f"run ``{q1}`` again", f"```\npytest -k {q1}\n```", f"~~~\n{q1}: x\n~~~"], [])
 check("plain id: an id in backticks names nothing (inline code, a test name in code, a fenced block)", not _m, _m)
 _m = _missed([f'3 checks: "{q1}: a close by another session…", "{q1}: a reopen…"', f"“{q1} done”", f"‘{q1} done’", f"the '{q1}' check"], [])
@@ -3087,10 +3090,10 @@ _real = [f"hand-off of {q1}", f"{q1}: do X", f"({q1})", f"{q1}.", f"[{q1}]({_cor
          f"**{q1}**", f"see {_core_instance.BOARD_URL}/items/{q1} for it", f"line one\n{q1}\nline three", f"{q1.upper()} is yours", f"{q1}—the build"]
 check("plain id: the real handover forms still name (hand-off of, id: do X, (id), id., a markdown link, a possessive, a page link)", not _missed(_real, [q1]), _missed(_real, [q1]))
 n0 = len(wait_push(0))
-res = server._message("work-osprey-x", f"the test `{q1}_scenario` failed; e.g. \"1 {q1}@1791800000\"; see {q1}/x and \"{q1}: a close by …\"", "work-osprey-main"); wait_push(n0 + 1); time.sleep(0.3)
+res = _messaging._message("work-osprey-x", f"the test `{q1}_scenario` failed; e.g. \"1 {q1}@1791800000\"; see {q1}/x and \"{q1}: a close by …\"", "work-osprey-main"); wait_push(n0 + 1); time.sleep(0.3)
 check("plain id: a message to a background agent that cites an id only in code, quotes or glued names nobody", "needs" not in rd(q1)["metadata"] and "(named" not in res, (rd(q1)["metadata"], res))
 n0 = len(wait_push(0))
-res = server._message("work-osprey-x", f"Build job, {q2}, from Oliver's words (Wed Jun 10th 09:40 +00). Context: `{q3}` carried recycle=true, which only flags it.", "work-osprey-main")
+res = _messaging._message("work-osprey-x", f"Build job, {q2}, from Oliver's words (Wed Jun 10th 09:40 +00). Context: `{q3}` carried recycle=true, which only flags it.", "work-osprey-main")
 wait_push(n0 + 1); time.sleep(0.3)
 check("plain id: a sala-style handover names the job's item and not the item its context line cites in backticks",
       needs46(q2) == ["work-osprey-x"] and "needs" not in rd(q3)["metadata"] and res.count("(named work-osprey-x") == 1, (needs46(q2), rd(q3)["metadata"], res))
@@ -3202,7 +3205,7 @@ check(f"auto-name: a status whose text the update path rewrites (g9999 → board
       needs46(e7) == ["work-osprey-x"] and "(named" in res and ("work-osprey-x", "open", f"wait for board#{BID_B} now") in st46(e7), (needs46(e7), st46(e7), res))
 wait_push(0)
 z1 = mk46(); _wt_complete.stackshot_complete(z1, sender="work-osprey-main", outcome="done", reason="landed", description="- Goal: Done")
-res = _update_svc._update(z1, priority="p1", sender="work-osprey-x"); res2 = server._message("work-osprey-x", f"look at {z1}", "home-beta"); time.sleep(0.3)
+res = _update_svc._update(z1, priority="p1", sender="work-osprey-x"); res2 = _messaging._message("work-osprey-x", f"look at {z1}", "home-beta"); time.sleep(0.3)
 check("auto-name: a closed item is never touched, by a write or by a message", "needs" not in rd(z1)["metadata"] and rd(z1)["status"] == "completed" and "(named" not in res and "(named" not in res2, (rd(z1)["metadata"], res, res2))
 x1 = mk46(); n0 = len(wait_push(0))
 # the open step names the front agent: the close marks it itself (done=[1]), as a close no longer settles another session's step
@@ -3221,11 +3224,11 @@ O = "55555555-5555-4555-8555-555555555555"; _fl46 = (T / "fleet/a/sessions.json"
 _rg46["pages"]["projects/alpha"]["agents"]["work-osprey-ops"] = "back"; _rg46["pages"]["projects/alpha"]["back_agents"]["work-osprey-ops"] = "back"
 (T / "store/projects.json").write_text(json.dumps(_rg46)); _cfg.CFG["pilot"]["never_named"] = ["work-osprey-ops"]
 m_a = mk46(); n0 = len(wait_push(0))
-res = server._message("work-osprey-ops", f"release PR #102, which touches {m_a} in passing", "home-beta"); wait_push(n0 + 1); time.sleep(0.3)
+res = _messaging._message("work-osprey-ops", f"release PR #102, which touches {m_a} in passing", "home-beta"); wait_push(n0 + 1); time.sleep(0.3)
 check("never_named: a message-tool handover to a listed background agent that names an item names nobody", "needs" not in rd(m_a)["metadata"] and "(named" not in res, (rd(m_a)["metadata"], res))
 res = _update_svc._update(m_a, next="released", sender="work-osprey-ops"); time.sleep(0.3)
 check("never_named: …nor does an update by that agent; the write still lands", "needs" not in rd(m_a)["metadata"] and "(named" not in res and rd(m_a)["metadata"].get("next", "").endswith("\nreleased"), (rd(m_a)["metadata"], res))
-res = server._message("work-osprey-x", f"please take {m_a}", "home-beta"); time.sleep(0.3)
+res = _messaging._message("work-osprey-x", f"please take {m_a}", "home-beta"); time.sleep(0.3)
 check("never_named: an unlisted background agent is still named, with the list set", needs46(m_a) == ["work-osprey-x"] and f"(named work-osprey-x in {m_a}'s needs" in res, (needs46(m_a), res))
 m_b = mk46(); res = _update_svc._update(m_b, next="x", sender="work-osprey-x")
 check("never_named: …and an update by it still names it", needs46(m_b) == ["work-osprey-x"] and f"(named work-osprey-x in {m_b}'s needs: update by work-osprey-x)" in res, (needs46(m_b), res))

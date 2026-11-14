@@ -115,6 +115,7 @@ os.environ.update(ANTHROPIC_API_KEY="test-not-a-real-key", ANTHROPIC_AUTH_TOKEN=
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.anchors import anchors as a
 import shadow_harness as H; from stackshot.router import router_live
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -142,11 +143,11 @@ n_board = rec("projects/alpha", "board", "completed: [home] item 1", label="boar
 n_auto = routing.record_auto("projects/alpha", "merged", "log-only: a green release", kind="message", pilot=True, who="release (a script on box)", text="[release] PR #9 green", target="project-wide")
 n_other = rec("projects/gamma", "anchor", "new message from Gus: the quote", anchor="slack:C0000000003", target="project-wide", to=G)
 n_beta = routing.record("projects/beta", kind="anchor", to=B, label="Slack anchor", who="Bob", text="beta talk", pilot=False, anchor="slack:C0000000002")
-res = server._message("projects/alpha", "please look at a2 today", "home-beta")                    # a message naming one open item
-res2 = server._message("projects/alpha", "what about a4 and the contract?", "home-beta")          # names a completed item
-res3 = server._message("projects/alpha", "a5 needs a look", "home-beta")                         # names an item the keeper owns
-res4 = server._message("projects/alpha", "and a2 with a1?", "home-beta")                         # names two items
-res5 = server._message("projects/alpha", "when is the next release?", "home-beta")               # names none
+res = _messaging._message("projects/alpha", "please look at a2 today", "home-beta")                    # a message naming one open item
+res2 = _messaging._message("projects/alpha", "what about a4 and the contract?", "home-beta")          # names a completed item
+res3 = _messaging._message("projects/alpha", "a5 needs a look", "home-beta")                         # names an item the keeper owns
+res4 = _messaging._message("projects/alpha", "and a2 with a1?", "home-beta")                         # names two items
+res5 = _messaging._message("projects/alpha", "when is the next release?", "home-beta")               # names none
 time.sleep(0.3)
 msgs = [n for n in routing.read("projects/alpha") if n["kind"] == "message" and not n.get("log_only")]
 m_a2, m_a4, m_a5, m_two, m_none = (next(n["id"] for n in msgs if t in n["text"]) for t in ("a2 today", "a4 and", "a5 needs", "a2 with a1", "next release"))

@@ -42,6 +42,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.model import nextlines as NL
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 _cfg.CFG["audit"]["mode"] = "script"
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                       # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
@@ -324,8 +325,8 @@ cfg_audit["front_step_move_hours"] = 3
 # ---- 6. the server's tick
 load_fixtures()
 msgs = []
-real_msg = server._message
-server._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
+real_msg = _messaging._message
+_messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
 from stackshot.anchors import anchors as _anc
 real_roles = _anc.file_roles
 _anc.file_roles = lambda reg=None, live=None: ROLES
@@ -338,7 +339,7 @@ msgs.clear()
 res = server._filing_tick()
 check("6 …and moves a step whose clock is due, telling the mover through the server's own message function as an fyi", [m["id"] for m in res["front_steps"]["moved"]] == ["board#1"] and opener_of("a1") == "home-agent"
       and [(m[0], m[5]) for m in msgs if "is now yours" in m[1]] == [("home-agent", True)] and all(m[2] == "stackshot audit" for m in msgs), (res["front_steps"], msgs))
-server._message = real_msg; _anc.file_roles = real_roles
+_messaging._message = real_msg; _anc.file_roles = real_roles
 
 # ---- 7. a moved step is chased again (a far wake that is only a backstop does not silence it)
 from stackshot.audit import silence as SL, audit_checks as AC; from stackshot.tools import next_report as NR

@@ -94,6 +94,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.anchors import anchors as _anc_y
 from fastmcp.exceptions import ToolError
@@ -159,17 +160,17 @@ check("reports: the reason names what stopped it", reports.report_doubt("is it l
 roles = _anc_y.session_roles()
 check("fixture: osprey-main and osprey-front2 are front agents, osprey-x a background one", roles["osprey-main"]["role"] == "front" and roles["osprey-front2"]["role"] == "front" and roles["osprey-x"]["role"] == "back", {k: v["role"] for k, v in roles.items()})
 p0, s0 = len(pushes()), len(saved)
-rep = server._message("osprey-main", f"{MK} a1: PR 18 is live and the suites pass. The step is merged.", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a1: PR 18 is live and the suites pass. The step is merged.", "osprey-x"); settle()
 check("1a: a builder's marked message that only reports on an item is not delivered: the reply says so and names the item and the writer", rep.startswith("Not delivered: written onto")
       and "written onto a1 as a History line from osprey-x, because osprey-main is a front agent" in rep and "send it again saying what" in rep, rep)
 check("…it is on the item as the server's note (History), without the mark, naming sender and receiver; nothing was pushed", len([x for x in saved[s0:] if "reported to" in x[1]]) == 1 and saved[-1][0] == "a1"
       and saved[-1][1] == "osprey-x reported to osprey-main (not sent to it: a plain status report): a1: PR 18 is live and the suites pass. The step is merged." and len(pushes()) == p0, (saved[s0:], pushes()[p0:]))
 check("…the item itself is unchanged (a filing note: no clock moves, no field; the stored phase every save of an open item writes apart)", {k: v for k, v in rd(1)["metadata"].items() if k != "phase"} == {"owner": A, "mover": A, "project": "projects/alpha", "next": "the next step"} and rd(1)["updated"] == now0 - 3600, rd(1))
-msgs = [json.loads(l) for l in server.MSG_LOG.read_text().splitlines()]
+msgs = [json.loads(l) for l in _messaging.MSG_LOG.read_text().splitlines()]
 check("…the messages log says written onto the item, not delivered", msgs and msgs[-1]["from"] == "osprey-x" and msgs[-1]["outcome"] == "written onto a1, not delivered", msgs[-1:])
-rep = server._message(A, f"{MK} a1 and a2: both merged", "osprey-x"); settle()
+rep = _messaging._message(A, f"{MK} a1 and a2: both merged", "osprey-x"); settle()
 check("1b: …by the front agent's transcript id too, and two items get a line each", rep.startswith("Not delivered") and "a1, a2" in rep and [g for g, _ in saved[s0 + 1:]] == ["a1", "a2"], (rep, saved[s0 + 1:]))
-check("1c: a builder's sender given as its transcript id is a builder too", server._message("osprey-main", f"{MK} a3: merged", X).startswith("Not delivered"))
+check("1c: a builder's sender given as its transcript id is a builder too", _messaging._message("osprey-main", f"{MK} a3: merged", X).startswith("Not delivered"))
 p0, s0 = len(pushes()), len(saved)
 NEG = (("a question mark", f"{MK} a1: PR 18 is live. Merge it?"), ("a question mark ending a URL", f"{MK} a1: merged, log at https://x.example/log?"),
        ("needs: decision", f"{MK} a1: needs: decision on the wording"), ("an opening instruction", f"{MK} Take a1"),
@@ -180,52 +181,52 @@ NEG = (("a question mark", f"{MK} a1: PR 18 is live. Merge it?"), ("a question m
        ("a plan", f"{MK} a1: merged. I deploy after the suites pass."), ("a prose sentence that is no status shape", f"{MK} a1: the footer line stays."),
        ("a fenced block", f"{MK} a1: merged\n```\nsudo systemctl restart x\n```"))
 for name, text in NEG:
-    rep = server._message("osprey-main", text, "osprey-x"); settle()
+    rep = _messaging._message("osprey-main", text, "osprey-x"); settle()
     check(f"1d negative: a builder's message with {name} still reaches the front agent", rep.startswith("delivered"), (rep, text))
 check(f"…all {len(NEG)} were pushed to osprey-main and none was written onto the item", len(to("osprey-main", p0)) == len(NEG) and not [x for x in saved[s0:] if "reported to" in x[1]], (len(to("osprey-main", p0)), saved[s0:]))
 p0, s0 = len(pushes()), len(saved)
-rep = server._message("osprey-main", f"{MK} a7: PR 18 is live", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a7: PR 18 is live", "osprey-x"); settle()
 check("1d2 negative: a plain report on an item that waits on his decision (needs: decision) is delivered", rep.startswith("delivered") and len(to("osprey-main", p0)) == 1 and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
-rep = server._message("osprey-main", f"{MK} a8: PR 18 is live", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a8: PR 18 is live", "osprey-x"); settle()
 check("…and one on an item whose needs name the front agent is delivered", rep.startswith("delivered") and len(to("osprey-main", p0)) == 2 and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
-rep = server._message("osprey-front2", f"{MK} a8: PR 18 is live", "osprey-x"); settle()
+rep = _messaging._message("osprey-front2", f"{MK} a8: PR 18 is live", "osprey-x"); settle()
 check("…but a8 names osprey-main alone, so the same report to the other front agent is held", rep.startswith("Not delivered") and saved[-1][0] == "a8", (rep, saved[-1:]))
-rep = server._message("osprey-main", f"{MK} a1 and a7: PR 18 is live", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a1 and a7: PR 18 is live", "osprey-x"); settle()
 check("…a report naming two items is delivered when either waits on him", rep.startswith("delivered"), rep)
 p0, s0 = len(pushes()), len(saved)
-rep = server._message("osprey-main", f"{MK} the build is live, the suites pass", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} the build is live, the suites pass", "osprey-x"); settle()
 check("1e negative: a report that names no item is delivered (nowhere to put it)", rep.startswith("delivered") and len(to("osprey-main", p0)) == 1 and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
-rep = server._message("osprey-main", f"{MK} `a1` is live", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} `a1` is live", "osprey-x"); settle()
 check("…an id in backticks names nothing (the cited-for-context form): delivered", rep.startswith("delivered"), rep)
-rep = server._message("osprey-main", f"{MK} a1, a2, a3 and a4 are all merged", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a1, a2, a3 and a4 are all merged", "osprey-x"); settle()
 check("…a report naming four items is delivered (it is not about one thing)", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
-rep = server._message("osprey-main", f"{MK} board#{BID_A} is merged", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} board#{BID_A} is merged", "osprey-x"); settle()
 check("…an id that names no item names nothing: delivered", rep.startswith("delivered"), rep)
 p0, s0 = len(pushes()), len(saved)
-rep = server._message("osprey-main", f"{MK} a1 is merged", "home-beta"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a1 is merged", "home-beta"); settle()
 check("1f negative: the same report from a session that is no background agent is delivered as before", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-rep = server._message("osprey-main", f"{MK} a1 is merged", "osprey-front2"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a1 is merged", "osprey-front2"); settle()
 check("…and from another front agent", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-rep = server._message("osprey-x", "a1 is merged, the suites pass", "home-beta"); settle()
+rep = _messaging._message("osprey-x", "a1 is merged, the suites pass", "home-beta"); settle()
 check("…a message to a background agent is never held back", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-rep = server._message("osprey-main", f"{MK} a1 is live", "nightly-job", origin="testbox"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a1 is live", "nightly-job", origin="testbox"); settle()
 check("…a script's message (origin) is not a builder's", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
 check("1g: an unmarked message is still refused first, and 'no action needed' is still refused, builder or not",
-      why(lambda: server._message("osprey-main", "a1 is merged", "osprey-x")).startswith("Refused: osprey-main is a front agent")
-      and "says nothing is needed from him ('no action needed')" in why(lambda: server._message("osprey-main", f"{MK} a1 is merged, no action needed", "osprey-x")))
+      why(lambda: _messaging._message("osprey-main", "a1 is merged", "osprey-x")).startswith("Refused: osprey-main is a front agent")
+      and "says nothing is needed from him ('no action needed')" in why(lambda: _messaging._message("osprey-main", f"{MK} a1 is merged, no action needed", "osprey-x")))
 # a message to a project that opens "For <front agent>"
 p0, s0 = len(pushes()), len(saved); n0 = len(routing.read("projects/alpha"))
-rep = server._message("projects/alpha", "For osprey-main, a2: PR 24 is live, the suites pass.", "osprey-x"); settle()
+rep = _messaging._message("projects/alpha", "For osprey-main, a2: PR 24 is live, the suites pass.", "osprey-x"); settle()
 check("1h: a builder's 'For <front agent>' report to the project is written onto the item, not recorded for the router", rep.startswith("Not delivered: written onto")
       and saved[s0:] and saved[-1][0] == "a2" and len(routing.read("projects/alpha")) == n0 and not to("osprey-main", p0), (rep, saved[s0:], len(routing.read("projects/alpha")) - n0))
-msgs = [json.loads(l) for l in server.MSG_LOG.read_text().splitlines()]
+msgs = [json.loads(l) for l in _messaging.MSG_LOG.read_text().splitlines()]
 check("…the log names the project it was addressed to", msgs[-1]["to"] == "projects/alpha" and msgs[-1]["outcome"] == "written onto a2, not delivered", msgs[-1])
 s0 = len(saved)
-rep = server._message("projects/alpha", "For osprey-main, a2: PR 24 is live. Can you merge it?", "osprey-x")
+rep = _messaging._message("projects/alpha", "For osprey-main, a2: PR 24 is live. Can you merge it?", "osprey-x")
 check("1i negative: the same with a question is held for the router, as before", rep.startswith("held for the router") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-rep = server._message("projects/alpha", "For osprey-x, a2: PR 24 is live", "home-beta")
+rep = _messaging._message("projects/alpha", "For osprey-x, a2: PR 24 is live", "home-beta")
 check("…one to a background agent, or from a non-builder, is held for the router, as before", rep.startswith("held for the router") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-rep = server._message("projects/alpha", "a2: PR 24 is live", "osprey-x")
+rep = _messaging._message("projects/alpha", "a2: PR 24 is live", "osprey-x")
 check("…a project message that is not addressed to a front agent is the router's, as before", rep.startswith("held for the router") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
 
 # ---- 2. anchor notices on a builder's pull request

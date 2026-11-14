@@ -70,6 +70,7 @@ inbox.ack(ids)
 check("fixture: the three lines are gone once confirmed", inbox.waiting() == {}, inbox.waiting())
 
 from stackshot.fleet import client; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+from stackshot.service import messaging as _messaging
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
@@ -199,7 +200,7 @@ with TestClient(app) as c:
     real_run = subprocess.run
     subprocess.run = lambda *a, **k: _R()
     try:
-        out = server._message(NAME, "hello", "site-main")
+        out = _messaging._message(NAME, "hello", "site-main")
     finally:
         subprocess.run = real_run
     check("message: an `inbox` reply no longer calls a running session away; it says when the sender is told", out.startswith(f"inbox → {NAME} — it waits in the server's inbox") and "is away" not in out
@@ -207,7 +208,7 @@ with TestClient(app) as c:
     cfg.CFG["client"]["inbox_flag_minutes"] = 0
     subprocess.run = lambda *a, **k: _R()
     try:
-        out0 = server._message(NAME, "hello", "site-main")
+        out0 = _messaging._message(NAME, "hello", "site-main")
     finally:
         subprocess.run = real_run
     cfg.CFG["client"]["inbox_flag_minutes"] = 5

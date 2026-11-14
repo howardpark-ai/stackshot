@@ -103,6 +103,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -158,19 +159,19 @@ T_LIVE = time.time()
 # ---- 3. live on: a message, an anchor-hub notice, a board relay and a wake are held for the router, not delivered to the keeper
 cfg(live=True)
 p0 = len(pushes())
-r1 = server._message("projects/alpha", "please look at the quote from the vendor (see https://example.invalid/q)", "home-beta")
+r1 = _messaging._message("projects/alpha", "please look at the quote from the vendor (see https://example.invalid/q)", "home-beta")
 m_quote = routing.read("projects/alpha")[-1]
 check("live: a message to a project is held for the router, nothing is pushed", r1.startswith("held for the router") and len(pushes()) == p0, (r1, pushes()[p0:]))
 check("live: its routing line has no recipient and the live mark; it is a pilot notice, unruled", m_quote["to"] == "" and m_quote["live"] is True and m_quote["pilot"] is True and not m_quote.get("ruling"), m_quote)
-msg_rows = [json.loads(l) for l in server.MSG_LOG.read_text(encoding="utf-8").splitlines() if l.strip()]
+msg_rows = [json.loads(l) for l in _messaging.MSG_LOG.read_text(encoding="utf-8").splitlines() if l.strip()]
 check("live: the message log names the page key it was addressed to, not the retired name-line session, and says it was held for the router",
       msg_rows[-1]["to"] == "projects/alpha" and msg_rows[-1]["outcome"] == "held for the router", msg_rows[-1])
 item(94, "projects/alpha", A, mover=X)         # an item the builder moves: the builder's message to its own project about it reaches no one, and the reply says so
 _rec, _stash = routing.record, live.stash          # the two sends below leave no notice for the tick checks that follow
 routing.record = lambda *a, **k: "abc123"; live.stash = lambda *a, **k: None
 try:
-    r_own = server._message("projects/alpha", "a94: the handback is done, so the next session's step is due", "work-osprey-x")
-    r_oth = server._message("projects/alpha", "a94: the handback is done, so the next session's step is due", "home-beta")
+    r_own = _messaging._message("projects/alpha", "a94: the handback is done, so the next session's step is due", "work-osprey-x")
+    r_oth = _messaging._message("projects/alpha", "a94: the handback is done, so the next session's step is due", "home-beta")
 finally:
     routing.record, live.stash = _rec, _stash
     (T / "store/a/94.json").unlink()
@@ -298,7 +299,7 @@ server._router_live_after("projects/alpha", {**note_, "ruling": "merged"}); held
 check("a hold waiting on an anchor: the router's dropped or held ruling leaves it held (as a keeper's does), a merged one releases it", (held_d, held_h, held_m) == (True, True, False), (held_d, held_h, held_m))
 
 # ---- 6. a notice the router cannot judge goes to -main with the mark; the keeper gets nothing
-server._message("projects/alpha", "an odd one", "home-beta"); n_odd = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "an odd one", "home-beta"); n_odd = routing.read("projects/alpha")[-1]
 fake("exit"); p0 = len(pushes()); r1_ = live.tick(); settle()
 check("a failed call: the notice stays held on the first try (nothing delivered, nothing ruled), one retry", r1_["retry"] == 1 and not [x for x in pushes()[p0:] if n_odd["id"] in x[1]] and not rule_of(n_odd["id"]).get("ruling") and router._load_attempts().get(n_odd["id"]) == 1, (r1_, router._load_attempts()))
 live.tick(); settle()
@@ -306,22 +307,22 @@ pp = [x for x in pushes()[p0:] if "router: notice" in x[1] or x[0] == "work-ospr
 check("a call that failed twice: the notice is passed to -main, ruled passed with the reason, marked [for Oliver]", len(pp) == 1 and pp[0][0] == "work-osprey-main" and pp[0][1].startswith("[for Oliver]")
       and ro["ruling"] == "passed" and ro["ruled_to"] == "work-osprey-main" and "call failed" in ro["reason"], (pp, ro))
 check("the keeper heard nothing of it", not to_name_line(pp))
-fake("good", "this is not JSON"); server._message("projects/alpha", "another odd one", "home-beta"); n_odd2 = routing.read("projects/alpha")[-1]; p0 = len(pushes()); live.tick(); live.tick(); settle()
+fake("good", "this is not JSON"); _messaging._message("projects/alpha", "another odd one", "home-beta"); n_odd2 = routing.read("projects/alpha")[-1]; p0 = len(pushes()); live.tick(); live.tick(); settle()
 check("an answer that does not parse is handled the same way (one retry, then -main)", [x[0] for x in pushes()[p0:] if n_odd2["id"] in x[1]] == ["work-osprey-main"] and rule_of(n_odd2["id"])["ruled_to"] == "work-osprey-main", pushes()[p0:])
 _orig = router.call_project
 router.call_project = lambda *a_, **k_: (_ for _ in ()).throw(RuntimeError("kaboom"))
-server._message("projects/alpha", "a third odd one", "home-beta"); n_odd3 = routing.read("projects/alpha")[-1]; p0 = len(pushes()); live.tick()
+_messaging._message("projects/alpha", "a third odd one", "home-beta"); n_odd3 = routing.read("projects/alpha")[-1]; p0 = len(pushes()); live.tick()
 router.call_project = _orig
 check("an exception while judging is passed to -main with the mark too, the exception in the reason", [x[0] for x in pushes()[p0:]] == ["work-osprey-main"] and pushes()[p0:][0][1].startswith("[for Oliver]") and "kaboom" in rule_of(n_odd3["id"])["reason"], (pushes()[p0:], rule_of(n_odd3["id"])))
 
 # ---- 7. a project with no agent and no hub: the scope's general -main takes it
-server._message("projects/delta", "delta wants something", "home-beta"); n_d = routing.read("projects/delta")[-1]
+_messaging._message("projects/delta", "delta wants something", "home-beta"); n_d = routing.read("projects/delta")[-1]
 fake("exit"); p0 = len(pushes()); live.tick(); live.tick(); pp = pushes()[p0:]
 check("no agent and no hub: a notice that cannot be judged (twice) is passed to the scope's general -main (home-commons-main), marked, never to a keeper name", [x[0] for x in pp] == ["home-commons-main"] and pp[0][1].startswith("[for Oliver]") and "delta wants" in pp[0][1], pp)
 check("…and it is ruled passed by the router (not left to a keeper) and not taken again", routing.read("projects/delta")[-1].get("ruling") == "passed" and routing.read("projects/delta")[-1].get("ruled_to") == "home-commons-main" and (live.tick() is not None and len(pushes()) == p0 + 1), routing.read("projects/delta")[-1])
 
 # ---- 7b. a pilot root with no agent of its own (projects/example-portal, ops/example-hub) is served by its hub's agents
-server._message("projects/epsilon", "epsilon wants something", "home-beta"); n_e = routing.read("projects/epsilon")[-1]
+_messaging._message("projects/epsilon", "epsilon wants something", "home-beta"); n_e = routing.read("projects/epsilon")[-1]
 check("a component page (hub: projects/gamma) is held for the router like any pilot root", n_e["live"] is True and live.holds("projects/epsilon", "work-gamma") and live.agent_root("projects/epsilon", a.registry()) == "projects/gamma")
 check("…and its stand-in is its hub's", live.stand_in("projects/epsilon") == "work-gamma-main", live.stand_in("projects/epsilon"))
 fake("good", answer([(n_e["id"], "passed", "work-gamma-main", True)])); p0 = len(pushes()); live.tick(); settle()
@@ -330,7 +331,7 @@ check("…and a notice on it goes to its hub's agent, marked, ruled by the route
       and "Project: projects/gamma" in calls()[-1]["stdin"], (pe, calls()[-1]["stdin"][:200]))
 
 # ---- 8. a failed delivery is retried, then goes to -main
-FAIL.write_text("work-osprey-x\n"); server._message("projects/alpha", "tell the builder about the deploy", "home-beta"); n_f = routing.read("projects/alpha")[-1]
+FAIL.write_text("work-osprey-x\n"); _messaging._message("projects/alpha", "tell the builder about the deploy", "home-beta"); n_f = routing.read("projects/alpha")[-1]
 fake("good", answer([(n_f["id"], "passed", "work-osprey-x", False)])); p0 = len(pushes())
 for _ in range(3): live.tick()
 errs = [l for l in lines() if l["id"] == n_f["id"] and l["status"] == "error"]
@@ -350,7 +351,7 @@ check("`router_live.py status` prints a line per project from the logs", cli.ret
 
 # ---- 11. there is no rollback to the keepers: `[router] live = false` in an old config is ignored, and no notice is delivered to a keeper
 cfg(live=False, live_projects=["projects/nowhere"]); p0 = len(pushes())
-r2 = server._message("projects/alpha", "after the rollback key was set", "home-beta"); last = routing.read("projects/alpha")[-1]
+r2 = _messaging._message("projects/alpha", "after the rollback key was set", "home-beta"); last = routing.read("projects/alpha")[-1]
 res = live.tick()
 check("[router] live = false (and live_projects naming another page) is ignored: a message is still held for the router, delivered to no keeper, and the tick strands nothing", r2.startswith("held for the router") and last["to"] == "" and last.get("live") is True
       and live.holds("projects/alpha", "work-osprey") and "stranded" not in res and not [x for x in pushes()[p0:] if x[0] == "work-osprey"], (r2, last, res, pushes()[p0:]))
@@ -373,8 +374,8 @@ PLU = "projects/example-site"
 core._ROUTES["drive:FILE1"] = [{"project": PLU, "session": "work-example-site", "target": "project-wide", "pilot": True, "filter": ""}]
 hub.send("drive:FILE1", "work-example-site", "[anchor] Drive: Plan.docx edited → https://drive.google.com/x", ev("Drive anchor", "Kim", "https://drive.google.com/x"), "Plan.docx edited")
 n_q = routing.read(PLU)[-1]
-server._message(PLU, "keeper: the plan page is stale", "nightly-job"); n_pp = routing.read(PLU)[-1]
-server._message("projects/alpha", "keeper: the roadmap page is stale", "nightly-job"); n_ap = routing.read("projects/alpha")[-1]
+_messaging._message(PLU, "keeper: the plan page is stale", "nightly-job"); n_pp = routing.read(PLU)[-1]
+_messaging._message("projects/alpha", "keeper: the roadmap page is stale", "nightly-job"); n_ap = routing.read("projects/alpha")[-1]
 live.tick()
 lq = next(l for l in lines() if l.get("id") == n_q["id"]); lp = next(l for l in lines() if l.get("id") == n_pp["id"])
 check("example-site: the Drive anchor notice is held by the quiet rule, the nightly job's page message by the page pass; the router rules both held",
@@ -422,7 +423,7 @@ st1 = {r["project"]: r for r in live.status()}
 check("status after the digest: nothing held since it, its time shown", st1["projects/alpha"]["held_since_digest"] == 0 and st1["projects/alpha"]["last_digest_at"] == D0 and "last digest" in live.render(live.status()))
 
 # a notice held later the same day waits for the next day's digest, and the digest lists it alone, with the router's reason
-server._message("projects/alpha", "a photo of the whiteboard, please file it", "home-beta"); n_img = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "a photo of the whiteboard, please file it", "home-beta"); n_img = routing.read("projects/alpha")[-1]
 fake("good", json.dumps([{"id": n_img["id"], "ruling": "held", "target": "", "reason": "held for the digest: image not read", "for_owner": False}]))
 live.tick(); p1 = len(pushes()); live.digest_tick(now=D0 + 4 * 3600)
 check("a notice held after the day's digest is not sent the same day", rule_of(n_img["id"])["ruling"] == "held" and not digests(p1))
@@ -433,7 +434,7 @@ check("the next day's digest is logged, not sent: it lists it alone (not the one
       and "1 notice was held" in lg1[0]["text"] and n_img["id"] in ledger()["sent"], (d1, lg1))
 
 # a held-only digest is logged, never pushed
-server._message("projects/alpha", "someone left a voicemail about the paper order", "home-beta"); n_v = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "someone left a voicemail about the paper order", "home-beta"); n_v = routing.read("projects/alpha")[-1]
 fake("good", answer([(n_v["id"], "held", "", False)])); live.tick()
 n_lg0 = len([l for l in lines() if l.get("kind") == "digest_logged"]); p1 = len(pushes()); n_dl0 = len(dlines())
 FAIL.write_text("work-osprey-main\nwork-osprey-x\n")
@@ -456,7 +457,7 @@ def cp_notes(*a_, **k_):
     return got_, rec_
 router.call_project = cp_notes
 def one(text, note=None, ruling="dropped"):
-    server._message("projects/alpha", text, "home-beta"); n_ = routing.read("projects/alpha")[-1]
+    _messaging._message("projects/alpha", text, "home-beta"); n_ = routing.read("projects/alpha")[-1]
     if note is not None: NOTES[n_["id"]] = note
     fake("good", answer([(n_["id"], ruling, "", False)])); live.tick(); return n_
 today = dt.datetime.now(_cfg.tz()).strftime("%Y-%m-%d")
@@ -489,7 +490,7 @@ def rr(nid, *a_, **k_):
     if nid in BREAK: raise OSError("disk full")
     return _rr(nid, *a_, **k_)
 routing.rule = rr
-server._message("projects/alpha", "this ruling cannot be written", "home-beta"); n_c = routing.read("projects/alpha")[-1]; BREAK.add(n_c["id"])
+_messaging._message("projects/alpha", "this ruling cannot be written", "home-beta"); n_c = routing.read("projects/alpha")[-1]; BREAK.add(n_c["id"])
 fake("good", answer([(n_c["id"], "dropped", "", False)])); c0 = len(calls())
 for _ in range(3): live.tick()
 ls_ = [l for l in lines() if l.get("id") == n_c["id"]]
@@ -508,11 +509,11 @@ check("`router_live.py status` shows the held count and the last digest", cli2.r
 
 # ---- 12d. who gets a digest that holds a notice the router could not rule: the builder unmarked, else -main marked; held rows are only listed with it
 routing.rule = rr
-server._message("projects/alpha", "the supplier quote is attached for the record", "home-beta"); n_h2 = routing.read("projects/alpha")[-1]
-server._message("projects/alpha", "this second ruling cannot be written either", "home-beta"); n_s2 = routing.read("projects/alpha")[-1]; BREAK.add(n_s2["id"])
+_messaging._message("projects/alpha", "the supplier quote is attached for the record", "home-beta"); n_h2 = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "this second ruling cannot be written either", "home-beta"); n_s2 = routing.read("projects/alpha")[-1]; BREAK.add(n_s2["id"])
 fake("good", answer([(n_h2["id"], "held", "", False), (n_s2["id"], "dropped", "", False)])); live.tick()
 fake("good", answer([(n_s2["id"], "dropped", "", False)])); live.tick(); live.tick()
-server._message("projects/gamma", "this gamma ruling cannot be written", "home-beta"); n_g = routing.read("projects/gamma")[-1]; BREAK.add(n_g["id"])
+_messaging._message("projects/gamma", "this gamma ruling cannot be written", "home-beta"); n_g = routing.read("projects/gamma")[-1]; BREAK.add(n_g["id"])
 fake("good", answer([(n_g["id"], "dropped", "", False)]))
 for _ in range(3): live.tick()
 routing.rule = _rr
@@ -569,8 +570,8 @@ cfg()
 check("builder: alpha's builder, none for gamma (-main only), none for a page with no agents (beta)", live.builder("projects/alpha") == "work-osprey-x" and live.builder("projects/gamma") == "" and live.builder("projects/beta") == ""
       and _agents._builder_agent("projects/alpha") == "work-osprey-x")
 check("message gate: an unmarked message to a front agent is sent to the project, where the router rules it (no keeper named)",
-      "the project, where the router rules it (to='projects/alpha')" in server._project_takes("projects/alpha") and "steward" not in server._project_takes("projects/alpha"), server._project_takes("projects/alpha"))
-try: server._message("work-osprey-main", "unmarked", "home-beta"); e = ""
+      "the project, where the router rules it (to='projects/alpha')" in _messaging._project_takes("projects/alpha") and "steward" not in _messaging._project_takes("projects/alpha"), _messaging._project_takes("projects/alpha"))
+try: _messaging._message("work-osprey-main", "unmarked", "home-beta"); e = ""
 except ToolError as x: e = str(x)
 check("…and the refusal says so", e.startswith("Refused: work-osprey-main is a front agent") and "router rules it" in e and "steward" not in e, e)
 out = _wt_anchors._anchors("projects/alpha", who="home-beta")
@@ -633,45 +634,45 @@ _pil = _cfg.CFG.get("pilot"); _cfg.CFG["pilot"] = {**(_pil or {}), "projects": [
 check("a leftover [pilot] projects list is ignored: every page is the router's", live.is_live("projects/beta") and live.is_live("projects/eta") and a.pilot_root("projects/beta") == "projects/beta" and a.pilot_root("projects/nowhere") == "")
 _cfg.CFG["pilot"] = _pil if _pil is not None else {}
 cfg(live=True)
-p_e = len(pushes()); r_e = server._message("projects/eta", "audit batch for the general page", "home-beta"); n_e = routing.read("projects/eta")
+p_e = len(pushes()); r_e = _messaging._message("projects/eta", "audit batch for the general page", "home-beta"); n_e = routing.read("projects/eta")
 check("(d) a message to eta's page key is held for the router, not delivered to the keeper home-eta or to anyone", "router" in r_e, r_e)
 check("(d) …the routing line is live and records no keeper as the recipient; nothing was pushed", n_e and n_e[-1].get("live") is True and n_e[-1]["to"] != "home-eta" and len(pushes()) == p_e, (n_e[-1:] if n_e else n_e, pushes()[p_e:]))
 fake("good", answer([(n_e[-1]["id"], "passed", "home-eta-main", True)])); live.tick(); settle()
 check("(d) …the router passes it to the page's -main agent, marked, ruled by the router", [x[0] for x in pushes()[p_e:]] == ["home-eta-main"] and pushes()[p_e][1].startswith("[for Oliver]") and rule_of(n_e[-1]["id"], "projects/eta")["ruled_to"] == "home-eta-main", (pushes()[p_e:], routing.read("projects/eta")[-1]))
-p_e = len(pushes()); r_e2 = server._message("projects/theta", "hub-keyed", "home-beta"); n_t = routing.read("projects/theta")[-1]
+p_e = len(pushes()); r_e2 = _messaging._message("projects/theta", "hub-keyed", "home-beta"); n_t = routing.read("projects/theta")[-1]
 fake("good", answer([(n_t["id"], "passed", "home-eta-main", True)])); live.tick(); settle()
 check("(d) a message to a sub-page (theta, hub eta) is held, then reaches the hub's -main agent", n_t.get("live") is True and [x[0] for x in pushes()[p_e:]] == ["home-eta-main"] and "Project: projects/eta" in calls()[-1]["stdin"], (pushes()[p_e:], calls()[-1]["stdin"][:300]))
-p_b = len(pushes()); server._message("projects/beta", "beta has no agent and no hub", "home-eta-main"); n_b = routing.read("projects/beta")[-1]
+p_b = len(pushes()); _messaging._message("projects/beta", "beta has no agent and no hub", "home-eta-main"); n_b = routing.read("projects/beta")[-1]
 check("(d) a message to a page with no agent (beta, whose keeper home-beta runs a pane) is held for the router too, not delivered to home-beta", n_b.get("live") is True and n_b["to"] != "home-beta" and len(pushes()) == p_b, (n_b, pushes()[p_b:]))
 fake("good", answer([(n_b["id"], "passed", "home-commons-main", True)])); live.tick(); settle()
 check("(d) …and the router passes it to the scope's general -main", [x[0] for x in pushes()[p_b:]] == ["home-commons-main"] and rule_of(n_b["id"], "projects/beta")["ruled_to"] == "home-commons-main", (pushes()[p_b:], routing.read("projects/beta")[-1]))
 check("(d) …and the thin call was told of the general -main as the page's one agent", "home-commons-main" in calls()[-1]["stdin"], calls()[-1]["stdin"][:400])
-p_i = len(pushes()); server._message("projects/iota", "its keeper's pane is up", "home-eta-main"); n_i = routing.read("projects/iota")[-1]
+p_i = len(pushes()); _messaging._message("projects/iota", "its keeper's pane is up", "home-eta-main"); n_i = routing.read("projects/iota")[-1]
 check("(d) a page that lists an agent but whose keeper's pane runs (iota: home-beta) is held for the router, never delivered to the keeper", n_i.get("live") is True and len(pushes()) == p_i and n_i["to"] != "home-beta", (n_i, pushes()[p_i:]))
 routing.rule(n_i["id"], "dropped", by="test")      # settled by hand, so the later ticks of this file make no call for it
 check("retired page: an unmarked message to its -main agent is refused with the page key, not the retired name-line session",
-      "the project, where the router rules it (to='projects/eta')" in server._project_takes("projects/eta") and "steward" not in server._project_takes("projects/eta"), server._project_takes("projects/eta"))
-try: server._message("home-eta-main", "unmarked", "home-beta"); e = ""
+      "the project, where the router rules it (to='projects/eta')" in _messaging._project_takes("projects/eta") and "steward" not in _messaging._project_takes("projects/eta"), _messaging._project_takes("projects/eta"))
+try: _messaging._message("home-eta-main", "unmarked", "home-beta"); e = ""
 except ToolError as x: e = str(x)
 check("…the refusal names projects/eta, not home-eta", e.startswith("Refused: home-eta-main is a front agent") and "to='projects/eta'" in e and "home-eta " not in e and "steward" not in e, e)
 SJ = T / "fleet/a/sessions.json"; SJ_SAVE = SJ.read_text()
 p_a = len(pushes())
-try: server._message("home-eta", "to the retired name-line session", "home-beta"); e = ""
+try: _messaging._message("home-eta", "to the retired name-line session", "home-beta"); e = ""
 except ToolError as x: e = str(x)
 check("retired-name: a message to the retired name-line session of projects/eta is refused, naming the page key, where the router rules it", e.startswith("Refused:") and "message(to='projects/eta'" in e and "the project, where the router rules it (to='projects/eta')" in e and len(pushes()) == p_a, (e, pushes()[p_a:]))
 SJ.write_text(json.dumps({**json.loads(SJ_SAVE), "ffffffff-ffff-4fff-8fff-ffffffffffff": {"name": "home-eta", "machine": "a", "url": "", "seen": "x"}}))
-try: server._message("home-eta", "to a keeper whose pane runs", "home-beta"); e = ""
+try: _messaging._message("home-eta", "to a keeper whose pane runs", "home-beta"); e = ""
 except ToolError as x: e = str(x)
 check("retired-name: …but a keeper whose pane is running under that name is a pane and is delivered to, as before", e == "" and [x[0] for x in pushes()[p_a:]] == ["home-eta"], (e, pushes()[p_a:]))
 _gone = (__import__("datetime").datetime.now(__import__("datetime").timezone.utc) - __import__("datetime").timedelta(hours=2)).isoformat().replace("+00:00", "Z")
 SJ.write_text(json.dumps({**json.loads(SJ_SAVE), "ffffffff-ffff-4fff-8fff-ffffffffffff": {"name": "home-eta", "machine": "a", "url": "", "seen": "x", "gone": _gone}}))
 p_a = len(pushes())
-try: server._message("home-eta", "to the retired name-line session, its row gone", "home-beta"); e = ""
+try: _messaging._message("home-eta", "to the retired name-line session, its row gone", "home-beta"); e = ""
 except ToolError as x: e = str(x)
 check("retired-name: a retired name-line session that has a gone row is refused (the retired-and-not-running branch), naming the page key", a.session_roles()["home-eta"].get("retired") and e.startswith("Refused: 'home-eta' cannot receive this (a retired name-line session") and "message(to='projects/eta'" in e and len(pushes()) == p_a, (e, pushes()[p_a:]))
 SJ.write_text(SJ_SAVE)
 check("retired-name: a retired name-line session (the router is live for projects/alpha) whose pane is running is still delivered to: a running pane is a pane",
-      a.session_roles()["work-osprey"].get("retired") and server._message("work-osprey", "to a running retired name-line session", "home-beta").startswith("delivered") and [x[0] for x in pushes()[p_a:]][-1:] == ["work-osprey"], pushes()[p_a:])
+      a.session_roles()["work-osprey"].get("retired") and _messaging._message("work-osprey", "to a running retired name-line session", "home-beta").startswith("delivered") and [x[0] for x in pushes()[p_a:]][-1:] == ["work-osprey"], pushes()[p_a:])
 check("the keeper of eta's items is its -main agent, of theta's the hub's; none is a retired name-line session", telling.project_keeper("projects/eta") == "home-eta-main" and telling.project_keeper("projects/theta") == "home-eta-main"
       and telling.page_keeper("projects/eta") == "home-eta-main", (telling.project_keeper("projects/eta"), telling.project_keeper("projects/theta")))
 # ---- 19. review of the one-session-keeper change: a one-session page keeps its own session as keeper; a nameless page's debts reach the general -main agent
@@ -708,7 +709,7 @@ _pj["pages"]["ops/note-x/kept"] = page("Note X kept", "work-osprey-main", role="
 check("the page call is not live here (the 30-minute move below is the relay of today)", not _page_debt.live())
 p_n = len(pushes()); n_log = len(routing.read("ops/note-x"))
 _web_page_debts._owed_mark("ops/note-x", "work-osprey-x", "a30", settle="ct", moves="heron-main", what="changed (next)")
-k_n = server._pilot_fallback_tick(time.time() + 31 * 60); settle()
+k_n = pdebt_svc._pilot_fallback_tick(time.time() + 31 * 60); settle()
 ln_ = routing.read("ops/note-x")[n_log:]
 check("30-minute move on a nameless page (page call not live): the debt that moved to the general -main agent is held for the router in one routing line, not dropped",
       k_n == 1 and len(ln_) == 1 and ln_[0].get("live") is True and ln_[0]["to"] == "" and live.stashed(ln_[0]["id"]) and len(pushes()) == p_n, (k_n, ln_, pushes()[p_n:]))
@@ -910,7 +911,7 @@ item(46, "projects/zeta", ZP, "completed"); item(47, "projects/zeta", ZL)
 cfg(live=True)
 HEAD = "from: falcon-audit · board audit, Tue Jun 16th 13:25 +00 · 6 items. Re-read each against the page."
 def batch(*body, to="projects/zeta", sender="falcon-audit"):
-    n_before = len(routing.read(to)); server._message(to, "\n".join([HEAD, *body]), sender); settle()
+    n_before = len(routing.read(to)); _messaging._message(to, "\n".join([HEAD, *body]), sender); settle()
     return [n for n in routing.read(to)[n_before:] if n.get("kind") == "message"]
 L40 = "a40 · stale · external, confirmed Mon Jun 15th 17:10 (20 h) · confirm"
 L41 = "a41 · stale · external, confirmed Mon Jun 15th 20:00 (17 h); the page's last entry is from Jun 15th · confirm, or record any new request"
@@ -1047,9 +1048,9 @@ finally:
 
 # ---- 16. a message whose first line is "For <agent>" reaches that agent, a front agent included (notices a1b2c6 and a1b2c7)
 cfg(live=True); c15 = len(calls())
-server._message("projects/alpha", "For work-osprey-main: you were renamed and your brief is now ~/briefs/alpha-main.md. No action needed.", "home-beta"); f15 = routing.read("projects/alpha")[-1]
-server._message("projects/epsilon", "For work-gamma-main, from home-beta: the hand-over is ready.", "home-beta"); e15 = routing.read("projects/epsilon")[-1]
-server._message("projects/alpha", "For work-osprey-nobody: this agent is not on the page.", "home-beta"); u15 = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "For work-osprey-main: you were renamed and your brief is now ~/briefs/alpha-main.md. No action needed.", "home-beta"); f15 = routing.read("projects/alpha")[-1]
+_messaging._message("projects/epsilon", "For work-gamma-main, from home-beta: the hand-over is ready.", "home-beta"); e15 = routing.read("projects/epsilon")[-1]
+_messaging._message("projects/alpha", "For work-osprey-nobody: this agent is not on the page.", "home-beta"); u15 = routing.read("projects/alpha")[-1]
 fake("good", answer([(u15["id"], "merged", "", False)])); p15 = len(pushes()); live.tick(); settle(); g15 = pushes()[p15:]
 pf = [x for x in g15 if f15["id"] in x[1]]; pe15 = [x for x in g15 if e15["id"] in x[1]]
 check("16: 'For <front agent>' is delivered to that front agent with the mark, ruled by the router in code, no call made for it",
@@ -1096,7 +1097,7 @@ check("17: deliver_via with a dead interpreter delivers through the fallback", l
 check("17: …and the fake push saw the line", pushes()[n0:] == [["work-osprey", "no env, still delivered"]], pushes()[n0:])
 telling.PUSH = [DEAD, FAKE]; cfg()
 try:
-    server._message("work-osprey-docs", "sent with the env gone", "home-beta"); settle()      # a session by name: a message to a project key is held for the router, nothing is spawned for it
+    _messaging._message("work-osprey-docs", "sent with the env gone", "home-beta"); settle()      # a session by name: a message to a project key is held for the router, nothing is spawned for it
 finally:
     telling.PUSH = [sys.executable, FAKE]
 check("17: the server's own message relay delivers with a dead interpreter", any(x[0] == "work-osprey-docs" and "sent with the env gone" in x[1] for x in pushes()[n0 + 1:]), pushes()[n0 + 1:])
@@ -1121,7 +1122,7 @@ check("17: the real fallback child runs with an empty stderr (no uv warning stor
 (T / "cli").mkdir(exist_ok=True); handoff_svc.CLI_SESSIONS = T / "cli"        # the CLI's own registry on this box: nothing in it, so no turn-end rule fires
 cfg(live=True); fake("good", "[]")
 item(40, "projects/alpha", A, next="work-osprey-docs: look at the quote")
-r18 = server._message("projects/alpha", "the vendor's quote for a40 came in; someone should look at it", "home-beta")
+r18 = _messaging._message("projects/alpha", "the vendor's quote for a40 came in; someone should look at it", "home-beta")
 m18 = routing.read("projects/alpha")[-1]
 fake("good", answer([(m18["id"], "passed", "work-osprey-docs", False)])); p0 = len(pushes()); live.tick(); settle()
 check("18 hand-off: the router passes the notice to the page's keeper (a background agent), delivered", rule_of(m18["id"])["ruling"] == "passed" and rule_of(m18["id"])["ruled_to"] == "work-osprey-docs"

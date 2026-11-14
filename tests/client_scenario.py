@@ -45,6 +45,7 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.model import holders as _holders
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -256,7 +257,7 @@ with TestClient(app) as c:
     st, body = client.get("page-ts", "projects/alpha"); check("client.get passes the key", st == 200 and json.loads(body)["key"] == "projects/alpha", (st, body))
     # the write verb: a script's message, over HTTP and through client.py
     sent = []
-    server._message = lambda to, text, sender, auth="", origin="": (sent.append((to, text, sender, auth, origin)), "delivered → x — arrives as a labelled [stackshot message] turn")[1] if sender else (_ for _ in ()).throw(ToolError("Refused: sender is required"))
+    _messaging._message = lambda to, text, sender, auth="", origin="": (sent.append((to, text, sender, auth, origin)), "delivered → x — arrives as a labelled [stackshot message] turn")[1] if sender else (_ for _ in ()).throw(ToolError("Refused: sender is required"))
     r = c.post("/client/message", json={"to": "projects/alpha", "text": "hello", "sender": "nightly-job"}); check("http: a message without a token → 401", r.status_code == 401 and not sent, r.status_code)
     r = c.post("/client/message", json={"to": "projects/alpha", "text": "hello", "sender": "nightly-job"}, headers=H)
     check("http: a message with a machine token goes through the message path, marked with the machine", r.status_code == 200 and r.json()["result"].startswith("delivered") and sent == [("projects/alpha", "hello", "nightly-job", "machine:box-far", "box-far")], (r.text, sent))

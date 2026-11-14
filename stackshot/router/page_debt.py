@@ -1,7 +1,7 @@
 """page_debt.py — the page-debt call, made once per audit run (router step 3b; design: the design doc).
 
 Today a session that changes a board item's state owes the item's project page an update, and one still unpaid after
-[page_rule] grace_minutes moves to the project's keeper, who writes the page (server.py: _pilot_fallback_tick). The project sessions that used to take it were
+[page_rule] grace_minutes moves to the project's keeper, who writes the page (service/page_debt.py: `_pilot_fallback_tick`). The project sessions that used to take it were
 retired; the 30-minute move becomes ONE thin call per project per audit run (the pages stage of audit_run.py, twice a day): a fresh `claude -p` (router.py's runner: Sonnet, no
 tools, safe mode, the API variables unset, a timeout, usage recorded) that is given the moved debts' items and the page's Current
 state and proposes the smallest edit to the Current state, or says it cannot. This module holds the parts that need no server
