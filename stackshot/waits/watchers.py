@@ -281,6 +281,11 @@ def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list
 WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "post_wake_mover", "ask_by", "wake", "until", "after", "party", "needs", "waits", "wait_mode")      # waits and wait_mode: a list put back on "not yet" keeps its lines and what had arrived
 
 
+def was_picker(was: dict[str, Any] | None) -> str:
+    """Who picks the item up when the wait ends, as a `was` snapshot (metadata.watch.was) holds it: a snapshot written by older code stores the legacy key, a newer one `mover`; "" when it names nobody."""
+    return _model.stored_picker(was or {})
+
+
 def remember(meta: dict[str, Any], asked: str, now: float) -> None:
     """The item is about to turn to the owner for a watcher ask: keep the wait's fields (what to put back on "not yet" or "keep waiting") and which ask is up, under metadata.watch."""
     was = {k: meta[k] for k in WAS_FIELDS if meta.get(k) not in (None, "", [])}
