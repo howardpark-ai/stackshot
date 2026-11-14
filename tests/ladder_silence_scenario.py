@@ -520,6 +520,13 @@ LD.advance(live_rec, "main", 4000.0)
 check("11g advance: the notice stamps `main_at` and `last` and leaves the step where it is (the cold call and the builder stay reachable)", live_rec["main_at"] == 4000.0 and live_rec["last"] == 4000.0 and live_rec["step"] == 2, live_rec)
 check("11g action: …the next one is due `MAIN_EVERY` after the first, counted from `main_at`, not from every pass",
       bg(live_rec, "busy", 4000.0 + LD.MAIN_EVERY - 1, live=True) == "" and bg(live_rec, "busy", 4000.0 + LD.MAIN_EVERY, live=True) == "main" and LD.MAIN_EVERY == 4 * 3600.0, None)
+def bgf(rec, now, floor): return LD.action(rec, "busy", 1.0, floor, now, 10.0, 30.0, background=True, live=True)
+fresh_rec = {k: v for k, v in live_rec.items() if k != "main_at"}      # the same entry before its first notice to -main
+check("11g action: the repeat clock honors the floor: an item that reached its mover again 2 hours after the last notice is told again 4 hours after that, not 4 hours after the last notice",
+      live_rec["main_at"] == 4000.0 and bgf(live_rec, 4000.0 + LD.MAIN_EVERY, 4000.0 + 2 * H) == "" and bgf(live_rec, 4000.0 + 2 * H + LD.MAIN_EVERY - 1, 4000.0 + 2 * H) == ""
+      and bgf(live_rec, 4000.0 + 2 * H + LD.MAIN_EVERY, 4000.0 + 2 * H) == "main" and bgf(live_rec, 4000.0 + LD.MAIN_EVERY, 0.0) == "main", None)
+check("11g action: …and so does the first notice: it is due `minutes` after the later of the look and the floor",
+      fresh_rec["last"] == 4000.0 and bgf(fresh_rec, 4000.0 + 600, 5000.0) == "" and bgf(fresh_rec, 5000.0 + 599, 5000.0) == "" and bgf(fresh_rec, 5000.0 + 600, 5000.0) == "main" and bgf(fresh_rec, 4000.0 + 600, 0.0) == "main", None)
 check("11g action: …a pane that stops being live still reaches the cold call, counted from the last rung", bg(live_rec, "", 4000.0 + 600, live=False) == "cold" and bg({**live_rec, "step": 3}, "", 4000.0 + 600, live=False) == "builder", None)
 check("11g action: a mover that is not a background agent never gets 'main' (the pane rule stands)", LD.action(live_rec, "busy", 1.0, 0.0, 9e9, 10.0, 30.0, live=True) == "", None)
 
@@ -541,6 +548,9 @@ n_first = len(main_notices(9081))
 for off in (41 * MIN + 1 * H + 1, 41 * MIN + 2 * H, 41 * MIN + 3 * H, 41 * MIN + 4 * H - 60):
     stk(now0 + off)
 check("12 …a silent live mover's item: ONE notice to -main at the first due time, and none an hour, 2 hours or 3 hours 59 minutes after it (main_hours = 1 is not its interval)", n_first == 1 and len(main_notices(9081)) == 1, pushes_to("home-front", "a9081"))
+t9081 = main_notices(9081)[0][1] if main_notices(9081) else ""
+check("12 …and the notice says it comes again in 4 hours (the fixed interval), not in the 1 hour the config's main_hours says",
+      "it comes again in 4 hours while the item stays silent." in t9081 and "1 hour" not in t9081, t9081)
 stk(now0 + 41 * MIN + 4 * H)
 check("12 …and the next one goes 4 hours after the first, as ladder.MAIN_EVERY says (a fixed interval, no key)", len(main_notices(9081)) == 2 and LD.MAIN_EVERY == 4 * 3600.0 and not hasattr(server, "_ladder_main_hours")
       and "main_every" not in __import__("inspect").signature(LD.action).parameters, pushes_to("home-front", "a9081"))

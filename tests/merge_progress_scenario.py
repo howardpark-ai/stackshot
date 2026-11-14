@@ -287,6 +287,31 @@ check("a backlog line from 30 hours ago (the server was down) is not stamped on 
       saved == ["a222"] and "merged_seen" not in mt(221) and rd(221)["updated"] == now0 - 30 * MIN and server._merge_progress_offset() == ML.size(), (saved, server._merge_progress_offset(), ML.size()))
 close(221, 222)
 
+# the floor is the pass's own six hours and nothing else: a merge a little under it counts, one a little over it does not, whatever `[ladder] main_hours` (a retired key nothing reads) says
+FLOOR_H = 6 * H
+def floor_pass(label, n_young, n_old, items, ladder=None):
+    """One merge pass at `now0` over two lines: a merge 5 hours 50 minutes old and one 6 hours 10 minutes old, each for its own anchored item; `ladder` is the config's `[ladder]` table for the pass (None: none) → the ids saved."""
+    for i in items: fixture(i, project="projects/alpha")
+    (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/{n_young}", "items": [f"a{items[0]}"]}, {"url": f"{W_}/pull/{n_old}", "items": [f"a{items[1]}"]}]}))
+    ML.append(line(n_young, at=-(FLOOR_H - 10 * MIN))); ML.append(line(n_old, at=-(FLOOR_H + 10 * MIN)))
+    had = server._cfg.CFG.get("ladder")
+    if ladder is None: server._cfg.CFG.pop("ladder", None)
+    else: server._cfg.CFG["ladder"] = ladder
+    try: return merge_pass(now0)
+    finally:
+        if had is None: server._cfg.CFG.pop("ladder", None)
+        else: server._cfg.CFG["ladder"] = had
+        close(*items)
+saved = floor_pass("default", 80, 81, (223, 224))
+check("the floor is six hours: a merge 5 hours 50 minutes old is recorded, one 6 hours 10 minutes old is not (a floor of 5 hours drops the first, one of 6.9 or 8 hours records the second)",
+      saved == ["a223"] and "merged_seen" in mt(223) and "merged_seen" not in mt(224), (saved, mt(223).get("merged_seen"), mt(224).get("merged_seen")))
+saved = floor_pass("main_hours 1", 82, 83, (225, 226), {"enabled": True, "main_hours": 1})
+check("…with `[ladder] main_hours = 1` in the config the 5 hours 50 minute merge is still recorded (the floor is not main_hours plus two hours, which would be three)",
+      saved == ["a225"] and "merged_seen" in mt(225) and "merged_seen" not in mt(226), (saved, mt(225).get("merged_seen"), mt(226).get("merged_seen")))
+saved = floor_pass("main_hours 10", 84, 85, (227, 228), {"enabled": True, "main_hours": 10})
+check("…and with `main_hours = 10` the 6 hours 10 minute merge is still not recorded (it would be, with a floor of twelve)",
+      saved == ["a227"] and "merged_seen" in mt(227) and "merged_seen" not in mt(228), (saved, mt(227).get("merged_seen"), mt(228).get("merged_seen")))
+
 # which ids a body names: board#N, a temporary id, a legacy letter-and-number id and an item link, as a message's ids are read (code, quotes, glued ids and the queue's groups are not)
 TMP_ = "board" + "-tmp-box" + chr(35)      # a temporary id and an item link, built from pieces so no id-shaped or link-shaped text sits in the source
 HOST_ = "https" + ":" + "//host" + "/items/"
