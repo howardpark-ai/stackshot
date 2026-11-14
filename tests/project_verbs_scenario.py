@@ -7,7 +7,7 @@ first and the page mirror from it, the mirror's states (written, unchanged, woul
 later; a page edit to a mirrored line not read and the next mirror write restoring it; a project with no page (no page store call at all) and one whose pointer is a link elsewhere; a project with
 no entry yet getting one at its first verb, its pending agents folded in; a sub-page key refused by `create` and `move_page` and resolved to the top-level project by the others; rename
 keeping the id and the old name and key resolving; a failed page move changing nothing; a dry run writing nothing; concurrent writers leaving every change in the record and the page the record
-describes; the CLI (tools/project.py) in a subprocess on the same temporary config.
+describes; the CLI (stackshot/tools/project.py) in a child process on the same temporary config.
 
     tests/run-suite project_verbs        → exit 0 / 1"""
 import hashlib, json, logging, os, pathlib, re, shutil, subprocess, sys, threading
@@ -394,7 +394,7 @@ page("projects/kappa.md", "type: project\ntitle: Kappa\ndisplay-name: home-kappa
 def runner_stub_half(args):
     calls.append(args); ph, pair = args[0], args[1]; old, new = pair.split("=")
     if ph == "copy": shutil.copy(BRAIN / (old + ".md"), BRAIN / (new + ".md")); return 0, "copy ok"
-    return 1, f"stub {old} → {new}\n  FAIL project id of {old} not moved to {new} (boom); run: python3 projects.py rename {old} {new}"
+    return 1, f"stub {old} → {new}\n  FAIL project id of {old} not moved to {new} (boom); run: stackshot projects rename {old} {new}"
 calls.clear()
 res = pv.move_page("projects/kappa", "projects/kappa-new", runner=runner_stub_half, io=IO)
 check("move-page: a stub written but exiting 1 (the id move failed) is not an error: the record is made right, the answer carries a warning saying the page was stubbed",

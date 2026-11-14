@@ -1,5 +1,5 @@
 """anchor-hub — receive change events on a project's anchors and push a one-line notice into the sessions bound to them
-(the session-anchors PRD in the config repo). The hub is anchorhub/core.py; the receivers are anchorhub/{slack,gworkspace,notion,github}.py
+(the session-anchors PRD in the config repo). The hub is stackshot/anchors/anchorhub/core.py; the receivers are stackshot/anchors/anchorhub/{slack,gworkspace,notion,github}.py
 (one module each since an earlier change). Bindings come from the board store (board-data/anchors.json: a project's anchors →
 its name line (`display-name:`), which the router stands in for, + the movers of its open items in scope) plus extra.json in the hub's state dir. Delivery goes through push.py.
 

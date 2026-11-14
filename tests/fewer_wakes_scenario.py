@@ -133,7 +133,7 @@ DELIVERED = [          # every shape the review named, and the earlier asks: non
     "a1 approves the change", "approved and merged", "実装が終わり、確認が必要です", "配布の前に決定が必要です", "検討をお願いします", "ご意見をお願いします", "see https://x.example/y? for the log",
     "https://x.example/page?", "deploy broke the site; rolled back", "the deploy cost $40 and is live", "the suites failed on 010cc0d", "an error in the log; fixed in 010cc0d and live", "blocked on the runner; PR 18 is up",
     "is it live?", "needs: decision", "PR 18 is live. Please look at the page.", "can you look at the vendor thread", "Decide: ship or hold", "your call", "go ahead with the release",
-    "Options: A, B, C", "I recommend A", "Oliver should try a copy on box-c", "only Oliver can run this", "You, as a front agent, can run: python3 client.py x", "log in on box-c first",
+    "Options: A, B, C", "I recommend A", "Oliver should try a copy on box-c", "only Oliver can run this", "You, as a front agent, can run: python3 stackshot/fleet/client.py x", "log in on box-c first",
     "PR 18 is live. Merge it", "merged. The footer line stays.", "merged and the keeper has it", "merged; osprey-main has it", "merged, and I will deploy later", "merged, then deployed",
     "merged; `see the long note here and decide`", "merged\n```\ncode\n```", "PR 18 is live, the suites pass.\nWhat now",
     # reports of other shapes: each carries a plan, a wait or a need, or says something that is no status shape, so none is taken for one

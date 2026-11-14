@@ -492,7 +492,7 @@ import subprocess
 stale = T / "stale.toml"; stale.write_text(toml + "\n[runner]\nenabled = true\n", encoding="utf-8")
 cp = subprocess.run([sys.executable, "-I", f"{STACK}/stackshot/core/config.py", "check"], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)
 check("4 a file that still carries [runner] enabled = true loads and passes `config.py check`", cp.returncode == 0, (cp.returncode, cp.stdout[-300:], cp.stderr[-300:]))
-cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import config; print('\\n'.join(config.notes()))", STACK], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)
+cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config; print('\\n'.join(config.notes()))", STACK], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)
 check("4 …and its notes (the start, doctor, a reload) carry the one line about the retired key", cp.returncode == 0 and cp.stdout.count("[runner] enabled is retired") == 1, (cp.returncode, cp.stdout[-300:], cp.stderr[-300:]))
 
 # no tick twice: drive the runner for one round and count every clock

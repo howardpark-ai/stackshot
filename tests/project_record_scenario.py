@@ -65,7 +65,7 @@ st0 = (T / "store/project-record.json").stat().st_mtime_ns
 p.cmd_registry(quiet=True)
 check("a second registry build mints nothing: the same ids, the id file untouched", {k: e["id"] for k, e in reg().items()} == ids0 and (T / "store/project-record.json").stat().st_mtime_ns == st0)
 # a restart: a fresh interpreter on the same config finds the same ids
-code = f"import sys, json; sys.path.insert(0, {STACK!r}); import projects; print(json.dumps(projects.ensure_ids({sorted(ids0)!r} + ['projects/new-one'])))"
+code = f"import sys, json; sys.path.insert(0, {STACK!r}); from stackshot.projects import projects; print(json.dumps(projects.ensure_ids({sorted(ids0)!r} + ['projects/new-one'])))"
 r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=os.environ)
 out = json.loads(r.stdout) if r.returncode == 0 else {}
 check("a fresh process (a restart) reads the same ids, and mints one for a key it has not seen", r.returncode == 0 and all(out[k] == ids0[k] for k in ids0) and ID.match(out.get("projects/new-one", "")), (r.stdout, r.stderr[-300:]))
@@ -424,7 +424,7 @@ check("rename onto a key that already has its own id: the moved page keeps the o
 (T / "brain/projects/swap-old.md").unlink(); p.cmd_registry(quiet=True)
 check("…and the registry after the old page is gone: the new key is under the old id", reg()["projects/swap-new"]["id"] == so and "projects/swap-old" not in reg())
 r = subprocess.run([sys.executable, f"{STACK}/stackshot/projects/projects.py", "rename", "projects/swap-new", "projects/swap-final"], capture_output=True, text=True, env=os.environ)
-check("python3 projects.py rename <old> <new> moves the id (exit 0) and says so", r.returncode == 0 and so in r.stdout and idfile()["ids"][so] == "projects/swap-final", (r.stdout, r.stderr[-200:]))
+check("stackshot projects rename <old> <new> moves the id (exit 0) and says so", r.returncode == 0 and so in r.stdout and idfile()["ids"][so] == "projects/swap-final", (r.stdout, r.stderr[-200:]))
 r = subprocess.run([sys.executable, f"{STACK}/stackshot/projects/projects.py", "rename", "projects/no-such", "projects/x"], capture_output=True, text=True, env=os.environ)
 check("…and exits non-zero with the reason for a key with no id; a wrong usage prints the usage", r.returncode != 0 and "no project id" in r.stderr
       and subprocess.run([sys.executable, f"{STACK}/stackshot/projects/projects.py"], capture_output=True, text=True, env=os.environ).returncode != 0)

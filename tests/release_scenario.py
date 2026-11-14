@@ -1274,11 +1274,21 @@ def plan(*files):
     g("add", "-A", cwd=pbx); g("commit", "-qm", "change " + " ".join(files), cwd=pbx); g("push", "-q", "-f", "origin", "HEAD:main", cwd=pbx); g("reset", "-q", "--hard", pbase, cwd=pbx)
     r = subprocess.run(["bash", str(pbx / "deploy.sh"), "--dry-run"], cwd=pbx, env={**genv, "PATH": os.environ.get("PATH", "")}, capture_output=True, text=True, timeout=60)
     return r.returncode, [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("restarts:")], r.stdout + r.stderr
-for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), 2), ("uv.lock alone", ("uv.lock",), 2),
-                          ("stackshot/cli.py", ("stackshot/cli.py",), 2), ("an icon (the server only)", ("icons/a.png",), 1), ("a doc only", ("docs/notes.md",), 0)):
+S_, H_, P_ = "stackshot.service", "anchor-hub.service", "stackshot-puller.service"
+# the whole table of deploy.sh: what a change restarts, as the set of units (the server is always first when it is in the plan)
+for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), {S_, H_}), ("uv.lock alone", ("uv.lock",), {S_, H_}),
+                          ("stackshot/cli.py", ("stackshot/cli.py",), {S_, H_}), ("an icon (the server only)", ("icons/a.png",), {S_}), ("a doc only", ("docs/notes.md",), set()),
+                          ("stackshot/__init__.py: every program starts through it", ("stackshot/__init__.py",), {S_, H_, P_}), ("stackshot/__main__.py", ("stackshot/__main__.py",), {S_, H_, P_}),
+                          ("stackshot/paths.py", ("stackshot/paths.py",), {S_, H_, P_}), ("stackshot/core/config.py: the puller reads it too", ("stackshot/core/config.py",), {S_, H_, P_}),
+                          ("stackshot/fleet/puller.py: the puller only", ("stackshot/fleet/puller.py",), {P_}), ("stackshot/fleet/client.py: the puller only", ("stackshot/fleet/client.py",), {P_}),
+                          ("stackshot/fleet/push.py: the hub only", ("stackshot/fleet/push.py",), {H_}), ("push.py, the root forwarder: the hub only", ("push.py",), {H_}),
+                          ("config.py, the root forwarder: all three", ("config.py",), {S_, H_, P_}), ("pages.py, the root forwarder: the server", ("pages.py",), {S_}), ("stackshot/anchors/anchor_hub.py: the hub only", ("stackshot/anchors/anchor_hub.py",), {H_}),
+                          ("stackshot/anchors/anchors.py: the server and the hub", ("stackshot/anchors/anchors.py",), {S_, H_}), ("a module of the server (stackshot/web/server.py)", ("stackshot/web/server.py",), {S_}),
+                          ("a suite (tests/x_scenario.py)", ("tests/x_scenario.py",), set()), ("a module the server never runs (stackshot/projects/rename_page.py)", ("stackshot/projects/rename_page.py",), set()),
+                          ("units/anchor-hub.service.in: the hub only", ("units/anchor-hub.service.in",), {H_}), ("units/stackshot-puller.service.in: the puller only", ("units/stackshot-puller.service.in",), {P_})):
     rc, got, out = plan(*files)
     units = got[0].split()[1:] if got and got[0] != "restarts: none" else []
-    check(f"deploy.sh plan: {what} restarts {want} unit(s), the server first", rc == 0 and len(got) == 1 and len(units) == want and (not units or units[0] == "stackshot.service"), (rc, got, out[-300:]))
+    check(f"deploy.sh plan: {what} restarts exactly {sorted(want) or 'nothing'}, the server first", rc == 0 and len(got) == 1 and set(units) == want and len(units) == len(want) and (not units or S_ not in units or units[0] == S_), (rc, got, out[-300:]))
 
 long = [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 check(f"no scenario polls more than {MAX_POLLS} times (one that waits main's run out to the 3 h cap: pass RELEASE_CAP_MAIN, as most do)", not long, long)

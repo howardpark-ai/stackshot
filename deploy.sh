@@ -108,7 +108,7 @@ while IFS= read -r f; do
         units/stackshot.service.in|units/stackshot-reload.*|install.sh) server=1 ;;
         units/anchor-hub.service.in) hub=1 ;;
         units/stackshot-puller.service.in) puller=1 ;;
-        stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
+        push.py|stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;      # push.py at the root is a forwarder for older plugin copies
         stackshot/anchors/merge_log.py) server=1; hub=1 ;;      # the hub writes the merge log and the server reads it: both read the file at their start
         stackshot/anchors/event_log.py) server=1; hub=1 ;;      # the same for the event log (events.jsonl): the hub writes it, the server's last-activity pass reads it
         pyproject.toml|uv.lock) server=1; hub=1 ;;      # the units' pinned dependencies (uv run --project --locked): a new pin takes effect at the restart
@@ -118,7 +118,7 @@ while IFS= read -r f; do
         fonts/*) server=1 ;;             # the code font's ?v= is in the pages' stylesheet, read at the start (render.py font_href)
         shared/*) server=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (stackshot/web/ui/colortool.py)
         stackshot/fleet/puller.py|stackshot/fleet/client.py) puller=1 ;;
-        stackshot/core/config.py) server=1; hub=1; puller=1 ;;
+        config.py|stackshot/core/config.py) server=1; hub=1; puller=1 ;;      # config.py at the root is a forwarder for older plugin copies
         stackshot/core/retired_inputs.py) server=1; puller=1 ;;      # client.py imports it: the puller's source
         stackshot/__init__.py|stackshot/__main__.py|stackshot/paths.py) server=1; hub=1; puller=1 ;;      # every program finds the checkout's files through it
         stackshot/anchors/anchors.py|stackshot/projects/project_registry.py|stackshot/projects/projects.py|stackshot/fleet/fleet.py|stackshot/fleet/liveness.py|stackshot/router/routing.py|stackshot/fleet/inbox.py|stackshot/fleet/sessions_registry.py|stackshot/core/interp.py) server=1; hub=1 ;;
