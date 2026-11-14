@@ -715,7 +715,7 @@ for nm, pg in ALLPG.items():
           "header.top h1,header.top p.site{display:flex;align-items:center;min-height:var(--ico);padding-right:calc(24px + 2 * var(--ico))}" in sheet
           and "header.top .theme{position:absolute;top:12px;right:16px}header.top .pbtn{position:absolute;top:12px;right:calc(24px + var(--ico))}" in sheet)
     check(f"header: {nm} page: on a phone the buttons sit at the header's top padding, so they line up with the title row, and the connection notice keeps clear of them",
-          "header.top{position:relative;margin:0;padding:16px 0 0;border:0;box-shadow:none}header.top .theme{top:16px;right:0}header.top .pbtn{top:16px;right:calc(8px + var(--ico))}" in sheet
+          "header.top{position:relative;margin:0 0 32px;padding:16px 0 0;border:0;box-shadow:none}header.top .theme{top:16px;right:0}header.top .pbtn{top:16px;right:calc(8px + var(--ico))}" in sheet
           and ".conn{display:flex;align-items:center;gap:8px;margin:0 calc(24px + 2 * var(--ico, 32px)) 8px 0;" in sheet)
     check(f"header: {nm} page: the search box's input is as tall as its button (the row stretches; the input has a minimum, never a fixed height)",
           ".sbox{display:flex;align-items:stretch;" in sheet and re.search(r"\.sbox input\{[^}]*min-height:32px", sheet) is not None and re.search(r"\.sbox input\{[^}]*[^-]height:", sheet) is None, sheet[sheet.find(".sbox{"):sheet.find(".sbox{") + 300])
@@ -742,8 +742,21 @@ for nm, pg in ALLPG.items():
     sp = re.search(r"</header>\s*(<[^>]+>)", pg)
     check(f"title spacing: {nm} page: the page's title block (its h1; on a project page the small back link just above it, then the h1) follows the header directly and takes the 32 px margin above it that home has above its first section",
           bool(sp) and (sp.group(1) == "<h1>" or sp.group(1).startswith("<h1 ") or (sp.group(1) == '<p class="pjback">' and re.match(r'</header>\s*<p class="pjback"><a [^>]*>[^<]*</a></p>\s*<h1[ >]', pg[sp.start():]) is not None)), sp.group(1) if sp else None)
-check("title spacing: the margin is one rule for every non-home page (item, project, Projects, Closed, Search, runners), stronger than the item page's own h1 margin (6px 0 8px), and home's section margin it copies is 32 px",
-      "main header.top+h1,main header.top+p.pjback{margin-top:32px}" in _sheet and "main.itempage h1{font-size:22px;line-height:1.3;margin:6px 0 8px}" in "".join(re.findall(r"<style>(.*?)</style>", ALLPG["item"], re.S)) and re.search(r"(?:^|[};])h2\{[^}]*;margin:32px 0 12px;", _sheet) is not None, "")
+check("title spacing: the gap under the header is one rule, the header's own bottom margin (32 px), for every page; the item page's own h1 margin (6px 0 8px) is smaller, so it collapses into the gap and never adds to it, and home's section margin it matches is 32 px",
+      re.search(r"(?:^|[};\s])header\.top\{[^}]*margin:0 -16px 32px;", _sheet) is not None and "main.itempage h1{font-size:22px;line-height:1.3;margin:6px 0 8px}" in "".join(re.findall(r"<style>(.*?)</style>", ALLPG["item"], re.S)) and re.search(r"(?:^|[};])h2\{[^}]*;margin:32px 0 12px;", _sheet) is not None, "")
+# ---- the gap under the header is set once, on the header: every page kind the UI draws (the pages above, the Audits page and the probe page too) has no rule that keys on the element under the header
+# (`header.top + x`): a page with no such rule of its own had no gap (the Audits page did not). The gap is the header's bottom margin, on the desktop and on the phone; the browser check
+# (tests/hcard_height_check.py) measures it on every page kind
+GAP_PAGES = dict(ALLPG); GAP_PAGES["Audits"] = Bd().audits_html(); GAP_PAGES["Probe"] = Bd().probe_html()
+check("header gap: the page kinds checked are home, item, project, Projects, Closed (two pages), Search (two kinds), runners, Audits and the probe page", len(GAP_PAGES) == len(ALLPG) + 2 and {"home", "item", "project", "Projects", "Closed", "Search", "runners", "Audits", "Probe"} <= set(GAP_PAGES), sorted(GAP_PAGES))
+for nm, pg in GAP_PAGES.items():
+    sh = re.sub(r"/\*.*?\*/", "", "".join(re.findall(r"<style>(.*?)</style>", pg, re.S)), flags=re.S)
+    check(f"header gap: {nm} page: no CSS rule keys on the element under the header (no `header.top + x` or `header.top ~ x`, spaced or not): the gap is not a page's own rule", re.search(r"header(?:\.top)?\s*[+~]", sh) is None, re.findall(r"[^{}]*header(?:\.top)?\s*[+~][^{}]*", sh)[:3])
+    check(f"header gap: {nm} page: the 32 px gap is set on header.top itself (the desktop rule's bottom margin)", re.search(r"(?:^|[};\s])header\.top\{position:sticky;[^}]*;margin:0 -16px 32px;", sh) is not None, sh[sh.find("header.top{position:sticky"):][:200])
+    check(f"header gap: {nm} page: on a phone the header keeps its own margin and padding (none at the sides, 16 px above) and has the same 32 px gap below, set on header.top",
+          "@media(max-width:600px){" in sh and "header.top{position:relative;margin:0 0 32px;padding:16px 0 0;border:0;box-shadow:none}" in sh, "")
+    below = re.search(r"</header>\s*<([a-z0-9]+)", pg)
+    check(f"header gap: {nm} page: the element under the header is a block (h1, p, div, section or details), so its small top margin collapses into the header's gap", bool(below) and below.group(1) in ("h1", "p", "div", "section", "details"), below.group(0) if below else None)
 hc = header_of(ALLPG["home"])
 check("header: home's cards keep their own #anchors and the click that filters in place", [c[0] for c in HOME_CARDS] == ["#" + x[0] for x in LISTS] + ["/closed"]
       and "a.hcard[href^=\"#\"]" in ALLPG["home"] and "go(location.hash,false)" in ALLPG["home"] and "go(h,true)" in ALLPG["home"], [c[0] for c in HOME_CARDS])

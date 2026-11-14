@@ -462,10 +462,10 @@ check("gone: the Task board and Completed folds are not on the home page (the Pr
 _hc_ = render.Board(str(T / "store"), now=NOW)._css()
 _ul = lambda sid: re.search(r'<ul class="([^"]*)">', section(sid)).group(1)
 check("the three lists are the one row list (ir-rows)", _ul("your-move") == "ir-rows" and _ul("agents-at-work") == "ir-rows" and _ul("waiting-list") == "ir-rows", [_ul(s) for s in ("your-move", "agents-at-work", "waiting-list")])
-check("the count cards stay on one row down to the phone breakpoint (five columns that shrink: minmax(0, ...), never auto-fit), wrapping only at 480 px and under; the Sent notice under the header has the sections' 32 px gap above it",
+check("the count cards stay on one row down to the phone breakpoint (five columns that shrink: minmax(0, ...), never auto-fit), wrapping only at 480 px and under; the Sent notice under the header has the sections' 32 px gap above it (the gap is the header's own bottom margin, one rule for every page)",
       "nav.hcards{display:grid;grid-template-columns:repeat(5,minmax(0,148px))" in _hc_ and "@media(max-width:600px){nav.hcards{grid-template-columns:repeat(5,minmax(0,1fr))" in _hc_
       and "@media(max-width:480px){nav.hcards{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}}" in _hc_ and "minmax(104px,148px)" not in _hc_
-      and "header.top+.isent{margin-top:32px}" in _hc_ and re.search(r"\}h2\{[^}]*margin:32px 0 12px", _hc_), None)
+      and re.search(r"(?:^|[};\s])header\.top\{[^}]*margin:0 -16px 32px;", _hc_) and re.search(r"header\.top\s*[+~]", _hc_) is None and re.search(r"\}h2\{[^}]*margin:32px 0 12px", _hc_), None)
 # ---- the blocks the in-place update swaps ----
 bl = re.search(r'name="stackshot-blocks" content="([^"]*)"', h).group(1)
 check("blocks: the live set is counts, status, the four lists, machines, runners, anchorhub, audit-panel, projects-panel (in page order)", [x.split("=")[0] for x in bl.split()] == ["counts", "status", "your-move", "agents-at-work", "queued-release", "waiting-list", "machines", "runners", "anchorhub", "audit-panel", "projects-panel"], bl)
