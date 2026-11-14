@@ -45,7 +45,7 @@ def rd(g):
     return json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 def ct(g):
     c = rd(g)["metadata"].get("contact")
-    return server._session_label(c) if c else ""
+    return _fleet_sessions_registry._session_label(c) if c else ""
 def bytes_of(g): return (T / f"store/a/{str(g)[1:]}.json").read_bytes()
 now0 = time.time()
 def put(i, status="open", **meta):
@@ -53,6 +53,11 @@ def put(i, status="open", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server; from stackshot.service import projects as _psvc
+from stackshot.core import instance as _core_instance
+from stackshot.github import ghsync as _gh
+from stackshot.core import config as _cfg
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
@@ -61,13 +66,13 @@ from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-sh = server._gh.shown
+sh = _gh.shown
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 told = []                                              # every notice the server would send: recorded, never sent
 telling.tell_woken = lambda *a, **k: told.append((a, k))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 
 def refusal(fn):
     try:
@@ -202,7 +207,7 @@ class PageIO:
 DELTA_PAGE = (f"---\ntype: project\ntitle: Delta\norg: home\ndisplay-name: home-delta\nagents:\n  {MAIN}: talks to the owner about the delta project\n  {SIDE}: answers questions at the side desk\n"
               f"  background:\n    {BUILD}: builds it\n    {REVIEW}: reviews it\nstatus: active\n---\n# Delta\n")
 _psvc.PAGE_IO = PageIO({"projects/delta": DELTA_PAGE})
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 for p_ in (T / "store").glob("?/*.json"): p_.unlink()
 put(50, contact=SIDE); put(51, contact=SIDE, project="projects/delta/sub"); put(52, contact=MAIN); put(53, status="completed", contact=SIDE, outcome="done", reason="done")
 told.clear()
@@ -227,7 +232,7 @@ put(16)
 check("get: an item with no stored contact shows the project's -main agent", f"contact: {MAIN}" in _wt_get.stackshot_get(item_id="a16"))
 put(17, status="completed", contact=SIDE, outcome="done", reason="done")
 check("get: a closed item shows the contact it had", f"contact: {SIDE}" in _wt_get.stackshot_get(item_id="a17"))
-check("brief: the line is left out (the brief loads into every session)", "contact:" not in server._fmt(server._load("a15"), brief=True))
+check("brief: the line is left out (the brief loads into every session)", "contact:" not in server._fmt(_service_store._load("a15"), brief=True))
 st, _t, body = server._client_item_facts("some-session", "a15,a17")
 facts = json.loads(body)["items"]
 check("client JSON: item-facts carries the contact", st == 200 and facts["a15"]["contact"] == MAIN and facts["a17"]["contact"] == SIDE, facts)
@@ -261,7 +266,7 @@ check("backfill: a second run writes nothing", out["written"] == 0 and all(bytes
 from stackshot.web.ui import render as r2
 for p in (T / "store").glob("?/*.json"): p.unlink()
 put(30, contact=SIDE); put(31); put(32, contact="home-delta-gone"); put(33, status="completed", contact=SIDE, outcome="done", reason="done")
-server._cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"; server._cfg.CFG.setdefault("fleet", {})["tool_name"] = "sala"
+_cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"; _cfg.CFG.setdefault("fleet", {})["tool_name"] = "sala"
 def side_of(h): return h.split('<aside class="iside"', 1)[1].split("</aside>", 1)[0]
 def board(): return r2.Board(str(T / "store"))
 def dts_of(h): return [re.sub(r"<[^>]+>", "", d) for d in re.findall(r"<dt>(.*?)</dt>", side_of(h))]
@@ -279,9 +284,9 @@ s32 = side_of(board().item_html("a32", answer=None, watch=None, contact=MAIN))
 check("item page: the contact the server passes (the derived one) is the row's value", f"#s={MAIN}" in s32 and "home-delta-gone" not in s32, s32[:500])
 check("item page: an empty contact from the server (nobody to name) draws no row", "Owner" not in side_of(board().item_html("a32", answer=None, watch=None, contact="")))
 check("item page: a closed item shows the contact it had", f"#s={SIDE}" in side_of(board().item_html("a33", answer=None, watch=None)))
-server._cfg.CFG["client"]["session_view"] = ""
+_cfg.CFG["client"]["session_view"] = ""
 check("item page: with no fleet tool set the name is plain text", f">{SIDE}</dd>" in side_of(board().item_html("a30", answer=None, watch=None)) and "#s=" not in side_of(board().item_html("a30", answer=None, watch=None)))
-server._cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"
+_cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"
 g_ = board().item_html("a30", answer=None, watch=None, contact="home-delta-nopane")
 check("item page: a contact whose session has no live pane is plain text, as every session on the page (no link)", "<dd>home-delta-nopane</dd>" in side_of(g_) and "#s=home-delta-nopane" not in g_, side_of(g_)[:400])
 # the routes: the item page through the server, whichever renderer draws it
@@ -291,7 +296,7 @@ with TestClient(server.mcp.http_app(), base_url="http://localhost") as c:
     check("route: /items/<n> answers 200 with the Owner row, the derived contact (a stored one that is no front agent any more reads as the project's -main agent)",
           ra32.status_code == 200 and dts_of(ra32.text)[:3] == ["Mover", "Owner", "Creator"] and f"#s={MAIN}" in side_of(ra32.text) and "home-delta-gone" not in side_of(ra32.text), (ra32.status_code, dts_of(ra32.text)[:3]))
     check("route: an item with no contact (a31 stores none; its project has a -main agent) shows the -main agent as its Owner", ra31.status_code == 200 and f"#s={MAIN}" in side_of(ra31.text), ra31.status_code)
-server._cfg.CFG["client"]["session_view"] = ""; server._cfg.CFG["fleet"]["tool_name"] = ""
+_cfg.CFG["client"]["session_view"] = ""; _cfg.CFG["fleet"]["tool_name"] = ""
 
 # ---- the tool text says it
 snap_s = json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8")))

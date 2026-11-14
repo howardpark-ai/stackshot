@@ -64,6 +64,9 @@ def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model_guards as mg
+from stackshot.router import router_live as _router_live
+from stackshot.router import routing as _routing
+from stackshot.model import model as _model
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import complete as _wt_complete
@@ -77,7 +80,7 @@ told: list[tuple[str, str, str, str]] = []           # every notice the server s
 telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
 def close_told(since=0): return [t for t in told[since:] if t[3] == "close"]
 def upd(i, **kw): return server._update(f"board#{i}", sender="home-front", **kw)
-OWN = server._model.owner_display()
+OWN = _model.owner_display()
 ZONE_HOURS = 4                                  # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * DAY + ZONE_HOURS * 3600))
 FRONT, PEER, OTHER, BACK = U["home-front"], U["home-peer"], U["home-other"], U["team-back"]
@@ -281,15 +284,15 @@ check("2 close: …and the reply counts all 20", "20 other open items name board
 # the router's path (as _wake_tell): where the router holds the project for the recipient, the notice is recorded for it and not sent
 item(65, subject="[home] closes with the router live"); item(30, needs=[PEER], mover="home-peer", subject="[home] named, router holds", next="home-peer: use board#65's output", owner=U["home-other"])
 rec, stash_ = [], []
-real = (server._router_live.holds, server._routing.record, server._router_live.stash)
-server._router_live.holds = lambda project, sid, stand_in_too=False: sid == PEER
-server._routing.record = lambda project, **kw: (rec.append((project, kw)), "nid_a")[1]
-server._router_live.stash = lambda nid, body: stash_.append((nid, body))
+real = (_router_live.holds, _routing.record, _router_live.stash)
+_router_live.holds = lambda project, sid, stand_in_too=False: sid == PEER
+_routing.record = lambda project, **kw: (rec.append((project, kw)), "nid_a")[1]
+_router_live.stash = lambda nid, body: stash_.append((nid, body))
 n8 = len(told)
 try:
     _wt_complete.stackshot_complete("board#65", outcome="done", reason="finished", description=NEW, sender="home-front")
 finally:
-    server._router_live.holds, server._routing.record, server._router_live.stash = real
+    _router_live.holds, _routing.record, _router_live.stash = real
 mine = [r for r in rec if r[1].get("label") == "close board#65"]
 check("2 close: a recipient the router holds the project for gets the notice through the routing log, and no message", close_told(n8) == [] and len(mine) == 1 and mine[0][1].get("live") is True
       and mine[0][1].get("pilot") is True and "board#30" in mine[0][1].get("text", ""), (close_told(n8), rec))

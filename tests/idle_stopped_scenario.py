@@ -63,6 +63,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 from stackshot.web.tools import anchors as _wt_anchors
@@ -81,10 +82,10 @@ check("…a tail with no turn in it: nothing known", server._pane_stuck(U["home-
 (TR / f"{U['home-far']}.jsonl").unlink()
 got = []
 for op in ("home-stew", "home-crew", ""):
-    server._cfg.CFG.setdefault("fleet", {})["operator_session"] = op; got.append(fleetev.fleet_builder())
+    _cfg.CFG.setdefault("fleet", {})["operator_session"] = op; got.append(fleetev.fleet_builder())
 check("the notice of a stopped pane goes to the fleet's builder, [fleet] operator_session; with none set, nobody; there is no [idle] stuck_to",
-      got == ["home-stew", "home-crew", ""] and not hasattr(server, "_stuck_to") and "stuck_to" not in (server._cfg.CFG.get("idle") or {}), got)
-server._cfg.CFG["fleet"]["operator_session"] = "home-stew"
+      got == ["home-stew", "home-crew", ""] and not hasattr(server, "_stuck_to") and "stuck_to" not in (_cfg.CFG.get("idle") or {}), got)
+_cfg.CFG["fleet"]["operator_session"] = "home-stew"
 
 # ---- 0b. a pane on another machine: no transcript here, so its puller (version 7) reads it there and reports `stopped` on the session's record
 check("a pane with no transcript on this box and a running record that carries `stopped` (its puller's report) reads as stopped, with that reason; a gone record, or none, does not",

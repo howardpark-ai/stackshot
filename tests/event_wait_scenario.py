@@ -65,6 +65,9 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.core import config as _cfg
+from stackshot.service import store as _service_store
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc, released_live as rlive_svc
@@ -83,7 +86,7 @@ ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no dayligh
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 BACK, FRONT = "team-back", "home-front"
 UB = U["team-back"]
-CFG = server._cfg.CFG.setdefault("model", {})
+CFG = _cfg.CFG.setdefault("model", {})
 def cfg(**kw):
     for k, v in kw.items(): CFG[k] = v
 cfg(guards=False, watchers=True, pause=False)
@@ -183,7 +186,7 @@ try:
                                  wait_kind="event", wait_event="recycle testbox", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-1")
 except Exception as e:
     out = f"ERR {e}"
-check("create: an item can be filed already waiting on an event, its phrase canonical and the reply saying what is watched", g and server._load(g)["metadata"].get("wait_kind") == "event" and server._load(g)["metadata"].get("wait_event") == "recycle testbox" and "event wait:" in out, out[-400:])
+check("create: an item can be filed already waiting on an event, its phrase canonical and the reply saying what is watched", g and _service_store._load(g)["metadata"].get("wait_kind") == "event" and _service_store._load(g)["metadata"].get("wait_event") == "recycle testbox" and "event wait:" in out, out[-400:])
 refused("create: …and a create for an event that already happened is refused", lambda: create_svc.create_item(subject="[home] filed waiting on a live PR", description=DESC, project="projects/alpha", owner=U["home-front"],
         next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event="pr_released 9", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-2"), "already merged and live")
 rlive_svc.merged_prs = lambda head, limit=3000: {}
@@ -247,20 +250,20 @@ with TestClient(server.mcp.http_app()) as c:
     res = c.post("/client/event", json={"kind": "fleet_op", "verb": "update", "sessions": 1}, headers=h)
     check("route: a fleet op over one session does not end a `many` wait", res.status_code == 200 and res.json()["woken"] == [] and mt(32).get("wait_kind") == "event", (res.status_code, res.text))
     res = c.post("/client/event", json={"kind": "fleet_op", "verb": "update", "sessions": 6, "text": "sala update finished on 6 sessions"}, headers=h)
-    check("route: …one over six sessions does, and the item's mover is told what the report said", res.status_code == 200 and res.json()["woken"] == [server._gh.shown("a32")] and mt(32).get("mover") == BACK
+    check("route: …one over six sessions does, and the item's mover is told what the report said", res.status_code == 200 and res.json()["woken"] == [_gh.shown("a32")] and mt(32).get("mover") == BACK
           and "sala update finished on 6 sessions" in mt(32)["woke"]["what"], (res.status_code, res.text, mt(32)))
     item(35, wait_kind="event", wait_event="job_run nightly", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a job")
     res = c.post("/client/event", json={"kind": "job_run", "name": "weekly"}, headers=h)
     check("route: another job's run does not end it", res.status_code == 200 and res.json()["woken"] == [] and mt(35).get("wait_kind") == "event", res.text)
     res = c.post("/client/event", json={"kind": "job_run", "name": "nightly"}, headers=h)
-    check("route: …its own run does", res.status_code == 200 and res.json()["woken"] == [server._gh.shown("a35")] and mt(35).get("mover") == BACK, res.text)
+    check("route: …its own run does", res.status_code == 200 and res.json()["woken"] == [_gh.shown("a35")] and mt(35).get("mover") == BACK, res.text)
     # a provision op over four sessions, as the fleet tool reports the end of every op
     item(80, wait_kind="event", wait_event="fleet_op provision", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a provision wait")
     item(81, wait_kind="event", wait_event="fleet_op many", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a many wait")
     item(82, wait_kind="event", wait_event="fleet_op lane", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a lane wait")
     res = c.post("/client/event", json={"kind": "fleet_op", "verb": "provision", "sessions": 4, "result": "ok", "text": "provision finished on 4 sessions"}, headers=h)
     check("route: a provision op over four sessions wakes the `fleet_op provision` wait and the `fleet_op many` wait, not the lane wait, and both are told what the report said",
-          res.status_code == 200 and sorted(res.json()["woken"]) == sorted(server._gh.shown(g) for g in ("a80", "a81")) and mt(80).get("mover") == BACK and mt(81).get("mover") == BACK
+          res.status_code == 200 and sorted(res.json()["woken"]) == sorted(_gh.shown(g) for g in ("a80", "a81")) and mt(80).get("mover") == BACK and mt(81).get("mover") == BACK
           and mt(82).get("wait_kind") == "event" and "provision finished on 4 sessions" in mt(81)["woke"]["what"], (res.status_code, res.text, mt(80), mt(81)))
     for body, want in (({"kind": "fleet_op"}, "names the op"), ({"kind": "bogus"}, "kind is one of"), ({"kind": "pr_released"}, "kind is one of")):
         res = c.post("/client/event", json=body, headers=h)
@@ -269,7 +272,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("route: no token, no write", res.status_code == 401, res.text)
     item(9154, wait_kind="event", wait_event="recycle testbox", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] this machine's recycle")
     res = c.post("/client/event", json={"kind": "recycle"}, headers=h)
-    check("route: a report names no machine: the token's machine is used", res.status_code == 200 and "a9154" in str(res.json()["woken"]) or res.json()["woken"] == [server._gh.shown("a9154")], res.text)
+    check("route: a report names no machine: the token's machine is used", res.status_code == 200 and "a9154" in str(res.json()["woken"]) or res.json()["woken"] == [_gh.shown("a9154")], res.text)
 
 # ================================================================ the backstop
 item(40, wait_kind="event", wait_event="fleet_op many", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] the event never came")
@@ -288,7 +291,7 @@ check("recycle-wanted: an item that asks for a recycle is counted, an event wait
       "a51" in wanted and "a50" in wanted and "a52" not in wanted, wanted)
 
 # ================================================================ the display
-server._cfg.CFG.setdefault("model", {})["watchers"] = True
+_cfg.CFG.setdefault("model", {})["watchers"] = True
 html = render.Board().item_html("a1") if hasattr(render, "Board") and False else ""
 home = server._fmt({**rd(1), "gid": "a1"})
 check("get: the model line says what the item waits on", "PR #7 live" in home or "fleet event" in home or "event" in home, home[:600])
@@ -490,7 +493,7 @@ rlive_svc.merged_prs, rlive_svc.git_commit = REAL_MERGED_PRS, REAL_GIT_COMMIT; r
 def wgate(phrase): return server._evwait_gate({}, {"wait_kind": "event", "wait_event": phrase, "ask_by": day(5)}, creating=True)
 refused("foreign: with no [released.repos] a pr_released for a sibling repository is refused as before, and the refusal says none is configured",
         lambda: wgate(f"pr_released {SIB}#8"), "pr_released is release.sh's event", "none is configured", f"pr_merged {SIB}#8")
-server._cfg.CFG["released"] = {"repos": {SIB: {"checkout": str(SC)}}}
+_cfg.CFG["released"] = {"repos": {SIB: {"checkout": str(SC)}}}
 try:
     check("foreign: a configured repository's PR that is not live yet is a wait the server stores (the reply says what is watched)", "event wait: the server watches for" in wgate(f"pr_released {SIB}#8"), wgate(f"pr_released {SIB}#8"))
     refused("foreign: …one already live (its merge is in the checkout's HEAD) is refused, as for this repository", lambda: wgate(f"pr_released {SIB}#7"), "already merged and live")
@@ -504,13 +507,13 @@ try:
     sg("merge", "-q", "--ff-only", "pending")      # the sibling's deploy: its checkout moves to the branch that holds #8
     fired = evwaits_svc.evwait_poll(now0 + 460)
     check("foreign poll: after the checkout moves, the PR that was not live turns its wait", "a90" in fired and mt(90).get("mover") == BACK, (fired, mt(90)))
-    server._cfg.CFG["released"] = {"repos": {SIB: {"checkout": "relative/path"}, "not a repo name": {"checkout": str(SC)}, "x/y": "no table"}}
-    check("foreign: an entry without an absolute checkout, a key that is no owner/repo and a value that is no table are all ignored, and said", server._cfg.released_repos() == {}
-          and len(server._cfg.released_notes()) == 3, (server._cfg.released_repos(), server._cfg.released_notes()))
-    server._cfg.CFG["released"] = {"repos": {SIB.upper(): {"checkout": "~/sib-checkout"}}}
-    check("foreign: names are lower-cased and ~ is expanded", server._cfg.released_repos() == {SIB: pathlib.Path(os.path.expanduser("~/sib-checkout"))} and server._cfg.released_notes() == [], server._cfg.released_repos())
+    _cfg.CFG["released"] = {"repos": {SIB: {"checkout": "relative/path"}, "not a repo name": {"checkout": str(SC)}, "x/y": "no table"}}
+    check("foreign: an entry without an absolute checkout, a key that is no owner/repo and a value that is no table are all ignored, and said", _cfg.released_repos() == {}
+          and len(_cfg.released_notes()) == 3, (_cfg.released_repos(), _cfg.released_notes()))
+    _cfg.CFG["released"] = {"repos": {SIB.upper(): {"checkout": "~/sib-checkout"}}}
+    check("foreign: names are lower-cased and ~ is expanded", _cfg.released_repos() == {SIB: pathlib.Path(os.path.expanduser("~/sib-checkout"))} and _cfg.released_notes() == [], _cfg.released_repos())
 finally:
-    server._cfg.CFG.pop("released", None)
+    _cfg.CFG.pop("released", None)
     rlive_svc.merged_prs, rlive_svc.git_commit = (lambda head, limit=3000: {}), (lambda ref: "f" * 40 if ref else "")
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

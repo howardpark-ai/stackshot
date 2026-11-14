@@ -63,6 +63,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import brief as _wt_brief
@@ -96,7 +97,7 @@ def refused_nw(name, i, f, *want):
 get = lambda i: _wt_get.stackshot_get(f"a{i}")
 ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 ASK2 = "Decide: ship the thing next week · Recommend: yes · Stakes: two weeks of delay · By: no date"
-TODAY_D = server._pages.zone_now().date()
+TODAY_D = pg.zone_now().date()
 NOTE3 = "note: next names Oliver but the state is {s}: pass step=… (or needs=decision with an ask)"
 
 # ================================================================ 3. Oliver's step hidden under the agent
@@ -348,7 +349,7 @@ item(70, needs=["decision"], ask=ASK)
 check("6: (setup) Oliver answers on the board: decision out of needs, ask dropped, the ask he answered kept with his answer", server._answer("a70", "", "ship it", "answer") == "decision"
       and "decision" not in mt(70).get("needs", []) and "ask" not in mt(70) and mt(70)["answers"][-1].get("ask") == ASK, mt(70))
 refused_nw("6: needs=decision back with the same ask within the hour is refused, with why and how to go on", 70, lambda: upd(70, needs=["decision"], ask=ASK),
-           "answered board#70" if server._gh.shown("a70") == "board#70" else "answered ", "min ago", "one ask per decision", "pass the new ask line in this same write")
+           "answered board#70" if _gh.shown("a70") == "board#70" else "answered ", "min ago", "one ask per decision", "pass the new ask line in this same write")
 refused_nw("6: …with no ask in the write at all", 70, lambda: upd(70, needs=["decision"]), "one ask per decision")
 upd(70, needs=["decision"], ask=ASK2)
 check("6: a changed ask line passes", mt(70)["needs"] == ["decision"] and mt(70)["ask"] == ASK2, mt(70))

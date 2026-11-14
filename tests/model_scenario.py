@@ -62,6 +62,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
+from stackshot.service import store as _service_store
+from stackshot.anchors import anchors as _anc
+from stackshot.core import instance as _core_instance
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -228,7 +232,7 @@ m = mt(1)
 check("update: a relay wait is stored (kind, event, ask-by day, post-wake mover), and mover=none drops the mover", m["wait_kind"] == "relay" and m["wait_event"] == "Robin's reply on the contract" and ab_(m) == FUT and m["post_wake_mover"] == "home-front" and "mover" not in m, m)
 check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; until {FUT}) · mover home-front" in _wt_get.stackshot_get("a1"), _wt_get.stackshot_get("a1"))
 check("update: …the brief carries the model line of the item too", "model: waiting on news only" in _wt_brief.stackshot_brief() and "model: alive · mover team-back" in _wt_brief.stackshot_brief(), None)
-server._anc.save({"projects/alpha": [{"url": "https://example.org/pull/7", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
+_anc.save({"projects/alpha": [{"url": "https://example.org/pull/7", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
 out = upd(1, wait_kind="anchor", wait_anchor="https://example.org/pull/7", wait_event="merged", wake=FUT)
 m = mt(1)
 check("update: the kind can change; the old inputs stay stored until cleared, the new ones are read", m["wait_kind"] == "anchor" and m["wait_anchor"] == "https://example.org/pull/7" and "model: waiting on an anchor (https://example.org/pull/7: merged; until" in out, out)
@@ -270,7 +274,7 @@ server._update("a20", sender="home-other", next="home-other: do the thing")
 check("filing: ...the control: a plain write of next by that background agent does name it", len(mt(20)["needs"]) == 2, mt(20))
 # a done-check close drops what a session's close drops
 item(21, needs=[BACK], subject="[home] check close", goal="Closed by its check", mover="team-back", then="home-front", wait_kind="anchor", wait_anchor="https://x/pull/1", wait_event="merged", ask_by=FUT, post_wake_mover="team-back", check="item_closed a3")
-checks_svc.check_close("a21", server._load("a21"), "item_closed a3", time.time())
+checks_svc.check_close("a21", _service_store._load("a21"), "item_closed a3", time.time())
 m = mt(21)
 check("check close: the mover, then and the wait are dropped, the goal stays, the item is closed", rd(21)["status"] == "completed" and m["goal"] == "Closed by its check" and not any(k in m for k in model.DROP_ON_CLOSE) and m["outcome"] == "done", (rd(21)["status"], m))
 check("check close: ...the check close is a server save: the last real writer stays and nothing is added", "written_by_server" not in rd(21), rd(21))
@@ -302,28 +306,28 @@ server._update("a10", sender="home-other", next="team-back: look at it again")
 check("author: …the next writer replaces the last in the file (the store's history keeps each revision's)", wb(10) == ("home-other", U["home-other"]), wb(10))
 _wt_complete.stackshot_confirm("a10", sender="team-back")
 check("author: a confirm records its sender", wb(10) == ("team-back", U["team-back"]), wb(10))
-it_ = server._load("a10"); writes.save("a10", it_)
-before_srv = raw(10); it_ = server._load("a10"); writes.save("a10", it_)
+it_ = _service_store._load("a10"); writes.save("a10", it_)
+before_srv = raw(10); it_ = _service_store._load("a10"); writes.save("a10", it_)
 check("author: a server act (no writer) leaves the item byte for byte as it was: the last real writer stays", wb(10) == ("team-back", U["team-back"]) and raw(10) == before_srv and "written_by_server" not in rd(10), rd(10))
-it_ = server._load("a10"); writes.save("a10", it_)
-it_ = server._load("a10"); writes.save("a10", it_)
+it_ = _service_store._load("a10"); writes.save("a10", it_)
+it_ = _service_store._load("a10"); writes.save("a10", it_)
 check("author: ...a second server save changes nothing either", raw(10) == before_srv, rd(10))
 server._update("a10", sender="home-front", next="team-back: after a server act")
 server._update("a10", sender="home-front", next="team-back: after a server act")
 check("author: ...the next real write names its writer", wb(10) == ("home-front", U["home-front"]), rd(10))
-item(11, needs=[BACK], subject="[home] never written by a session"); writes.save("a11", server._load("a11"))
-item(11, needs=[BACK], subject="[home] never written by a session"); before11 = raw(11); writes.save("a11", server._load("a11"))
+item(11, needs=[BACK], subject="[home] never written by a session"); writes.save("a11", _service_store._load("a11"))
+item(11, needs=[BACK], subject="[home] never written by a session"); before11 = raw(11); writes.save("a11", _service_store._load("a11"))
 check("author: a server save of an item no session wrote adds nothing: no writer, the file as it was (but for the activity clock an item from before that field gains at its first save, seeded with its last update: activity.py, and the stored phase every save of an open item writes)",
       {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in rd(11).items() if k not in ("activity",)} == json.loads(before11) and rd(11).get("written_by") is None
       and rd(11).get("activity") == max(json.loads(before11)["updated"], json.loads(before11)["state_updated"]), rd(11))
-it_ = server._load("a10"); writes.save("a10", it_, note="answered", author=(server.OWNER, "board"))
-check("author: the owner's answer on the board records his name and `board`", wb(10) == (server.OWNER, "board"), wb(10))
+it_ = _service_store._load("a10"); writes.save("a10", it_, note="answered", author=(_core_instance.OWNER, "board"))
+check("author: the owner's answer on the board records his name and `board`", wb(10) == (_core_instance.OWNER, "board"), wb(10))
 server._update("a10", sender="home-front", status="completed", outcome="done", reason="finished", description="- Goal: The thing is done and closed")
 check("author: a close records its writer", wb(10) == ("home-front", U["home-front"]), wb(10))
 check("author: a create records the owner (the writer of a create)", rd(cid, "s").get("written_by") == "home-front" and rd(cid, "s").get("written_by_id") == U["home-front"], rd(cid, "s"))
-it_ = server._load("a10"); it_["written_by"] = "someone else"; writes.save("a10", it_, writer=U["home-other"])
+it_ = _service_store._load("a10"); it_["written_by"] = "someone else"; writes.save("a10", it_, writer=U["home-other"])
 check("author: the field is the save's own: a value carried in on the item is overwritten", wb(10) == ("home-other", U["home-other"]), wb(10))
-it_ = server._load("a10"); writes.save("a10", it_, writer="a script label (a script on box)")
+it_ = _service_store._load("a10"); writes.save("a10", it_, writer="a script label (a script on box)")
 check("author: a writer that is no session id (a script's label) is recorded by name, with no id", wb(10) == ("a script label (a script on box)", None), wb(10))
 check("author: a stored revision is plain JSON a later step reads: written_by is a string", all(isinstance(rd(i).get("written_by"), str) for i in (1, 2, 3, 10)), None)
 
@@ -342,10 +346,10 @@ out = _wt_create.stackshot_create(**_mc(subject="[home] owner create", owner="ho
 check("create: an owner still accepted before the cut-off is stored as the creator, with a note that names mover and the model page",
       "(note: owner is going away: it is accepted until " in out and "mover=" in out and PAGE_ in out and rd(re.search(r"created (?:board#|s)(\d+)", out)[1], "s")["metadata"]["owner"] == U["home-front"], out[-500:])
 refused("create: no sender and no owner is refused, with sender and mover named", lambda: _wt_create.stackshot_create(**_mc()), "pass sender=", "mover=", PAGE_)
-refused("create: a sender that names the owner is refused as on update", lambda: _wt_create.stackshot_create(**_mc(sender=server.OWNER)), "Only the board writes as")
-_CUT = server._cfg.CFG["model"].get("owner_param_until")
+refused("create: a sender that names the owner is refused as on update", lambda: _wt_create.stackshot_create(**_mc(sender=_core_instance.OWNER)), "Only the board writes as")
+_CUT = _cfg.CFG["model"].get("owner_param_until")
 n0 = nfiles()
-server._cfg.CFG["model"]["owner_param_until"] = (_dt.datetime.now(server._cfg.tz()).date() - _dt.timedelta(days=1)).isoformat()      # patch the date: yesterday was the last day
+_cfg.CFG["model"]["owner_param_until"] = (_dt.datetime.now(_cfg.tz()).date() - _dt.timedelta(days=1)).isoformat()      # patch the date: yesterday was the last day
 refused("create: after the cut-off owner is refused, with a pointer to sender and mover", lambda: _wt_create.stackshot_create(**_mc(subject="[home] late owner", owner="home-front")), "owner is not a parameter of create any more", "sender=", "mover=", PAGE_)
 check("create: …and wrote nothing", nfiles() == n0, None)
 out = _wt_create.stackshot_create(**_mc(subject="[home] late sender", sender="home-front", mover="team-back"))
@@ -354,13 +358,13 @@ was = raw(1)
 refused("update: after the cut-off owner is refused, with a pointer to mover", lambda: _wt_update.stackshot_update(item_id="a1", sender="home-front", owner="team-back"), "owner is not a parameter of update any more", "mover=", PAGE_)
 check("update: …and wrote nothing", raw(1) == was, None)
 check("update: without owner it goes through after the cut-off", "updated" in _wt_update.stackshot_update(item_id="a1", sender="home-front", goal="Say mover"), None)
-server._cfg.CFG["model"]["owner_param_until"] = (_dt.datetime.now(server._cfg.tz()).date()).isoformat()                                  # today is the last day: still accepted
+_cfg.CFG["model"]["owner_param_until"] = (_dt.datetime.now(_cfg.tz()).date()).isoformat()                                  # today is the last day: still accepted
 out = _wt_update.stackshot_update(item_id="a1", sender="home-front", owner="home-front")
 check("update: on the last day owner is accepted, with a note that names mover", "(note: owner is going away: it is accepted until " in out and "set mover=<session>" in out and PAGE_ in out, out[-400:])
-server._cfg.CFG["model"]["owner_param_until"] = "not a date"
+_cfg.CFG["model"]["owner_param_until"] = "not a date"
 check("a value that is no date reads as the default cut-off", _wt_notes._owner_param_until() == _dt.date(2099, 3, 3), _wt_notes._owner_param_until())
-if _CUT is None: server._cfg.CFG["model"].pop("owner_param_until", None)
-else: server._cfg.CFG["model"]["owner_param_until"] = _CUT
+if _CUT is None: _cfg.CFG["model"].pop("owner_param_until", None)
+else: _cfg.CFG["model"]["owner_param_until"] = _CUT
 # get: leads with mover and then; the keeper of record among the details
 item(31, needs=["decision"], ask=ASK, subject="[home] get leads"); upd(31, mover="OLIVER", then="team-back")
 g = _wt_get.stackshot_get("a31").split("\n")
@@ -373,16 +377,16 @@ check("get: a waiting item's mover line says who picks it up when the wait ends,
 check("get: a closed item has no mover line", not any(l.startswith("mover:") for l in _wt_get.stackshot_get("a21").split("\n")), _wt_get.stackshot_get("a21")[:200])
 check("brief: the open items carry the model line that names the mover; the brief's items show `keeper of record:` too", "model: alive · mover team-back" in _wt_brief.stackshot_brief() and not re.search(r"(?m)^owner:", _wt_brief.stackshot_brief()), None)
 check("the tool descriptions say mover, name the model page and say owner only to say it is going", all(PAGE_ in str(f) for f in (_wt_text._MODEL_FORM, _wt_get.stackshot_get.__doc__)) and "mover" in _wt_update._UPDATE_DESC
-      and not re.findall(r"(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-])", _wt_text._NEEDS_FORM.replace(server.OWNER, "")), re.findall(r".{30}(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-]).{30}", _wt_text._NEEDS_FORM.replace(server.OWNER, "")))
+      and not re.findall(r"(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-])", _wt_text._NEEDS_FORM.replace(_core_instance.OWNER, "")), re.findall(r".{30}(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-]).{30}", _wt_text._NEEDS_FORM.replace(_core_instance.OWNER, "")))
 check("create's schema takes sender and no longer requires owner", "sender" in _inspect.signature(_wt_create.stackshot_create).parameters and _inspect.signature(_wt_create.stackshot_create).parameters["owner"].default == "", None)
-_sw = server._cfg.CFG["model"].get("switchover")
-server._cfg.CFG["model"]["switchover"] = True
+_sw = _cfg.CFG["model"].get("switchover")
+_cfg.CFG["model"]["switchover"] = True
 md_ = render.render(str(T / "store"), "full")
 check("board.md: after the switchover each open item names its mover, and none says `session:`", re.search(r"(?m)^- mover: `", md_) is not None and re.search(r"(?m)^- session: ", md_) is None, md_[md_.find("## Needs"):][:600])
-server._cfg.CFG["model"]["switchover"] = False
+_cfg.CFG["model"]["switchover"] = False
 md_ = render.render(str(T / "store"), "full")
 check("board.md: …and the switchover setting no longer changes it (the board speaks of the mover)", re.search(r"(?m)^- mover: `", md_) is not None and re.search(r"(?m)^- session: ", md_) is None, None)
-server._cfg.CFG["model"]["switchover"] = _sw
+_cfg.CFG["model"]["switchover"] = _sw
 facts_ = json.loads(server._client_item_facts("home-front", "a32")[2])["items"]["a32"]
 check("item-facts says who moves the item, for the hook's note on a Board line about another session's item", facts_["mover"] == "team-back", facts_)
 # the what-changed line: shown for 7 days after its date, then gone
@@ -393,7 +397,7 @@ check("what changed: …still on the 7th day after (date + 7 days is today)", wh
 check("what changed: …gone on the 8th day, and not shown before its date", whatschanged.lines(_dt.date(2099, 3, 11), cf) == [] and whatschanged.lines(_dt.date(2099, 3, 2), cf) == [], None)
 check("what changed: a missing file or a malformed one shows nothing", whatschanged.lines(_dt.date(2099, 3, 3), T / "nope.json") == [] and whatschanged.entries(T / "RULES.md") == [], None)
 whatschanged.PATH = cf
-_today = _dt.datetime.now(server._cfg.tz()).date()
+_today = _dt.datetime.now(_cfg.tz()).date()
 cf.write_text(json.dumps([{"date": _today.isoformat(), "text": "a tool changed"}]))
 check("what changed: the brief tool carries the line at its top while the entry is live", _wt_brief.stackshot_brief().split("\n")[0].startswith(f"stackshot changed on {whatschanged.day_words(_today)}: a tool changed; see {PAGE_}"), _wt_brief.stackshot_brief()[:200])
 check("what changed: …and the session-start brief too", render.render(str(T / "store"), "brief").split("\n")[1].startswith("stackshot changed on "), render.render(str(T / "store"), "brief")[:300])

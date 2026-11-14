@@ -70,6 +70,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.service import landed as ld; from stackshot.notify import landed as ld_rules
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.web import answers as _web_answers
+from stackshot.waits import watchers as _watch
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import watching as watching_svc
@@ -105,7 +107,7 @@ _rel2._run = lambda argv: ""             # the release queue is the host's syste
 # ---- 1. the pages
 COOKIE =_signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 SAME = {"Origin": BOARD}
-tok = lambda g: server._answer_token(EMAIL, g)
+tok = lambda g: _web_answers._answer_token(EMAIL, g)
 wtok = lambda g: _rt_answers._watch_token(EMAIL, g)
 PAGES = [("home", "/"), ("item", "/items/a1"), ("project", "/projects/alpha"), ("landed", "/closed"), ("search", "/search?q=needle"), ("runners", "/runners")]
 search.sync(render.Board(str(T / "store")))                        # the search index is built from the fixture before the first query
@@ -343,7 +345,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     a33 = rd(33)["metadata"]; ans33 = (a33.get("answers") or [{}])[-1]
     check("answer with a lettered choice: recorded as the label with its letter, the note and the option's line kept", r.status_code == 303 and r.headers["location"].startswith("/items/a33?sent=decision")
           and ans33.get("choice") == "Beta" and ans33.get("letter") == "B" and ans33.get("text") == "go with it" and ans33.get("choice_line") == LONG["Beta"] and "options" not in a33, ans33)
-    check("…and the History line, the saved note and the notice words show \"B · Beta\"", "B · Beta" in get("/items/a33").text and "**B · Beta**" in server._answer_note(ans33) and server._answer_words(ans33).startswith("B · Beta — go with it"), server._answer_words(ans33))
+    check("…and the History line, the saved note and the notice words show \"B · Beta\"", "B · Beta" in get("/items/a33").text and "**B · Beta**" in _web_answers._answer_note(ans33) and _web_answers._answer_words(ans33).startswith("B · Beta — go with it"), _web_answers._answer_words(ans33))
     r = post("/items/a34/answer", {"token": tok("a34"), "choice": "C · Beta"})
     check("a letter that is not the option's place is refused as stale, nothing recorded", r.status_code == 303 and "sent=stale" in r.headers["location"] and not rd(34)["metadata"].get("answers"), (r.headers.get("location"), rd(34)["metadata"].get("answers")))
     r = post("/items/a35/answer", {"token": tok("a35"), "choice": "B · Nowhere"})
@@ -373,8 +375,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r = post("/items/a40/answer", {"token": tok("a40"), "choice": "C · B · X"})
     a40 = (rd(40)["metadata"].get("answers") or [{}])[-1]
     check("…and \"C · B · X\" is the option labelled \"B · X\" at place C", "sent=decision" in r.headers["location"] and a40.get("choice") == "B · X" and a40.get("letter") == "C", a40)
-    check("_split_letter in the stored order: a letter past the options, or at another option's place, is left for the stale check", server._split_letter(rd(30), "D · Gamma") == ("D · Gamma", "")
-          and server._split_letter(rd(30), "A · Beta") == ("A · Beta", "") and server._split_letter(rd(30), "B · Beta") == ("Beta", "B") and server._split_letter(rd(30), "Beta") == ("Beta", ""))
+    check("_split_letter in the stored order: a letter past the options, or at another option's place, is left for the stale check", _web_answers._split_letter(rd(30), "D · Gamma") == ("D · Gamma", "")
+          and _web_answers._split_letter(rd(30), "A · Beta") == ("A · Beta", "") and _web_answers._split_letter(rd(30), "B · Beta") == ("Beta", "B") and _web_answers._split_letter(rd(30), "Beta") == ("Beta", ""))
 
     # ---- 2c. a label that repeats its own badge letter ("A Report" under the badge A) is read without it, everywhere, and a pick that names it still lands
     from stackshot.model import option_labels as ol
@@ -426,15 +428,15 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the home row draws the same stripped cards", bool(hrow60) and re.findall(r'name="choice" value="([^"]*)"', hrow60.group(0)) == ["A · Report", "B · Plan", "C · Fix"] and "A Report" not in hrow60.group(0), hm60[:200])
     # a pick lands on a stripped card whichever form the answer comes in: the card's own "A · Report", the bare shown label, the label as stored, a page loaded before the change ("A · A Report")
     for pick in ("A · Report", "Report", "A Report", "A · A Report"):
-        check(f"_split_letter on a stripped card: {pick!r} is the first option", server._split_letter(rd(60), pick) == ("Report", "A" if "·" in pick else ""), server._split_letter(rd(60), pick))
-    check("_split_letter on a stripped card: a letter at another place, or past the options, is still left for the stale check", server._split_letter(rd(60), "B · Report") == ("B · Report", "")
-          and server._split_letter(rd(60), "D · Fix") == ("D · Fix", "") and server._split_letter(rd(60), "Nowhere") == ("Nowhere", "") and server._split_letter(rd(60), "A") == ("A", ""))
-    check("_split_letter on a card of whole labels: unchanged (\"A · A wake alone\" is its first option, the bare label has no letter)", server._split_letter(rd(61), "A · A wake alone") == ("A wake alone", "A")
-          and server._split_letter(rd(61), "A wake alone") == ("A wake alone", "") and server._split_letter(rd(61), "B · A dropped step") == ("A dropped step", "B") and server._split_letter(rd(61), "A") == ("A", ""))
-    check("_split_letter on a card with a letter-only option: the letter alone, \"A · A\" or the stored label", all(server._split_letter(rd(62), p) == ("A", "A") for p in ("A", "a", "A · A"))
-          and server._split_letter(rd(62), "A · Plan") == ("A · Plan", "") and server._split_letter(rd(62), "B · Plan") == ("Plan", "B") and server._split_letter(rd(62), "B") == ("B", ""))
-    check("…and the same cards with only two options (no badge) keep their labels: \"A · Report\" is no option", server._split_letter({"metadata": {"options": opts_of("A Report", "B Plan")}}, "A · Report") == ("A · Report", "")
-          and server._split_letter({"metadata": {"options": opts_of("A Report", "B Plan")}}, "A Report") == ("A Report", ""))
+        check(f"_split_letter on a stripped card: {pick!r} is the first option", _web_answers._split_letter(rd(60), pick) == ("Report", "A" if "·" in pick else ""), _web_answers._split_letter(rd(60), pick))
+    check("_split_letter on a stripped card: a letter at another place, or past the options, is still left for the stale check", _web_answers._split_letter(rd(60), "B · Report") == ("B · Report", "")
+          and _web_answers._split_letter(rd(60), "D · Fix") == ("D · Fix", "") and _web_answers._split_letter(rd(60), "Nowhere") == ("Nowhere", "") and _web_answers._split_letter(rd(60), "A") == ("A", ""))
+    check("_split_letter on a card of whole labels: unchanged (\"A · A wake alone\" is its first option, the bare label has no letter)", _web_answers._split_letter(rd(61), "A · A wake alone") == ("A wake alone", "A")
+          and _web_answers._split_letter(rd(61), "A wake alone") == ("A wake alone", "") and _web_answers._split_letter(rd(61), "B · A dropped step") == ("A dropped step", "B") and _web_answers._split_letter(rd(61), "A") == ("A", ""))
+    check("_split_letter on a card with a letter-only option: the letter alone, \"A · A\" or the stored label", all(_web_answers._split_letter(rd(62), p) == ("A", "A") for p in ("A", "a", "A · A"))
+          and _web_answers._split_letter(rd(62), "A · Plan") == ("A · Plan", "") and _web_answers._split_letter(rd(62), "B · Plan") == ("Plan", "B") and _web_answers._split_letter(rd(62), "B") == ("B", ""))
+    check("…and the same cards with only two options (no badge) keep their labels: \"A · Report\" is no option", _web_answers._split_letter({"metadata": {"options": opts_of("A Report", "B Plan")}}, "A · Report") == ("A · Report", "")
+          and _web_answers._split_letter({"metadata": {"options": opts_of("A Report", "B Plan")}}, "A Report") == ("A Report", ""))
     for n, (src, pick, want_choice, want_letter) in enumerate((("A · Report", "A · Report", "Report", "A"), ("the shown label", "Plan", "Plan", ""), ("the stored label", "C Fix", "Fix", ""), ("an old page", "C · C Fix", "Fix", "C"))):
         g = 63 + n; item(g, needs=["decision"], ask=ASKL, options=opts_of(*LAB))
         r = post(f"/items/a{g}/answer", {"token": tok(f"a{g}"), "choice": pick})
@@ -444,12 +446,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         check(f"…the answer keeps the options as stored (read again, they strip again: no letter lost twice) ({pick!r})", [o["label"] for o in a_.get("options") or []] == LAB
               and [o["label"] for o in r2.options_of({"metadata": {"options": a_["options"]}})] == WORDS, a_.get("options"))
     a63 = rd(63)["metadata"]["answers"][-1]
-    check("…its words read \"A · Report\" in the notice and the saved note (never \"A · A Report\")", server._answer_words(a63).startswith("A · Report") and "**A · Report**" in server._answer_note(a63) and "A · A Report" not in get("/items/a63").text
-          and "A · Report" in get("/items/a63").text, server._answer_words(a63))
+    check("…its words read \"A · Report\" in the notice and the saved note (never \"A · A Report\")", _web_answers._answer_words(a63).startswith("A · Report") and "**A · Report**" in _web_answers._answer_note(a63) and "A · A Report" not in get("/items/a63").text
+          and "A · Report" in get("/items/a63").text, _web_answers._answer_words(a63))
     item(67, needs=["decision"], ask=ASKL, options=opts_of("A", "B Plan", "C Fix"))
     r = post("/items/a67/answer", {"token": tok("a67"), "choice": "A"}); a67 = rd(67)["metadata"].get("answers", [{}])[-1]
     check("a pick of the letter-only card (\"A\") lands on the first option, stored under its label as stored", "sent=decision" in r.headers["location"] and a67.get("choice") == "A" and a67.get("letter") == "A" and a67.get("choice_line") == "Line 0", (r.headers["location"], a67))
-    check("…and it reads as the letter alone in the notice, the note and the History", server._answer_words(a67).startswith("A") and not server._answer_words(a67).startswith("A ·") and "**A**" in server._answer_note(a67) and "A · A" not in get("/items/a67").text)
+    check("…and it reads as the letter alone in the notice, the note and the History", _web_answers._answer_words(a67).startswith("A") and not _web_answers._answer_words(a67).startswith("A ·") and "**A**" in _web_answers._answer_note(a67) and "A · A" not in get("/items/a67").text)
     item(68, needs=["decision"], ask=ASKL, options=opts_of(*WAKE)); r = post("/items/a68/answer", {"token": tok("a68"), "choice": "B · A dropped step"}); a68 = rd(68)["metadata"].get("answers", [{}])[-1]
     check("a pick on a card of whole labels lands as before (the label whole, the letter beside it)", "sent=decision" in r.headers["location"] and a68.get("choice") == "A dropped step" and a68.get("letter") == "B" and [o["label"] for o in a68.get("options", [])] == WAKE, a68)
     item(69, needs=["decision"], ask=ASKL, options=opts_of(*LAB)); r = post("/items/a69/answer", {"token": tok("a69"), "choice": "B · Report"})
@@ -458,7 +460,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     # a one-character pick that is a letter but not an ASCII one ("ß" upper-cases to "SS", "ﬁ" to "FI") is no option: stale like any unknown choice, never an error
     item(72, needs=["decision"], ask=ASKL, options=opts_of("A", "B Plan", "C Fix"))
     check("_split_letter with a one-character non-ASCII letter on a card with a letter-only option: left whole for the stale check, no exception",
-          all(server._split_letter(rd(72), p) == (p, "") for p in ("ß", "ﬁ", "ŉ")) and server._split_letter(rd(72), "a") == ("A", "A"))
+          all(_web_answers._split_letter(rd(72), p) == (p, "") for p in ("ß", "ﬁ", "ŉ")) and _web_answers._split_letter(rd(72), "a") == ("A", "A"))
     for n, pick in enumerate(("ß", "ﬁ")):
         g = 73 + n; item(g, needs=["decision"], ask=ASKL, options=opts_of("A", "B Plan", "C Fix"))
         r = post(f"/items/a{g}/answer", {"token": tok(f"a{g}"), "choice": pick})
@@ -475,7 +477,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("a pick of option B on [A, B A, C X] lands on option B, not on option A", "sent=decision" in r.headers["location"] and a71.get("choice") == "B A" and a71.get("letter") == "B" and a71.get("choice_line") == "Line 1", (r.headers["location"], a71))
     check("options_of in both renderers: colliding labels draw whole", all([o["label"] for o in m.options_of({"metadata": {"options": opts_of(*COLL)}})] == COLL for m in (render, r2)))
     item(70, needs=["decision"], ask=ASKL, options=opts_of(*COLL))
-    check("_split_letter on colliding labels: the letter picks its own place", server._split_letter(rd(70), "B · B Report") == ("B Report", "B") and server._split_letter(rd(70), "A · A Report") == ("A Report", "A"))
+    check("_split_letter on colliding labels: the letter picks its own place", _web_answers._split_letter(rd(70), "B · B Report") == ("B Report", "B") and _web_answers._split_letter(rd(70), "A · A Report") == ("A Report", "A"))
     r = post("/items/a70/answer", {"token": tok("a70"), "choice": "B · B Report"}); a70 = rd(70)["metadata"].get("answers", [{}])[-1]
     check("a pick of the second of two colliding labels lands on the second option, not the first", "sent=decision" in r.headers["location"] and a70.get("choice") == "B Report" and a70.get("letter") == "B"
           and a70.get("choice_line") == "Line 1", (r.headers["location"], a70))
@@ -484,7 +486,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     for stored in (["A Report", "B Plan", "C Fix"], ["A", "B", "C"]):
         wm = {"needs": ["wait"], "ask": ASKL, "options": opts_of(*stored)}
         wask, wopts = watching_svc.watch_ask("a72", wm, "its wait ended")
-        server._watch.turn_to_owner(wm, "", wask, wopts, "its wait ended", time.time())
+        _watch.turn_to_owner(wm, "", wask, wopts, "its wait ended", time.time())
         check(f"a wait that ends keeps the stored options {stored}: the post-wake question carries them, the item stores them unchanged",
               wask == ASKL and [o["label"] for o in wopts] == stored and wm["options"] == opts_of(*stored), (wask, wm.get("options")))
 

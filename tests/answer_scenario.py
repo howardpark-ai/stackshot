@@ -171,6 +171,16 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.web import answers as _web_answers
+from stackshot.waits import watchers as _watch
+from stackshot.core import instance as _core_instance
+from stackshot.model import model as _model
+from stackshot.core import config as _cfg
+from stackshot.service import store as _service_store
+from stackshot.model import states as _states
+from stackshot.model import owner_steps as _hs
+import datetime as dt
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
@@ -194,10 +204,10 @@ def jobs(): return [json.loads(p.read_text()) for p in G.pending()]
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want), str(e))
 
-check("the fixture: the mirror is on (the queue is read, never drained), the owner is Oliver", G.enabled() and server.OWNER == "Oliver")
+check("the fixture: the mirror is on (the queue is read, never drained), the owner is Oliver", G.enabled() and _core_instance.OWNER == "Oliver")
 
 # ---- 1. the form, as the renderer draws it
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
@@ -263,7 +273,7 @@ check("pages restored from the back-forward cache reload: the item page (with or
 from starlette.testclient import TestClient
 COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 OTHER = _signin._ui_sign(json.dumps({"email": "someone@example.org", "exp": time.time() + 3600}))
-tok = lambda g: server._answer_token(EMAIL, g)
+tok = lambda g: _web_answers._answer_token(EMAIL, g)
 SAME = {"Origin": BOARD}
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def post(path, data, headers=SAME, cookie=COOKIE):
@@ -280,7 +290,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and f'<input type="hidden" name="token" value="{tok("a1")}">' in g1.text and 'action="/items/a1/answer"' in g1.text, (g0.status_code, g1.status_code))
     before = rd("a", 1)
     r_anon = post("/items/a1/answer", {"token": tok("a1"), "choice": "Ship"}, cookie=None)
-    r_other = post("/items/a1/answer", {"token": server._answer_token("someone@example.org", "a1"), "choice": "Ship"}, cookie=OTHER)
+    r_other = post("/items/a1/answer", {"token": _web_answers._answer_token("someone@example.org", "a1"), "choice": "Ship"}, cookie=OTHER)
     r_notok = post("/items/a1/answer", {"choice": "Ship"})
     r_wrong = post("/items/a1/answer", {"token": tok("a2"), "choice": "Ship"})
     r_evil = post("/items/a1/answer", {"token": tok("a1"), "choice": "Ship"}, headers={"Origin": "https://evil.example.net"})
@@ -305,7 +315,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("GET /answer-tokens: with the server's own sign-in off (this scenario's STACKSHOT_AUTH=off), not signed in gets 200 and no token", t_anon.status_code == 200 and t_anon.json() == {}, (t_anon.status_code, t_anon.text[:200]))
     t_forged = page("/answer-tokens?ids=a1", cookie="forged.cookie")
     check("GET /answer-tokens: a forged cookie is nobody: 200 and no token", t_forged.status_code == 200 and t_forged.json() == {} and tok("a1") not in t_forged.text, (t_forged.status_code, t_forged.text[:200]))
-    _am, _uo = _signin._auth_mode, server._cfg.CFG["auth"]["ui_open"]
+    _am, _uo = _signin._auth_mode, _cfg.CFG["auth"]["ui_open"]
     try:
         _signin._auth_mode = lambda: "oauth"          # the server's own sign-in on, [auth] ui_open = false as this scenario's config has it
         def raw(cookie):
@@ -313,10 +323,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
             if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
             return c.get("/answer-tokens?ids=a1", follow_redirects=False)
         r_no, r_bad, r_ok = raw(None), raw("forged.cookie"), raw(COOKIE)
-        server._cfg.CFG["auth"]["ui_open"] = True
+        _cfg.CFG["auth"]["ui_open"] = True
         r_open = raw(None)
     finally:
-        _signin._auth_mode = _am; server._cfg.CFG["auth"]["ui_open"] = _uo
+        _signin._auth_mode = _am; _cfg.CFG["auth"]["ui_open"] = _uo
     check("GET /answer-tokens: ui_open = false and no cookie is a redirect to the sign-in, with no token in it", r_no.status_code == 302 and r_no.headers["location"].startswith("/ui/login?next=") and tok("a1") not in r_no.text + r_no.headers["location"], (r_no.status_code, r_no.headers.get("location")))
     check("GET /answer-tokens: ui_open = false and a forged cookie is the same redirect", r_bad.status_code == 302 and r_bad.headers["location"].startswith("/ui/login?next=") and tok("a1") not in r_bad.text, (r_bad.status_code, r_bad.headers.get("location")))
     check("GET /answer-tokens: ui_open = false and a good cookie still gets the token; ui_open = true and no cookie gets {} (the edge decides who reaches the board, nobody has a token)",
@@ -497,9 +507,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and rd("a", 32) == b32 and rd("a", 33) == b33 and not told and len(jobs()) == njobs2, [x.headers.get("location") for x in (r_s1, r_s2, r_s3)])
     check("...and through the server's own entry: Yes is no choice of an item with options (even its own Approve and Decline), and a closed item is closed",
           server._answer("a32", "Yes", "", "") == "stale" and server._answer("a6", "No", "", "") == "stale" and server._answer("a4", "Yes", "", "") == "closed" and rd("a", 32) == b32)
-    st_a = server._answers_load()
+    st_a = _web_answers._answers_load()
     check("a Yes / No answer is tracked for the escalation like any decision (then dropped here, so the later escalation checks count the earlier answers only)", "a30" in st_a and "a31" in st_a, st_a)
-    server._answers_save({g: e for g, e in st_a.items() if g not in ("a30", "a31")}); told.clear()
+    _web_answers._answers_save({g: e for g, e in st_a.items() if g not in ("a30", "a31")}); told.clear()
     told.clear()
     r = post("/items/a7/answer", {"token": tok("a7"), "text": "Neither: do the smaller fix first.", "act": "answer"})
     m7 = rd("a", 7)["metadata"]
@@ -532,11 +542,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("a note over 4000 characters with Done is refused as for any answer: nothing written, the step still stands", r_ng.headers["location"] == "/items/a13?sent=toolong" and "answers" not in rd("a", 13)["metadata"] and rd("a", 13)["metadata"]["state"] == "your-step")
     told.clear()
     r_d = post("/items/a13/answer", {"token": tok("a13"), "act": "done", "text": "ran it, it said ok", "back": "/#task-a-13"})
-    m13 = rd("a", 13)["metadata"]; d13 = server._model.derive(rd("a", 13))
+    m13 = rd("a", 13)["metadata"]; d13 = _model.derive(rd("a", 13))
     check("Done with a note: 303 back to the page it came from with sent=donenote (the note went along), the item and who takes it (the then-mover's name), the row's anchor after",
           r_d.status_code == 303 and r_d.headers["location"] == "/?sent=donenote&item=a13&then=home-agent#task-a-13", r_d.headers.get("location"))
     check("Done: the step and its state are gone, the item moves to its then-mover (home-agent), Oliver is no longer in needs or the mover",
-          "state" not in m13 and "step" not in m13 and m13.get("mover") == "home-agent" and not server._model.is_owner(d13.mover) and d13.mover == "home-agent" and "decision" not in [x.lower() for x in m13.get("needs", [])]
+          "state" not in m13 and "step" not in m13 and m13.get("mover") == "home-agent" and not _model.is_owner(d13.mover) and d13.mover == "home-agent" and "decision" not in [x.lower() for x in m13.get("needs", [])]
           and rd("a", 13)["status"] == "open", m13)
     check("Done: his words are recorded as his (kind decision, choice Done, his note, via board, the step he did), once",
           [(a["kind"], a["choice"], a["text"], a["via"], a["step"]) for a in m13["answers"]] == [("decision", "Done", "ran it, it said ok", "board", STEP.replace('\"', '"'))], m13["answers"])
@@ -544,7 +554,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Done: the then-mover (home-agent, in needs) alone is told, in a line headed as his answer, 'Oliver did his step on <id>: <step>. It's yours now, with his note: “<note>”' (review F5;: the creator is not told)",
       sorted((t[1], t[3]) for t in told) == [(AGENT, "answer")]
       and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver did his step on a13: {_STEPN}. It's yours now, with his note: “ran it, it said ok” → {BOARD}/items/a13", told)
-    check("Done: the answer is tracked for the escalation like any decision, and no issue comment is queued for it", "a13" in server._answers_load() and not any("comment" in x for x in jobs()), jobs()[-1:])
+    check("Done: the answer is tracked for the escalation like any decision, and no issue comment is queued for it", "a13" in _web_answers._answers_load() and not any("comment" in x for x in jobs()), jobs()[-1:])
     r_again = post("/items/a13/answer", {"token": tok("a13"), "act": "done", "text": "again"})
     check("Done twice: the second finds no step any more, nothing more written", r_again.headers["location"] == "/items/a13?sent=nostep" and len(rd("a", 13)["metadata"]["answers"]) == 1)
     told.clear(); r_d14 = post("/items/a14/answer", {"token": tok("a14"), "act": "done", "text": "", "back": "/"})
@@ -552,17 +562,17 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Done with no note and no session in needs: the item goes to the project's keeper (never its creator), the answer is a bare Done, the redirect names the keeper",
           r_d14.headers["location"] == "/?sent=done&item=a14&then=home-keeper" and m14.get("mover") == "home-keeper" and "state" not in m14 and [(a["choice"], a.get("text")) for a in m14["answers"]] == [("Done", None)], (r_d14.headers.get("location"), m14))
     r_d18 = post("/items/a18/answer", {"token": tok("a18"), "act": "done", "text": "ok"}); m18 = rd("a", 18)["metadata"]
-    check("Done on an item that stores mover and then too: they are replaced, the item reads as the then-mover's", m18.get("mover") == "home-agent" and "then" not in m18 and "state" not in m18 and server._model.derive(rd("a", 18)).mover == "home-agent", m18)
+    check("Done on an item that stores mover and then too: they are replaced, the item reads as the then-mover's", m18.get("mover") == "home-agent" and "then" not in m18 and "state" not in m18 and _model.derive(rd("a", 18)).mover == "home-agent", m18)
     # F1: a then-mover that is neither the owner nor in needs is told, and its write settles the pending answer (the keeper is not told "its owner has not written")
     told.clear(); r_19 = post("/items/a19/answer", {"token": tok("a19"), "act": "done", "text": "go on"}); m19 = rd("a", 19)["metadata"]
     check("Done with then = home-keeper (not in needs): the item moves to home-keeper, who alone is told, once", m19.get("mover") == "home-keeper" and sorted(t[1] for t in told) == [STEW]
           and any(t[1] == STEW and "It's yours now, with his note: “go on”" in t[2] for t in told), (m19, told))
-    check("…the answer is pending for the then-mover, and its write settles it", sorted(server._answers_load().get("a19", {}).get("told", [])) == [STEW], server._answers_load().get("a19"))
+    check("…the answer is pending for the then-mover, and its write settles it", sorted(_web_answers._answers_load().get("a19", {}).get("told", [])) == [STEW], _web_answers._answers_load().get("a19"))
     check("Done on a step item (mover Oliver, then home-keeper, no needs): needs names the then-mover, and the notice goes to it, not the page's keeper",
           m19.get("needs") == [STEW] and telling.notice_to(m19) == [(STEW, "as a session named in its needs")]
-          and server._model.derive(rd("a", 19)).mover == "home-keeper", (m19, telling.notice_to(m19)))
+          and _model.derive(rd("a", 19)).mover == "home-keeper", (m19, telling.notice_to(m19)))
     server._update("a19", next="home-keeper: on it", sender="home-keeper")
-    check("…so no pending answer is left for a19, and the keeper is not told after 30 min that its owner has not written", "a19" not in server._answers_load(), server._answers_load())
+    check("…so no pending answer is left for a19, and the keeper is not told after 30 min that its owner has not written", "a19" not in _web_answers._answers_load(), _web_answers._answers_load())
     # F3: no owner and no session in needs: the project's keeper takes it at once, as mover, and is told
     told.clear(); _kp = telling.project_keeper; telling.project_keeper = lambda project, owner="": "home-keeper"
     try: r_20 = post("/items/a20/answer", {"token": tok("a20"), "act": "done", "text": ""}); m20 = rd("a", 20)["metadata"]
@@ -584,9 +594,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Done keeps cap_ok's due words (the cap stays lifted for the due date, so the item does not resurface early) and drops the wake, the hold and the wake's words",
           _waiting.cap_words(m23, "due") and m23["cap_ok"] == {"due": "2027-06-01", "due_by": "Oliver"} and "wake" not in m23 and "hold" not in m23 and m23["due"] == "2027-06-01", m23)
     # N1: Done ends a wait the way the watcher does (watchers.LIVE_DROP): a leftover wait_kind does not hold the item
-    check("fixture: a leftover wait reads as a wait", server._model.derive(rd("a", 24)).state == "waiting", server._model.derive(rd("a", 24)))
+    check("fixture: a leftover wait reads as a wait", _model.derive(rd("a", 24)).state == "waiting", _model.derive(rd("a", 24)))
     post("/items/a24/answer", {"token": tok("a24"), "act": "done", "text": ""}); m24 = rd("a", 24)["metadata"]
-    check("Done on a step item with a leftover wait_kind: the wait fields are gone and the item derives as alive, the then-mover's", server._model.derive(rd("a", 24)).state == "alive" and server._model.derive(rd("a", 24)).mover == "home-agent"
+    check("Done on a step item with a leftover wait_kind: the wait fields are gone and the item derives as alive, the then-mover's", _model.derive(rd("a", 24)).state == "alive" and _model.derive(rd("a", 24)).mover == "home-agent"
           and not any(k in m24 for k in ("wait_kind", "post_wake_mover", "wake")), m24)
     # no owner, no session in needs and no keeper: refused, nothing written
     told.clear(); before25 = rd("a", 25); _kp = telling.project_keeper; telling.project_keeper = lambda project, owner="": ""
@@ -608,7 +618,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     m15 = rd("a", 15)["metadata"]
     check("Send on a step item: a comment; the step, its state and the mover stay, nothing moves",
           r_c15.headers["location"] == "/?sent=comment&item=a15#task-a-15" and m15["state"] == "your-step" and m15["step"] == STEP.replace('\"', '"') and [(a["kind"], a["text"]) for a in m15["answers"]] == [("comment", "which box do I run it on?")]
-          and server._model.is_owner(server._model.derive(rd("a", 15)).mover), m15)
+          and _model.is_owner(_model.derive(rd("a", 15)).mover), m15)
     # ---- an old page's single Send (act=send, a page loaded before the two buttons): an empty box finishes the step, a note is his note on it
     told.clear(); r_s40 = post("/items/a40/answer", {"token": tok("a40"), "act": "send", "text": "  ", "back": "/#task-a-40"}); m40 = rd("a", 40)["metadata"]
     check("an old page's Send with an empty box is a Done: sent=done with who takes it, the step and state gone, the item with the then-mover, recorded as his answer Done (kind decision, no text)",
@@ -619,10 +629,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear(); r_s41 = post("/items/a41/answer", {"token": tok("a41"), "act": "send", "text": "which box do I run it on?", "back": "/#task-a-41"}); m41 = rd("a", 41)["metadata"]
     check("an old page's Send with a note: sent=stepreply with who takes it; the step and its state are gone and the item is with the then-mover (home-agent), as after a Done",
           r_s41.headers["location"] == "/?sent=stepreply&item=a41&then=home-agent#task-a-41" and "state" not in m41 and "step" not in m41 and m41.get("mover") == "home-agent"
-          and not server._model.is_owner(server._model.derive(rd("a", 41)).mover) and rd("a", 41)["status"] == "open", (r_s41.headers.get("location"), m41))
+          and not _model.is_owner(_model.derive(rd("a", 41)).mover) and rd("a", 41)["status"] == "open", (r_s41.headers.get("location"), m41))
     check("an old page's Send with a note: recorded as his note on the step (kind step-reply, his words, via board, the step he did), not as a Done",
           [(a["kind"], a.get("choice"), a["text"], a["via"], a["step"]) for a in m41["answers"]] == [("step-reply", None, "which box do I run it on?", "board", _STEPN)], m41["answers"])
-    _tz, _minreason = server._cfg.tz_abbr(), server._cfg.WAIT_GUARD_REASON_MIN
+    _tz, _minreason = _cfg.tz_abbr(), _cfg.WAIT_GUARD_REASON_MIN
     _judge_old = ". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to Oliver with a new step (step=…)"
     _judge_later = (f"; if it says he will do the step at a later time, put the item on hold until then (update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_tz}>, "
                     f"wait_reason=<what it waits on, at least {_minreason} characters>), leave his step open and hand no new step back.")
@@ -631,7 +641,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           sorted((t[1], t[3]) for t in told) == [(AGENT, "answer")]
           and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver sent a note on his step on a41: {_STEPN}. It's yours now with his note: “which box do I run it on?”{_judge} → {BOARD}/items/a41", told)
     check("an old page's Send with a note: tracked for the escalation, and no issue comment is queued for it",
-          "a41" in server._answers_load() and not any("comment" in x for x in jobs()), jobs()[-1:])
+          "a41" in _web_answers._answers_load() and not any("comment" in x for x in jobs()), jobs()[-1:])
     check("History and `get` show the note as his note on the step, never as Done",
           "note on his step" in ui_render.Board(str(STORE)).item_html("a41") and "<b>Done</b>" not in ui_render.Board(str(STORE)).item_html("a41")
           and "note on his step: which box do I run it on?" in _wt_get.stackshot_get("a41"), None)
@@ -647,12 +657,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the server does not read a time out of a note that names none: the item is with the then-mover, not on hold, no wake (the instruction is the notice's text, carried out by the mover's update)",
           r_s45.headers["location"] == "/?sent=stepreply&item=a45&then=home-agent#task-a-45" and m45.get("mover") == "home-agent" and "hold" not in m45 and "wake" not in m45
           and [a["kind"] for a in m45["answers"]] == ["step-reply"], m45)
-    _when = (server.dt.datetime.now(_wt_text.ZONE) + server.dt.timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    _when = (dt.datetime.now(_wt_text.ZONE) + dt.timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
     r_u45 = _wt_update.stackshot_update("a45", hold=True, wake=_when, wait_reason="Oliver said he will do the step tomorrow evening", sender="home-agent")
     i45 = rd("a", 45); m45 = i45["metadata"]
     check("following the notice (update hold=true, wake, wait_reason) is accepted: the item is on hold with that wake, the same mover, and no step handed back to him",
           r_u45.startswith("updated a45") and hd_(m45) is True and wk_(m45) == _when and m45.get("mover") == "home-agent" and "step" not in m45 and m45.get("state") != "your-step"
-          and server._model.derive(i45).state == "waiting" and not server._model.is_owner(server._model.derive(i45).mover), (r_u45, m45))
+          and _model.derive(i45).state == "waiting" and not _model.is_owner(_model.derive(i45).mover), (r_u45, m45))
     check("the wake stands on his note: it is recorded as the words behind the hold (cap_ok quote)", "after the trip" in str((m45.get("cap_ok") or {}).get("quote")), m45.get("cap_ok"))
     # a note the server reads ("tomorrow evening"): it puts the item on hold itself, with his words behind the wake, and the notice says so instead of asking the mover to judge
     told.clear(); r_s47 = post("/items/a47/answer", {"token": tok("a47"), "act": "send", "text": "I will do this tomorrow evening", "back": "/#task-a-47"}); m47 = rd("a", 47)["metadata"]; n47 = {t[1]: t[2] for t in told}[AGENT]
@@ -661,11 +671,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and "put the item on hold until" in n47 and "Judge the note" not in n47 and [a["kind"] for a in m47["answers"]] == ["step-reply"], (m47, n47))
     # a wake past the cap: his note, given since the item's last move, is the words that let it stand
     told.clear(); post("/items/a46/answer", {"token": tok("a46"), "act": "send", "text": "after the trip, next month", "back": "/#task-a-46"})
-    _far = (server.dt.datetime.now(_wt_text.ZONE) + server.dt.timedelta(days=server._wt.cap_days() + 12)).replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    _far = (dt.datetime.now(_wt_text.ZONE) + dt.timedelta(days=_WT.cap_days() + 12)).replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
     r_u46 = _wt_update.stackshot_update("a46", hold=True, wake=_far, wait_reason="Oliver said he will do the step after the trip", sender="home-agent")
     i46 = rd("a", 46); m46 = i46["metadata"]
     check("a note that names a time beyond the usual wait cap: the same update is accepted on his note's words, and the item waits until then",
-          r_u46.startswith("updated a46") and hd_(m46) is True and wk_(m46) == _far and "after the trip" in str((m46.get("cap_ok") or {}).get("quote")) and server._model.derive(i46).state == "waiting", (r_u46[:300], m46))
+          r_u46.startswith("updated a46") and hd_(m46) is True and wk_(m46) == _far and "after the trip" in str((m46.get("cap_ok") or {}).get("quote")) and _model.derive(i46).state == "waiting", (r_u46[:300], m46))
     r_s41b = post("/items/a41/answer", {"token": tok("a41"), "act": "send", "text": "again"})
     check("an old page's Send with a note twice: the second finds no step any more, so it is a comment (the board item's rule), the first note stays", r_s41b.headers["location"] == "/items/a41?sent=comment" and [a["kind"] for a in rd("a", 41)["metadata"]["answers"]] == ["step-reply", "comment"])
     r_s42 = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": ""}); r_s42c = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": "late note"})
@@ -719,14 +729,14 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("a decision on the home page's row and on the item page's own form: the same result (mover and needs the then-mover, then gone), each back to its own page",
           r55.headers["location"] == "/?sent=decision&item=a55#task-a-55" and r56.headers["location"] == "/items/a56?sent=decision"
           and {k: m55.get(k) for k in ("mover", "needs", "then")} == {k: m56.get(k) for k in ("mover", "needs", "then")} == {"mover": "home-agent", "needs": [AGENT], "then": None}, (m55, m56))
-    st_ = server._answers_load()
+    st_ = _web_answers._answers_load()
     for g in ("a55", "a56"): st_.pop(g, None)
-    server._answers_save(st_)
+    _web_answers._answers_save(st_)
     told.clear()
 
-    st_ = server._answers_load()
+    st_ = _web_answers._answers_load()
     for g in ("a13", "a14", "a18", "a19", "a20", "a21", "a22", "a23", "a24", "a25", "a17", "a27", "a40", "a41", "a42", "a45", "a46", "a47", "a141", "a142", "a143"): st_.pop(g, None)
-    server._answers_save(st_)
+    _web_answers._answers_save(st_)
     for p in G.pending(): p.unlink()
     told.clear()
 
@@ -745,13 +755,13 @@ check("get shows his answers to the session reading the item, with the chosen op
       and "options:" not in _wt_get.stackshot_get("a1") and "ask:" not in _wt_get.stackshot_get("a1"), _wt_get.stackshot_get("a1"))
 
 # ---- 8. the escalation: 30 min without a write by a session it was sent to → the keeper, once
-st = server._answers_load()
+st = _web_answers._answers_load()
 check("pending: a1, a2, a6 and a7 (decisions), not the comments", sorted(st) == ["a1", "a2", "a6", "a7"] and st["a1"]["told"] == [AGENT], st)
 told.clear()
 check("before 30 min nothing goes", server._answer_tick(time.time() + 600) == [] and not told, told)
 server._update("a1", next="home-agent: shipping it", dropped=[1], sender="home-agent")             # the session named in needs acts
 server._update("a2", next="home-here: telling Pat", dropped=[1], sender="home-here")               # the owner acts
-check("a write by a session the answer went to settles it (the owner's, or one named in needs)", sorted(server._answers_load()) == ["a6", "a7"], server._answers_load())
+check("a write by a session the answer went to settles it (the owner's, or one named in needs)", sorted(_web_answers._answers_load()) == ["a6", "a7"], _web_answers._answers_load())
 server._update("a7", next="home-keeper: someone else wrote", dropped=[1], sender="home-keeper")    # the keeper is not who was told: item 7 stays pending
 told.clear()
 out = server._answer_tick(time.time() + 1801)
@@ -763,7 +773,7 @@ check("…in one line: what he answered, that its mover has not written, and the
       s7.startswith("[stackshot] Oliver answered a7 on the board at ") and "its mover home-here has not written to the item in 30 min: Neither: do the smaller fix first." in s7
       and "As the keeper of projects/alpha" in s7 and s7.endswith(f"→ {BOARD}/items/a7"), s7)
 told.clear()
-check("a second pass tells nobody again", server._answer_tick(time.time() + 7200) == [] and not told and server._answers_load() == {}, told)
+check("a second pass tells nobody again", server._answer_tick(time.time() + 7200) == [] and not told and _web_answers._answers_load() == {}, told)
 
 # ---- 9. no session writes as Oliver
 for nm in ("Oliver", "oliver", " OLIVER ", "Oliver · board"):
@@ -824,19 +834,19 @@ check("the update tool's description and parameters name the new flags",
 
 # ---- 12. the decision hand-over: a decision answer hands the item to its `then`, as a Done does on a step
 told.clear()
-b = lambda n: server._model.derive(server._load(f"a{n}"))
+b = lambda n: _model.derive(_service_store._load(f"a{n}"))
 check("a decision with then = home-agent (Yes, no options): mover = then, needs = then, then cleared, your-call gone, no model conflict, and the then-mover is told with his answer",
       server._answer("a50", "Yes", "go on", "") == "decision" and rd("a", 50)["metadata"].get("mover") == "home-agent" and rd("a", 50)["metadata"].get("needs") == [AGENT]
       and "then" not in rd("a", 50)["metadata"] and "ask" not in rd("a", 50)["metadata"] and "state" not in rd("a", 50)["metadata"]
-      and b(50).mover == "home-agent" and not b(50).conflicts and b(50).state == "alive" and server._states.of(server._load("a50"))[0] == "doing"
+      and b(50).mover == "home-agent" and not b(50).conflicts and b(50).state == "alive" and _states.of(_service_store._load("a50"))[0] == "doing"
       and sorted(t[1] for t in told if t[0] == "a50") == [AGENT] and all("answered a50 on the board: Yes" in t[2] for t in told if t[0] == "a50"), (rd("a", 50)["metadata"], b(50), told))
 told_a50 = [t for t in told if t[0] == "a50"]
 check("F3: the then-mover's notice ends \"It's yours now\" (the owner's does not)",
       any(t[1] == AGENT and "answered a50 on the board: Yes — go on. It's yours now → " in t[2] for t in told_a50) and not any("yours now" in t[2] for t in told_a50 if t[1] == OWNER), told_a50)
 check("...the pending answer names the then-mover alone",
-      server._answers_load().get("a50", {}).get("told") == [AGENT], server._answers_load().get("a50"))
+      _web_answers._answers_load().get("a50", {}).get("told") == [AGENT], _web_answers._answers_load().get("a50"))
 server._update("a50", next="home-agent: on it", sender="home-agent")
-check("...and the then-mover's write settles it", "a50" not in server._answers_load(), server._answers_load())
+check("...and the then-mover's write settles it", "a50" not in _web_answers._answers_load(), _web_answers._answers_load())
 told.clear()
 check("a pick among the options with then = home-keeper (not in needs): the item goes to home-keeper, who alone is told, and the model reads clean",
       server._answer("a51", "Ship", "", "") == "decision" and rd("a", 51)["metadata"].get("mover") == "home-keeper" and rd("a", 51)["metadata"].get("needs") == [STEW] and "then" not in rd("a", 51)["metadata"]
@@ -958,8 +968,8 @@ check("D2, the prerequisite closes: the hand-over declines (home-agent is alread
       "then" not in rd("a", 82)["metadata"] and rd("a", 82)["metadata"].get("needs") == ["home-agent"] and b(82).state == "alive" and b(82).mover == "home-agent" and not b(82).conflicts, (rd("a", 82)["metadata"], b(82)))
 check("D2, the wake pass drops a then that already is the mover (mover home-agent, then home-agent, hold due)",
       "then" not in rd("a", 84)["metadata"] and rd("a", 84)["metadata"].get("mover") == "home-agent" and not b(84).conflicts, (rd("a", 84)["metadata"], b(84)))
-_real_enabled = server._watch.enabled
-server._watch.enabled = lambda: False       # D3: [model] watchers = false
+_real_enabled = _watch.enabled
+_watch.enabled = lambda: False       # D3: [model] watchers = false
 try:
     told.clear()
     check("D3, watchers off: a park with a then stores no time wait: the old park stays (hold, wake), then stays, mover Oliver gone, no wait fields, no conflict",
@@ -972,11 +982,11 @@ try:
           b(85).state == "alive" and b(85).mover == "home-agent" and rd("a", 85)["metadata"].get("needs") == [AGENT] and not any(k in rd("a", 85)["metadata"] for k in ("hold", "wake", "then", "wait_kind", "post_wake_mover"))
           and not b(85).conflicts and any(t[0] == "a85" and t[1] == AGENT for t in told), (rd("a", 85)["metadata"], b(85), told))
 finally:
-    server._watch.enabled = _real_enabled
+    _watch.enabled = _real_enabled
 
 # ---- a your-step set by an update that also names the mover (mover=Oliver) still gets the server's step, so his note ticks it
 STEP90 = "Run the 8 run deletions yourself: my gh DELETE call is refused by the permission layer"
-_ol = lambda g: [(x["status"], x["text"]) for x in server._hs._steps.view(rd("a", g)["metadata"], keeper=OWNER) if x["text"].startswith("Oliver:")]
+_ol = lambda g: [(x["status"], x["text"]) for x in _hs._steps.view(rd("a", g)["metadata"], keeper=OWNER) if x["text"].startswith("Oliver:")]
 _wt_update.stackshot_update("a90", sender="home-agent", step=STEP90, mover="Oliver", next="home-agent: confirm the runs are gone\nOliver: `for id in 1 2; do gh api -X DELETE runs/$id; done`")
 _m90 = rd("a", 90)["metadata"]
 check("named mover, setup: step= and mover=Oliver in one update: his step is on the list as the server's own (owner_step), beside the session's own Oliver line",

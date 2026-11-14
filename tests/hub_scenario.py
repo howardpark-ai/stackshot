@@ -109,6 +109,11 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 # ---- 2. the server's note
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import page_debts as _pdebts
+from stackshot.core import config as _cfg
+from stackshot.service import store as _service_store
+from stackshot.model import model as _model
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.web import publish as _web_publish
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -118,7 +123,7 @@ from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.service import telling
 from stackshot.projects import project_registry as _projects_registry
-server._cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
+_cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 def create(project, owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, sender=owner, **{"next": f"{owner}: carry on", **kw})
 r = create("ops/example-hub", "falcon-anchors"); fold1 = r.split()[1]
@@ -135,37 +140,37 @@ check("create: a background agent may create an item (no refusal pointing at nee
 r = create("projects/ops", "harbor-ops")
 check("create: a hub not yet converted (no agents:): no note", "(note:" not in r, r)
 r = create("projects/example", "harbor-ops"); g_out = r.split()[1]
-check("create: a session from elsewhere gets no note naming its hub: the item was created", r.startswith("created") and "(note:" not in r and server._path(g_out).exists(), r)
+check("create: a session from elsewhere gets no note naming its hub: the item was created", r.startswith("created") and "(note:" not in r and _service_store._path(g_out).exists(), r)
 check("get shows no check line for it either", "keeper of record" not in _wt_get.stackshot_get(g_out), _wt_get.stackshot_get(g_out))
 r = server._update(g_out, next="harbor-ops: carry on\nharbor-ops: a new step", sender="harbor-ops")
 check("update: a change that is not a re-filing stays quiet", "(note:" not in r, r)
 # the creator is not moved by a hand-over and moves nothing; mover= says who moves the item
-_ho_was = server._cfg.CFG["model"].get("handoff"); server._cfg.CFG["model"]["handoff"] = False      # this block is about the creator staying put: the hand-off gate (a live pane) has its own suite
-own_of = lambda g: server._load(g)["metadata"]["owner"]
-SID = server._session_id
+_ho_was = _cfg.CFG["model"].get("handoff"); _cfg.CFG["model"]["handoff"] = False      # this block is about the creator staying put: the hand-off gate (a live pane) has its own suite
+own_of = lambda g: _service_store._load(g)["metadata"]["owner"]
+SID = _pdebts._session_id
 r = create("projects/example", "falcon-main"); h1 = r.split()[1]
 r = server._update(h1, project="projects/side", mover="home-side-main", sender="falcon-main")
 check("mover: a hand-over to another project's user-facing agent with project= files it there; the creator stays and nothing says keeper of record",
-      server._load(h1)["metadata"]["project"] == "projects/side" and own_of(h1) == SID("falcon-main") and "refiled" not in r and "keeper of record" not in r, r)
+      _service_store._load(h1)["metadata"]["project"] == "projects/side" and own_of(h1) == SID("falcon-main") and "refiled" not in r and "keeper of record" not in r, r)
 r = create("projects/example", "falcon-main"); h2 = r.split()[1]
 r = server._update(h2, mover="falcon-maintainer", sender="falcon-main")
-check("mover: a background agent as mover is the mover; the creator stays", server._load(h2)["metadata"]["mover"] == "falcon-maintainer" and own_of(h2) == SID("falcon-main") and "keeper of record" not in r, r)
+check("mover: a background agent as mover is the mover; the creator stays", _service_store._load(h2)["metadata"]["mover"] == "falcon-maintainer" and own_of(h2) == SID("falcon-main") and "keeper of record" not in r, r)
 r = create("projects/example", "falcon-main"); h3 = r.split()[1]
 r = server._update(h3, mover="falcon-anchors", sender="falcon-main")
-check("mover: a plain mover change within the project leaves the creator alone", server._load(h3)["metadata"]["mover"] == "falcon-anchors" and own_of(h3) == SID("falcon-main") and "keeper of record" not in r, r)
+check("mover: a plain mover change within the project leaves the creator alone", _service_store._load(h3)["metadata"]["mover"] == "falcon-anchors" and own_of(h3) == SID("falcon-main") and "keeper of record" not in r, r)
 r = server._update(h3, mover="OLIVER", project="projects/side", sender="falcon-main")
-check("mover: Oliver as mover leaves the creator alone, and the project written is the project stored (no refile)", own_of(h3) == SID("falcon-main") and server._load(h3)["metadata"]["project"] == "projects/side" and server._load(h3)["metadata"]["mover"] == server._model.owner_display(), r)
+check("mover: Oliver as mover leaves the creator alone, and the project written is the project stored (no refile)", own_of(h3) == SID("falcon-main") and _service_store._load(h3)["metadata"]["project"] == "projects/side" and _service_store._load(h3)["metadata"]["mover"] == _model.owner_display(), r)
 facts_ = json.loads(server._client_item_facts("falcon-anchors", h1 + "," + h3)[2])["items"]
 check("item-facts: says who moves each item, and whether it is the asking session (the hook's note on a Board line leaves that session's own item out)",
-      facts_[h1]["mover"] == "home-side-main" and facts_[h1]["mover_me"] is False and facts_[h3]["mover"] == server._model.owner_display(), facts_)
+      facts_[h1]["mover"] == "home-side-main" and facts_[h1]["mover_me"] is False and facts_[h3]["mover"] == _model.owner_display(), facts_)
 r = server._update(h3, mover="falcon-anchors", sender="falcon-main")
 facts_ = json.loads(server._client_item_facts("falcon-anchors", h3)[2])["items"][h3]
 check("item-facts: the mover that is not in needs is told it moves the item", facts_["mover_me"] is True and facts_["agent"] is False, facts_)
-if _ho_was is None: server._cfg.CFG["model"].pop("handoff", None)
-else: server._cfg.CFG["model"]["handoff"] = _ho_was
+if _ho_was is None: _cfg.CFG["model"].pop("handoff", None)
+else: _cfg.CFG["model"]["handoff"] = _ho_was
 r = server._update(g_out, project="projects/other")
 check("update: re-filed under another project: it stays there, nothing refiles it to its creator's project",
-      "refiled" not in r and "(note:" not in r and server._load(g_out)["metadata"]["project"] == "projects/other", r)
+      "refiled" not in r and "(note:" not in r and _service_store._load(g_out)["metadata"]["project"] == "projects/other", r)
 r = create("projects/example", "11111111-2222-4333-8444-555555555555")
 check("a creator with no known name gives no note", "(note:" not in r, r)
 r = create("projects/example", "outsider-pane", mover="outsider-pane")
@@ -200,7 +205,7 @@ check("roles.json: no rewrite before 30 min with nothing changed", _projects_reg
 check("roles.json: refreshed with a new stamp at 30 min though nothing changed (a reader calls a file over an hour old stale)",
       _projects_registry._roles_sync(now=t0 + 120 + 31 * 60) is True and json.loads(RJ.read_text())["generated"] != g1)
 _stale = json.loads(RJ.read_text()); _stale["generated"] = "2026-01-01T00:00:00Z"; RJ.write_text(json.dumps(_stale))
-server._roles_sync_safe()
+_projects_registry._roles_sync_safe()
 check("roles.json: a stale file is refreshed by the pass the runner runs every minute (with the board held too)", json.loads(RJ.read_text())["generated"] > "2026-01-02"
       and [(t.group, t.board) for t in runner_svc.ticks() if t.name == "roles_sync_safe"] == [("fleet", False)] and "_roles_sync_safe()" in inspect.getsource(_web_publish._publish_now), json.loads(RJ.read_text())["generated"])
 st, ct, body = server._client_get("roles", {})
@@ -209,7 +214,7 @@ from stackshot.fleet import client as _client
 check("client.py knows the read", "roles" in _client.READS)
 check("the server's own gates keep session_roles: a one-session project's keeper may be named in needs, takes messages unmarked, "
       "and is no front agent for its notices", gates.gate_needs_session("harbor-ops", "projects/ops", "falcon-main") == "harbor-ops"
-      and telling.front_keeper("harbor-ops", "projects/ops") == (False, "") and server._gate_front("harbor-ops", "a plain note", server._sessions_index()) is None)
+      and telling.front_keeper("harbor-ops", "projects/ops") == (False, "") and server._gate_front("harbor-ops", "a plain note", _fleet_sessions_registry._sessions_index()) is None)
 ls = _wt_sessions._sessions_listing("").split("\n")
 row = lambda n: next((l for l in ls if l.startswith(f"- {n} — ")), "")
 check("sessions tool: each session's role and project", row("falcon-anchors").endswith(" · testbox · front agent of projects/example")

@@ -66,6 +66,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.core import instance as _core_instance
+from stackshot.core import config as _cfg
+from stackshot.anchors import anchors as _anc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import runner as runner_svc
@@ -98,7 +102,7 @@ def M(i):
 item(1)                                                                       # a plain on-agent item
 check("a plain item: the stored mover's move", M(1) == {"kind": "session", "who": U["home-owner"]}, M(1))
 item(2, needs=["decision"], ask="Decide: x · Recommend: y · Stakes: z · By: no date", su=now0 - 1 * DAY)
-check("needs decision: Oliver's move", M(2) == {"kind": "owner", "who": server.OWNER}, M(2))
+check("needs decision: Oliver's move", M(2) == {"kind": "owner", "who": _core_instance.OWNER}, M(2))
 item(3, needs=["external"], su=now0 - 4 * DAY)
 check("needs external: an outside party's move, however long ago it was set", M(3)["kind"] == "outside", M(3))
 item(4, needs=["team-back"], su=now0 - 1 * DAY)
@@ -109,7 +113,7 @@ item(6, hold=True, wake=wk(-3600), su=now0 - 1 * DAY)
 check("a hold with a wake that has passed: the same mover, nothing else is said of it", M(6)["who"] == U["home-owner"] and "via" not in M(6), M(6))
 item(9, hold=True, recycle=True, recycle_at=now0 - 2 * DAY, su=now0 - 2 * DAY)
 check("a hold waiting for a pane recycle: the fleet tool's move", M(9) == {"kind": "outside", "who": "the fleet tool (pane recycle)"}, M(9))
-server._cfg.CFG.setdefault("fleet", {})["tool_name"] = "sala"; m_named = M(9); server._cfg.CFG["fleet"]["tool_name"] = ""
+_cfg.CFG.setdefault("fleet", {})["tool_name"] = "sala"; m_named = M(9); _cfg.CFG["fleet"]["tool_name"] = ""
 check("…and with [fleet] tool_name set the mover is named by it", m_named == {"kind": "outside", "who": "sala (pane recycle)"}, m_named)
 item(10, hold=True, recycle=True, wake=wk(DAY), su=now0 - 2 * DAY)
 check("…a recycle hold that has a wake of its own keeps the item's mover", M(10)["kind"] == "session", M(10))
@@ -186,7 +190,7 @@ check("the server has been up an hour and the puller last checked in two hours a
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": False, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now0 - 60))}}))
 check("…a puller that checked in a minute ago is not (online_minutes is ten)", server._machine_unreachable("a", now0) == "", server._machine_unreachable("a", now0))
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": False, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now0 - 7200))}}))
-nmx, idxx = server._anc.names(), server._sessions_index()
+nmx, idxx = _anc.names(), _fleet_sessions_registry._sessions_index()
 check("a running session on it reads as unreachable then, with the reason", "is unreachable" in server._session_down(U["home-other"], nmx, idxx, None, now0), server._session_down(U["home-other"], nmx, idxx, None, now0))
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 server._STARTED = real_started
@@ -202,14 +206,14 @@ refused("a wake past the cap (8 days) is refused, naming the cap, the config key
         lambda: server._update("a70", wake=day(8), sender="home-owner"), "at most 7 days", "[waiting] cap_days", "said=", "to answer on the item")
 check("…the refusal left the wake as it was", wk_(rd(70)["metadata"]) == day(6), rd(70)["metadata"])
 refused("a hold with a far wake is refused the same way", lambda: server._update("a70", hold=True, wake=day(20), sender="home-owner"), "at most 7 days")
-server._cfg.CFG["waiting"]["cap_days"] = 10
+_cfg.CFG["waiting"]["cap_days"] = 10
 server._update("a70", wake=day(9), sender="home-owner")
 check("[waiting] cap_days is a config value, read at use", wk_(rd(70)["metadata"]) == day(9), rd(70)["metadata"])
-server._cfg.CFG["waiting"]["cap_days"] = 7
-server._cfg.CFG["waiting"]["cap_needs_owner"] = False
+_cfg.CFG["waiting"]["cap_days"] = 7
+_cfg.CFG["waiting"]["cap_needs_owner"] = False
 server._update("a70", wake=day(20), sender="home-owner")
 check("cap_needs_owner = false: a longer wake is allowed", wk_(rd(70)["metadata"]) == day(20), rd(70)["metadata"])
-server._cfg.CFG["waiting"]["cap_needs_owner"] = True
+_cfg.CFG["waiting"]["cap_needs_owner"] = True
 server._update("a70", wake="none", sender="home-owner")
 # his words, checked against a real transcript
 TR = T / "transcripts" / "-home-x"

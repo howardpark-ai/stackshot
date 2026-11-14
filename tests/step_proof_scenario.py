@@ -109,6 +109,10 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
 from stackshot.web import server
+from stackshot.core import instance as _core_instance
+from stackshot.core import config as _cfg
+from stackshot.model import steps as _steps
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc, released_live as rlive_svc
 from stackshot.service import runner as runner_svc
@@ -118,7 +122,7 @@ from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 OTHER = "other-owner/other"
 ALL = range(1, 27)
 def fixtures():
@@ -198,7 +202,7 @@ def drain():
 def pushes(): drain(); return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_for(gid): return [p for p in pushes() if p[1].startswith(f"[stackshot] {gid}: ")]
 check("home-builder is a front agent, so the notices below go through the front gate", telling.front_sender(U["home-builder"]))
-check("his own step reads as his, a session's does not", server._steps.is_his(f"{OWNER}: release PR #42", unnamed_is_his=False) and not server._steps.is_his("home-builder: release PR #42", unnamed_is_his=False))
+check("his own step reads as his, a session's does not", _steps.is_his(f"{OWNER}: release PR #42", unnamed_is_his=False) and not _steps.is_his("home-builder: release PR #42", unnamed_is_his=False))
 
 # ---- 3. the dry run first: lists what it would do, writes nothing, tells nobody
 s0 = snap(); p0 = len(pushes())
@@ -222,18 +226,18 @@ for x in d["items"]: rows.setdefault(x["item"], []).append(x)
 a1 = rd(1)
 check("the only open step is a merged PR's merge: the item closes, outcome done, the reason names the PR and where it was seen",
       a1["status"] == "completed" and a1["metadata"].get("outcome") == "done" and a1["metadata"]["reason"] == "PR #39 is merged (merged on GitHub)"
-      and [(s["status"], s["by"]) for s in a1["metadata"].get("steps", [])] == [("done", server.NAME)] and "next" not in a1["metadata"] and "step_proof" not in a1["metadata"], a1["metadata"])
+      and [(s["status"], s["by"]) for s in a1["metadata"].get("steps", [])] == [("done", _core_instance.NAME)] and "next" not in a1["metadata"] and "step_proof" not in a1["metadata"], a1["metadata"])
 check("…nobody is told of a close", not pushes_for("a1"), pushes())
 a2 = rd(2)
 check("a step after it: the merge step is ticked done by the server, the step after it stays open",
       a2["status"] == "open" and a2["metadata"].get("next") == "home-builder: then check the pages"
-      and [(s["text"], s["status"], s.get("by")) for s in a2["metadata"]["steps"]] == [("home-builder: merge PR #39", "done", server.NAME), ("home-builder: then check the pages", "open", None)], a2["metadata"])
+      and [(s["text"], s["status"], s.get("by")) for s in a2["metadata"]["steps"]] == [("home-builder: merge PR #39", "done", _core_instance.NAME), ("home-builder: then check the pages", "open", None)], a2["metadata"])
 n2 = pushes_for("a2")
 check("…and its mover gets one real notice that names the next open step",
       len(n2) == 1 and n2[0][0] == U["home-builder"] and "PR #39 is merged; its step is ticked; the item's other open steps remain." in n2[0][1]
       and "Next step: home-builder: then check the pages." in n2[0][1], n2)
 check("…the History says the step was ticked, by the server, with the event",
-      any(re.search(r"step done: home-builder: merge PR #39 \(PR #39 is merged; ticked by " + re.escape(server.NAME) + r"\)", str(h)) for h in server._history_lines("a2")) if hasattr(server, "_history_lines") else True)
+      any(re.search(r"step done: home-builder: merge PR #39 \(PR #39 is merged; ticked by " + re.escape(_core_instance.NAME) + r"\)", str(h)) for h in server._history_lines("a2")) if hasattr(server, "_history_lines") else True)
 check("…the item is stamped with the merge it told", a2["metadata"].get("released_told") == [f"merged {key(39)}"], a2["metadata"])
 a3 = rd(3)
 check("a follow-up after the merge phrase: the step stays open and un-ticked, the mover is told once",
@@ -324,9 +328,9 @@ check("the first pass of the clock only logs: it writes and tells nothing, keeps
 check("…the pass after it acts: it settles what the sweep would (the ids of the closed, ticked and told)", proofs_svc.proof_tick(now + 2) == [] and not same(s_t))
 done = proofs_svc.proof_tick(now + 1 + proofs_svc.PROOF_EVERY + 1)
 check("…once its interval has passed", "a1" in done and "a2" in done and "a3" in done and rd(1)["status"] == "completed", done)
-_cfg_get = server._cfg.get
+_cfg_get = _cfg.get
 def with_switch(v):
-    server._cfg.get = lambda *k, **kw: ({} if v is None else {"live": v}) if k == ("step_proof",) else _cfg_get(*k, **kw)
+    _cfg.get = lambda *k, **kw: ({} if v is None else {"live": v}) if k == ("step_proof",) else _cfg_get(*k, **kw)
 fixtures(); (T / "state/step-proof.json").unlink(); s_t = snap()
 with_switch(False); proofs_svc.PROOF_LAST[0] = 0.0
 proofs_svc.proof_tick(now + 1); proofs_svc.PROOF_LAST[0] = 0.0; proofs_svc.proof_tick(now + 2)
@@ -342,7 +346,7 @@ fixtures()
 def upd(i, **kw): return server._update(f"a{i}", sender="home-builder", **kw)
 def refused(name, fn, *want):
     try: fn(); check(name, False)
-    except server.ToolError as e: check(name, str(e).startswith("Refused:") and all(w in str(e) for w in want), str(e))
+    except ToolError as e: check(name, str(e).startswith("Refused:") and all(w in str(e) for w in want), str(e))
 item(30, "home-builder: restart the unit\nhome-builder: merge PR #39\nhome-builder: check the pages")
 out = upd(30, step_proof=[{"step": 1, "proof": "pr_released #45"}, {"step": "home-builder: check the pages", "proof": f"pr_merged {url(7, OTHER)}"}])
 m30 = rd(30)["metadata"]

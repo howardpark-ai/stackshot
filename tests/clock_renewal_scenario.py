@@ -66,6 +66,8 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.core import config as _cfg
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
@@ -88,7 +90,7 @@ ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no dayligh
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 hrs = lambda n: time.strftime("%Y-%m-%d %H:%M", time.gmtime(now0 + n * 3600 + ZONE_OFFSET))
 BACK = "team-back"
-CFG = server._cfg.CFG.setdefault("model", {})
+CFG = _cfg.CFG.setdefault("model", {})
 CFG.update(guards=True, pause=False)
 mt = lambda i: rd(i)["metadata"]
 raw = lambda i: (T / f"store/a/{i}.json").read_text()
@@ -161,7 +163,7 @@ item(15, needs=[BACK], next="team-back: do the thing\nteam-back: and the other t
 was15 = raw(15)
 try:
     _wt_update.stackshot_update("a15", sender=BACK, wake=day(5), wait_reason="x" * 60); check("tool: a later wake with a long wait_reason is refused", False, mt(15))
-except server.ToolError as e:
+except ToolError as e:
     check("tool: a later wake with a long wait_reason is refused by the clock gate, after the self-wait gate passed it", "clock pushed out" in str(e) and len(CALLS) == 1, (str(e), len(CALLS)))
 check("tool: …and nothing is written", raw(15) == was15, None)
 _wt_update.stackshot_update("a15", sender=BACK, wake=day(5), done=[1], wait_reason="the vendor ships on that day, not before")

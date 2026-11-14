@@ -64,6 +64,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.core import readonly as _ro
+from stackshot.core import config as _cfg
+from stackshot.model import model as _model
+from stackshot.anchors import anchors as _anc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -89,8 +94,8 @@ class _Clock:
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
 CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
-server._cfg.CFG["audit"]["pattern_review"] = "off"
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["pattern_review"] = "off"
+_cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
 def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
 telling.tell_woken = fake_tell
@@ -103,7 +108,7 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
+_fleet_sessions_registry._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", idle_line=True, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. With `idle_line` it carries the hourly audit's idle line, written 5 minutes before now0."""
@@ -119,8 +124,8 @@ def mover_of(i): return mt(i).get("mover")      # the stored mover (a waiting it
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     sent.clear(); panes.clear(); dead.clear()
-def on(): server._cfg.CFG["audit"]["hand_idle"] = True
-def off(): server._cfg.CFG["audit"]["hand_idle"] = False
+def on(): _cfg.CFG["audit"]["hand_idle"] = True
+def off(): _cfg.CFG["audit"]["hand_idle"] = False
 def tick(at=None, **kw):
     """One pass of the hand-over at `at` (default now0), the server's clock set to it → the ids handed on."""
     at = now0 if at is None else at
@@ -157,18 +162,18 @@ def rule(name, probe, patches):
 wipe(); put(1, act=90, idle_line=False); panes["home-peer"] = "idle"
 check("1 the example config documents `hand_idle = true` in [audit]", re.search(r"(?m)^hand_idle = true\b", pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
 check("1 …and the config as loaded (from that example) has it on; with no audit line on the item nothing is handed on and nobody is told", HI.enabled() is True and tick() == [] and mover_of(1) == "home-peer" and sent == [])
-server._cfg.CFG["audit"].pop("hand_idle", None)
+_cfg.CFG["audit"].pop("hand_idle", None)
 check("1 …and with the key absent the code's default is on", HI.enabled() is True)
 put(1, act=90)      # now with the hourly audit's idle line on it: only the switch decides whether it is handed on
 for label, val in (("false", False), ("the string true", "true"), ("1", 1), ("yes", "yes")):
-    server._cfg.CFG["audit"]["hand_idle"] = val
+    _cfg.CFG["audit"]["hand_idle"] = val
     check(f"1 {label} leaves it off (only a TOML true leaves it on)", HI.enabled() is False and tick() == [] and mover_of(1) == "home-peer")
 on()
 check("1 a TOML true switches it on", HI.enabled() is True)
-ro = server._ro.is_read_only
-server._ro.is_read_only = lambda: True
+ro = _ro.is_read_only
+_ro.is_read_only = lambda: True
 check("1 a read-only standby copy hands nothing on", tick() == [] and mover_of(1) == "home-peer" and sent == [])
-server._ro.is_read_only = ro
+_ro.is_read_only = ro
 off()
 def probe_off():
     wipe(); put(1, act=90); panes["home-peer"] = "idle"; off()
@@ -213,8 +218,8 @@ _real_main = server._main_agent
 server._main_agent = lambda p: "Oliver"
 def probe_owner_main():
     wipe(); on(); put(1, act=90); panes["team-back"] = "idle"; tick()
-    return not any(x[1] in ("Oliver", server._session_id("Oliver")) for x in sent)
-rule("2 …a page that names the owner as -main tells him nothing", probe_owner_main, [(server._model, "is_owner", lambda who: False)])
+    return not any(x[1] in ("Oliver", _web_page_debts._session_id("Oliver")) for x in sent)
+rule("2 …a page that names the owner as -main tells him nothing", probe_owner_main, [(_model, "is_owner", lambda who: False)])
 server._main_agent = _real_main
 
 # ================================================================ 3. what is read
@@ -339,8 +344,8 @@ def probe_held_builder_free():
 rule("5 a builder that moves only a held item is free", probe_held_builder_free, [(HI, "busy_movers", lambda items, now: [it.get("metadata", {}).get("mover") for it in items.values() if it.get("status") == "open"])])
 def old_builders(project):      # the reverted rule: the project's own background agents, then every other project's agent whose mandate says build
     out = list(handoff_svc.handoff_background(project))
-    reg = server._anc.registry()
-    return out + [n for n, r in server._anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
+    reg = _anc.registry()
+    return out + [n for n, r in _anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
                   and re.search(r"\bbuild", str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""), re.I)]
 def probe_other_project():
     got, mv = first_pick(panes={"team-back": "busy", "team-aux": "busy", "other-back": "idle", "delta-one": "idle"})
@@ -500,7 +505,7 @@ check("8 an item that cannot be read at all is left out and stops no other", pro
 
 # ================================================================ 9. the tick
 wipe(); on(); put(1, act=90); panes["team-back"] = "idle"
-server._cfg.CFG["audit"]["hourly_line"] = True
+_cfg.CFG["audit"]["hourly_line"] = True
 order = []
 real_hourly, real_hand = server._hourly_tick, server._hand_idle_tick
 server._hourly_tick = lambda *a, **k: (order.append("hourly"), real_hourly(*a, **k))[1]
@@ -518,11 +523,11 @@ order.clear()
 with _Err() as err9: server._silence_tick()
 check("9 a failure in the hand-over is a stderr line and stops nothing", "idle items not handed on: OSError" in err9.text, err9.text)
 server._hourly_tick, server._hand_idle_tick = real_hourly, real_hand
-server._cfg.CFG["audit"]["mode"] = "agent"
+_cfg.CFG["audit"]["mode"] = "agent"
 wipe(); on(); put(1, act=90); panes["team-back"] = "idle"
 server._silence_tick()
 check("9 the tick stands still when the audit runs in agent mode", mover_of(1) == "home-peer")
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["mode"] = "script"
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

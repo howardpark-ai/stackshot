@@ -103,6 +103,8 @@ def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import telling
@@ -120,7 +122,7 @@ upd = lambda i, **kw: _wt_update.stackshot_update(i, **{"sender": "home-agent", 
 history = lambda i: [str(x.get("text") if isinstance(x, dict) else x) for x in (rd(i)["metadata"].get("stall") or {}).get("log", [])]
 stood = lambda i: bool(rd(i)["metadata"].get("ask")) and "decision" in _model_needs._needs_kinds(rd(i)["metadata"])
 
-check("the fixture: the owner is Oliver", server.OWNER == "Oliver")
+check("the fixture: the owner is Oliver", _core_instance.OWNER == "Oliver")
 
 # ---- 0. the pure readers
 S = AL.author_says_wrong
@@ -635,8 +637,8 @@ check("a corrupt ask_rec.at or ask_left.at never fails the write: the update is 
 
 # (round 12, L4) the writer's label is read only when a save changes the ask
 labels = []
-_label0 = server._session_label
-server._session_label = _wt_route._session_label = lambda w: (labels.append(w), _label0(w))[1]
+_label0 = _fleet_sessions_registry._session_label
+_fleet_sessions_registry._session_label = _wt_route._session_label = lambda w: (labels.append(w), _label0(w))[1]
 try:
     it0 = rd(1000); before0 = json.loads(json.dumps(it0))
     server._ask_stamp(it0, before0, "home-agent"); n_same = len(labels)
@@ -645,7 +647,7 @@ try:
     it2 = json.loads(json.dumps(it0)); it2["metadata"].pop("ask", None)
     server._ask_stamp(it2, before0, "home-agent"); n_gone = len(labels) - n_same - n_changed
 finally:
-    server._session_label = _wt_route._session_label = _label0
+    _fleet_sessions_registry._session_label = _wt_route._session_label = _label0
 check("a save that leaves the ask as it was, or removes it, does not look the writer up; one that changes it does, once, and records who wrote it",
       n_same == 0 and n_gone == 0 and n_changed == 1 and it1["metadata"]["ask_rec"]["by"] and "ask_rec" not in it2["metadata"] and it0["metadata"]["ask_rec"] == before0["metadata"]["ask_rec"], (n_same, n_changed, n_gone))
 check("changed(): a new ask, the same ask with other spacing, none", AL.changed({"ask": "a b"}, {"ask": "a  c"}) and not AL.changed({"ask": "a  b"}, {"ask": "a b"}) and not AL.changed({}, {"ask": "a"}) and AL.changed({"ask": "a"}, None))

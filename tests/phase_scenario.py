@@ -57,6 +57,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import create as _wt_create
@@ -99,7 +100,7 @@ def bare(it):
     out = copy.deepcopy(it); out.get("metadata", {}).pop("phase", None); return out
 def save(i, letter="g"):
     gid = f"{letter}{i}"
-    writes.save(gid, server._load(gid))
+    writes.save(gid, _service_store._load(gid))
     return raw(i, letter)
 def shown(i, letter="g"): return dict(raw(i, letter), gid=f"{letter}{i}")
 
@@ -167,12 +168,12 @@ def created(out):
 def uptd(gid, **kw): return server._update(gid, sender="home-front", **kw)
 out = _wt_create._create(subject="[home] phase create alive", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK])
 gid = created(out)
-check("3 a create of a doing item stores phase alive and no wait_kind", server._load(gid)["metadata"].get("phase") == "alive" and "wait_kind" not in server._load(gid)["metadata"], server._load(gid)["metadata"])
+check("3 a create of a doing item stores phase alive and no wait_kind", _service_store._load(gid)["metadata"].get("phase") == "alive" and "wait_kind" not in _service_store._load(gid)["metadata"], _service_store._load(gid)["metadata"])
 uptd(gid, hold=True, wake=day(30), wait_basis=f"the vendor ships on {day(33)}")
-m = server._load(gid)["metadata"]
+m = _service_store._load(gid)["metadata"]
 check("3 …an update that parks it (a hold, a wake, a wait_basis) stores phase waiting and waits_on time, and still no wait_kind", m.get("phase") == "waiting" and m.get("waits_on") == "time" and "wait_kind" not in m, m)
 uptd(gid, clear_hold=True)
-m = server._load(gid)["metadata"]
+m = _service_store._load(gid)["metadata"]
 check("3 …releasing the hold stores phase alive again, and drops the waits_on", m.get("phase") == "alive" and "waits_on" not in m and not m.get("hold"), m)
 put(46, needs=[BACK], state="doing")          # an item that stores the old word doing (fixture data: no call sets a state any more)
 uptd("g46", hold=True, wake=wk(24 * 5), wait_basis=f"the vendor ships on {day(7)}")
@@ -180,21 +181,21 @@ m = mt(46)
 check("3 …a stored doing item put on hold with a far wake stores waiting, and the hold ends the stored doing word (the item reads from its fields)", m.get("phase") == "waiting" and m.get("waits_on") == "time" and "state" not in m, m)
 out = _wt_create._create(subject="[home] phase create blocked", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK], after=["g31"], ask_by=day(9))
 gid_b = created(out)
-check("3 a create with an open after link stores phase waiting and waits_on item", server._load(gid_b)["metadata"].get("phase") == "waiting" and server._load(gid_b)["metadata"].get("waits_on") == "item", server._load(gid_b)["metadata"])
+check("3 a create with an open after link stores phase waiting and waits_on item", _service_store._load(gid_b)["metadata"].get("phase") == "waiting" and _service_store._load(gid_b)["metadata"].get("waits_on") == "item", _service_store._load(gid_b)["metadata"])
 out = _wt_create._create(subject="[home] phase create decision", description=DESC, project="projects/alpha", owner="home-front", next=f"{OWN}: decide", needs=["decision"],
                      ask="Decide: ship it · Recommend: yes · Stakes: a week · By: no date")
 gid_d = created(out)
-check("3 a create that asks the owner stores phase alive", server._load(gid_d)["metadata"].get("phase") == "alive", server._load(gid_d)["metadata"])
+check("3 a create that asks the owner stores phase alive", _service_store._load(gid_d)["metadata"].get("phase") == "alive", _service_store._load(gid_d)["metadata"])
 out = _wt_create._create(subject="[home] phase create relay", description=DESC, project="projects/alpha", owner="home-front", next="team-back: wait for the reply", needs=[BACK],
                      wait_kind="relay", wait_event="Acme's reply", ask_by=day(6), post_wake_mover=BACK)
 gid_r = created(out)
-m = server._load(gid_r)["metadata"]
+m = _service_store._load(gid_r)["metadata"]
 check("3 a create with a wait_kind stores phase waiting and a waits_on equal to the wait_kind it was given", m.get("phase") == "waiting" and m.get("wait_kind") == "relay" and m.get("waits_on") == "relay", m)
 uptd(gid, status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
-c = server._load(gid)
+c = _service_store._load(gid)
 check("3 an update that closes it leaves no phase, no waits_on and no wait_kind", c["status"] == "completed" and "phase" not in c["metadata"] and "waits_on" not in c["metadata"] and "wait_kind" not in c["metadata"], c["metadata"])
 uptd(gid_d, priority="p2")
-check("3 a filing edit on an open item keeps the phase (a save restamps it)", server._load(gid_d)["metadata"].get("phase") == "alive", server._load(gid_d)["metadata"])
+check("3 a filing edit on an open item keeps the phase (a save restamps it)", _service_store._load(gid_d)["metadata"].get("phase") == "alive", _service_store._load(gid_d)["metadata"])
 
 # ---- 4. the older fields are stored exactly as before: the same save with the stamp off writes the same item, bar the phase
 real_stamp = server._phase_stamp
@@ -327,7 +328,7 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
     try:
         for gid, _path in _core_store._item_files():
             try:
-                it = server._load(gid)
+                it = _service_store._load(gid)
             except Exception as e:  # noqa: BLE001
                 rows.append((gid, None, f"load: {e}")); continue
             it = dict(it, gid=gid)

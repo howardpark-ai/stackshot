@@ -54,11 +54,12 @@ if len(sys.argv) > 2 and sys.argv[1] == "--standby-child":
     os.environ.update(STACKSHOT_CONFIG=f"{root}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{root}/fleet"); os.environ.pop("STACKSHOT_URL", None)
     sys.path.insert(0, STACK); logging.disable(logging.CRITICAL)
     from stackshot.web import server
+    from stackshot.core import config as _cfg
     from stackshot.web import app as _wapp
     from stackshot.web.auth import signin as _signin
     from stackshot.web.colorcombos import WEB_LABEL as WL
     from starlette.testclient import TestClient
-    server._cfg.CFG["project_agent"] = {"form_senders": [WL], "form_machines": [HOST]}
+    _cfg.CFG["project_agent"] = {"form_senders": [WL], "form_machines": [HOST]}
     cookie = _signin._ui_sign(json.dumps({"email": MINA, "exp": time.time() + 3600}))
     VALS = json.loads(sys.argv[3])
     out = {}
@@ -99,6 +100,7 @@ def check(name, cond, got=None):
 from stackshot.web import colorcombos as cc
 WL = cc.WEB_LABEL         # the label the web form sends: the code's own constant, so this file names none of its own
 from stackshot.web import server
+from stackshot.core import config as _cfg
 from stackshot.web import app as _wapp
 from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
@@ -320,7 +322,7 @@ try:
     COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, EVE)}
     EXPIRED = _signin._ui_sign(json.dumps({"email": MINA, "exp": time.time() - 10}))
     JSON_H = {"Origin": BOARD, "Content-Type": "application/json"}
-    server._cfg.CFG["project_agent"] = {"form_senders": [WL, "other-web"], "form_machines": [HOST]}
+    _cfg.CFG["project_agent"] = {"form_senders": [WL, "other-web"], "form_machines": [HOST]}
     MH = {"Authorization": "Bearer " + TOK[HOST], "Content-Type": "application/json"}
     OH = {"Authorization": "Bearer " + TOK[OTHER], "Content-Type": "application/json"}
     drops = []
@@ -510,9 +512,9 @@ try:
         check("machine GET: a valid token of a machine that is not in form_machines is 403 (a read too), an error object", is_err(r, 403, None, "form_machines"), (r.status_code, r.text))
         r = mget()
         check("machine GET: the right machine reads {combos: [], max: 50}, JSON, no-store", r.status_code == 200 and js(r) == {"combos": [], "max": 50} and r.headers.get("cache-control") == "no-store", (r.status_code, r.text))
-        server._cfg.CFG["project_agent"] = {"form_senders": [WL], "form_machines": []}
+        _cfg.CFG["project_agent"] = {"form_senders": [WL], "form_machines": []}
         check("machine GET: with form_machines empty nobody reads", is_err(mget(), 403))
-        server._cfg.CFG["project_agent"] = {"form_senders": [WL, "other-web"], "form_machines": [HOST]}
+        _cfg.CFG["project_agent"] = {"form_senders": [WL, "other-web"], "form_machines": [HOST]}
         MS = {**S, "sender": WL}
         res = [mpost(MS, {"Content-Type": "application/json"}), mpost(MS, {"Authorization": "Bearer " + "x" * 43, "Content-Type": "application/json"}),
                mpost({"id": "00000000", "sender": WL}, {"Content-Type": "application/json"}, path="/client/colors/combos/delete")]
@@ -526,13 +528,13 @@ try:
         check("machine POST: a sender that is not text, blank, more than one line, over 80 characters is 400, field sender", all(is_err(r, 400, "sender") for r in res), [(r.status_code, r.text[:80]) for r in res])
         res = [mpost({**S, "sender": s}) for s in ("other-web", WL.upper(), WL.split("-")[0], "board", "osprey-x")]
         check("machine POST: another label (even one in form_senders), another case, a label not in form_senders: 403, field sender, nothing saved", all(is_err(r, 403, "sender", WL) for r in res) and not FILE.exists(), [(r.status_code, r.text[:80]) for r in res])
-        server._cfg.CFG["project_agent"] = {"form_senders": ["other-web"], "form_machines": [HOST]}
+        _cfg.CFG["project_agent"] = {"form_senders": ["other-web"], "form_machines": [HOST]}
         r = mpost(MS); r2 = mpost({"id": "00000000", "sender": WL}, path="/client/colors/combos/delete")
         check("machine POST: the web label that is not in form_senders is 403 (a label alone is not enough), delete too", is_err(r, 403, "sender") and is_err(r2, 403, "sender") and not FILE.exists())
-        server._cfg.CFG["project_agent"] = {"form_senders": WL, "form_machines": HOST}
+        _cfg.CFG["project_agent"] = {"form_senders": WL, "form_machines": HOST}
         check("machine POST: a bare string in the config counts as one name (as for the For you writes)", mpost(MS).status_code == 200)
         reset()
-        server._cfg.CFG["project_agent"] = {"form_senders": [WL, "other-web"], "form_machines": [HOST]}
+        _cfg.CFG["project_agent"] = {"form_senders": [WL, "other-web"], "form_machines": [HOST]}
         res = [mpost(MS, {"Authorization": "Bearer " + TOK[HOST], "Content-Type": ct}) for ct in ("text/plain", "")]
         check("machine POST: a body not declared JSON is 415", all(is_err(r, 415) for r in res) and not FILE.exists())
         res = [mpost(None, raw=b"{no"), mpost(None, raw=b"[1]"), mpost(None, raw=b"")]

@@ -58,16 +58,18 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.fleet import client
+import subprocess
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import message as _wt_message
 _web_publish._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
-_orig_run = server.subprocess.run
+_orig_run = subprocess.run
 def _fake_run(cmd, *a, **kw):
     if isinstance(cmd, list) and any(str(x).endswith("push.py") for x in cmd):
-        pushed.append(list(cmd)[-2:]); return server.subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
+        pushed.append(list(cmd)[-2:]); return subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
     return _orig_run(cmd, *a, **kw)
-server.subprocess.run = _fake_run
+subprocess.run = _fake_run
 def settle():
     for t in threading.enumerate():
         if t is not threading.current_thread() and t.daemon and t.is_alive(): t.join(3)
@@ -85,8 +87,8 @@ def mt(i): return json.loads((T / f"store/a/{i}.json").read_text())["metadata"]
 def needs(i):
     """The names in the item's needs as the board shows them (the store keeps a session by its id)."""
     v = mt(i).get("needs")
-    return [x if x in ("decision", "external") else server._session_label(x) for x in v] if isinstance(v, list) else v
-def set_cfg(**kw): server._cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py); a suite that sets [model] whole keeps it
+    return [x if x in ("decision", "external") else sr._session_label(x) for x in v] if isinstance(v, list) else v
+def set_cfg(**kw): _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py); a suite that sets [model] whole keeps it
 set_cfg()
 def send(to, text, sender=MAIN): return server._name_on_handover(to, text, sender)
 def write_ok(i, sender, **kw):
@@ -180,9 +182,9 @@ check("40 an agent already named: no line, as before", send(NOTES, "a40 again") 
 item(41, status="completed", needs=[BBUILD])
 check("41 a closed item: no line, as before", send(GBUILD, "a41 is done") == "" and needs(41) == [BBUILD])
 item(42, needs=[BBUILD])
-server._cfg.CFG.setdefault("pilot", {})["never_named"] = [GBUILD]
+_cfg.CFG.setdefault("pilot", {})["never_named"] = [GBUILD]
 check("42 an agent listed in [pilot] never_named: no line, nothing named", send(GBUILD, "a42 release please") == "" and needs(42) == [BBUILD])
-server._cfg.CFG["pilot"]["never_named"] = []
+_cfg.CFG["pilot"]["never_named"] = []
 check("43 a message that names no item: no line", send(GBUILD, "just words, no id here") == "")
 check("44 an id in backticks names nothing: no line", send(GBUILD, "see `a42` for context") == "" and needs(42) == [BBUILD])
 check("45 a front agent as the recipient: nothing (only background agents are named)", send(MAIN, "a42 is yours", sender=GBUILD) == "" and needs(42) == [BBUILD])

@@ -46,6 +46,7 @@ def rd(g):
     return json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 
 from stackshot.web import server
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
@@ -60,9 +61,9 @@ DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 def conf(table):
     """Set (or remove, with None) the map, as a reload would, and drop the fallback cache the board keeps for a few seconds."""
     if table is None:
-        server._cfg.CFG.pop("handoff", None)
+        _cfg.CFG.pop("handoff", None)
     else:
-        server._cfg.CFG["handoff"] = {"builder_by_page": table}
+        _cfg.CFG["handoff"] = {"builder_by_page": table}
     telling.FALLBACK_CACHE.clear()
 
 def filed(project, n, **kw):
@@ -82,7 +83,7 @@ check("an empty map is today's behaviour", filed("projects/delta/ui", 2) == CORE
 for odd in ("not a table", ["projects/delta/ui"], {"projects/delta/ui": 7, "": SCREEN, 5: SCREEN}):
     conf(odd)
     check(f"a malformed map ({odd!r}) reads as empty: the first builder", filed("projects/delta/ui", 3) == CORE and server._builder_by_page() == {}, server._builder_by_page())
-server._cfg.CFG["handoff"] = "not a table"; telling.FALLBACK_CACHE.clear()
+_cfg.CFG["handoff"] = "not a table"; telling.FALLBACK_CACHE.clear()
 check("a [handoff] that is not a table reads as empty", server._builder_by_page() == {} and telling.fallback_mover("projects/delta/ui") == CORE)
 
 # ---- the map

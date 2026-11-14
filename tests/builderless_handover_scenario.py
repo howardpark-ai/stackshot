@@ -48,6 +48,7 @@ def put(i, project="projects/sigma", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": SMAIN, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
@@ -59,7 +60,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake", **k: told.append((gid, owner, note, tag))
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 STEP = "run the one line in a terminal"
 WAKE = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400))      # a few days out

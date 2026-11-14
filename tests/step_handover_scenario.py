@@ -72,12 +72,16 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import needs as _model_needs
+from stackshot.core import instance as _core_instance
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.model import steps as _steps
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released_live as rlive_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 IDS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
 def fixtures():
     for f in (T / "store/a").glob("*.json"): f.unlink()
@@ -125,7 +129,7 @@ def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): drain(); return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_for(gid, to=None): return [p for p in pushes() if p[1].startswith(f"[stackshot] {gid}") and (to is None or p[0] == U.get(to, to))]
-def mover_of(i): return server._session_label(telling.holder({**rd(i), "gid": f"a{i}"}))
+def mover_of(i): return _fleet_sessions_registry._session_label(telling.holder({**rd(i), "gid": f"a{i}"}))
 check("the fixture: home-builder is a front agent, home-one and home-two are background sessions with a pane, home-gone has none",
       telling.front_sender(U["home-builder"]) and proofs_svc.handover_kind("home-two") == HO.SESSION and proofs_svc.handover_kind("home-builder") == HO.FRONT and proofs_svc.handover_kind(OWNER) == HO.OWNER
       and proofs_svc.handover_kind("nobody-here") == HO.OTHER and not proofs_svc.handover_down("home-two") and proofs_svc.handover_down("home-gone"), (proofs_svc.handover_kind("home-two"), proofs_svc.handover_down("home-gone")))
@@ -202,7 +206,7 @@ check("…and one asked for a step on record as handed over does nothing, whoeve
 p0 = len(pushes()); r = proofs_svc.handover("a2", time.time(), ["x"])
 check("…nor a second fallback (the mover was told already)", r["action"] == "none" and "told already" in r["why"] and len(pushes()) == p0, r)
 (T / "fleet/a/sessions.json").write_text(json.dumps({**{U[n]: {"name": n, "machine": "a", "seen": time.time()} for n in U}, "00000000-0000-4000-8000-0000000000ff": {"name": "home-gone", "machine": "a", "seen": time.time()}}))
-server._sessions_index.cache_clear() if hasattr(server._sessions_index, "cache_clear") else None
+_fleet_sessions_registry._sessions_index.cache_clear() if hasattr(_fleet_sessions_registry._sessions_index, "cache_clear") else None
 r = proofs_svc.handover("a2", time.time(), ["home-one: merge PR #11"])
 check("…and a session that came back is handed the item the next time the hand-over is asked (a fallback is not a final answer)", r["action"] == "moved" and mover_of(2) == "home-gone" and rd(2)["metadata"]["handover"]["kind"] == HO.MOVED, r)
 (T / "fleet/a/sessions.json").write_text(json.dumps({U[n]: {"name": n, "machine": "a", "seen": time.time()} for n in U}))
@@ -230,12 +234,12 @@ def refused(name, fn, *want):
     try:
         with writes.session_write(): fn()
         check(name, False, "no refusal")
-    except server.ToolError as e: check(name, str(e).startswith("Refused:") and "\n" not in str(e) and all(w in str(e) for w in want), str(e))
+    except ToolError as e: check(name, str(e).startswith("Refused:") and "\n" not in str(e) and all(w in str(e) for w in want), str(e))
 def accepts(name, fn):
     try:
         with writes.session_write(): fn()
         check(name, True)
-    except server.ToolError as e: check(name, False, str(e))
+    except ToolError as e: check(name, False, str(e))
 def mk(nxt, **kw): return lambda: _wt_create._create(subject="[home] made", description="- Goal: a thing works. It lives here.", project="projects/alpha", owner="home-builder", mover="home-one", next=nxt, **kw)
 refused("write check: a create whose step delivers a PR and is followed by another session's step is refused with the one-line fix",
         mk("home-one: merge PR #12 and restart the unit\nhome-two: verify the pages"), "step 1", "delivers #12", "another session's step follows", 'step_proof=[{"step": 1, "proof": "pr_merged #12"}]')
@@ -249,7 +253,7 @@ refused("…a release step with a follow-up, a URL and a second gap: the first i
 _scr = lambda: _wt_create._create(subject="[home] made by a script", description="- Goal: a thing works. It lives here.", project="projects/alpha", owner="home-builder",
                                                                                  mover="home-one", next="home-one: merge PR #18 and restart the unit\nhome-two: verify the pages")
 try: _scr(); check("…a script's write (no session's) is not judged", True)
-except server.ToolError as e: check("…a script's write (no session's) is not judged", False, str(e))
+except ToolError as e: check("…a script's write (no session's) is not judged", False, str(e))
 fixtures()
 item(20, "home-one: write the fix")
 refused("write check: an update that adds such a step is refused the same way", lambda: server._update("a20", sender="home-one", check="pr_merged example-owner/stackshot#11", next="home-one: write the fix\nhome-one: merge PR #19 and restart\nhome-two: verify the pages"), "step 2", "delivers #19")
@@ -267,14 +271,14 @@ check("delivers: the leading verb only", [_SP.delivers(t) for t in ("a: review t
       == [("", ""), ("pr_merged", "#7"), ("", ""), ("", ""), ("pr_merged", "#7"), ("pr_released", "#7"), ("pr_merged", "#7"), ("pr_released", "#7"), ("", "")], None)
 refused("the refusal says to split the step as well as to pass the proof, in one line", mk("home-one: merge PR #12 and restart the unit\nhome-two: verify the pages"), "split it so `merge PR #12` is a step of its own", "or, if the PR landing finishes the step, add step_proof=")
 _st = lambda *t: [{"text": x, "status": "open"} for x in t]
-_gap = lambda own, *t: _SP.proof_gaps(_st(*t), {}, server._steps.opener, lambda a, b: a == b, server._steps.key, own=own)
+_gap = lambda own, *t: _SP.proof_gaps(_st(*t), {}, _steps.opener, lambda a, b: a == b, _steps.key, own=own)
 check("…a release of a URL naming another repository is given a merge proof (only this repository's PRs are released); this repository's keeps the release proof",
       _gap("o/q", "home-one: release https://github.com/o/r/pull/9 and restart", "home-two: x") == [(1, "https://github.com/o/r/pull/9", "pr_merged https://github.com/o/r/pull/9")]
       and _gap("o/r", "home-one: release https://github.com/o/r/pull/9 and restart", "home-two: x") == [(1, "https://github.com/o/r/pull/9", "pr_released https://github.com/o/r/pull/9")], _gap("o/q", "home-one: release https://github.com/o/r/pull/9 and restart", "home-two: x"))
 check("…and a repository listed as released keeps the release proof, with the plain URL and with `release PR <URL>`; one not listed still gets the merge proof",
-      _SP.proof_gaps(_st("home-one: release PR https://github.com/o/r/pull/9 and restart", "home-two: x"), {}, server._steps.opener, lambda a, b: a == b, server._steps.key, own="o/q", released={"o/r"})
+      _SP.proof_gaps(_st("home-one: release PR https://github.com/o/r/pull/9 and restart", "home-two: x"), {}, _steps.opener, lambda a, b: a == b, _steps.key, own="o/q", released={"o/r"})
       == [(1, "https://github.com/o/r/pull/9", "pr_released https://github.com/o/r/pull/9")]
-      and _SP.proof_gaps(_st("home-one: release PR https://github.com/o/r/pull/9 and restart", "home-two: x"), {}, server._steps.opener, lambda a, b: a == b, server._steps.key, own="o/q", released={"o/s"})
+      and _SP.proof_gaps(_st("home-one: release PR https://github.com/o/r/pull/9 and restart", "home-two: x"), {}, _steps.opener, lambda a, b: a == b, _steps.key, own="o/q", released={"o/s"})
       == [(1, "https://github.com/o/r/pull/9", "pr_merged https://github.com/o/r/pull/9")], None)
 check("…`release PR <URL>` is a release phrase of its own (pure when it is all the step does), as `release <URL>` is",
       _SP.text_proofs("home-one: release PR https://github.com/o/r/pull/9") == _SP.text_proofs("home-one: release https://github.com/o/r/pull/9")
@@ -295,7 +299,7 @@ item(34, "home-one: merge PR #28 and restart\nhome-nobody: verify")
 fs, _x = AC.filing_findings({f"a{i}": {**rd(i), "gid": f"a{i}"} for i in (31, 32, 33, 34)}, {}, time.time(), _Env())
 check("audit: …not found for a pure step, one with a stored proof, one followed by the owner's step or by a name no role map knows", [x for x in fs if x["category"] == "step-handover"] == [], [(x["id"], x["detail"]) for x in fs])
 # a done step whose next session was never reached: ticked by the server long ago, mover unchanged, no record
-item(35, "home-one: the first part\nhome-two: the second part", steps=[{"text": "home-one: the first part", "status": "done", "by": server.NAME, "at": now - 7200}, {"text": "home-two: the second part", "status": "open", "by": "", "at": 0}])
+item(35, "home-one: the first part\nhome-two: the second part", steps=[{"text": "home-one: the first part", "status": "done", "by": _core_instance.NAME, "at": now - 7200}, {"text": "home-two: the second part", "status": "open", "by": "", "at": 0}])
 sh = [x for x in AC.filing_findings({"a35": {**rd(35), "gid": "a35"}}, {}, now, _Env())[0] if x["category"] == "step-handover"]
 check("audit: a next session never reached after a done step is found half an hour on, with no hand-over on record", len(sh) == 1 and "home-two" in sh[0]["detail"] and "no hand-over to home-two is on record" in sh[0]["detail"] and sh[0]["mover"] == "home-one", sh)
 mm = rd(35); mm["metadata"]["handover"] = {"step": HO.step_hash("home-two: the second part"), "kind": HO.MOVED, "to": "home-two", "at": now}
@@ -325,7 +329,7 @@ def env(**kw):
     return AR.Env(roles=ROLES, fallback=lambda p: "alpha-main", builder=lambda p: "alpha-builder", page_of=lambda p: ("", None), deliver=deliver, sessions=lambda: None, **kw)
 for p in (T / "state/audit").glob("*.json"): p.unlink()
 fixtures()
-item(40, "home-one: the first part\nhome-two: the second part", steps=[{"text": "home-one: the first part", "status": "done", "by": server.NAME, "at": now - 7200}, {"text": "home-two: the second part", "status": "open", "by": "", "at": 0}])
+item(40, "home-one: the first part\nhome-two: the second part", steps=[{"text": "home-one: the first part", "status": "done", "by": _core_instance.NAME, "at": now - 7200}, {"text": "home-two: the second part", "status": "open", "by": "", "at": 0}])
 item(41, "home-one: the first part\nhome-two: the second part", mover="home-builder", steps=[{"text": "home-one: the first part", "status": "done", "by": "home-builder", "at": now - 7200}, {"text": "home-two: the second part", "status": "open", "by": "", "at": 0}])
 items = {f"a{i}": {**rd(i), "gid": f"a{i}"} for i in (40, 41)}
 r1 = AR.filing_pass(now=now, items=items, anchors={}, env=env())

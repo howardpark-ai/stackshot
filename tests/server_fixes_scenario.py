@@ -65,6 +65,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import update as _wt_update; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.core import instance as _core_instance
+from stackshot.service import store as _service_store
+from stackshot.web import answers as _web_answers
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import telling
@@ -86,7 +90,7 @@ TIMED = f"{BACK}: at 08:00 run the nightly check and report"
 
 from stackshot.waits import server_fixes as SF; from stackshot.tools import board_report as BR
 from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR
-OWN = server.OWNER
+OWN = _core_instance.OWNER
 log = lambda i: [e["text"] for e in ((mt(i).get("stall") or {}).get("log") or [])]
 w3 = local_day(now0 + 3 * DAY)
 FRONT, BUILD, OTHER = "home-front", "team-back", "home-other"
@@ -176,7 +180,7 @@ check("2 then=<front agent> becomes the builder; the item the owner moves is oth
 DESC2 = "- Goal: A thing\n- It lives here\n- Done when done"
 r = _wt_create.stackshot_create(subject="[home] handed to the front", description=DESC2, project="projects/alpha", sender=OTHER, mover=FRONT, next=f"{BUILD}: look at it")
 new_gid = re.search(r"created (\w+) ", r).group(1)
-new_item = server._load(new_gid)
+new_item = _service_store._load(new_gid)
 new_log = [e["text"] for e in ((new_item["metadata"].get("stall") or {}).get("log") or [])]
 check("2 create: the same fix; the item is made with the builder as mover and the reply says so", r.startswith("created") and telling.holder(new_item) == BUILD and f"mover={BUILD}" in r and "no hand-off notice" in r, r[:400])
 check("2 …History has the line on the new item, and the fix is recorded", any(FRONT in x and BUILD in x for x in new_log) and fm_marked(new_item["metadata"]), (new_log, new_item["metadata"]))
@@ -217,7 +221,7 @@ check("3 an item that waits on the owner is never fixed (a hold beside his decis
 
 # ================================================================ 4. settled_pick
 names = SF.owner_names()
-o = (server._cfg.owner_names() or [OWN])[0]      # a name the board report matches (the instance's alias); the server's own hold note matches server.OWNER
+o = (_cfg.owner_names() or [OWN])[0]      # a name the board report matches (the instance's alias); the server's own hold note matches server.OWNER
 settled = lambda t: SF.settled_out(t, names)
 check("4 a quoted span and a past pick are blanked, a present wait is not", o not in settled(f"{o} picked A") and "decides" not in settled(f'He wrote "wait until {o} decides"')
       and f"waiting on {o}" in settled(f"waiting on {o}") and settled("a b") == "a b", (settled(f"{o} picked A"), settled(f'He wrote "{o} decides"')))
@@ -234,8 +238,8 @@ check("4 (as before) a hold whose words wait on the owner's decision is mislabel
 check("4 a hold that records a pick the owner already made is not", "mislabeled-state" not in br(f"the export ships {w2}; {o} picked option A on the board") and "mislabeled-state" not in br(f"the export ships {w2}; {o} has approved the release"), br(f"the export ships {w2}; {o} picked option A"))
 check("4 …nor one that quotes his words", "mislabeled-state" not in br(f'the export ships {w2}; his answer was "{o} approves B"') and "mislabeled-state" not in br(f"the export ships {w2}; his note, 'waiting on {o} was over'"), None)
 check("4 …but a pick recorded beside a present wait on him is still found", "mislabeled-state" in br(f"{o} picked A; waiting on {o} for the date, after {w2}"), None)
-note_q = server._form_notes(parked=True, meta={"next": f'{BACK}: his answer was "wait until {server.OWNER} decides"; carry out A'}, gid="a1")
-note_p = server._form_notes(parked=True, meta={"next": f"{BACK}: wait until {server.OWNER} decides"}, gid="a1")
+note_q = server._form_notes(parked=True, meta={"next": f'{BACK}: his answer was "wait until {_core_instance.OWNER} decides"; carry out A'}, gid="a1")
+note_p = server._form_notes(parked=True, meta={"next": f"{BACK}: wait until {_core_instance.OWNER} decides"}, gid="a1")
 check("4 the server's hold note is quiet for a quoted past answer and still speaks for a present wait on him", "waits on" not in note_q and "waits on" in note_p, (note_q, note_p))
 
 # ================================================================ 5. never by the server
@@ -267,34 +271,34 @@ check("6.1 …also with the owner as mover and a next line that is the session's
 # 6.2 the pass's park is the server's own save: no writer, so the author, the activity clock and a pending answer are as they were
 _k, d_ = aitem(9200)
 d_["written_by"] = "someone-else"; d_["activity"] = now - 5 * H; (T / "store/a/9200.json").write_text(json.dumps(d_))
-server._answers_save({"a9200": {"told": [server._session_id(BACK)], "kind": "decision"}})
+_web_answers._answers_save({"a9200": {"told": [_web_page_debts._session_id(BACK)], "kind": "decision"}})
 before_ = rd(9200)
 res_ = server._wake_park("a9200", now)
 after_ = rd(9200)
 check("6.2 the pass parks it", res_.get("parked") is True and hd_(after_["metadata"]) is True and "text" in (after_["metadata"].get("wait_basis") or {}), (res_, after_["metadata"]))
 check("6.2 …written_by and written_at are as they were", after_.get("written_by") == "someone-else" and after_.get("written_at") == before_.get("written_at"), (before_.get("written_by"), after_.get("written_by")))
 check("6.2 …the activity clock did not move", before_.get("activity") and after_.get("activity") == before_.get("activity"), (before_.get("activity"), after_.get("activity")))
-check("6.2 …and the pending answer record is still there", "a9200" in server._answers_load(), server._answers_load())
+check("6.2 …and the pending answer record is still there", "a9200" in _web_answers._answers_load(), _web_answers._answers_load())
 check("6.2 …with the History line and the record", len(log(9200)) == 1 and "parked" in log(9200)[0] and SF.marked(mt(9200), SF.WAKE_PARK, str(wk_(before_["metadata"]))), (log(9200), mt(9200)))
 
 # 6.3 the front_mover mark is bound to the session whose write was fixed, and lasts a day
 fput(210, mover=BUILD, needs=[BUILD])
 out = _wt_update.stackshot_update(item_id="a210", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 the first send is substituted and marked for its sender", holder(210) == BUILD and fm_marked(mt(210)), (out[:200], mt(210).get(SF.MARK)))
-fput(211, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", server._session_id(OTHER) or OTHER, time.time())]}})
+fput(211, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", _web_page_debts._session_id(OTHER) or OTHER, time.time())]}})
 out = _wt_update.stackshot_update(item_id="a211", sender=BACK, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 an unrelated session after another's token is substituted, not waved through", holder(211) == BUILD and "as you sent it" not in out, (out[:300], mt(211)))
-fput(212, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", server._session_id(OTHER) or OTHER, time.time() - 2 * DAY)]}})
+fput(212, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", _web_page_debts._session_id(OTHER) or OTHER, time.time() - 2 * DAY)]}})
 out = _wt_update.stackshot_update(item_id="a212", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 …and the same session after a stale token (two days) is substituted again", holder(212) == BUILD and "as you sent it" not in out, (out[:300], mt(212)))
-fput(213, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", server._session_id(OTHER) or OTHER, time.time() - 2 * HOUR)]}})
+fput(213, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", _web_page_debts._session_id(OTHER) or OTHER, time.time() - 2 * HOUR)]}})
 out = _wt_update.stackshot_update(item_id="a213", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 …while the same session within the day sending it again is kept as sent", holder(213) == FRONT and "as you sent it" in out, (out[:300], mt(213)))
 
 # 6.4 a negation, a waiting word before the name and his name alone in quotes still wait on him
 check("6.4 'wait until <owner> has not yet decided' is still a wait on him", o in settled(f"wait until {o} has not yet decided") and o in settled(f"{o} hasn't decided"), settled(f"wait until {o} has not yet decided"))
 check("6.4 'parked until <owner> confirmed or rejected' is still a wait on him", o in settled(f"parked until {o} confirmed or rejected") and o in settled(f"waiting on {o} picked one"), settled(f"parked until {o} confirmed or rejected"))
-check("6.4 a quoted <owner> name alone ('blocked on <owner> approval') is the name, not a quoted answer", o in settled(f"blocked on '{o}' approval") and server._waits_on_owner(f"blocked on '{server.OWNER}' approval"), settled(f"blocked on '{o}' approval"))
+check("6.4 a quoted <owner> name alone ('blocked on <owner> approval') is the name, not a quoted answer", o in settled(f"blocked on '{o}' approval") and server._waits_on_owner(f"blocked on '{_core_instance.OWNER}' approval"), settled(f"blocked on '{o}' approval"))
 check("6.4 …the readers find them: the board report calls each hold mislabeled", all("mislabeled-state" in br(f"{t} (after {w2})") for t in (f"wait until {o} has not yet decided", f"parked until {o} confirmed or rejected", f"blocked on '{o}' approval")), None)
 check("6.4 (as before) a past pick with nothing waiting before it is still blanked", o not in settled(f"the export ships; {o} has approved it") and o not in settled(f"{o} picked A"), None)
 

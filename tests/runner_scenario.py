@@ -19,7 +19,7 @@ fleet's clocks in a fixed order. Fixture data, no live store, no network, no Git
      a current runner is told to nobody · a stalled one makes exactly one log line and one message to the builder · a second look while it stays stalled sends nothing · a completed round re-arms it · the message names the tick the runner is in
 
     tests/run-suite runner        → exit 0 / 1"""
-import contextlib, datetime as dt, io, json, logging, os, pathlib, re, sys, threading, time, types
+import contextlib, datetime as dt, io, json, logging, os, pathlib, re, sys, threading, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
@@ -303,6 +303,12 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
 from stackshot.web import server; from stackshot.service import foryou_events as fyev
+from stackshot.web import runners as _runners
+from stackshot.waits import watchers as _watch
+from stackshot.projects import pages as _pages
+from stackshot.router import router_live as _router_live
+from stackshot.web import search as _search
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
@@ -348,7 +354,7 @@ def spy_all():
         saved[fn] = getattr(own(fn), fn)
         setattr(own(fn), fn, (lambda label=label: (counts.__setitem__(label, counts.get(label, 0) + 1), order_seen.append(label), [])[-1]))
     saved["next_wake"] = wakes_svc.next_wake
-    wakes_svc.next_wake = lambda: dt.datetime(2000, 1, 1, tzinfo=server._pages.zone_now().tzinfo)       # a wake is due, so the watchers' pass runs
+    wakes_svc.next_wake = lambda: dt.datetime(2000, 1, 1, tzinfo=_pages.zone_now().tzinfo)       # a wake is due, so the watchers' pass runs
     saved["fleet_stamp"] = runner_svc.fleet_stamp
     runner_svc.fleet_stamp = lambda: 1.0
 def unspy_all():
@@ -430,7 +436,8 @@ class FakeThread:
     def is_alive(self): return False
     def join(self, timeout=None): pass
 real_thread = threading.Thread
-server._runners = types.SimpleNamespace(PERSIST=False, AUTOSTART=False, ON_CHANGE=None, restore=lambda: None)     # the CI runners page makes GitHub calls once it may start
+real_runners = (_runners.PERSIST, _runners.AUTOSTART, _runners.ON_CHANGE, _runners.restore)
+_runners.restore = lambda: None     # the CI runners page makes GitHub calls once it may start: the start's three switches are put back below, after the last start
 
 
 def start_mode(runner_section):
@@ -459,7 +466,7 @@ for label, section in (("absent", None), ("enabled = true", {"enabled": True}), 
           names_ == ["runner", "publish", "watchdog", "router", "search", "ghsync-worker", "ghsync-comments"], names_)
     check(f"4 start with {label}: …no thread more than the runner's loop and the six others is started", len(targets) == 7 and runners_[0].loop in targets, [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …the other loops are untouched: publish, watchdog, router, search, the mirror's worker and comments",
-          all(f in targets for f in (runner_svc.publish_loop, runner_svc.watchdog_loop, server._router_live.loop, server._search.loop, server._gh.worker_loop, server._gh.comments_loop)), [getattr(t, "__name__", t) for t in targets])
+          all(f in targets for f in (runner_svc.publish_loop, runner_svc.watchdog_loop, _router_live.loop, _search.loop, _gh.worker_loop, _gh.comments_loop)), [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …no thread of the page-debt call is started: the audit run's pages stage asks the server for it", not hasattr(server, "_page_debt_loop") and not any(getattr(t, "__name__", "") == "_page_debt_loop" for t in targets), [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …the start says the runner runs, and says nothing of a mode or the flag", "stackshot: minute set: runner (one thread, one lock, paced rounds every 60 s)" in err and "old threads" not in err, err[-600:])
     if section is not None:
@@ -473,6 +480,7 @@ try:
         server._start_background()
 finally:
     threading.Thread = real_thread
+_runners.PERSIST, _runners.AUTOSTART, _runners.ON_CHANGE, _runners.restore = real_runners
 check("4 a second start in the same process reuses the runner it has: one Runner, the same one, not overwritten", len(runner_svc.RUNNER) == 1 and runner_svc.RUNNER[0] is first_runner, runner_svc.RUNNER)
 check("4 …the runner runs on the wake event _update sets, and over the server's table", runners_[0].wake is runner_svc.WAKE_EVENT and [t.name for t in runners_[0].ticks] == names)
 check("4 …the status is the runner's (enabled, mode runner, a record for every tick)", runner_svc.status()["enabled"] is True and runner_svc.status()["mode"] == "runner"
@@ -539,14 +547,14 @@ with TestClient(app, base_url=BOARD) as c:
 # the migration's hold, on the server's table
 spy_all()
 try:
-    real_hold = server._watch.holding
-    server._watch.holding = lambda: True
+    real_hold = _watch.holding
+    _watch.holding = lambda: True
     rh = runner_svc.make()
     rh.run_round(event=True)
     check("5 hold: while the migration holds the board only the registry sync, the clients' tick and the two wake passes (which check for themselves) run",
           set(counts) == {"wake_pass", "anchor_pass", "roles_sync_safe", "clients_tick"}, counts)
 finally:
-    server._watch.holding = real_hold
+    _watch.holding = real_hold
     unspy_all()
 
 # the publish step
@@ -591,7 +599,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: publ
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
 woke = []; published.clear()
 real_nw, real_wp, real_ap = wakes_svc.next_wake, wakes_svc.wake_pass, wakes_svc.anchor_pass
-ZONE_TZ = server._pages.zone_now().tzinfo
+ZONE_TZ = _pages.zone_now().tzinfo
 try:
     wakes_svc.wake_pass = lambda: (woke.append("wake"), ["a1"])[1]
     wakes_svc.next_wake = lambda: None
@@ -621,10 +629,10 @@ try:
     check("5 wake wait: a wake in hours, the 60 s cap", wakes_svc.minute_wake_wait() == 60.0)
     wakes_svc.next_wake = lambda: dt.datetime.now(ZONE_TZ) - dt.timedelta(hours=1)
     check("5 wake wait: a wake already due, 0 (the runner's floor then applies)", wakes_svc.minute_wake_wait() == 0.0)
-    real_paused = server._watch.paused
-    server._watch.paused = lambda: True
+    real_paused = _watch.paused
+    _watch.paused = lambda: True
     check("5 wake wait: while [model] pause holds every wake, 60 s (nothing fires, so no spinning on a due wake)", wakes_svc.minute_wake_wait() == 60.0)
-    server._watch.paused = real_paused
+    _watch.paused = real_paused
 finally:
     wakes_svc.next_wake, wakes_svc.wake_pass, wakes_svc.anchor_pass = real_nw, real_wp, real_ap
 

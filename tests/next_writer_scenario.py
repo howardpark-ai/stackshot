@@ -43,6 +43,11 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
+from stackshot.service import store as _service_store
+from stackshot.waits import handoff as _ho
+from stackshot.core import config as _cfg
+from stackshot.core import instance as _core_instance
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -52,7 +57,7 @@ from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
+_cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 STK = "projects/example"
@@ -61,7 +66,7 @@ def create(next, sender=MAIN, **kw):
     r = _wt_create.stackshot_create(subject="[home] a thing", description=DESC, project=STK, sender=sender, next=next, **kw)
     return _model_ids._norm_id(r.split()[1])
 def upd(gid, sender, **kw): return server._update(gid, sender=sender, **kw)
-def rd(gid): return json.loads(server._path(gid).read_text())
+def rd(gid): return json.loads(_service_store._path(gid).read_text())
 def nx(gid): return rd(gid)["metadata"].get("next")
 def who(gid):
     m = rd(gid)["metadata"]
@@ -71,7 +76,7 @@ def lines(gid): return (nx(gid) or "").splitlines()
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want), str(e))
 
 # ================================================================ create: the lines are the creator's
@@ -268,9 +273,9 @@ refused("glue: an indented first line after another session's line is refused", 
 refused("glue: …so is a parenthesised one", lambda: upd(g4, ENG, next="(a note)\nx: y"), "next must start with a line naming")
 refused("glue: …and a fenced one", lambda: upd(g4, ENG, next="```\nrm -rf x\n```"), "next must start with a line naming")
 check("glue: …and nothing was stored", (nx(g4), rd(g4)["metadata"].get("next_by")) == before, (nx(g4), before))
-server._cfg.CFG["model"]["guards"] = True
+_cfg.CFG["model"]["guards"] = True
 refused("glue: with the guards on, the wait-word line cannot slip past them behind another writer's entry", lambda: upd(g4, ENG, next=f"{GL}\n{ENG}: step"), "next must start with a line naming")
-server._cfg.CFG["model"]["guards"] = False
+_cfg.CFG["model"]["guards"] = False
 upd(g_none, ENG, next=f"{GL}\n{ENG}: step")
 check("glue: the same text is fine when nothing stands above it (it is the first entry)", nx(g_none) == f"{GL}\n{ENG}: step", nx(g_none))
 mg = {"owner": "K"}
@@ -284,8 +289,8 @@ check("write: lines that would not read back as the same lines raise before anyt
 # server-written lines (the cold call, a script) are the keeper's, which a session can replace
 gc = create(K1)
 upd(gc, GEN, next=A1)
-upd(gc, server._ho.COLD, next=f"{server.OWNER}: answer the ask on the item", clear_next=True)
-check("cold call: its line is stored with the keeper as the writer, not 'cold-call'", who(gc) == [MAIN] and nx(gc) == f"{server.OWNER}: answer the ask on the item", (nx(gc), who(gc), rd(gc)["metadata"].get("next_by")))
+upd(gc, _ho.COLD, next=f"{_core_instance.OWNER}: answer the ask on the item", clear_next=True)
+check("cold call: its line is stored with the keeper as the writer, not 'cold-call'", who(gc) == [MAIN] and nx(gc) == f"{_core_instance.OWNER}: answer the ask on the item", (nx(gc), who(gc), rd(gc)["metadata"].get("next_by")))
 upd(gc, MAIN, next=f"{MAIN}: his answer is in, carry on")
 check("cold call: …so the keeper's next replaces it and it does not outlive his answer", lines(gc) == [f"{MAIN}: his answer is in, carry on"], nx(gc))
 upd(gc, GEN, next=A1)
@@ -319,13 +324,13 @@ telling.tell_woken = _tw
 # the migration's own write: a nameless line given a name keeps its writer
 gm = _model_ids._norm_id(_wt_create._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN, next="nameless line").split()[1])     # a line stored before N1: only the server's own write can make one now
 upd(gm, GEN, next=f"{GEN}: second")
-it = server._load(gm)
+it = _service_store._load(gm)
 res = migsvc.migrate_one({"item": gm, "set": {"next": f"{MAIN}: nameless line\n{GEN}: second"}, "drop": [], "expect": it["updated"], "expect_sig": migsvc.migrate_sig(gm, it), "kind": "named"})
 check("migration: the apply goes through", res.get("action") == "set", res)
 check("migration: the lines it named keep their writers", lines(gm) == [f"{MAIN}: nameless line", f"{GEN}: second"] and who(gm) == [MAIN, GEN], (nx(gm), who(gm)))
 
 # the write guards on next's text judge the lines the write set, not lines another session wrote
-server._cfg.CFG["model"]["guards"] = True
+_cfg.CFG["model"]["guards"] = True
 nowt = time.time() - 86400
 (T / "store/a/41.json").write_text(json.dumps({"id": "41", "subject": "[home] old", "description": DESC, "status": "open", "updated": nowt, "state_updated": nowt, "confirmed": nowt,
                                               "metadata": {"owner": U[MAIN], "project": STK, "next": "do the thing (an unnamed line stored before the guard)"}}))
@@ -333,7 +338,7 @@ upd("a41", GEN, next=f"{MAIN}: a named line by the engineer")
 check("guards: a session's valid line is not refused for the keeper's old nameless line beside it", lines("a41") == ["do the thing (an unnamed line stored before the guard)", f"{MAIN}: a named line by the engineer"], nx("a41"))
 refused("guards: …but a nameless line of the sender's own is still refused", lambda: _wt_update.stackshot_update("a41", sender=GEN, next="a nameless line of mine"), "names no one")
 check("…and the refused write changed nothing", len(lines("a41")) == 2 and who("a41") == [MAIN, GEN], (nx("a41"), who("a41")))
-server._cfg.CFG["model"]["guards"] = False
+_cfg.CFG["model"]["guards"] = False
 
 # a notice quotes the line the writer wrote, not the head of lines others wrote
 mn = {"owner": U[MAIN], "next": f"{MAIN}: head line"}

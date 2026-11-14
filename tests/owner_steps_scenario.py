@@ -72,6 +72,9 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import owner_steps as HS; from stackshot.web import itempage as IP; from stackshot.model import next_backfill as NB
+from stackshot.service import store as _service_store
+from stackshot.core import instance as _core_instance
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc
@@ -87,7 +90,7 @@ def refused(name, f, *want, i=None):
     was = rd(i) if i is not None else None
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
 def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
 def st(i): return [(x["status"], x["text"]) for x in S.view(mt(i), keeper=OWNER)]
@@ -99,7 +102,7 @@ H1, H2 = f"Oliver: {D1}", f"Oliver: {D2}"
 # ---- 1. N2: an ask makes his step
 r = upd(1, needs="decision", ask=ASK, options=OPTS)
 check("an update that adds a decision ask: the server adds the open step `Oliver: <Decide part>` at the end of the list", his(1) == [OPEN(H1)] and st(1)[0] == OPEN("home-agent: build it"), st(1))
-check("…it is a line of next too, written by the server, not by the session (a session's update never replaces it)", H1 in mt(1)["next"].splitlines() and writers(1).get(H1) == server.NAME, (mt(1), writers(1)))
+check("…it is a line of next too, written by the server, not by the session (a session's update never replaces it)", H1 in mt(1)["next"].splitlines() and writers(1).get(H1) == _core_instance.NAME, (mt(1), writers(1)))
 check("…recorded as the server's step", mt(1).get("owner_step") == H1, mt(1))
 upd(1, next="home-agent: build it, then test it")
 check("a session's next write replaces its own lines and leaves his step", his(1) == [OPEN(H1)] and "home-agent: build it, then test it" in mt(1)["next"], st(1))
@@ -108,9 +111,9 @@ check("a write that touches neither the ask nor the next adds no second step", l
 
 r = _wt_create.stackshot_create(subject="[home] decide the thing", description=DESC, project="projects/alpha", needs="decision", ask=ASK, options=OPTS, next="home-agent: build it", sender="home-agent")
 cid = re.match(r"created (\S+)", r).group(1)
-cm = server._load(cid)["metadata"]
+cm = _service_store._load(cid)["metadata"]
 check("a create with an ask: his step is on the list from the first save, written by the server", [(x["status"], x["text"]) for x in S.view(cm, keeper=OWNER) if x["text"].startswith("Oliver:")] == [OPEN(H1)]
-      and dict(NL.resolve(cm, OWNER)).get(H1) == server.NAME, (r, cm))
+      and dict(NL.resolve(cm, OWNER)).get(H1) == _core_instance.NAME, (r, cm))
 
 r = upd(2, step=STEP)
 check("a step= (the your-step state) gets `Oliver: <the step>`", his(2) == [OPEN(f"Oliver: {STEP}")], (st(2), r))
@@ -154,7 +157,7 @@ r = upd(4, needs="decision", ask=ASK, options=OPTS)
 check("(setup) item the item asks", his(4) == [OPEN(H1)], st(4))
 r = upd(4, ask=ASK2, options=OPTS)
 check("a changed ask: the old step is dropped and the new one added, in that order, once", [s for s, _ in his(4)] == ["dropped", "open"] and his(4)[0][1] == H1 and his(4)[1][1] == H2 and mt(4)["next"].count("Oliver:") == 1, st(4))
-check("…the drop is the server's, with a time", mt(4)["steps"][[x["text"] for x in mt(4)["steps"]].index(H1)]["by"] == server.NAME, mt(4)["steps"])
+check("…the drop is the server's, with a time", mt(4)["steps"][[x["text"] for x in mt(4)["steps"]].index(H1)]["by"] == _core_instance.NAME, mt(4)["steps"])
 
 # ---- 4. N4: his answer ticks, shown on the step
 t0 = time.time()

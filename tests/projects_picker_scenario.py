@@ -96,6 +96,9 @@ ID = re.compile(r"^prj_[0-9a-f]{8}$")
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.service import projects as _psvc
+from stackshot.web import page_debts as _pdebts
+from stackshot.core import config as _cfg
+from stackshot.anchors import anchors as _anc
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -431,7 +434,7 @@ relist("projects/live-keeper", sender="fleet-web"); st, out = pa("projects/live-
 check("project-agent: an agentless project whose keeper IS a present session (home-fresh) refuses the label exception, however fresh the list: the keeper's own id may", st == 403 and "home-fresh-main" not in rec("projects/live-keeper")["agents"]
       and pa("projects/live-keeper", "home-fresh-main", U["home-fresh"])[0] == 200, (st, out))
 check("project-agent: the keeper's liveness is the fleet's present-only lookup: kappa's keeper home-kappa is a retired session in the fleet's identity records (its name is in names(), but by_name has no present holder), and the label still got in above",
-      "home-kappa" in set(server._anc.names().values()) and "home-kappa" not in server._anc.names().by_name and "home-fresh" in server._anc.names().by_name)
+      "home-kappa" in set(_anc.names().values()) and "home-kappa" not in _anc.names().by_name and "home-fresh" in _anc.names().by_name)
 st, out = pa("projects/delta", "home-delta-main", "fleet-web")
 check("project-agent: a hidden project never listed (delta) still refuses a label; its keeper's session may list one, which lists the project by agents",
       st == 403 and rec("projects/delta")["listed"] is False, (st, out))
@@ -492,10 +495,10 @@ def fpa(machine, project, name, sender, role="helper", front=False, mandate="a h
 def lam_pending():
     """The agents the form (or any label) listed on lambda: the record's agents that carry a `by` (the page's own line is the one without)."""
     return {n: a for n, a in (pverbs.pr.entries().get(L, {}).get("agents") or {}).items() if a.get("by")}
-CFG0 = server._cfg.CFG.get("project_agent", "absent")
+CFG0 = _cfg.CFG.get("project_agent", "absent")
 check("form call: the example config carries the section with the defaults (no sender label: the instance names its form's), and the code's defaults are neutral (no sender, no machine)",
       CFG0 == {"form_senders": [], "form_machines": ["box-a"]} and _psvc._FORM_SENDERS == [] and _psvc._FORM_MACHINES == [], CFG0)
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}   # the instance's own config: it names its form's label
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}   # the instance's own config: it names its form's label
 check("form call: the setup is a listed project that has agents (and no session's id is involved)", rec("projects/lambda")["listed"] is True and "home-lambda-main" in rec("projects/lambda")["agents"], rec("projects/lambda"))
 st, out = fpa("box-a", "projects/lambda", "home-lambda-helper", "fleet-web")
 check("form call: fleet-web from box-a on a listed project WITH agents → 200, listed in the record by the label (no page line owed: the page is written from the record)", st == 200 and out["page_owed"] is False
@@ -587,31 +590,31 @@ fpa("box-c", "projects/lambda", "home-lambda-body", "fleet-web"); fpa("box-a", "
 check("form call: refused form calls (hidden, name owned by another project, 409 on another sender's pending, wrong machine, wrong label) leave the published projects.json byte for byte as it was",
       (T / "state/projects.json").read_bytes() == PJ1)
 # the config: absent section → the defaults; a changed section → the file's lists; a malformed value → nobody
-server._cfg.CFG["project_agent"] = "x"
+_cfg.CFG["project_agent"] = "x"
 check("form call: a section that is not a table (project_agent = \"x\") switches form calls off, it does not fall back to the defaults", fpa("box-a", "projects/lambda", "home-lambda-notable", "fleet-web")[0] == 403 and "home-lambda-notable" not in lam_pending()
       and _psvc._form_call("box-a", "fleet-web") is False)
-server._cfg.CFG["project_agent"] = ["fleet-web"]
+_cfg.CFG["project_agent"] = ["fleet-web"]
 check("form call: …a list as the section too", _psvc._form_call("box-a", "fleet-web") is False)
-server._cfg.CFG["project_agent"] = {"form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_machines": ["box-a"]}
 check("form call: a table that sets one key keeps the other's default (no sender label: no form call)", _psvc._form_call("box-a", "fleet-web") is False and _psvc._form_call("box-c", "fleet-web") is False)
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"]}
 check("form call: …and the senders alone keep the default machines (none since the code names no machine), so the form calls nobody", _psvc._form_call("box-a", "fleet-web") is False and _psvc._form_call("box-c", "fleet-web") is False)
-server._cfg.CFG.pop("project_agent", None)
+_cfg.CFG.pop("project_agent", None)
 st, out = fpa("box-a", "projects/lambda", "home-lambda-nocfg", "fleet-web")
 check("form call: with the config section absent the defaults apply (no sender label: fleet-web on box-a → 403), and the defaults refuse anyone else too", st == 403 and "home-lambda-nocfg" not in lam_pending()
       and fpa("box-c", "projects/lambda", "home-lambda-nocfg2", "fleet-web")[0] == 403 and fpa("box-a", "projects/lambda", "home-lambda-nocfg2", "other-form")[0] == 403, (st, out))
-server._cfg.CFG["project_agent"] = {"form_senders": ["other-form"], "form_machines": ["box-c", "box-e"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["other-form"], "form_machines": ["box-c", "box-e"]}
 check("form call: the section as the file sets it: its senders on its machines (200); the default sender/machine pair no longer is (403)",
       fpa("box-e", "projects/lambda", "home-lambda-cfg1", "other-form")[0] == 200 and fpa("box-c", "projects/lambda", "home-lambda-cfg2", "other-form")[0] == 200
       and fpa("box-a", "projects/lambda", "home-lambda-cfg3", "fleet-web")[0] == 403 and fpa("box-a", "projects/lambda", "home-lambda-cfg3", "other-form")[0] == 403
       and fpa("box-c", "projects/lambda", "home-lambda-cfg3", "fleet-web")[0] == 403, lam_pending())
-server._cfg.CFG["project_agent"] = {"form_senders": "fleet-web", "form_machines": "box-a"}
+_cfg.CFG["project_agent"] = {"form_senders": "fleet-web", "form_machines": "box-a"}
 check("form call: a bare string in the file counts as one name", fpa("box-a", "projects/lambda", "home-lambda-str", "fleet-web")[0] == 200)
-server._cfg.CFG["project_agent"] = {"form_senders": 5, "form_machines": {"box-a": 1}}
+_cfg.CFG["project_agent"] = {"form_senders": 5, "form_machines": {"box-a": 1}}
 check("form call: a value of the wrong type means nobody (never a wider rule than the file says)", fpa("box-a", "projects/lambda", "home-lambda-bad", "fleet-web")[0] == 403 and "home-lambda-bad" not in lam_pending())
-server._cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
 check("form call: an empty list switches the form call off", fpa("box-a", "projects/lambda", "home-lambda-off", "fleet-web")[0] == 403 and "home-lambda-off" not in lam_pending())
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}   # back to the instance's own config, which the rest of the test runs on
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}   # back to the instance's own config, which the rest of the test runs on
 check("form call: the old rules are unchanged beside it: a keeper's or front agent's own session id still works on a listed project with agents, a stranger's still 403",
       pa("projects/alpha", "home-sparrow-formcheck", U["home-sparrow-main"], role="formcheck")[0] == 200 and pa("projects/alpha", "home-sparrow-formcheck2", U["home-outsider"], role="formcheck2")[0] == 403, None)
 with prj._Locked(): d_ = prj._read(); d_["pending_agents"].pop(L, None); d_["pending_agents"].pop(MU, None); d_["pending_agents"].pop(rec("projects/lambda-docs")["id"], None); d_["pending_agents"].get(A, {}).pop("home-sparrow-formcheck", None); prj._write(d_)   # leave the later sections their fixtures
@@ -762,7 +765,7 @@ ren_page("projects/ren-cli", REN_FRONT.replace("home-ren", "home-rcli").replace(
 ren_page("projects/ren-http", REN_FRONT.replace("home-ren", "home-rhttp").replace("Ren", "Rhttp"))
 p.cmd_registry(quiet=True); fresh()
 _psvc.PAGE_IO = rio
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
 def rn(project, old, new, sender="fleet-web", machine="box-a", **kw):
     b = {"project": project, "old": old, "new": new, **kw}
     if sender is not None: b["sender"] = sender
@@ -814,9 +817,9 @@ check("rename: a sender that is no form label (a stranger's label, none, the mac
 bad = [rn("projects/ren", "home-ren-main", "home-ren-chief", machine=m) for m in ("box-c", "box-e", "")]
 check("rename: the form's label from a machine that is not in form_machines (or with no machine proven) → 403, nothing changed", all(s == 403 and o == {"error": pverbs.RENAME_NOT_FORM} for s, o in bad)
       and len(rio.gets) == gets_before and nothing_changed("wrong machine"), bad)
-server._cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
 check("rename: with no form label in the config (the defaults) nobody may, the form's label included", rn("projects/ren", "home-ren-main", "home-ren-chief")[0] == 403 and nothing_changed("no labels"))
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
 # bad names, unknown project, other kinds of page
 cases = [("a bad new name", rn("projects/ren", "home-ren-main", "home ren chief")), ("a bad old name", rn("projects/ren", "home ren main", "home-ren-chief")), ("a 65-character name", rn("projects/ren", "home-ren-main", "home-ren-" + "x" * 58)),
          ("a name not starting with the project's", rn("projects/ren", "home-ren-main", "home-other-chief")), ("the bare prefix", rn("projects/ren", "home-ren-main", "home-ren-")),
@@ -913,9 +916,9 @@ _psvc.PAGE_IO = gio
 
 # ---- 6e. post project-agent-retire: sala retired a session; the record drops the agent, the page's agents block follows with a timeline line there (or a leftover pending entry is dropped)
 import copy as _copy
-CFG_PA_6E = _copy.deepcopy(server._cfg.CFG.get("project_agent", None))      # put back at the end of the section
+CFG_PA_6E = _copy.deepcopy(_cfg.CFG.get("project_agent", None))      # put back at the end of the section
 _psvc.PAGE_IO = rio
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 ren_page("projects/rtr", REN_FRONT.replace("home-ren", "home-rtr").replace("Ren", "Rtr"))
 ren_page("projects/rtr-solo", "type: project\ntitle: Rtr solo\norg: home\ndisplay-name: home-rts\nagents:\n  home-rts-main: talks\n  background:\n    home-rts-bg: in the back\nstatus: active")
 ren_page("projects/rtr-fold", "type: project\ntitle: Rtr fold\norg: home\ndisplay-name: home-rtf\nagents:\n  home-rtf-main: talks\n  home-rtf-engineer: >-\n    builds it,\n\n    all of it\n  home-rtf-ops: runs it\n  background:\n    home-rtf-bg: in the back\nstatus: active")
@@ -926,7 +929,7 @@ def rt(project, name, sender="sala-retire", machine="box-a", **kw):
     b = {"project": project, "name": name, **kw}
     if sender is not None: b["sender"] = sender
     return server._client_post(machine, "project-agent-retire", b)
-def today(): return server.dt.datetime.now(server._cfg.tz()).strftime("%Y-%m-%d")
+def today(): return datetime.datetime.now(_cfg.tz()).strftime("%Y-%m-%d")
 def tl(key="projects/rtr"): return [(t[1], t[2], t[3], t[4]) for t in rio.timeline if t[0] == key]
 ag0, bg0 = agents_of("projects/rtr")
 check("retire: (setup) the page has two front agents and two background ones, and no timeline line was added yet", [n for n, _ in ag0] == ["home-rtr-main", "home-rtr-engineer", "home-rtr-curator", "home-rtr-watch"] and [n for n, _ in bg0] == ["home-rtr-curator", "home-rtr-watch"] and not tl(), (ag0, bg0))
@@ -1045,12 +1048,12 @@ check("retire: a sender that is no form label (a stranger's label, none, the mac
       and len(rio.gets) == gets_rt and rt_same(), bad)
 bad = [rt("projects/rtr", "home-rtr-main", machine=m) for m in ("box-c", "box-e", "")]
 check("retire: the form's label from a machine that is not in form_machines (or none proven) → 403, nothing changed", all(s == 403 and o == {"error": pverbs.RETIRE_NOT_FORM} for s, o in bad) and len(rio.gets) == gets_rt and rt_same(), bad)
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
 st, out = rt("projects/rtr", "home-rtr-main")
 check("retire: a label that is not in form_senders (sala-retire missing from the config) → 403, so the live config must name sala-retire", st == 403 and out == {"error": pverbs.RETIRE_NOT_FORM} and rt_same(), (st, out))
-server._cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
 check("retire: with no form label in the config (the defaults) nobody may", rt("projects/rtr", "home-rtr-main", sender="fleet-web")[0] == 403 and rt_same())
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 
 # pages.remove_agent on its own
 check("pages.remove_agent: a page with no frontmatter, no agents map, or an unclosed frontmatter is refused, not guessed at", p.remove_agent("# x\n", "a")[0] is None and p.remove_agent("---\ntitle: x\n---\n", "a")[0] is None
@@ -1059,23 +1062,23 @@ check("pages.remove_agent: a name only in a mandate text, in another field or no
 check("pages.remove_agent: a longer name that starts with the name is not touched (home-x-eng vs home-x-engineer), nor the body", p.remove_agent("---\nagents:\n  home-x-engineer: a\n  home-x-eng: b\n---\nbody home-x-eng: c\n", "home-x-eng")[0]
       == "---\nagents:\n  home-x-engineer: a\n---\nbody home-x-eng: c\n")
 check("pages.remove_agent: the entry after a wrapped one, a quoted key and the field after the map are kept as they were", p.remove_agent("---\nagents:\n  \"a\": x\n    wrapped\n  b: y\nowner: z\n---\nbody\n", "a")[0] == "---\nagents:\n  b: y\nowner: z\n---\nbody\n")
-if CFG_PA_6E is None: server._cfg.CFG.pop("project_agent", None)
-else: server._cfg.CFG["project_agent"] = CFG_PA_6E
+if CFG_PA_6E is None: _cfg.CFG.pop("project_agent", None)
+else: _cfg.CFG["project_agent"] = CFG_PA_6E
 _psvc.PAGE_IO = gio
 
 # the retire lines an earlier release kept on the ledger: gone, a debt on the same entry stays
-real_page_ts = server._pdebts._page_ts
+real_page_ts = _pdebts._page_ts
 try:
-    server._owed_save({"projects/rtr": {"home-old-keeper": {"ts": time.time(), "item": "", "retired_only": True, "retired": [{"name": "home-rtr-x", "line": "x", "ts": time.time(), "seen": True}]},
+    _pdebts._owed_save({"projects/rtr": {"home-old-keeper": {"ts": time.time(), "item": "", "retired_only": True, "retired": [{"name": "home-rtr-x", "line": "x", "ts": time.time(), "seen": True}]},
                                         "home-debtor": {"ts": time.time(), "item": f"board#{BID_A}", "retired": [{"name": "home-rtr-y", "line": "y", "ts": time.time(), "seen": True}]}}})
-    server._pdebts._page_ts = lambda key: 0.0              # the page did not change since: the debt stays
-    left = server._owed_settle()
+    _pdebts._page_ts = lambda key: 0.0              # the page did not change since: the debt stays
+    left = _pdebts._owed_settle()
 finally:
-    server._pdebts._page_ts = real_page_ts
+    _pdebts._page_ts = real_page_ts
 check("retire: a leftover retire-lines-only entry on the ledger is dropped at the next settle, and the line on an entry that also owes a debt goes with the debt kept", set(left.get("projects/rtr", {})) == {"home-debtor"} and "retired" not in left["projects/rtr"]["home-debtor"]
-      and left["projects/rtr"]["home-debtor"]["item"] == f"board#{BID_A}" and "AGENTS RETIRED" not in server._nag("home-debtor"), left)
-d_ = server._owed_load(); d_.pop("projects/rtr", None); server._owed_save(d_)
-check("retire: (cleanup) the ledger holds nothing for the test page", not server._owed_load().get("projects/rtr"), server._owed_load())
+      and left["projects/rtr"]["home-debtor"]["item"] == f"board#{BID_A}" and "AGENTS RETIRED" not in _pdebts._nag("home-debtor"), left)
+d_ = _pdebts._owed_load(); d_.pop("projects/rtr", None); _pdebts._owed_save(d_)
+check("retire: (cleanup) the ledger holds nothing for the test page", not _pdebts._owed_load().get("projects/rtr"), _pdebts._owed_load())
 
 # ---- 7. the published file and the id file
 J = pj()
@@ -1102,7 +1105,7 @@ prj.set_mark(A, on_purpose=None)
 
 # ---- 8. the HTTP API and client.py
 import copy; from stackshot.fleet import client
-_NOCFG = object(); CFG_PA_8 = copy.deepcopy(server._cfg.CFG.get("project_agent", _NOCFG))      # the section's own config, put back by the rename checks' finally
+_NOCFG = object(); CFG_PA_8 = copy.deepcopy(_cfg.CFG.get("project_agent", _NOCFG))      # the section's own config, put back by the rename checks' finally
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); HD = {"Authorization": "Bearer " + tok}
 app = server.mcp.http_app()
@@ -1162,7 +1165,7 @@ with TestClient(app) as c:
     check("client.py: …and the list shows the project with that agent, front, as main", len(mine) == 1 and mine[0]["main"] == "ops-by-cli-main" and "page_owed" not in mine[0]["agents"]["ops-by-cli-main"] and mine[0]["listed_by"] == "agents", mine)
     check("client.py: get projects is one of the reads", "projects" in client.READS)
     # post project-agent-rename over HTTP and through client.py (the token's machine is this one: let it be a form machine for the checks, then put the config back)
-    server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": [me]}; _psvc.PAGE_IO = rio
+    _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": [me]}; _psvc.PAGE_IO = rio
     try:
         r = c.post("/client/project-agent-rename", json={"project": "projects/ren-http", "old": "home-rhttp-engineer", "new": "home-rhttp-builder", "sender": "fleet-web"})
         check("http: POST project-agent-rename without a token → 401, nothing written", r.status_code == 401 and "home-rhttp-builder" not in rio.pages["projects/ren-http"], r.status_code)
@@ -1192,7 +1195,7 @@ with TestClient(app) as c:
                     ["post", "project-agent-rename", "projects/ren-cli", "a", "b", "--sender"], ["post", "project-agent-rename", "--sender", "x", "a", "b"]):
             rc, o, e = run(*bad); check(f"client.py post project-agent-rename misuse → usage on stderr, exit 1 ({' '.join(bad[2:])})", rc == 1 and not o and "usage: client.py post project-agent-rename <project> <OLD> <NEW> [--sender <label>]" in e, (rc, o, e))
         # post project-agent-retire, the same way: the form's label (sala-retire); the page's line removed, the timeline line added
-        server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": [me]}
+        _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": [me]}
         RH = rec("projects/ren-http")["id"]; prj.add_pending(RH, "home-rhttp-pend", {"front": False, "role": "pend", "mandate_line": "m"}, by="fleet-web", at="2026-03-13T00:00:00Z")
         rh_puts = len(rio.puts); rh_tl = len(rio.timeline)
         r = c.post("/client/project-agent-retire", json={"project": "projects/ren-http", "name": "home-rhttp-pend", "sender": "sala-retire"})
@@ -1232,8 +1235,8 @@ with TestClient(app) as c:
             d_ = prj._read(); [d_["pending_agents"].get(k, {}).pop(n, None) for k, n in ((RH, "home-rhttp-pend"), (RC, "home-rcli-pend"))]; prj._write(d_)
     finally:
         _psvc.PAGE_IO = gio
-        if CFG_PA_8 is _NOCFG: server._cfg.CFG.pop("project_agent", None)
-        else: server._cfg.CFG["project_agent"] = copy.deepcopy(CFG_PA_8)
+        if CFG_PA_8 is _NOCFG: _cfg.CFG.pop("project_agent", None)
+        else: _cfg.CFG["project_agent"] = copy.deepcopy(CFG_PA_8)
 
 # ---- 9. a retired project (the page's status is archived, retired, closed, done or dropped): never listed, not re-listed, no label adds an agent
 page("projects/ark.md", "type: project\ntitle: Sunset ark\nname: Sunset ark\nstatus: archived\ndisplay-name: home-ark")                       # recent items, archived
@@ -1317,12 +1320,12 @@ check("retired: with the key absent the defaults apply", prj.retired_statuses() 
 cfgps["retired_statuses"] = had; fresh()
 
 _psvc.PAGE_IO = rio
-CFG_PA_6F = _copy.deepcopy(server._cfg.CFG.get("project_agent", None))
-server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
+CFG_PA_6F = _copy.deepcopy(_cfg.CFG.get("project_agent", None))
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 
 # ---- 6f. archive on the last retire: a project with no agent and no open item is archived; one with open items waits on a list and is archived by the sweep once none is left
 from stackshot.projects import project_archive as ARC
-AWAIT = pathlib.Path(server._cfg.state("archive-wait.json"))
+AWAIT = pathlib.Path(_cfg.state("archive-wait.json"))
 def wait_keys(): return set(json.loads(AWAIT.read_text())) if AWAIT.exists() else set()
 def status_of(slug): return str(p.frontmatter_text(rio.pages[slug]).get("status") or "")
 def arc_page(slug, agents, status="active", extra=""):
@@ -1476,8 +1479,8 @@ try:
 finally:
     AEP._page_debt.page_io = real_pio
 
-if CFG_PA_6F is None: server._cfg.CFG.pop("project_agent", None)
-else: server._cfg.CFG["project_agent"] = CFG_PA_6F
+if CFG_PA_6F is None: _cfg.CFG.pop("project_agent", None)
+else: _cfg.CFG["project_agent"] = CFG_PA_6F
 _psvc.PAGE_IO = gio
 
 

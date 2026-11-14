@@ -68,6 +68,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import stall as S; from stackshot.audit import audit_run as AR
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import fleet_events as fleetev
@@ -100,9 +102,9 @@ def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and 
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
 def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
-def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
-set_cfg(); server._cfg.CFG["stall"] = {}
-server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
+def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)
+set_cfg(); _cfg.CFG["stall"] = {}
+_cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
 COLD_MSGS = []
 def cold(answer, status="ok"):
     def run(msg):
@@ -125,7 +127,7 @@ def env():
 def clear_records():
     for p in (T / "state/audit").glob("*.json"): p.unlink()
     sent.clear()
-def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
+def load(*ids): return {f"a{i}": _service_store._load(f"a{i}") for i in ids}
 def entry(i): return stall_svc.stall_load().get(f"a{i}")
 
 from stackshot.model import progress as PG
@@ -137,7 +139,7 @@ class _Clock:
 CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = stall_svc.time = stalltick_svc.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp is the one a live write takes."""
-    d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts
+    d_ = _service_store._load(f"a{i}"); mutate(d_); CLK.t = ts
     try: writes.save(f"a{i}", d_, writer=writer, **kw)
     finally: CLK.t = None
 
@@ -156,7 +158,7 @@ W_ = "https://github.com/acme/widgets"
 def shown(i): return f"board#{i}"
 def merge_pass(now):
     """One merge pass at `now`, the saves stamped at it; the board id board#<n> is the fixture item a<n> for the pass (the fixtures are a<n>: [github] issues_letter), and the other sections' ids are left as they were."""
-    gh_ = server._cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
+    gh_ = _cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
     try: return server._merge_progress_tick(now)
     finally:
         CLK.t = None
@@ -246,7 +248,7 @@ close(214, 215)
 for i in (216, 217, 218): fixture(i, project="projects/alpha")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/54", "items": ["a216", "a217", "a218"]}]}))
 ML.append(line(54, at=-60))
-_real_save, _real_load = writes.save, server._load
+_real_save, _real_load = writes.save, _service_store._load
 def _bad_save(gid, *a, **kw):
     if gid == "a216": raise OSError("disk full")
     return _real_save(gid, *a, **kw)
@@ -254,14 +256,14 @@ def _bad_load(gid, *a, **kw):
     if gid == "a218" and _bad_load.on: raise OSError("unreadable")
     return _real_load(gid, *a, **kw)
 _bad_load.on = False
-writes.save, server._load = _bad_save, _bad_load
+writes.save, _service_store._load = _bad_save, _bad_load
 import io as _io, contextlib as _cl
 errs = _io.StringIO()
 try:
     _bad_load.on = True
     with _cl.redirect_stderr(errs): saved = merge_pass(now0)
 finally:
-    writes.save, server._load = _real_save, _real_load
+    writes.save, _service_store._load = _real_save, _real_load
 check("an item whose save fails (a216) or whose read fails (a218) is logged and skipped; the other (a217) is saved, and the offset is stored so the pass does not repeat",
       saved == ["a217"] and "merged_seen" not in mt(216) and "merged_seen" not in mt(218) and mt(217).get("merged_seen") == ["acme/widgets#54"] and "a216 not saved" in errs.getvalue() and server._merge_progress_offset() == ML.size(),
       (saved, errs.getvalue()[-300:], server._merge_progress_offset(), ML.size()))
@@ -300,13 +302,13 @@ def floor_pass(label, n_young, n_old, items, ladder=None):
     for i in items: fixture(i, project="projects/alpha")
     (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/{n_young}", "items": [f"a{items[0]}"]}, {"url": f"{W_}/pull/{n_old}", "items": [f"a{items[1]}"]}]}))
     ML.append(line(n_young, at=-(FLOOR_H - 10 * MIN))); ML.append(line(n_old, at=-(FLOOR_H + 10 * MIN)))
-    had = server._cfg.CFG.get("ladder")
-    if ladder is None: server._cfg.CFG.pop("ladder", None)
-    else: server._cfg.CFG["ladder"] = ladder
+    had = _cfg.CFG.get("ladder")
+    if ladder is None: _cfg.CFG.pop("ladder", None)
+    else: _cfg.CFG["ladder"] = ladder
     try: return merge_pass(now0)
     finally:
-        if had is None: server._cfg.CFG.pop("ladder", None)
-        else: server._cfg.CFG["ladder"] = had
+        if had is None: _cfg.CFG.pop("ladder", None)
+        else: _cfg.CFG["ladder"] = had
         close(*items)
 saved = floor_pass("default", 80, 81, (223, 224))
 check("the floor is six hours: a merge 5 hours 50 minutes old is recorded, one 6 hours 10 minutes old is not (a floor of 5 hours drops the first, one of 6.9 or 8 hours records the second)",

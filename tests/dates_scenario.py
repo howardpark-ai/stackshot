@@ -230,11 +230,11 @@ for k, v in pass_items.items(): (T / f"store/a/{k[1:]}.json").write_text(json.du
 msgs = []
 real_msg = server._message
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
-server._cfg.CFG["audit"]["enabled"] = False
+_cfg.CFG["audit"]["enabled"] = False
 check("3 the expected-time look stands still while the audit is off", server._dates_expected_tick() is None and msgs == [])
-server._cfg.CFG["audit"]["enabled"] = True; server._cfg.CFG["audit"]["mode"] = "agent"
+_cfg.CFG["audit"]["enabled"] = True; _cfg.CFG["audit"]["mode"] = "agent"
 check("3 …and in agent mode (the rollback)", server._dates_expected_tick() is None and msgs == [])
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["mode"] = "script"
 fyev._FORYOU_LAST[0] = time.time() + 1e6              # the For-you look's own gate is shut …
 res = server._dates_tick()
 check("3 the dates pass still opens the For-you look's gate, so the look runs every ten minutes", fyev._FORYOU_LAST[0] < time.time() + 1000 and res == [], fyev._FORYOU_LAST[0])

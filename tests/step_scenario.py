@@ -70,6 +70,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import create as _wt_create
@@ -89,7 +90,7 @@ upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender
 get = lambda i: _wt_get.stackshot_get(f"a{i}")
 
 from stackshot.model import step_commands as SC; from stackshot.model import states
-GUARDS = server._cfg.CFG.setdefault("model", {})
+GUARDS = _cfg.CFG.setdefault("model", {})
 HOW = dict(mover="Oliver", then="team-back", needs=["team-back"], state="your-step", next="team-back: check it")
 BOX = {"action": "/items/a4/answer", "token": "TOKEN", "sent": ""}
 page = lambda i, **kw: ui_render.Board(f"{tmp}/store").item_html(f"a{i}", **kw)
@@ -702,7 +703,7 @@ check("10 text: …and the your-step line of the states", "step=<one line, no co
 
 # ================================================================ 15. [steps] owner_shell = "sala-shell": a command is bash as typed in sala's Shell, or ssh for another machine
 # The guards read the setting where they run, so the section flips it in the running config and puts it back; the tool text is built at import, so it is read from fresh processes on a config of each kind.
-STEPS = server._cfg.CFG["steps"]; WAS15 = dict(STEPS)
+STEPS = _cfg.CFG["steps"]; WAS15 = dict(STEPS)
 STEPS["owner_shell"] = "sala-shell"; STEPS["shell_name"] = "my-shell"
 try:
     check("15 mode: sala-shell is its own mode: not the PowerShell rule", SC.shell_mode() == "sala-shell" and SC.sala_shell() and not SC.shell_rule() and SC.shell_name() == "my-shell", SC.shell_mode())

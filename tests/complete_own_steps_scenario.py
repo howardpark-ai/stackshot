@@ -40,16 +40,17 @@ DESC = "- A thing\n- It lives here\n- Done when done"
 OUT = "- The thing works now\n- It lives here\n- Finished when it ships"
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL
+from stackshot.core import instance as _core_instance
+from stackshot.web.tools import text as _web_tools_text
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.tools import complete as _wt_complete
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 _web_publish._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
-server._tell_woken = lambda gid, owner, note, tag="wake", result=None: None
-server._tell_check_closed = lambda gid, item, label: []
 
 MINE, THEIRS = "home-front: build it", "team-back: verify the deploy"
 def item(i, lines=(MINE, THEIRS), writers=None, status="open", **meta):
@@ -78,7 +79,7 @@ def close_update(i, who="home-front", outcome="done", **kw):
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want), str(e))
         return str(e)
     return ""
@@ -176,7 +177,7 @@ check("a close the closer does not mark, with a step of its own and the other's 
 # ================================================================ 3. the server's own closes
 item(20); item(21); item(22)
 checks_svc.check_close("g20", rd(20), "a done check", time.time())
-check("a done check's close settles every open step, by the server (unchanged)", kinds(20) == ["done", "done"] and {b for _, b in sts(20)} == {server.NAME} and rd(20)["metadata"]["outcome"] == "done", sts(20))
+check("a done check's close settles every open step, by the server (unchanged)", kinds(20) == ["done", "done"] and {b for _, b in sts(20)} == {_core_instance.NAME} and rd(20)["metadata"]["outcome"] == "done", sts(20))
 it21 = rd(21); server._watch_close(it21, "dropped on his answer", time.time())
 check("a watcher ask's drop settles every open step, by the server (unchanged)", [x["status"] for x in it21["metadata"]["steps"]] == ["dropped", "dropped"], it21["metadata"])
 server._update(ref(22), status="completed", outcome="done", reason="it ended", outcome_text=OUT, sender="a script on testbox")
@@ -187,7 +188,7 @@ import asyncio
 desc_ = {t.name: t.description for t in asyncio.run(server.mcp.list_tools())}
 for n in ("complete", "update"):
     check(f"text: {n} says a close ticks only the closer's own steps and leaves another session's open", "ticks only the steps that are still open and are yours" in desc_[n] and "another session" in desc_[n] and "marks every step" not in desc_[n], desc_[n][:300])
-check("text: the rule a refused close appends says it too", "ticks only the steps that are still open and are yours" in server._CLOSE_REFUSAL and "marks every step" not in server._CLOSE_REFUSAL, None)
+check("text: the rule a refused close appends says it too", "ticks only the steps that are still open and are yours" in _web_tools_text._CLOSE_REFUSAL and "marks every step" not in _web_tools_text._CLOSE_REFUSAL, None)
 check("text: complete tells where to mark another session's step (update, done or dropped with the close)", "mark it in the closing call with update" in desc_["complete"] and "dropped=[n]" in desc_["complete"], None)
 
 print(("ok" if not fails else "FAILED") + f": complete own steps scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

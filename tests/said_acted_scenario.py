@@ -130,7 +130,7 @@ check("owner_words_by (N4's words) does not read an acted entry", NR.owner_words
 check("…even one stored with a words tag beside kind acted: entries_of reads it as Done-by, kind acted",
       said.entries_of({"said": [{**acted_rec, "tag": "Acked-by"}]})[0]["tag"] == "Done-by" and NR.owner_words_by({"said": [{**acted_rec, "tag": "Acked-by"}]}, ACT_TS + 60) == "")
 check("the server's decision words (a wake past the cap) are not satisfied by an acted entry", server._owner_words_on({"metadata": {}}, [{**acted_rec, "ts": time.time() - 60}], 30.0) == "")
-check("the server's close words are not satisfied by an acted entry", server._owner_words({"metadata": {"said": [acted_rec]}}) == "")
+check("the server's close words are not satisfied by an acted entry", said._owner_words({"metadata": {"said": [acted_rec]}}) == "")
 
 # ---- N4
 DONE_AT = NR.PART1_LIVE + 1000

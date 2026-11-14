@@ -115,6 +115,11 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.waits import waiting as _wt
+from stackshot.core import config as _cfg
+from stackshot.model import said as _said
+from stackshot.core import ghbudget as _gb
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc, foryou as fy_svc
@@ -129,14 +134,14 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.service import writes
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
+_wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want), str(e))
 clock = [now0]
 def tick(n=1):
@@ -185,9 +190,9 @@ check("a re-sent old lane word over a stored one is no changed check; another la
       not checks_svc.check_changed("lane home-x max", "lane home-x max") and not checks_svc.check_changed("lane home-x subscription-1", "lane home-x max")
       and not checks_svc.check_changed("lane home-x max", "lane home-x subscription-1") and not checks_svc.check_changed(None, "") and not checks_svc.check_changed("unit_active a.service", "unit_active a.service")
       and checks_svc.check_changed("lane home-x api", "lane home-x max") and checks_svc.check_changed("", "lane home-x max") and checks_svc.check_changed("lane home-y max", "lane home-x max"))
-server._cfg.CFG["client"]["lanes_file"] = ""
+_cfg.CFG["client"]["lanes_file"] = ""
 refused("lane with no lane record configured (no fleet tool)", lambda: server._update("a1", check="lane home-x api", sender="home-owner"), "[client] lanes_file is empty")
-server._cfg.CFG["client"]["lanes_file"] = f"{tmp}/sala/lanes.tsv"
+_cfg.CFG["client"]["lanes_file"] = f"{tmp}/sala/lanes.tsv"
 server._update("a1", check="unit_active stackshot.service", sender="home-owner")
 check("unit_active stores the unit", rd(1)["metadata"].get("check") == "unit_active stackshot.service", rd(1)["metadata"])
 server._update("a1", check="unit_active example-watch@x.timer", sender="home-owner")
@@ -202,7 +207,7 @@ refused("an unknown kind", lambda: server._update("a1", check="shell true", send
 check("nothing above changed the stored check", rd(1)["metadata"].get("check") == "unit_active example-watch@x.timer", rd(1)["metadata"])
 g = _wt_get.stackshot_get("a1")
 check("get shows the check and that the server closes on it", "check: unit_active example-watch@x.timer (the server closes the item when it passes)" in g, g)
-check("a check alone is a filing edit: the state clock stays, no page owed", rd(1)["state_updated"] == now0 - 60 and "a1" not in json.dumps(server._owed_load()), (rd(1)["state_updated"], server._owed_load()))
+check("a check alone is a filing edit: the state clock stays, no page owed", rd(1)["state_updated"] == now0 - 60 and "a1" not in json.dumps(_web_page_debts._owed_load()), (rd(1)["state_updated"], _web_page_debts._owed_load()))
 server._update("a1", check="none", sender="home-owner")
 check('check="none" clears it', "check" not in rd(1)["metadata"], rd(1)["metadata"])
 out = _wt_create._create(subject="[home] made with a check", description=DESC, project="projects/alpha", owner="home-owner", next="team-back: build it", needs=["team-back"], check="pr_merged o/r#8")
@@ -215,7 +220,7 @@ refused("next handing the work to a background agent, no check, no wake: refused
         lambda: server._update("a2", next="team-back: merge the PR", sender="home-owner"), "hands a2 to team-back", "a line of next in the form `<session>: <action>`", "check=<what closes it>", FORMS, "wake=YYYY-MM-DD",
         "Only when no check fits, add a date, wake=YYYY-MM-DD", "the item stays active in the new mover's lane", "as the backstop of this hand-off", "the date is no wait", "If this tool shows no check parameter", "codemode.stackshot_update({item_id, sender, next, check})")
 try: server._update("a2", next="team-back: merge the PR", sender="home-owner"); _hand = ""
-except server.ToolError as e: _hand = str(e)
+except ToolError as e: _hand = str(e)
 check("the hand-off refusal steers to check first, the wake only when no check fits, and never mentions a hold or a park (Fri Oct 16th 2026)",
       _hand.index("Add check=") < _hand.index("Only when no check fits") < _hand.index("wake=YYYY-MM-DD") and not re.search(r"hold|park", _hand, re.I), _hand)
 check("the refusal left the item as it was", rd(2)["metadata"].get("next") == "do the thing" and "check" not in rd(2)["metadata"], rd(2)["metadata"])
@@ -229,7 +234,7 @@ refused("next handing it to the keeper: refused", lambda: server._update("a3", n
 # a wake alone is a backstop, not a hold (items kept showing while their work was live): the wake the refusal offers is a backstop, never a hold
 try:
     server._update("a3", next="home-stew: rule on it", sender="home-owner"); e_h = ""
-except server.ToolError as e:
+except ToolError as e:
     e_h = str(e)
 check("the hand-off refusal offers the date as the hand-off's backstop that leaves the item active in the new mover's lane, and never says hold",
       "wake=YYYY-MM-DD" in e_h and "as the backstop of this hand-off" in e_h and "the date is no wait" in e_h and "the item stays active in the new mover's lane" in e_h and "hold" not in e_h.lower(), e_h)
@@ -305,7 +310,7 @@ check("the clocks moved", rd(20)["state_updated"] == clock[0] and rd(20)["confir
 about20 = [x for x in told if x[1] == "a20"]
 check("the item's mover (the session in its needs) is told once (tag check), in one line naming the check; not the observer, not the creator",
       len(about20) == 1 and about20[0][0] == "check" and about20[0][2] == U["team-back"] and "its done check passed (item_closed a21)" in about20[0][3], told)
-check("no page owed by anyone for the close", "a20" not in json.dumps(server._owed_load()), server._owed_load())
+check("no page owed by anyone for the close", "a20" not in json.dumps(_web_page_debts._owed_load()), _web_page_debts._owed_load())
 check("the item that waited on it is released and told, as any close releases it", "after" not in rd(22)["metadata"] and [x for x in told if x[1] == "a22"], (rd(22)["metadata"], told))
 check("get shows the close", "outcome: done" in _wt_get.stackshot_get("a20") and "reason: done check passed: item_closed a21" in _wt_get.stackshot_get("a20"), _wt_get.stackshot_get("a20"))
 check("a completed item with a check left on it is left alone", rd(13)["metadata"].get("reason") == "before")
@@ -330,7 +335,7 @@ check("the pass closes it", tick(1) == ["a37"] and rd(37)["status"] == "complete
 about37 = [x for x in told if x[1] == "a37"]
 check("a board answer alone is not his words about the close: the keeper is told, the owner is not (he answered on it, so it is a row on his list all the same)",
       [x[2] for x in about37] == [U["team-back"]] and {x[0] for x in about37} == {"check"} and len([r for r in fy_svc.rows() if r["gid"] == "a37" and r["kind"] == "closed"]) == 1, told)
-check("_owner_words: a board answer (text or choice) alone is none; a said entry counts", server._owner_words(rd(37)) == "" and server._owner_words({"metadata": {"answers": [{"choice": "Go"}]}}) == "" and server._owner_words(rd(33)) == "a said entry", (server._owner_words(rd(37)), server._owner_words(rd(33))))
+check("_owner_words: a board answer (text or choice) alone is none; a said entry counts", _said._owner_words(rd(37)) == "" and _said._owner_words({"metadata": {"answers": [{"choice": "Go"}]}}) == "" and _said._owner_words(rd(33)) == "a said entry", (_said._owner_words(rd(37)), _said._owner_words(rd(33))))
 
 # ---- 4. unit_active with a stubbed runner (the argv is what the stub sees: systemctl is never run)
 calls = []
@@ -382,9 +387,9 @@ check("no row and no lane-default: the fallback is the subscription lane, so api
 closed = tick(1)
 check("the row on the lane, and the default lane for a session with no row: both close", sorted(closed) == ["a24", "a25"] and rd(24)["metadata"].get("reason") == "done check passed: sala_lane home-x api", (closed, rd(24)["metadata"]))
 item(26, check="lane home-x api", next="team-back: move it")
-server._cfg.CFG["client"]["lanes_file"] = ""
+_cfg.CFG["client"]["lanes_file"] = ""
 check("[client] lanes_file empty: no lane data, an error that says so", tick(1) == [] and st()["items"]["a26"]["err"] == "no lane data: [client] lanes_file is empty", st())
-server._cfg.CFG["client"]["lanes_file"] = f"{tmp}/sala/lanes.tsv"
+_cfg.CFG["client"]["lanes_file"] = f"{tmp}/sala/lanes.tsv"
 check("…and back with the file", tick(1) == ["a26"])
 
 # ---- 5b. awsplatform and aws-platform are one lane: in any of the records, either word, both ways
@@ -488,7 +493,7 @@ server._evwait_preread("event", "pr_merged o/r#39")
 check("6a: the event wait's early read of the same PR inside the pace makes no GET, and its own memory holds the record the check pass kept",
       len(gets(39)) == 1 and evwaits_svc.EVW_GH.get("o/r#39", {}).get("merged") is False and evwaits_svc.EVW_GH["o/r#39"] == st()["github"]["o/r#39"], (F.log, evwaits_svc.EVW_GH))
 proof_gh = {}
-with server._gb.tag("step_proof"):
+with _gb.tag("step_proof"):
     got = checks_svc.pr_merged("o/r#39", clock[0] + 1, proof_gh)
 check("6a: …nor does the step proof's read (its own dict gets the record all the same), and the pair it returns is the same", len(gets(39)) == 1 and got == (False, "") and proof_gh["o/r#39"]["merged"] is False, (F.log, proof_gh))
 F.closed.add(39); F.merged[39] = False

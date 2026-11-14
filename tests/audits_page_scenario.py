@@ -251,14 +251,14 @@ with TestClient(server.mcp.http_app()) as c:
     config.CFG["audit"]["enabled"] = True
 
     # ---- 8. signed out
-    real_mode = _signin._auth_mode; _signin._auth_mode = (lambda: "google"); server._cfg.CFG["auth"]["ui_open"] = False
+    real_mode = _signin._auth_mode; _signin._auth_mode = (lambda: "google"); config.CFG["auth"]["ui_open"] = False
     try:
         r = c.get("/audits", follow_redirects=False)
         check("signed out: GET /audits asks for the board's sign-in first, as every page does, and shows no audit", r.status_code == 302 and r.headers["location"] == "/ui/login?next=%2Faudits" and "Audits" not in r.text, (r.status_code, r.headers.get("location")))
         r = c.post("/audits", follow_redirects=False)
         check("the page takes GET only", r.status_code == 405, r.status_code)
     finally:
-        _signin._auth_mode = real_mode; server._cfg.CFG["auth"]["ui_open"] = True
+        _signin._auth_mode = real_mode; config.CFG["auth"]["ui_open"] = True
 
 _scratch.cleanup()
 if fails: print(f"FAILED: audits page scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)

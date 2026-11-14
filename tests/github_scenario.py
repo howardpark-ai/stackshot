@@ -244,6 +244,11 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.service import store as _service_store
+from stackshot.waits import waiting as _wt
+from stackshot.core import config as _cfg
+from stackshot.model import said as _said
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -259,13 +264,13 @@ from stackshot.service import telling
 from stackshot.core import instance as _core_instance
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
+_wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 telling.tell_woken = lambda *a, **k: None            # no push.py
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want), str(e))
 def issue(n): return F.issues[n]
 def comments(n): return [c["body"] for c in F.issues[n]["_comments"]]
@@ -326,7 +331,7 @@ check("the after list that named a1 now names g1", rd("g", 4)["metadata"]["after
 check("_norm_id: the old id, the board form, the hash form and g<n> all name the moved item", _model_ids._norm_id("a1") == "g1" and _model_ids._norm_id("board#2") == "g2"
       and _model_ids._norm_id("#3") == "g3" and _model_ids._norm_id("G4") == "g4" and _model_ids._norm_id("a2") == "a2", [_model_ids._norm_id(x) for x in ("a1", "board#2", "#3", "G4", "a2")])
 refused("a bad id names the board#<n> form", lambda: _model_ids._norm_id("board5"), "board#<n>")
-check("_path resolves an old id kept in a field", server._path("a1") == STORE / "g/1.json" and server._path("a2") == STORE / "a/2.json", server._path("a1"))
+check("_path resolves an old id kept in a field", _service_store._path("a1") == STORE / "g/1.json" and _service_store._path("a2") == STORE / "a/2.json", _service_store._path("a1"))
 check("get by the old id answers with the item, shown as board#1", _wt_get.stackshot_get("a1").startswith("board#1 [open] [home] item a1"), _wt_get.stackshot_get("a1"))
 check("the board renders the moved items", ui_render.Board(str(STORE)).item("g1")["subject"] == "[home] item a1" and "[home] item a1" in ui_render.Board(str(STORE)).item_html("g1"))
 lk = _wmw._link_ids
@@ -394,7 +399,7 @@ snap("migrated")
 
 # ---- 3. the mirror on, by a config reload (no restart): the issue carries the subject, open or closed and the description, nothing else
 write_toml(sync=True, issue_ids=False)
-changed = server._cfg.reload()
+changed = _cfg.reload()
 check("a reload turns the mirror on", G.enabled() and "github.sync" in (changed or []), changed)
 F.log.clear(); paced0 = len(GH._writes)                 # the pacer's stamps so far: the pace check below reads the ones from here on
 out = _wt_create._create(subject="[home] made with the mirror on", description=DESC, project="projects/alpha", owner="home-here", next="first step", needs="decision", ask=ASK)
@@ -417,7 +422,7 @@ check("the issue link: with sync on an issue-backed item's page links its issue 
 check("the issue link: a migrated item reached by its old id (/items/s12 → /items/4) links the issue its alias resolves to",
       r_old.status_code == 200 and "<title>#4 · item s12</title>" in r_old.text and ghl(r_old.text) == ["o/r/issues/4"] and G.issue_of("s12", STORE) == 4, (r_old.status_code, ghl(r_old.text)))
 check("the issue link: an item kept under its old id and mirrored by the sync links its own issue", ghl(p22) == ["o/r/issues/6"], ghl(p22))
-_ghc = server._cfg.CFG["github"]; _repo = _ghc["issues_repo"]; _ghc["issues_repo"] = ""
+_ghc = _cfg.CFG["github"]; _repo = _ghc["issues_repo"]; _ghc["issues_repo"] = ""
 check("the issue link: with sync on but no issues_repo set an item page shows none", ghl(ui_render.Board(str(STORE)).item_html("g4")) == [] and ghl(ui_render.Board(str(STORE)).item_html("s22")) == [])
 _ghc["issues_repo"] = _repo
 # a change to anything the issue does not carry: stored, no job, no call at all
@@ -460,14 +465,14 @@ check("body_of: no section for an open item (a reopen), for a close with no outc
 _wt_complete.stackshot_complete("s22", outcome="dropped", reason="no longer needed", outcome_text="- Not needed after the redesign", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("dropped closes as not planned", issue(6)["state"] == "closed" and issue(6)["state_reason"] == "not_planned" and not comments(6), issue(6))
 # the server's own act: a wake that has come releases the hold. The hold and the wake are not on the issue: nothing is sent
-it = server._load("g3"); it["metadata"]["wake"] = "2020-01-01"; _wr.save("g3", it)
+it = _service_store._load("g3"); it["metadata"]["wake"] = "2020-01-01"; _wr.save("g3", it)
 log0 = len(F.log)
 woke = wakes_svc.wake_pass()
 G.drain(GH, STORE, say=lambda s: None)
 check("the wake pass released g3 (the hold is stored away); nothing went to GitHub: no job, no comment, no label", woke and rd("g", 3)["metadata"].get("hold") is None
       and qlen() == 0 and len(F.log) == log0 and not comments(3) and issue(3)["labels"] == [], (woke, qlen(), F.log[log0:]))
 # a filing-only rewrite says nothing
-it = server._load("g1"); it["metadata"]["idle"] = {"poked": now}; _wr.save("g1", it)
+it = _service_store._load("g1"); it["metadata"]["idle"] = {"poked": now}; _wr.save("g1", it)
 check("a write that changes nothing a person would call a change (an idle mark) queues no job", qlen() == 0, G.pending())
 
 # ---- 3b. the server's other passes (the item phase 2 prep) change fields the issue does not carry: a release from hold, an after-release, an anchor release and a recycle done send nothing; the closing item's own PATCH is the only write
@@ -526,7 +531,7 @@ check("with a sender the complete goes through: the issue is closed, still no co
 check("the mirror has posted no comment on any issue so far", all(not i["_comments"] for i in F.issues.values()), [(n_, len(i["_comments"])) for n_, i in F.issues.items() if i["_comments"]])
 
 # ---- 3d. step statuses: a change to a step's status is not on the issue (no comment, no call); History reads it from the store's git
-g_w, n_w = made("[home] with step statuses"); snap("work item"); owed_w = server._owed_load(); log_w = len(F.log)
+g_w, n_w = made("[home] with step statuses"); snap("work item"); owed_w = _web_page_debts._owed_load(); log_w = len(F.log)
 server._update(g_w, work={"text": "migrating the ids"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work defined")
 server._update(g_w, work={"text": "PR 83 up", "state": "in progress"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work in progress")
 server._update(g_w, work={"state": "done"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work done")
@@ -538,7 +543,7 @@ bw = ui_render.Board(str(STORE)); evs, _more = bw.item_events(bw.item(g_w))
 wev = [h for _t, k, h in evs if k == "work"]
 check("the item page's History has one line for the step with its three status updates folded under it, from the store's git",
       len(wev) == 1 and "step done: " in wev[0] and "3 status updates" in wev[0] and "migrating the ids" in wev[0] and "PR 83 up" in wev[0], evs)
-check("a step status owes no page", server._owed_load() == owed_w, server._owed_load())
+check("a step status owes no page", _web_page_debts._owed_load() == owed_w, _web_page_debts._owed_load())
 refused("mirror on: a status write without a sender is refused like any other", lambda: _wt_update.stackshot_update(g_w, work="another line"), *HINT)
 check("the queue is empty after the work writes, and no label, field, blocked-by or comment call has reached GitHub so far", qlen() == 0 and F.forbidden == [], (G.pending(), F.forbidden))
 
@@ -730,7 +735,7 @@ check("…the kept answer is a copy: a caller changing the rows it got leaves th
 
 # ---- 5. the id switch: a new item's id is its issue number
 seq = (STORE / "next-id").read_text().strip()
-write_toml(sync=True, issue_ids=True); server._cfg.reload()
+write_toml(sync=True, issue_ids=True); _cfg.reload()
 check("a reload turns the id switch on", G.issue_ids())
 F.log.clear(); nxt = F.next
 out = _wt_create._create(subject="[home] numbered by GitHub", description=DESC, project="projects/alpha", owner="home-here", next="x", needs="external")
@@ -751,14 +756,14 @@ check("[instance] machine names the temporary form: l3 reads board-tmp-boxa#3, i
       and G.norm("BOARD-TMP-BOXA-3") == "l3" and G.norm("board-tmp-other#3") == "" and G.norm("board-tmp-local#3") == "" and G.norm("board-tmp-boxa#03") == ""
       and G.href_id("g5") == "5" and G.shown("g5") == "board#5" and G.shown("s5") == "s5" and G.href_id("s5") == "s5",
       (G.machine(), G.shown("l3"), G.href_id("l3"), G.norm("board-tmp-boxa#3"), G.norm("board-tmp-other#3")))
-_inst = server._cfg.CFG["instance"]; _kept = _inst.pop("machine")
+_inst = _cfg.CFG["instance"]; _kept = _inst.pop("machine")
 check("with [instance] machine unset a temporary id reads board-tmp-local#<n>, at /items/board-tmp-local-<n>",
       G.machine() == "local" and G.shown("l1") == "board-tmp-local#1" and G.href_id("l1") == "board-tmp-local-1" and G.norm("board-tmp-local#1") == "l1"
       and G.norm("board-tmp-boxa#1") == "", (G.machine(), G.shown("l1")))
 _inst["machine"] = "Box_1"
 check("a machine that is not a lowercase name of letters, digits and hyphens reads as local", G.machine() == "local" and G.shown("l1") == "board-tmp-local#1", G.machine())
 _inst["machine"] = _kept
-check("[instance] machine is restart-only", server._cfg._restart_only("instance.machine") is not None)
+check("[instance] machine is restart-only", _cfg._restart_only("instance.machine") is not None)
 F.down = True; nxt2 = F.next
 out = _wt_create._create(subject="[home] during an outage", description=DESC, project="projects/alpha", owner="home-here", next="x")
 check("a create during an outage is not refused: the item is l1 in the store and board-tmp-boxa#1 in the reply (which says it is temporary), the file is under l/, the create is queued, no issue yet",
@@ -793,12 +798,12 @@ check("while temporary, /items/board-tmp-boxa-1 serves the item; /items/l1 and t
 told = []; telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 it_l1 = rd("l", 1); it_l1["metadata"] = {**it_l1["metadata"], "needs": ["home-other"], "mover": "home-here"}
 wakes_svc.wake_notify("l1", it_l1, "woke (wake 2020-01-01)")
-_pr, _fs = server._anc.pilot_root, telling.front_keeper
-server._anc.pilot_root = lambda p: p; telling.front_keeper = lambda who, project="": (True, "home-keeper")
+_pr, _fs = _anc.pilot_root, telling.front_keeper
+_anc.pilot_root = lambda p: p; telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try:
     telling.tell_owner("l1", rd("l", 1), "was completed (done: closed by another session)", "home-other")   # a front agent's item: its keeper hears the close
 finally:
-    server._anc.pilot_root, telling.front_keeper = _pr, _fs
+    _anc.pilot_root, telling.front_keeper = _pr, _fs
 TMP_URL = "https://board.example.org/items/board-tmp-boxa-1"
 check("a wake notice for a temporary item names board-tmp-boxa#1 and links /items/board-tmp-boxa-1; the stderr tag keeps l1",
       any(t[0] == "l1" and t[1] == "home-other" and t[2].startswith("[stackshot] board-tmp-boxa#1 woke (wake 2020-01-01), ") and re.search(re.escape(f"→ {TMP_URL}") + r"( · notice [0-9a-f]{6})?$", t[2])
@@ -826,7 +831,7 @@ with TestClient(server.mcp.http_app()) as c:
     r1 = c.get("/items/l1", follow_redirects=False); r2 = c.get(f"/items/g{n1}"); r3 = c.get("/items/board-tmp-boxa-1", follow_redirects=False)
 check("lookups by l1, board-tmp-boxa#1 and board-tmp-boxa-1 resolve to the item: _norm_id, get (shown board#<n>), and /items/l1 and /items/board-tmp-boxa-1 → 301 to its page /items/<n>",
       all(_model_ids._norm_id(x) == f"g{n1}" and _wt_get.stackshot_get(x).startswith(f"board#{n1} [open] [home] during an outage") for x in ("l1", "board-tmp-boxa#1", "board-tmp-boxa-1"))
-      and server._path("l1") == STORE / f"g/{n1}.json"
+      and _service_store._path("l1") == STORE / f"g/{n1}.json"
       and r1.status_code == 301 and r1.headers["location"] == f"/items/{n1}" and r3.status_code == 301 and r3.headers["location"] == f"/items/{n1}" and r2.status_code == 200,
       (r1.status_code, r1.headers.get("location"), r3.status_code, r3.headers.get("location"), r2.status_code))
 check("the issue link: once re-keyed to its issue number the item's page links that issue", ghl(r2.text) == [f"o/r/issues/{n1}"], ghl(r2.text))
@@ -873,33 +878,33 @@ check("…and the issue has no comment: the server's note of the release is not 
 # an owner notice: another session closes a front agent's item, so its keeper hears it; a close by the keeper itself tells nobody
 # (no item notice wakes a front agent owner used to tell it the keeper's close plainly). A move to decision tells nobody either, neither the owner nor its keeper; a non-front owner still hears it, unmarked
 g_own = mk("[home] closed by its keeper")
-_pr, _fs = server._anc.pilot_root, telling.front_keeper
-server._anc.pilot_root = lambda p: p; telling.front_keeper = lambda who, project="": (True, "home-keeper")
+_pr, _fs = _anc.pilot_root, telling.front_keeper
+_anc.pilot_root = lambda p: p; telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try:
-    told.clear(); telling.tell_owner(g_own, server._load(g_own), "was completed (done: closed by another session)", "home-other")
+    told.clear(); telling.tell_owner(g_own, _service_store._load(g_own), "was completed (done: closed by another session)", "home-other")
     told_stew = list(told)
-    told.clear(); quiet = telling.tell_owner(g_own, server._load(g_own), "was completed (done: closed by the keeper)", "home-keeper")
+    told.clear(); quiet = telling.tell_owner(g_own, _service_store._load(g_own), "was completed (done: closed by the keeper)", "home-keeper")
     told_close = list(told)
     told.clear(); heard_f: list[str] = []
-    quiet_d = telling.tell_owner(g_own, server._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_f)
+    quiet_d = telling.tell_owner(g_own, _service_store._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_f)
     told_dec = list(told)
     telling.front_keeper = lambda who, project="": (False, "")
     told.clear(); heard_n: list[str] = []
-    said_n = telling.tell_owner(g_own, server._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_n)
+    said_n = telling.tell_owner(g_own, _service_store._load(g_own), "now needs the owner's call (ask: pick one), set", "home-other", decision=True, heard=heard_n)
     told_dec_n = list(told)
 finally:
-    server._anc.pilot_root, telling.front_keeper = _pr, _fs
+    _anc.pilot_root, telling.front_keeper = _pr, _fs
 check("an owner notice (a close on a front agent's item, to its keeper) names the item board#<n>",
       any(t[1] == "home-keeper" and t[3] == "owner" and t[2] == f"[stackshot] board#{num(g_own)} (mover home-here, a front agent) was completed (done: closed by another session) by home-other: [home] closed by its keeper → https://board.example.org/items/{num(g_own)}"
           for t in told_stew), told_stew)
 check("a close by the keeper itself on a front agent's item tells nobody, and the reply says the owner is not told",
       told_close == [] and quiet == "\n(its mover home-here is a front agent: not told; the board shows it)", (told_close, quiet))
 check("a move to decision on a front agent's item tells nobody (neither the owner nor its keeper), and the reply says the owner is not told",
-      told_dec == [] and quiet_d == "\n(its mover home-here is a front agent: not told; the board shows it)" and heard_f == [server._session_id("home-here")], (told_dec, quiet_d, heard_f))
+      told_dec == [] and quiet_d == "\n(its mover home-here is a front agent: not told; the board shows it)" and heard_f == [_web_page_debts._session_id("home-here")], (told_dec, quiet_d, heard_f))
 check("a move to decision on a non-front owner's item tells the owner, unmarked, and the reply says so",
-      len(told_dec_n) == 1 and told_dec_n[0][1] == server._session_id("home-here") and told_dec_n[0][3] == "owner"
+      len(told_dec_n) == 1 and told_dec_n[0][1] == _web_page_debts._session_id("home-here") and told_dec_n[0][3] == "owner"
       and told_dec_n[0][2].startswith(f"[stackshot] board#{num(g_own)} now needs the owner's call (ask: pick one), set by home-other: ") and _wt_text._FOR_OWNER not in told_dec_n[0][2]
-      and said_n == "\n(its mover home-here has been told)" and heard_n == [server._session_id("home-here")], (told_dec_n, said_n, heard_n))
+      and said_n == "\n(its mover home-here has been told)" and heard_n == [_web_page_debts._session_id("home-here")], (told_dec_n, said_n, heard_n))
 # a recycle done: two items waiting for it, one held only for it
 g_r1 = mk("[home] waits for a recycle too"); server._update(g_r1, recycle=True, sender="home-here")
 g_r2 = mk("[home] held for a recycle too"); server._update(g_r2, recycle=True, sender="home-here"); server._update(g_r2, hold=True, sender="home-here")
@@ -920,7 +925,7 @@ snap("before the owner's comment")
 old = F.comment(n_c, "an old word by the owner, before the reader ran", at=time.time() - 100)   # history: the owner's login, no header, before the first read
 check("the reader's defaults: 60 s between reads, the owner's login unset (the token's), no state before the first read",
       G.poll_seconds() == 60.0 and G.owner_login() == "" and not G.comments_state(), (G.poll_seconds(), G.owner_login(), G.comments_state()))
-_ghc = server._cfg.CFG["github"]; _ghc["poll_seconds"] = 5; p5 = G.poll_seconds(); _ghc["poll_seconds"] = "x"; px = G.poll_seconds(); _ghc.pop("poll_seconds")
+_ghc = _cfg.CFG["github"]; _ghc["poll_seconds"] = 5; p5 = G.poll_seconds(); _ghc["poll_seconds"] = "x"; px = G.poll_seconds(); _ghc.pop("poll_seconds")
 check("[github] poll_seconds is floored at 15 and a bad value reads as 60", p5 == 15.0 and px == 60.0, (p5, px))
 check("a comment is the owner's by the login (case apart) and the missing header; the issue number comes from its issue_url",
       G.is_owner_comment(old, "Example-Owner") and not G.is_owner_comment(old, "someone") and not G.is_owner_comment({**old, "body": "[author: x · y]\nz"}, "example-owner")
@@ -1066,9 +1071,9 @@ def run_worker_once():
     stop_ = threading.Event(); th_ = threading.Thread(target=G.worker_loop, args=(stop_,), daemon=True); th_.start(); G._EVENT.set(); time.sleep(0.6); stop_.set(); G._EVENT.set(); th_.join(timeout=3)
 run_worker_once()
 check("backfill_bodies off (the default): the worker never asks for the sweep", called == [], called)
-write_toml(sync=True, issue_ids=True, backfill=True); server._cfg.reload(); run_worker_once()
+write_toml(sync=True, issue_ids=True, backfill=True); _cfg.reload(); run_worker_once()
 check("[github] backfill_bodies = true: the worker asks for it (resync_bodies itself decides once per body form)", G.backfill_bodies() is True and called != [], (G.backfill_bodies(), called))
-write_toml(sync=True, issue_ids=True); server._cfg.reload(); G.resync_bodies = _rs
+write_toml(sync=True, issue_ids=True); _cfg.reload(); G.resync_bodies = _rs
 # the one-time rewrite: every mirrored item whose body is not what it renders now gets one background job, drained paced, behind live writes
 _budget0 = GH.budget; GH.budget = 100000                          # the whole scenario's writes so far never count against the sweep here; the reserve has its own case below
 G.resync_bodies(STORE, say=lambda s: None, force=True); G.drain(GH, STORE, say=lambda s: None)    # whatever earlier sections left unsynced, brought up first
@@ -1162,7 +1167,7 @@ U = lambda n: f"11111111-1111-4111-8111-{n:012d}"
     entry(U(17), "Page: projects/alpha Today: 2026-06-16 — curate it.", kind=None, ps="sdk"),      # a claude -p turn: no origin at all, promptSource sdk
 ]) + "\n")
 (T / "transcripts-team" / "-home-user-other" / f"{FRONT}.jsonl").write_text(entry(U(21), "relayed: yes, go with the trailers", ps="queued", ts="2026-06-16T09:57:00.000Z") + "\n")
-OWN = server.OWNER; LINK = lambda n, k: f"https://board.example.org/items/{n}#said-{k}"
+OWN = _core_instance.OWNER; LINK = lambda n, k: f"https://board.example.org/items/{n}#said-{k}"
 said_of = lambda g: json.loads((STORE / g[0] / f"{g[1:]}.json").read_text())["metadata"].get("said") or []
 g_t = mk("[home] the trailers"); n_t = G.issue_of(g_t, STORE); F.log.clear()
 server._update(g_t, next="first step", sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("before the trailers")   # a git version without his words, for section 7's fallback
@@ -1200,8 +1205,8 @@ refused("a message that starts with sala's marker on a line of its own is refuse
 refused("…the marker first with whitespace around it too", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "indented marker", "msg": U(14)}]), "it starts with the marker '<!-- sala -->'")
 refused("…and sala's one-line form, the marker then a space then the brief (salamander's form)", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "Carry on.", "msg": U(15)}]),
         "it starts with the marker '<!-- sala -->'")
-check("with no [said] injected_marker no marker is looked for (the stopgaps still apply)", server._said.injected("<!-- sala -->\nHandle the queue item.", (), (), "") == ""
-      and server._said.injected("<!-- sala -->\nHandle the queue item.", (), (), "<!-- sala -->") != "" and server._said.injected("[auto-note] x", ("[auto-note]",), (), "") != "")
+check("with no [said] injected_marker no marker is looked for (the stopgaps still apply)", _said.injected("<!-- sala -->\nHandle the queue item.", (), (), "") == ""
+      and _said.injected("<!-- sala -->\nHandle the queue item.", (), (), "<!-- sala -->") != "" and _said.injected("[auto-note] x", ("[auto-note]",), (), "") != "")
 refused("an injected prefix ([said] injected_prefixes, the stopgap for messages before the marker) is refused as injected text", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "Go ahead.", "msg": U(5)}]),
         "text a tool typed into the pane", "'[auto-note]'", "injected_prefixes")
 refused("an injected phrase ([said] injected_phrases, spawn's wording, the other stopgap) anywhere in the text is refused too", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "Carry on.", "msg": U(16)}]),
@@ -1243,17 +1248,17 @@ server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes,
 e9 = said_of(g_t)[-1]
 check("relayed: session=home-front (a pane name) resolves to that pane's transcript uuid, the message is found there (under the second configured root): checked, the front session stored, the sender as by",
       e9["checked"] and e9["session"] == FRONT and e9["by"] == OWNER and e9["ts"] == calendar.timegm((2026, 6, 16, 9, 57, 0)), e9)
-server._cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"   # session names link to the fleet tool's view while they have a live pane
+_cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"   # session names link to the fleet tool's view while they have a live pane
 check("…the page's tag names and links the front session to its view, like other session names (no [fleet] tool_name: the title names none)", f'<span class="smeta">{OWN} in <a href="https://sala.example.org/#s=home-front" target="_blank" rel="noopener" title="open this session\'s view">home-front</a> · Tue Jun 16th {9 + ZONE_HOURS:02d}:57 · checked against the transcript</span>' in page(g_t),
       re.findall(r'<details class="said" id="said-9".*?</details>', page(g_t)))
-server._cfg.CFG["client"]["session_view"] = ""
+_cfg.CFG["client"]["session_view"] = ""
 # the item page draws no Discuss button (a link to the fleet tool's side conversation), with a fleet tool's address configured or not
 for sv_ in ("", "https://sala.example.org/#s={name}"):
-    server._cfg.CFG["client"]["session_view"] = sv_
+    _cfg.CFG["client"]["session_view"] = sv_
     pg_d = {t_: page(t_) for t_ in (g_t, "s22", "g2")}
     check(f"no Discuss button: with [client] session_view {'set' if sv_ else 'unset'}, an open item's page and a completed one draw no idiscuss link, no #side= address and no Discuss text",
           all("idiscuss" not in p_ and "#side=" not in p_ and "Discuss" not in p_ for p_ in pg_d.values()), {t_: ("idiscuss" in p_, "#side=" in p_) for t_, p_ in pg_d.items()})
-server._cfg.CFG["client"]["session_view"] = ""
+_cfg.CFG["client"]["session_view"] = ""
 refused("relayed with the wrong session: the message is not in that transcript", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21)}]), f"no message {U(21)} in the transcript of home-here")
 server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21), "session": FRONT}]); G.drain(GH, STORE, say=lambda s: None)
 check("…session given as the transcript uuid itself works the same", said_of(g_t)[-1]["checked"] and said_of(g_t)[-1]["session"] == FRONT, said_of(g_t)[-1])
@@ -1337,11 +1342,11 @@ check("the repo's home known again: the marker is looked for first, one issue is
       and [(m_, p_) for m_, p_, _t in F.log].index(("GET", REPO + "/issues")) < [(m_, p_) for m_, p_, _t in F.log].index(("POST", REPO + "/issues")), (r_c2, F.next, F.log))
 
 # ---- 7. the switches off again: with no queue an outage create is refused as in phase 1, and a server pass queues nothing
-write_toml(sync=False, issue_ids=True); server._cfg.reload(); F.down = True
+write_toml(sync=False, issue_ids=True); _cfg.reload(); F.down = True
 refused("with the mirror off there is no queue to carry the create, so an outage refuses it, with why",
         lambda: _wt_create._create(subject="[home] no queue", description=DESC, project="projects/alpha", owner="home-here", next="x"), "GitHub did not answer", "issue_ids")
 F.down = False
-write_toml(sync=False, issue_ids=False); server._cfg.reload(); F.log.clear()
+write_toml(sync=False, issue_ids=False); _cfg.reload(); F.log.clear()
 server._update(f"g{n1}", hold=True, wake="2026-12-01", sender="home-here")
 import datetime as _dt
 woke = wakes_svc.wake_pass(_dt.date(2027, 1, 1))
@@ -1364,7 +1369,7 @@ telling.tell_woken = lambda *a, **k: None
 # that takes text writes a bare g<n> that names an item as board#<n>; code, links, unknown ids and glued tokens stay as written
 gk, nk = f"g{n1}", f"board#{n1}"
 check("the fixture: the referent is an issue-numbered item in the store and g999 is none", (STORE / f"g/{n1}.json").exists() and not (STORE / "g/999.json").exists())
-sw = server._shown_ids
+sw = _service_store._shown_ids
 check("_shown_ids: a bare g<n> → board#<n>, also at a sentence's end, before a colon or a possessive and inside parentheses",
       sw(f"waits on {gk}. Then ({gk}), {gk}: done; {gk}'s owner") == f"waits on {nk}. Then ({nk}), {nk}: done; {nk}'s owner", sw(f"waits on {gk}. Then ({gk}), {gk}: done; {gk}'s owner"))
 code_txt = f"see `{gk}` here\n```\nrun {gk}\n```\n[{gk}](https://example.org/{gk}) and https://example.org/x/{gk} and [about {gk}][r]"
@@ -1442,7 +1447,7 @@ try:
     check("handover (c): a board#<n> in the same text still names its item, and the group's item stays unnamed", server._item_refs(txt_f) == [gf] and "ops-alpha-bg" in str(_needs(gf)) and _needs(ge) == ne0, (server._item_refs(txt_f), _needs(gf), _needs(ge)))
     txt_g = f"PR 7 failed on its own (group {ge}, split from {gf})"
     check("handover (c): the driver's 'group g<n>, split from g<n>' form and an upper-case G name no item either, and nothing in them is rewritten",
-          server._item_refs(txt_g) == [] and server._shown_ids(txt_g) == txt_g and server._item_refs(f"group {ge.upper()} [{gf.upper()}]") == [], (server._item_refs(txt_g), server._shown_ids(txt_g)))
+          server._item_refs(txt_g) == [] and _service_store._shown_ids(txt_g) == txt_g and server._item_refs(f"group {ge.upper()} [{gf.upper()}]") == [], (server._item_refs(txt_g), _service_store._shown_ids(txt_g)))
     check("handover (c): a bare g<n>, a g<n> link and a g<n> beside a group number still name; only the two release forms are skipped",
           server._item_refs(f"take {ge}") == [ge] and server._item_refs(f"[{ge}]({_core_instance.BOARD_URL}/items/{ge[1:]})") == [ge] and server._item_refs(f"group {ge} [{ge}] and {gf}") == [gf], (server._item_refs(f"group {ge} [{ge}] and {gf}"),))
 finally:
@@ -1458,7 +1463,7 @@ check("the shipped defaults: 250 writes an hour, 1500 counted reads, a 300 s mer
       G.DEFAULT_BUDGET == 250 == _gb.DEFAULT_WRITES and G.DEFAULT_READ_BUDGET == 1500 == _gb.DEFAULT_READS and G.DEFAULT_MERGE == 300.0 and G.DEFAULT_PACE == 1.5
       and all(re.search(rf"(?m)^{k} = {v}\b", _ex) for k, v in (("hourly_budget", 250), ("read_budget", 1500), ("merge_seconds", 300), ("min_interval_seconds", "1.5"))),
       (G.DEFAULT_BUDGET, G.DEFAULT_READ_BUDGET, G.DEFAULT_MERGE, G.DEFAULT_PACE))
-MERGE_S = 300; write_toml(sync=True, issue_ids=True); server._cfg.reload()
+MERGE_S = 300; write_toml(sync=True, issue_ids=True); _cfg.reload()
 check("[github] merge_seconds is read live", G.merge_seconds() == 300.0, G.merge_seconds())
 # three changes of the issue inside the window: held, then one PATCH of the issue with all of them, and no comment
 g_m = mk("[home] merge window"); n_m = G.issue_of(g_m, STORE)
@@ -1518,7 +1523,7 @@ check("a restart in the middle of the window keeps the pending job: the same fil
 r = G.drain(GH3, STORE, say=lambda s: None, now=T5 + 400)
 check("…and the new process sends it as one PATCH when the window is over", r["done"] == 1 and qlen() == 0 and "- pending over a restart" in issue(n_r)["body"] and not comments(n_r), (r, mine(n_r)))
 # merge_seconds = 0: every update goes at once, as before
-MERGE_S = 0; write_toml(sync=True, issue_ids=True); server._cfg.reload()
+MERGE_S = 0; write_toml(sync=True, issue_ids=True); _cfg.reload()
 F.log.clear(); server._update(g_r, description=D("no window"), sender="home-here"); r = G.drain(GH, STORE, say=lambda s: None)
 check("merge_seconds = 0: the update goes in the first drain", r["done"] == 1 and "held" not in r and qlen() == 0 and "- no window" in issue(n_r)["body"], (r, G.merge_seconds()))
 
@@ -1606,7 +1611,7 @@ check("a stamp is never saved ahead of the call's own time (the list and the cal
       fl_["r"] == [round(fr_ - 0.06, 1)] and fl_["by"]["r"]["step_proof"] == fl_["r"] and _gb.wait("r", 1, now=fr_) <= 3600.0 and 3599 < _gb.wait("r", 1, now=fr_ + 0.5) <= 3600.0, (fl_, _gb.wait("r", 1, now=fr_)))
 led_.unlink()
 # the read cap: refused over it, nothing sent; the queue's own reads are counted but never held
-READS = _gb.count("r") + 1; write_toml(sync=True, issue_ids=True); server._cfg.reload()
+READS = _gb.count("r") + 1; write_toml(sync=True, issue_ids=True); _cfg.reload()
 GR.get_issue(n_led); nlog = len(F.log)
 try: GR.get_issue(n_led); capped = None
 except G.GitHubBudget as e: capped = e
@@ -1616,9 +1621,9 @@ rc = _gb.count("r"); G._UNCAPPED.on = True
 try: GR.get_issue(n_led)
 finally: G._UNCAPPED.on = False
 check("…the reads of a write job are counted all the same, never held", _gb.count("r") == rc + 1, (_gb.count("r"), rc))
-READS = 100000; write_toml(sync=True, issue_ids=True); server._cfg.reload()
+READS = 100000; write_toml(sync=True, issue_ids=True); _cfg.reload()
 # the write cap in the ledger: a client made after a restart still knows the hour
-HOURLY = _gb.count("w") + 2; write_toml(sync=True, issue_ids=True); server._cfg.reload()
+HOURLY = _gb.count("w") + 2; write_toml(sync=True, issue_ids=True); _cfg.reload()
 GW = G.GitHub("o/r", API, "test-token", pace=0.0, shared=True); slept = []
 def _would_sleep(w): slept.append(w); raise RuntimeError("would sleep")
 GW.sleep = _would_sleep
@@ -1627,7 +1632,7 @@ try: GW.edit_issue(n_led, title="ledger w3"); third = "sent"
 except RuntimeError: third = "waits"
 check("the write cap counts in the ledger: two writes under it go, the third waits for the hour (a client with an empty memory included)",
       third == "waits" and len(slept) == 1 and 3000 < slept[0] <= 3600 and issue(n_led)["title"] == "ledger w2" and GW.recent_writes() >= HOURLY, (third, slept, issue(n_led)["title"]))
-HOURLY = 100000; write_toml(sync=True, issue_ids=True); server._cfg.reload()
+HOURLY = 100000; write_toml(sync=True, issue_ids=True); _cfg.reload()
 
 # ---- the create is never refused by the read cap; the merged comment is split only by its own trailer; the span of a group; the ledger's failures
 def set_caps(reads=None, writes=None, merge=None):
@@ -1635,7 +1640,7 @@ def set_caps(reads=None, writes=None, merge=None):
     if reads is not None: READS = reads
     if writes is not None: HOURLY = writes
     if merge is not None: MERGE_S = merge
-    write_toml(sync=True, issue_ids=True); server._cfg.reload()
+    write_toml(sync=True, issue_ids=True); _cfg.reload()
 set_caps(reads=_gb.count("r"))
 G._CLIENT.clear(); cl_ = G.client(); nlog = len(F.log)
 g_sp = G.norm(made("[home] created under a spent read cap")[0]); n_sp = G.issue_of(g_sp, STORE)
@@ -1810,7 +1815,7 @@ def one_pass():
 def reads(): return _gb.count("r")
 def set_reads(n):
     global READS
-    READS = n; write_toml(sync=True, issue_ids=True); server._cfg.reload()
+    READS = n; write_toml(sync=True, issue_ids=True); _cfg.reload()
 try:
     a0 = reads(); ghr.run(hub)
     check("anchor-hub: the start-up read (GET /user) is in the ledger", reads() == a0 + 1 and calls == ["/user"], (reads() - a0, calls))

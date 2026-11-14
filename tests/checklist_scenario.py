@@ -92,6 +92,8 @@ def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.core import config as _cfg
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import complete as _wt_complete
@@ -107,7 +109,7 @@ def refused(name, f, *want, i=None):
     was = rd(i) if i is not None else None
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
 def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-here", **kw)
 def upa(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
@@ -187,10 +189,10 @@ check("a step written again after an earlier call marked it is a new step, open 
       st(6)[-1] == OPEN("home-agent: tell the keeper") and sum(1 for s, t in st(6) if t == "home-agent: tell the keeper") == 2, st(6))
 
 # ---- 6. [metadata.next] require_marks = false: the way back
-server._cfg.CFG["metadata"]["next"]["require_marks"] = False
+_cfg.CFG["metadata"]["next"]["require_marks"] = False
 r = upd(7, next="home-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper")
 check("require_marks = false: a step left out of next reads as dropped, with nobody and no time", st(7)[0] == ("dropped", "home-agent: build the thing") and mt(7)["steps"][0]["by"] == "" and not mt(7)["steps"][0]["at"] and mt(7)["next"].startswith("home-agent: test it"), (st(7), mt(7)["steps"]))
-server._cfg.CFG["metadata"]["next"]["require_marks"] = True
+_cfg.CFG["metadata"]["next"]["require_marks"] = True
 
 # ---- 7. a write that knows nothing of steps
 check("a stored open step whose line left next reads as dropped (nobody, no time); a line of next with no step is a new open step at the end",

@@ -74,6 +74,9 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.core import instance as _core_instance
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc
@@ -92,7 +95,7 @@ telling.tell_woken = lambda gid, owner, note, tag="wake": None
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))   # no rollout runway in the way
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 CAP = W.cap_days()
 
 # ================================================================ A. his words already in the store
@@ -296,11 +299,11 @@ check("digest: on the weekly day the board's head lists them (before Machines), 
       and md_m.index("## Waits on a real-world date") < md_m.index("## Machines"), sec[:500])
 check("digest: on another weekday the section is not there", "Waits on a real-world date" not in md_t, md_t[:100])
 check("digest: the brief lists them on the weekly day only", "waits on a real-world date: a66" in bm.brief() and "waits on a real-world date" not in bt.brief(), (bm.brief(), bt.brief()))
-server._cfg.CFG.setdefault("waiting", {})["basis_weekday"] = -1
+_cfg.CFG.setdefault("waiting", {})["basis_weekday"] = -1
 check("digest: [waiting] basis_weekday = -1 lists them every day", "a66" in bt.markdown() and "waits on a real-world date: a66" in bt.brief(), None)
-server._cfg.CFG["waiting"]["basis_weekday"] = 1
+_cfg.CFG["waiting"]["basis_weekday"] = 1
 check("digest: …and 1 is Tuesday", "a66" in bt.markdown() and "Waits on a real-world date" not in bm.markdown(), None)
-server._cfg.CFG["waiting"].pop("basis_weekday")
+_cfg.CFG["waiting"].pop("basis_weekday")
 
 # the web board's rows, every day (the wait that stands on a real-world date is a row of the Waiting list, with its basis, its wake date and who set it, in place of the block)
 item(67, hold=True, wake=day(40), wait_basis={"text": f"vendor answers on {day(43)}", "wake": day(40), "by": "home-stew", "at": now0})
@@ -560,18 +563,18 @@ try:
     item(55, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[ans(now0 - 4 * DAY)])
     W.prior_state_ts = spy
     calls.clear()
-    orig_load = server._load; n_loads = [0]
+    orig_load = _service_store._load; n_loads = [0]
     def load_moving(g):
         if g == "a55":
             n_loads[0] += 1
             if n_loads[0] == 2:                      # the first read is the one before the lock; the second is under it
                 dd = rd(55); dd["state_updated"] = now0 - 1 * DAY; (T / "store/a/55.json").write_text(json.dumps(dd))
         return orig_load(g)
-    server._load = load_moving
+    _service_store._load = load_moving
     try:
         refused("lock: a state clock that moved after a current answer was read without history is refused, to be run again", lambda: server._record_cap_words({"sender": "home-test", "item": "a55", "ts": now0 - 4 * DAY}, "testbox"), "moved while its history was being read")
     finally:
-        server._load = orig_load
+        _service_store._load = orig_load
     check("lock: ...and the history was never read for it, nothing recorded", calls == [] and "cap_ok" not in rd(55)["metadata"], (calls, rd(55)["metadata"]))
     # the state clock moves while the history is read, the wake does not: refused as well (the wake alone is not enough to compare)
     item(56, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[ans(now0 - 5 * DAY - 3600)])

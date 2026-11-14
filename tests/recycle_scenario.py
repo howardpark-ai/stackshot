@@ -58,6 +58,9 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.waits import waiting as _wt
+from stackshot.core import config as _cfg
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.model import field_gates as _fg
@@ -70,10 +73,10 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.web.auth import oauth as _oauth
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
+_wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, owner, note))
-owed = lambda: json.dumps(server._owed_load())
+owed = lambda: json.dumps(_web_page_debts._owed_load())
 
 # ---- 1. setting, showing, refusing, clearing
 out = server._update("a1", recycle=True)
@@ -85,13 +88,13 @@ check("the update's reply shows it", "recycle: waits for a pane recycle (since "
 check("get shows it", "recycle: waits for a pane recycle" in _wt_get.stackshot_get("a1"))
 for kw, name in (({"recycle": True, "clear_recycle": True}, "recycle with clear_recycle is refused"),):
     try: server._update("a1", **kw); check(name, False)
-    except server.ToolError: check(name, True)
+    except ToolError: check(name, True)
 server._update("a7", recycle=True); server._update("a7", clear_recycle=True)
 check("clear_recycle takes it off", "recycle" not in rd(7)["metadata"] and "recycle_at" not in rd(7)["metadata"], rd(7)["metadata"])
 server._update("a6", recycle=True); _wt_complete.stackshot_complete("a6", outcome="done", reason="the work landed", description="- The test item's work is in place")
 check("a completion takes it off", rd(6)["status"] == "completed" and "recycle" not in rd(6)["metadata"], rd(6)["metadata"])
 try: server._update("a6", recycle=True); check("a completed item cannot wait for a recycle", False)
-except server.ToolError: check("a completed item cannot wait for a recycle", True)
+except ToolError: check("a completed item cannot wait for a recycle", True)
 check("get no longer shows it on a cleared item", "recycle:" not in _wt_get.stackshot_get("a7"))
 
 # ---- 2. sala reports a recycle
@@ -214,7 +217,7 @@ check("an exception still exits 0", rc == 0)
 
 # ---- 5. recycle-due: a script marks a recycle as due on an existing item,
 # by id or through the pull request it is anchored to, and never files one (and it is not an item)
-def _no_identity(): raise server.ToolError("Refused: unknown identity is not allowed on this board")
+def _no_identity(): raise ToolError("Refused: unknown identity is not allowed on this board")
 _oauth._who = _no_identity                         # as with auth on and no signed-in caller: the client path must not need one
 nfiles = lambda: len(list((T / "store").glob("?/*.json")))
 item(8, "home-here"); item(9, "home-skipped")
@@ -255,14 +258,14 @@ with TestClient(app) as c:
 for name, call in (("create", lambda: _wt_create.stackshot_create(subject="[home] y", description="- A thing", project="projects/alpha", owner="home-here")),
                    ("update", lambda: _wt_update.stackshot_update("a1", next="x")), ("complete", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="the work landed", description="- The test item's work is in place"))):
     try: call(); check(f"the {name} tool still checks the identity", False)
-    except server.ToolError as e: check(f"the {name} tool still checks the identity", "unknown identity" in str(e), str(e))
+    except ToolError as e: check(f"the {name} tool still checks the identity", "unknown identity" in str(e), str(e))
 
 # ---- 5b. create refuses an item that only asks for a recycle (after); update's recycle parameter says where a recycle goes
 _web_page_debts._refuse_if_owing = lambda debtor: None
 for subj in ("[home] Relaunch every pane so the connector's new parameters load", "[home] Recycle the sessions on box-a",
              "[home] Restart all panes after the plugin update", "[home] Load the new skills: re-launch the Claude sessions"):
     try: _wt_create._create(subject=subj, description="- A thing", project="projects/alpha", owner="home-here"); check(f"create refuses {subj!r}", False)
-    except server.ToolError as e: check(f"create refuses {subj!r}, naming both paths", "update(<item>, recycle=true)" in str(e) and "sala recycle --when-idle" in str(e), str(e))
+    except ToolError as e: check(f"create refuses {subj!r}, naming both paths", "update(<item>, recycle=true)" in str(e) and "sala recycle --when-idle" in str(e), str(e))
 n1 = nfiles()
 _wt_create._create(subject="[home] Fix the restart logic of the puller", description="- A thing", project="projects/alpha", owner="home-here")
 check("a task that only mentions a restart is created", nfiles() == n1 + 1)
@@ -274,11 +277,11 @@ check("update's description names the board's status line and that sala runs the
       "Pane recycle pending for … (sala runs it)" in _wt_update._UPDATE_DESC and "sala runs a flagged recycle itself" in _wt_update._UPDATE_DESC and "Pane recycle needed" not in _wt_update._UPDATE_DESC)
 _ut = next(t for t in __import__("asyncio").run(server.mcp.list_tools()) if t.name == "update")
 check("the update tool as served carries the same guidance", "never before" in (_ut.description or "") and "(sala runs it)" in (_ut.description or ""), (_ut.description or "")[:200])
-server._cfg.CFG["fleet"].update(tool_name="", recycle_when_idle="")      # no fleet tool: nothing named, no command suggested
+_cfg.CFG["fleet"].update(tool_name="", recycle_when_idle="")      # no fleet tool: nothing named, no command suggested
 try: _wt_create._create(subject="[home] Recycle the sessions on box-a", description="- A thing", project="projects/alpha", owner="home-here"); check("with no fleet tool, create still refuses a recycle item", False)
-except server.ToolError as e: check("with no fleet tool, create still refuses a recycle item and names no tool or command", "update(<item>, recycle=true)" in str(e) and "sala" not in str(e) and "next recycle" in str(e), str(e))
+except ToolError as e: check("with no fleet tool, create still refuses a recycle item and names no tool or command", "update(<item>, recycle=true)" in str(e) and "sala" not in str(e) and "next recycle" in str(e), str(e))
 check("with no fleet tool the prose says 'the fleet tool'", _fg._fleet_tool() == "the fleet tool" and _fg._when_idle().startswith("leave it for the next recycle"), (_fg._fleet_tool(), _fg._when_idle()))
-server._cfg.CFG["fleet"].update(tool_name="sala", recycle_when_idle="sala recycle --when-idle")
+_cfg.CFG["fleet"].update(tool_name="sala", recycle_when_idle="sala recycle --when-idle")
 
 # ---- 6. the client verb
 sent = []

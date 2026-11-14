@@ -64,6 +64,8 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.model import retire_fields as RF; from stackshot.tools import retire_fields_report as RR; from stackshot.tools import stamp_phase as SP
+from stackshot.core import config as _cfg
+from stackshot.waits import watchers as _watch
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -73,7 +75,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
-CFGM = server._cfg.CFG.setdefault("model", {})
+CFGM = _cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
@@ -97,8 +99,8 @@ def reading(i):
     it = dict(raw(i), gid=f"g{i}")
     with SP.fields_only(server):
         mod = server._model_of(it)
-        shown = server._model.view(it, mod, None, lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
-        return [list(server._model.shown_pair(shown)), server._item_list(it), shown.mover if shown.state == server._model.ALIVE else ""]
+        shown = _model.view(it, mod, None, lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
+        return [list(_model.shown_pair(shown)), server._item_list(it), shown.mover if shown.state == _model.ALIVE else ""]
 
 BASIS_DAY = day(12)
 END_WAKE = BASIS_DAY + "T23:59"
@@ -188,8 +190,8 @@ check("3 …no side effect: the state folder is the same and the phase and waits
 check("4 a party beside a wait_event keeps the wait_event; a supplies the description said adds no line", mt(4)["wait_event"] == "Acme legal replies" and mt(4)["ask_by"] == day(6) and raw(14)["description"] == orig[14]["description"], (mt(4), raw(14)["description"]))
 check("4 the supplies line is the last bullet of the description", raw(5)["description"] == DESC + "\n- Needs: its output feeds the build", raw(5)["description"])
 it7 = dict(raw(7), gid="g7")
-m7 = server._model.view(it7, server._model_of(it7), None, lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
-check("5 the verifying item reads waiting on its end day, with the proof as the text of the wait", m7.state == server._model.WAITING and W.basis_of(mt(7)) == "the nightly run is green" and mt(7)["wake"] == END_WAKE, (m7.state, mt(7)))
+m7 = _model.view(it7, server._model_of(it7), None, lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
+check("5 the verifying item reads waiting on its end day, with the proof as the text of the wait", m7.state == _model.WAITING and W.basis_of(mt(7)) == "the nightly run is green" and mt(7)["wake"] == END_WAKE, (m7.state, mt(7)))
 check("5 …and it waits to the end of that day, as the verifying state read it (its end is now its wake, and whose move it is stays the same)",
       W.wake_epoch(mt(7)["wake"]) is not None and wc(7) == wait_before[7], (wait_before[7], wc(7), mt(7)))
 check("5 waiting.mover_for: the stored-doing items (a session as mover, nothing waited on) are a session's move, before and after the pass",
@@ -259,7 +261,7 @@ check("9 …dry goes with retire only; an empty list is refused", st_ == 400 and
 st_, d_ = call(op="retire", items=["g9999", "nonsense"])
 check("9 …an unknown item and a malformed id are refused one by one", st_ == 200 and [r["action"] for r in d_["results"]] == ["refused", "refused"], (st_, d_))
 st_, d_ = call(op="retire", items=["g41"])
-check("9 …a retire needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and "state" not in mt(41) and not server._watch.holding(), (st_, d_))
+check("9 …a retire needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and "state" not in mt(41) and not _watch.holding(), (st_, d_))
 CFGM["migration"] = False
 
 # ---- 10. the script

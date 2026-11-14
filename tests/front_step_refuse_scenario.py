@@ -51,6 +51,9 @@ def put(i, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.audit import audit_run as AR
+from stackshot.core import instance as _core_instance
+from stackshot.anchors import anchors as _anc
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import create as _wt_create
@@ -60,7 +63,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 
 def refusal(fn):
     try:
@@ -128,32 +131,32 @@ put(5, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
 r = server._update("a5", next=f"{BUILD}: build it\n{MAIN}: look at it", sender=BUILD, check="item_closed a1")
 check("5 the server's internal update is not judged by the tool gate", "Refused" not in r and MAIN in stored_next(5), r)
 put(6, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
-real_roles = server._anc.session_roles
+real_roles = _anc.session_roles
 def boom(*a, **k): raise RuntimeError("roles unreadable")
-server._anc.session_roles = boom
+_anc.session_roles = boom
 errbuf = io.StringIO()
 try:
     with contextlib.redirect_stderr(errbuf):
         msg = refusal(lambda: _wt_update.stackshot_update(item_id="a6", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
 finally:
-    server._anc.session_roles = real_roles
+    _anc.session_roles = real_roles
 check("5 a failing roles read lets the write through and says so once on stderr", "no work notice" not in msg and "front-step gate" in errbuf.getvalue() and "roles unreadable" in errbuf.getvalue(), (msg, errbuf.getvalue()[:300]))
 put(8, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
 def retired_build(*a, **k): return {**real_roles(*a, **k), BUILD: {**real_roles(*a, **k)[BUILD], "retired": True}}
-server._anc.session_roles = retired_build
+_anc.session_roles = retired_build
 try:
     msg = refusal(lambda: _wt_update.stackshot_update(item_id="a8", sender=MAIN, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
 finally:
-    server._anc.session_roles = real_roles
+    _anc.session_roles = real_roles
 check("5 a mover that is retired (not running) leaves a front agent's step allowed", "no work notice" not in msg and msg == "" and MAIN in stored_next(8), (msg, stored_next(8)))
-guards_was = server._cfg.CFG.setdefault("model", {}).get("guards")
-server._cfg.CFG["model"]["guards"] = False
+guards_was = _cfg.CFG.setdefault("model", {}).get("guards")
+_cfg.CFG["model"]["guards"] = False
 try:
     put(7, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
     msg = refusal(lambda: _wt_update.stackshot_update(item_id="a7", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
 finally:
-    if guards_was is None: server._cfg.CFG["model"].pop("guards", None)
-    else: server._cfg.CFG["model"]["guards"] = guards_was
+    if guards_was is None: _cfg.CFG["model"].pop("guards", None)
+    else: _cfg.CFG["model"]["guards"] = guards_was
 check("5 [model] guards = false switches the check off with the other write guards", "no work notice" not in msg, msg)
 
 # ---- 6. the shared test and the monthly count

@@ -75,12 +75,14 @@ def dry_run(a: argparse.Namespace) -> int:
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         from stackshot.web import server  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        from stackshot.core import config as _cfg  # noqa: PLC0415
+        from stackshot.github import ghsync as _gh  # noqa: PLC0415
         _web_publish._publish = lambda: None
         d = root / "repo/board-data"
         now = time.time()
         items = SP.load_dir(d)
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
-        max_lines = int(server._cfg.CFG["description"].get("max_lines", 8))
+        max_lines = int(_cfg.CFG["description"].get("max_lines", 8))
         before = {g: reading(server, items[g], g, now) for g in opens}
         planned = {g: server._retire_one(g, dry=True) for g in opens}
         wrote = {g: server._retire_one(g) for g in opens}
@@ -99,7 +101,7 @@ def dry_run(a: argparse.Namespace) -> int:
             if before[g]["list"] != aft["list"]:
                 why = (why + "; " if why else "") + f"list {before[g]['list']} -> {aft['list']}"
             r, w = planned[g], wrote[g]
-            rows.append({"item": server._gh.shown(g), "state": meta.get("state"), "plan": r, "result": w["action"], "again": again[g]["action"], "before": before[g], "after": aft, "same": same, "why": why, "word_changes": before[g]["word"] != aft["word"],
+            rows.append({"item": _gh.shown(g), "state": meta.get("state"), "plan": r, "result": w["action"], "again": again[g]["action"], "before": before[g], "after": aft, "same": same, "why": why, "word_changes": before[g]["word"] != aft["word"],
                          "description_lines": (len(str(after_items[g].get("description") or "").strip().splitlines()), len(str(it.get("description") or "").strip().splitlines()))})
         todo = [r for r in rows if r["plan"]["action"] in ("would_set", "refused")]
         print(f"{len(opens)} open items read from {store}; the pass run on a copy of it\n")
@@ -113,7 +115,7 @@ def dry_run(a: argparse.Namespace) -> int:
         needs = [(r, r["plan"]["after"]["description"]) for r in rows if r["plan"].get("after") and r["plan"]["after"].get("description") is not None]
         over: list[str] = []
         if needs:
-            max_chars = int(server._cfg.CFG["description"].get("line_max", 120))
+            max_chars = int(_cfg.CFG["description"].get("line_max", 120))
             print(f"\nlines the pass adds to descriptions (the new description's last line; its lines before -> after against the limit of {max_lines}, and its longest line against {max_chars} characters):")
             for r, text in needs:
                 n1, n0 = r["description_lines"]

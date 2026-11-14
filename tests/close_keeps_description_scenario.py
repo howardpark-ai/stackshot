@@ -80,6 +80,9 @@ try:
     def mt(i): return rd(i)["metadata"]
 
     from stackshot.web import server
+    from fastmcp.exceptions import ToolError
+    from stackshot.core import instance as _core_instance
+    from stackshot.model import said as _said
     from stackshot.web import publish as _web_publish
     from stackshot.web import page_debts as _web_page_debts
     from stackshot.web.tools import anchors as _wt_anchors
@@ -92,7 +95,7 @@ try:
     def refused(name, f, *want):
         try:
             out = f(); check(name, False, out)
-        except server.ToolError as e:
+        except ToolError as e:
             check(name, all(w in str(e) for w in want), str(e))
 
     # ---- 1. a close keeps the description and stores the outcome text
@@ -124,13 +127,13 @@ try:
     refused("a legacy description that is not bullets is refused as the outcome text", lambda: _wt_complete.stackshot_complete("a8", outcome="done", reason="finished", description="It is finished."), "outcome_text line is not a `- ` bullet")
 
     # ---- 2b. whose words: a close is judged on what it wrote (the outcome text and the reason), not on the background the description keeps
-    QUOTE = f'- {server.OWNER}, Wed Oct 28th: "ship it"'
+    QUOTE = f'- {_core_instance.OWNER}, Wed Oct 28th: "ship it"'
     bg_quote = {"status": "completed", "description": QUOTE, "metadata": {"outcome_text": NEW, "reason": "shipped"}}
-    check("_owner_words on a close: the owner quoted only in the kept description does not count (no For you row for every close)", server._owner_words(bg_quote) == "", server._owner_words(bg_quote))
-    check("…quoted in the outcome text it counts", server._owner_words({**bg_quote, "description": DESC, "metadata": {"outcome_text": QUOTE, "reason": "shipped"}}) == "quoted in the text")
-    check("…quoted in the reason it counts", server._owner_words({**bg_quote, "description": DESC, "metadata": {"outcome_text": NEW, "reason": f'{server.OWNER}, Wed Oct 28th: "ship it"'}}) == "quoted in the text")
-    check("an open item is still judged on its description", server._owner_words({"status": "open", "description": QUOTE, "metadata": {}}) == "quoted in the text")
-    check("a closed item with no outcome text (stored before this change) is still judged on its description", server._owner_words({"status": "completed", "description": QUOTE, "metadata": {"reason": "shipped"}}) == "quoted in the text")
+    check("_owner_words on a close: the owner quoted only in the kept description does not count (no For you row for every close)", _said._owner_words(bg_quote) == "", _said._owner_words(bg_quote))
+    check("…quoted in the outcome text it counts", _said._owner_words({**bg_quote, "description": DESC, "metadata": {"outcome_text": QUOTE, "reason": "shipped"}}) == "quoted in the text")
+    check("…quoted in the reason it counts", _said._owner_words({**bg_quote, "description": DESC, "metadata": {"outcome_text": NEW, "reason": f'{_core_instance.OWNER}, Wed Oct 28th: "ship it"'}}) == "quoted in the text")
+    check("an open item is still judged on its description", _said._owner_words({"status": "open", "description": QUOTE, "metadata": {}}) == "quoted in the text")
+    check("a closed item with no outcome text (stored before this change) is still judged on its description", _said._owner_words({"status": "completed", "description": QUOTE, "metadata": {"reason": "shipped"}}) == "quoted in the text")
 
     # ---- 3. the description of a closed item can still be edited; the outcome text stays; reopening drops it
     EDIT = "- Move the nightly export to the new bucket\n- Owner: home-here\n- The old bucket is deleted since"

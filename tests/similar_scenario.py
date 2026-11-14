@@ -40,10 +40,13 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import ids as _model_ids
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.model import similar as _sim
 from stackshot.web.tools import create as _wt_create
-server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
+_cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 MAIN, OTHER = "falcon-main", "home-other"
 STK, ATT, OTH = "projects/example", "projects/example/queue-notes", "projects/other"
@@ -55,11 +58,11 @@ def note(r):
     m = re.search(r"\n\(similar items, [^\n]*\)", r)
     return m.group(0) if m else ""
 def age(gid, days, status="completed"):
-    it = server._load(gid); it["status"] = status
+    it = _service_store._load(gid); it["status"] = status
     it["state_updated"] = it["updated"] = time.time() - days * 86400
     writes.save(gid, it)
 def created(r, gid):
-    return r.startswith("created ") and server._load(gid)["status"] == "open"
+    return r.startswith("created ") and _service_store._load(gid)["status"] == "open"
 
 # ---- the words and the score
 W = getattr(_sim, "_subject_words", lambda s: None)   # absent before the feature: the checks below then fail, they do not crash
@@ -76,11 +79,11 @@ check("first create: nothing similar yet, a plain create", created(r, seed) and 
 r, dup = create("[home] List similar items as a note in the create reply")
 n = note(r)
 check("(a) a near-duplicate subject in the same project is listed, open, in the reply's link form",
-      f'{server._gh.shown(seed)} "[home] Add similar-items note to the create reply" [open]' in n, r)
+      f'{_gh.shown(seed)} "[home] Add similar-items note to the create reply" [open]' in n, r)
 check("(a) the line has the asked form: the lead, the list, the supersede advice, one line",
       n.startswith("\n(similar items, check before working this one: ") and n.endswith("; if one already carries this, update it and close the new one as superseded)") and n.count("\n") == 1, n)
 check("(d) the near-duplicate is still created, open", created(r, dup), r)
-check("the new item is never listed against itself", server._gh.shown(dup) not in n, n)
+check("the new item is never listed against itself", _gh.shown(dup) not in n, n)
 
 # ---- (b) an unrelated subject lists nothing
 r, unrel = create("[home] Renew the TLS certificate for the mail relay")
@@ -98,21 +101,21 @@ check("(d) the item is created", created(r, new), r)
 r, fresh = create("[home] Rotate signing keys every quarter", project=OTH, owner=OTHER)
 age(fresh, 2)
 r, new = create("[home] Rotate the signing keys quarterly", project=OTH, owner=OTHER)
-check("(c) an item completed 2 days ago is listed, marked completed", f'{server._gh.shown(fresh)} "[home] Rotate signing keys every quarter" [completed]' in note(r), r)
+check("(c) an item completed 2 days ago is listed, marked completed", f'{_gh.shown(fresh)} "[home] Rotate signing keys every quarter" [completed]' in note(r), r)
 check("(d) the item is created", created(r, new), r)
 r, dropped = create("[home] Archive stale vendor contracts folder", project=OTH, owner=OTHER)
 age(dropped, 13.9)
 r, new = create("[home] Archive stale vendor contracts folder again", project=OTH, owner=OTHER)
-check("(c) 13.9 days ago is still inside the window", server._gh.shown(dropped) in note(r), r)
+check("(c) 13.9 days ago is still inside the window", _gh.shown(dropped) in note(r), r)
 
 # ---- the hub bonus: same page 0.10, same hub 0.05, another hub none
 r, base = create("[home] Rebuild search index nightly", project=STK)
 r, same_page = create("[home] Rebuild search cache weekly", project=STK)
-check("bonus: two shared words of four, the same project page: listed", server._gh.shown(base) in note(r), r)
+check("bonus: two shared words of four, the same project page: listed", _gh.shown(base) in note(r), r)
 r, same_hub = create("[home] Rebuild search cache weekly", project=ATT)
-check("bonus: the same hub page (a sub-page of the project): listed", server._gh.shown(base) in note(r) and created(r, same_hub), r)
+check("bonus: the same hub page (a sub-page of the project): listed", _gh.shown(base) in note(r) and created(r, same_hub), r)
 r, other_hub = create("[home] Rebuild search cache weekly", project=OTH, owner=OTHER)
-check("bonus: the same borderline subject in another hub: nothing, the item still created", server._gh.shown(base) not in note(r) and created(r, other_hub), r)
+check("bonus: the same borderline subject in another hub: nothing, the item still created", _gh.shown(base) not in note(r) and created(r, other_hub), r)
 
 # ---- at most 3, the closest first
 for i in range(4):

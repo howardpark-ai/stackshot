@@ -201,13 +201,14 @@ check("…and unmarking it writes again", brains.shared_refusal("projects/delta"
 
 # ---- 7. a shared page owes no page update to a session
 from stackshot.web import server
-server._owed_mark("projects/shr-one", "agent-one", "board#N", settle="ct")
-server._owed_mark("projects/own-one", "agent-one", "board#N", settle="ct")
-owed = server._owed_load()
+from stackshot.web import page_debts as _pdebts
+_pdebts._owed_mark("projects/shr-one", "agent-one", "board#N", settle="ct")
+_pdebts._owed_mark("projects/own-one", "agent-one", "board#N", settle="ct")
+owed = _pdebts._owed_load()
 check("pages owed: nothing is charged on a page of a shared brain, a page of an unmarked brain is charged as before", "projects/shr-one" not in owed and "projects/own-one" in owed, list(owed))
-owed["projects/shr-two"] = {"agent-two": {"ts": 1.0, "item": "board#N", "settle": "ct"}}; server._owed_save(owed)
-left = server._owed_settle()
-check("…a debt charged before the mark was set is dropped at the next settle", "projects/shr-two" not in left and "projects/shr-two" not in server._owed_load(), (list(left), list(server._owed_load())))
+owed["projects/shr-two"] = {"agent-two": {"ts": 1.0, "item": "board#N", "settle": "ct"}}; _pdebts._owed_save(owed)
+left = _pdebts._owed_settle()
+check("…a debt charged before the mark was set is dropped at the next settle", "projects/shr-two" not in left and "projects/shr-two" not in _pdebts._owed_load(), (list(left), list(_pdebts._owed_load())))
 
 # ---- 8. config.notes
 cfg = copy.deepcopy(_cfg.CFG)

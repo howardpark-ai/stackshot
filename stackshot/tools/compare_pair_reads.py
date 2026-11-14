@@ -83,9 +83,10 @@ def make_scratch(store: Path, brain: Path | None) -> Path:
 
 def rows_at(server: Any, store: Path, now: float, label: str) -> list[dict[str, Any]]:
     """One row per open item of the store at the clock `now`: the pair it stores, the reading from the fields, the reading from the stored pair, the list each puts it in."""
+    from stackshot.github import ghsync as _gh  # noqa: PLC0415
+    from stackshot.model import model  # noqa: PLC0415
     items = SP.load_dir(store)
     out: list[dict[str, Any]] = []
-    model = server._model
     for g in sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num):
         it = items[g]
         probe = {**it, "gid": g}
@@ -98,7 +99,7 @@ def rows_at(server: Any, store: Path, now: float, label: str) -> list[dict[str, 
                 list_fields = server._item_list(probe)
             list_stored = server._item_list(probe)
         meta = it.get("metadata") or {}
-        out.append({"item": server._gh.shown(g), "gid": g, "at": label, "stored": {"phase": meta.get("phase"), "waits_on": meta.get("waits_on")},
+        out.append({"item": _gh.shown(g), "gid": g, "at": label, "stored": {"phase": meta.get("phase"), "waits_on": meta.get("waits_on")},
                     "fields": list(model.shown_pair(fields)), "shown": list(model.shown_pair(stored)), "list_fields": list_fields, "list_shown": list_stored,
                     "same": model.shown_pair(fields) == model.shown_pair(stored) and list_fields == list_stored, "unstamped": not (model.stored_phase(probe) and (model.stored_phase(probe) == model.ALIVE or model.stored_waits_on(probe)))})
     return out

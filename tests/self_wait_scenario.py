@@ -75,6 +75,8 @@ def mt(i): return rd(i)["metadata"]
 def files(): return sorted(p.name for p in (T / "store/a").glob("*.json"))
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
+from stackshot.core import config as _cfg
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import complete as _wt_complete
@@ -101,7 +103,7 @@ def reset(ans=None):
     CALLS.clear(); SW._CALLS.clear(); ANSWER = ans if ans is not None else answer(False, "the build is still running")
 @contextlib.contextmanager
 def cfg(**kw):
-    g = server._cfg.CFG.setdefault("wait_guard", {}); was = dict(g); g.update(kw)
+    g = _cfg.CFG.setdefault("wait_guard", {}); was = dict(g); g.update(kw)
     try: yield
     finally: g.clear(); g.update(was)
 ZONE_OFFSET = dt.timedelta(hours=4)      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
@@ -116,17 +118,17 @@ def refused(name, f, *want, i=None, calls=None):
     was = rd(i) if i is not None else None
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was) and (calls is None or len(CALLS) == calls), (str(e), len(CALLS)))
 def passes(name, f, calls):
     try:
         out = f(); check(name, len(CALLS) == calls, (out, len(CALLS)))
         return out
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, False, str(e))
 def quiet(name, f):
     try: f()
-    except server.ToolError: pass
+    except ToolError: pass
     check(name, len(CALLS) == 0, len(CALLS))
 
 # ---- the replay

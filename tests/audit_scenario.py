@@ -244,6 +244,7 @@ check("…the CLI's cue was logged like any other", n0 == 5 and json.loads((D / 
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -276,12 +277,12 @@ with TestClient(server.mcp.http_app()) as c:
           and [g["found"] for g in card_["groups"]][-2:] == [None, None] and all(isinstance(g["found"], int) and isinstance(g["audits"], int) for g in card_["groups"][:6])
           and card_.get("note") == "– keeps no findings log", card_)
     check("POST /audit/status is not a route: 405", c.post("/audit/status").status_code == 405)
-    real_mode, _signin._auth_mode = _signin._auth_mode, (lambda: "google"); server._cfg.CFG["auth"]["ui_open"] = False
+    real_mode, _signin._auth_mode = _signin._auth_mode, (lambda: "google"); config.CFG["auth"]["ui_open"] = False
     r1, r2 = c.post("/audit/now", follow_redirects=False), c.get("/audit/status", follow_redirects=False)
     check("[auth] ui_open = false: both ask for the board's sign-in first, as the board and the item pages do",
           r1.status_code == 302 and r1.headers["location"].startswith("/ui/login") and r2.status_code == 302 and r2.headers["location"] == "/ui/login?next=%2Faudit%2Fstatus" and calls == [],
           (r1.status_code, r1.headers.get("location"), r2.status_code, r2.headers.get("location")))
-    _signin._auth_mode = real_mode; server._cfg.CFG["auth"]["ui_open"] = True
+    _signin._auth_mode = real_mode; config.CFG["auth"]["ui_open"] = True
 
 # ---- 8. the audit's own writes and a bare confirm do not move an item's activity clock (activity.py; its full table is tests/activity_scenario.py)
 from stackshot.model import activity
@@ -291,7 +292,7 @@ ACT_OLD = T0 - 7200
 (T / "store/a/60.json").write_text(json.dumps({"id": "60", "subject": "[home] an item", "description": "- A\n- B\n- C", "status": "open", "updated": ACT_OLD, "state_updated": ACT_OLD, "confirmed": ACT_OLD,
                                                "metadata": {"owner": "home-a", "project": "projects/a", "next": "home-a: do it", "mover": "home-a"}}))
 def act60(): return json.loads((T / "store/a/60.json").read_text()).get("activity")
-def save60(**kw): it = server._load("a60"); it["updated"] = time.time(); writes.save("a60", it, **kw)
+def save60(**kw): it = _service_store._load("a60"); it["updated"] = time.time(); writes.save("a60", it, **kw)
 save60(writer=audit_agent)
 seed = act60()
 check("8 an audit agent's write to an old item leaves its activity at the item's last update (the field is seeded, not set to now)", seed is not None and abs(seed - ACT_OLD) < 1, (seed, ACT_OLD))
@@ -299,7 +300,7 @@ save60(note="stall: the notice was sent again")
 save60(note="nudge", author=("stackshot audit", "stackshot audit"))
 check("8 …nor does the server's own nudge, nor a write stamped with the audit's label", act60() == seed, act60())
 time.sleep(0.02)
-item60 = server._load("a60"); item60["confirmed"] = time.time(); writes.save("a60", item60, writer="home-a", activity=activity.CONFIRM)
+item60 = _service_store._load("a60"); item60["confirmed"] = time.time(); writes.save("a60", item60, writer="home-a", activity=activity.CONFIRM)
 check("8 a bare confirm moves `confirmed` and not `activity`", json.loads((T / "store/a/60.json").read_text())["confirmed"] > ACT_OLD + 1 and act60() == seed, act60())
 save60(writer="home-a")
 check("8 a write by the item's mover does move it", act60() > seed + 3600, act60())

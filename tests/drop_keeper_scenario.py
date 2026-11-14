@@ -63,7 +63,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
-SID = server._session_id
+SID = _web_page_debts._session_id
 NOKEEP = lambda s: "keeper of record" not in str(s).lower()
 
 # ---- 1. D1/D3: any session creates; the creator holds nothing; an item with no mover falls to the builder, else the -main agent

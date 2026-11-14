@@ -89,6 +89,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.core import instance as _core_instance
+from stackshot.core import config as _cfg
+from stackshot.github import ghsync as _gh
+from stackshot.router import routing as _routing
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import handoff as handoff_svc
@@ -122,14 +127,14 @@ def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
-def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
+def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)
 def set_stall(**kw):
     """The [stall] section as given. A pause (enabled = false, a paused_until) names the item as its pause_item unless the call says otherwise: an item that carries Oliver's own answer,
     dated far ahead so it counts at any clock below; section 18 tests the refusals with answers of its own."""
     if (kw.get("enabled") is False or kw.get("paused_until")) and "pause_item" not in kw: kw["pause_item"] = "a97"
-    server._cfg.CFG["stall"] = dict(kw)
+    _cfg.CFG["stall"] = dict(kw)
 set_cfg(); set_stall()
-server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
+_cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
 def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
@@ -147,7 +152,7 @@ def cli_row(who, status, at):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
 handoff_svc.CLI_SESSIONS = T / "cli"
-OWN = server.OWNER
+OWN = _core_instance.OWNER
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
 ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
 MIN = 60.0
@@ -386,7 +391,7 @@ stalltick_svc.stall_tick(T1 + 6 * 3600); l1 = stall_svc.STALL_LAST[0]
 stalltick_svc.stall_tick(T1 + 6 * 3600 + 60); l2 = stall_svc.STALL_LAST[0]
 stalltick_svc.stall_tick(T1 + 6 * 3600 + 80); l3 = stall_svc.STALL_LAST[0]
 check("8 config: with the default every_seconds (20) a tick every 60 s (the minute pace) runs the pass each time, and a tick 20 s after a pass runs again too",
-      l1 == T1 + 6 * 3600 and l2 == T1 + 6 * 3600 + 60 and l3 == T1 + 6 * 3600 + 80 and stall_svc.stall_num("every_seconds", server._stall.EVERY) == 20, (l1, l2, l3))
+      l1 == T1 + 6 * 3600 and l2 == T1 + 6 * 3600 + 60 and l3 == T1 + 6 * 3600 + 80 and stall_svc.stall_num("every_seconds", S.EVERY) == 20, (l1, l2, l3))
 set_cfg(handoff=False)
 item(25, mover="home-peer2")
 check("8 config: [model] handoff = false: the pass does nothing (it moves items through the hand-off machinery)", stk(IDLE0 + 5 * 3600) == [] and not log_of(25), log_of(25))
@@ -460,7 +465,7 @@ close(53, 54); no_row("team-back"); no_row("home-front")
 cli_row("home-peer2", "idle", IDLE0)
 item(60, mover="home-peer2")
 R = T1 + 100.0
-stall_svc.stall_save({"a60": {"mover": "home-peer2", "ver": stall_svc.stall_ver(server._load("a60")), "step": 0, "last": R, "kept": R}})       # the cold call kept the item with its mover at R (the entry is carried into a new episode)
+stall_svc.stall_save({"a60": {"mover": "home-peer2", "ver": stall_svc.stall_ver(_service_store._load("a60")), "step": 0, "last": R, "kept": R}})       # the cold call kept the item with its mover at R (the entry is carried into a new episode)
 check("14 24 h: an item kept less than 24 hours ago is left alone, 23 hours on", stk(R + 23 * 3600) == [] and not log_of(60), log_of(60))
 done = stk(R + 25 * 3600)
 check("14 24 h: …and past 24 hours the ladder runs again (the notice, step 1)", "a60" in done and len(log_of(60)) == 1 and S.spent({"kept": R}, R + 25 * 3600) is False and S.spent({"kept": R}, R + 23 * 3600) is True, (done, log_of(60)))
@@ -576,11 +581,11 @@ check("17 paused_until ahead: the pass takes no step, and the journal says until
 check("17 paused_until ahead: the pause's start is kept in <state>/stall_pause.json", json.loads(PAUSE_FILE.read_text())["since"] == Q, PAUSE_FILE.read_text() if PAUSE_FILE.exists() else None)
 r, e = err(stk, Q + 3600)
 check("17 paused_until ahead: still paused an hour in, and no second start line", r == [] and not log_of(80) and e == "", (r, e))
-n_rt = len(server._routing.read("projects/alpha"))
+n_rt = len(_routing.read("projects/alpha"))
 r, e = err(stk, Q + 7200 + 1)
 check("17 paused_until passed: the pass runs again with no config edit (the item is stepped), one `pause ended` line", "a80" in r and len(log_of(80)) == 1 and e.count("stall: pause ended, the pass runs again") == 1, (r, e))
-rt = [n for n in server._routing.read("projects/alpha") if n.get("label") == "stall pause ended"]
-check("17 paused_until passed: ...and one routing-log line, ruled dropped by stackshot (auto), not delivered to anyone", len(rt) == 1 and rt[0].get("ruling") == "dropped" and rt[0].get("text") == "stall: pause ended, the pass runs again" and len(server._routing.read("projects/alpha")) == n_rt + 1, rt)
+rt = [n for n in _routing.read("projects/alpha") if n.get("label") == "stall pause ended"]
+check("17 paused_until passed: ...and one routing-log line, ruled dropped by stackshot (auto), not delivered to anyone", len(rt) == 1 and rt[0].get("ruling") == "dropped" and rt[0].get("text") == "stall: pause ended, the pass runs again" and len(_routing.read("projects/alpha")) == n_rt + 1, rt)
 check("17 paused_until passed: ...and the state file is gone", not PAUSE_FILE.exists())
 r, e = err(stk, Q + 7200 + 2 * MIN)
 check("17 paused_until passed: no further pause line while the setting stays in the file", e == "", e)
@@ -647,20 +652,20 @@ r, e = err(stall_svc.stall_pause_check, Q6)
 check("17 [stall] max_pause_hours that is not a number: the default (4 h)", r == Q6 + H4, (r, e))
 set_stall(paused_until="tomorrow"); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
 r, e = err(stall_svc.stall_pause_check, Q6)
-check("17 a paused_until that is not a time is ignored (the pass runs), and the notes name it", r is None and e == "" and any("paused_until" in n and "ignored" in n for n in server._cfg.stall_notes()), (r, e, server._cfg.stall_notes()))
+check("17 a paused_until that is not a time is ignored (the pass runs), and the notes name it", r is None and e == "" and any("paused_until" in n and "ignored" in n for n in _cfg.stall_notes()), (r, e, _cfg.stall_notes()))
 
 # 17e. doctor and the start (config.notes) and the reload name a pause and when it ends
 set_stall(); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-check("17 notes: nothing paused: no stall note", server._cfg.notes() == [] and server._cfg.stall_notes() == [], server._cfg.notes())
+check("17 notes: nothing paused: no stall note", _cfg.notes() == [] and _cfg.stall_notes() == [], _cfg.notes())
 set_stall(paused_until=iso(now0 + 3600))
-n1 = server._cfg.stall_notes()
+n1 = _cfg.stall_notes()
 check("17 notes: a pause the server has not read yet: named with its end, counted from now", len(n1) == 1 and "takes no step until" in n1[0] and "counted from now" in n1[0] and "runs again on its own" in n1[0] and ZONE_ABBR in n1[0], n1)
 err(stall_svc.stall_pause_check)
-n2 = server._cfg.stall_notes()
+n2 = _cfg.stall_notes()
 check("17 notes: ...once the server has read it: its end, no 'counted from now'", len(n2) == 1 and "takes no step until" in n2[0] and "counted from now" not in n2[0] and "(paused_until)" in n2[0], n2)
-check("17 notes: ...config.notes (doctor, the start) carries it too", any("takes no step until" in n for n in server._cfg.notes()), server._cfg.notes())
+check("17 notes: ...config.notes (doctor, the start) carries it too", any("takes no step until" in n for n in _cfg.notes()), _cfg.notes())
 set_stall(enabled=False); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-n3 = server._cfg.stall_notes()
+n3 = _cfg.stall_notes()
 check("17 notes: enabled = false: named with 'enabled=false, capped at 4 h'", len(n3) == 1 and "enabled=false, capped at 4 h" in n3[0], n3)
 set_stall(); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
 
@@ -699,7 +704,7 @@ def reset18():
 def oliver(i, *stamps, **extra):
     """An item that carries Oliver's answers dated `stamps` (a closed item: the pass leaves it alone)."""
     item(i, status="completed", answers=[{"ts": t, "kind": "comment", "text": "Pause it.", "via": "board"} for t in stamps], **extra)
-def raw_stall(**kw): server._cfg.CFG["stall"] = dict(kw)       # the section as a file would give it: no pause_item added
+def raw_stall(**kw): _cfg.CFG["stall"] = dict(kw)       # the section as a file would give it: no pause_item added
 cli_row("home-peer", "idle", IDLE0)
 
 # 18a. no pause_item: refused; the pass runs; ONE line, once per load (not per tick); doctor shows it; a reload or start logs it once more; no "pause ended" when the setting goes
@@ -717,13 +722,13 @@ check("18 no pause_item: ...many checks, still nothing more, and the pass is on"
 stall_svc.stall_pause_reload()
 r, e = err(stall_svc.stall_pause_check, Q7 + 90)
 check("18 no pause_item: a reload or a start (a new config load) logs the refusal once more", len(re.findall(REFUSED, e)) == 1 and e.count("\n") == 1, e)
-nn = server._cfg.stall_notes()
+nn = _cfg.stall_notes()
 check("18 no pause_item: doctor and the start show it: refused, the pass keeps running, why", len(nn) == 1 and "pause_item names no board item" in nn[0] and "refused" in nn[0] and "keeps running" in nn[0] and "takes no step until" not in nn[0], nn)
-check("18 no pause_item: ...config.notes (doctor, the start) carries it", any("refused" in n for n in server._cfg.notes()), server._cfg.notes())
+check("18 no pause_item: ...config.notes (doctor, the start) carries it", any("refused" in n for n in _cfg.notes()), _cfg.notes())
 check("18 no pause_item: the record keeps when the server first saw the setting, marked refused", json.loads(PAUSE_FILE.read_text()).get("refused") is True and json.loads(PAUSE_FILE.read_text())["since"] == Q7, PAUSE_FILE.read_text() if PAUSE_FILE.exists() else None)
 set_stall()
 r, e = err(stall_svc.stall_pause_check, Q7 + 120)
-check("18 no pause_item: the setting going away logs nothing (no `pause ended`: nothing had paused) and clears the record", r is None and e == "" and not PAUSE_FILE.exists() and server._cfg.stall_notes() == [], (r, e))
+check("18 no pause_item: the setting going away logs nothing (no `pause ended`: nothing had paused) and clears the record", r is None and e == "" and not PAUSE_FILE.exists() and _cfg.stall_notes() == [], (r, e))
 close(96)
 
 # 18b. pause_item names no item; an item without an answer of his (a note a session wrote is not one); an answer that is too old; the edge of the window
@@ -838,7 +843,7 @@ check("18 pure: ...inside the cap it keeps its first sighting and starts normall
       vLb == ["start"] and rLb["since"] == 1000.0 and eLb == 1000.0 + 4 * 3600, (rLb, eLb, vLb))
 
 # 18d. the pause_item can be written as board#N or as a stored id
-g7 = server._gh.norm("board#7"); (T / f"store/{g7[0]}").mkdir(exist_ok=True)
+g7 = _gh.norm("board#7"); (T / f"store/{g7[0]}").mkdir(exist_ok=True)
 (T / f"store/{g7[0]}/{g7[1:]}.json").write_text(json.dumps({"id": g7[1:], "subject": "[home] item", "description": DESC, "status": "completed", "updated": B, "state_updated": B, "confirmed": B,
                                                            "metadata": {"project": "projects/alpha", "answers": [{"ts": 9e9, "kind": "decision", "choice": "Pause", "via": "board"}]}}))
 Q10 = Q9 + 86400
@@ -986,10 +991,10 @@ close(67)
 # ================================================================ 22. the one ladder ([ladder] enabled): the stall pass takes the later rungs of an entry the hand-off audit or the dates pass made
 # A pane with no turn running starts no ladder here. With the flag off (the default) sections 1 to 21 above are the ladder.
 from stackshot.waits import ladder as LD
-def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, **kw}
+def ladder_cfg(on=True, **kw): _cfg.CFG["ladder"] = {"enabled": on, **kw}
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "no turn running" in p[1]]
 cold("no json at all here"); COLD_MSGS.clear(); set_cfg(); set_stall()
-server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, as at the top (an earlier section's config swap may have dropped it)
+_cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, as at the top (an earlier section's config swap may have dropped it)
 check("22 off: the flag is off by default: no [ladder] section reads as off", not ladder_svc.ladder_on() and ladder_svc.ladder_look() == 30.0, None)
 ladder_cfg(True)
 check("22 on: [ladder] enabled = true turns it on (only a TOML true), look_minutes is the look time (30 by default; a bad value is the default)", ladder_svc.ladder_on() and ladder_svc.ladder_look() == 30.0

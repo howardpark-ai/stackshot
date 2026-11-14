@@ -158,8 +158,9 @@ def dry_run(a: argparse.Namespace) -> int:
             raise SystemExit("until_migrate: the config was loaded before the scratch copy was made; refusing to run the pass (it would write the live store)")
         from stackshot.web import server  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        from stackshot.service import store as _service_store  # noqa: PLC0415
         from stackshot.waits import until_pass as UP  # noqa: PLC0415
-        if not Path(server._path("g1")).resolve().is_relative_to(root.resolve()):
+        if not Path(_service_store._path("g1")).resolve().is_relative_to(root.resolve()):
             raise SystemExit("until_migrate: the server does not resolve items inside the scratch copy; refusing to run the pass")
         _web_publish._publish = lambda: None
         d = root / "repo/board-data"
