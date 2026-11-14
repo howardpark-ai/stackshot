@@ -1,5 +1,5 @@
 """Scenario test for items by project id: an item stores the permanent id of its project (metadata.project_id), and every reader that groups, filters or labels items by project reads the page through it
-(item_project.py, the project-id pass server._pid_one / _unpid_one, the project_id and unproject_id ops of the migration route, tools/project_id_report.py) — fixture data, no live store written, no
+(item_project.py, the project-id pass stamp_svc._pid_one / _unpid_one, the project_id and unproject_id ops of the migration route, tools/project_id_report.py) — fixture data, no live store written, no
 network, no server socket.
 
 A page key is not permanent: a project's page moves and is renamed. The project record holds, per project, the page it points at and the keys the page had before, and now an item holds the project's id.
@@ -74,6 +74,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as pg; from stackshot.projects import project_registry as PR; from stackshot.model import item_project as IP
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
+from stackshot.service import stamp as stamp_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
@@ -148,7 +149,7 @@ check("2 read_through changes the in-memory dict only, and a file is never writt
 snap0 = snapshot()
 for i in CASES: os.utime(T / f"store/g/{i}.json", (now0 - 40 * DAY - i, now0 - 40 * DAY - i))          # a time of its own on each file
 MT0 = {i: os.stat(T / f"store/g/{i}.json").st_mtime_ns for i in CASES}
-res = {i: server._pid_one(f"g{i}", dry=True) for i in CASES}
+res = {i: stamp_svc._pid_one(f"g{i}", dry=True) for i in CASES}
 check("3 the plan: an id for each item that names a project, `same` for the one that stores its own, `unresolved` for the one that names none",
       all(res[i]["action"] == "would_set" and res[i]["after"] == {"project_id": EXPECT[i]} for i in EXPECT) and res[10]["action"] == "same" and res[7]["action"] == "unresolved", {i: (r["action"], r["after"]) for i, r in res.items()})
 check("3 …a closed item is planned like an open one, and the plan carries the file's hash", res[5]["action"] == "would_set" and res[11]["status"] == "completed" and all(len(r["sha256_before"]) == 64 for r in res.values()), res[5])
@@ -171,7 +172,7 @@ check("6 the fixture is shown by the readers: a brief and a board with the open 
 
 # ---- 4. the pass writes one key
 CFGM["migration"] = False
-wrote = {i: server._pid_one(f"g{i}") for i in CASES}
+wrote = {i: stamp_svc._pid_one(f"g{i}") for i in CASES}
 snap1 = snapshot()
 check("4 every item but the one naming no project got its id, open or closed", all(wrote[i]["action"] == "set" and mt(i).get("project_id") == EXPECT[i] for i in EXPECT) and wrote[10]["action"] == "same" and wrote[7]["action"] == "unresolved", {i: (r["action"], mt(i).get("project_id")) for i, r in wrote.items()})
 def minus(d, k): return {a: b for a, b in d.items() if a != k}
@@ -184,7 +185,7 @@ check("4 …a stale id (a beta item that stored alpha's) was replaced by the id 
 check("4 …a sub-page's item stores the top-level project's id and keeps its sub-page as its key", mt(2)["project_id"] == A and mt(2)["project"] == "projects/alpha/sub" and mt(3)["project_id"] == A and mt(3)["project"] == "ops/alpha-tool", (mt(2), mt(3)))
 
 # ---- 5. idempotent
-again = {i: server._pid_one(f"g{i}") for i in CASES}
+again = {i: stamp_svc._pid_one(f"g{i}") for i in CASES}
 check("5 a second pass writes nothing: every item is `same` or `unresolved`, and no file is rewritten", {r["action"] for r in again.values()} == {"same", "unresolved"} and snapshot() == snap1, {i: r["action"] for i, r in again.items()})
 
 # ---- 6 (after). the readers show the same
@@ -193,7 +194,7 @@ for name in before_reads:
     check(f"6 {name} is the same before and after the pass", before_reads[name] == after_reads[name], [(a, b) for a, b in zip(before_reads[name].splitlines(), after_reads[name].splitlines()) if a != b][:3])
 
 # ---- 7. a page that moves keeps its items
-put(12, "projects/old-gamma"); server._pid_one("g12")
+put(12, "projects/old-gamma"); stamp_svc._pid_one("g12")
 b12 = bytes_of(12)
 put(13, "projects/old-gamma")                                         # an open item the pass has not reached: no id
 check("7 a stored item on a former key reads at the page now, in the anchors, both render modules and the project counts, with no write", ANC.project_of(_service_store._load("g12")) == "projects/gamma"
@@ -238,16 +239,16 @@ put(14, "projects/beta", project_id=A)                                          
 check("8b …a file that already holds the stale id reads as its key too (a page that exists and no project owns wins over the id)", IP.key_of(mt(14)) == "projects/beta" and ANC.project_of(_service_store._load("g14")) == "projects/beta", (IP.key_of(mt(14)), ANC.project_of(_service_store._load("g14"))))
 check("8b …a page that moved (its old key is no page, and no project owns it) still follows the id", IP.key_of({"project": "projects/old-alpha", "project_id": A}) == "projects/alpha", IP.key_of({"project": "projects/old-alpha", "project_id": A}))
 b14 = bytes_of(14)
-r14 = server._pid_one("g14", dry=True)
+r14 = stamp_svc._pid_one("g14", dry=True)
 check("8b (b) the pass reports a stale id as one it would take out: after shows no id, before shows the old one, and a dry run writes nothing",
       r14["action"] == "would_set" and r14["before"] == {"project_id": A} and r14["after"] == {"project_id": None} and bytes_of(14) == b14, r14)
-r14 = server._pid_one("g14")
+r14 = stamp_svc._pid_one("g14")
 check("8b (b) …the pass takes the stale id out, writes that one key, and keeps the file's time", r14["action"] == "set" and r14["after"] == {"project_id": None} and "project_id" not in mt(14)
       and minus(mt(14), "project_id") == minus(json.loads(b14)["metadata"], "project_id"), r14)
-check("8b (b) …a second pass writes nothing, and an item that stores no id is `unresolved` with no id after", server._pid_one("g14")["action"] == "unresolved" and server._pid_one("g14")["after"] == {"project_id": None}
-      and server._pid_one("g4")["after"] == {"project_id": None}, server._pid_one("g14"))
-u14 = server._unpid_one({"item": r14["item"], "before": r14["before"], "after": r14["after"]})
-check("8b (b) …undo puts the id back as it was (byte for byte), and a second undo is a no-op", u14["action"] == "set" and bytes_of(14) == b14 and server._unpid_one({"item": r14["item"], "before": r14["before"], "after": r14["after"]})["action"] == "same", u14)
+check("8b (b) …a second pass writes nothing, and an item that stores no id is `unresolved` with no id after", stamp_svc._pid_one("g14")["action"] == "unresolved" and stamp_svc._pid_one("g14")["after"] == {"project_id": None}
+      and stamp_svc._pid_one("g4")["after"] == {"project_id": None}, stamp_svc._pid_one("g14"))
+u14 = stamp_svc._unpid_one({"item": r14["item"], "before": r14["before"], "after": r14["after"]})
+check("8b (b) …undo puts the id back as it was (byte for byte), and a second undo is a no-op", u14["action"] == "set" and bytes_of(14) == b14 and stamp_svc._unpid_one({"item": r14["item"], "before": r14["before"], "after": r14["after"]})["action"] == "same", u14)
 (T / "store/g/14.json").unlink(missing_ok=True)
 write_record(REC_KEEP)
 check("8b the record is back as it was", IP.derive("projects/beta") == B, IP.derive("projects/beta"))
@@ -348,7 +349,7 @@ check("11 the dry run over a copy writes nothing live, prints the totals and the
 # ---- 12. an item's project reads as the top-level project; the page it is filed on stays its detail link
 REC12 = record()
 for i, k in {20: "projects/alpha/sub", 21: "projects/alpha", 22: "ops/alpha-tool", 23: "projects/beta", 24: "projects/nowhere", 25: "projects/old-gamma"}.items(): put(i, k)
-server._pid_one("g20"); server._pid_one("g25")                                    # these two store their id; the others store none
+stamp_svc._pid_one("g20"); stamp_svc._pid_one("g25")                                    # these two store their id; the others store none
 PO = lambda **m: IP.project_of(m)
 check("12 a sub-page's item reads as the project that owns the page, with a stored id and without one", PO(project="projects/alpha/sub", project_id=A) == "projects/alpha" and PO(project="projects/alpha/sub") == "projects/alpha", (PO(project="projects/alpha/sub", project_id=A), PO(project="projects/alpha/sub")))
 check("12 …a page with a hub: line reads as its hub's project", PO(project="ops/alpha-tool") == "projects/alpha" and PO(project="ops/alpha-tool", project_id=A) == "projects/alpha", PO(project="ops/alpha-tool"))

@@ -60,6 +60,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.service import stamp as stamp_svc
 from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -208,7 +209,7 @@ check("3 the shape set directly in the store is a why-not-now finding for each i
 f9031 = next(f for f in fs if f["id"] == "board#9031")
 check("3 …to the mover, with the wake, the hours away, the line and the park as the fix", f9031["mover"] == "home-agent" and f9031["source"] == "code" and wk_(shape["a9031"]["metadata"]) in f9031["detail"] and "hours away" in f9031["detail"]
       and "every open next line waits for it" in f9031["detail"] and f9031["fix"] == AC.DATE_ONLY_FIX and "hold=true" in f9031["fix"] and "wait_basis" in f9031["fix"], f9031)
-check("3 …and the server's stamp agrees that the board shows such an item alive (the gap this closes)", server._stamp_values("a9031", shape["a9031"])[0] == "alive", server._stamp_values("a9031", shape["a9031"]))
+check("3 …and the server's stamp agrees that the board shows such an item alive (the gap this closes)", stamp_svc._stamp_values("a9031", shape["a9031"])[0] == "alive", stamp_svc._stamp_values("a9031", shape["a9031"]))
 many = dict(aitem(i) for i in range(40, 40 + AR.SELF_WAIT_MAX + 4))
 fs, _flags = AC.filing_findings(many, {}, now, env())
 check(f"3 it is not capped: {len(many)} such items, more than the daily run's {AR.SELF_WAIT_MAX} why-not-now suspects a run, are all found", len([f for f in fs if f["category"] == "why-not-now"]) == len(many), len(fs))

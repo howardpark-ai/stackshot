@@ -8,7 +8,7 @@ just before the close and whether it has changed since.
     versions(store_dir, path)                       the item's file at every commit that touched it, oldest first, then the file on disk when it differs from the last commit
     row_for(gid, cur, vers, now, days)              (row, "") for an item to repair, (None, why) for one to leave: the reasons are in SKIP_WHY
 
-Nothing here writes; server._close_description_repair saves the rows. Reads only: `git log`, `git cat-file`, the item file."""
+Nothing here writes; migrations._close_description_repair saves the rows. Reads only: `git log`, `git cat-file`, the item file."""
 from __future__ import annotations
 
 import json

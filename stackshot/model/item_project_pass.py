@@ -1,11 +1,11 @@
 """item_project_pass.py — the project-id pass: `metadata.project_id` stored on every item, open or closed, and put back (item_project.py has the rules; tools/project_id_report.py runs it).
 
-The ops `project_id` and `unproject_id` of the migration route (service/migrations.py `migrate_write`) call `write_op`. The pass is the stamp pass's shape (server._stamp_one): one item at a time under its lock, the file read
-and replaced whole with only the one key changed (server._stamp_write: no activity seed, no mover settled, no hand-off, no search or GitHub job: a stamp is not an event on the item), a sha256 check so a
+The ops `project_id` and `unproject_id` of the migration route (service/migrations.py `migrate_write`) call `write_op`. The pass is the stamp pass's shape (stamp._stamp_one): one item at a time under its lock, the file read
+and replaced whole with only the one key changed (stamp._stamp_write: no activity seed, no mover settled, no hand-off, no search or GitHub job: a stamp is not an event on the item), a sha256 check so a
 writer that takes no lock is never overwritten, and an undo that puts back only what the pass left. What differs: it writes closed items too, and a file keeps its access and modification times (a legacy
 closed item holds no clock of its own and the board dates it by the file's time, so a write that moved it would move the item in the Closed list).
 
-Every function takes `S`, the server module: the lock, the file helpers and the refusal shape are the migration route's own (server.py), and this file holds only what the pass does with them."""
+Every function takes `S`, the server module (the running server passes `stamp.PassHost`, which looks a name up on the server module and then on service/stamp.py: the stamp helpers live there): the lock, the file helpers and the refusal shape are the migration route's own (server.py), and this file holds only what the pass does with them."""
 from __future__ import annotations
 
 import os
@@ -23,7 +23,7 @@ KEYS = ("project_id",)                          # the one key the pass writes, a
 
 
 def write(S: Any, p: Path, raw: dict[str, Any], h0: str, edits: dict[str, Any]) -> bool:
-    """server._stamp_write, and the file keeps its access and modification times. → False when the file moved (S._stamp_commit)."""
+    """stamp._stamp_write, and the file keeps its access and modification times. → False when the file moved (S._stamp_commit)."""
     st = p.stat()
     done = S._stamp_write(p, raw, h0, edits)
     if done:

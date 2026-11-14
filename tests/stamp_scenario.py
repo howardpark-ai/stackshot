@@ -1,7 +1,7 @@
-"""Scenario test for the stamp of the stored phase and the kind of its wait on the open items (metadata.phase, metadata.waits_on; server._stamp_one, the stamp and unstamp ops of the migration
+"""Scenario test for the stamp of the stored phase and the kind of its wait on the open items (metadata.phase, metadata.waits_on; stamp_svc._stamp_one, the stamp and unstamp ops of the migration
 route, tools/stamp_phase.py) — fixture data, no live store written, no network, no server socket.
 
-An open item stores `phase` (alive | waiting) and, when waiting, `waits_on` (time | anchor | item | relay | event): what the board shows it as. A save writes both (server._phase_stamp); the stamp pass
+An open item stores `phase` (alive | waiting) and, when waiting, `waits_on` (time | anchor | item | relay | event): what the board shows it as. A save writes both (stamp_svc._phase_stamp); the stamp pass
 writes them on the items nobody has saved since, without being an event on the item: the server works the values out at write time under the item's lock and writes those two keys and nothing else.
 
   1  kind_stamped_per_case      waits_on equals the kind the board shows for all 23 cases (event too); an alive item has none; phase is right; model.stamp_values says the same
@@ -73,6 +73,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.service import stamp as stamp_svc
 from stackshot.service import update as _update_svc
 from stackshot.web import search as _search
 from stackshot.github import ghsync as _gh
@@ -176,7 +177,7 @@ for i, name, meta, phase, kind, stored_kind in CASES:
     check(f"1 fixture {i} ({name}) stores neither key before the stamp", not any(k in it["metadata"] for k in KEYS), it["metadata"])
     mod = old_of(it)
     check(f"1 {i} {name}: model.stamp_values gives ({phase}, {kind or 'none'})", _model.stamp_values(it, mod) == (phase, kind), _model.stamp_values(it, mod))
-    r = server._stamp_one(f"g{i}")
+    r = stamp_svc._stamp_one(f"g{i}")
     m = mt(i)
     check(f"1 {i} {name}: the stamp answers set and stores phase {phase}", r["action"] == "set" and m.get("phase") == phase, (r, m))
     check(f"1 {i} {name}: …and waits_on {kind or '(none: alive)'}", m.get("waits_on") == (kind or None) and ("waits_on" not in m or phase == "waiting"), m)
@@ -210,7 +211,7 @@ telling.tell_woken = spy("_tell_woken")
 _gh.enabled = lambda: True; _gh.on_change = spy("gh.on_change"); _search.touch = spy("search.touch"); writes.save = spy("save")
 state0 = state_listing(); b0 = {n: bytes_of(n) for n in (51, 52, 53)}
 try:
-    res = [server._stamp_one(f"g{n}") for n in (51, 52, 53)]
+    res = [stamp_svc._stamp_one(f"g{n}") for n in (51, 52, 53)]
 finally:
     for (m, k), v in real.items(): setattr(m, k, v)
     telling.tell_woken = real_tw
@@ -222,22 +223,22 @@ check("4 …no temporary file is left in the store", not list((T / "store/g").gl
 
 # ---- 5. a closed item is left as it is
 b32, b33 = bytes_of(32), bytes_of(33)
-r32, r33 = server._stamp_one("g32"), server._stamp_one("g33")
+r32, r33 = stamp_svc._stamp_one("g32"), stamp_svc._stamp_one("g33")
 check("5 a closed item is refused (closed) and its file is byte-identical", r32["action"] == "refused" and "closed" in r32["why"] and bytes_of(32) == b32, r32)
 check("5 …a closed item that carries a stale stamp is refused too and keeps it (its next save drops it)", r33["action"] == "refused" and bytes_of(33) == b33 and mt(33).get("phase") == "waiting", (r33, mt(33)))
-check("5 …an item that is not there is refused", server._stamp_one("g9999")["action"] == "refused", None)
+check("5 …an item that is not there is refused", stamp_svc._stamp_one("g9999")["action"] == "refused", None)
 
 # ---- 6. a second stamp changes nothing
 mt0 = {i: (T / f"store/g/{i}.json").stat().st_mtime_ns for i, *_ in CASES}
 b_all = {i: bytes_of(i) for i, *_ in CASES}
-res2 = [server._stamp_one(f"g{i}") for i, *_ in CASES]
+res2 = [stamp_svc._stamp_one(f"g{i}") for i, *_ in CASES]
 check("6 a second stamp answers same for every case", [r["action"] for r in res2] == ["same"] * len(CASES), [r["action"] for r in res2 if r["action"] != "same"])
 check("6 …and rewrites no file (bytes and mtimes equal)", all(bytes_of(i) == b_all[i] and (T / f"store/g/{i}.json").stat().st_mtime_ns == mt0[i] for i, *_ in CASES), None)
 
 # ---- 7. a stored waiting the fields no longer read is a fix
 put(61, needs=[BACK], state="doing", phase="waiting", waits_on="time")           # stored waiting, but the fields read alive (its wake has passed, say)
 check("7 a stale stamp is what a read shows until the stamp (the stored waiting decides; the fields alone read alive)", new_of(shown(61)).state == _model.WAITING and old_of(shown(61)).state == _model.ALIVE, new_of(shown(61)))
-r61 = server._stamp_one("g61")
+r61 = stamp_svc._stamp_one("g61")
 check("7 …the stamp fixes it: phase alive, waits_on gone, the answer names what it was", r61["action"] == "set" and mt(61).get("phase") == "alive" and "waits_on" not in mt(61) and r61["before"] == {"phase": "waiting", "waits_on": "time"}, (r61, mt(61)))
 check("7 …and a read after it shows alive, as the fields do", new_of(shown(61)).state == _model.ALIVE and new_of(shown(61)) == old_of(shown(61)), None)
 
@@ -398,10 +399,10 @@ check("9b a session's save on an already-stamped item between batches: exit 0, n
 check("9b …and the session's save stands in the file", raw(int(saved["g"][1:]))["metadata"]["next"] == "team-back: a session saved this between batches", None)
 # the control: a stamp that itself changes something outside the two keys still fails the run
 for i in (97, 98): put(i, needs=[BACK], state="doing")
-real_sw = server._stamp_write
-server._stamp_write = lambda p, raw_, h0, edits: real_sw(p, dict(raw_, description="changed by a faulty stamp"), h0, edits)
+real_sw = stamp_svc._stamp_write
+stamp_svc._stamp_write = lambda p, raw_, h0, edits: real_sw(p, dict(raw_, description="changed by a faulty stamp"), h0, edits)
 try: rcB, outB = cli(SP.apply)
-finally: server._stamp_write = real_sw
+finally: stamp_svc._stamp_write = real_sw
 check("9b the control: a stamp that changed the file outside the two keys (nothing else saved it) still counts and exits 1", rcB == 1 and outB["files_changed_outside_the_two_keys"] == 2 and outB["saved_by_a_session_since_our_stamp"] == [], (rcB, outB))
 # a run that dies after the server wrote its batch and before the script recorded it
 put(74, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5))
@@ -426,19 +427,19 @@ CFGM["migration"] = False
 
 # ---- 10. a writer between the read and the replace
 put(81, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5))
-real_commit = server._stamp_commit
+real_commit = stamp_svc._stamp_commit
 def racing(p, tmpf, h0):
     d = json.loads(p.read_text()); d["metadata"]["next"] = "team-back: a session wrote this meanwhile"; d["updated"] = d["updated"] + 5
     p.write_text(json.dumps(d, ensure_ascii=False, indent=1))
     return real_commit(p, tmpf, h0)
-server._stamp_commit = racing
+stamp_svc._stamp_commit = racing
 try:
-    r81 = server._stamp_one("g81")
+    r81 = stamp_svc._stamp_one("g81")
 finally:
-    server._stamp_commit = real_commit
+    stamp_svc._stamp_commit = real_commit
 check("10 a write between the read and the replace: the stamp answers moved, the write stands and nothing was stamped", r81["action"] == "moved" and mt(81)["next"] == "team-back: a session wrote this meanwhile" and "phase" not in mt(81), (r81, mt(81)))
 check("10 …no temporary file is left", not list((T / "store/g").glob(".*")), list((T / "store/g").glob(".*")))
-r81b = server._stamp_one("g81")
+r81b = stamp_svc._stamp_one("g81")
 check("10 …the next run stamps it, and the session's write survives", r81b["action"] == "set" and mt(81)["next"] == "team-back: a session wrote this meanwhile" and mt(81)["phase"] == "waiting", (r81b, mt(81)))
 
 # ---- 11. a session's update while the stamp loops
@@ -457,13 +458,13 @@ th = threading.Thread(target=worker); th.start()
 acts = collections.Counter()
 rounds = 0
 while rounds < 50 or not stop.is_set():
-    acts[server._stamp_one("g82")["action"]] += 1; rounds += 1
+    acts[stamp_svc._stamp_one("g82")["action"]] += 1; rounds += 1
 th.join()
-acts[server._stamp_one("g82")["action"]] += 1
+acts[stamp_svc._stamp_one("g82")["action"]] += 1
 f82 = raw(82)
 check("11 a thread updating the item while the stamp loops: no error, and no round was moved or refused", not errs and done and set(acts) <= {"set", "same"}, (errs, acts))
 check("11 …the file ends with the last update and the right stamp", "step 49" in f82["metadata"]["next"] and (f82["metadata"].get("phase"), f82["metadata"].get("waits_on")) == (("alive", None)) and
-      server._stamp_values("g82", f82) == ("alive", ""), (f82["metadata"], acts))
+      stamp_svc._stamp_values("g82", f82) == ("alive", ""), (f82["metadata"], acts))
 
 # ---- 12. the read-back check of waits_on
 it10 = shown(10)
@@ -525,13 +526,13 @@ def events(bd, gid): return [k for _t, k, _h in bd.item_events(next(r for r in b
 put(101, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5)); distinct(101)
 put(102, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5)); distinct(102)
 gitc("init", "-q"); gitc("add", "-A"); gitc("commit", "-q", "-m", "older revisions")
-r_stamp = server._stamp_one("g101")
+r_stamp = stamp_svc._stamp_one("g101")
 check("13 a stamp-only revision adds phase waiting and waits_on time", r_stamp["action"] == "set" and mt(101).get("phase") == "waiting" and mt(101).get("waits_on") == "time", mt(101))
 for label, mod_ in (("ui/render.py", ui_render), ("render.py", root_render)):
     kinds = events(mod_.Board(STORE_DIR), "g101")
     check(f"13 {label}: …and adds no History line", kinds == ["created"], kinds)
 def confirm_revision(i, when):
-    d = raw(i); d["confirmed"] = when; server._phase_stamp(f"g{i}", d); (T / f"store/g/{i}.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))
+    d = raw(i); d["confirmed"] = when; stamp_svc._phase_stamp(f"g{i}", d); (T / f"store/g/{i}.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))
 confirm_revision(102, now0 - 5 * DAY)
 check("13 the confirm revision of a waiting item moved `confirmed` and added the phase and waits_on, nothing else", mt(102).get("phase") == "waiting" and mt(102).get("waits_on") == "time" and raw(102)["confirmed"] == now0 - 5 * DAY, raw(102))
 for label, mod_ in (("ui/render.py", ui_render), ("render.py", root_render)):
@@ -588,6 +589,18 @@ if src.is_dir() and any(q.is_dir() and len(q.name) == 1 for q in src.iterdir()):
         shutil.rmtree(R, ignore_errors=True)
 else:
     print("replay: skipped (PHASE_REPLAY_STORE names no store here)")
+
+# ---- the names the three passes written against the server module read off `S` all resolve on the host the server hands them (stamp.PassHost), and the project-id pass's own `S` (the stamp module) holds its own
+from stackshot.service import retire_passes as retire_svc
+from stackshot.service import merge_progress as mprog_svc
+_HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc, mprog_svc)
+def _reads(rel): return sorted(set(re.findall(r"\bS\.([A-Za-z_][A-Za-z_0-9]*)", open(f"{STACK}/stackshot/{rel}", encoding="utf-8").read())))
+for _rel in ("waits/until_pass.py", "model/last_activity_pass.py"):
+    _gone = [n for n in _reads(_rel) if not hasattr(_HOST, n)]
+    check(f"the names {_rel} reads off S all resolve on the host (stamp.PassHost over the server, the stamp and the retire modules)", not _gone and len(_reads(_rel)) >= 7, _gone)
+_gone = [n for n in _reads("model/item_project_pass.py") if not hasattr(stamp_svc, n)]
+check("the names model/item_project_pass.py reads off S all resolve on the stamp module", not _gone and len(_reads("model/item_project_pass.py")) >= 2, _gone)
+check("the host answers a name that is on none of its modules with AttributeError (hasattr False), and prefers the server's own", not hasattr(_HOST, "_no_such_name_s9") and _HOST._gh is server._gh and _HOST._stamp_write is stamp_svc._stamp_write)
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

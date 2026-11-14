@@ -122,6 +122,9 @@ def dry_run(a: argparse.Namespace) -> int:
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
         from stackshot.service import store as _service_store  # noqa: PLC0415
         from stackshot.model import last_activity_pass as LP  # noqa: PLC0415
+        from stackshot.service import retire_passes as _retire_passes  # noqa: PLC0415
+        from stackshot.service import merge_progress as _merge_progress  # noqa: PLC0415
+        from stackshot.service import stamp as _stamp  # noqa: PLC0415
         if not Path(_service_store._path("g1")).resolve().is_relative_to(root.resolve()):
             raise SystemExit("last_activity_backfill: the server does not resolve items inside the scratch copy; refusing to run the pass")
         _web_publish._publish = lambda: None
@@ -129,10 +132,11 @@ def dry_run(a: argparse.Namespace) -> int:
         items = SP.load_dir(d)
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
         now = time.time()
-        tied, tie_problem = LP.ties(server, now)
-        planned = {g: LP.one(server, g, dry=True, tied=tied, now=now, git_store=store) for g in opens}
-        wrote = {g: LP.one(server, g, tied=tied, now=now, git_store=store) for g in opens}
-        again = {g: LP.one(server, g, tied=tied, now=now, git_store=store) for g in opens}
+        host = _stamp.PassHost(server, _stamp, _retire_passes, _merge_progress)
+        tied, tie_problem = LP.ties(host, now)
+        planned = {g: LP.one(host, g, dry=True, tied=tied, now=now, git_store=store) for g in opens}
+        wrote = {g: LP.one(host, g, tied=tied, now=now, git_store=store) for g in opens}
+        again = {g: LP.one(host, g, tied=tied, now=now, git_store=store) for g in opens}
         rows = [{**planned[g], "result": wrote[g]["action"], "again": again[g]["action"]} for g in opens]
         print(f"{len(opens)} open items read from {store}; the pass run on a copy of it (the History read from its git)\n")
         if tie_problem:

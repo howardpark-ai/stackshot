@@ -76,6 +76,7 @@ sr.TTL = 0          # the directory is looked at on every call here: the test re
 from stackshot.service import gates
 from stackshot.web import server
 from stackshot.service import client_reads as client_reads_svc
+from stackshot.service import migrations as migsvc
 from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.web import page_debts as _pdebts
@@ -391,7 +392,7 @@ held = threading.Event(); free = threading.Event(); done = []
 def holder():
     with writes.ITEM_LOCK: held.set(); free.wait(5)
 th = threading.Thread(target=holder); th.start(); held.wait(2)
-runner = threading.Thread(target=lambda: done.append(server._session_ids_pass())); runner.start(); time.sleep(0.4)
+runner = threading.Thread(target=lambda: done.append(migsvc._session_ids_pass())); runner.start(); time.sleep(0.4)
 check("the pass waits for a thread that holds the item lock", not done and digest() == d0)
 free.set(); th.join(); runner.join(10)
 line = done[0] if done else ""
@@ -409,24 +410,24 @@ check("apply: one undo file, gid/field/old/new for each change", len(uf) == 1 an
 check("apply: no temp file left in the store", not [x for x in (T / "store").rglob("*") if x.name.endswith(".tmp")])
 check("apply: get reads the same names as before the migration", "then: home-sparrow-main" in _wt_get.stackshot_get(mig["tr"]) and "needs: decision, site-builder, home-twin" in _wt_get.stackshot_get(mig["tr"]), _wt_get.stackshot_get(mig["tr"]))
 d1 = digest()
-sid.main(["migrate", "--request"]); line2 = server._session_ids_pass()
+sid.main(["migrate", "--request"]); line2 = migsvc._session_ids_pass()
 check("a second request changes nothing (idempotent) and writes no second undo file", digest() == d1 and "0 field(s)" in line2 and len(undo_files()) == 1, line2)
-check("no request file: the pass does nothing and says nothing", server._session_ids_pass() == "")
+check("no request file: the pass does nothing and says nothing", migsvc._session_ids_pass() == "")
 # rollback through the same door
 sid.main(["rollback", str(uf[0])])
 check("rollback: the request names the undo file", sid.read_request() == ("rollback", str(uf[0])))
 it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["docs"]; writes.save(mig["name"], it)         # changed since: must be left
-line3 = server._session_ids_pass()
+line3 = migsvc._session_ids_pass()
 back = {k: hashlib.sha256(f.read_bytes()).hexdigest() for k, f in files.items()}
 check("rollback: the fields go back to what they were; a field changed since is left and said so", item(mig["tr"])["metadata"]["owner"] == Tr["main_a"] and item(mig["tr"])["metadata"]["needs"] == ["decision", "site-builder", "home-twin", "cse_0123456789abcdefghijklmn", "some-outsider"]
       and item(mig["tr"])["metadata"]["observers"] == ["home-sparrow-docs", S["docs"]] and item(mig["name"])["metadata"]["owner"] == S["docs"] and "1 skipped" in line3 and back["tr"] == d0["tr"] and back["closed"] == d0["closed"], (line3, item(mig["tr"])["metadata"]))
 for bad_req in ("nonsense\n", "rollback /no/such/undo.json\n"):
     sid.request_path().write_text(bad_req, encoding="utf-8")
-    try: ln = server._session_ids_pass(); ok = True
+    try: ln = migsvc._session_ids_pass(); ok = True
     except BaseException: ln, ok = "", False
     check(f"a bad request ({bad_req.split()[0]}) is consumed, logged, and never fails the start", ok and not sid.request_path().exists() and ln.startswith("session ids:"), ln)
 SALA.unlink()
-d2 = digest(); sid.main(["migrate", "--request"]); ln = server._session_ids_pass()
+d2 = digest(); sid.main(["migrate", "--request"]); ln = migsvc._session_ids_pass()
 check("no registry: the request is consumed all the same (ask again once the registry reads)", not sid.request_path().exists())
 rep3 = sid.scan()
 check("no registry: the pass says so and touches nothing; the dry run says so", digest() == d2 and "no session registry" in ln and rep3["errors"] and "no session registry" in rep3["errors"][0][1], (ln, rep3["errors"]))

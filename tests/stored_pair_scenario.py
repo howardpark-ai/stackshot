@@ -60,6 +60,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import client_reads as client_reads_svc
+from stackshot.service import stamp as stamp_svc
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
 from stackshot.anchors import anchors as _anc
@@ -126,7 +127,7 @@ put(32, needs=[BACK], state="doing", next="team-back: wait for board#1, then boa
 put(52, needs=["external"], state="outside", party="Acme legal", chase=day_of(T0 + 5 * DAY).isoformat())              # an anchor is scoped to it in anchors.json: an anchor wait with no wait_anchor
 put(40, status="completed", needs=[BACK], state="doing", outcome="done"); put(41, status="completed", needs=[BACK], state="doing", outcome="done", phase="waiting", waits_on="time")
 with contextlib.redirect_stderr(io.StringIO()), frozen(T0):
-    server._phase_sweep()
+    stamp_svc._phase_sweep()
 # items nobody stamped, and values that are wrong or half there: the fields must win
 put(42, needs=[BACK], state="doing", hold=True, wake=local(T0 + 5 * DAY))                                                # never stamped, a view-only wait
 put(43, needs=[BACK], state="doing", phase="waiting", waits_on="time")                                                 # stored waiting, the fields alive
@@ -194,7 +195,7 @@ def quietly(fn, *a):
 src_toml = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 check("1 [model] read_stored, read_stored(), _read_stored, check_stored, DISAGREEMENTS and STALE_AT_EDGE are gone from model.py", not any(hasattr(_model, n) for n in ("read_stored", "_read_stored", "check_stored", "DISAGREEMENTS", "STALE_AT_EDGE", "stored_wait_kind")), None)
 check("1 …the example config has no read_stored key", "read_stored" not in src_toml, None)
-st = server._phase_sweep_status()
+st = stamp_svc._phase_sweep_status()
 check("1 …/audit/status phase_sweep counts unstamped reads and no longer the display's disagreements or stale-at-edge reads", "unstamped_reads" in st and "model_disagreements" not in st and "stale_at_edge" not in st, sorted(st))
 
 
@@ -202,9 +203,9 @@ check("1 …/audit/status phase_sweep counts unstamped reads and no longer the d
 def swept_at(src, t, fn):
     """A private copy of `src` swept at the clock t, then fn(store, done, derived, items, opens) where derived = {gid: the pair the fields give at t}."""
     def go(store):
-        with contextlib.redirect_stderr(io.StringIO()), frozen(t): done = server._phase_sweep()
+        with contextlib.redirect_stderr(io.StringIO()), frozen(t): done = stamp_svc._phase_sweep()
         items = SP.load_dir(store); opens = [g for g, it in items.items() if it.get("status") == "open"]
-        with frozen(t): derived = {g: server._stamp_values(g, items[g]) for g in opens}
+        with frozen(t): derived = {g: stamp_svc._stamp_values(g, items[g]) for g in opens}
         return fn(store, done, derived, items, opens)
     return with_store(src, go)
 def stored_equals_derived(items, derived, opens): return all((items[g]["metadata"].get("phase") or "", items[g]["metadata"].get("waits_on") or "") == derived[g] for g in opens)

@@ -1,8 +1,8 @@
 """tools/stamp_phase.py — the one-time stamp of the stored phase and the kind of its wait on the open items already in the store.
 
-Every save of an open item stores two keys beside its fields (`server._phase_stamp`): `metadata.phase` (alive | waiting, what the board SHOWS the item as) and, for a waiting one, `metadata.waits_on`
+Every save of an open item stores two keys beside its fields (`stamp._phase_stamp`): `metadata.phase` (alive | waiting, what the board SHOWS the item as) and, for a waiting one, `metadata.waits_on`
 (time | anchor | item | relay | event, the kind of the wait it shows). An item nobody has saved since gets them here. The server works the two values out AT WRITE TIME, under the item's lock, from the item's
-fields as they stand (`server._stamp_one`), so nothing planned can be stale; it writes those two keys and nothing else: no `updated`, no writer, no activity clock, no hand-off record, no For you row,
+fields as they stand (`stamp._stamp_one`), so nothing planned can be stale; it writes those two keys and nothing else: no `updated`, no writer, no activity clock, no hand-off record, no For you row,
 no GitHub job, and `wait_kind` is never touched (a stored `wait_kind` hands an item to the watchers; `waits_on` is only a label). A closed item is left as it is. No begin and no hold: a session's
 update takes its turn at the item's lock. Run it at a quiet time, away from the `edge` rows below.
 

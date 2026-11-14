@@ -1,11 +1,12 @@
 """migrations.py: the start-up migrations and the passes of the migration route.
 
-Two groups. The start-up migrations (`migrate_needs`, `migrate_owner_mover`, `migrate_holds`) run once per server start, before it serves: each rewrites the open items stored in an older form, keeps their
-clocks as they were and says one line per item on standard error. The migration route's passes are what `POST /client/migrate` applies (the route itself stays in web/server.py, behind `migration_gate`): the
+Three groups. The start-up migrations (`migrate_needs`, `migrate_owner_mover`, `migrate_holds`) run once per server start, before it serves: each rewrites the open items stored in an older form, keeps their
+clocks as they were and says one line per item on standard error. The start passes beside them (`_session_ids_pass`, `_retire_rank_pass`, `_mover_backfill_pass`, `_close_marks_pass`, which `_start_background` in
+web/server.py runs in its own order, and the one-off `_close_description_repair` of tools/restore_close_descriptions.py) have the same shape. The migration route's passes are what `POST /client/migrate` applies (the route itself stays in web/server.py, behind `migration_gate`): the
 plan is made by tools/migrate_model.py and model/migration.py, and this is where it is applied, so the server stays the one writer. Each planned write is a filing edit made under the item lock through
 `writes.save`, author `migration`; while a pass runs the server holds the board-wide pause (`watchers.hold`), and `end` lifts it and runs one wake pass.
 
-What they still reach in server.py (the item model's readers, the write path's flags, the stamp, retire and project-id passes the route dispatches to, the publish, the outcomes and the time zone) comes through
+What they still reach in server.py (the item model's readers, the write path's flags, the stamp, retire and project-id passes the route dispatches to (service/stamp.py, service/retire_passes.py), the publish, the outcomes and the time zone) comes through
 `Hooks` in service/passes_hooks.py, looked up when they run. A suite that replaces a function or the clock of the passes sets it here (and `time` here, since this module reads its own).
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
@@ -25,22 +26,29 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
+from stackshot.core import store as _store
 from stackshot.core.instance import OWNER
 from stackshot.core.store import _item_files
+from stackshot.fleet import session_ids as _sid
+from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
+from stackshot.model import close_repair as _cr
 from stackshot.model import last_activity_pass as _lact_pass
 from stackshot.model import migration as _mig
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import next_backfill as _nbf
 from stackshot.model import nextlines as _nl
+from stackshot.model import steps as _steps
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _norm_id
-from stackshot.model.needs import _needs_of
+from stackshot.model.needs import _needs_of, _needs_sessions
 from stackshot.service import gates as _gates
 from stackshot.service import handoff as _handoff
+from stackshot.service import item_read as _item_read
 from stackshot.service import runner as _runner
+from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
 from stackshot.service import wakes as _wakes
 from stackshot.service import writes as _writes
@@ -142,6 +150,239 @@ def migrate_holds() -> list[str]:
         print(f"migrate: {gid} status on_hold → open + metadata.hold (wake {it['metadata'].get('wake') or 'none'}), clocks unchanged — {it.get('subject')}",
               file=sys.stderr, flush=True)
     return out
+
+
+# ----------------------------------------------------------------------------- the start passes beside them (once per start, before the server serves: ranks, close marks, movers, session ids; the one-off close repair)
+def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
+    """Ranks are retired: a builder starts every item handed to it, and no item waits in a numbered line. Once per start, before the server serves; idempotent (an item without the
+    field or the state is not written, so a store that is clean writes nothing). Every OPEN item that still stores `metadata.rank` loses the field, whatever its value, and one whose stored
+    state is the retired `queued` (a state that stood on the rank alone) loses the state, so it reads as derived from its fields (doing for an item in a builder's hands). Nothing else changes: `updated`, `state_updated`, `confirmed` and every other field stay as they were,
+    a closed item is not read as a candidate (its record keeps whatever it held), and nothing is posted to GitHub (mirror off).
+    The save is quiet (the QUIET write context of `service/writes.py`): no mover is settled and no hand-off record is ended. The item's History says it, because it reads the item's revisions: `rank cleared (was N)` and,
+    for a queued item, `state cleared (was queued)`. `apply=False` is the dry run: the same rows, nothing written.
+    → [{gid, item, rank, queued}] in id order, the items cleaned (apply) or that would be; `rank` is the stored value or None, `queued` whether the stored state was `queued`."""
+    out: list[dict[str, Any]] = []
+    for gid, p in _item_files():
+        try:
+            with open(p, encoding="utf-8") as f:
+                head = json.load(f)
+        except Exception:  # noqa: BLE001  — an unreadable file is not this pass's to judge
+            continue
+        hm = head.get("metadata")
+        if head.get("status") != "open" or not isinstance(hm, dict) or ("rank" not in hm and hm.get("state") != "queued"):
+            continue
+        try:
+            with _writes.ITEM_LOCK:
+                it = _svcstore._load(gid)
+                m = it.get("metadata")
+                if it.get("status") != "open" or not isinstance(m, dict) or ("rank" not in m and m.get("state") != "queued"):
+                    continue
+                out.append({"gid": gid, "item": _gh.shown(gid), "rank": m.get("rank"), "queued": m.get("state") == "queued"})
+                if apply:
+                    m.pop("rank", None)
+                    if m.get("state") == "queued":
+                        m.pop("state", None)
+                    _writes.save(gid, it, mirror=False, ctx=_writes.QUIET)
+        except Exception as e:  # noqa: BLE001  — one item never stops the start
+            if out and out[-1]["gid"] == gid:
+                out.pop()
+            print(f"migrate: {gid} rank not cleared: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if apply and out:
+        print(f"migrate: retired ranks: {len(out)} open item(s) cleaned ({sum(1 for r in out if r['rank'] is not None)} rank field(s) removed, "
+              f"{sum(1 for r in out if r['queued'])} queued state(s) cleared), clocks unchanged, agent waits counted from now", file=sys.stderr, flush=True)
+    return out
+
+
+CLOSE_MARKS_BY = "stackshot (backfill)"
+
+
+def _close_marks_pass(apply: bool = True) -> list[dict[str, Any]]:
+    """a closed item shows no open step. A close marks the steps still open since an earlier change (see _update); this marks those of the items closed before: every closed item whose checklist has an
+    open step gets them marked, done when its outcome is done, dropped otherwise (dropped, superseded, unrecorded, none), by CLOSE_MARKS_BY at the time the item closed (state_updated, else updated).
+    Once per start, before the server serves; idempotent (an item with no open step is not read twice and not written, a store with none writes nothing); only metadata.steps changes, the clocks stay;
+    nothing is posted to GitHub (mirror off). `apply=False` is the dry run (tools/close_marks_backfill.py): the same rows, nothing written. One stderr line when something was marked.
+    → [{gid, item, outcome, status, at, steps: [(position, first line)]}] in id order, the items marked (apply) or that would be."""
+    out: list[dict[str, Any]] = []
+    for gid, p in _item_files():
+        try:
+            with open(p, encoding="utf-8") as f:
+                head = json.load(f)
+        except Exception:  # noqa: BLE001  — an unreadable file is not this pass's to judge
+            continue
+        if head.get("status") != "completed" or not any(isinstance(s, dict) and s.get("status") == _steps.OPEN for s in ((head.get("metadata") or {}).get("steps") or [])):
+            continue
+        try:
+            with _writes.ITEM_LOCK:
+                it = _svcstore._load(gid)
+                m = it.get("metadata") or {}
+                cl = _steps.view(m, closed=True)
+                open_ix = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN]
+                if it.get("status") != "completed" or not open_ix:
+                    continue
+                at = float(it.get("state_updated") or it.get("updated") or 0)
+                out.append({"gid": gid, "item": _gh.shown(gid), "outcome": str(m.get("outcome") or ""), "status": _steps.close_status(m.get("outcome")), "at": at,
+                            "steps": [(i + 1, _steps.first_line(cl[i]["text"])) for i in open_ix]})
+                if apply:
+                    it.setdefault("metadata", {})["steps"] = _steps.stored(_steps.mark_open(cl, m.get("outcome"), CLOSE_MARKS_BY, at))
+                    _writes.save(gid, it, mirror=False)
+        except Exception as e:  # noqa: BLE001  — one item never stops the start
+            if out and out[-1]["gid"] == gid:
+                out.pop()
+            print(f"migrate: {gid} close marks not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if apply and out:
+        print(f"migrate: close marks: {sum(len(r['steps']) for r in out)} open step(s) of {len(out)} closed item(s) marked "
+              f"({sum(len(r['steps']) for r in out if r['status'] == _steps.DONE)} done, {sum(len(r['steps']) for r in out if r['status'] == _steps.DROPPED)} dropped), by {CLOSE_MARKS_BY}", file=sys.stderr, flush=True)
+    return out
+
+
+def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
+    """a live (open) item with no mover, no session in its needs and not on the owner's move used to be moved by whoever created it. It now gets the project's builder, else its -main
+    agent, stored as its mover, never the creator (an item that waits has a post-wake mover, not a mover; one on his call is his). Once per start, before the server serves; idempotent (an item
+    that has a mover stored, names a session in needs, waits or is his is not touched, so a store with none writes nothing); only metadata.mover changes, the clocks stay and nothing is posted to
+    GitHub (mirror off). The save is quiet (the QUIET write context of `service/writes.py`): it records no hand-off and ends none, so a hand-off record that names another mover than the one given here is left for the repair pass
+    (_handoff.handoff_repair_pass), which runs right after. An item whose project names no builder and no -main agent is left and counted in the stderr line.
+    `apply=False` is the dry run: the same rows, nothing written. → [{gid, item, project, mover, creator}] in id order, the items given a mover (apply) or that would be; `mover` is "" for the ones no agent can be named for."""
+    out: list[dict[str, Any]] = []
+    for gid, p in _item_files():
+        try:
+            with open(p, encoding="utf-8") as f:
+                head = json.load(f)
+        except Exception:  # noqa: BLE001  — an unreadable file is not this pass's to judge
+            continue
+        hm = head.get("metadata") or {}
+        if head.get("status") != "open" or _model.norm_who(hm.get("mover")) or _needs_sessions(hm):
+            continue
+        try:
+            with _writes.ITEM_LOCK:
+                it = _svcstore._load(gid)
+                m = it.get("metadata") or {}
+                if it.get("status") != "open" or _model.norm_who(m.get("mover")) or _needs_sessions(m):
+                    continue
+                mod = _item_read._model_of({**it, "gid": gid})
+                if mod.state != _model.ALIVE or _model.is_owner(mod.mover) or mod.wait is not None:
+                    continue
+                project = str(m.get("project") or "")
+                who = _telling.fallback_mover(project)
+                out.append({"gid": gid, "item": _gh.shown(gid), "project": project, "mover": who, "creator": _sr._session_label(str(m.get("owner") or "")) or str(m.get("owner") or "")})
+                if apply and who:
+                    it.setdefault("metadata", {})["mover"] = who
+                    _writes.save(gid, it, mirror=False, ctx=_writes.QUIET)
+        except Exception as e:  # noqa: BLE001  — one item never stops the start
+            if out and out[-1]["gid"] == gid:
+                out.pop()
+            print(f"migrate: {gid} mover not backfilled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if apply and out:
+        done = [r for r in out if r["mover"]]
+        print(f"migrate: mover backfill: {len(done)} open item(s) with no mover given the project's builder or -main agent, "
+              f"{len(out) - len(done)} left (no builder or -main agent named)", file=sys.stderr, flush=True)
+    return out
+
+
+def _session_ids_pass() -> str:
+    """Once, at server start and before it serves a request (step B): when `<state>/session-ids-migrate.request` exists, apply the move of open
+    items' creator (metadata.owner), needs and observers to permanent session ids (session_ids.py), or put a past one back (the request names its undo file). The
+    request is consumed first, so a crash never loops (a request met while the registry is unreadable is consumed too: ask again once it reads). It is
+    safe because it runs before the server starts any writer thread or serves a request, so nothing else writes an item meanwhile (not because every
+    writer takes the item lock: _update does not); the pass still holds the item lock, which the threads that do take it respect. It writes the undo file (<state>/session-ids-undo-<UTC time>.json: gid, field, old, new) before it touches the first item, and saves each item through
+    `writes.save`. A field that no longer holds the value the plan saw (apply) or the value the migration wrote (rollback) is left and said so.
+    Never fails the start: any error is logged and the start goes on. → the one-line summary logged ("" when there was no request)."""
+    try:
+        rp = _sid.request_path()
+        if not rp.exists():
+            return ""
+        kind, arg = _sid.read_request()
+        try:
+            rp.unlink()                                  # consumed before the work: a crash or a bad file never runs twice
+        except OSError:
+            pass
+        if not kind:
+            line = "session ids: the request file was not 'apply' or 'rollback <undo file>': nothing done"
+            print(line, file=sys.stderr, flush=True)
+            return line
+        rep = _sid.new_report()
+        with _writes.ITEM_LOCK:
+            if kind == "apply":
+                if not _sr.available():
+                    line = "session ids: apply requested but no session registry is readable: nothing done"
+                    print(line, file=sys.stderr, flush=True)
+                    return line
+                plan: list[tuple[str, str, Any, Any]] = []
+                for gid, _p in _item_files():
+                    try:
+                        it = _svcstore._load(gid)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    for field, (old, new) in (_sid.plan_item(gid, it, rep) or {}).items():
+                        plan.append((gid, field, old, new))
+                rep["changed"] = list(plan)
+                if plan:
+                    rep["undo"] = str(_sid.write_undo(plan))              # on disk before the first item changes
+                    for gid in dict.fromkeys(g for g, _f, _o, _n in plan):
+                        it = _svcstore._load(gid)
+                        moved = False
+                        for g, f, o, n in (x for x in plan if x[0] == gid):
+                            if _sid.apply_to(it, f, o, n):
+                                moved = True
+                            else:
+                                rep["skipped"].append((g, f, "it changed since the plan was made: left"))
+                        if moved:
+                            _writes.save(gid, it)
+                            rep["written"] += 1
+            else:
+                d = json.loads(Path(arg).read_text(encoding="utf-8"))
+                for c in d["changes"]:
+                    gid, f = str(c["gid"]), str(c["field"])
+                    try:
+                        it = _svcstore._load(gid)
+                    except Exception:  # noqa: BLE001
+                        rep["skipped"].append((gid, f, "no such item now")); continue
+                    if _sid.apply_to(it, f, c["new"], c["old"]):
+                        _writes.save(gid, it)
+                        rep["written"] += 1
+                        rep["changed"].append((gid, f, c["new"], c["old"]))
+                    else:
+                        rep["skipped"].append((gid, f, "it no longer holds what the migration wrote: left"))
+        line = (f"session ids: {kind} done: {len(rep['changed'])} field(s) {'moved to permanent ids' if kind == 'apply' else 'put back'}, {rep['written']} item file(s) written, "
+                f"{len(rep['kept'])} kept, {len(rep['skipped'])} skipped" + (f", undo file {rep['undo']}" if rep.get('undo') else ""))
+        print(line, file=sys.stderr, flush=True)
+        return line
+    except Exception as e:  # noqa: BLE001  — never fails the start
+        line = f"session ids: failed, nothing more done: {e.__class__.__name__}: {e}"
+        print(line, file=sys.stderr, flush=True)
+        return line
+
+
+def _close_description_repair(apply: bool = False, days: float = 14.0, now: float | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """The one-off repair of the closes that replaced a description (tools/restore_close_descriptions.py runs it): every item closed in the last `days` days whose description is the
+    one its close wrote has the description of the revision before the close (found in the store's git, close_repair.py) put back, and the text the close wrote moved into
+    `outcome_text`; an item that already has an outcome text is left (counted as "has_outcome"). Dry by default (reads, writes nothing); `apply` saves each repaired item as the server's own quiet save, under the item lock, after
+    reading the file again: an item that changed since the scan is left (counted as `moved`). Clocks, mover, status and every other field stay as they were; the GitHub mirror, when
+    on, takes the restored description like any description change. → (one row per item repaired or to repair: {gid, shown, closed_at, before, after, outcome_text},
+    a count per reason an item was left)."""
+    now = time.time() if now is None else now
+    rows, skipped = _cr.scan(_store.STORE, _item_files(), now, days)
+    out = []
+    for row in rows:
+        gid = row["gid"]
+        row = {**row, "shown": _gh.shown(gid)}
+        if apply:
+            with _writes.ITEM_LOCK:
+                try:
+                    with open(_path(gid), encoding="utf-8") as f:
+                        it = json.load(f)
+                    if it.get("status") != "completed" or str(it.get("description") or "") != row["before"] or str((it.get("metadata") or {}).get("outcome_text") or "").strip():
+                        skipped["moved"] = skipped.get("moved", 0) + 1
+                        continue
+                    meta = it.setdefault("metadata", {})
+                    meta["outcome_text"] = row["before"].strip()
+                    it["description"] = row["after"]
+                    _writes.save(gid, it, background=True, ctx=_writes.QUIET)      # a body sync behind the live writes: nobody waits on a repair; it writes the description and the outcome text and nothing else: no mover is settled, no hand-off record ended
+                except Exception as e:  # noqa: BLE001  — one item never stops the repair
+                    print(f"close-repair: {gid} not repaired: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+                    skipped["failed"] = skipped.get("failed", 0) + 1
+                    continue
+        out.append(row)
+    return out, skipped
 
 
 # ----------------------------------------------------------------------------- the migration onto the item model (migration.py, tools/migrate_model.py)
@@ -566,9 +807,9 @@ def migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     if op in ("project_id", "unproject_id"):
         return _hooks().pid_write_op(spec, op, by)
     if op in ("until", "ununtil"):
-        return _until_pass.write_op(_hooks().server_module(), spec, op, by)
+        return _until_pass.write_op(_hooks().pass_host(), spec, op, by)
     if op in ("lastact", "unlastact"):
-        return _lact_pass.write_op(_hooks().server_module(), spec, op, by)
+        return _lact_pass.write_op(_hooks().pass_host(), spec, op, by)
     if op == "wake_text":
         return migrate_wake_text(spec)
     if op == "send_wake":

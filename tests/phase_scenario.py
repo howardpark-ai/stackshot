@@ -1,6 +1,6 @@
 """Scenario test for the stored phase (metadata.phase: alive | waiting) — fixture data, no live store, no network, no server socket.
 
-An open item stores what the board shows it as, beside the fields that board reading is made from. Every save writes it (server._phase_stamp, called from the one save path, writes.save);
+An open item stores what the board shows it as, beside the fields that board reading is made from. Every save writes it (stamp_svc._phase_stamp, called from the one save path, writes.save);
 model.view takes the alive-or-waiting decision and the kind of the wait from it and from nothing else (an item that stores no usable pair is shown as the writer would store it, and counted). The
 older fields are stored exactly as before. A waiting item also stores `waits_on`, the kind of its wait as the board shows it (time | anchor | item | relay | event),
 beside the phase and under the same rules (tests/stamp_scenario.py is the suite of the pass that stamps it on items nobody has saved since).
@@ -60,6 +60,7 @@ from stackshot.web import server; from stackshot.web.tools import anchors as _wt
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import client_reads as client_reads_svc
+from stackshot.service import stamp as stamp_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
@@ -203,14 +204,14 @@ uptd(gid_d, priority="p2")
 check("3 a filing edit on an open item keeps the phase (a save restamps it)", _service_store._load(gid_d)["metadata"].get("phase") == "alive", _service_store._load(gid_d)["metadata"])
 
 # ---- 4. the older fields are stored exactly as before: the same save with the stamp off writes the same item, bar the phase
-real_stamp = server._phase_stamp
+real_stamp = stamp_svc._phase_stamp
 for i, name, *_ in CASES:
     put(i, **before[i]["metadata"])
-    server._phase_stamp = lambda gid_, it_: None
+    stamp_svc._phase_stamp = lambda gid_, it_: None
     try:
         off = save(i)
     finally:
-        server._phase_stamp = real_stamp
+        stamp_svc._phase_stamp = real_stamp
     put(i, **before[i]["metadata"])
     on = save(i)
     strip = lambda d: {k: v for k, v in d.items() if k not in ("updated", "written_at")} | {"metadata": {k: v for k, v in d["metadata"].items() if k not in ("phase", "waits_on", "written_at")}}
@@ -274,7 +275,7 @@ put(42, needs=[BACK], state="doing"); distinct(42)
 gitc("add", "-A"); gitc("commit", "-q", "-m", "older revisions")
 check("8 the older revision of the item to confirm holds no phase", "phase" not in mt(41), mt(41))
 def confirm_revision(i, when):   # the revision a bare confirm writes: `confirmed` moved, the phase stamped by the save, nothing else (the writer stamp a session's confirm adds is no part of this check)
-    d = raw(i); d["confirmed"] = when; server._phase_stamp(f"g{i}", d); (T / f"store/g/{i}.json").write_text(json.dumps(d))
+    d = raw(i); d["confirmed"] = when; stamp_svc._phase_stamp(f"g{i}", d); (T / f"store/g/{i}.json").write_text(json.dumps(d))
 confirm_revision(41, now0 - 5 * DAY)
 check("8 …the confirm revision moved `confirmed` and added the phase, nothing else", mt(41).get("phase") == "alive" and raw(41)["confirmed"] == now0 - 5 * DAY, raw(41))
 for label, mod_ in (("ui/render.py", ui_render), ("render.py", root_render)):
@@ -340,7 +341,7 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
             after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
             old = _model.view(bare(it), _model.derive(bare(it), now_, after_open=after, anchored=lambda i: False), now_, after, check=False)
             stamped = copy.deepcopy(it)
-            server._phase_stamp(gid, stamped)
+            stamp_svc._phase_stamp(gid, stamped)
             new = _model.view(stamped, _model.derive(stamped, now_, after_open=after, anchored=lambda i: False), now_, after)
             rows.append((gid, it, (old, new, stamped, client_reads_svc._item_list(bare(it)), client_reads_svc._item_list(stamped), _notes_tool._model_lines(bare(it), short=True), _notes_tool._model_lines(stamped, short=True),
                                          _get_tool._fmt(bare(it)) + _get_tool._fmt(bare(it), brief=True), _get_tool._fmt(stamped) + _get_tool._fmt(stamped, brief=True))))

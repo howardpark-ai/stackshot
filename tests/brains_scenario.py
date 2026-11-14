@@ -164,6 +164,7 @@ check("2 a healthy second brain reports no problem", brains.problem(brains.for_k
 
 # ---- 3. the second copy is missing: fail open everywhere
 from stackshot.web import server
+from stackshot.web.tools import rules as _wt_rules
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import gates as _gates
@@ -820,7 +821,7 @@ check("18 a prefix without a separator at its end is named", "does not end in" i
 check("18 keep without new_prefixes is named", "keep changes nothing" in note_for(new_prefixes=[]), note_for(new_prefixes=[]))
 only_new = [n for n in _cfg.notes({**_cfg.CFG, "brains": [{"name": "x", "path": str(T / "second"), "home": "h", "new_prefixes": ["projects/zeta-"]}]}) if "names no slugs" in n]
 check("18 an entry with only new_prefixes is not told it names no pages", not only_new, only_new)
-check("18 the rules note names new_prefixes and keep", (set_brains(NEWP), "does not exist yet" in server._brains_rules_note() and "projects/zeta-" in server._brains_rules_note() and "zeta-old" in server._brains_rules_note())[1], (set_brains(NEWP), server._brains_rules_note())[1])
+check("18 the rules note names new_prefixes and keep", (set_brains(NEWP), "does not exist yet" in _wt_rules._brains_rules_note() and "projects/zeta-" in _wt_rules._brains_rules_note() and "zeta-old" in _wt_rules._brains_rules_note())[1], (set_brains(NEWP), _wt_rules._brains_rules_note())[1])
 # a folder above the key is no page: only the full key's own folder, or a parent page file, holds it
 INFRA = {**SECOND, "slugs": ["gamma"], "prefixes": ["projects/beta-"], "new_prefixes": ["infra/acme/"], "keep": []}
 (T / "brain/infra/acme/folder").mkdir(parents=True, exist_ok=True)
