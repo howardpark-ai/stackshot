@@ -22,7 +22,7 @@ panes that are files in a temp folder, messages recorded by a fake push, a fake 
      a mover whose pane is not live (the cold call, the builder) get none; a project with no -main agent gets the History line alone; a mover that is the project's -main agent itself is told nothing (nobody is above it) and its History line and the note of its save say so
 
     tests/run-suite ladder_silence       -> exit 0 / 1"""
-import json, os, re, sys, pathlib, time, logging
+import contextlib, io, json, os, re, sys, pathlib, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="laddersil-"); T = pathlib.Path(tmp)
@@ -495,10 +495,14 @@ close(75, 76, 78, 79)
 # 11f. a project with no -main agent: the History line alone, the rung is taken (no retry every pass)
 clear_records(); put(77, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
 enter([77]); stk(now0 + 31 * MIN); real_main = server._main_agent; server._main_agent = lambda project: ""
+err_f = io.StringIO()
 try:
-    n_push = len(pushes()); done = stk(now0 + 41 * MIN + 1); done2 = stk(now0 + 41 * MIN + 61)
+    n_push = len(pushes())
+    with contextlib.redirect_stderr(err_f): done = stk(now0 + 41 * MIN + 1)
+    done2 = stk(now0 + 41 * MIN + 61); flag_f = ladder_svc.ladder_no_main("a77", "home-docs")
 finally:
     server._main_agent = real_main
+check("11f …the stderr line says there is no -main agent to tell, and the reason is flagged as not the mover itself", "ladder: a77 home-docs is live and silent after the look: no -main agent to tell" in err_f.getvalue() and flag_f == (False, "the project has no -main agent to tell"), (err_f.getvalue(), flag_f))
 check("11f no -main agent: nothing is sent, a History line says so, and the rung is taken once (the next pass does nothing)", "a77" in done and "a77" not in done2 and len(pushes()) == n_push and any("no -main agent to tell" in x["text"] for x in log_of(77)) and entry(77).get("main_at"), (done, done2, log_of(77)))
 close(77)
 # 11g. the live background mover is the project's -main agent itself: nobody is above it, so it is not told about its own silence (a mutant that lets -main tell itself fails the first check), the History line says
@@ -508,12 +512,16 @@ enter([9091]); stk(now0 + 31 * MIN); real_main = server._main_agent; server._mai
 real_save = ladder_svc._writes.save; save_notes = []
 def noting_save(gid, item, *a, **kw): save_notes.append(kw.get("note", "")); return real_save(gid, item, *a, **kw)      # the save's note reaches no page: read it as it is handed over
 ladder_svc._writes.save = noting_save
+err_g = io.StringIO()
 try:
-    n_push = len(pushes()); n_own = len(pushes_to("home-docs", "a9091")); done = stk(now0 + 41 * MIN + 1); done2 = stk(now0 + 41 * MIN + 61)
-    to_ = ladder_svc.ladder_main_to("a9091", "home-docs"); why_ = ladder_svc.ladder_no_main("a9091", "home-docs")
+    n_push = len(pushes()); n_own = len(pushes_to("home-docs", "a9091"))
+    with contextlib.redirect_stderr(err_g): done = stk(now0 + 41 * MIN + 1)
+    done2 = stk(now0 + 41 * MIN + 61)
+    to_ = ladder_svc.ladder_main_to("a9091", "home-docs"); itself_, why_ = ladder_svc.ladder_no_main("a9091", "home-docs")
 finally:
     server._main_agent = real_main; ladder_svc._writes.save = real_save
-check("11g the mover is the -main agent itself: ladder_main_to is empty (nobody above it), and its reason names that mover, not a missing -main agent", to_ == "" and "no one above it to tell" in why_ and "has no -main agent" not in why_, (to_, why_))
+check("11g the mover is the -main agent itself: ladder_main_to is empty (nobody above it), the reason is flagged as the mover itself and names it, not a missing -main agent", to_ == "" and itself_ is True and "no one above it to tell" in why_ and "has no -main agent" not in why_, (to_, itself_, why_))
+check("11g …the stderr line does not say the project has no -main agent: it says the mover is the -main agent itself", "ladder: a9091 home-docs is live and silent after the look: it is the -main agent itself, so no one above it is told" in err_g.getvalue() and "no -main agent to tell" not in err_g.getvalue(), err_g.getvalue())
 check("11g …nothing is sent to it about its own silence, and the rung is taken once (the next pass does nothing)", "a9091" in done and "a9091" not in done2 and len(pushes()) == n_push and len(pushes_to("home-docs", "a9091")) == n_own and entry(9091).get("main_at"), (done, done2, pushes()[n_push:], entry(9091)))
 check("11g …the History line says the mover is the project's -main agent, with no one above it to tell (not the no -main agent wording)", any("its mover is the project's -main agent, so there is no one above it to tell" in x["text"] for x in log_of(9091)) and not any("no -main agent to tell" in x["text"] for x in log_of(9091)), log_of(9091))
 check("11g …and the note the save is handed says it is the -main agent itself", "ladder: its mover is silent, it is the -main agent itself" in save_notes and not any("no -main agent to tell" in n for n in save_notes), save_notes)

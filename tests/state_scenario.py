@@ -17,7 +17,7 @@ stored a state on is still READ as before, so this suite writes such an item as 
     tests/run-suite state        → exit 0 / 1"""
 import asyncio, contextlib, datetime, importlib.util, io, json, os, re, sys, pathlib, tempfile, time, logging, hashlib
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _midnight
 tmp = _scratch.mkdtemp(prefix="statetest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
@@ -33,6 +33,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "store/g", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 NAMES = ("home-owner", "home-stew", "team-back", "home-front", "home-other", "home-gone")
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1)}
+_midnight.wait_out("Asia/Dubai")      # a local midnight inside the run would move the "today" and "tomorrow" the checks read: start on the far side of one that is close
 now0 = time.time()
 DAY = 86400.0
 ZONE_HOURS = 4; ZONE_OFFSET = ZONE_HOURS * 3600      # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)

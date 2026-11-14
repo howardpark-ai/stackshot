@@ -107,13 +107,15 @@ def ladder_main_to(gid: str, who: str) -> str:
     return "" if not to or _hooks().session_id(to) == _hooks().session_id(who) else to
 
 
-def ladder_no_main(gid: str, who: str) -> str:
-    """Why nobody is told when `ladder_main_to` is empty, in words for the History line: the mover is itself the project's -main agent (nobody above it to tell), or the project has none."""
+def ladder_no_main(gid: str, who: str) -> tuple[bool, str]:
+    """Why nobody is told when `ladder_main_to` is empty → (itself, why): `itself` is True when the mover is itself the project's -main agent (nobody above it to tell), False when the project has none;
+    `why` is the same thing in words for the History line. Callers branch on `itself`, never on the words."""
     try:
         main = _hooks().main_agent(str((_load(gid).get("metadata") or {}).get("project") or ""))
     except Exception:  # noqa: BLE001
         main = ""
-    return "its mover is the project's -main agent, so there is no one above it to tell" if main and _hooks().session_id(main) == _hooks().session_id(who) else "the project has no -main agent to tell"
+    itself = bool(main) and _hooks().session_id(main) == _hooks().session_id(who)
+    return itself, ("its mover is the project's -main agent, so there is no one above it to tell" if itself else "the project has no -main agent to tell")
 
 
 def ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list[tuple[str, str, str]] | None" = None, info: "dict[str, dict[str, str]] | None" = None) -> str:
@@ -129,20 +131,21 @@ def ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list
         last = _hooks().silence_clock(item, who)
         meta = item.setdefault("metadata", {})
         to = ladder_main_to(gid, who)
+        itself, why = (False, "") if to else ladder_no_main(gid, who)      # nobody to tell: the mover is the -main agent itself, or the project has none
         span = _hooks().silence_minutes(now - last) if last > 0 else "a long time"
         since = _hooks().when_words(dt.datetime.fromtimestamp(last, _hooks().zone())) if last > 0 else "it was handed over"
         before = float(rec.get("main_at") or 0)      # when -main was told about this silence last, if it was
         told = _hooks().when_words(dt.datetime.fromtimestamp(before, _hooks().zone())) if before else ""
         data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
-        _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else ladder_no_main(gid, who)))
-        _writes.save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, " + ("it is the -main agent itself" if "is the project" in ladder_no_main(gid, who) else "no -main agent to tell")))
+        _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else why))
+        _writes.save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, " + ("it is the -main agent itself" if itself else "no -main agent to tell")))
     if to:
         line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no write since {since} ({span})" + (f", told before {told}" if told else "")
         if rows is not None and info is not None:
             rows.append((to, gid, line)); info[gid] = data
         else:
             ladder_main_tell(to, [(gid, line)], {gid: data})
-    print(f"ladder: {gid} {who} is live and silent after the look: " + (f"{to} told" if to else "no -main agent to tell"), file=sys.stderr, flush=True)
+    print(f"ladder: {gid} {who} is live and silent after the look: " + (f"{to} told" if to else "it is the -main agent itself, so no one above it is told" if itself else "no -main agent to tell"), file=sys.stderr, flush=True)
     return _ladder.MAIN
 
 

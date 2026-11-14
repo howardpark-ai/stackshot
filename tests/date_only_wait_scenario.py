@@ -15,7 +15,7 @@ asked. Checked here against a scratch store and config (no port, no real server,
     tests/run-suite date_only_wait        → exit 0 / 1"""
 import datetime as dt, json, logging, os, pathlib, re, sys, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _midnight
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools"))
 tmp = _scratch.mkdtemp(prefix="dateonlywait-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
@@ -34,6 +34,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 NAMES = ("home-owner", "home-stew", "team-back", "home-front", "home-other")
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1)}
+_midnight.wait_out("Asia/Dubai")      # a local midnight inside the run would move the "today" and "tomorrow" the checks read: start on the far side of one that is close
 now0 = time.time()
 DAY, HOUR = 86400.0, 3600.0
 ZONE_OFFSET = 4 * HOUR                       # the instance timezone (Asia/Dubai, "timezone" above): UTC+4, no DST
