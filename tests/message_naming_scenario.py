@@ -58,6 +58,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.fleet import client
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import messaging as _messaging
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import update as _update_svc
@@ -206,10 +207,10 @@ check("60 …and the mover's write on it passes", ok, why)
 
 # ---- 8. the other routes carry the same line
 item(70, needs=[BBUILD])
-st, res = server._client_post("testbox", "handover", {"to": GBUILD, "text": "SendMessage about a70", "sender": MAIN})
+st, res = _rt_client._client_post("testbox", "handover", {"to": GBUILD, "text": "SendMessage about a70", "sender": MAIN})
 check("70 the SendMessage route (POST /client/handover): the same line, nothing named", st == 200 and "did not name" in res["result"] and f"update(mover={GBUILD})" in res["result"] and needs(70) == [BBUILD], (st, res, needs(70)))
 item(71, needs=[])
-st, res = server._client_post("testbox", "handover", {"to": GBUILD, "text": "SendMessage about a71", "sender": MAIN})
+st, res = _rt_client._client_post("testbox", "handover", {"to": GBUILD, "text": "SendMessage about a71", "sender": MAIN})
 check("71 …and where it can name, the line it always had", st == 200 and res["result"].startswith(f"(named {GBUILD} in a71's needs: handover message from {MAIN} (SendMessage on testbox))") and needs(71) == [GBUILD], (st, res))
 item(72, needs=[BBUILD])
 settle(); pushed.clear()

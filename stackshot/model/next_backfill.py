@@ -1,7 +1,7 @@
 """next_backfill.py — the one-off fill-in of the owner's past decisions as done steps (the Next design, "Past decisions on open items are filled in from the saved answers. Closed items are left as they are").
 
 Before the server made his steps (part 1), his answer to a decision left no step behind: the answer is saved on the item (`metadata.answers`, each with its exact time), the checklist shows nothing. This module works out,
-for ONE item, the done steps his saved decisions would have left, exactly as `server._answer` leaves them now (owner_steps.tick): `<owner>: <what he was asked> → <what he picked>`, done by him at the answer's time.
+for ONE item, the done steps his saved decisions would have left, exactly as `service/answer.py`'s `_answer` leaves them now (owner_steps.tick): `<owner>: <what he was asked> → <what he picked>`, done by him at the answer's time.
 
   - Only an OPEN item. A closed item is the record as it is.
   - Only the `decision` answers. A comment is no decision; a note on a step (`step-reply`) leaves its step open for the session that judges it.

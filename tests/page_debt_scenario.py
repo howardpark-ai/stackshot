@@ -103,6 +103,7 @@ os.environ.update(ANTHROPIC_API_KEY="[masked secret]", ANTHROPIC_AUTH_TOKEN="tok
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import page_debt; from stackshot.projects import pages as _pg
 _ct_changed_since = _pg.ct_changed_since       # the real one: section 9 patches it
 from stackshot.web import server
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.web import page_debts as _pdebts
 from stackshot.web import publish as _web_publish
 from stackshot.service import page_debt as pdebt_svc
@@ -378,14 +379,14 @@ with contextlib.redirect_stderr(buf):
 check("a page whose call raises is counted as error and the next page is still called", out["pages"] == 2 and out.get("error") == 1 and sum(v for k, v in out.items() if k not in ("pages", "error")) == 1, out)
 check("…the failure is logged and the failed page keeps its mark, so it is not called again in this run", "page-debt call for projects/alpha failed: RuntimeError: boom" in buf.getvalue() and page_debt.read_days().get("projects/alpha") == "r-boom:live", (buf.getvalue(), page_debt.read_days()))
 reset()           # no debt left: the server's own page store (the gbrain CLI) is never reached
-st, d = server._client_post("m", "page-debt", {"run": "2026-10-16-050000"})
+st, d = _rt_client._client_post("m", "page-debt", {"run": "2026-10-16-050000"})
 check("POST /client/page-debt runs the pass for the named run and answers its mode and counts", st == 200 and d == {"enabled": True, "mode": "live", "counts": {"pages": 0}}, (st, d))
 GOOD = "2026-10-16-050000"
-check("…a body with no run, an empty run, a run that is not the audit's stamp shape, or a bad deadline is refused", [server._client_post("m", "page-debt", b)[0] for b in ({}, {"run": " "}, {"run": "x" * 41}, {"run": "r-http"}, {"run": GOOD + "\n"}, {"run": " " + GOOD}, {"run": 20261016050000}, {"run": GOOD, "deadline": "soon"})] == [400] * 8)
-check("…a deadline of NaN or infinity is refused, not read as no deadline", [server._client_post("m", "page-debt", {"run": GOOD, "deadline": v})[0] for v in ("nan", "inf", "-inf", float("nan"), float("inf"))] == [400] * 5)
-check("…the stamp the audit run writes passes the route's check", server._client_post("m", "page-debt", {"run": __import__("stackshot.audit.audit_run", fromlist=["_"])._stamp_of(1.8e9), "deadline": time.time() + 60})[0] == 200)
+check("…a body with no run, an empty run, a run that is not the audit's stamp shape, or a bad deadline is refused", [_rt_client._client_post("m", "page-debt", b)[0] for b in ({}, {"run": " "}, {"run": "x" * 41}, {"run": "r-http"}, {"run": GOOD + "\n"}, {"run": " " + GOOD}, {"run": 20261016050000}, {"run": GOOD, "deadline": "soon"})] == [400] * 8)
+check("…a deadline of NaN or infinity is refused, not read as no deadline", [_rt_client._client_post("m", "page-debt", {"run": GOOD, "deadline": v})[0] for v in ("nan", "inf", "-inf", float("nan"), float("inf"))] == [400] * 5)
+check("…the stamp the audit run writes passes the route's check", _rt_client._client_post("m", "page-debt", {"run": __import__("stackshot.audit.audit_run", fromlist=["_"])._stamp_of(1.8e9), "deadline": time.time() + 60})[0] == 200)
 rcfg(page_debt=False)
-st, d = server._client_post("m", "page-debt", {"run": "2026-10-16-200000"})
+st, d = _rt_client._client_post("m", "page-debt", {"run": "2026-10-16-200000"})
 check("…with [router] page_debt off it makes no call and says so", st == 200 and d == {"enabled": False, "mode": "", "counts": {}}, (st, d))
 
 # ---- 11. apply_edits, unit checks

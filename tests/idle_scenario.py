@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import answer as answer_svc
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.service import update as _update_svc
@@ -90,7 +91,7 @@ def _tw(gid, owner, note, tag="wake"):
     return None if HOLD[0] else object()
 telling.tell_woken = _tw
 clock = [now0]
-# ---- 2b. a raise stored before the last rung existed: his button answers still apply (the item page's form posts them through server._answer)
+# ---- 2b. a raise stored before the last rung existed: his button answers still apply (the item page's form posts them through answer_svc._answer)
 # The server raises no question any more, so the stored raises of items 3, 6 and 7 are set up by hand, in the shape the old pass wrote them.
 told.clear()
 park = (dt.datetime.fromtimestamp(clock[0], _wt_text.ZONE) + dt.timedelta(days=3)).strftime("%Y-%m-%d")
@@ -107,7 +108,7 @@ opts3 = rd(3)["metadata"]["options"]
 import contextlib, io as _io
 runner_svc.WAKE_EVENT.clear(); err3 = _io.StringIO()
 with contextlib.redirect_stderr(err3):
-    r = server._answer("a3", opts3[0]["label"], "", "")
+    r = answer_svc._answer("a3", opts3[0]["label"], "", "")
 it3 = rd(3); m3 = it3["metadata"]
 check("Park until …: the minute loop is woken, and the log line says it was parked until the day", runner_svc.WAKE_EVENT.is_set() and f"parked until {park}" in err3.getvalue(), err3.getvalue()[-300:])
 check("Park until …: his decision is in and the server parks it: waiting until the option's day (the one until date), decision out of needs, the ask and the idle record gone, the state clock moved",
@@ -118,7 +119,7 @@ check("the park he set from the board stores no hold record and no old field: th
 check("a park is acted on by the server itself: no answer escalation waits on it", "a3" not in _web_answers._answers_load(), _web_answers._answers_load())
 check("get shows it waiting until the day", f"until: {park}" in _wt_get.stackshot_get("a3") and "waiting on a time" in _wt_get.stackshot_get("a3"), _wt_get.stackshot_get("a3"))
 later = (_pages.zone_now() + dt.timedelta(days=10)).strftime("%Y-%m-%d")
-r = server._answer("a6", rd(6)["metadata"]["options"][0]["label"], f"not before {later}, Pat is away", "")
+r = answer_svc._answer("a6", rd(6)["metadata"]["options"][0]["label"], f"not before {later}, Pat is away", "")
 m6 = rd(6)["metadata"]
 check("Park until … with a day written in the box: that day is the wake, his note kept", r == "decision" and m6.get("until") == later and "hold" not in m6
       and m6["answers"][-1].get("text") == f"not before {later}, Pat is away" and m6["answers"][-1].get("parked") == later, m6)
@@ -132,11 +133,11 @@ check("a session's write cannot carry a wake on an option: the gate drops the ke
       "wake" not in wait_gates_svc._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}])[0],
       wait_gates_svc._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}]))
 told.clear()
-r = server._answer("a7", "Not needed", "", "")
+r = answer_svc._answer("a7", "Not needed", "", "")
 check("Not needed: decision leaves needs, no hold, the owner is told with the choice", r == "decision" and "hold" not in rd(7)["metadata"] and rd(7)["metadata"].get("needs") == [U["home-owner"]]
       and any(g == "a7" and "Not needed" in n for t, g, o, n in told), ({k: v for k, v in rd(7)["metadata"].items() if k in ("needs", "mover", "hold", "idle", "next")}, r, [x for x in told if x[1] == "a7"]))
 check("there is no \"Nag again\" any more: the word is not an option of any raise, and an answer that is not one of the options is stale and writes nothing",
-      not hasattr(server, "IDLE_RETRY_LABEL") and server._answer("a2", "Nag again", "", "") == "stale" and server._answer("a2", "Approve", "", "") == "stale" and "answers" not in rd(2)["metadata"], rd(2)["metadata"])
+      not hasattr(server, "IDLE_RETRY_LABEL") and answer_svc._answer("a2", "Nag again", "", "") == "stale" and answer_svc._answer("a2", "Approve", "", "") == "stale" and "answers" not in rd(2)["metadata"], rd(2)["metadata"])
 
 # ---- 3. a state change drops the stored idle record; a keeper parks an item it does not own
 it1 = rd(1); it1["metadata"]["idle"] = {"poked": clock[0] - 600, "to": "home-stew", "recovery": clock[0] - 300}; (T / "store/a/1.json").write_text(json.dumps(it1))      # what the retired pass stored

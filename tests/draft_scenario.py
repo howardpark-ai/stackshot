@@ -58,6 +58,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.service import answer as answer_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
@@ -138,7 +139,7 @@ refused("1 field: a completed item takes no draft", lambda: upd(3, draft="late")
 refused("1 field: …nor one passed with the close", lambda: upd(2, status="completed", outcome="done", reason="finished", description="- It shipped\n- Closed as done\n- Nothing left", draft="late"), "completed item keeps no draft")
 # his Done
 item(4, needs=["team-back"], mover="Oliver", then="team-back", state="your-step", step="paste the text from the item page into #general", draft="the text to paste")
-r = server._answer("a4", "", "", "done")
+r = answer_svc._answer("a4", "", "", "done")
 check("1 field: his Done drops the draft with the step", r == "done" and "draft" not in mt(4) and "state" not in mt(4), (r, mt(4)))
 
 # ================================================================ 3. the write guard

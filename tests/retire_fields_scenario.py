@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.model import retire_fields as RF; from stackshot.tools import retire_fields_report as RR; from stackshot.tools import stamp_phase as SP
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
@@ -172,7 +173,7 @@ orig = {i: raw(i) for i in OPEN}
 listing0 = state_listing()
 snap0 = snapshot()
 CFGM["migration"] = True
-call = lambda machine="box-a", **body: server._client_post(machine, "migrate", {"sender": SENDER, **body})
+call = lambda machine="box-a", **body: _rt_client._client_post(machine, "migrate", {"sender": SENDER, **body})
 st_, d_ = call(op="retire", items=[f"g{i}" for i in OPEN], dry=True)
 dry = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 else {}
 check("6 a dry run answers what each item would get and writes no file", st_ == 200 and snapshot() == snap0 and dry[3]["action"] == "would_set" and dry[9]["action"] == "same" and dry[11]["action"] == "same" and dry[11]["held"] == ["step"], (st_, d_))
@@ -274,7 +275,7 @@ class DirectApp:
     def __init__(self): self.log = []
     def call(self, body):
         self.log.append(body["op"] + ("-dry" if body.get("dry") else ""))
-        return server._client_post("box-a", "migrate", {**body, "sender": SENDER})
+        return _rt_client._client_post("box-a", "migrate", {**body, "sender": SENDER})
 CFGM["migration"] = True
 RUN = pathlib.Path(_scratch.mkdtemp(prefix="retire-run-"))
 args = argparse.Namespace(sender=SENDER, run_dir=str(RUN), undo="")

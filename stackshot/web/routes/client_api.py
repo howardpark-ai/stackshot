@@ -1,10 +1,15 @@
 """client_api.py: the client API, /client/...: what a machine's puller and a session's hooks call (write, for-you seen, item watch and the read calls of /client/{what}).
 
-`register(mcp, *, client_get, client_post, recycle_wanted_tokens)` adds the routes to the server's `mcp` in the order they were declared in server.py. The three callables are the server's own
-(`_client_get` and `_client_post` serve the read and write calls, `_recycle_wanted_tokens` the tokens a poll hands out) and are looked up when a call is made, never when the routes are added."""
+`_client_post` is the POST dispatcher of /client/{what}: one branch per `what`, each handing the body to the service that does the work (service/recycle.py, released.py, question.py, terminal_prompt.py, job_gap.py, item_open.py and the others) and answering (status, JSON).
+It is the surface's: it names the services and the status codes, and writes nothing itself. A suite that replaces a function of one of those services sets it on that module and calls `_client_post` here.
+
+`register(mcp, *, client_get, recycle_wanted_tokens)` adds the routes to the server's `mcp` in the order they were declared in server.py. The two callables are the server's own
+(`_client_get` serves the read calls, `_recycle_wanted_tokens` the tokens a poll hands out) and are looked up when a call is made, never when the routes are added."""
 from __future__ import annotations
 
 import json
+import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -20,13 +25,32 @@ from stackshot.fleet.clients import POLL_MAX as _POLL_MAX
 from stackshot.github import ghsync as _gh
 from stackshot.model.ids import _norm_id
 from stackshot.projects import brains as _brains
-from stackshot.service.store import _load
+from stackshot.router import page_debt as _page_debt
+from stackshot.service import agent_names as _agent_names
+from stackshot.service import contacts as _contacts
+from stackshot.service import event_waits as _evwaits
 from stackshot.service import foryou as _fy
-from stackshot.service.projects import _form_call
+from stackshot.service import handoff as _handoff
+from stackshot.service import item_open as _item_open
+from stackshot.service import job_gap as _job_gap
+from stackshot.service import messaging as _messaging
+from stackshot.service import migrations as _migrations
+from stackshot.service import owner_words as _owner_words
+from stackshot.service import page_debt as _pdsvc
+from stackshot.service import proofs as _proofs
+from stackshot.service import question as _question_svc
+from stackshot.service import recycle as _recycle_svc
+from stackshot.service import released as _relsvc
+from stackshot.service import terminal_prompt as _terminal_prompt_svc
+from stackshot.service import update as _update_svc
+from stackshot.service.projects import _form_call, _new_project, _project_agent, _project_agent_mandate, _project_agent_rename, _project_agent_retire, _project_list
+from stackshot.service.store import _load
+from stackshot.waits import event_waits as _ew
+from stackshot.waits import held as _held
 from stackshot.web.publish import _publish
 
 
-_client_get, _client_post, _recycle_wanted_tokens = None, None, None      # the server's own, set by register()
+_client_get, _recycle_wanted_tokens = None, None      # the server's own, set by register()
 
 
 _CLIENTS = _cfg.secrets("clients.json")     # {machine: {"sha256": <hex of its token>, "created": <iso>}}, written by client.py mint
@@ -69,6 +93,216 @@ def _client_config() -> dict[str, Any]:
     if _brains.configured():    # each second brain's page rules and mirror, so a client box links its pages to the right mirror (no gbrain home: a client writes nothing)
         out["brains"] = _brains.client_entries()
     return out
+
+
+def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """One write of the client API → (status, JSON). `machine` is the token's, never the body's."""
+    if what == "recycled":      # the fleet tool's end-of-recycle hook: the waits-for-recycle field comes off what the recycle covered
+        sk = body.get("skipped") or []
+        sk = sk.split() if isinstance(sk, str) else sk
+        if not isinstance(sk, list):
+            return 400, {"error": "skipped is a list of session names (or one space-separated string)"}
+        try:
+            started = float(body.get("started") or 0)
+        except (TypeError, ValueError):
+            return 400, {"error": "started is an epoch in seconds"}
+        kind = str(body.get("kind") or "recycle")
+        if kind not in ("recycle", "reboot"):
+            return 400, {"error": "kind = recycle | reboot"}
+        try:
+            flag_at = float(body.get("flag_at") or 0)
+        except (TypeError, ValueError):
+            return 400, {"error": "flag_at is an epoch in seconds"}
+        return 200, _recycle_svc._recycled(machine, kind, started, str(body.get("result") or "ok"), [str(x) for x in sk], flag_at)
+    if what == "recycle-due":   # a script marks a recycle as due on an item (client.py recycle-due)
+        try:
+            return 200, _recycle_svc._recycle_due(machine, str(body.get("item") or ""), str(body.get("pr") or ""))
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "released":      # release.sh: main's tests passed on a released merge, so the items built for that PR are settled (client.py released)
+        try:
+            return 200, _relsvc.released(str(body.get("pr") or ""), str(body.get("sha") or ""), bool(body.get("dry_run")))
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "event":         # a machine reports a fleet event an event wait may wait on: a recycle, a fleet op's end, a job's run (client.py event)
+        try:
+            ev = _ew.event_from_report({**body, "machine": body.get("machine") or machine})
+        except _ew.EventWaitError as e:
+            return 400, {"error": str(e)}
+        woken = _evwaits.evwait_report(ev)
+        return 200, {"event": _ew.arrival(ev), "woken": [_gh.shown(g) for g in woken]}
+    if what == "sweep-released":   # the same rule for the PRs the running server already holds (client.py sweep-released [--dry-run])
+        try:
+            return 200, _relsvc.sweep_released(bool(body.get("dry_run")))
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "sweep-step-proof":   # every open step whose proof (a PR merged or released) already happened is settled (client.py sweep-step-proof [--dry-run])
+        try:
+            return 200, _proofs.sweep_proofs(bool(body.get("dry_run")))
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "page-debt":      # the audit run's pages stage (audit_run.py): the page-debt pass for that run, made here because the debt ledger and the page writes are this process's
+        run = body.get("run")
+        if not isinstance(run, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{6}", run):     # the shape audit_run._stamp_of writes
+            return 400, {"error": "run = the audit run's start stamp, YYYY-MM-DD-HHMMSS"}
+        try:
+            deadline = float(body["deadline"]) if body.get("deadline") not in (None, "") else None
+            if deadline is not None and not math.isfinite(deadline):
+                raise ValueError(deadline)
+        except (TypeError, ValueError):
+            return 400, {"error": "deadline = an epoch in seconds (the end of the run's time budget), or left out"}
+        enabled = _page_debt.enabled()
+        return 200, {"enabled": enabled, "mode": _page_debt.mode() if enabled else "", "counts": _pdsvc.page_debt_pass(run=run, deadline=deadline)}
+    if what == "orphan-handover":   # the audit run's hand-over of open items whose mover is gone (audit_run.py); a dry run unless the body says apply
+        try:
+            return 200, _handoff.orphan_handover(apply=body.get("apply") is True)
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "backfill-contact":   # every open item without a live contact gets one (client.py backfill-contact [--dry-run]); a dry run unless the body says apply
+        try:
+            return 200, _contacts._contact_backfill(dry=body.get("apply") is not True)
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "message":       # a script sends a message the way a session's `message` tool does
+        to, text, sender = (str(body.get(k) or "") for k in ("to", "text", "sender"))
+        if str(body.get("release") or "") == "green" and text.strip() and sender.strip():   # release.sh's green result: log-only (the turn rule's second build)
+            try:
+                res = _relsvc._release_green(to, text, sender.strip(), machine, str(body.get("pr") or ""))
+            except Exception as e:  # noqa: BLE001  — what the log-only path cannot do is delivered as before, never lost
+                print(f"release: log-only failed, delivering instead: {e}", file=sys.stderr, flush=True)
+                res = None
+            if res is not None:
+                return 200, {"result": res}
+        # No For you row for a failed release: release.sh's raw text told him nothing he could act on and stayed after the fix.
+        # The builder gets the message below; he hears of a failure through the item it serves.
+        try:
+            return 200, {"result": _messaging._message(to, text, sender, f"machine:{machine}", machine, **({"fyi": True} if body.get("fyi") is True else {}))}
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "handover":      # a box's PostToolUse hook saw a SendMessage to a background agent that names an item (pages.py touch)
+        to, text, sender = (str(body.get(k) or "").strip() for k in ("to", "text", "sender"))
+        if not (to and text and sender):
+            return 400, {"error": "to, text and sender are required: the recipient, the message and the sending session"}
+        try:
+            return 200, {"result": _agent_names._name_on_handover(to, text, sender, via=f"SendMessage on {machine}").strip()}
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "project-agent":     # phase A: a front agent or the keeper lists a new agent of the project (client.py post project-agent)
+        try:
+            return _project_agent(machine, body)
+        except ValueError as e:         # the id file is damaged (projects.py raises, mints nothing and writes nothing): not recorded, say so
+            return 503, {"error": f"the project record cannot be read or written right now, nothing was recorded: {e}"}
+    if what == "project-agent-mandate":     # the keeper or a front agent changes the mandate line of a listed agent (client.py post project-agent-mandate)
+        try:
+            return _project_agent_mandate(machine, body)
+        except ValueError as e:         # the id file is damaged (projects.py raises): nothing was changed
+            return 503, {"error": f"the project record cannot be read right now, nothing was changed: {e}"}
+    if what == "project-agent-rename":      # the form renames an agent's entry on the project's page, in place (client.py post project-agent-rename)
+        try:
+            return _project_agent_rename(machine, body)
+        except ValueError as e:         # the id file is damaged (projects.py raises): nothing was written
+            return 503, {"error": f"the project record cannot be read right now, nothing was changed: {e}"}
+    if what == "project-agent-retire":      # sala retired a session; the form removes its line from the page's agents map with a timeline line, or drops its pending agent (client.py post project-agent-retire)
+        try:
+            return _project_agent_retire(machine, body)
+        except ValueError as e:         # the id file is damaged (projects.py raises): nothing was changed
+            return 503, {"error": f"the project record cannot be read right now, nothing was changed: {e}"}
+    if what == "project":       # the fleet tool's New session form makes a project and its gbrain page (client.py post project)
+        return _new_project(machine, body)
+    if what == "project-list":  # ... and lists a hidden one again (client.py post project-list)
+        return _project_list(machine, body)
+    if what == "question":      # a script files a question for the owner as a needs=decision item (client.py post question)
+        return _question_svc._question(machine, body)
+    if what == "terminal-prompt":   # sala: a pane waiting in its terminal is a row in the owner's Your move list (client.py post terminal-prompt open | clear)
+        return _terminal_prompt_svc._terminal_prompt(machine, body)
+    if what == "job-gap":       # sala: a gap in a scheduled job is one item per (timer, code), moved by the owning repo's builder (client.py post job-gap open | clear)
+        return _job_gap._jobgap_post(machine, body)
+    if what == "item-open":     # a script opens one board item for a background agent of a project, once per marker while it is open (client.py post item-open)
+        return _item_open._itemopen_post(machine, body)
+    if what == "cap-words":     # tools/cap_words.py --apply: his park words already in the store, or a long wait's real-world date, recorded through the normal write path
+        try:
+            if "basis" in body:
+                by = _owner_words._script_sender(body, machine)
+                gid = _norm_id(str(body.get("item") or ""))
+                out = _update_svc._update(gid, wait_basis=str(body.get("basis") or ""), sender=by)
+                return 200, {"item": _gh.shown(gid), "action": "set", "result": out.splitlines()[0] if out else ""}
+            return 200, _owner_words._record_cap_words(body, machine)
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "rebullet":      # tools/rebullet_descriptions.py: an open item's description rewritten as short bullets, checked for loss, through the normal write path
+        try:
+            return 200, _owner_words._rebullet_write(body, machine)
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "state":         # retired: the route answers 400 with the refusal naming what update takes instead (client.py post state sends nothing any more)
+        try:
+            return 200, _owner_words._state_write(body, machine)
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "migrate":       # tools/migrate_model.py: the migration onto the item model, planned by the script, applied here through the normal save path (begin | apply | end)
+        gate = _migrations.migration_gate(machine, body)       # off by default ([model] migration), and only the named sessions on the named machines
+        if gate is not None:
+            return gate
+        try:
+            return 200, _migrations.migrate_write(body, machine)
+        except ToolError as e:
+            return 400, {"error": str(e)}
+    if what == "register":      # a session says it exists (its SessionStart hook)
+        try:
+            s = _clients.register(machine, body)
+        except ValueError as e:
+            return 400, {"error": str(e)}
+        return 200, {"ok": True, "name": s.get("name") or "", "machine": s.get("machine")}
+    if what == "setup-result":  # a PC's own provisioning run ended (client.py setup-result): kept per machine, drawn on its Machines column
+        ok = body.get("ok")
+        if not isinstance(ok, bool):
+            return 400, {"error": "ok = true (the run succeeded) or false (it failed at step, for reason)"}
+        try:
+            rec = _clients.setup_result(machine, ok, str(body.get("step") or ""), str(body.get("reason") or ""))
+        except ValueError as e:
+            return 400, {"error": str(e)}
+        return 200, {"machine": machine, "setup": rec}
+    if what == "seen":          # a sign of life from a registered session (its Stop hook)
+        return 200, {"ok": _clients.seen(machine, str(body.get("uuid") or ""))}
+    if what == "ack":           # a puller confirms what it delivered and what it could not
+        d, f = body.get("delivered") or [], body.get("failed") or []
+        if not (isinstance(d, list) and isinstance(f, list)):
+            return 400, {"error": "delivered and failed are lists of line ids"}
+        acked = _inbox.peek([str(x) for x in d])           # step 2: the lines are gone once acked; a hand-off notice among them is the delivery of its hand-off
+        removed = _inbox.ack([str(x) for x in d], [str(x) for x in f])
+        if acked:
+            _handoff.handoff_acked(acked)
+        return 200, {"removed": removed}
+    if what == "held":          # a session's UserPromptSubmit hook fetches the notices held for it while it was busy (held.py); handed over once
+        uuid = str(body.get("uuid") or "").lower()
+        if not _clients.UUID.match(uuid):
+            return 400, {"error": "uuid = the session's transcript id"}
+        rec = _clients.sessions_on(machine).get(uuid)       # as drain: only a session the server holds for THIS machine, and its name is the server's record, never the request's
+        if rec is None:
+            return 200, {"text": "", "ids": []}
+        name = str(rec.get("name") or "")
+        if "ack" in body:       # the hook printed these lines: they go (until then they are leased, and offered again when the lease runs out)
+            ids = body.get("ack")
+            if not (isinstance(ids, list) and all(isinstance(x, str) for x in ids)):
+                return 400, {"error": "ack = the list of line ids the hook printed"}
+            return 200, {"removed": _held.ack(uuid, name, ids=ids)}
+        _held.mark_client(uuid, name)       # this session's hook fetches held lines: from now on a notice that asks nothing of it is held (the rollout gate)
+        text, ids = _held.lease(uuid, name)
+        return 200, {"text": text, "ids": ids}
+    if what == "drain":         # no puller on the machine: a session's own hook fetches what waits for it, at its next prompt
+        uuid = str(body.get("uuid") or "").lower()
+        if not _clients.UUID.match(uuid):
+            return 400, {"error": "uuid = the session's transcript id"}
+        rec = _clients.sessions_on(machine).get(uuid)
+        if rec is None:
+            try:
+                rec = _clients.register(machine, {"uuid": uuid, "name": str(body.get("name") or "")})
+            except ValueError as e:
+                return 400, {"error": str(e)}
+        else:
+            _clients.seen(machine, uuid)
+        return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
+    return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
 async def client_write(request: Request):
@@ -217,10 +451,10 @@ async def client_api(request: Request):
     return PlainTextResponse(body, status_code=status, media_type=ctype, headers={"Cache-Control": "no-store"})
 
 
-def register(mcp, *, client_get, client_post, recycle_wanted_tokens) -> None:
+def register(mcp, *, client_get, recycle_wanted_tokens) -> None:
     """Add the routes to the server's `mcp`, in the order they were declared in server.py. Called once."""
-    global _client_get, _client_post, _recycle_wanted_tokens
-    _client_get, _client_post, _recycle_wanted_tokens = client_get, client_post, recycle_wanted_tokens
+    global _client_get, _recycle_wanted_tokens
+    _client_get, _recycle_wanted_tokens = client_get, recycle_wanted_tokens
     mcp.custom_route("/client/{what}", methods=["POST"])(client_write)
     mcp.custom_route("/client/for-you/seen", methods=["POST"])(client_foryou_seen)
     mcp.custom_route("/client/items/{key}/watch", methods=["POST"])(client_item_watch)

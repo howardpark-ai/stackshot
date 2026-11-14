@@ -74,6 +74,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
 from stackshot.service import stamp as stamp_svc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import update as _update_svc
 from stackshot.web import search as _search
 from stackshot.github import ghsync as _gh
@@ -328,7 +329,7 @@ class DirectApp:
     def __init__(self): self.log = []
     def call(self, body):
         self.log.append(body["op"] + ("-dry" if body.get("dry") else ""))
-        return server._client_post("box-a", "migrate", {**body, "sender": SENDER})
+        return _rt_client._client_post("box-a", "migrate", {**body, "sender": SENDER})
 CFGM["migration"] = True
 RUN = pathlib.Path(_scratch.mkdtemp(prefix="pr2stamp-run-"))
 import argparse
@@ -483,7 +484,7 @@ closed_w = shown(32); closed_w["metadata"]["waits_on"] = "time"
 check("12 a closed item reads no stored waits_on", _model.stored_waits_on(closed_w) == "" and new_of(closed_w).state == _model.DEAD, None)
 
 # ---- 14. the gate
-call = lambda machine="box-a", **body: server._client_post(machine, "migrate", {"sender": SENDER, **body})
+call = lambda machine="box-a", **body: _rt_client._client_post(machine, "migrate", {"sender": SENDER, **body})
 put(91, needs=[BACK], state="doing")
 b91 = bytes_of(91)
 CFGM["migration"] = False

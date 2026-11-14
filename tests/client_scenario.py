@@ -447,6 +447,61 @@ check("owner change with owner_name: the given name is kept", m["owner"] == U an
 _update_svc._update("a7", owner="cse_0123456789abcdef", sender="sparrow"); m = md(7)
 check("owner re-passed unchanged without owner_name: the name it carries stays (a chat's name is only its owner_name)", m["owner_name"] == "sparrow", m)
 
+# the dispatcher of /client/{what} lives in web/routes/client_api.py: the `what` -> handlers table of its branches is pinned, as it stood when it left server.py
+import ast, inspect
+def _what_table(fn):
+    tree = ast.parse(inspect.getsource(fn)).body[0]
+    def whats(t):
+        if isinstance(t, ast.Compare) and isinstance(t.left, ast.Name) and t.left.id == "what":
+            c = t.comparators[0]
+            return [c.value] if isinstance(t.ops[0], ast.Eq) else [e.value for e in c.elts] if isinstance(t.ops[0], ast.In) else []
+        return []
+    def calls(nodes):
+        out = []
+        for n in nodes:
+            for c in ast.walk(n):
+                if isinstance(c, ast.Call):
+                    f = c.func
+                    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id.startswith("_"): out.append(f"{f.value.id}.{f.attr}")
+                    elif isinstance(f, ast.Name) and f.id.startswith("_"): out.append(f.id)
+        return list(dict.fromkeys(out))
+    return [" | ".join(whats(st.test)) + " -> " + ", ".join(calls(st.body)) for st in tree.body if isinstance(st, ast.If) and whats(st.test)]
+_WHAT_TABLE = [
+    "recycled -> _recycle_svc._recycled",
+    "recycle-due -> _recycle_svc._recycle_due",
+    "released -> _relsvc.released",
+    "event -> _ew.event_from_report, _evwaits.evwait_report, _ew.arrival, _gh.shown",
+    "sweep-released -> _relsvc.sweep_released",
+    "sweep-step-proof -> _proofs.sweep_proofs",
+    "page-debt -> _page_debt.enabled, _pdsvc.page_debt_pass, _page_debt.mode",
+    "orphan-handover -> _handoff.orphan_handover",
+    "backfill-contact -> _contacts._contact_backfill",
+    "message -> _relsvc._release_green, _messaging._message",
+    "handover -> _agent_names._name_on_handover",
+    "project-agent -> _project_agent",
+    "project-agent-mandate -> _project_agent_mandate",
+    "project-agent-rename -> _project_agent_rename",
+    "project-agent-retire -> _project_agent_retire",
+    "project -> _new_project",
+    "project-list -> _project_list",
+    "question -> _question_svc._question",
+    "terminal-prompt -> _terminal_prompt_svc._terminal_prompt",
+    "job-gap -> _job_gap._jobgap_post",
+    "item-open -> _item_open._itemopen_post",
+    "cap-words -> _owner_words._script_sender, _norm_id, _update_svc._update, _owner_words._record_cap_words, _gh.shown",
+    "rebullet -> _owner_words._rebullet_write",
+    "state -> _owner_words._state_write",
+    "migrate -> _migrations.migration_gate, _migrations.migrate_write",
+    "register -> _clients.register",
+    "setup-result -> _clients.setup_result",
+    "seen -> _clients.seen",
+    "ack -> _inbox.peek, _inbox.ack, _handoff.handoff_acked",
+    "held -> _clients.sessions_on, _held.ack, _held.mark_client, _held.lease",
+    "drain -> _clients.sessions_on, _clients.seen, _clients.register, _inbox.take",
+]
+check("client_post: the `what` -> handlers table of the dispatcher is the one it had in server.py (%d branches)" % len(_WHAT_TABLE), _what_table(_rt_client._client_post) == _WHAT_TABLE, _what_table(_rt_client._client_post))
+check("client_post: an unknown `what` is a 404 naming the writes there are, and the dispatcher is no name of server", _rt_client._client_post("home", "no-such-write", {})[0] == 404 and not hasattr(server, "_client_post"), _rt_client._client_post("home", "no-such-write", {}))
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": client scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))
 sys.exit(1 if fails else 0)

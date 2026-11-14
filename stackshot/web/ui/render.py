@@ -445,7 +445,7 @@ def yesno_options(r):
     """(the owner): an open decision whose owner stored no options gets two choices of its own, Yes (recommended, first) and No, as
     choices with the box beside them. [] for any other item: one with stored options shows only those (never Yes/No, Approve or
     Decline added to them; nor to a hand-edited list that broke the shape), and so does one that asks no decision or is closed. The server takes the same two labels on the same test
-    (server._answer), so an answer to an ask that has since gained options, or left the decision, reads as stale."""
+    (`_answer` of service/answer.py), so an answer to an ask that has since gained options, or left the decision, reads as stale."""
     if r.get("status") == "completed" or "decision" not in [x.lower() for x in needs_of(r)] or (r.get("metadata") or {}).get("options"): return []
     return [dict(o) for o in YESNO_OPTIONS]
 def option_lines(r):
@@ -2662,7 +2662,7 @@ class Board:
                     + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
                     f'<div class="abtns"><button type="submit" class="b main" name="act" value="comment">{_t("home.send")}</button></div>'
                     '<p class="isent warn aerr" role="alert" hidden></p></form>')
-        call = "decision" in [x.lower() for x in needs_of(r)]          # the server takes a choice only then (server._answer)
+        call = "decision" in [x.lower() for x in needs_of(r)]          # the server takes a choice only then (`_answer` of service/answer.py)
         opts = _card_order(options_of(r) or yesno_options(r)) if call else []     # three or more in the stored order (lettered), two with the recommended one first; the owner's stored options only, and with none, Yes and No
         if opts:                  # the cards (_cards_html), an optional note and one Send, greyed by the page script (_CARDS_JS) until a card is picked or the note has text
             return (f'<form class="ianswer" data-cards method="post" action="{e(answer["action"])}"><b>{_t("answer.your_answer")}</b>'

@@ -75,6 +75,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as pg; from stackshot.projects import project_registry as PR; from stackshot.model import item_project as IP
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
 from stackshot.service import stamp as stamp_svc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
@@ -263,7 +264,7 @@ for i in (12, 13): (T / f"store/g/{i}.json").unlink(missing_ok=True)
 snapU = snapshot()
 CFGM["migration"] = True
 SENDER = "falcon-engineer"
-call = lambda machine="box-a", **body: server._client_post(machine, "migrate", {"sender": SENDER, **body})
+call = lambda machine="box-a", **body: _rt_client._client_post(machine, "migrate", {"sender": SENDER, **body})
 st_, d_ = call(op="project_id", items=[f"g{i}" for i in CASES], pass_id="20260101-000000-abcdef")
 undo_entries = [{"item": r["item"], "before": r["before"], "after": r["after"]} for r in d_["results"] if r["action"] == "set"]
 check("9 the route stores the ids and answers, per item, the key before and after", st_ == 200 and len(undo_entries) == len(EXPECT), (st_, d_["results"][:2] if st_ == 200 else d_))
@@ -306,7 +307,7 @@ class DirectApp:
     def __init__(self): self.log = []
     def call(self, body):
         self.log.append(body["op"] + ("-dry" if body.get("dry") else ""))
-        return server._client_post("box-a", "migrate", {**body, "sender": SENDER})
+        return _rt_client._client_post("box-a", "migrate", {**body, "sender": SENDER})
 CFGM["migration"] = True
 RUN = pathlib.Path(_scratch.mkdtemp(prefix="itemprj-run-"))
 args = argparse.Namespace(sender=SENDER, run_dir=str(RUN), undo="")

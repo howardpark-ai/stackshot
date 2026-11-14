@@ -4,7 +4,7 @@ pending answers are kept in (`_answers_path`, `_answers_load`, `_answers_save`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the renderer, the option labels, the item
 states, the instance settings (`core/instance.py`) and the sign-in key (`auth/signin.py`). server.py imports the names its own code reads from here (`_answer_words`, `_answers_load` and the others it calls), and the suites and scripts read and set every other name on this module.
-`_ANSWER_LOCK` is taken only by the functions that stay in server.py (`_answer_ack`, `_answer` and `_answer_tick`), nothing here takes it: they read it on this module (`answers._ANSWER_LOCK`),
+`_ANSWER_LOCK` is taken only by the answer path of service/answer.py (`_answer_ack`, `_answer` and `_answer_tick`), nothing here takes it: it reads it on this module each time (`answers._ANSWER_LOCK`, through the `answers_mod` hook),
 so the suite that puts a spy in its place sets it here."""
 from __future__ import annotations
 

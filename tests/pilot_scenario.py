@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc
@@ -3219,9 +3220,9 @@ check("auto-name: a close by an unnamed background agent names it first (the rec
       rd(x1)["status"] == "completed" and "needs" not in rd(x1)["metadata"] and f"(named work-osprey-x in {x1}'s needs: close by work-osprey-x)" in res
       and not [m for m in p[n0:] if "now names work-osprey-x" in m[1]] and any(f"{x1} (mover work-osprey-main, a front agent) was completed (done: built) by work-osprey-x" in m[1] for m in p[n0:]), (res, p[n0:]))
 check("auto-name: the client API's handover write takes the same path (a box's hook reporting a SendMessage), with the path in the record",
-      (lambda g: server._client_post("testbox", "handover", {"to": "work-osprey-x", "text": f"SendMessage about {g}", "sender": "home-beta"}) == (200, {"result": f"(named work-osprey-x in {g}'s needs: handover message from home-beta (SendMessage on testbox))"})
+      (lambda g: _rt_client._client_post("testbox", "handover", {"to": "work-osprey-x", "text": f"SendMessage about {g}", "sender": "home-beta"}) == (200, {"result": f"(named work-osprey-x in {g}'s needs: handover message from home-beta (SendMessage on testbox))"})
        and needs46(g) == ["work-osprey-x"])(mk46(owner="home-beta")))
-check("auto-name: …and refuses a body without a sender", server._client_post("testbox", "handover", {"to": "work-osprey-x", "text": "x"})[0] == 400)
+check("auto-name: …and refuses a body without a sender", _rt_client._client_post("testbox", "handover", {"to": "work-osprey-x", "text": "x"})[0] == 400)
 # [pilot] never_named (a follow-up): a background agent whose mandate never works items (a maintainer agent, the audit) is
 # never named by the server, at either moment; an unlisted background agent still is; a listed one can still be named by hand
 O = "55555555-5555-4555-8555-555555555555"; _fl46 = (T / "fleet/a/sessions.json").read_text()
@@ -3261,7 +3262,7 @@ GREEN = "[release] PR #113 merged and deployed — a change — main at 0606060,
 n0 = len(wait_push(0)); owed0 = json.dumps(_web_page_debts._owed_load(), sort_keys=True); comments = []
 _ge, _goc = _ghs.enabled, _ghs.on_change
 _ghs.enabled = lambda: True; _ghs.on_change = lambda gid, before, after, name="", sid="", note="", background=False: comments.append((gid, before == {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in after.items() if k not in ("activity",)}, name, note, after.get("activity")))      # an item from before the activity clock gains the field at its first save (seeded from its last update, so a server note moves nothing), and an open item gains its stored phase: the item is otherwise unchanged
-st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
+st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
 _ghs.enabled, _ghs.on_change = _ge, _goc
 time.sleep(0.3)
 m47 = re.search(r"notice ([0-9a-f]{6}) on projects/alpha", str(body.get("result")))
@@ -3293,19 +3294,19 @@ def held47(body, k0):      # the notice id of a message held for the router, or 
     return m.group(1) if m and len(wait_push(0)) == k0 else ""
 n0 = len(wait_push(0))
 RED = "[release] PR #114 FAILED at deploy: healthz did not answer · log /x/pr-114.log"
-st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": RED, "sender": "release"})
+st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": RED, "sender": "release"})
 nr = held47(body, n0); nrl = next((n for n in routing.read("projects/alpha") if n["id"] == nr), {})
 check("red release: held for the router, a [stackshot message] with its notice id waiting for a ruling; nothing is delivered to the keeper", st == 200 and nr and (router_live.stashed(nr) or "").startswith("[stackshot message] from release (a script on testbox) · ")
       and "[release] PR #114 FAILED" in (router_live.stashed(nr) or ""), (body, wait_push(0)[n0:]))
 check("red release: its routing line is live, has no recipient, no log-only mark and no ruling", nrl.get("live") is True and nrl["to"] == "" and not nrl.get("log_only") and not nrl.get("ruling"), nrl)
-st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": RED, "sender": "release", "release": "red", "pr": PRU})
+st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": RED, "sender": "release", "release": "red", "pr": PRU})
 check("red release: --release red is held the same way", held47(body, n0) != "" and "PR #114 FAILED" in (router_live.stashed(held47(body, n0)) or ""), body)
-st, body = server._client_post("testbox", "message", {"to": "projects/beta", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
+st, body = _rt_client._client_post("testbox", "message", {"to": "projects/beta", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
 check("green release to a project with one session (beta, no longer outside any list: the router rules every page): logged, not delivered, like alpha's", body["result"].startswith("logged, not delivered") and len(wait_push(0)) == n0, body)
 for n in routing.read("projects/beta"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="done with the release checks", by="work-osprey")
 _rg = released_svc._release_green; released_svc._release_green = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full"))
-st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
+st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
 released_svc._release_green = _rg
 check("a log-only path that fails hands the result to the router instead, never loses it", held47(body, n0) != "" and "PR #113 merged" in (router_live.stashed(held47(body, n0)) or ""), body)
 # only release.sh's own report of a PR of this repo goes log-only: anything else is held for the router
@@ -3313,19 +3314,19 @@ for why, extra in (("another sender", {"sender": "size-watch"}), ("a sender that
                    ("no pr", {"pr": ""}), ("a garbage pr", {"pr": "not a url"}), ("an issue, not a PR", {"pr": "https://github.com/example-owner/stackshot/issues/113"}),
                    ("another repository's PR", {"pr": "https://github.com/someone/else/pull/113"})):
     k0 = len(wait_push(0))
-    st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU, **extra})
+    st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU, **extra})
     nx = held47(body, k0)
     check(f"green with {why}: not log-only, held for the router, waiting for a ruling",
           st == 200 and nx and not next(n for n in routing.read("projects/alpha") if n["id"] == nx).get("ruling") and not next(n for n in routing.read("projects/alpha") if n["id"] == nx).get("log_only"), body)
 k0 = len(wait_push(0)); _or = released_svc._OWN_REPO[:]; released_svc._OWN_REPO[:] = [""]
-st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
+st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
 released_svc._OWN_REPO[:] = _or
 check("a checkout whose own repository cannot be read sends nothing log-only: held for the router", held47(body, k0) != "", body)
 for n in routing.read("projects/alpha"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="done with the release checks", by="work-osprey")
 
 # the daily digest of automatic rulings is gone with the keeper: a ruling by stackshot (auto) stays on the routing page, and route() overrules it
-st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN.replace("PR #113", "PR #115"), "sender": "release", "release": "green", "pr": PRU.replace("113", "115")})
+st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN.replace("PR #113", "PR #115"), "sender": "release", "release": "green", "pr": PRU.replace("113", "115")})
 nid47c = re.search(r"notice ([0-9a-f]{6})", body["result"]).group(1)
 res = _wt_route._route(nid47c, "passed", to="work-osprey-main", reason="the owner should hear of this one", sender="work-osprey")
 nc = next(n for n in routing.read("projects/alpha") if n["id"] == nid47c)
@@ -3688,11 +3689,11 @@ try:
     GREEN49 = "[release] PR #113 merged and deployed — a change — main at 0606060, restarted: stackshot.service, healthz ok · log /x/pr-113.log"
     for origin49, pr49, what49 in ((OLD49, newpr49(113), "origin old, PR new"), (NEW49, oldpr49(113), "origin new, PR old")):
         released_svc._OWN_REPO[:] = [origin49]; n0 = len(wait_push(0))
-        st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN49, "sender": "release", "release": "green", "pr": pr49})
+        st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN49, "sender": "release", "release": "green", "pr": pr49})
         check(f"green release, {what49}: logged, not delivered, ruled merged by stackshot (auto)", st == 200 and str(body.get("result")).startswith("logged, not delivered") and "ruled merged by stackshot (auto)" in body["result"]
               and len(wait_push(0)) == n0, (st, body))
     moved49(None); released_svc._OWN_REPO[:] = [OLD49]; n0 = len(wait_push(0))
-    st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN49, "sender": "release", "release": "green", "pr": newpr49(113)})
+    st, body = _rt_client._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN49, "sender": "release", "release": "green", "pr": newpr49(113)})
     check("green release, no table: origin old, PR new is not this repo's PR, held for the router as before", not str(body.get("result")).startswith("logged, not delivered"), body)
     released_svc._OWN_REPO[:] = ["example-owner/stackshot"]
     for n in routing.read("projects/alpha"):

@@ -53,6 +53,7 @@ def put(i, status="open", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server; from stackshot.service import projects as _psvc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import contacts as _contacts
@@ -214,15 +215,15 @@ _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form
 for p_ in (T / "store").glob("?/*.json"): p_.unlink()
 put(50, contact=SIDE); put(51, contact=SIDE, project="projects/delta/sub"); put(52, contact=MAIN); put(53, status="completed", contact=SIDE, outcome="done", reason="done")
 told.clear()
-st, out = server._client_post("box-a", "project-agent-retire", {"project": "projects/delta", "name": SIDE, "sender": "sala-retire"})
+st, out = _rt_client._client_post("box-a", "project-agent-retire", {"project": "projects/delta", "name": SIDE, "sender": "sala-retire"})
 check("endpoint retire: the page's line is removed (200) and the answer lists the items whose contact fell", st == 200 and out.get("result") == "line removed" and sorted(out.get("contact_moved", [])) == [sh("a50"), sh("a51")], (st, out))
 check("endpoint retire: …to the project's -main agent; another contact and a closed item stay", ct(50) == MAIN and ct(51) == MAIN and ct(52) == MAIN and ct(53) == SIDE and SIDE not in _psvc.PAGE_IO.pages["projects/delta"], (rd(50)["metadata"], rd(53)["metadata"]))
 check("endpoint retire: nobody is told, and the filing write keeps both clocks", told == [] and rd(50)["state_updated"] == now0 - 60 and rd(50)["updated"] == now0 - 60, (told, rd(50)))
 put(54, contact=MAIN)
-st, out = server._client_post("box-a", "project-agent-rename", {"project": "projects/delta", "old": MAIN, "new": "delta-lead", "sender": "fleet-web"})
+st, out = _rt_client._client_post("box-a", "project-agent-rename", {"project": "projects/delta", "old": MAIN, "new": "delta-lead", "sender": "fleet-web"})
 check("endpoint rename: the page's key is renamed (200) and the answer lists the items that followed", st == 200 and out.get("result") == "renamed" and sh("a54") in out.get("contact_moved", []), (st, out))
 check("endpoint rename: the contact stored as the old plain name is the new name; nobody is told", rd(54)["metadata"]["contact"] == "delta-lead" and told == [], (rd(54)["metadata"], told))
-st, out = server._client_post("box-a", "project-agent-retire", {"project": "projects/delta", "name": "home-delta-nobody", "sender": "sala-retire"})
+st, out = _rt_client._client_post("box-a", "project-agent-retire", {"project": "projects/delta", "name": "home-delta-nobody", "sender": "sala-retire"})
 check("endpoint retire: a name on no page → 200 'not listed', no contact_moved in the answer", st == 200 and out.get("result") == "not listed" and "contact_moved" not in out, (st, out))
 _psvc.PAGE_IO = None
 (T / "store" / "project-record.json").unlink(missing_ok=True)       # the endpoints above wrote the RECORD (an entry for projects/delta made from the page, then its renamed agents); the sections below read the REG fixture, so the record goes with the fake page

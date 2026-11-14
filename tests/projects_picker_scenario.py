@@ -96,6 +96,7 @@ ID = re.compile(r"^prj_[0-9a-f]{8}$")
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.service import projects as _psvc; from stackshot.service import audit_ticks as audit_ticks_svc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.core import config as _cfg
@@ -229,7 +230,7 @@ class FakeIO:
         s.pages[slug] = content; s.revs[slug] = s.revs.get(slug, 1) + 1; return "ok", ""
     def add_timeline(s, slug, date, summary, detail, source, request_id=""): s.timeline.append((slug, summary)); return ""
 gio = FakeIO(); _psvc.PAGE_IO = gio
-def mk(key, scope, title="", sender="fleet-web", **kw): return server._client_post("box-c", "project", {"key": key, "scope": scope, "title": title, "sender": sender, **kw})
+def mk(key, scope, title="", sender="fleet-web", **kw): return _rt_client._client_post("box-c", "project", {"key": key, "scope": scope, "title": title, "sender": sender, **kw})
 st, out = mk("projects/new-one", "work", "New one")
 r = out.get("project", {})
 check("new project: 200, created, the page written once through gbrain at that key", st == 200 and out["created"] is True and out["page"] == {"key": "projects/new-one", "state": "ok", "display_name": "work-new-one"}
@@ -349,7 +350,7 @@ st, out = mk("projects/yaml-check", "home", "Yaml check")
 check("new project: the reply carries page_yaml, empty until an agent is registered (project-agent's reply fills it)", st == 200 and out["page_yaml"] == "" and "page_yaml" in out, (st, out))
 
 # ---- 5. list a hidden project again
-def relist(key, **kw): return server._client_post("box-c", "project-list", {"key": key, **kw})
+def relist(key, **kw): return _rt_client._client_post("box-c", "project-list", {"key": key, **kw})
 H = rec("projects/eta")["id"]
 check("re-list: before, eta is hidden but found by a search", "projects/eta" not in keys("home") and "projects/eta" in keys("home", "eta"))
 nc = len(gio.creates); st, out = relist("projects/eta", sender="fleet-web")
@@ -380,7 +381,7 @@ check("re-list: …and the file is as it was", idfile() == json.loads(good) and 
 
 # ---- 6. project-agent: the form's agent (the record first, the page's agents block written from it)
 from stackshot.projects import project_verbs as pverbs; from stackshot.projects import pages as _pg
-def pa(project, name, sender, role="main", front=True, mandate="the main agent"): return server._client_post("box-c", "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender})
+def pa(project, name, sender, role="main", front=True, mandate="the main agent"): return _rt_client._client_post("box-c", "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender})
 def page_agents(key): return _pg.split_agents(_pg.frontmatter_text(gio.pages[key]).get("agents"))
 locked_seen = []; real_add = pverbs.agent_add
 def spy_add(*a, **k): locked_seen.append(_psvc._PROJECT_LOCK.locked()); return real_add(*a, **k)
@@ -454,7 +455,7 @@ OLD_B = "builds, via subagents"
 NEW_B = "builds the server; reviews each change; releases for every builder"
 st1, _o = pa("projects/mand", "home-mand-main", U["home-mand"])
 st2, _o = pa("projects/mand", "home-mand-builder", U["home-mand"], role="builder", front=False, mandate=OLD_B)
-def pam(project, name, sender, mandate=NEW_B): return server._client_post("box-c", "project-agent-mandate", {"project": project, "name": name, "mandate": mandate, "sender": sender})
+def pam(project, name, sender, mandate=NEW_B): return _rt_client._client_post("box-c", "project-agent-mandate", {"project": project, "name": name, "mandate": mandate, "sender": sender})
 check("agent mandate: (setup) a project with a front agent and a background builder, both on the page", st == 200 and st1 == 200 and st2 == 200 and page_agents("projects/mand") == ({"home-mand-main": "the main agent", "home-mand-builder": OLD_B}, {"home-mand-builder": OLD_B}), page_agents("projects/mand"))
 st, out = pam("projects/mand", "home-mand-builder", "home-mand-main")
 check("agent mandate: a name as sender proves nothing -> 403, the old line stays", st == 403 and "name" in out["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == OLD_B, (st, out))
@@ -485,14 +486,14 @@ check("agent mandate: an agent that is not listed -> 404 naming it and pointing 
 for bad_ in ("", "   ", "a\nb", "x" * 601):
     st, out = pam("projects/mand", "home-mand-builder", U["home-mand"], mandate=bad_)
     check(f"agent mandate: a bad line ({bad_[:8]!r}) -> 400 with a text that says what to change; the line stays", st == 400 and ("empty" in out["error"] or "one line" in out["error"]) and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == NEW_B, (st, out))
-check("agent mandate: no such project -> 404; a missing sender -> 400", pam("projects/nowhere", "home-x-main", U["home-mand"])[0] == 404 and server._client_post("box-c", "project-agent-mandate", {"project": "projects/mand", "name": "home-mand-builder", "mandate": NEW_B})[0] == 400)
+check("agent mandate: no such project -> 404; a missing sender -> 400", pam("projects/nowhere", "home-x-main", U["home-mand"])[0] == 404 and _rt_client._client_post("box-c", "project-agent-mandate", {"project": "projects/mand", "name": "home-mand-builder", "mandate": NEW_B})[0] == 400)
 st, out = pa("projects/mand", "home-mand-builder", U["home-mand"], role="builder", front=False, mandate="something else")
 check("agent mandate: project-agent with another line for a listed name is still a 409, and the text now names project-agent-mandate", st == 409 and "project-agent-mandate" in out["error"], (st, out))
 
 # ---- 6a. the form call: a trusted label AND a trusted machine (the token's, never the body's) may add a pending agent to any LISTED project
 page("projects/lambda.md", "type: project\ntitle: Lambda\norg: home\ndisplay-name: home-lambda\nagents:\n  home-lambda-main: talks to Oliver"); p.cmd_registry(quiet=True)
 L = rec("projects/lambda")["id"]
-def fpa(machine, project, name, sender, role="helper", front=False, mandate="a helper for the form"): return server._client_post(machine, "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender})
+def fpa(machine, project, name, sender, role="helper", front=False, mandate="a helper for the form"): return _rt_client._client_post(machine, "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender})
 def lam_pending():
     """The agents the form (or any label) listed on lambda: the record's agents that carry a `by` (the page's own line is the one without)."""
     return {n: a for n, a in (pverbs.pr.entries().get(L, {}).get("agents") or {}).items() if a.get("by")}
@@ -583,7 +584,7 @@ check("main_of: the page's front -main beats a page_owed one whatever the order;
       and prj.main_of({"a-main": {"front": True, "page_owed": True}, "b-main": {"front": True, "page_owed": True}}) == "a-main"
       and prj.main_of({"a-main": {"front": False}, "b-x": {"front": True}}) == "" and prj.main_of({}) == "")
 st, out = fpa("box-c", "projects/lambda", "home-lambda-body", "fleet-web")
-st2, out2 = server._client_post("box-c", "project-agent", {"project": "projects/lambda", "name": "home-lambda-body", "role": "helper", "front": False, "mandate": "m", "sender": "fleet-web", "machine": "box-a"})
+st2, out2 = _rt_client._client_post("box-c", "project-agent", {"project": "projects/lambda", "name": "home-lambda-body", "role": "helper", "front": False, "mandate": "m", "sender": "fleet-web", "machine": "box-a"})
 check("form call: a body that carries a machine field makes no form call (the token's machine decides): 403, nothing recorded", st2 == 403 and "home-lambda-body" not in lam_pending(), (st2, out2))
 PJ1 = (T / "state/projects.json").read_bytes()
 fpa("box-a", "projects/delta", "home-delta-helper", "fleet-web"); fpa("box-a", "projects/lambda", "home-lambda-docs-main", "fleet-web"); fpa("box-a", "projects/lambda", "home-lambda-SEED", "fleet-web", role="seed", mandate="other")
@@ -770,7 +771,7 @@ _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["b
 def rn(project, old, new, sender="fleet-web", machine="box-a", **kw):
     b = {"project": project, "old": old, "new": new, **kw}
     if sender is not None: b["sender"] = sender
-    return server._client_post(machine, "project-agent-rename", b)
+    return _rt_client._client_post(machine, "project-agent-rename", b)
 def agents_of(slug):
     f, b = p.split_agents(p.frontmatter_text(rio.pages[slug]).get("agents")); return list(f.items()), list(b.items())
 def rec_agents(pid): return [(n, a["mandate_line"]) for n, a in (pverbs.pr.entries().get(pid, {}).get("agents") or {}).items()]
@@ -929,7 +930,7 @@ RT = rec("projects/rtr")["id"]; RTS = rec("projects/rtr-solo")["id"]
 def rt(project, name, sender="sala-retire", machine="box-a", **kw):
     b = {"project": project, "name": name, **kw}
     if sender is not None: b["sender"] = sender
-    return server._client_post(machine, "project-agent-retire", b)
+    return _rt_client._client_post(machine, "project-agent-retire", b)
 def today(): return datetime.datetime.now(_cfg.tz()).strftime("%Y-%m-%d")
 def tl(key="projects/rtr"): return [(t[1], t[2], t[3], t[4]) for t in rio.timeline if t[0] == key]
 ag0, bg0 = agents_of("projects/rtr")

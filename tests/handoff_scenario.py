@@ -86,6 +86,8 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.web.routes import client_api as _rt_client
+from stackshot.service import answer as answer_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import github_events as ghev_svc
 from stackshot.service import agent_names as _agent_names
@@ -228,11 +230,11 @@ check("2 delivered: …it is queued (queued_at), with no delivered_at", isinstan
 # the puller's ack, seen by the server in the /inbox/ack route, is the delivery
 from stackshot.fleet import inbox as IB
 iid = IB.put(U["home-peer"], handoff_svc.handoff_text("a10", rd(10), ho(10)), "msg", sender="home-send")
-st_, body_ = server._client_post("a", "ack", {"delivered": [iid]})
+st_, body_ = _rt_client._client_post("a", "ack", {"delivered": [iid]})
 check("2 ack: the puller's ack of the hand-off notice (read from the inbox file before it goes) makes the hand-off delivered, at the ack's time", st_ == 200 and abs((ho(10).get("delivered_at") or 0) - time.time()) < 30
       and "queued_at" not in ho(10) and "queued" not in ho(10) and not IB.exists(iid), (st_, body_, ho(10)))
 iid = IB.put(U["home-peer"], "[stackshot] a99 is handed to you by home-send: something else", "msg", sender="home-send"); item(98); hand(98, "home-peer"); inbox("home-peer"); drain()
-server._client_post("a", "ack", {"delivered": [iid]})
+_rt_client._client_post("a", "ack", {"delivered": [iid]})
 check("2 ack: …an acked line about another item delivers nothing", ho(98).get("delivered_at") is None and ho(98).get("queued", "").startswith("inbox"), ho(98))
 inbox()
 # no ack seen: the clock starts [model] handoff_inbox_grace_minutes (10) after the line was queued
@@ -769,7 +771,7 @@ check("11 ack: (setup) a needs-based hand-off whose line waits in the inbox is q
 line_ao = [x for x in pushes_to("team-back", "a25")][-1][1]
 check("11 ack: …and the line it sent is not the hand-off notice's wording", "now needs you" in line_ao and "is handed to you by" not in line_ao, line_ao)
 iid = IB.put(U["team-back"], line_ao, "msg", sender="home-send")
-st_, body_ = server._client_post("a", "ack", {"delivered": [iid]})
+st_, body_ = _rt_client._client_post("a", "ack", {"delivered": [iid]})
 check("11 ack: …the ack of that line, whatever its phrasing, delivers the hand-off", st_ == 200 and isinstance(ho(25).get("delivered_at"), float) and "queued" not in ho(25), (st_, ho(25)))
 check("11 script labels: every label a script writes under is one (via a script on, (a script on …), a script on …), a session's name is not",
       all(H.is_script(x) for x in ("home-send via a script on testbox", "a script on testbox", "home-send (a script on testbox)")) and not H.is_script("home-send") and not H.is_script("cold-call"), None)
@@ -786,7 +788,7 @@ check("12 his hand-off: a write that hands an item to him records it, mover Oliv
 check("12 his hand-off: …and get reads it as not yet taken", f"handoff: handed to {OWN}, not yet taken" in _wt_get.stackshot_get("a26"), _wt_get.stackshot_get("a26"))
 upd(26, "team-back", next="Oliver: decide")
 check("12 his hand-off: a later write of the agent's, with the item still his to move, leaves it not taken", not ho(26).get("taken_at"), ho(26))
-check("12 his hand-off: …and his board answer ends it, with the mover back on the agent", server._answer("a26", "Yes", "", "answer") == "decision" and isinstance(ho(26).get("taken_at"), float)
+check("12 his hand-off: …and his board answer ends it, with the mover back on the agent", answer_svc._answer("a26", "Yes", "", "answer") == "decision" and isinstance(ho(26).get("taken_at"), float)
       and mt(26)["mover"] == "team-back" and "then" not in mt(26), (mt(26), ho(26)))
 g_aa = _wt_get.stackshot_get("a26")
 check("12 his hand-off: …get no longer says not yet taken and the brief does not list it", "not yet taken" not in g_aa and f"handoff: handed to {OWN}, taken" in g_aa and "a26" not in "\n".join(handoff_svc.handoff_brief()), g_aa)

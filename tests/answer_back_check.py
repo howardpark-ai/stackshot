@@ -63,6 +63,7 @@ git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 import uvicorn; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+from stackshot.service import answer as answer_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.auth import signin as _signin
@@ -107,14 +108,14 @@ try:
         ctx.close()
 
         # 2. the buttons are disabled while the request runs
-        real = server._answer
-        server._answer = lambda *a: (time.sleep(1.0), real(*a))[1]
+        real = answer_svc._answer
+        answer_svc._answer = lambda *a: (time.sleep(1.0), real(*a))[1]
         ctx, pg = tab()
         pg.goto(BASE + "/"); pg.goto(BASE + "/items/a2")
         pg.click('label.acard:has(input[value="Wait"])'); pg.click('button[name="act"][value="answer"]', no_wait_after=True); pg.wait_for_timeout(250)
         st = pg.evaluate("[[...document.querySelectorAll('form.ianswer button')].map(b => b.disabled), document.querySelector('form.ianswer').hasAttribute('aria-busy')]")
         check("script: while the request runs every button is disabled and the form is aria-busy", all(st[0]) and len(st[0]) == 1 and st[1], st)
-        pg.wait_for_url(BASE + "/items/a2?sent=decision"); server._answer = real
+        pg.wait_for_url(BASE + "/items/a2?sent=decision"); answer_svc._answer = real
         pg.go_back(); pg.wait_for_load_state()
         check("script: …and Back from there lands on the board too", pg.url == BASE + "/", pg.url)
         ctx.close()

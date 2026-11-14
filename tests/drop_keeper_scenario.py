@@ -48,6 +48,7 @@ def put(i, status="open", project="projects/alpha", creator=MAIN, **meta):
 
 from stackshot.web import server
 from stackshot.service import migrations as migsvc
+from stackshot.service import answer as answer_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
@@ -159,7 +160,7 @@ STORED = [{"label": "Park until a day", "line": "On hold with a wake.", "recomme
     "metadata": {"owner": MAIN, "project": "projects/alpha", "mover": BUILD, "needs": ["decision"], "options": STORED, "idle": {"poked": since, "to": BUILD, "raised": since + 300},
                  "ask": "Decide: what to do with a16, idle on agent since earlier · Recommend: Park until a day · Stakes: the builder was asked and did not move it · By: no date"}}))
 told.clear()
-res = server._answer("a16", "Not needed", "", "")
+res = answer_svc._answer("a16", "Not needed", "", "")
 check("Not needed: an ordinary answer to the mover, nothing is poked", res == "decision" and not [x for x in told if x[0] == "idle" and x[1] == "a16"], told)
 
 # ---- 8. nothing left says 'keeper of record'

@@ -68,6 +68,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids; from stackshot.service import terminal_prompt as terminal_prompt_svc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.service import store as _service_store
@@ -98,7 +99,7 @@ def tp(action, session="home-sparrow-builder", question="May I run the migration
     b = {"action": action, "session": session, "sender": sender}
     if question is not None: b["question"] = question
     b.update(kw)
-    return server._client_post(machine or me, "terminal-prompt", {k: v for k, v in b.items() if v is not None})
+    return _rt_client._client_post(machine or me, "terminal-prompt", {k: v for k, v in b.items() if v is not None})
 def nxt(name, question): return f"Oliver: open {SALA}{name} and answer: `{question}`"
 def open_for(session): return [g for g in terminal_prompt_svc._terminal_open_items(session)]
 n0 = len(items())
@@ -212,7 +213,7 @@ refused("a session missing is refused", "session", session="")
 refused("a session of more than 120 characters is refused", "session", session="s" * 121)
 refused("an action that is neither open nor clear is refused", "action = open | clear", action="reopen")
 refused("a clear with no sender is refused", "sender", action="clear", question=None, sender="")
-st, o = server._client_post(me, "terminal-prompt", {"action": "open", "session": "home-sparrow-builder", "sender": "s", "question": 5}); check("a question that is not a string is refused", st == 400, (st, o))
+st, o = _rt_client._client_post(me, "terminal-prompt", {"action": "open", "session": "home-sparrow-builder", "sender": "s", "question": 5}); check("a question that is not a string is refused", st == 400, (st, o))
 check("…the refusals left no item and no part of one", terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == [], terminal_prompt_svc._terminal_open_items("home-sparrow-builder"))
 
 # ---- 7. what a pane writes: alarming words, a long line, characters
@@ -416,7 +417,7 @@ import _docs
 readme = _docs.page("client-contract")
 check("the docs document the post kind: both verbs, the route, the item's shape, the idempotency and the page-debt rule", "POST /client/terminal-prompt" in readme and "post terminal-prompt open" in readme
       and "post terminal-prompt clear" in readme and "metadata.terminal_prompt" in readme and "the pane stopped waiting" in readme)
-check("the 404 list of the client API names the new write", "terminal-prompt" in server._client_post(me, "nope", {})[1]["error"])
+check("the 404 list of the client API names the new write", "terminal-prompt" in _rt_client._client_post(me, "nope", {})[1]["error"])
 check("the server's docstring and the client's usage line carry the shape", "terminal-prompt" in client.TERMINAL_PROMPT_USAGE and "Answer <session>'s question in its terminal" in " ".join(terminal_prompt_svc._terminal_prompt.__doc__.split()))
 
 # [subject] fallback_prefix: the prefix of an item no session wrote when the project's scope has none of its own

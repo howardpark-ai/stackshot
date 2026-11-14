@@ -42,6 +42,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import bullet_text as BT; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from fastmcp.exceptions import ToolError
@@ -156,7 +157,7 @@ check("a server-side _update with an unlabeled description is written", stored("
 out = _wt_create._create(subject="[home] built by the server", description="- No label here\n- Second", project=STK, owner=MAIN, next=f"{MAIN}: carry on")
 check("the server's own _create is filed whatever its first bullet", out.startswith("created"), out)
 me = "box-1"
-st, ans = server._client_post(me, "question", {"project": "example", "ask": "Decide: whether to cut the retry to three · Recommend: cut it · Stakes: the run waits an hour either way · By: Fri Oct 23rd",
+st, ans = _rt_client._client_post(me, "question", {"project": "example", "ask": "Decide: whether to cut the retry to three · Recommend: cut it · Stakes: the run waits an hour either way · By: Fri Oct 23rd",
                                                "text": "The nightly run failed twice on the same step.\nCut the retry to three, or keep five and wait?", "sender": "q-script",
                                                "options": [{"label": "Cut", "line": "Cut the retry to three and go on.", "recommended": True}, {"label": "Keep", "line": "Keep five retries and wait.", "recommended": False}],
                                                "subject": "[home] Cut the nightly retry?", "request_id": "goal-q-1"})

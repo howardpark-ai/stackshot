@@ -63,6 +63,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.service import answer as answer_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import agents as _agents
@@ -350,7 +351,7 @@ check("5b: the year rule: a `Jan 5th` written in December is next January's, an 
 
 # ================================================================ 6. a decision asked again
 item(70, needs=["decision"], ask=ASK)
-check("6: (setup) Oliver answers on the board: decision out of needs, ask dropped, the ask he answered kept with his answer", server._answer("a70", "", "ship it", "answer") == "decision"
+check("6: (setup) Oliver answers on the board: decision out of needs, ask dropped, the ask he answered kept with his answer", answer_svc._answer("a70", "", "ship it", "answer") == "decision"
       and "decision" not in mt(70).get("needs", []) and "ask" not in mt(70) and mt(70)["answers"][-1].get("ask") == ASK, mt(70))
 refused_nw("6: needs=decision back with the same ask within the hour is refused, with why and how to go on", 70, lambda: upd(70, needs=["decision"], ask=ASK),
            "answered board#70" if _gh.shown("a70") == "board#70" else "answered ", "min ago", "one ask per decision", "pass the new ask line in this same write")

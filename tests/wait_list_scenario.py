@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
 from stackshot.service import stamp as stamp_svc
+from stackshot.service import answer as answer_svc
 from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -488,17 +489,17 @@ check("backstop (open relay line): the owner is asked, as a relay's ask-by day a
 check("backstop (open relay line): …the words of what arrived and what did not are on the item, nobody is messaged, and the wait is put by", m["woke"]["to"] == OWN and m["woke"]["what"].startswith(f"backstop day {day(-1)}: arrived ") and "still open" in m["woke"]["what"] and not sent("watch")
       and all(k not in m for k in GONE) and m["watch"]["was"]["wait_kind"] == "list" and len(m["watch"]["was"]["waits"]) == 3 and m["watch"]["was"]["waits"][0].get("arrived"), m)
 check("backstop (open relay line): …the model reads it as the owner's move", mod_of(184).owner_moves, mod_of(184))
-out = server._answer("a184", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer"); m = mt(184)
+out = answer_svc._answer("a184", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer"); m = mt(184)
 check("backstop (open relay line): `not yet` with a date puts the list back: its lines (what had arrived stays), mode and post-wake mover, the backstop moved to that day, nothing of the question left",
       out == "decision" and m.get("wait_kind") == "list" and m.get("wait_mode") == "all" and m.get("until") == day(10) and arrived_of(184) == [True, False, False] and m.get("post_wake_mover") == BACK
       and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and WL.valid(m) and mod_of(184).wait.kind == "list", (out, m))
 check("backstop (open relay line): …and it is watched again (the next moment is that day)", wk.watches(rd(184)) and wk.next_moment(m) == wk.day_epoch(day(10)), None)
 # the owner says arrived / drop
 lst(186, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); wakes_svc.wake_pass(); reset()
-server._answer("a186", "arrived", "", "answer"); m = mt(186)
+answer_svc._answer("a186", "arrived", "", "answer"); m = mt(186)
 check("backstop (open relay line): `arrived` puts the item with the post-wake mover, alive; the wait's fields are gone", m.get("mover") == BACK and "ask" not in m and all(k not in m for k in GONE), m)
 lst(187, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); wakes_svc.wake_pass()
-server._answer("a187", "drop", "", "answer"); m = mt(187)
+answer_svc._answer("a187", "drop", "", "answer"); m = mt(187)
 check("backstop (open relay line): `drop` closes it as not planned and the list goes with the rest of the wait", rd(187)["status"] == "completed" and m.get("outcome") == "dropped" and all(k not in m for k in GONE) and "ask" not in m, m)
 # an open relay line that has arrived does not ask
 reset()

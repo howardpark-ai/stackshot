@@ -171,6 +171,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.service import answer as answer_svc
 from stackshot.service import answer_handover as handover_svc
 from stackshot.service import update as _update_svc
 from stackshot.web import answers as _web_answers
@@ -440,12 +441,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear()
     r_c2 = post("/items/a4/answer", {"token": tok("a4"), "text": "late", "act": "comment"})
     check("a second send of the same note on the closed item is a no-op: one comment, nobody told again", r_c2.headers.get("location") == "/items/a4?sent=closednote" and len(rd("a", 4)["metadata"]["answers"]) == 1 and not told, rd("a", 4)["metadata"]["answers"])
-    server._answer("a4", "Yes", "a pick on it", "")
+    answer_svc._answer("a4", "Yes", "a pick on it", "")
     check("a pick sent with a note on a closed item is kept with the pick named in front",
           [a["text"] for a in rd("a", 4)["metadata"]["answers"]][-1] == "(the item is closed: Yes) a pick on it" and len(rd("a", 4)["metadata"]["answers"]) == 2, rd("a", 4)["metadata"]["answers"])
     told.clear()
     d4 = rd("a", 4); d4["metadata"]["answers"] = [{"ts": "not a number", "kind": "comment", "text": "hand-edited"}, {"ts": None, "kind": "comment", "text": "no stamp"}]; (T / "store/a/4.json").write_text(json.dumps(d4))
-    check("a record with a ts that is not a number is read as old: the note is kept, not an error", server._answer("a4", "", "after the hand edit", "comment") == "closednote" and [a["text"] for a in rd("a", 4)["metadata"]["answers"]][-1] == "after the hand edit"
+    check("a record with a ts that is not a number is read as old: the note is kept, not an error", answer_svc._answer("a4", "", "after the hand edit", "comment") == "closednote" and [a["text"] for a in rd("a", 4)["metadata"]["answers"]][-1] == "after the hand edit"
           and len(rd("a", 4)["metadata"]["answers"]) == 3, rd("a", 4)["metadata"]["answers"])
     told.clear()
     a4_again = rd("a", 4)
@@ -472,7 +473,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and k26 == [("comment", "(late, the item no longer asks this: Decline) no")] and rd("a", 28) == b28 and len(told_f) == 1 and len(jobs()) == njobs0
           and all(d26["metadata"].get(k) == b26["metadata"].get(k) for k in ("needs", "ask", "options")), (k26, told_f, rd("a", 28) == b28, len(jobs()), njobs0))
     (T / "store/a/26.json").write_text(json.dumps(b26))      # back to the fixture
-    check("…and the same through the server's own entry", server._answer("a26", "Approve", "", "") == "stale" and server._answer("a26", "Decline", "", "answer") == "stale" and rd("a", 26) == b26)
+    check("…and the same through the server's own entry", answer_svc._answer("a26", "Approve", "", "") == "stale" and answer_svc._answer("a26", "Decline", "", "answer") == "stale" and rd("a", 26) == b26)
     r_q = post("/items/a27/answer", {"token": tok("a27"), "act": "answer", "text": "Go, with the smaller scope."})
     m27 = rd("a", 27)["metadata"]
     check("an open question's Send is his answer: kind decision with his text and no choice, the decision and the ask leave the item, the owner is told",
@@ -508,7 +509,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           [x.headers.get("location") for x in (r_s1, r_s2, r_s3)] == ["/items/a32?sent=stale", "/items/a33?sent=stale", "/items/a3?sent=stale"]
           and rd("a", 32) == b32 and rd("a", 33) == b33 and not told and len(jobs()) == njobs2, [x.headers.get("location") for x in (r_s1, r_s2, r_s3)])
     check("...and through the server's own entry: Yes is no choice of an item with options (even its own Approve and Decline), and a closed item is closed",
-          server._answer("a32", "Yes", "", "") == "stale" and server._answer("a6", "No", "", "") == "stale" and server._answer("a4", "Yes", "", "") == "closed" and rd("a", 32) == b32)
+          answer_svc._answer("a32", "Yes", "", "") == "stale" and answer_svc._answer("a6", "No", "", "") == "stale" and answer_svc._answer("a4", "Yes", "", "") == "closed" and rd("a", 32) == b32)
     st_a = _web_answers._answers_load()
     check("a Yes / No answer is tracked for the escalation like any decision (then dropped here, so the later escalation checks count the earlier answers only)", "a30" in st_a and "a31" in st_a, st_a)
     _web_answers._answers_save({g: e for g, e in st_a.items() if g not in ("a30", "a31")}); told.clear()
@@ -588,7 +589,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and not any("on hold" in t[2] for t in told) and "choice_line" not in m21["answers"][-1], (m21, told))
     post("/items/a22/answer", {"token": tok("a22"), "act": "done", "text": ""}); m22 = rd("a", 22)["metadata"]
     check("Done drops a hold and its wake, and decision and the old one-word kind from needs (the session stays)", "hold" not in m22 and "wake" not in m22 and "hold_set" not in m22 and m22["needs"] == [AGENT] and m22.get("mover") == "home-agent", m22)
-    check("Done with a choice in the form is an ordinary answer, not a step (a stale option, act=done)", server._answer("a17", "Approve", "", "done") == "decision" and "Done" not in [a.get("choice") for a in rd("a", 17)["metadata"]["answers"]], rd("a", 17)["metadata"])
+    check("Done with a choice in the form is an ordinary answer, not a step (a stale option, act=done)", answer_svc._answer("a17", "Approve", "", "done") == "decision" and "Done" not in [a.get("choice") for a in rd("a", 17)["metadata"]["answers"]], rd("a", 17)["metadata"])
     # G1: Done keeps the owner's words behind a far due date (as the watcher's arrival does) and drops those behind the wake
     from stackshot.waits import waiting as _waiting
     check("fixture: the due date's cap is lifted by the owner's words", _waiting.cap_words(rd("a", 23)["metadata"], "due"))
@@ -709,7 +710,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r_s44 = post("/items/a41/answer", {"token": tok("a41"), "act": "send", "text": "x" * 4001})
     check("a step note over 4000 characters is refused as any answer", r_s44.headers["location"] == "/items/a41?sent=toolong")
     check("an old page's act=done still works (the Done checks above); its act=comment on a step form stays a comment and the step stands (the Send of a page loaded before the release)",
-          server._answer("a15", "", "still a comment", "comment") == "comment" and rd("a", 15)["metadata"]["state"] == "your-step")
+          answer_svc._answer("a15", "", "still a comment", "comment") == "comment" and rd("a", 15)["metadata"]["state"] == "your-step")
     # the page and the home row draw their forms, and the notices say who takes it
     pg = page("/items/a16").text; pg_done = page("/items/a13?sent=done").text
     check("the item page of a step item draws the step, the optional note box and TWO buttons: Done (the main one, act=done) and Send note (act=note, needs text), no comment button, with the token",
@@ -760,13 +761,13 @@ check("get shows his answers to the session reading the item, with the chosen op
 st = _web_answers._answers_load()
 check("pending: a1, a2, a6 and a7 (decisions), not the comments", sorted(st) == ["a1", "a2", "a6", "a7"] and st["a1"]["told"] == [AGENT], st)
 told.clear()
-check("before 30 min nothing goes", server._answer_tick(time.time() + 600) == [] and not told, told)
+check("before 30 min nothing goes", answer_svc._answer_tick(time.time() + 600) == [] and not told, told)
 _update_svc._update("a1", next="home-agent: shipping it", dropped=[1], sender="home-agent")             # the session named in needs acts
 _update_svc._update("a2", next="home-here: telling Pat", dropped=[1], sender="home-here")               # the owner acts
 check("a write by a session the answer went to settles it (the owner's, or one named in needs)", sorted(_web_answers._answers_load()) == ["a6", "a7"], _web_answers._answers_load())
 _update_svc._update("a7", next="home-keeper: someone else wrote", dropped=[1], sender="home-keeper")    # the keeper is not who was told: item 7 stays pending
 told.clear()
-out = server._answer_tick(time.time() + 1801)
+out = answer_svc._answer_tick(time.time() + 1801)
 stew = [t for t in told if t[1] == STEW]
 check("after 30 min the keeper of the project is told, once per answer, and nobody else",
       sorted(out) == ["a6", "a7"] and len(stew) == 2 and len(told) == 2 and all(t[3] == "answer" for t in told), (out, told))
@@ -775,7 +776,7 @@ check("…in one line: what he answered, that its mover has not written, and the
       s7.startswith("[stackshot] Oliver answered a7 on the board at ") and "its mover home-here has not written to the item in 30 min: Neither: do the smaller fix first." in s7
       and "As the keeper of projects/alpha" in s7 and s7.endswith(f"→ {BOARD}/items/a7"), s7)
 told.clear()
-check("a second pass tells nobody again", server._answer_tick(time.time() + 7200) == [] and not told and _web_answers._answers_load() == {}, told)
+check("a second pass tells nobody again", answer_svc._answer_tick(time.time() + 7200) == [] and not told and _web_answers._answers_load() == {}, told)
 
 # ---- 9. no session writes as Oliver
 for nm in ("Oliver", "oliver", " OLIVER ", "Oliver · board"):
@@ -787,10 +788,10 @@ check("a session's own name still writes", _wt_update.stackshot_update("a3", nex
 # ---- 10. a pick among the options clears ask and options; anything else leaves them as it did
 for g in ("a8", "a9", "a10", "a11"): assert rd("a", int(g[1:]))["metadata"]["options"] == OPTS
 check("free text (no choice): the decision is in and the ask is cleared as before, the options are untouched, no option line recorded",
-      server._answer("a8", "", "Neither, do the smaller fix", "answer") == "decision" and "ask" not in rd("a", 8)["metadata"] and rd("a", 8)["metadata"].get("options") == OPTS
+      answer_svc._answer("a8", "", "Neither, do the smaller fix", "answer") == "decision" and "ask" not in rd("a", 8)["metadata"] and rd("a", 8)["metadata"].get("options") == OPTS
       and "choice_line" not in rd("a", 8)["metadata"]["answers"][0] and "choice" not in rd("a", 8)["metadata"]["answers"][0], rd("a", 8)["metadata"])
 check("an option picked with a note: ask and options cleared, the answer keeps choice, line and text; the session named stays in needs",
-      server._answer("a9", "Wait", "after the holiday", "") == "decision" and "ask" not in rd("a", 9)["metadata"] and "options" not in rd("a", 9)["metadata"]
+      answer_svc._answer("a9", "Wait", "after the holiday", "") == "decision" and "ask" not in rd("a", 9)["metadata"] and "options" not in rd("a", 9)["metadata"]
       and rd("a", 9)["metadata"]["needs"] == ["home-agent"]
       and [(a["choice"], a["choice_line"], a["text"]) for a in rd("a", 9)["metadata"]["answers"]] == [("Wait", "Wait for the next release", "after the holiday")], rd("a", 9)["metadata"])
 b9 = ui_render.Board(str(STORE)).item_html("a9", answer={**BOX, "action": "/items/a9/answer"})
@@ -798,21 +799,21 @@ check("…the cleared item draws no options, no ask and no option buttons, and H
       'class="iopts"' not in b9 and 'class="iask"' not in b9 and 'name="choice"' not in b9 and "Oliver (board): <b>Wait</b> — after the holiday" in b9 and "options cleared" in b9 and "ask cleared" in b9,
       re.findall(r'<li class="ev ev-[a-z]+">.*?</li>', b9))
 check("a choice that matches no option is stale: nothing written, options and ask stay",
-      server._answer("a10", "Nope", "", "") == "stale" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
+      answer_svc._answer("a10", "Nope", "", "") == "stale" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
       and "answers" not in rd("a", 10)["metadata"], rd("a", 10)["metadata"])
 check("a choice that matches no option, sent with a note, keeps the note as his comment (the choice named in it); the options and the ask stay, and it is no decision",
-      server._answer("a10", "Nope", "wait, I meant the second one", "") == "stalenote" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
+      answer_svc._answer("a10", "Nope", "wait, I meant the second one", "") == "stalenote" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
       and "decision" in rd("a", 10)["metadata"]["needs"]
       and [(a["kind"], a["text"]) for a in rd("a", 10)["metadata"]["answers"]] == [("comment", "(late, the item no longer asks this: Nope) wait, I meant the second one")], rd("a", 10)["metadata"])
 d10 = rd("a", 10); del d10["metadata"]["answers"]; (T / "store/a/10.json").write_text(json.dumps(d10))      # back to the fixture for the checks below
 item("a", 120, needs=["decision"], ask=ASK, options=OPTS)
 told.clear()
 check("a pick with a note is a decision; the same send again (a double click) is stale and adds no comment and tells nobody more",
-      server._answer("a120", "Wait", "after the holiday", "") == "decision" and (n_told := len(told)) >= 1
-      and server._answer("a120", "Wait", "after the holiday", "") == "stalenote" and len(told) == n_told and [(a["kind"], a["text"]) for a in rd("a", 120)["metadata"]["answers"]] == [("decision", "after the holiday")], (told, rd("a", 120)["metadata"].get("answers")))
-check("…but the same note sent again after another pick or other text is kept", server._answer("a120", "Ship", "after the holiday", "") == "stalenote" and len(rd("a", 120)["metadata"]["answers"]) == 2, rd("a", 120)["metadata"]["answers"])
+      answer_svc._answer("a120", "Wait", "after the holiday", "") == "decision" and (n_told := len(told)) >= 1
+      and answer_svc._answer("a120", "Wait", "after the holiday", "") == "stalenote" and len(told) == n_told and [(a["kind"], a["text"]) for a in rd("a", 120)["metadata"]["answers"]] == [("decision", "after the holiday")], (told, rd("a", 120)["metadata"].get("answers")))
+check("…but the same note sent again after another pick or other text is kept", answer_svc._answer("a120", "Ship", "after the holiday", "") == "stalenote" and len(rd("a", 120)["metadata"]["answers"]) == 2, rd("a", 120)["metadata"]["answers"])
 check("a comment on an item with options changes neither the options nor the ask",
-      server._answer("a10", "", "what does Drop mean?", "comment") == "comment" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
+      answer_svc._answer("a10", "", "what does Drop mean?", "comment") == "comment" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
       and rd("a", 10)["metadata"]["needs"] == ["decision"], rd("a", 10)["metadata"])
 
 # ---- 11. the update tool clears options and ask without a recommended one
@@ -838,7 +839,7 @@ check("the update tool's description and parameters name the new flags",
 told.clear()
 b = lambda n: _model.derive(_service_store._load(f"a{n}"))
 check("a decision with then = home-agent (Yes, no options): mover = then, needs = then, then cleared, your-call gone, no model conflict, and the then-mover is told with his answer",
-      server._answer("a50", "Yes", "go on", "") == "decision" and rd("a", 50)["metadata"].get("mover") == "home-agent" and rd("a", 50)["metadata"].get("needs") == [AGENT]
+      answer_svc._answer("a50", "Yes", "go on", "") == "decision" and rd("a", 50)["metadata"].get("mover") == "home-agent" and rd("a", 50)["metadata"].get("needs") == [AGENT]
       and "then" not in rd("a", 50)["metadata"] and "ask" not in rd("a", 50)["metadata"] and "state" not in rd("a", 50)["metadata"]
       and b(50).mover == "home-agent" and not b(50).conflicts and b(50).state == "alive" and _states.of(_service_store._load("a50"))[0] == "doing"
       and sorted(t[1] for t in told if t[0] == "a50") == [AGENT] and all("answered a50 on the board: Yes" in t[2] for t in told if t[0] == "a50"), (rd("a", 50)["metadata"], b(50), told))
@@ -851,19 +852,19 @@ _update_svc._update("a50", next="home-agent: on it", sender="home-agent")
 check("...and the then-mover's write settles it", "a50" not in _web_answers._answers_load(), _web_answers._answers_load())
 told.clear()
 check("a pick among the options with then = home-keeper (not in needs): the item goes to home-keeper, who alone is told, and the model reads clean",
-      server._answer("a51", "Ship", "", "") == "decision" and rd("a", 51)["metadata"].get("mover") == "home-keeper" and rd("a", 51)["metadata"].get("needs") == [STEW] and "then" not in rd("a", 51)["metadata"]
+      answer_svc._answer("a51", "Ship", "", "") == "decision" and rd("a", 51)["metadata"].get("mover") == "home-keeper" and rd("a", 51)["metadata"].get("needs") == [STEW] and "then" not in rd("a", 51)["metadata"]
       and "options" not in rd("a", 51)["metadata"] and b(51).mover == "home-keeper" and not b(51).conflicts and sorted(t[1] for t in told if t[0] == "a51") == [STEW], (rd("a", 51)["metadata"], told))
 told.clear()
 check("a stored mover Oliver and no then: the stored mover goes, the item reads as when nothing is stored (the first session in needs), no model conflict",
-      server._answer("a52", "Yes", "", "") == "decision" and "mover" not in rd("a", 52)["metadata"] and rd("a", 52)["metadata"].get("needs") == ["home-agent"]
+      answer_svc._answer("a52", "Yes", "", "") == "decision" and "mover" not in rd("a", 52)["metadata"] and rd("a", 52)["metadata"].get("needs") == ["home-agent"]
       and b(52).mover == "home-agent" and not b(52).conflicts, (rd("a", 52)["metadata"], b(52)))
 told.clear()
 check("nothing stored (today's behaviour, unchanged): decision out of needs, no mover or then written, the project's builder takes it as the model's default",
-      server._answer("a53", "Yes", "", "") == "decision" and not any(k in rd("a", 53)["metadata"] for k in ("mover", "then", "needs")) and b(53).mover == "home-here" and not b(53).conflicts
+      answer_svc._answer("a53", "Yes", "", "") == "decision" and not any(k in rd("a", 53)["metadata"] for k in ("mover", "then", "needs")) and b(53).mover == "home-here" and not b(53).conflicts
       and [t[1] for t in told if t[0] == "a53"] == [OWNER], (rd("a", 53)["metadata"], b(53), told))
 told.clear()
 check("F1, a hold with a wake still standing: the stored mover Oliver goes, the item reads waiting with no model conflict, it is a time wait to home-agent (wait_kind time, post_wake_mover home-agent, watch.set_at stamped), then cleared, nobody told it is theirs",
-      server._answer("a58", "Yes", "", "") == "decision" and "mover" not in rd("a", 58)["metadata"] and "then" not in rd("a", 58)["metadata"] and "needs" not in rd("a", 58)["metadata"]
+      answer_svc._answer("a58", "Yes", "", "") == "decision" and "mover" not in rd("a", 58)["metadata"] and "then" not in rd("a", 58)["metadata"] and "needs" not in rd("a", 58)["metadata"]
       and rd("a", 58)["metadata"].get("wait_kind") == "time" and rd("a", 58)["metadata"].get("post_wake_mover") == "home-agent" and rd("a", 58)["metadata"].get("watch", {}).get("set_at")
       and b(58).state == "waiting" and not b(58).conflicts and not any("yours now" in t[2] for t in told if t[0] == "a58"), (rd("a", 58)["metadata"], b(58), told))
 _out = {}
@@ -873,13 +874,13 @@ check("F1, a58 followed to the wake: alive, home-agent moves it, named in needs,
       and not any(k in rd("a", 58)["metadata"] for k in ("hold", "wake", "then", "wait_kind", "post_wake_mover")), (rd("a", 58)["metadata"], _out))
 told.clear()
 check("F1, external still in needs: mover Oliver goes, the item reads waiting (outside), then is dropped (nothing reads it when external ends), needs holds external only, no model conflict",
-      server._answer("a59", "Yes", "", "") == "decision" and "mover" not in rd("a", 59)["metadata"] and "then" not in rd("a", 59)["metadata"] and rd("a", 59)["metadata"].get("needs") == ["external"]
+      answer_svc._answer("a59", "Yes", "", "") == "decision" and "mover" not in rd("a", 59)["metadata"] and "then" not in rd("a", 59)["metadata"] and rd("a", 59)["metadata"].get("needs") == ["external"]
       and b(59).state == "waiting" and not b(59).conflicts and not any("yours now" in t[2] for t in told if t[0] == "a59"), (rd("a", 59)["metadata"], b(59), told))
 _update_svc._update("a59", needs=[], sender="home-here")
 check("F1, a59 followed to the end of external: it reads alive with no conflict (the owner's default mover; no stale then)", b(59).state == "alive" and not b(59).conflicts and "then" not in rd("a", 59)["metadata"], (rd("a", 59)["metadata"], b(59)))
 told.clear()
 check("F1, an open after link: mover Oliver goes, the item reads waiting (blocked), then stays for the release, no model conflict",
-      server._answer("a60", "Yes", "", "") == "decision" and "mover" not in rd("a", 60)["metadata"] and rd("a", 60)["metadata"].get("then") == "home-agent" and "needs" not in rd("a", 60)["metadata"]
+      answer_svc._answer("a60", "Yes", "", "") == "decision" and "mover" not in rd("a", 60)["metadata"] and rd("a", 60)["metadata"].get("then") == "home-agent" and "needs" not in rd("a", 60)["metadata"]
       and b(60).state == "waiting" and not b(60).conflicts, (rd("a", 60)["metadata"], b(60)))
 # the prerequisite closes (its file says so), and the release hands to their then-movers
 _p62 = json.loads((T / "store/a/62.json").read_text()); _p62["status"] = "completed"; _p62["outcome"] = "done"; (T / "store/a/62.json").write_text(json.dumps(_p62))
@@ -890,7 +891,7 @@ check("F1, a60 followed to the end of its after: home-agent moves it (mover, fir
       and any(t[0] == "a60" and t[1] == AGENT for t in told), (rd("a", 60)["metadata"], b(60), told))
 told.clear()
 check("F2, a pick that carries a wake with a then: it waits on its until, the mover Oliver and the then are gone, the time wait's post-wake mover is the then (stamped), no model conflict",
-      server._answer("a61", "Park", "", "") == "decision" and hd_(rd("a", 61)["metadata"]) is True and wk_(rd("a", 61)["metadata"]) == "2099-01-01" and "mover" not in rd("a", 61)["metadata"]
+      answer_svc._answer("a61", "Park", "", "") == "decision" and hd_(rd("a", 61)["metadata"]) is True and wk_(rd("a", 61)["metadata"]) == "2099-01-01" and "mover" not in rd("a", 61)["metadata"]
       and "then" not in rd("a", 61)["metadata"] and rd("a", 61)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 61)["metadata"]
       and rd("a", 61)["metadata"].get("watch", {}).get("set_at")
       and b(61).state == "waiting" and b(61).wait.post_wake_mover == "home-agent" and not b(61).conflicts, (rd("a", 61)["metadata"], b(61)))
@@ -901,7 +902,7 @@ check("F2, through the wake: the item turns alive with home-agent as its mover, 
       and b(61).state == "alive" and b(61).mover == "home-agent" and not b(61).conflicts and AGENT in _out, (rd("a", 61)["metadata"], _out))
 told.clear()
 check("a park on an item that also waits after an open item: no time wait is stored (the wake would drop the after), then stays for the release of the after, no conflict",
-      server._answer("a63", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 63)["metadata"] and "post_wake_mover" not in rd("a", 63)["metadata"] and rd("a", 63)["metadata"].get("then") == "home-agent"
+      answer_svc._answer("a63", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 63)["metadata"] and "post_wake_mover" not in rd("a", 63)["metadata"] and rd("a", 63)["metadata"].get("then") == "home-agent"
       and rd("a", 63)["metadata"].get("after") == ["a67"] and hd_(rd("a", 63)["metadata"]) is True and not b(63).conflicts, (rd("a", 63)["metadata"], b(63)))
 _p67 = json.loads((T / "store/a/67.json").read_text()); _p67["status"] = "completed"; _p67["outcome"] = "done"; (T / "store/a/67.json").write_text(json.dumps(_p67))
 told.clear(); wakes_svc.release_after("a67", "done", "", "home-here")
@@ -910,10 +911,10 @@ check("...a63 followed to the end of its after: the hold and wake go with it, ho
       and any(t[0] == "a63" and t[1] == AGENT for t in told), (rd("a", 63)["metadata"], b(63), told))
 told.clear()
 check("a park on an item that also has external in needs: no time wait is stored, then is dropped, the item reads waiting with no conflict",
-      server._answer("a64", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 64)["metadata"] and "post_wake_mover" not in rd("a", 64)["metadata"] and "then" not in rd("a", 64)["metadata"]
+      answer_svc._answer("a64", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 64)["metadata"] and "post_wake_mover" not in rd("a", 64)["metadata"] and "then" not in rd("a", 64)["metadata"]
       and "external" in rd("a", 64)["metadata"].get("needs", []) and not b(64).conflicts, (rd("a", 64)["metadata"], b(64)))
 check("a park with a then stored its post-wake mover; update clear_hold=true releases it and drops the wait's fields with it (wait_kind, post_wake_mover, watch), no refusal, no conflict",
-      server._answer("a65", "Park", "", "") == "decision" and rd("a", 65)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 65)["metadata"]
+      answer_svc._answer("a65", "Park", "", "") == "decision" and rd("a", 65)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 65)["metadata"]
       and (_update_svc._update("a65", clear_hold=True, sender="home-agent") or True) and not any(k in rd("a", 65)["metadata"] for k in ("hold", "wake", "wait_kind", "post_wake_mover", "watch", "then"))
       and b(65).state == "alive" and not b(65).conflicts, (rd("a", 65)["metadata"], b(65)))
 told.clear()
@@ -936,33 +937,33 @@ check("the board item's shape through an after release: handed to home-agent (st
       and any(t[0] == "a69" and t[1] == AGENT for t in told), (rd("a", 69)["metadata"], b(69), told))
 before54 = rd("a", 54)["metadata"]["needs"], rd("a", 54)["metadata"]["mover"], rd("a", 54)["metadata"]["then"]
 check("a comment only on such an item: it stays his (decision, mover and then unchanged)",
-      server._answer("a54", "", "a question first", "comment") == "comment" and (rd("a", 54)["metadata"]["needs"], rd("a", 54)["metadata"]["mover"], rd("a", 54)["metadata"]["then"]) == before54, rd("a", 54)["metadata"])
+      answer_svc._answer("a54", "", "a question first", "comment") == "comment" and (rd("a", 54)["metadata"]["needs"], rd("a", 54)["metadata"]["mover"], rd("a", 54)["metadata"]["then"]) == before54, rd("a", 54)["metadata"])
 _u74 = _update_svc._update("a74", needs=["decision"], ask=YESNO, sender="home-agent")
 m74 = rd("a", 74)["metadata"]
 check("the whole chain, first half: the agent's own ask on an item it moves stores mover Oliver and then home-agent (his state makes him the mover), with no conflict",
       m74.get("mover") == "Oliver" and m74.get("then") == "home-agent" and "decision" in (m74.get("needs") or []) and not b(74).conflicts and b(74).mover == "Oliver", (_u74, m74, b(74)))
 told.clear()
 check("...second half: his answer hands the item back to the stored then-mover home-agent (mover, first in needs), then cleared, no conflict, and home-agent is told it is theirs",
-      server._answer("a74", "Yes", "", "") == "decision" and rd("a", 74)["metadata"].get("mover") == "home-agent" and rd("a", 74)["metadata"].get("needs") == [AGENT] and "then" not in rd("a", 74)["metadata"]
+      answer_svc._answer("a74", "Yes", "", "") == "decision" and rd("a", 74)["metadata"].get("mover") == "home-agent" and rd("a", 74)["metadata"].get("needs") == [AGENT] and "then" not in rd("a", 74)["metadata"]
       and b(74).mover == "home-agent" and b(74).state == "alive" and not b(74).conflicts
       and any(t[0] == "a74" and t[1] == AGENT and "It's yours now" in t[2] for t in told), (rd("a", 74)["metadata"], b(74), told))
 check("a then that names him is no then: the stored mover goes, the project's builder takes it, no conflict",
-      server._answer("a57", "Yes", "", "") == "decision" and "mover" not in rd("a", 57)["metadata"] and b(57).mover == "home-here" and not b(57).conflicts, (rd("a", 57)["metadata"], b(57)))
+      answer_svc._answer("a57", "Yes", "", "") == "decision" and "mover" not in rd("a", 57)["metadata"] and b(57).mover == "home-here" and not b(57).conflicts, (rd("a", 57)["metadata"], b(57)))
 
 # ---- 13. review findings: D1 a then that is no live session, D2 a stale then after a declined hand-over, D3 watchers off
 told.clear()
 check("D1, Yes: a stored then that is no live session (home-ghost) takes nothing: then dropped, mover Oliver gone, the builder takes it as when no then is stored, no conflict, home-ghost not told or named",
-      server._answer("a80", "Yes", "", "") == "decision" and "then" not in rd("a", 80)["metadata"] and "mover" not in rd("a", 80)["metadata"] and "home-ghost" not in json.dumps(rd("a", 80)["metadata"])
+      answer_svc._answer("a80", "Yes", "", "") == "decision" and "then" not in rd("a", 80)["metadata"] and "mover" not in rd("a", 80)["metadata"] and "home-ghost" not in json.dumps(rd("a", 80)["metadata"])
       and b(80).mover == "home-here" and b(80).state == "alive" and not b(80).conflicts and [t[1] for t in told if t[0] == "a80"] == [OWNER], (rd("a", 80)["metadata"], b(80), told))
 told.clear()
 check("D1, Park: a dead then is not stored as post_wake_mover: parked (hold and wake), then and mover Oliver gone, no wait_kind, no post_wake_mover, no conflict",
-      server._answer("a81", "Park", "", "") == "decision" and hd_(rd("a", 81)["metadata"]) is True and wk_(rd("a", 81)["metadata"]) == "2099-01-01"
+      answer_svc._answer("a81", "Park", "", "") == "decision" and hd_(rd("a", 81)["metadata"]) is True and wk_(rd("a", 81)["metadata"]) == "2099-01-01"
       and not any(k in rd("a", 81)["metadata"] for k in ("then", "mover", "wait_kind", "post_wake_mover")) and "home-ghost" not in json.dumps(rd("a", 81)["metadata"]) and not b(81).conflicts, (rd("a", 81)["metadata"], b(81)))
 check("D1, a then that is live is still handed: a50's hand-over unchanged (mover home-agent), so the shared test lets a live session through",
       rd("a", 50)["metadata"].get("mover") == "home-agent" and handover_svc._then_live("home-agent", {"project": "projects/alpha"}) and not handover_svc._then_live("home-ghost", {"project": "projects/alpha"}))
 told.clear()
 check("D2, before the release: Yes on needs [decision, home-agent] + then home-agent + an open after leaves the item waiting, then stored, no conflict",
-      server._answer("a82", "Yes", "", "") == "decision" and rd("a", 82)["metadata"].get("then") == "home-agent" and "mover" not in rd("a", 82)["metadata"] and rd("a", 82)["metadata"].get("needs") == ["home-agent"]
+      answer_svc._answer("a82", "Yes", "", "") == "decision" and rd("a", 82)["metadata"].get("then") == "home-agent" and "mover" not in rd("a", 82)["metadata"] and rd("a", 82)["metadata"].get("needs") == ["home-agent"]
       and b(82).state == "waiting" and not b(82).conflicts, (rd("a", 82)["metadata"], b(82)))
 _p83 = json.loads((T / "store/a/83.json").read_text()); _p83["status"] = "completed"; _p83["outcome"] = "done"; (T / "store/a/83.json").write_text(json.dumps(_p83))
 wakes_svc.release_after("a83", "done", "", "home-here")
@@ -975,7 +976,7 @@ _watch.enabled = lambda: False       # D3: [model] watchers = false
 try:
     told.clear()
     check("D3, watchers off: a park with a then stores no time wait: the old park stays (hold, wake), then stays, mover Oliver gone, no wait fields, no conflict",
-          server._answer("a85", "Park", "", "") == "decision" and hd_(rd("a", 85)["metadata"]) is True and wk_(rd("a", 85)["metadata"]) == "2099-01-01"
+          answer_svc._answer("a85", "Park", "", "") == "decision" and hd_(rd("a", 85)["metadata"]) is True and wk_(rd("a", 85)["metadata"]) == "2099-01-01"
           and rd("a", 85)["metadata"].get("then") == "home-agent" and not any(k in rd("a", 85)["metadata"] for k in ("mover", "wait_kind", "post_wake_mover", "watch")) and not b(85).conflicts, (rd("a", 85)["metadata"], b(85)))
     _p85 = rd("a", 85); _p85["metadata"]["until"] = "2020-01-01"; (T / "store/a/85.json").write_text(json.dumps(_p85))
     told.clear()
@@ -994,7 +995,7 @@ _m90 = rd("a", 90)["metadata"]
 check("named mover, setup: step= and mover=Oliver in one update: his step is on the list as the server's own (owner_step), beside the session's own Oliver line",
       _m90.get("state") == "your-step" and _m90.get("mover") == "Oliver" and _m90.get("owner_step") == f"Oliver: {STEP90}"
       and [(s_, t_.startswith("Oliver: `for id")) for s_, t_ in _ol(90)] == [("open", True), ("open", False)] and _ol(90)[1][1] == f"Oliver: {STEP90}", (_m90.get("owner_step"), _ol(90)))
-told.clear(); r_s90 = server._answer("a90", "", "tried it, it says forbidden", "send"); _m90 = rd("a", 90)["metadata"]
+told.clear(); r_s90 = answer_svc._answer("a90", "", "tried it, it says forbidden", "send"); _m90 = rd("a", 90)["metadata"]
 check("named mover: his note on that step ticks the server's step (done, his words after the arrow), leaves the session's own Oliver line open, and the then-mover is still told to judge the note",
       r_s90 == "stepreply" and "owner_step" not in _m90
       and [s_ for s_, t_ in _ol(90) if t_.startswith(f"Oliver: {STEP90}")] == ["done"] and [s_ for s_, t_ in _ol(90) if t_.startswith("Oliver: `for id")] == ["open"]
@@ -1002,7 +1003,7 @@ check("named mover: his note on that step ticks the server's step (done, his wor
 # a session that wrote its own Oliver line saying the same as the step: the equality rule adopts it (no second step), and his note ticks it
 _wt_update.stackshot_update("a91", sender="home-agent", step=STEP90, mover="Oliver", next=f"home-agent: confirm the runs are gone\nOliver: {STEP90}")
 check("named mover: the session's own `Oliver: <step>` line equal to the step is his one step (adopted, none added beside it)", len(_ol(91)) == 1 and rd("a", 91)["metadata"].get("owner_step") == f"Oliver: {STEP90}", (_ol(91), rd("a", 91)["metadata"].get("owner_step")))
-server._answer("a91", "", "why does this fail?", "send")
+answer_svc._answer("a91", "", "why does this fail?", "send")
 check("named mover: his note ticks that one line by equality", [s_ for s_, _ in _ol(91)] == ["done"], _ol(91))
 
 print(("ok" if not fails else "FAILED") + f": answer scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

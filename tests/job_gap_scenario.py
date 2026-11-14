@@ -57,6 +57,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids; from stackshot.service import job_gap as job_gap_svc
+from stackshot.web.routes import client_api as _rt_client
 import subprocess
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -84,7 +85,7 @@ def item(shown): return _service_store._load(_model_ids._norm_id(shown))
 def jg(action, timer="sala-foo.timer", code="no-lane", repo="acme/alpha", sender="sala-unit-gaps", machine=None, **kw):
     b = {"action": action, "timer": timer, "code": code, "repo": repo, "sender": sender}
     b.update(kw)
-    return server._client_post(machine or me, "job-gap", {k: v for k, v in b.items() if v is not None})
+    return _rt_client._client_post(machine or me, "job-gap", {k: v for k, v in b.items() if v is not None})
 def open_for(timer, code): return job_gap_svc._jobgap_open_items(f"{timer}: {code}")
 # the repo map of this instance: the test repos over the defaults
 _cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/nobuild": "projects/nobuild", "acme/gamma": "projects/gamma", "acme/ghost": "projects/ghost", "Acme/Mixed-Case": "projects/alpha"}}

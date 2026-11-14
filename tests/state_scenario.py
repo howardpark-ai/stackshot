@@ -63,6 +63,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.web.routes import client_api as _rt_client
+from stackshot.service import answer as answer_svc
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import client_reads as client_reads_svc
@@ -214,7 +216,7 @@ check("touched: a recycle mark is not wedged by a stored state its item no longe
 upd(37, priority="p1")
 check("touched: …nor is a filing edit (priority)", mt(37)["priority"] == "p1" and mt(37)["state"] == "doing", mt(37))
 item(57, needs=[], hold=True, wake=day(30), state="doing", expected_by=hrs(2))
-st, d = server._client_post("testbox", "cap-words", {"item": "a57", "basis": f"Printer order confirmed {day(35)}", "sender": "home-test"})
+st, d = _rt_client._client_post("testbox", "cap-words", {"item": "a57", "basis": f"Printer order confirmed {day(35)}", "sender": "home-test"})
 check("touched: …nor a cap-words wait_basis (doing stands on needs and next, not on that)", st == 200 and mt(57).get("wait_basis"), (st, d, mt(57)))
 item(114, needs=["decision"], ask=ASK, state="your-call")
 out = upd(114, clear_ask=True)
@@ -222,14 +224,14 @@ check("touched: a write that clears the ask a your-call stands on drops the stat
 
 # ---- his answer ends a stored your-call (and a park he picks)
 item(58, needs=["decision"], ask=ASK, state="your-call")
-server._answer("a58", "", "go ahead with it", "answer")
+answer_svc._answer("a58", "", "go ahead with it", "answer")
 check("answer: his decision ends a stored your-call (the call is made)", "state" not in mt(58) and "decision" not in mt(58).get("needs", []) and "ask" not in mt(58), mt(58))
 upd(58, next="home-front: carrying on")
 check("answer: …and a plain write afterwards is not refused", mt(58)["next"] == "home-front: carrying on", mt(58))
 park_lab = f"Park until {day(5)}"      # a raise stored before the park option was dropped still carries one; his press is his own hold
 opts_ = [{"label": park_lab, "line": f"On hold with a wake on {day(5)}.", "recommended": True, "wake": day(5)}, {"label": "Not needed", "line": "No longer wanted.", "recommended": False}]
 item(59, needs=["decision", BACK], ask=ASK, options=opts_, state="your-call")
-server._answer("a59", park_lab, "", "")
+answer_svc._answer("a59", park_lab, "", "")
 check("answer: …a park he picks from the options leaves no stored state, only the hold and the wake", "state" not in mt(59) and hd_(mt(59)) is True and wk_(mt(59)), mt(59))
 upd(59, next="home-front: waiting it out")
 check("answer: …and a plain write on it works", mt(59)["next"] == "home-front: waiting it out", mt(59))
@@ -254,7 +256,7 @@ item(133, needs=[BACK], state="doing", expected_by=hrs(2))
 upd(133, wake=day(3))
 check("hold: a wake alone is a backstop: it does not drop a stored state", mt(133)["state"] == "doing", mt(133))
 item(39, needs=["decision", BACK], ask=ASK, options=[{"label": f"Park until {day(5)}", "line": "On hold.", "recommended": True, "wake": day(5)}, {"label": "Not needed", "line": "No.", "recommended": False}], state="doing", expected_by=hrs(2))
-server._answer("a39", f"Park until {day(5)}", "", "")
+answer_svc._answer("a39", f"Park until {day(5)}", "", "")
 check("answer: a park he picks ends a stored state of any kind (doing here), not only your-call", "state" not in mt(39) and "expected_by" not in mt(39) and hd_(mt(39)) is True, mt(39))
 # ================================================================ the derived state
 item(63, needs=["decision", BACK], ask=ASK, state="doing", expected_by=hrs(2))        # a stored state that is not the section's: the brief says it

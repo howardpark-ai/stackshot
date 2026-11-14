@@ -53,6 +53,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.service import mover_steps as _mover_steps; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.github import ghsync as G
 from stackshot.web import page_debts as _pdebts
@@ -79,7 +80,7 @@ def desc(sender="q-script", machine=me, text=BODY): return "\n".join("- " + l.st
 def q(machine=None, **kw):
     """The client API's write, in-process; every call a new request id unless it passes one (None leaves it out)."""
     b = {"project": "alpha", "ask": ASK, "text": BODY, "sender": "q-script", "options": OPTS, "subject": SUBJ, "request_id": f"t-{next(RIDS)}"}; b.update(kw)
-    return server._client_post(machine or me, "question", {k: v for k, v in b.items() if v is not None})
+    return _rt_client._client_post(machine or me, "question", {k: v for k, v in b.items() if v is not None})
 def items():
     return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit() and p_.stem != "1")
 def item(shown): return _service_store._load(_model_ids._norm_id(shown))
@@ -164,8 +165,8 @@ check("the route's items pass the create gate in full: every line is a bullet wi
 refused("a forbidden token in the text is still refused through the create gate (400)", 400, "contains 'resolved:'", text="resolved: the retry")
 refused("missing text: 400", 400, "required", text="  \n ")
 refused("missing ask: 400", 400, "required", ask="")
-st, out = server._client_post(me, "question", {"project": "alpha", "ask": ASK, "text": BODY, "options": "nope"}); check("options that are not a list: 400", st == 400 and "options" in out["error"], (st, out))
-st, out = server._client_post(me, "question", {"project": "alpha", "ask": ASK, "text": 5}); check("text that is not a string: 400", st == 400, (st, out))
+st, out = _rt_client._client_post(me, "question", {"project": "alpha", "ask": ASK, "text": BODY, "options": "nope"}); check("options that are not a list: 400", st == 400 and "options" in out["error"], (st, out))
+st, out = _rt_client._client_post(me, "question", {"project": "alpha", "ask": ASK, "text": 5}); check("text that is not a string: 400", st == 400, (st, out))
 
 # ---- 3. the page-debt rules: a script owes no page, the owner is charged none, and its own debt is not the script's to be refused for
 old = time.time() - 8 * 3600; os.utime(T / "brain/projects/alpha.md", (old, old))     # the page is older than the debt, so nothing settles it
@@ -421,7 +422,7 @@ readme = _docs.page("client-contract")
 check("the docs' client contract documents POST /client/question and GET /client/answer", "POST /client/question" in readme and "GET /client/answer" in readme and "fresh item per question" in readme
       and "A caller resumes only on `decision`" in readme and "**the fleet tool passes one per parked question**" in readme and "Filed by <sender> (a script on" in readme and "GitHub issue comment" not in readme and "the keeper is the owner itself" in readme and "never reads the project record" in readme and "newest `decision`" in readme)
 check("the pilot_charge docstring says a script's filing is never charged to the owner, the keeper being the owner included", "the owner itself" in telling.pilot_charge.__doc__)
-check("the 404 lists of the client API name the new entries", "question" in server._client_post(me, "nope", {})[1]["error"] and "answer?key=" in client_reads_svc._client_get("nope", {})[2])
+check("the 404 lists of the client API name the new entries", "question" in _rt_client._client_post(me, "nope", {})[1]["error"] and "answer?key=" in client_reads_svc._client_get("nope", {})[2])
 
 # ---- a script's subject is cut to the subject limit, never refused (a script's item must not be lost on a 400)
 LONG_SUBJ = "[home] " + " ".join(f"Cut the retry of step {i}?" for i in range(1, 8))       # about 170 characters

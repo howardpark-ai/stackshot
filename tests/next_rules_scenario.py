@@ -72,6 +72,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.service import answer as answer_svc
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -351,7 +352,7 @@ refused("a refused tool call leaves the flag off again", lambda: mk(next="build 
 check("…the flag is off after a tool call, refused or not", not getattr(writes.SESSION_NEXT, "on", False), None)
 _ng.__exit__(None, None, None)
 upd(47, needs="decision", ask=ASK, options=OPTS)
-r = server._answer("a47", "Ship", "", "")
+r = answer_svc._answer("a47", "Ship", "", "")
 check("internal: his answer ticks his step without a refusal, with the session's own step still open", r == "decision" and ("done", "Oliver: whether to ship it now → Ship") in st(47) and OPEN("home-agent: build it") in st(47), (r, st(47)))
 import datetime as _dt
 _w = (_dt.date.today() + _dt.timedelta(days=3)).isoformat()
