@@ -5,7 +5,7 @@
 
 Run it THROUGH an SSH port-forward from the machine whose browser will sign in, so the loopback
 redirect lands on the host and no code or token passes through a chat:
-  ssh -t -L 8765:localhost:8765 <host> 'uv run --script <checkout>/anchor-hub-google-auth.py <instance>'
+  ssh -t -L 8765:localhost:8765 <host> 'uv run --project <checkout> --locked --extra anchor-hub stackshot anchor-hub-google-auth <instance>'
 Then open the printed URL in that browser, sign in as the matching account, approve. Token lands in
 <secrets>/anchor-hub/google/<email>.json (chmod 600; paths.secrets in stackshot.toml). Requires http://localhost:8765/ registered as an
 authorized redirect URI on that OAuth client (register it once on the OAuth client).

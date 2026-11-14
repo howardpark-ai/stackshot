@@ -202,7 +202,7 @@ r2 = ss("client", "install", "--no-systemd")
 check("a second client install changes nothing", r2.returncode == 0 and SP.read_text(encoding="utf-8") == first and "already" in r2.stdout, r2.stdout[-400:])
 check("…and makes no second backup", len(list(SP.parent.glob("settings.json.bak-*"))) == 1)
 
-# the hooks run: the forwarder reaches pages.py, the session-start hook prints the brief or nothing, never fails
+# the hooks run: the page hook reaches stackshot/projects/pages.py, the session-start hook prints the brief or nothing, never fails
 pt = subprocess.run(["bash", os.path.join(STACK, "client/hooks/project-page.sh"), "touch"], input=json.dumps({"session_id": "x", "tool_name": "Read"}),
                     capture_output=True, text=True, env=ENV)
 check("project-page.sh touch runs pages.py and exits 0", pt.returncode == 0, pt.stderr[-300:])

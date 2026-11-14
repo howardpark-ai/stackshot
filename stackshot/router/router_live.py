@@ -67,7 +67,7 @@ ruling), or goes to a front agent, is passed as before. [router] hold_notices = 
 CAP. A ruling that cannot be written to the routing log (routing.rule raised) is tried again at the next ticks, three times in all.
 After that the notice is logged with status "stuck", never judged again, and listed in the next digest as "could not be ruled".
 
-`python3 router_live.py status` prints a line per project: the notices acted on in the last hour; the notices held
+`stackshot router-live status` prints a line per project: the notices acted on in the last hour; the notices held
 since the last digest and the time of that digest; the last error. Stdlib only; anchor-hub imports it for holds() and stash().
 """
 from __future__ import annotations

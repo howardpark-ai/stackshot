@@ -1,14 +1,13 @@
-"""Scenario test for the package layout (stackshot/<area>/<module>.py) and the forwarders at the old root paths — no server, no network.
+"""Scenario test for the package layout (stackshot/<area>/<module>.py) and for the absence of forwarders at the old root paths — no server, no network.
 
-The code lives in the `stackshot` package; every module that moved keeps a forwarder at its old path until Sun Nov 22nd 2026, so units, hooks, allow rules and scripts that name
-the old path keep working. Covers:
-  * every forwarder names a module that exists, imports as that very module object (state and monkeypatching are shared), and keeps its old file mode and shebang
-  * a forwarder started as a script runs the module's main (same output as `python3 -m <module>`), also in isolated mode and from another directory
-  * the puller's forwarder: the VERSION line an older puller reads, and the namespace an older puller's reload (runpy.run_path) takes main() from
-  * ui/ and anchorhub/ keep importing by their old names, to the same module objects
-  * no module of the package imports a flat name or edits sys.path; client, puller, config and push import only the standard library
+The code lives in the `stackshot` package. Every root forwarder of the moved modules is gone, `puller.py` and `client.py` included: nothing is kept. Covers:
+  * no forwarder anywhere: a file outside the package and the tests that holds a `_TARGET = "stackshot...."` line fails the suite, and so does any `.py` file at the checkout's root
+  * no script at the root or in tools/ carries inline metadata or a lock of its own; the moved copies carry none
+  * the package's puller reads its own VERSION line on disk and runs from the checkout; client, puller, config and push import only the standard library
+  * no module of the package imports a flat name or edits sys.path
   * the command line: `python3 -m stackshot`, bin/stackshot, and a program run as `stackshot <program>`
   * pyproject.toml, the entry point and uv.lock; no lock of a suite
+  * no unit, script, hook or workflow of the checkout runs a root script or imports a root module by its old name (no exemption: every name of a moved module is searched for)
 
     tests/run-suite package_layout        → exit 0 / 1"""
 import ast, importlib, os, pathlib, re, subprocess, sys
@@ -29,88 +28,40 @@ def run(args, cwd=None, **kw):
     p = subprocess.run(args, capture_output=True, text=True, timeout=120, env=ENV, cwd=cwd or str(T), **kw)
     return p.returncode, p.stdout, p.stderr
 
-# ---- the forwarders, found as files: a forwarder is a file with a `_TARGET = "stackshot...."` line
+# ---- the forwarders, found as files: a forwarder is a file with a `_TARGET = "stackshot...."` line, anywhere in the checkout but the package and the tests
 FWD = {}      # old path (relative) -> target module
-for sub in ("", "tools", "ui", "anchorhub"):
-    d = ROOT / sub if sub else ROOT
-    for f in sorted(d.glob("*.py")):
-        m = re.search(r'^_TARGET = "(stackshot[\w.]*)"$', f.read_text(encoding="utf-8"), re.M)
-        if m:
-            FWD[f"{sub}/{f.name}" if sub else f.name] = m.group(1)
-check("the forwarders are there: one at the old path of each moved module", len(FWD) >= 140, len(FWD))
+_SKIP_DIRS = {".git", ".venv", "__pycache__", "node_modules", "stackshot", "tests"}
+for f in sorted(ROOT.rglob("*.py")):
+    rel = f.relative_to(ROOT)
+    if _SKIP_DIRS & set(rel.parts[:-1]): continue
+    m = re.search(r'^_TARGET = "(stackshot[\w.]*)"$', f.read_text(encoding="utf-8"), re.M)
+    if m:
+        FWD[rel.as_posix()] = m.group(1)
+check("there is no forwarder: no file outside the package and the tests holds a `_TARGET = \"stackshot....\"` line", not FWD, sorted(FWD))
+rootpy = sorted(f.name for f in ROOT.glob("*.py"))
+check("... and no .py file at the root (a root script is a forwarder or a program that belongs in the package)", not rootpy, rootpy)
 
-missing = []
-for old, target in FWD.items():
-    rel = target.replace(".", "/")
-    if not ((ROOT / (rel + ".py")).is_file() or (ROOT / rel / "__init__.py").is_file()):
-        missing.append((old, target))
-check("every forwarder names a module of the package that exists", not missing, missing)
-
-dup = [t for t in set(FWD.values()) if list(FWD.values()).count(t) > 1]
-check("no two forwarders name the same module", not dup, dup)
-
-body = [(old, t) for old, t in FWD.items() if (ROOT / old).read_text(encoding="utf-8").count("\n") > 40]
-check("a forwarder holds no code: none is longer than a screen", not body, body)
-
-# ---- importing by the old name gives the module object of the package (a child process: the old names must not leak into this one)
-# not these three: importing one needs a dependency the suites do not have or an instance (their forwarders are run as scripts by the units, which the checks below cannot start)
-SKIP = {"anchor-hub-google-auth.py", "server.py", "tools/make_icons.py"}
-names = [(old[:-3].replace("/", "."), t) for old, t in FWD.items() if not old.endswith("/__init__.py") and old not in SKIP]
-probe = "import importlib, sys\nsys.path.insert(0, %r)\nbad = []\nfor old, new in %r:\n    try:\n        a = importlib.import_module(old); b = importlib.import_module(new)\n        if a is not b: bad.append((old, new, 'not the same object'))\n    except BaseException as e:\n        bad.append((old, new, type(e).__name__ + ': ' + str(e)[:120]))\nprint(repr(bad))\n" % (STACK, names)
-(T / "probe.py").write_text(probe)
-rc, out, err = run([sys.executable, str(T / "probe.py")])
-check("importing a module by its old name gives the package's module object (also ui.* and anchorhub.*)", rc == 0 and out.strip() == "[]", (rc, out[-900:], err[-600:]))
-
-probe2 = ("import sys\nsys.path.insert(0, %r)\nimport config, ui, anchorhub\nfrom stackshot.core import config as c2\nimport ui.render as r\nfrom stackshot.web.ui import render as r2\n"
-          "config.CFG['x_probe'] = 1\nprint(config is c2, c2.CFG.get('x_probe') == 1, r is r2, ui.PREFIX == '', ui.under('/x') == '/x')\n") % STACK
-(T / "probe2.py").write_text(probe2)
-rc, out, err = run([sys.executable, str(T / "probe2.py")])
-check("state is shared: a change through the old name is seen through the new one; the old ui package still answers PREFIX and under()", rc == 0 and out.split()[:4] == ["True"] * 4, (rc, out, err[-400:]))
-
-# ---- modes and shebangs: what was executable stays executable, with its shebang
-EXEC = ["anchor-hub-google-auth.py", "anchor-hub.py", "client.py", "pages.py", "push.py", "server.py", "tools/handoff_repair.py", "tools/migrate_model.py", "tools/model_guard_report.py"]
-bad = [f for f in EXEC if f in FWD and not os.access(ROOT / f, os.X_OK)]
-check("a forwarder of a program that was executable is executable", not bad and all(f in FWD for f in EXEC), bad or [f for f in EXEC if f not in FWD])
-badsh = [f for f in EXEC if f in FWD and not (ROOT / f).read_text(encoding="utf-8").startswith("#!")]
-check("... and starts with its shebang", not badsh, badsh)
-UV = ["server.py", "anchor-hub.py", "anchor-hub-google-auth.py", "audit.py", "publish.py", "ghmigrate.py", "tools/make_icons.py", "tools/migrate_model.py", "tools/close_marks_backfill.py", "tools/rulebook_scan.py"]
-nohdr = [f for f in UV if not (ROOT / f).read_text(encoding="utf-8").count("# /// script") == 1 or not (ROOT / (f + ".lock")).is_file()]
-check("the ten forwarders that units start as `uv run --locked --script` keep their inline metadata and their lock", not nohdr, nohdr)
+hdr = [p.relative_to(ROOT).as_posix() for p in list(ROOT.glob("*.py")) + list((ROOT / "tools").glob("*.py")) if "# /// script" in p.read_text(encoding="utf-8")]
+locks = [p.relative_to(ROOT).as_posix() for p in list(ROOT.glob("*.lock")) + list((ROOT / "tools").glob("*.lock")) if p.name != "uv.lock"]
+check("no script at the root or in tools/ carries inline metadata or a lock of its own: one dependency list, pyproject.toml and uv.lock", not hdr and not locks, (hdr, locks))
 moved_hdr = [str(p.relative_to(ROOT)) for p in (ROOT / "stackshot").rglob("*.py") if "# /// script" in p.read_text(encoding="utf-8")]
 check("... and the moved copies carry none (one dependency list: pyproject.toml)", not moved_hdr, moved_hdr)
 
-# ---- started as a script: the module's main runs
-for old in ("held.py", "config.py", "tools/board_report.py", "pages.py"):
-    target = FWD[old]
-    r1 = run([sys.executable, str(ROOT / old), "--help"], cwd="/")
-    # the module run the way a forwarder runs it (the checkout must be on the path)
-    r2 = run([sys.executable, "-c", f"import sys, runpy; sys.path.insert(0, {STACK!r}); sys.argv = [{target!r}, '--help']; runpy.run_module({target!r}, run_name='__main__', alter_sys=True)"], cwd="/")
-    check(f"python3 {old} --help prints what the module prints and exits the same", r1[0] == r2[0] and r1[1] == r2[1] and (r1[1] or r1[2]), (r1, r2))
-rc, out, err = run([sys.executable, "-I", str(ROOT / "config.py"), "path"], cwd="/")
-check("python3 -I config.py path (isolated mode, another directory) still runs", rc == 0 or "usage" in out + err, (rc, out, err))
-for old in ("tools/cap_words.py", "tools/project.py"):
-    rc, out, err = run([sys.executable, str(ROOT / old), "--help"], cwd="/")
-    check(f"{old} --help runs from another directory", rc == 0 and (out + err).strip() != "", (rc, out[-200:], err[-300:]))
-
-# ---- the real files run as scripts too (python3 stackshot/<area>/<name>.py), and as the old path's target
+# ---- the real files run as scripts (python3 stackshot/<area>/<name>.py)
 rc, out, err = run([sys.executable, str(ROOT / "stackshot/fleet/client.py"), "--help"], cwd="/")
 check("python3 stackshot/fleet/client.py runs as a script (the package finds the checkout itself)", rc == 0 or "usage" in (out + err).lower(), (rc, out[-200:], err[-300:]))
 
 # ---- the puller
-pf = (ROOT / "puller.py").read_text(encoding="utf-8")
 real = (ROOT / "stackshot/fleet/puller.py").read_text(encoding="utf-8")
-va = re.search(r'^VERSION\s*=\s*"([^"]+)"', pf, re.M); vb = re.search(r'^VERSION\s*=\s*"([^"]+)"', real, re.M)
-check("puller.py's VERSION line (read as text by an older puller and the provisioning script) equals the package's", va and vb and va.group(1) == vb.group(1), (va and va.group(1), vb and vb.group(1)))
-probe3 = ("import runpy, sys\nsys.path.insert(0, %r)\nns = runpy.run_path(%r, run_name='puller_reloaded')\nprint(callable(ns.get('main')), ns.get('VERSION'), callable(ns.get('_entry')))\n") % (STACK, str(ROOT / "puller.py"))
-(T / "probe3.py").write_text(probe3)
-rc, out, err = run([sys.executable, str(T / "probe3.py")])
-check("an older puller's reload (runpy.run_path of puller.py) gets main() and the VERSION in the namespace it takes", rc == 0 and out.split()[:1] == ["True"] and out.split()[1:2] == [va.group(1)], (rc, out, err[-500:]))
+vb = re.search(r'^VERSION\s*=\s*"([^"]+)"', real, re.M)
 dv = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); from stackshot.fleet import puller; print(puller.disk_version(), puller.VERSION, puller.HERE == {STACK!r}); print(sorted(puller._RELOAD_FILES))"], capture_output=True, text=True, env=ENV, cwd="/")
 check("the package's puller reads its own VERSION on disk and runs from the checkout", dv.returncode == 0 and dv.stdout.split("\n")[0].split() == [vb.group(1), vb.group(1), "True"], (dv.stdout, dv.stderr[-400:]))
 
 # ---- the modules of the package: no flat imports, no sys.path edits (except the script bootstrap)
-flat = {old[:-3].split("/")[-1] for old in FWD if "/" not in old} | {"ui", "anchorhub"}
-tools_flat = {old[:-3].split("/")[-1] for old in FWD if old.startswith("tools/")}
+# the old flat names: every module of the package (a module that moved took its stem from the root), less the standard library's own; and the two packages that moved whole
+_stems = {p.stem for p in (ROOT / "stackshot").rglob("*.py") if p.name != "__init__.py" and "__pycache__" not in p.parts}
+flat = (_stems - set(sys.stdlib_module_names)) | {"ui", "anchorhub"}
+tools_flat = set()
 bad_imports, bad_path, nopkg = [], [], []
 for p in sorted((ROOT / "stackshot").rglob("*.py")):
     rel = str(p.relative_to(ROOT))
@@ -142,8 +93,8 @@ rc, out, err = run([str(ROOT / "bin/stackshot"), "config", "path"], cwd="/")
 rc2, out2, err2 = run([sys.executable, str(ROOT / "stackshot/core/config.py"), "path"], cwd="/")
 check("bin/stackshot config path runs the config program (same answer as the module)", (rc, out, err) == (rc2, out2, err2), ((rc, out, err), (rc2, out2, err2)))
 rc, out, err = run([str(ROOT / "bin/stackshot"), "pages", "--help"], cwd="/")
-rc2, out2, err2 = run([sys.executable, str(ROOT / "pages.py"), "--help"], cwd="/")
-check("stackshot pages --help prints what pages.py prints", rc == rc2 and out == out2 and out.strip(), ((rc, out[:100], err[:200]), (rc2, out2[:100])))
+rc2, out2, err2 = run([sys.executable, str(ROOT / "stackshot/projects/pages.py"), "--help"], cwd="/")
+check("stackshot pages --help prints what stackshot/projects/pages.py prints", rc == rc2 and out == out2 and out.strip(), ((rc, out[:100], err[:200]), (rc2, out2[:100])))
 rc, out, err = run([str(ROOT / "bin/stackshot"), "client", "mint", "--help"], cwd="/")
 check("stackshot client mint is the setup command, not the client program", "mint" in (out + err).lower() and "usage: stackshot" in (out + err), (rc, out[-300:], err[-300:]))
 sys.path.insert(0, STACK)
@@ -155,11 +106,11 @@ rc, out, err = run([str(ROOT / "bin/stackshot"), "ghmigrate", "-h"], cwd="/")
 check("stackshot <program> -h prints the usage line under the name typed (`stackshot ghmigrate`), not `python3 -m <module>`", rc == 0 and out.startswith("usage: stackshot ghmigrate "), (rc, out[:200], err[-200:]))
 check("... and the parser class is the stock one again once the program has run", "stackshot" not in __import__("argparse").ArgumentParser.__init__.__code__.co_names)
 
-# ---- no caller outside the package names a forwarder (the forwarders go on Sun Nov 22nd 2026)
-# a caller is a command that runs a root script, or a python -c that imports a root module, in a file that is not a forwarder, a test or the package; a comment line names things and runs nothing
-FWD_NAMES = sorted({pathlib.PurePosixPath(k).stem for k in FWD if k.count("/") == 0} | {pathlib.PurePosixPath(k).stem for k in FWD if k.startswith("tools/")})
+# ---- no caller outside the package names a root script (there are no forwarders left, and no exemption: every module name of the package is searched for)
+# a caller is a command that runs a root script, or a python -c that imports a root module, in a file that is not a test or the package; a comment line names things and runs nothing
+FWD_NAMES = sorted(flat)
 CALLER_FILES = [p for p in ROOT.rglob("*") if p.is_file() and not any(s in p.relative_to(ROOT).parts[:1] for s in ("stackshot", "tests", ".git", ".venv", "docs", "ui", "fonts", "icons", "shared"))
-                and p.suffix in ("", ".sh", ".in", ".py", ".yml", ".toml") and str(p.relative_to(ROOT)) not in FWD and p.name != "uv.lock"]
+                and p.suffix in ("", ".sh", ".in", ".py", ".yml", ".toml") and p.name != "uv.lock"]
 _N = "|".join(re.escape(n) for n in FWD_NAMES)
 RUNS = re.compile(r"(?:\$CHECKOUT|\$HERE|\$\{HERE\}|@CHECKOUT@)(?:/\.\.)?/(?:tools/)?(?:" + _N + r")\.py\b(?!\.lock)|(?:python3?|--script|exec|\$PY)\s+\"?(?:\./)?(?:tools/)?(?:" + _N + r")\.py\b(?!\.lock)")
 IMPORTS = re.compile(r"python3? -c .*(?:['\"]|;\s*)(?:import|from) (" + "|".join(re.escape(n) for n in FWD_NAMES) + r")\b")
@@ -171,6 +122,12 @@ for p in CALLER_FILES:
         if l.lstrip().startswith("#"): continue
         if RUNS.search(l) or IMPORTS.search(l): callers.append(f"{p.relative_to(ROOT)}:{i}: {l.strip()[:110]}")
 check("no unit, script, hook or workflow of the checkout runs a root forwarder or imports a root module by its old name", not callers, callers[:8])
+
+# ---- an argument that is not a command never starts the hub (anchor-hub -h used to start one)
+rc, out, err = run([str(ROOT / "bin/stackshot"), "anchor-hub", "-h"], cwd="/")
+check("stackshot anchor-hub -h prints its usage and exits 0 (it does not start a hub)", rc == 0 and "stackshot anchor-hub status" in out, (rc, out[:200], err[-300:]))
+rc, out, err = run([str(ROOT / "bin/stackshot"), "anchor-hub", "frobnicate"], cwd="/")
+check("... and a word that is no command is refused with exit 2", rc == 2 and "unknown command" in err, (rc, out[:200], err[-300:]))
 
 # ---- the project
 import tomllib

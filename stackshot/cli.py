@@ -15,7 +15,7 @@
 
 How to run it: `uv run stackshot ...` in the checkout (the package is installed by `uv sync`); on a box with no uv, `bin/stackshot ...` from anywhere, or
 `python3 -m stackshot ...` from the checkout's root (`python3 stackshot ...` does not run: a folder started that way puts itself, not the checkout, on the import path).
-The scripts at the checkout's root (pages.py, client.py, ...) still forward to the package until Sun Nov 22nd 2026; callers use the program names or the package paths.
+Callers use the program names or the package paths; the checkout's root holds no program of its own.
 Each takes -h. INSTALL.md is the walk-through.
 """
 from __future__ import annotations

@@ -653,14 +653,14 @@ check("main fails: FAILED at main's tests: rolled back to the sha, red (no --rel
       and "--release" not in s["msgs"][1] and s["msgs"][1].endswith("| --sender | release"), s["msgs"])
 check("main fails: the report says main still holds the merge and that no recycle was flagged",
       "main still holds the failing merge, fix forward or revert it" in s["msgs"][1] and "no recycle was flagged" in s["msgs"][1], s["msgs"][1])
-s = fast("fast-fail-notice", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="next_rules.py", notice="notify")
+s = fast("fast-fail-notice", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="stackshot/model/next_rules.py", notice="notify")
 check("main fails after a notice went out: the rollback report says in one line that the notice had gone out and is not taken back",
       "notice: sent" in s["msgs"][0] and len(s["notice"]) == 1 and "no recycle was flagged; a notice about this release had already gone out, and a rollback does not take it back" in red(s)[0], (s["notice"], s["msgs"]))
-s = fast("fast-fail-notice-unset", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="next_rules.py")
+s = fast("fast-fail-notice-unset", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="stackshot/model/next_rules.py")
 check("main fails when no notice was sent (no command set): the rollback report does not claim one", "no recycle was flagged" in red(s)[0] and "a notice about this release" not in red(s)[0], red(s))
-s = fast("fast-fail-notice-failed", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="next_rules.py", notice="notify", notice_fail="1")
+s = fast("fast-fail-notice-failed", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="stackshot/model/next_rules.py", notice="notify", notice_fail="1")
 check("main fails when the notice command failed: the rollback report does not claim a notice went out", "a notice about this release" not in red(s)[0], red(s))
-s = fast("fast-fail-mixed", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="client/hooks/session-start.sh,next_rules.py", notice="notify")
+s = fast("fast-fail-mixed", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="client/hooks/session-start.sh,stackshot/model/next_rules.py", notice="notify")
 check("main fails after a recycle and a notice: the rollback report names both",
       "a recycle was already flagged for this PR's items before the failure" in red(s)[0] and "a notice about this release had already gone out" in red(s)[0], red(s))
 check("main fails: the last good record is unchanged", s["lastgood"] == GOOD, s["lastgood"])
@@ -1005,7 +1005,7 @@ check("pick: a server-only PR (code, docs, tests) picks nothing: no recycle, no 
       s["rc"] == 0 and s["deployed"] and not recycled(s) and not s["notice"] and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS)
       and "session pick: nothing (from server.py, render.py, docs/windows.md, tests/release_scenario.py)" in s["log"]
       and "sessions: nothing (from server.py, render.py" in s["msgs"][0] and len(pick_reads(s)) == 1, (s["log"], s["msgs"], s["gh"]))
-s = scenario("pick-per-call-hook", merge="ok", pickfiles="client/hooks/project-page.sh,client/hooks/client.sh,client.py,pages.py", notice="notify")
+s = scenario("pick-per-call-hook", merge="ok", pickfiles="client/hooks/project-page.sh,client/hooks/client.sh,stackshot/fleet/client.py,stackshot/projects/pages.py", notice="notify")
 check("pick: a per-call hook script and the client CLI pick nothing (each call runs them afresh)",
       s["rc"] == 0 and not recycled(s) and not s["notice"] and "session pick: nothing (from client/hooks/project-page.sh" in s["log"]
       and s["msgs"][0].endswith(GREEN_ARGS), (s["log"], s["msgs"]))
@@ -1015,22 +1015,22 @@ check("pick: a file loaded at the session's start picks a recycle, over nothing:
       and "sessions: recycle (from client/hooks/session-start.sh)" in s["msgs"][0] and "recycle: " in s["msgs"][0] and s["msgs"][0].endswith(GREEN_ARGS), (s["log"], s["msgs"]))
 check("pick: the log lists each changed file with its need", all(t in s["log"] for t in ("recycle  client/hooks/session-start.sh", "nothing  docs/windows.md", "nothing  server.py")), s["log"])
 # a PR that needs a recycle and also a notice does both: a recycle does not deliver a notice's change (the tools' text, the write rules)
-s = scenario("pick-mixed", merge="ok", pickfiles="server.py,next_rules.py,client/hooks/session-start.sh,tests/tool_text.snapshot.json", notice="notify --all")
+s = scenario("pick-mixed", merge="ok", pickfiles="server.py,stackshot/model/next_rules.py,client/hooks/session-start.sh,tests/tool_text.snapshot.json", notice="notify --all")
 check("pick: files that need a recycle and a notice do both: recycle-due on the PR, and [fleet] notice_cmd run with the notice files only, green",
       s["rc"] == 0 and recycled(s) and s["notice"][0] == "--all" and len(s["notice"]) == 2 and s["notice"][1].startswith("release: stackshot PR #23: a change \u2014 ")
-      and "next_rules.py, tests/tool_text.snapshot.json" in s["notice"][1] and "session-start.sh" not in s["notice"][1] and "a recycle does not deliver it" in s["notice"][1]
-      and "session pick: recycle + notice (from client/hooks/session-start.sh; notice from next_rules.py, tests/tool_text.snapshot.json)" in s["log"]
-      and "sessions: recycle + notice (from client/hooks/session-start.sh; notice from next_rules.py" in s["msgs"][0]
+      and "stackshot/model/next_rules.py, tests/tool_text.snapshot.json" in s["notice"][1] and "session-start.sh" not in s["notice"][1] and "a recycle does not deliver it" in s["notice"][1]
+      and "session pick: recycle + notice (from client/hooks/session-start.sh; notice from stackshot/model/next_rules.py, tests/tool_text.snapshot.json)" in s["log"]
+      and "sessions: recycle + notice (from client/hooks/session-start.sh; notice from stackshot/model/next_rules.py" in s["msgs"][0]
       and "notice: sent" in s["msgs"][0] and "recycle: " in s["msgs"][0] and s["msgs"][0].endswith(GREEN_ARGS), (s["notice"], s["log"], s["msgs"]))
-check("pick: the log lists the notice file and the recycle file with their needs", all(t in s["log"] for t in ("recycle  client/hooks/session-start.sh", "notice   next_rules.py", "nothing  server.py")), s["log"])
-s = scenario("pick-mixed-notice-fails", merge="ok", pickfiles="client/hooks/session-start.sh,next_rules.py", notice="notify", notice_fail="1")
+check("pick: the log lists the notice file and the recycle file with their needs", all(t in s["log"] for t in ("recycle  client/hooks/session-start.sh", "notice   stackshot/model/next_rules.py", "nothing  server.py")), s["log"])
+s = scenario("pick-mixed-notice-fails", merge="ok", pickfiles="client/hooks/session-start.sh,stackshot/model/next_rules.py", notice="notify", notice_fail="1")
 check("pick: a failed notice beside a recycle still runs the recycle, and the report goes to the keeper instead of green",
       s["rc"] == 0 and recycled(s) and len(s["notice"]) == 1 and "notice NOT sent" in s["msgs"][0] and "recycle: " in s["msgs"][0] and "--release" not in s["msgs"][0], (s["log"], s["msgs"]))
-s = scenario("pick-mixed-notice-unset", merge="ok", pickfiles="client/hooks/session-start.sh,next_rules.py")
+s = scenario("pick-mixed-notice-unset", merge="ok", pickfiles="client/hooks/session-start.sh,stackshot/model/next_rules.py")
 check("pick: a recycle with a notice and no [fleet] notice_cmd set runs the recycle, says no notice command is set, and stays green",
       s["rc"] == 0 and recycled(s) and "notice: none sent, no [fleet] notice_cmd is set" in s["msgs"][0] and "recycle: " in s["msgs"][0] and s["msgs"][0].endswith(GREEN_ARGS), (s["log"], s["msgs"]))
 # a notice command that never finishes is stopped at the timeout (RELEASE_NOTICE_TIMEOUT, 60 s by default): not sent, no green, and the report still goes out
-s = scenario("pick-notice-hangs", merge="ok", pickfiles="model_guards.py", notice="notify", notice_hang="1", extra={"RELEASE_NOTICE_TIMEOUT": "1"}, secs=60)
+s = scenario("pick-notice-hangs", merge="ok", pickfiles="stackshot/model/model_guards.py", notice="notify", notice_hang="1", extra={"RELEASE_NOTICE_TIMEOUT": "1"}, secs=60)
 check("pick: a notice command that hangs is stopped at the timeout: the log says it timed out, the report goes out without the green flag, the release finishes",
       s["rc"] == 0 and s["deployed"] and len(s["msgs"]) == 1 and "notice NOT sent: [fleet] notice_cmd timed out after 1s" in s["msgs"][0] and "--release" not in s["msgs"][0]
       and "notice NOT sent: [fleet] notice_cmd timed out after 1s" in s["log"], (s["rc"], s["log"], s["msgs"]))
@@ -1038,43 +1038,43 @@ check("pick: the hung notice command is gone (stopped, not left running)", s["no
 check("pick: the notice timeout is 60 s by default", 'NOTICE_TIMEOUT="${RELEASE_NOTICE_TIMEOUT:-60}"' in pathlib.Path(STACK, "release.sh").read_text(), "")
 # a hostile title reaches the notice command as one argument, verbatim, and runs nothing
 HOSTILE = "it's \"quoted\" `touch PWNED_bt` $(touch PWNED_cmd) $HOME ${HOME} ; touch PWNED_semi & \\n *"
-s = scenario("pick-notice-hostile-title", merge="ok", pickfiles="model_guards.py", notice="notify --all", title=HOSTILE)
+s = scenario("pick-notice-hostile-title", merge="ok", pickfiles="stackshot/model/model_guards.py", notice="notify --all", title=HOSTILE)
 leftovers = [str(q) for base in (s["dir"], s["dir"] / "box", pathlib.Path.cwd()) for q in base.glob("PWNED_*")]
 check("pick: a hostile title (quotes, backticks, $(...), $HOME) reaches [fleet] notice_cmd inside its one text argument, verbatim apart from the joiner, and nothing in it runs",
       s["rc"] == 0 and s["notice"][:1] == ["--all"] and len(s["notice"]) == 2 and s["notice"][1].startswith(f"release: stackshot PR #23: {HOSTILE} \u2014 stackshot PR #23 is live at ")
       and "$HOME" in s["notice"][1] and len(s["notice"][1]) <= 400 and not leftovers, (s["notice"], leftovers, s["log"]))
 # the fleet notice command takes one text argument of at most 400 characters with no newline or tab: the title and summary are joined, flattened and cut
-s = scenario("pick-notice-flatten", merge="ok", pickfiles="model_guards.py", notice="notify", title="line one\nline two\tcell\r\nline three")
+s = scenario("pick-notice-flatten", merge="ok", pickfiles="stackshot/model/model_guards.py", notice="notify", title="line one\nline two\tcell\r\nline three")
 check("pick: a newline or tab in the title becomes a space, and the one argument has none left",
       s["rc"] == 0 and len(s["notice"]) == 1 and s["notice"][0].startswith("release: stackshot PR #23: line one line two cell  line three \u2014 stackshot PR #23 is live at ")
       and not any(c in s["notice"][0] for c in "\n\t\r"), (s["notice"], s["log"]))
 LONG = "long title " + "x" * 600
-s = scenario("pick-notice-cut", merge="ok", pickfiles="model_guards.py", notice="notify", title=LONG)
+s = scenario("pick-notice-cut", merge="ok", pickfiles="stackshot/model/model_guards.py", notice="notify", title=LONG)
 check("pick: a notice longer than 400 characters is cut to exactly 400, ending in an ellipsis, and the release stays green",
       s["rc"] == 0 and len(s["notice"]) == 1 and len(s["notice"][0]) == 400 and s["notice"][0].endswith("x\u2026") and s["notice"][0].startswith("release: stackshot PR #23: long title xxx")
       and "notice: sent" in s["msgs"][0] and s["msgs"][0].endswith(GREEN_ARGS), (s["notice"], s["log"], s["msgs"]))
-s = scenario("pick-notice-fits", merge="ok", pickfiles="model_guards.py", notice="notify")
+s = scenario("pick-notice-fits", merge="ok", pickfiles="stackshot/model/model_guards.py", notice="notify")
 check("pick: a notice of 400 characters or fewer is not cut and has no ellipsis", s["rc"] == 0 and len(s["notice"]) == 1 and len(s["notice"][0]) <= 400 and not s["notice"][0].endswith("\u2026"), s["notice"])
-s = scenario("pick-rules-text", merge="ok", pickfiles="server.py,next_rules.py,audit_rubric.txt", notice="notify --all")
+s = scenario("pick-rules-text", merge="ok", pickfiles="server.py,stackshot/model/next_rules.py,audit_rubric.txt", notice="notify --all")
 check("pick: a rules-text file picks a notice: [fleet] notice_cmd runs with one argument appended (title and summary joined), no recycle, green",
       s["rc"] == 0 and not recycled(s) and s["notice"][0] == "--all" and len(s["notice"]) == 2 and s["notice"][1].startswith("release: stackshot PR #23: a change \u2014 stackshot PR #23 is live at ")
-      and "next_rules.py, audit_rubric.txt" in s["notice"][1] and "\n" not in s["notice"][1]
-      and "session pick: notice (from next_rules.py, audit_rubric.txt)" in s["log"] and "notice: sent" in s["msgs"][0] and s["msgs"][0].endswith(GREEN_ARGS), (s["notice"], s["log"], s["msgs"]))
+      and "stackshot/model/next_rules.py, audit_rubric.txt" in s["notice"][1] and "\n" not in s["notice"][1]
+      and "session pick: notice (from stackshot/model/next_rules.py, audit_rubric.txt)" in s["log"] and "notice: sent" in s["msgs"][0] and s["msgs"][0].endswith(GREEN_ARGS), (s["notice"], s["log"], s["msgs"]))
 s = scenario("pick-tool-text", merge="ok", pickfiles="server.py,tests/tool_text.snapshot.json", notice="notify")
 check("pick: a change to the tools' text is a notice, never a recycle", s["rc"] == 0 and not recycled(s) and len(s["notice"]) == 1 and "session pick: notice (from tests/tool_text.snapshot.json)" in s["log"], (s["log"], s["notice"]))
 s = scenario("pick-notice-unset", merge="ok", pickfiles="audit_rubric.txt")
 check("pick: a notice with no [fleet] notice_cmd set logs that none is set and does not fail the release (still green)",
       s["rc"] == 0 and s["deployed"] and "notice: none sent, no [fleet] notice_cmd is set" in s["log"] and not s["notice"]
       and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and "FAILED" not in s["log"], (s["log"], s["msgs"]))
-s = scenario("pick-notice-fails", merge="ok", pickfiles="model_guards.py", notice="notify", notice_fail="1")
+s = scenario("pick-notice-fails", merge="ok", pickfiles="stackshot/model/model_guards.py", notice="notify", notice_fail="1")
 check("pick: a notice command that fails does not fail the release, and the report goes to the keeper instead of green",
       s["rc"] == 0 and len(s["notice"]) == 1 and "notice NOT sent" in s["msgs"][0] and "--release" not in s["msgs"][0], (s["log"], s["msgs"]))
-s = scenario("pick-notice-missing", merge="ok", pickfiles="model_guards.py", notice="no-such-notice-tool")
+s = scenario("pick-notice-missing", merge="ok", pickfiles="stackshot/model/model_guards.py", notice="no-such-notice-tool")
 check("pick: a notice command not on PATH is told the same way", s["rc"] == 0 and "notice NOT sent" in s["msgs"][0] and "--release" not in s["msgs"][0], s["msgs"])
 s = scenario("pick-override-recycle", args=("--recycle",), merge="ok", pickfiles="server.py", notice="notify")
 check("--recycle forces a recycle on a server-only PR, and the files are not read",
       s["rc"] == 0 and recycled(s) and not s["notice"] and not pick_reads(s) and "session pick: recycle (from forced by --recycle)" in s["log"], (s["log"], s["gh"]))
-s = scenario("pick-override-no-recycle", args=("--no-recycle",), merge="ok", pickfiles="client/hooks/session-start.sh,next_rules.py", notice="notify")
+s = scenario("pick-override-no-recycle", args=("--no-recycle",), merge="ok", pickfiles="client/hooks/session-start.sh,stackshot/model/next_rules.py", notice="notify")
 check("--no-recycle forces nothing on a PR that would pick a recycle: no recycle, no notice, no read, green",
       s["rc"] == 0 and not recycled(s) and not s["notice"] and not pick_reads(s) and "session pick: nothing (from forced by --no-recycle)" in s["log"]
       and s["msgs"][0].endswith(GREEN_ARGS), (s["log"], s["msgs"]))
@@ -1085,10 +1085,14 @@ s = scenario("pick-front-both", args=("--recycle", "--no-recycle"), front=True, 
 check("front door: two overrides are refused with the usage line", s["rc"] == 2 and "usage: release.sh <pr> [--recycle | --no-recycle]" in s["out"] and not s["gh"], s["out"])
 
 # the dry runs: the pick and each file's need, nothing else (no merge, no deploy, no message)
-s = scenario("pick-dry-files", raw=["--pick-files", "server.py", "client/hooks/session-start.sh", "next_rules.py"])
+s = scenario("pick-dry-files", raw=["--pick-files", "server.py", "client/hooks/session-start.sh", "stackshot/model/next_rules.py"])
 check("--pick-files: prints the pick and each file's need, calls nothing, deploys nothing, sends nothing; a recycle with a notice reads \"recycle + notice\"",
-      s["rc"] == 0 and "session pick for the files named: recycle + notice (from client/hooks/session-start.sh; notice from next_rules.py)" in s["out"] and "notice   next_rules.py" in s["out"]
+      s["rc"] == 0 and "session pick for the files named: recycle + notice (from client/hooks/session-start.sh; notice from stackshot/model/next_rules.py)" in s["out"] and "notice   stackshot/model/next_rules.py" in s["out"]
       and not s["gh"] and not s["deployed"] and not s["msg"] and not os.path.exists(s["dir"] / "releases/pr-23.log"), s["out"])
+# the root forwarders are deleted: a PR that deletes them tells no session (their package files carry the need)
+s = scenario("pick-dry-deleted-forwarders", raw=["--pick-files", "next_rules.py", "model_guards.py", "owner_steps.py", "bullet_text.py", "pages.py", "client.py", "puller.py"])
+check("--pick-files: a deleted root forwarder (next_rules.py ...) needs nothing; only the package's own file is a notice",
+      s["rc"] == 0 and "session pick for the files named: nothing" in s["out"] and "notice " not in s["out"].replace("session pick", ""), s["out"])
 s = scenario("pick-dry-pr", raw=["--pick", "23"], pickfiles="server.py,audit_rubric.txt")
 check("--pick <pr>: one read of the PR's files, prints the pick, nothing else",
       s["rc"] == 0 and "session pick for PR #23: notice (from audit_rubric.txt)" in s["out"] and len(pick_reads(s)) == 1

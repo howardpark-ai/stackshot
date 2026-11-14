@@ -9,7 +9,7 @@ Layout: ONE store, [paths] store (board-data/ in a repository of its own), <lett
 (the letters mark where an item came from; s = everything created since). This server is the only
 allocator (next-id file) and the only writer; publish.py renders and commits.
 
-Run:  STACKSHOT_CONFIG=<file> uv run --script server.py   (outside the production checkout a run without it is refused)
+Run:  STACKSHOT_CONFIG=<file> uv run --locked --extra server stackshot server   (outside the production checkout a run without it is refused)
       STACKSHOT_AUTH=off …                                 (local test only)
 """
 from __future__ import annotations

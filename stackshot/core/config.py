@@ -4,15 +4,16 @@ order, at $STACKSHOT_CONFIG, ~/.config/stackshot/stackshot.toml, a stackshot.tom
 stackshot.example.toml next to this file — the defaults, enough for a client box that only needs [client] and the secrets
 dir, and for the tests, which patch what they need. Stdlib only (tomllib), so the pane gate on every box reads it.
 
-    from config import CFG, get, path, state, secrets
+    from stackshot.core.config import CFG, get, path, state, secrets
     get("instance", "owner")            → "the owner"
     path("paths", "store")              → Path, ~ expanded
     state("site", "favicon.svg")        → <paths.state>/site/favicon.svg
     secrets("oauth.env")                → <paths.secrets>/oauth.env
 
-CLI (for shell scripts):  python3 config.py get instance.owner | path paths.store | state anchor-hub | secrets oauth.env
-                          python3 config.py file   → the config file in use
-                          python3 config.py check  → exit 0 when the file names no removed mode; otherwise the refusal line(s), exit 1
+CLI (for shell scripts; `bin/stackshot config ...`, or `python3 <checkout>/stackshot/core/config.py ...` where there is no uv):
+                          stackshot config get instance.owner | path paths.store | state anchor-hub | secrets oauth.env
+                          stackshot config file   → the config file in use
+                          stackshot config check  → exit 0 when the file names no removed mode; otherwise the refusal line(s), exit 1
                                                      (importing this module does the same: see REMOVED)
 
 Live reload: a long-running process (the server, anchor-hub) calls reload() on SIGHUP, which systemd sends on

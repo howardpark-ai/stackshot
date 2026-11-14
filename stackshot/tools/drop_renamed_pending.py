@@ -116,7 +116,7 @@ def main(argv: list[str]) -> int:
         for n in sorted(n for n in a.name if n.casefold() not in {g[1].casefold() for g in gone}):
             print(f"nothing to drop: {n} is pending in no project")
         if gone:
-            print(f"dropped {len(gone)} pending entr{'y' if len(gone) == 1 else 'ies'}; undo file {undo}  (python3 tools/drop_renamed_pending.py --undo {undo})", file=sys.stderr)
+            print(f"dropped {len(gone)} pending entr{'y' if len(gone) == 1 else 'ies'}; undo file {undo}  (python3 -m stackshot.tools.drop_renamed_pending --undo {undo}, from the checkout)", file=sys.stderr)
         return 0
     try:
         rows = plan(a.name)
