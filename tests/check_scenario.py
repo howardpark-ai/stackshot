@@ -115,6 +115,8 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc, foryou as fy_svc
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -126,9 +128,9 @@ from stackshot.web.tools import text as _wt_text
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.service import writes
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
-server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 def refused(name, f, *want):

@@ -70,6 +70,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import watching as watching_svc, event_waits as evwaits_svc
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
@@ -77,8 +79,8 @@ from stackshot.waits import waiting as _WT  # the wait is stored as one date, un
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 NOTES: list[tuple[str, str]] = []

@@ -63,10 +63,11 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # ---- 0. the tail reader on its own
 check("the transcript check: the last turn ended in an error, whatever the CLI wrote after it", server._pane_stuck(U["home-stuck"]) == "Credit balance is too low", server._pane_stuck(U["home-stuck"]))
 check("…a pane name resolves to its transcript; nothing known for a session with no transcript on this box, or a cloud id",

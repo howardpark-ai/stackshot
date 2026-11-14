@@ -96,10 +96,11 @@ ID = re.compile(r"^prj_[0-9a-f]{8}$")
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.service import projects as _psvc
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.projects import project_registry as _projects_registry
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 def reg(): return json.loads((T / "store/projects.json").read_text())["pages"]
 def idfile(): return json.loads((T / "store/project-record.json").read_text())
 def pj(): return json.loads((T / "state/projects.json").read_text())

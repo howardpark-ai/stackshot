@@ -82,12 +82,14 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import telling
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]

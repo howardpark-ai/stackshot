@@ -58,6 +58,8 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.model import field_gates as _fg
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -67,7 +69,7 @@ from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.auth import oauth as _oauth
 from stackshot.service import telling
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, owner, note))
@@ -256,7 +258,7 @@ for name, call in (("create", lambda: _wt_create.stackshot_create(subject="[home
     except server.ToolError as e: check(f"the {name} tool still checks the identity", "unknown identity" in str(e), str(e))
 
 # ---- 5b. create refuses an item that only asks for a recycle (after); update's recycle parameter says where a recycle goes
-server._refuse_if_owing = lambda debtor: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 for subj in ("[home] Relaunch every pane so the connector's new parameters load", "[home] Recycle the sessions on box-a",
              "[home] Restart all panes after the plugin update", "[home] Load the new skills: re-launch the Claude sessions"):
     try: _wt_create._create(subject=subj, description="- A thing", project="projects/alpha", owner="home-here"); check(f"create refuses {subj!r}", False)

@@ -66,6 +66,8 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import update as _wt_update
@@ -75,8 +77,8 @@ from stackshot.waits import waiting as _WT  # the wait is stored as one date, un
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 from stackshot.waits import waiting as W

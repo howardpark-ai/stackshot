@@ -45,6 +45,7 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -58,7 +59,7 @@ hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.core import store as _core_store
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 check("a valid token names its machine", _rt_client._client_machine("Bearer " + tok) == "box-far" and _rt_client._client_machine("bearer " + mine) == me)
 check("a replaced token is dead", _rt_client._client_machine("Bearer " + old) == "")
 for bad in ("", "Bearer ", "Bearer short", "Basic " + tok, tok, "Bearer " + tok + "x"):

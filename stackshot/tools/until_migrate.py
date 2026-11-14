@@ -157,10 +157,11 @@ def dry_run(a: argparse.Namespace) -> int:
         if "stackshot.core.config" in sys.modules:
             raise SystemExit("until_migrate: the config was loaded before the scratch copy was made; refusing to run the pass (it would write the live store)")
         from stackshot.web import server  # noqa: PLC0415
+        from stackshot.web import publish as _web_publish  # noqa: PLC0415
         from stackshot.waits import until_pass as UP  # noqa: PLC0415
         if not Path(server._path("g1")).resolve().is_relative_to(root.resolve()):
             raise SystemExit("until_migrate: the server does not resolve items inside the scratch copy; refusing to run the pass")
-        server._publish = lambda: None
+        _web_publish._publish = lambda: None
         d = root / "repo/board-data"
         items = SP.load_dir(d)
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)

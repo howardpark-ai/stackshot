@@ -244,6 +244,8 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.web import middleware as _wmw
@@ -256,9 +258,9 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.core import instance as _core_instance
 from stackshot.web.ui import render as ui_render
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
-server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 telling.tell_woken = lambda *a, **k: None            # no push.py
 def refused(name, f, *want):
     try:

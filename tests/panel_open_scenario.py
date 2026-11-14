@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 
 from stackshot.web import search; from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.routes import ui_api as _rt_ui
@@ -65,7 +66,7 @@ from stackshot.web.auth import signin as _signin
 from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 DEFAULT = ["machines", "runners", "anchorhub", "audit-panel", "projects-panel"]
 UI = up.path()
 def users(): return json.loads(UI.read_text())["users"] if UI.exists() else {}

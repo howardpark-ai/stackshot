@@ -117,12 +117,13 @@ def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import proofs as proofs_svc, released as released_svc, released_live as rlive_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
 server._HERE = rlive_svc.HERE = T / "repo"
 check("the last-good path is release.sh's ($LOGDIR/last-good, LOGDIR = config.py state releases)", server._cfg.state("releases", "last-good") == LAST_GOOD)

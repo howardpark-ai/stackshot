@@ -27,7 +27,7 @@ class Hooks:
     model_of: Callable[..., Any]  # server._model_of
     old_wait_off: Callable[..., Any]  # server._old_wait_off
     page_io: Callable[..., Any]  # server._page_io
-    publish: Callable[..., Any]  # server._publish
+    publish: Callable[..., Any]  # web.publish._publish
     recovery_role: Callable[[], Any]  # server._RECOVERY_ROLE
     recovery_target: Callable[..., Any]  # server._recovery_target
     recovery_tell: Callable[..., Any]  # server._recovery_tell

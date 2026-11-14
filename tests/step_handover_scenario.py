@@ -72,6 +72,7 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import needs as _model_needs
+from stackshot.web import publish as _web_publish
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released_live as rlive_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
@@ -101,7 +102,7 @@ fixtures()
 logging.disable(logging.INFO)
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def raw(i): return (T / f"store/a/{i}.json").read_text()
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]
 server._HERE = rlive_svc.HERE = T / "repo"
 GH = {key(11): ("merged", "")}

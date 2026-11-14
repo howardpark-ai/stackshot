@@ -72,6 +72,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.service import landed as ld; from stackshot.service import foryou as fy; from stackshot.notify import landed as ld_rules
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -83,9 +85,9 @@ from stackshot.service import writes
 from stackshot.web.ui import render
 from starlette.testclient import TestClient
 from stackshot.web.routes import ui_api as _rt_ui
-pub = [0]; server._publish = _wt_anchors._publish = _wt_route._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the Landed routes (web/routes/ui_api.py) look the publish up on their own module
+pub = [0]; _web_publish._publish = _wt_anchors._publish = _wt_route._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the Landed routes (web/routes/ui_api.py) look the publish up on their own module
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 NEWD = "- Goal: The thing works and is in use"
 def cl(i, sender="work-osprey-x", outcome="done", reason="PR 80 is live", **kw):

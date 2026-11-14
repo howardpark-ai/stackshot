@@ -103,13 +103,15 @@ def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 D = lambda t: f"- Goal: {t}\n- It lives here\n- Finished when it works"

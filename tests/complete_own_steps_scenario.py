@@ -40,12 +40,14 @@ DESC = "- A thing\n- It lives here\n- Done when done"
 OUT = "- The thing works now\n- It lives here\n- Finished when it ships"
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.tools import complete as _wt_complete
 OWNER = server.OWNER
-server._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake", result=None: None
 server._tell_check_closed = lambda gid, item, label: []
 

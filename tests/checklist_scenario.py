@@ -92,13 +92,15 @@ def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 def refused(name, f, *want, i=None):

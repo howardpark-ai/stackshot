@@ -115,7 +115,8 @@ def run(a: argparse.Namespace) -> dict:
         logging.disable(logging.INFO)
         from stackshot.service import checks as _checks, proofs as _proofs, released_live as _live  # noqa: PLC0415
         from stackshot.web import server  # noqa: PLC0415
-        server._publish = lambda: None
+        from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        _web_publish._publish = lambda: None
         server._HERE = _live.HERE = Path(a.checkout).expanduser().resolve() if a.checkout else ROOT
         server._OWN_REPO[:] = []
         unread: set[str] = set()

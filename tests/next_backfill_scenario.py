@@ -64,9 +64,11 @@ def mt(i): return rd(i)["metadata"]
 def digest(): return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((T / "store").glob("*/*.json"))}
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_backfill as NB; from stackshot.model import owner_steps as HS; from stackshot.model import migration as M
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 
 # ---- 1. the plan, one item
 p1 = NB.plan(mt(1), "open", OWNER)

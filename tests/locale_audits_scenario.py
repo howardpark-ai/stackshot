@@ -64,13 +64,15 @@ from stackshot.audit import audit_overview as ov
 from stackshot.router import routing
 from stackshot.service import foryou, landed as ld
 from stackshot.web import i18n, server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 EN = i18n.EN
 LOC = T / "locales"
 MARK = lambda v: f"[x:{v}]"
@@ -137,7 +139,7 @@ routing.record("projects/alpha", kind="anchor", to="alpha-main", label="Slack", 
 routing.record("projects/alpha", kind="message", to="", label="", who="alpha-x", text="a note with no one to take it", log_only=True, reason="log only: nothing to deliver", ts=now - 200)
 NEWD = "- The thing works and is in use"
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
-server._refuse_if_owing = lambda debtor: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 for i in (2, 3, 4):
     _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason="the change is live", description=NEWD, sender="alpha-x")
 check("the fixture has closes on the Closed list", len(ld.records()) == 3, ld.records())

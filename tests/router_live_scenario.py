@@ -103,6 +103,8 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import fleet_events as fleetev
 from stackshot.service import page_debt as pdebt_svc
 from stackshot.service import handoff as handoff_svc
@@ -115,7 +117,7 @@ from stackshot.web.routes import board_pages as _rt_board
 from stackshot.service import telling
 from stackshot.anchors.anchorhub import core
 for _bg in ("work-osprey-x", "work-osprey-docs", "work-zeta-lib"): held.mark_client(_bg)      # the rollout gate: these background agents' hooks fetch held lines (a notice is held only for such a session)
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about what the router and
 # the server record and push, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
 PRESENT = [True]
@@ -735,7 +737,7 @@ cfg()
 # board answer alone is not his words about the close), by the router, in one line with the mark a front pane takes. Such a close
 # is a row on his For you list and no turn of the front agent: no router notice, no [for Oliver] push, router live or not.
 # Otherwise a front owner hears nothing, as before.
-server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 NEWD = "- The thing works and is in use"
 def cl(i, sender="work-osprey-x", reason="PR 33 is live", description=NEWD): return _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
 ANS = [{"ts": 1.0, "kind": "decision", "choice": "Go", "via": "board"}]

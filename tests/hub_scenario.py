@@ -109,6 +109,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 # ---- 2. the server's note
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -118,7 +119,7 @@ from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.service import telling
 from stackshot.projects import project_registry as _projects_registry
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 def create(project, owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, sender=owner, **{"next": f"{owner}: carry on", **kw})
 r = create("ops/example-hub", "falcon-anchors"); fold1 = r.split()[1]
 check("create: an agent of the hub, on a folded page: no note", "(note:" not in r, r)
@@ -201,7 +202,7 @@ check("roles.json: refreshed with a new stamp at 30 min though nothing changed (
 _stale = json.loads(RJ.read_text()); _stale["generated"] = "2026-01-01T00:00:00Z"; RJ.write_text(json.dumps(_stale))
 server._roles_sync_safe()
 check("roles.json: a stale file is refreshed by the pass the runner runs every minute (with the board held too)", json.loads(RJ.read_text())["generated"] > "2026-01-02"
-      and [(t.group, t.board) for t in runner_svc.ticks() if t.name == "roles_sync_safe"] == [("fleet", False)] and "_roles_sync_safe()" in inspect.getsource(server._publish_now), json.loads(RJ.read_text())["generated"])
+      and [(t.group, t.board) for t in runner_svc.ticks() if t.name == "roles_sync_safe"] == [("fleet", False)] and "_roles_sync_safe()" in inspect.getsource(_web_publish._publish_now), json.loads(RJ.read_text())["generated"])
 st, ct, body = server._client_get("roles", {})
 check("client read `roles`: the file as written", (st, ct) == (200, "application/json") and body == RJ.read_text() and json.loads(body)["sessions"]["home-side-main"]["role"] == "front", (st, ct, body[:200]))
 from stackshot.fleet import client as _client

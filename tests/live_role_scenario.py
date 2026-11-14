@@ -45,12 +45,13 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web import middleware as _wmw
 from stackshot.projects import pages as pg
 from fastmcp.exceptions import ToolError
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
 # --- 1: the live roles in the end-of-turn texts ---
 item(1, "home-front", mover="home-front")                       # the asking session moves it

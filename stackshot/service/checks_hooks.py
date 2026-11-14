@@ -22,7 +22,7 @@ class Hooks:
     own_repo: Callable[..., Any]  # server._own_repo
     pr_key: Callable[..., Any]  # server._pr_key
     pr_url: Callable[[], Any]  # server._PR_URL
-    publish: Callable[..., Any]  # server._publish
+    publish: Callable[..., Any]  # web.publish._publish
     rmod_needs_kind: Callable[..., Any]  # server._rmod.needs_kind
     role_name: Callable[..., Any]  # server._role_name
     same_sess: Callable[..., Any]  # server._same_sess

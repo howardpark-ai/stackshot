@@ -12,7 +12,7 @@ update means. This suite installs hooks that record each call and return what a 
   7  complete        the complete write makes the update with status=completed through the hook the server fills, then appends the anchors prompt (a failing prompt is told, not raised)
   8  confirm         a confirm moves the `confirmed` clock only, saves quietly under the confirm activity, publishes and appends the nag; its writer is the sender or the item's mover; its reply tells the time in the zone the server holds
   9  the helpers     the private helpers that moved with the write, called directly: the retired-input note, the hand-off line test, the stale-next mark, the hand-off list, the contact after a move, the doing note, the loose wait reason, the time-wait reading, each on a non-default input and an edge, expected values taken from main's own functions
-  10 the table       the table the server builds holds every hook and looks each up when it is called (a patch of the server's name, or of the nag's owner, after the install reaches the update); the field and decision rules are model/'s, called on their modules, so a patch of the owner reaches the update; every `_late("<name>")` target of its two tables is a name of the server; the zone is the server's own;
+  10 the table       the table the server builds holds every hook and looks each up when it is called (a patch of the server's name, or of the nag's owner, after the install reaches the update); the field and decision rules are model/'s, called on their modules, so a patch of the owner reaches the update; every `_late("<name>")` target of its two tables is a name of the server, and every `_late_in(<owner>, "<name>")` target a name of its owner module (the publish and the page rule's refusal are looked up there); the zone is the server's own;
                      a write with no hooks installed is refused
  11  the layers      service/update.py imports nothing from web/, and web/server.py defines none of the moved bodies (the three tools, in web/tools/, are thin wrappers)
 
@@ -402,10 +402,13 @@ srv_tree = ast.parse(pathlib.Path(STACK, "stackshot/web/server.py").read_text(en
 LATE = {}                                                    # the names the server's two tables look up late: table -> [name, ...]
 for node in ast.walk(srv_tree):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "Hooks" and isinstance(node.func.value, ast.Name) and node.func.value.id in ("_create_svc", "_update_svc"):
-        LATE[node.func.value.id] = [c.args[0].value for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_late" and c.args and isinstance(c.args[0], ast.Constant)]
-missing = {t: [n for n in names_ if not hasattr(server, n)] for t, names_ in LATE.items()}
-check("10 every name the server's create table and update table look up late (`_late(\"<name>\")`) is an attribute of the server module (a renamed gate would otherwise fail only when a write reaches it)",
-      set(LATE) == {"_create_svc", "_update_svc"} and len(LATE.get("_create_svc", ())) >= 23 and len(LATE.get("_update_svc", ())) >= 55 and not any(missing.values()), ({t: len(v) for t, v in LATE.items()}, missing))
+        LATE[node.func.value.id] = [(None, c.args[0].value) for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_late" and c.args and isinstance(c.args[0], ast.Constant)] \
+            + [(c.args[0].id, c.args[1].value) for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_late_in" and len(c.args) == 2 and isinstance(c.args[0], ast.Name) and isinstance(c.args[1], ast.Constant)]
+OWNERS = {"_pubmod": "stackshot.web.publish", "_pdebts": "stackshot.web.page_debts"}      # the owner modules the server's `_late_in` lookups name, as the server imports them
+missing = {t: [(a, n) for a, n in names_ if not hasattr(server if a is None else sys.modules[OWNERS[a]], n)] for t, names_ in LATE.items()}
+check("10 every name the server's create table and update table look up late (`_late(\"<name>\")`, or `_late_in(<owner>, \"<name>\")` on the owner module) is an attribute of the server module or of its owner (a renamed gate would otherwise fail only when a write reaches it)",
+      set(LATE) == {"_create_svc", "_update_svc"} and len(LATE.get("_create_svc", ())) >= 23 and len(LATE.get("_update_svc", ())) >= 55 and not any(missing.values()) and all(a is None or a in OWNERS for v in LATE.values() for a, _n in v),
+      ({t: len(v) for t, v in LATE.items()}, missing))
 # the helpers that moved with the write, called directly on inputs where each differs from its default and on an edge, through the table the server builds. The expected values are what main's own version of each
 # function returned for the same input (server.py before the move, run on a scratch config); a roster, the contact lookups and the wait-basis gate are the server's names replaced for a case, the way a suite does.
 H = update

@@ -90,6 +90,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.service import foryou as fy, foryou_events as fyev, foryou_slack as fyslack; from stackshot.notify import foryou as fy_rules
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -101,8 +103,8 @@ from stackshot.service import writes
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 from stackshot.web.routes import client_api as _rt_client, ui_api as _rt_ui
-server._publish = _wt_anchors._publish = _wt_route._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about the notice's shape and
 # who is named in it, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
 PRESENT = [True]
@@ -113,7 +115,7 @@ slack = []
 REAL_SLACK_POST, REAL_SLACK_ON = fyslack._for_you_slack_post, fyslack._for_you_slack_on
 fyslack._for_you_slack_post = lambda text: slack.append(text) or ""      # the Slack hook is stubbed: nothing leaves this process
 fyslack._for_you_slack_on = lambda: True
-pub = [0]; server._publish = _wt_anchors._publish = _wt_route._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)
+pub = [0]; _web_publish._publish = _wt_anchors._publish = _wt_route._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)
 NEWD = "- The thing works and is in use"
 def cl(i, sender="osprey-x", reason="PR 14 is live", description=NEWD): return _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
 def rows(): return fy.rows()

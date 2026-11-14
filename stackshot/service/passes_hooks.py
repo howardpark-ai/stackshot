@@ -29,7 +29,7 @@ class Hooks:
     owed_save: Callable[..., Any]  # server._owed_save
     owed_settle: Callable[..., Any]  # server._owed_settle
     pid_write_op: Callable[..., Any]  # server._pid_write_op
-    publish: Callable[..., Any]  # server._publish
+    publish: Callable[..., Any]  # web.publish._publish
     retire_write_op: Callable[..., Any]  # server._retire_write_op
     scoped_anchors: Callable[..., Any]  # server._scoped_anchors
     script_sender: Callable[..., Any]  # server._script_sender

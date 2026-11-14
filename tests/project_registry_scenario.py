@@ -57,8 +57,9 @@ def tool(*args, store=None):
     return r.returncode, r.stdout, r.stderr
 
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.model import ids as _model_ids
+from stackshot.web import publish as _web_publish
 from stackshot.service import gates as _gates
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 p.cmd_registry(quiet=True)
 ids = {k: e["id"] for k, e in reg().items()}
 A, A_SUB, Z, G = (ids[k] for k in ("projects/alpha", "projects/alpha/sub", "projects/zeta", "projects/gamma"))

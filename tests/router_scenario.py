@@ -115,10 +115,11 @@ os.environ.update(ANTHROPIC_API_KEY="test-not-a-real-key", ANTHROPIC_AUTH_TOKEN=
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.anchors import anchors as a
 import shadow_harness as H; from stackshot.router import router_live
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 def router_cfg(**kw): _cfg.CFG["router"] = {"shadow": True, "command": [sys.executable, str(T / "fake_claude.py")], "timeout_seconds": 20, **kw}
 def rec(project, kind, text, **kw):
     """A notice the way anchor-hub and the server record one: delivered to the keeper, pilot."""

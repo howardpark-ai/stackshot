@@ -109,6 +109,7 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc, released_live as rlive_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -170,7 +171,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def raw(i): return (T / f"store/a/{i}.json").read_text()
 def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]
 server._HERE = rlive_svc.HERE = T / "repo"
 GH = {key(39): ("merged", ""), key(40): ("dead", ""), key(41): ("err", "GitHub refused the read (404)"), key(7, OTHER): ("merged", "")}

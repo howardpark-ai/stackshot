@@ -303,6 +303,7 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
 from stackshot.web import server; from stackshot.service import foryou_events as fyev
+from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
@@ -313,7 +314,7 @@ from stackshot.web.tools import rules as _wt_rules
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 ticks = runner_svc.ticks()
 names = [t.name for t in ticks]
 check("3 order: the settle events come first, in order: the watchers' pass, the anchor pass, the phase sweep, the event waits, the done check, the step proof",
@@ -550,7 +551,7 @@ finally:
 
 # the publish step
 published = []
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append(1)
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append(1)
 fleet_file = T / "fleet/a/machine.json"
 runner_svc.MINUTE_STAMP[0] = None
 runner_svc.fleet_publish()
@@ -567,7 +568,7 @@ check("5 fleet publish: a runner takes the stamp when it is made, so its first l
 # a publish that raises: tried once per change of the stamp, not every round; the stamp is never lowered
 tries = []
 def bad_publish(): tries.append(1); raise RuntimeError("publish broke")
-server._publish = _wt_anchors._publish = _wt_route._publish = bad_publish
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = bad_publish
 runner_svc.MINUTE_STAMP[0] = None
 runner_svc.fleet_publish()
 os.utime(fleet_file, (time.time() + 200, time.time() + 200))
@@ -584,10 +585,10 @@ os.utime(fleet_file, (time.time() + 400, time.time() + 400))
 try: runner_svc.fleet_publish()
 except RuntimeError: pass
 check("5 fleet publish: …and the next real change is tried once again", len(tries) == 2 and runner_svc.MINUTE_STAMP[0] > high, (tries, runner_svc.MINUTE_STAMP))
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
 
 # the watchers' pass wrapper
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
 woke = []; published.clear()
 real_nw, real_wp, real_ap = wakes_svc.next_wake, wakes_svc.wake_pass, wakes_svc.anchor_pass
 ZONE_TZ = server._pages.zone_now().tzinfo
@@ -708,9 +709,9 @@ try:
     # the publish loop: no wake pass and no watchdog of its own (the runner's ten-minute set and the watchdog's thread do those)
     class StopLoop(BaseException): pass
     woke, pubs, sleeps = [], [], []
-    real_wp7, real_pn, real_sleep = wakes_svc.wake_pass, server._publish_now, time.sleep
+    real_wp7, real_pn, real_sleep = wakes_svc.wake_pass, _web_publish._publish_now, time.sleep
     wakes_svc.wake_pass = lambda *a, **k: woke.append(1) or []
-    server._publish_now = _wt_rules._publish_now = lambda **k: pubs.append(k)
+    _web_publish._publish_now = _wt_rules._publish_now = lambda **k: pubs.append(k)
     sent6.clear(); runner_svc.RUNNER_STALL[0] = False
     def fake_sleep(sec):
         sleeps.append(sec)
@@ -721,7 +722,7 @@ try:
             try: runner_svc.publish_loop()
             except StopLoop: pass
     finally:
-        time.sleep, wakes_svc.wake_pass, server._publish_now = real_sleep, real_wp7, real_pn; _wt_rules._publish_now = real_pn
+        time.sleep, wakes_svc.wake_pass, _web_publish._publish_now = real_sleep, real_wp7, real_pn; _wt_rules._publish_now = real_pn
     check("6 publish loop: two passes publish twice (always probing versions) and call no wake pass and no watchdog", woke == [] and sent6 == [] and len(pubs) == 2 and all(p.get("force_versions") for p in pubs), (woke, sent6, pubs))
     import inspect
     check("6 publish loop: its source holds neither the wake pass nor the watchdog", "wake_pass(" not in inspect.getsource(runner_svc.publish_loop) and "watchdog(" not in inspect.getsource(runner_svc.publish_loop))

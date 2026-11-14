@@ -143,7 +143,8 @@ def main(argv: list[str]) -> int:
         os.environ.pop("STACKSHOT_URL", None)
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         from stackshot.web import server  # noqa: PLC0415  — after the environment points at the copy
-        server._publish = lambda: None
+        from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        _web_publish._publish = lambda: None
         now = time.time()
         bad = 0
         all_rows: list[dict[str, Any]] = []

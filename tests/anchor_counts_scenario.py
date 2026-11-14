@@ -90,6 +90,7 @@ check("completion_due: the same anchor on two pages is asked about on each (each
 
 # ---- the readers built on it
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -150,7 +151,7 @@ def item2(i, project, status="open", mover="mv-alpha", **meta):
                                                     "metadata": {"owner": "Oliver", "mover": mover, "project": project, **meta}}))
 held_meta = dict(state="parked", hold=True, needs=["external"], wake="2099-01-01", next="mv-alpha: look again")
 def is_held(g): return bool(json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())["metadata"].get("hold"))
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 woke = []; wakes_svc.wake_notify = lambda g, it, what, *a, **k: woke.append((g, what))
 URL_B = "https://acme.slack.com/archives/D0000000009"       # held by beta only
 URL_C = "https://github.com/o/r/pull/4"                    # held by gamma only (a keeper there)

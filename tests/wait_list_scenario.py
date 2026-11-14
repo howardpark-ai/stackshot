@@ -63,11 +63,13 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
 from stackshot.service import wakes as wakes_svc, watching as watching_svc, event_waits as evwaits_svc
 from stackshot.service import telling
-server._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 NOTES: list[tuple[str, str]] = []                      # the History line of every save the server makes on its own (writes.save's note)

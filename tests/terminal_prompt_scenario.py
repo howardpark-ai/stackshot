@@ -68,10 +68,11 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import get as _wt_get
 from stackshot.service import writes
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every delivery to a session the server would make (a notice to the keeper, a relay): none is expected
 class _FakePush:
     pass

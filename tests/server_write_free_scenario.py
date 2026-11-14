@@ -7,7 +7,8 @@ to reach the notices through hooks. This suite holds what is true now:
                  are on service/telling.py, and no other service module makes one
   2  tables      the twelve hook tables the server installs (the For you rows', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, at the top of the module (not inside a function), once each
   3  values      what a table takes as a plain value (not a function, not a late lookup) is a constant of the module that cannot change after the install, so a copy taken at the install cannot go stale; a late
-                 lookup (`_late("name")`, a call) is a lookup by name made when the hook runs, so it captures nothing, and each one must name a function or value the server module defines
+                 lookup (`_late("name")`, a call) is a lookup by name made when the hook runs, so it captures nothing, and each one must name a function or value the server module defines; a late lookup on an
+                 owner module (`_late_in(module, "name")`) is the same lookup on that module, and must name a function or value that module defines
   4  telling     no table of a service module holds a field that the telling answers: create, gates and update call service/telling.py on the module
 
     tests/run-suite server_write_free    -> exit 0 / 1"""
@@ -66,17 +67,34 @@ missing = sorted(name for name in captured if name not in module_values)
 check("3 every value a table captures is defined on the server module", not missing, missing)
 check("3 every value a table captures at the install is a string, a tuple or a number (a name defined by an import is its own module's constant), so it cannot change after it", not unsafe, unsafe)
 # A late lookup is a call, not a bare name, so `plain_entries` leaves it out: it takes no copy at the install. What it can still get wrong is a name the server no longer defines (the hook would then fail when it runs):
-# every `_late("name")` of every table, the minute set's and the wake passes' included, must name a def, a value or an import of the server module.
+# every `_late("name")` of every table, the minute set's and the wake passes' included, must name a def, a value or an import of the server module, and every `_late_in(module, "name")` a def or value of the owner module.
 server_defs = {n.name for n in SERVER.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | set(module_values)
-late_names = {}
+owner_files = {(a.asname or a.name): "/".join(n.module.split(".")[1:] + [a.name]) + ".py" for n in SERVER.body if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("stackshot.") for a in n.names}
+def late_call(v):
+    """(owner alias or None, name) of a late lookup, else None."""
+    if isinstance(v, ast.Call) and isinstance(v.func, ast.Name):
+        if v.func.id == "_late" and v.args and isinstance(v.args[0], ast.Constant): return (None, v.args[0].value)
+        if v.func.id == "_late_in" and len(v.args) == 2 and isinstance(v.args[0], ast.Name) and isinstance(v.args[1], ast.Constant): return (v.args[0].id, v.args[1].value)
+    return None
+late_names = {}; late_owned = {}
 for node, tab in installs:
     for kw in (node.value.args[0].keywords if node.value.args and isinstance(node.value.args[0], ast.Call) else []):
-        v = kw.value
-        if isinstance(v, ast.Call) and isinstance(v.func, ast.Name) and v.func.id == "_late" and v.args and isinstance(v.args[0], ast.Constant):
-            late_names.setdefault(v.args[0].value, []).append(f"{tab}.{kw.arg}")
+        lc = late_call(kw.value)
+        if lc and lc[0] is None: late_names.setdefault(lc[1], []).append(f"{tab}.{kw.arg}")
+        elif lc: late_owned.setdefault(lc, []).append(f"{tab}.{kw.arg}")
 check("3 every late lookup of every table names something the server module defines", bool(late_names) and not [n for n in late_names if n not in server_defs], sorted(n for n in late_names if n not in server_defs))
+def owner_defs(alias):
+    rel = owner_files.get(alias)
+    if rel is None or not (PKG / rel).exists(): return None
+    tree = parse(rel)
+    return {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | {t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)}
+owner_missing = sorted(f"{a}.{n}" for (a, n) in late_owned if (owner_defs(a) is None or n not in owner_defs(a)))
+check("3 every late lookup on an owner module (`_late_in`) names a module the server imports and something that module defines", bool(late_owned) and not owner_missing, owner_missing)
+check("3 the publish functions and the page rule's refusal are looked up on their owner modules (a suite that replaces one there reaches every table), never on the server",
+      {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_refuse_if_owing"}
+      and not {"_publish", "_publish_now", "_publish_every", "_refuse_if_owing"} & set(late_names), (sorted(late_owned), sorted(late_names)))
 runner_tab = next((n.value.args[0] for n, t in installs if t == "_runner"), None)
-is_late = lambda v: isinstance(v, ast.Call) and isinstance(v.func, ast.Name) and v.func.id == "_late"
+is_late = lambda v: late_call(v) is not None
 runner_plain = [kw.arg for kw in runner_tab.keywords if not is_late(kw.value)] if isinstance(runner_tab, ast.Call) else ["no table"]
 check("3 the minute set's table holds only late lookups (a tick function replaced on the server is the one the table calls), never a value copied at the install", not runner_plain, runner_plain)
 wake_tab = next((n.value.args[0] for n, t in installs if t == "_wake_hooks"), None)

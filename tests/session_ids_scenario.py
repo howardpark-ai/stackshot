@@ -75,6 +75,7 @@ from stackshot.fleet import sessions_registry as sr; from stackshot.anchors impo
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import create as _wt_create
@@ -84,7 +85,7 @@ from stackshot.service import writes
 from stackshot.projects import project_registry as _projects_registry
 from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 def create(owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner=owner, **{"mover": owner, "next": f"{owner}: carry on", **kw})
 def item(gid): return json.loads(server._path(gid).read_text(encoding="utf-8"))
 def meta(gid): return item(gid)["metadata"]

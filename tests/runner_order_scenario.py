@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.core import runner as R
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import handoff as handoff_svc, fleet_events as fleetev
 from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
 from stackshot.service import runner as runner_svc
@@ -49,7 +50,7 @@ from stackshot.service import checks as checks_svc, proofs as proofs_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
 class Clock:
     def __init__(self, t=1000.0): self.t = t

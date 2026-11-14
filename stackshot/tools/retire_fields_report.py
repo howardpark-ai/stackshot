@@ -74,7 +74,8 @@ def dry_run(a: argparse.Namespace) -> int:
         os.environ.pop("STACKSHOT_URL", None)
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         from stackshot.web import server  # noqa: PLC0415
-        server._publish = lambda: None
+        from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        _web_publish._publish = lambda: None
         d = root / "repo/board-data"
         now = time.time()
         items = SP.load_dir(d)

@@ -78,6 +78,8 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
 from stackshot.service import page_debt as pdebt_svc
 from stackshot.service import fleet_events as fleetev
@@ -93,8 +95,8 @@ from stackshot.audit import hourly as HR, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
 from stackshot.model import last_activity as LA, activity as ACT
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the pass is given its `now`, and the saves stamp from the server's own clock."""

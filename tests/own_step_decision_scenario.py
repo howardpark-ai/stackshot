@@ -49,11 +49,12 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web import publish as _web_publish
 from stackshot.model import decision_gates as _dg
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.tools import update as _wt_update
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 O = server.OWNER
 DESC = "- Goal: The release of the fruit sorter\n- It lives in the sorter repo\n- Done when the release is out"
 YESNO = [{"label": "Yes", "line": "The step is done.", "recommended": True}, {"label": "No", "line": "The step is not done yet.", "recommended": False}]
