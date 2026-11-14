@@ -312,9 +312,9 @@ PR, a thread, a file) and not a busy channel or DM; for a busy channel use a rel
 day) or a time wait (check back on a date). "none" clears it.
 
 ## param WAITS
-A wait on a list: 2 to 8 lines {"kind": time | anchor | item | relay | event, plus that kind's fields: until; anchor
-and event; after; event}. Needs until (the backstop day) beside it, and no wait_kind, wait_anchor, wait_event, after,
-wake, ask_by or hold. It replaces the stored list: send the lines that remain, [] ends it.
+A wait on a list: 2 to 8 lines {"kind": time|anchor|item|relay|event, plus its fields: until; anchor, event; after;
+event}. Needs until, the backstop day (an update may omit it); no wait_kind, wait_anchor, wait_event, after, wake, ask_by,
+hold, wait_basis or clear_*. Replaces the list: send the remaining lines, [] ends it.
 
 ## param WAIT_MODE
 With waits: all (the default, or the stored list's) = every line has arrived; any = the first has.

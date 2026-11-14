@@ -74,6 +74,8 @@ def parse(spec: Any) -> list[dict[str, Any]] | None:
             raise ValueError(f"waits is not valid JSON; pass a list of lines, {FORM}")
     if not isinstance(spec, list):
         raise ValueError(f"waits is a list of lines, {FORM}")
+    if len(spec) > _wl.MAX_LINES:      # the count first: a list over the limit is refused without a line of it being read (what `shape` says of it, in the same words)
+        raise ValueError(f"a list holds {_wl.MIN_LINES} to {_wl.MAX_LINES} lines (got {len(spec)})")
     out: list[dict[str, Any]] = []
     for i, raw in enumerate(spec, 1):
         if isinstance(raw, dict):

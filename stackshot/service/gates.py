@@ -46,8 +46,10 @@ from stackshot.model import steps as _steps
 from stackshot.projects import pages as _pages
 from stackshot.service import handoff as _handoff
 from stackshot.service import telling as _telling
+from stackshot.service import watching as _watching
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path
+from stackshot.waits import event_waits as _ew
 from stackshot.waits import handoff as _ho
 from stackshot.waits import handover as _hv
 from stackshot.waits import self_wait as _selfwait
@@ -479,6 +481,12 @@ def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: 
         mode = _wlw.mode_of(wait_mode, stored)
     except ValueError as e:
         raise ToolError(f"Refused: {e}")
+    for ln in lines:
+        if ln["kind"] == "event":      # an event phrase in its canonical form first (`Recycle`, `FLEET_OP   any`), so the stored line it names is found, keeps its arrival and is not judged again; one that is no event is left for the gate below to refuse
+            try:
+                ln["event"] = _ew.text(_watching.event_spec(ln["event"]))
+            except _ew.EventWaitError:
+                pass
     held = Counter(_wl.line_key(ln) for ln in _wl.lines(stored))
     have = set(held)
     for i, ln in enumerate(lines, 1):
@@ -491,7 +499,7 @@ def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: 
                 ln["after"] = nid        # a line the stored list holds already: kept as it is (its item may have closed since, which the watchers end the line for)
             else:
                 try:
-                    ln["after"] = gate_after([ln["after"]], gid)[0]
+                    ln["after"] = gate_after([ln["after"]], gid, i)[0]
                 except ToolError as e:
                     raise _line_refusal(i, e)
         elif ln["kind"] == "time":
@@ -784,7 +792,7 @@ def _open_step_keys(steps: list[dict[str, Any]]) -> list[str]:
 
 
 def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str, steps_old: list[dict[str, Any]], steps_new: list[dict[str, Any]] | None,
-                        description: str, said_l: list[dict[str, Any]], sender: str = "") -> None:
+                        description: str, said_l: list[dict[str, Any]], sender: str = "", list_end_words: str = "") -> None:
     """No clock renewal without progress: refuse a session's write that pushes a wake or an ask_by to a LATER time than the item already holds while the item's reason and its
     open steps are as they were. A reason changed is a new description or wait_basis text, or the owner's words in the write (a NEW said entry that
     _owner_words_on accepts: Acked-by, checked against a transcript, recent; a message (msg) the item already holds does not count again, whatever the quote, nor does a board answer already on it), or a change to what the wait stands on (wait_kind, wait_event,
@@ -792,7 +800,7 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
     step marked done or dropped, or a new line (the open lines differ; a line reworded in next alone reads as a new one). `reword=` is no progress: it restates a step that stays the same step, so a reword-only write does not renew a clock. A wait_reason is no reason here: it is not stored, so it cannot be compared and any text would pass.
     Setting a clock for the first time, pulling one in, leaving it as it is, clearing it and a real hand-off are not renewals: a hand-off is a write after which the item's effective holder
     (the stored mover, else the first session in needs), resolved through the registry, is another session than before AND is not the sender (a holder who sets its own clock is the same
-    session by another name, or a flip back and forth). Writes nothing."""
+    session by another name, or a flip back and forth). `list_end_words`: the refusal's own words for a write that ends a stored list (`waits=[]`) beside a later day; the refusal is then these, and a write with progress is let through as any other. Writes nothing."""
     h = _hooks()
     m0 = item_was.get("metadata") or {}
     struct_progress = _struct_progress(m0, meta)      # first: it records the structure of every write, whether or not a clock moves
@@ -835,6 +843,8 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
                             f"Only a step, the reason, {OWNER}'s own new words or a hand-off to another session resets the count. The item model: {h.model_page}")
         meta["clock_struct_n"] = struct_n + 1
         return
+    if list_end_words:
+        raise ToolError(f"{list_end_words}, or change something real in the same write: {real}.")
     event = ("the event-wait form (wait_kind=\"event\", wait_event=<the event>, ask_by=<the backstop day>, post_wake_mover=<who takes it when it happens>)")
     if _waits_decision(meta):
         ways = f"Change something real in the same write: {real}. An item on {OWNER}'s decision cannot be held, so the date stays as it is until a step or the reason changes."
@@ -851,9 +861,10 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
                     f"and an item that keeps being re-dated is how work sits unseen. {ways} A wait_reason does not count (it is not stored). The item model: {h.model_page}")
 
 
-def gate_after(after: Any, gid: str = "") -> list[str]:
+def gate_after(after: Any, gid: str = "", line: int = 0) -> list[str]:
     """after as given (a list of item ids, or a comma-separated string) → the ids stored. Each names an open item of any project
-    (a superseded one is followed to its replacement); the item itself, a closed one, a missing one and a loop are refused."""
+    (a superseded one is followed to its replacement); the item itself, a closed one, a missing one and a loop are refused. `line`: the position of the item line of a list this is for (the loop's refusal then has no
+    `(after)` in it: the written wait is no after link)."""
     h = _hooks()
     if isinstance(after, str):
         after = [x for x in re.split(r"[,\s]+", after) if x.strip()]
@@ -872,7 +883,7 @@ def gate_after(after: Any, gid: str = "") -> list[str]:
             raise ToolError(f"Refused: {g} is already {it.get('status')}" + (f" ({(it.get('metadata') or {}).get('outcome')})" if (it.get("metadata") or {}).get("outcome") else "")
                             + "; after names open items that must close first")
         if gid and h.after_reaches([g], gid):
-            raise ToolError(f"Refused: a loop: {g} itself waits on {gid} (after), so {gid} cannot wait on {g}")
+            raise ToolError(f"Refused: a loop: {g} itself waits on {gid}{'' if line else ' (after)'}, so {gid} cannot wait on {g}" + (f"; take {g} out of waits[{line}] or end its wait on {gid} first" if line else ""))
         if g not in out:
             out.append(g)
     return out

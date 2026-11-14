@@ -639,5 +639,151 @@ bullet_ = next(l for l in im_.splitlines() if l.startswith("- **A wait on a list
 check("5 …and no page says any more that the write path comes later", "a later change" not in wd_ and "a later change" not in bullet_ and "not yet written by any tool" not in bullet_ and "until a later change adds the write path" not in bullet_ and "later" not in bullet_, None)
 check("5 docs/item-model.md points to the write path and says an edit never stores a list of one", "how a list is written, and each refusal" in im_ and "never stores a list of one line" in im_, None)
 
+# ================================================================ 7. the lows round
+def arrive(i, k, what="it came"):
+    d_ = rd(i); d_["metadata"]["waits"][k]["arrived"] = {"at": now0 - 5, "what": what}; (T / f"store/a/{i}.json").write_text(json.dumps(d_))
+# ---- 7a an arrival is kept when the event line is sent again in another form
+fresh(300, [Ev("recycle"), Re("a")], until=w(6))
+arrive(300, 0)
+bupd(300, waits=[Ev("Recycle"), Re("a")], until=w(6))
+check("7a an event line that had arrived, sent again as `Recycle`, keeps its arrival and is the one line, not a new open line", mt(300)["waits"][0].get("arrived") and mt(300)["waits"][0]["event"] == "recycle" and len(mt(300)["waits"]) == 2, mt(300))
+bupd(300, waits=[Ev("recycle"), Re("a")], until=w(6))
+check("7a …and sent in its canonical form it keeps it as before (the control)", mt(300)["waits"][0].get("arrived") and not mt(300)["waits"][1].get("arrived"), mt(300))
+fresh(301, [Ev("fleet_op any"), Re("a")], until=w(6))
+arrive(301, 0)
+bupd(301, waits=[Ev("FLEET_OP   any"), Re("a")], until=w(6))
+check("7a …the same for `FLEET_OP   any` (case and spaces)", mt(301)["waits"][0].get("arrived") and mt(301)["waits"][0]["event"] == "fleet_op any", mt(301))
+fresh(302, [Ev("recycle"), Re("a")], until=w(6))
+arrive(302, 0)
+bupd(302, waits=[Re("a"), Ev(" RECYCLE ")], until=w(6))
+check("7a …in another position too, and the arrival goes with the line", mt(302)["waits"][1].get("arrived") and "arrived" not in mt(302)["waits"][0], mt(302))
+fresh(303, [Ev("recycle"), Re("the Lease")], until=w(6))
+arrive(303, 1)
+bupd(303, waits=[Ev("recycle"), Re("the lease")], until=w(6))
+check("7a a relay line that differs only in case stays a different line (its text is the owner's words, not a canonical phrase): the arrival is not carried", not mt(303)["waits"][1].get("arrived"), mt(303))
+fresh(304, [Re("Recycle"), Re("a")], until=w(6))
+check("7a a relay line whose text happens to parse as an event phrase (`Recycle`) is stored as written, not canonicalized as an event line would be", mt(304)["waits"][0] == {"kind": "relay", "event": "Recycle"}, mt(304))
+bupd(304, waits=[Re("Recycle"), Re("a"), Re("b")], until=w(6))
+check("7a …and sent again it stays `Recycle`", [ln["event"] for ln in mt(304)["waits"]] == ["Recycle", "a", "b"], mt(304))
+
+# ---- 7b a backstop earlier than an open time line, whichever parameter says it
+for name_, kw_ in (("ask_by", {"ask_by": w(4)}), ("after=none and until", {"after": "none", "until": w(4)}), ("hold and until", {"hold": True, "until": w(4)}), ("clear_hold and until", {"clear_hold": True, "until": w(4)}),
+                   ("clear_after and until", {"clear_after": True, "until": w(4)}), ("after=[] and until", {"after": [], "until": w(4)})):
+    fresh(310, [Tm(w(5)), Re("a")], until=w(6))
+    refused(f"7b {name_}, earlier than an open time line, is refused as until alone is", lambda kw_=kw_: bupd(310, **kw_), "waits[1] is a date", "later than the backstop day", "an earlier date or a later until")
+    check(f"7b …and nothing changed ({name_})", mt(310)["until"] == w(6) and listed(mt(310)) and not mt(310).get("ask_by"), mt(310))
+fresh(310, [Tm(w(5)), Re("a")], until=w(6))
+bupd(310, ask_by=w(5))
+check("7b ask_by on the day of the time line is accepted, and is the backstop", mt(310)["until"] == w(5) and listed(mt(310)), mt(310))
+fresh(310, [Tm(w(5)), Re("a")], until=w(6))
+bupd(310, after="none", until=w(5))
+check("7b after=none with a backstop on the day of the time line is accepted", mt(310)["until"] == w(5) and listed(mt(310)), mt(310))
+fresh(311, [Tm(w(5)), Re("a")], until=w(6))
+d_ = rd(311); d_["metadata"]["waits"][0]["arrived"] = {"at": now0 - 5, "what": "the date came"}; (T / "store/a/311.json").write_text(json.dumps(d_))
+bupd(311, ask_by=w(4))
+check("7b a time line that has arrived holds no backstop back from ask_by either", mt(311)["until"] == w(4), mt(311))
+item(312, needs=[BACK], wait_kind="list", wait_mode="all", waits=[Tm(w(5)), Re("a")], until=w(4), post_wake_mover=BACK)      # hand-edited: a backstop in front of its time line
+out = bupd(312, description="- Goal: the list ends\n- It lives here\n- And more\n- Done when done")
+check("7b a write that does not move the backstop day is no refusal for a hand-edited list whose backstop is already in front of a time line", "more" in rd(312)["description"] and mt(312)["until"] == w(4), out[-300:])
+
+# ---- 7c the model conflict note on a list written on an item in the doing state
+conflicts_ = lambda g: [l for l in _wt_get.stackshot_get(g).splitlines() if "the wait wins" in l]
+for k_, kw_ in (("list", dict(waits=[Re("a"), Re("b")], until=w(6))), ("relay", dict(wait_kind="relay", wait_event="x", until=w(6))), ("event", dict(wait_kind="event", wait_event="recycle", until=w(6))),
+                ("item", dict(wait_kind="item", after=["a900"], until=w(6)))):
+    item(320, needs=[BACK])
+    bupd(320, **kw_)
+    check(f"7c a {k_} wait written on an item with no stored state is no model conflict (the state it would read as is the wait's own)", conflicts_("a320") == [] and not MODEL.derive({**rd(320), "gid": "a320"}).conflicts, conflicts_("a320"))
+item(320, needs=[BACK])
+bupd(320, wait_kind="anchor", wait_anchor=A1, wait_event="merged", until=w(6))
+check("7c …a single anchor wait on such an item keeps its note, as before", len(conflicts_("a320")) == 1 and "update hold=true (a hold ends" in conflicts_("a320")[0], conflicts_("a320"))
+item(321, needs=[BACK], state="doing")
+bupd(321, waits=[Re("a"), Re("b")], until=w(6))
+check("7c a list written on an item whose state is stored as doing keeps the note, and its advice says where hold=true goes (an update of its own: beside waits it is refused)", len(conflicts_("a321")) == 1 and "update hold=true in an update of its own, not beside waits" in conflicts_("a321")[0], conflicts_("a321"))
+refused("7c …and beside waits hold=true is refused", lambda: bupd(321, waits=[Re("a"), Re("b")], until=w(6), hold=True), "does not go with hold")
+bupd(321, hold=True)
+check("7c …on its own it ends the stored state and the note with it, the list is as it was", conflicts_("a321") == [] and listed(mt(321)) and mt(321).get("state") != "doing", (conflicts_("a321"), mt(321)))
+
+# ---- 7d wording
+# a loop through a list line names the line, and is no `(after)` (the written wait is no after link)
+item(340, needs=[BACK]); item(341, needs=[BACK])
+bupd(341, waits=[It("a340"), Re("lp")], until=w(6))
+try: bupd(340, waits=[It("a341"), Re("lq")], until=w(6)); loop_ = "stored"
+except Exception as e: loop_ = str(e)
+check("7d a loop refusal for a list line names the line and says no (after): the written wait is no after link", "waits[1]: a loop" in loop_ and "(after)" not in loop_ and "out of waits[1]" in loop_, loop_)
+try: bupd(340, after=["a341"], until=w(6)); loop_ = "stored"
+except Exception as e: loop_ = str(e)
+check("7d …the loop through the single `after` keeps its words", "a loop" in loop_ and "(after)" in loop_ and "waits[" not in loop_, loop_)
+# the collapse reply says the day the item waits until
+fresh(342, [Tm(w(5)), Re("a")], until=w(6))
+o_ = bupd(342, waits=[Tm(w(5))], until=w(4))
+check("7d a list collapsed to a date later than the backstop: the reply says the stored day (the backstop), not the line's later one", mt(342)["until"] == w(4) and f"the date {w(4)}" in o_ and f"the date {w(5)}" not in o_, (mt(342), o_[-300:]))
+fresh(343, [Tm(w(5)), Re("a")], until=w(6))
+o_ = bupd(343, waits=[Tm(w(5))], until=w(5))
+check("7d …a date the backstop does not pass is as the line has it", mt(343)["until"] == w(5) and f"the date {w(5)}" in o_, (mt(343), o_[-300:]))
+# waits=[] beside a later until: the clock-renewal gate's own test decides (a write with progress goes through, as it does on main)
+def tryu(i, **kw):
+    """The write's reply and the refusal it met ("" for none), so a write that is refused fails its own check instead of ending the run."""
+    try: return bupd(i, **kw), ""
+    except Exception as e: return "", str(e)
+NEWDESC = "- Goal: the list ends\n- It lives here\n- Done when done\n- And it waits on a later date now"
+for i_, kw_ in ((344, dict(waits=[], until=w(7))), (345, dict(waits="none", until=w(7))), (346, dict(waits="[]", until=w(7)))):
+    fresh(i_, [Tm(w(5)), Re("a")], until=w(6))
+    refused(f"7d waits={kw_['waits']!r} beside an until later than the list's backstop, with no progress, is refused in its own words, not as a pushed-out clock", lambda i_=i_, kw_=kw_: bupd(i_, **kw_), "waits=[] ends the list", f"until={w(7)}", f"backstop day {w(6)}", "waits=[] alone", "or change something real in the same write")
+    check(f"7d …nothing changed ({i_})", listed(mt(i_)) and mt(i_)["until"] == w(6), mt(i_))
+fresh(347, [Tm(w(5)), Re("a")], until=w(6))
+bupd(347, waits=[], until=w(6))
+check("7d waits=[] beside the same day ends the list and leaves the date wait (as before)", not mt(347).get("waits") and mt(347)["until"] == w(6) and not mt(347).get("wait_kind"), mt(347))
+fresh(348, [Tm(w(5)), Re("a")], until=w(6))
+bupd(348, waits=[], until=w(3))
+check("7d …and beside an earlier one", not mt(348).get("waits") and mt(348)["until"] == w(3), mt(348))
+# …with progress, as on main: stored as the date wait on the later day
+fresh(349, [Tm(w(5)), Re("a")], until=w(6))
+_, why_ = tryu(349, waits=[], until=w(7), description=NEWDESC)
+check("7d waits=[] beside a later until with a new description is accepted: the list ends, the item waits on the later date", not why_ and not mt(349).get("waits") and not mt(349).get("wait_kind") and mt(349)["until"] == w(7), mt(349))
+fresh(350, [Tm(w(5)), Re("a")], until=w(6))
+_, why_ = tryu(350, waits=[], until=w(7), next=f"{BACK}: look again on {w(7)}")
+check("7d …with a new next step", not why_ and not mt(350).get("waits") and mt(350)["until"] == w(7) and "look again" in str(mt(350).get("next")), mt(350))
+fresh(352, [Tm(w(5)), Re("a")], until=w(6))
+refused("7d clear_wait beside waits=[] and a later until is refused as it is on a list-free item (it is no progress)", lambda: bupd(352, waits=[], clear_wait=True, until=w(7)), "Refused:")
+check("7d …nothing changed (clear_wait)", listed(mt(352)) and mt(352)["until"] == w(6), mt(352))
+# the owner's checked words lift it too: his words, from a transcript, in this very write
+SAY_SESSION, SAY_MSG = "22222222-3333-4444-8555-666666666666", "bbbbbbbb-bbbb-4bbb-8bbb-000000000001"
+(T / f"transcripts/-home-x/{SAY_SESSION}.jsonl").write_text(json.dumps({"type": "user", "uuid": SAY_MSG, "timestamp": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "origin": {"kind": "human"},
+                                                                       "message": {"role": "user", "content": "yes, the list can end and the date can move out"}}) + "\n", encoding="utf-8")
+fresh(353, [Tm(w(5)), Re("a")], until=w(6))
+_, why_ = tryu(353, waits=[], until=w(7), said=[{"tag": "Acked-by", "quote": "the list can end and the date can move out", "msg": SAY_MSG, "session": SAY_SESSION}])
+check("7d …and so do his words, checked against a transcript: the list ends, the item waits on the later date", not why_ and not mt(353).get("waits") and mt(353)["until"] == w(7) and mt(353).get("said"), mt(353))
+# an item that stores no list: waits=[] clears nothing, and the gate speaks its own words, never the list's
+item(354, needs=[BACK], wait_kind="anchor", wait_anchor=A1, wait_event="merged", until=w(5), post_wake_mover=BACK)
+try: bupd(354, waits=[], until=w(6)); why_ = "stored"
+except Exception as e: why_ = str(e)
+check("7d waits=[] with a later until on an item that stores no list is refused as a pushed-out clock, never as the end of a list", "pushed out" in why_ and "ends the list" not in why_ and "waits=[] alone" not in why_, why_[:400])
+out, why_ = tryu(354, waits=[], until=w(6), description=NEWDESC)
+check("7d …with progress it goes through as on main: the date moves, and the reply says there was no list to clear", not why_ and mt(354)["until"] == w(6) and "stores none" in out, (mt(354), out[-300:], why_[:300]))
+
+# ---- 7e the count is judged before the lines are read
+class Walked_(list):
+    walked = 0
+    def __iter__(self):
+        Walked_.walked += 1
+        return super().__iter__()
+big_ = Walked_([Re(f"news {i}") for i in range(200)] + [{"kind": "soon"}])
+try: WLW.parse(big_); why_ = "parsed"
+except ValueError as e: why_ = str(e)
+check("7e a list over 8 lines is refused on its count, before any line is read, with the same words (a bad line past the eighth is never reached)", why_ == "a list holds 2 to 8 lines (got 201)" and Walked_.walked == 0, (why_, Walked_.walked))
+try: WLW.parse([{"kind": "soon"}] + [Re(f"news {i}") for i in range(9)]); why_ = "parsed"
+except ValueError as e: why_ = str(e)
+check("7e …a bad first line in a list of ten says the count, as the count is judged first", why_ == "a list holds 2 to 8 lines (got 10)", why_)
+refused("7e …through create the refusal is the one it was", lambda: mk(waits=[Re(f"news {i}") for i in range(200)], until=w(5)), "Refused: a list holds 2 to 8 lines (got 200)")
+refused("7e …through update too, as JSON text", lambda: bupd(10, waits=json.dumps([Re(f"news {i}") for i in range(9)]), until=w(6)), "Refused: a list holds 2 to 8 lines (got 9)")
+check("7e …8 lines are read as before, and the count never refuses fewer", len(WLW.parse([Re(f"news {i}") for i in range(8)])) == 8 and len(WLW.parse([Re("a"), Re("b")])) == 2 and len(WLW.parse([Re("a")])) == 1, None)
+check("7e event_phrases and judged_as read a list over the limit as one that does not parse, as before (no phrase, and judged as a list)", WLW.event_phrases([Ev("recycle")] * 9) == [] and WLW.judged_as([Tm(w(5))] * 9) == "list", None)
+
+# ---- 7f the waits parameter text names what the refusal names
+for n_ in ("create", "update"):
+    d_ = tools_[n_].parameters["properties"]["waits"]["description"]
+    check(f"7f {n_}: the waits text names every parameter a list does not go with (clear_* for the clears), the stored backstop, and says until is not the only way to give it",
+          all(x in d_ or (x.startswith("clear_") and "clear_*" in d_) for x in WLW.SINGLE if x != "until") and "wait_basis" in d_ and "Needs until, the backstop day (an update may omit it)" in d_ and "or the stored one" not in d_, d_)
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": wait list write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

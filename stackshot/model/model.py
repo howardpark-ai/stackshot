@@ -266,8 +266,8 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
             conflicts.append(note)
             kind_set = ""
     waiting = bool(kind_set) or bool(su) or today in WAITING_STATES
-    if kind_set and today in ALIVE_STATES and not (kind_set in ("event", "relay") and derived):      # an event or relay wait on an item with no stored state is the way to store one (the state it would read as is the wait's own, never a stored alive one)
-        conflicts.append(f"wait_kind={kind_set} on an item whose state is {today}, which is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true (a hold ends a stored work-in-hand state)")
+    if kind_set and today in ALIVE_STATES and not (kind_set in ("event", "relay", _wl.LIST) and derived):      # an event, relay or list wait on an item with no stored state is the way to store one (the state it would read as is the wait's own, never a stored alive one)
+        conflicts.append(f"wait_kind={kind_set} on an item whose state is {today}, which is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true{' in an update of its own, not beside waits' if kind_set == _wl.LIST else ''} (a hold ends a stored work-in-hand state)")
     if not waiting:
         mv_d, then_d = _defaults(m, today)
         mover_s, then_s = norm_who(m.get("mover")), norm_who(m.get("then"))
