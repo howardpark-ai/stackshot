@@ -1,4 +1,4 @@
-"""Scenario test for the migration onto the item model (migration.py, tools/migrate_model.py, server.py `_migrate_write`, step 4) — fixture data, no live store, no network, no server socket.
+"""Scenario test for the migration onto the item model (migration.py, tools/migrate_model.py, service/migrations.py `migrate_write`, step 4) — fixture data, no live store, no network, no server socket.
 
 A fixture store with one open item for each state of the design's section 2 table, one for each kind of residue, and closed items without an outcome. The cold call is a stub that answers from a
 table; nothing starts `claude -p`. Covered:
@@ -13,7 +13,7 @@ table; nothing starts `claude -p`. Covered:
   * the default backstop on a wait with no end (an item wait: the latest expected-by of what it waits after plus two days, else 14 days from the pass; a relay or anchor wait: 14 days) and the
     batched residue wake: one message per owner, the exact field per item, a stored default said to be one to replace; the wake's text file.
   * the cold call's two reads: the parse, the validation and the refusals of an invented anchor, a name off the list, a past date, a duplicate of itself.
-  * the server's apply (`_migrate_write`, POST /client/migrate): begin holds the board-wide pause; each write goes through the normal save path as the author `migration`, judged by the guards,
+  * the server's apply (`migrate_write` in service/migrations.py, POST /client/migrate): begin holds the board-wide pause; each write goes through the normal save path as the author `migration`, judged by the guards,
     with no hand-off recorded, no notice sent and no clock moved; a write the guards refuse or an item that moved since the plan is reported, never forced; a field outside the whitelist is
     refused; with the pause held the wake pass and the watchers do nothing, and `end` lifts it and fires what came due in one batch, one message per recipient.
   * the script: `tools/migrate_model.py --dry-run --store <copy>` over a copy writes its report (JSON and markdown) and changes the copy and nothing else; it refuses the live store, a copy whose
@@ -133,6 +133,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import migrations as migsvc
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.service import telling
@@ -276,7 +277,7 @@ all_writes = [*plan.writes, *cplan.writes]
 st0 = {g: rd(g) for g in (2, 4, 9, 11)}
 BY = "falcon-redesign-engineer via a script on testbox"
 def call(op, sender="falcon-redesign-engineer", machine="testbox", **kw):
-    try: return server._migrate_write({"op": op, "sender": sender, **kw}, machine)
+    try: return migsvc.migrate_write({"op": op, "sender": sender, **kw}, machine)
     except Exception as e: return {"error": str(e)}
 E = lambda g: rd(g)["updated"]       # what a planned write expects of the item
 S = lambda g: M.activity_sig(rd(g), 0)   # …and of its answers and comments (the issue's local copy holds none here)
@@ -361,7 +362,7 @@ check("backstop: …wait_event for the missing event, ask_by with the suggested 
 rows = MM.residue_wake_rows(plan.residue)
 check("wake: the rows are the residue with a field to set and the defaults to replace, nothing else", rows and all((r["hand"] and r["fields"]) or r["kind"] in ("default_end", "anchor_seen") for r in rows) and {r["item"] for r in rows} >= {"board#36", "board#30", "board#13"}
       and not [r for r in rows if r["kind"] in ("hidden_wait", "snooze_alive", "mover_gone")], [r["kind"] for r in rows])
-wk_det = server._migrate_wake(rows)
+wk_det = migsvc.migrate_wake(rows)
 wk_txt = {k: v["text"] for k, v in wk_det.items()}
 alltext = "\n".join(wk_txt.values())
 check("wake: grouped per owner, one text each, naming the exact field for each item", wk_txt and "wait_event=<who or what is waited for>" in alltext and "ask_by=YYYY-MM-DD" in alltext and "board#36" in alltext and "board#12" in alltext
@@ -444,7 +445,7 @@ check("front: the live fixture has no reassignment of a front agent's item: the 
 wk.release()
 CFGM = server._cfg.CFG["model"]
 GB = lambda **kw: {"op": "begin", "sender": "falcon-redesign-engineer", **kw}
-check("gate: [model] migration is off by default", server._migration_on() is False, None)
+check("gate: [model] migration is off by default", migsvc.migration_on() is False, None)
 st_, d_ = server._client_post("box-a", "migrate", GB())
 check("gate: the route answers 403 while it is off, whoever asks, and holds nothing", st_ == 403 and "off" in d_["error"] and not wk.holding(), (st_, d_))
 cfg(migration=True)
@@ -589,7 +590,7 @@ r3_ = call("apply", writes=[{"item": "board#93", "set": {"mover": BACK}, "expect
 call("end")
 check("sig: a write with no expect_sig is refused; one planned before an answer arrived (neither moves `updated`) is `moved`; one planned on what the item holds is made",
       r_["action"] == "refused" and "expect_sig is required" in r_["why"] and r2_["action"] == "moved" and "answer or a comment" in r2_["why"] and r3_["action"] == "set" and mt(93).get("mover") == BACK, (r_, r2_, r3_))
-sig3 = server._migrate_sig("g93", rd(93))
+sig3 = migsvc.migrate_sig("g93", rd(93))
 check("sig: the second place is 0 since the mirror keeps no copy of an issue's comments; the answers are the first", sig3 == [1, 0], sig3)
 
 # ---- G1: the wake describes what is stored, never what was only planned
@@ -602,7 +603,7 @@ rows_g1 = [{"item": "board#94", "kind": "default_end", "why": "w", "hand": False
            {"item": "board#96", "kind": "anchor_seen", "why": "anchor-hub logged 1 notice on https://example.org/pull/7 since its last move", "hand": False, "fields": [], "default": "1"},
            {"item": "board#97", "kind": "anchor_seen", "why": "anchor-hub logged 1 notice on https://example.org/pull/7 since its last move", "hand": False, "fields": [], "default": "1"},
            {"item": "board#95", "kind": "no_end", "why": "w", "hand": True, "fields": ["ask_by"], "default": day(3)}]
-det_g1 = server._migrate_wake(rows_g1)
+det_g1 = migsvc.migrate_wake(rows_g1)
 txt_g1 = "\n".join(v["text"] for v in det_g1.values())
 check("wake rows: a default_end row for an item whose stored ask_by is not that default (it was never written) is left out; one that matches stays",
       "board#94" not in txt_g1 and f"ask_by={day(3)} as a DEFAULT" in txt_g1 and "board#95 " in txt_g1, txt_g1)
@@ -624,14 +625,14 @@ runs = pathlib.Path(_scratch.mkdtemp(prefix="migr-run-"))
 class LiveToServer:
     def __init__(self, sender): self.sender = sender
     def call(self, body):
-        try: return 200, server._migrate_write({**body, "sender": self.sender}, "testbox")
+        try: return 200, migsvc.migrate_write({**body, "sender": self.sender}, "testbox")
         except server.ToolError as e: return 400, {"error": str(e)}
 SND = "falcon-redesign-engineer"
 pid5 = e_g1["pass_id"]
-rec5 = server._pass_load(pid5)
-check("H2: `end` keeps one generated text per owner on the server under the pass's id, none sent; the pass id is the one `begin` gave", pid5 and rec5["owners"] and all(v["sent"] is None and v["text"].startswith(server._WAKE_HEAD) for v in rec5["owners"].values())
+rec5 = migsvc.pass_load(pid5)
+check("H2: `end` keeps one generated text per owner on the server under the pass's id, none sent; the pass id is the one `begin` gave", pid5 and rec5["owners"] and all(v["sent"] is None and v["text"].startswith(migsvc.WAKE_HEAD) for v in rec5["owners"].values())
       and {k: v["text"] for k, v in rec5["owners"].items()} == e_g1["wake"] and not sent("migration"), rec5)
-d5 = MM.write_rows(runs, pid5, rows_g1); MM.write_reading(d5, server._owners_view(rec5))
+d5 = MM.write_rows(runs, pid5, rows_g1); MM.write_reading(d5, migsvc.owners_view(rec5))
 check("H3: the rows that stand are written to <run dir>/<pass id>/ (with pass.json) and the texts to wake.txt to read", (d5 / "rows.json").exists() and json.loads((d5 / "pass.json").read_text())["pass_id"] == pid5 and "not sent yet" in (d5 / "wake.txt").read_text()
       and not MM.ledger_of(runs), list(d5.iterdir()))
 _live = MM.LiveApplier; MM.LiveApplier = LiveToServer
@@ -645,7 +646,7 @@ finally:
     MM.LiveApplier = _live
 stored5 = next(iter(rec5["owners"].values()))["text"]
 check("H2: --send-wake sends the stored text plus the note, once, and the server marks the owner sent", rc == 0 and len(first) == len(rec5["owners"]) and first[0][2] == stored5 + f"\n\nNote from {SND}: please read this today" and first[0][3] == "migration"
-      and all(v["sent"] for v in server._pass_load(pid5)["owners"].values()), (rc, first))
+      and all(v["sent"] for v in migsvc.pass_load(pid5)["owners"].values()), (rc, first))
 check("H2: …a second run skips the owners already sent and a second send of the same owner and pass is refused by the server", rc2 == 0 and len(sent("migration")) == len(first) and again[0] == 400 and "already sent" in again[1]["error"], (rc2, again))
 check("H3: the ledger gets a row only when its owner is SENT, not when the text is written", MM.ledger_of(runs) >= {MM.row_key(r) for r in rows_g1 if r["item"] in ("board#95", "board#97")} and "sent" in (d5 / "wake.txt").read_text(), MM.ledger_of(runs))
 # free text never goes: a body with a text of its own sends the stored one; a note is one short line
@@ -654,8 +655,8 @@ bad_notes = [LiveToServer(SND).call({"op": "send_wake", "pass_id": pidb, "owner"
 ok_b = LiveToServer(SND).call({"op": "send_wake", "pass_id": pidb, "owner": lab, "text": "[stackshot] anything I like", "note": "ok"})
 check("H2: a note of two lines, over 200 characters or no string is refused; a body carrying its own text sends the stored text, never that one", all(s_ == 400 and "one line" in r_["error"] for s_, r_ in bad_notes)
       and ok_b[0] == 200 and "anything I like" not in sent("migration")[0][2] and sent("migration")[0][2].startswith(e_b["wake"][lab]), (bad_notes, sent("migration")))
-refused("H2: a pass id that is no pass's, or an owner it stored nothing for, is refused", lambda: server._migrate_send_wake({"pass_id": "20260101-000000-abcdef", "owner": lab}, BY), "no pass")
-refused("H2: …", lambda: server._migrate_send_wake({"pass_id": pidb, "owner": "nobody-here"}, BY), "stored no text")
+refused("H2: a pass id that is no pass's, or an owner it stored nothing for, is refused", lambda: migsvc.migrate_send_wake({"pass_id": "20260101-000000-abcdef", "owner": lab}, BY), "no pass")
+refused("H2: …", lambda: migsvc.migrate_send_wake({"pass_id": pidb, "owner": "nobody-here"}, BY), "stored no text")
 # H3: a crash between the rows written down and the end: the texts are built from the rows once the pass no longer holds the board
 SENT.clear()
 bc = call("begin"); pidc = bc["pass_id"]; dC = MM.write_rows(runs, pidc, rows_g1)
@@ -666,7 +667,7 @@ try:
     rcC = MM.send_wake(dC, SND)
 finally:
     MM.LiveApplier = _live
-recC = server._pass_load(pidc)
+recC = migsvc.pass_load(pidc)
 check("H3: a crash after the rows were written and before `end`: while the pass still holds the board its texts are refused; after it lapsed --send-wake has the server build them from rows.json and sends them",
       held_try[0] == 400 and "still holds" in held_try[1]["error"] and rcC == 0 and recC.get("rebuilt") and all(v["sent"] for v in recC["owners"].values()) and len(sent("migration")) == len(recC["owners"]), (held_try, recC.get("rebuilt"), len(sent("migration"))))
 # H3: a crash between the send and the mark of the ledger: the server's mark is the truth, the rerun marks the ledger and sends nothing twice
@@ -698,12 +699,12 @@ class OrderApp:
 try: MM.apply_writes(OrderApp(), plan.writes[:1], lambda res: [{"item": "board#36", "kind": "no_end", "fields": ["ask_by"]}], before_end=lambda pid, rows: order.append(("rows", pid, len(rows))))
 except RuntimeError: pass
 check("H3: the rows are written down before the end is called, even when the pass stops on an error", order == ["begin", "apply", ("rows", "20260101-000000-abcdef", 1), "end"], order)
-check("send-wake: it is a mode of its own (`--send-wake <dir>`), and a pass's end only keeps the texts", "--send-wake" in pathlib.Path(STACK, "stackshot/tools/migrate_model.py").read_text() and "none sent" in pathlib.Path(STACK, "stackshot/web/server.py").read_text(), None)
+check("send-wake: it is a mode of its own (`--send-wake <dir>`), and a pass's end only keeps the texts", "--send-wake" in pathlib.Path(STACK, "stackshot/tools/migrate_model.py").read_text() and "none sent" in pathlib.Path(STACK, "stackshot/service/migrations.py").read_text(), None)
 # H4: a row that asks for the post-wake mover is dropped once the item has one
 item(99, needs=[BACK], owner=UB, wait_kind="relay", wait_event="the notary", subject="[home] no post-wake mover yet")
 item(19, needs=[BACK], owner=UB, wait_kind="relay", wait_event="the notary", post_wake_mover=BACK, subject="[home] a post-wake mover set")
 rows_h4 = [{"item": f"board#{n}", "kind": "post_wake", "why": "w", "hand": True, "fields": ["post_wake_mover"], "default": ""} for n in (99, 19)]
-txt_h4 = "\n".join(v["text"] for v in server._migrate_wake(rows_h4).values())
+txt_h4 = "\n".join(v["text"] for v in migsvc.migrate_wake(rows_h4).values())
 check("H4: a post_wake row stands only while the item has no post_wake_mover stored", "board#99 " in txt_h4 and "board#19" not in txt_h4 and "post_wake_mover=<value>" in txt_h4, txt_h4)
 
 # ---- S1: the rows a caller hands in are hints; every line of a text is derived from the stored items
@@ -712,7 +713,7 @@ crafted = [{"item": "board#95", "kind": "default_end", "why": INJ, "hand": False
            {"item": "board#97", "kind": "anchor_seen", "why": f"anchor-hub logged 2 notices on https://example.org/pull/7 {INJ}", "hand": False, "fields": [INJ], "default": f"3 {INJ}"},
            {"item": "board#94", "kind": "wait_input", "why": INJ, "hand": True, "fields": ["wait_event", INJ, "ask_by"], "default": f"{INJ} {day(5)}"},
            {"item": "board#94", "kind": INJ, "why": INJ, "hand": True, "fields": ["wait_event"], "default": INJ}]
-det_s1 = server._migrate_wake(crafted)
+det_s1 = migsvc.migrate_wake(crafted)
 txt_s1 = "\n".join(v["text"] for v in det_s1.values())
 call("begin"); e_s1 = call("end", residue=crafted)
 pid_s1 = call("begin")["pass_id"]; wk.release()          # a pass whose end never came: the texts are built from the rows handed in
@@ -724,7 +725,7 @@ check("S1: three crafted rows (an injected why, default, field and kind) put non
 check("S1: …the same through `end`'s residue and through wake_text's rows", not any(w in "\n".join(e_s1["wake"].values()) for w in bad_words) and e_s1["wake"] == {k: v["text"] for k, v in det_s1.items()}
       and w_s1[0] == 200 and w_s1[1]["owners"] and not any(w in json.dumps(w_s1[1]) for w in bad_words), (e_s1["wake"], w_s1))
 rows_odd = [{"item": "board#95", "kind": "default_end", "default": "tomorrow"}, {"item": "board#97", "kind": "anchor_seen", "why": "https://elsewhere.example", "default": "2"}, {"item": "board#94", "kind": "wait_input", "fields": ["subject"]}]
-check("S1: a default that is no day, an anchor the item does not store, or a field outside the wake's own list make no row", server._migrate_wake(rows_odd) == {}, server._migrate_wake(rows_odd))
+check("S1: a default that is no day, an anchor the item does not store, or a field outside the wake's own list make no row", migsvc.migrate_wake(rows_odd) == {}, migsvc.migrate_wake(rows_odd))
 
 # ---- S2: a failed push is not a send
 runs3 = pathlib.Path(_scratch.mkdtemp(prefix="migr-run-"))
@@ -733,14 +734,14 @@ FAIL_PUSH[0] = True; MM.LiveApplier = LiveToServer
 try:
     rc_f = MM.send_wake(dS, SND)
     direct_f = LiveToServer(SND).call({"op": "send_wake", "pass_id": pid_s2, "owner": next(iter(e_s2["wake"]))})
-    owners_f = server._pass_load(pid_s2)["owners"]; led_f = MM.ledger_of(runs3)
+    owners_f = migsvc.pass_load(pid_s2)["owners"]; led_f = MM.ledger_of(runs3)
     FAIL_PUSH[0] = False
     rc_ok = MM.send_wake(dS, SND)
 finally:
     FAIL_PUSH[0] = False; MM.LiveApplier = _live
 check("S2: a push that fails is reported `sent: false` with its reason, the owner's mark is cleared and nothing is ledgered; a rerun that succeeds sends it, marks it and ledgers it",
       rc_f == 1 and direct_f[0] == 200 and direct_f[1]["sent"] is False and "session gone" in direct_f[1]["why"] and all(v["sent"] is None for v in owners_f.values()) and not led_f
-      and rc_ok == 0 and len(sent("migration")) == len(e_s2["wake"]) and all(v["sent"] for v in server._pass_load(pid_s2)["owners"].values())
+      and rc_ok == 0 and len(sent("migration")) == len(e_s2["wake"]) and all(v["sent"] for v in migsvc.pass_load(pid_s2)["owners"].values())
       and MM.ledger_of(runs3) >= {MM.row_key(r) for r in rows_g1 if r["item"] in ("board#95", "board#97")}, (rc_f, direct_f, owners_f, led_f, rc_ok, len(sent("migration"))))
 
 # ---- the anchor pass stands still with the pass held

@@ -1,6 +1,6 @@
 """item_project_pass.py — the project-id pass: `metadata.project_id` stored on every item, open or closed, and put back (item_project.py has the rules; tools/project_id_report.py runs it).
 
-The ops `project_id` and `unproject_id` of the migration route (server._migrate_write) call `write_op`. The pass is the stamp pass's shape (server._stamp_one): one item at a time under its lock, the file read
+The ops `project_id` and `unproject_id` of the migration route (service/migrations.py `migrate_write`) call `write_op`. The pass is the stamp pass's shape (server._stamp_one): one item at a time under its lock, the file read
 and replaced whole with only the one key changed (server._stamp_write: no activity seed, no mover settled, no hand-off, no search or GitHub job: a stamp is not an event on the item), a sha256 check so a
 writer that takes no lock is never overwritten, and an undo that puts back only what the pass left. What differs: it writes closed items too, and a file keeps its access and modification times (a legacy
 closed item holds no clock of its own and the board dates it by the file's time, so a write that moved it would move the item in the Closed list).
@@ -16,6 +16,7 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.model import ids as _ids
+from stackshot.model import migration as _mig
 from stackshot.model import item_project as _ip
 
 KEYS = ("project_id",)                          # the one key the pass writes, and the only one it may name
@@ -70,29 +71,29 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
         return {**out, "action": "set", "why": "project_id stored"}
     except Exception as e:  # noqa: BLE001  — one item that fails never stops the batch
         print(f"project id: {gid} not stored: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return S._migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def undo_one(S: Any, w: Any) -> dict[str, Any]:
     """Put one item's project_id back: `w` = {item, before, after} (the key as it was, and as the pass left it; None = absent). Under the item lock, if the item holds `after` it gets `before` (a key that was
     absent is dropped) → `set`; if it already holds `before` → `same`; anything else (a later save stored another) → `kept`, untouched. Running it again is a no-op."""
     if not isinstance(w, dict):
-        return S._migrate_refuse("?", "an entry is an object {item, before, after}")
+        return _mig.refuse("?", "an entry is an object {item, before, after}")
     try:
         gid = _ids._norm_id(str(w.get("item") or ""))
     except ToolError as e:
-        return S._migrate_refuse(str(w.get("item") or "?"), str(e))
+        return _mig.refuse(str(w.get("item") or "?"), str(e))
     shown = S._gh.shown(gid)
     extra = [k for k in w if k not in S._STAMP_ENTRY]
     if extra:
-        return S._migrate_refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before and after only")
+        return _mig.refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before and after only")
     sides: dict[str, dict[str, Any]] = {}
     for side in ("before", "after"):
         d = w.get(side)
         if not isinstance(d, dict) or set(d) != set(KEYS):
-            return S._migrate_refuse(shown, f"{side} is {{project_id}}, and names no other key")
+            return _mig.refuse(shown, f"{side} is {{project_id}}, and names no other key")
         if not state_ok(d["project_id"]):
-            return S._migrate_refuse(shown, f"{side} holds a value that is no project id")
+            return _mig.refuse(shown, f"{side} holds a value that is no project id")
         sides[side] = d
     try:
         with S._writes.ITEM_LOCK:
@@ -111,21 +112,21 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
         return {**out, "action": "set", "why": "the key put back"}
     except Exception as e:  # noqa: BLE001
         print(f"project id: {gid} not put back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return S._migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
-    """op project_id {items: [id, …], pass_id?, dry?} | unproject_id {items: [{item, before, after}, …], pass_id?} (at most S._MIGRATE_BATCH): the project-id pass over every item, open or closed. No begin and
+    """op project_id {items: [id, …], pass_id?, dry?} | unproject_id {items: [{item, before, after}, …], pass_id?} (at most _mig.BATCH): the project-id pass over every item, open or closed. No begin and
     no hold: each item is worked out and written under its own lock (`one`). `dry` (project_id only) writes nothing and answers what each item would get. One publish at the end when anything was written.
     → {"op", "results": [...]}."""
     extra = [k for k in spec if k not in S._STAMP_BODY]
     if extra:
         raise ToolError(f"Refused: {op} takes op, sender, items, pass_id and dry only (got {', '.join(sorted(map(str, extra)))}): it writes the one key project_id and nothing else")
     items = spec.get("items")
-    if not isinstance(items, list) or not items or len(items) > S._MIGRATE_BATCH:
-        raise ToolError(f"Refused: items is a list of 1 to {S._MIGRATE_BATCH} " + ("item ids" if op == "project_id" else "entries {item, before, after}"))
+    if not isinstance(items, list) or not items or len(items) > _mig.BATCH:
+        raise ToolError(f"Refused: items is a list of 1 to {_mig.BATCH} " + ("item ids" if op == "project_id" else "entries {item, before, after}"))
     pid = str(spec.get("pass_id") or "")
-    if pid and not S._PASS_ID_RX.fullmatch(pid):
+    if pid and not _mig.PASS_ID_RX.fullmatch(pid):
         raise ToolError("Refused: pass_id is <YYYYMMDD-HHMMSS>-<6 hex>")
     dry = bool(spec.get("dry"))
     if dry and op != "project_id":
@@ -138,7 +139,7 @@ def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         try:
             gid = _ids._norm_id(str(it or ""))
         except ToolError as e:
-            results.append(S._migrate_refuse(str(it or "?"), str(e)))
+            results.append(_mig.refuse(str(it or "?"), str(e)))
             continue
         results.append(one(S, gid, dry=dry))
     if any(r["action"] == "set" for r in results):

@@ -181,13 +181,15 @@ def threaded(fn: Any, jobs: list[Any], workers: int) -> list[Any]:
 
 # ---------------------------------------------------------------------------------------------------------------- applying a plan
 class DryApplier:
-    """The server module imported against the copy: the writes go through its own `_migrate_write`, so the guards and the save path are the real ones; nothing is published or sent."""
+    """The server module imported against the copy: the writes go through service/migrations.py's `migrate_write`, so the guards and the save path are the real ones; nothing is published or sent."""
 
     def __init__(self, sender: str) -> None:
         import logging
+        from stackshot.service import migrations
         from stackshot.web import server
         logging.disable(logging.INFO)
         self.server = server
+        self.migrations = migrations
         server._publish = lambda: None
         self.sender = sender
         if server._gh.enabled():
@@ -195,7 +197,7 @@ class DryApplier:
 
     def call(self, body: dict[str, Any]) -> tuple[int, Any]:
         try:
-            return 200, self.server._migrate_write({**body, "sender": self.sender}, "dry-run")
+            return 200, self.migrations.migrate_write({**body, "sender": self.sender}, "dry-run")
         except self.server.ToolError as e:
             return 400, {"error": str(e)}
 
@@ -628,7 +630,7 @@ def main(argv: list[str]) -> int:
             results, begin, _ = apply_writes(app, writes, dry=True)
         # the pass ends: what the lift of the pause would fire (read only; nothing is sent in a dry run), and the text of the residue wake each owner would get (rows whose write was made, as the real pass keeps them)
         kept_rows = rows_that_stand(residue_wake_rows(residue), planned, results, set())
-        wake_detail = app.server._migrate_wake(kept_rows)
+        wake_detail = app.migrations.migrate_wake(kept_rows)
         wake = {k: v["text"] for k, v in wake_detail.items()}
         after_items = load_all()
         for gid, it in sorted(after_items.items(), key=lambda kv: M._num(kv[0])):

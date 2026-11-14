@@ -77,6 +77,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.service import migrations as migsvc
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
@@ -516,7 +517,7 @@ try:
     item(37, needs=[BACK]); writes.save("a37", server._load("a37"))
     check("6c migration: (probe) the mirror stub sees an ordinary save", GH_CALLS == ["a37"], GH_CALLS)
     GH_CALLS.clear()
-    done = server._migrate_owner_mover()
+    done = migsvc.migrate_owner_mover()
     mig_calls = list(GH_CALLS)
 finally:
     server._gh.enabled, server._gh.on_change = real_enabled, real_on_change
@@ -534,12 +535,12 @@ check("6c migration: a mover Oliver stored where he never held the item (no reco
 check("6c migration: his answer made after the hand-off ends the record, taken at the answer", mt(34)["handoff"]["taken_at"] == now0 - 3600, mt(34)["handoff"])
 check("6c migration: a record to him on an item that is no longer his ends too", isinstance(mt(35)["handoff"]["taken_at"], float), mt(35)["handoff"])
 check("6c migration: the clocks stay (updated and confirmed unchanged)", all(rd(n)["updated"] == now0 - 10 * DAY and rd(n)["confirmed"] == now0 - 10 * DAY for n in (49, 50, 34, 35)), [rd(n)["updated"] for n in (49, 50)])
-check("6c migration: it is idempotent: a second pass rewrites nothing", server._migrate_owner_mover() == [], None)
+check("6c migration: it is idempotent: a second pass rewrites nothing", migsvc.migrate_owner_mover() == [], None)
 AN = lambda ts: [{"ts": ts, "kind": "decision", "choice": "Yes", "via": "board"}]
 item(51, su=now0 - 3600, needs=[BACK], mover=OWN, then=BACK, answers=AN(now0 - 3600.5))   # no record: his answer within a second of the item's last write counts as letting go
 item(38, needs=[BACK], mover=OWN, then=OWN, handoff=dict(HO), answers=AN(now0 - 3600))    # alive, then holds he: the mover drops to the default, then stays as stored
 item(39, needs=[BACK], mover=OWN, handoff=dict(HO), answers=AN(now0 - 3600))              # alive, no then: the mover just drops
-done2 = server._migrate_owner_mover()
+done2 = migsvc.migrate_owner_mover()
 check("6c migration: with no record, an answer within a second of the last write moves the mover back (and then goes, as Done does)", "a51" in done2 and mt(51)["mover"] == BACK and "then" not in mt(51), mt(51))
 check("6c migration: an alive hand-back where then holds he: the mover drops to the default and then stays as stored", "a38" in done2 and "mover" not in mt(38) and mt(38)["then"] == OWN, mt(38))
 check("6c migration: …and with no then at all the mover just drops", "a39" in done2 and "mover" not in mt(39) and "then" not in mt(39), mt(39))
@@ -552,7 +553,7 @@ writes.save("a40", it_d)
 check("6c mover: a save where a wait replaces his state makes the agent in then the mover who picks it up, and then goes", mt(40).get("mover") == BACK and "then" not in mt(40), mt(40))
 set_cfg(guards=False, handoff=False)
 item(157, needs=["decision", BACK], mover=BACK, ask=ASK)
-check("6c migration: [model] guards = false and handoff = false: nothing to do", server._migrate_owner_mover() == [], None)
+check("6c migration: [model] guards = false and handoff = false: nothing to do", migsvc.migrate_owner_mover() == [], None)
 set_cfg()
 for n in list(range(28, 49)) + list(range(49, 170)): (T / f"store/a/{n}.json").unlink(missing_ok=True)
 for p in (T / "store").glob("*/*.json"):

@@ -65,7 +65,7 @@ def handoff_on() -> bool:
 def handoff_paused() -> bool:
     """[model] pause (default false): the board-wide pause switch (design section 5): the clock and the gone-mover pass do nothing while it is true. The key is SHARED with the
     watchers (they own it and document it in stackshot.example.toml; this reads it with the same reader, `_cfg.get("model", "pause")`)."""
-    return _watch.paused()          # the config's switch, or the migration's pass holding the board (_migrate_write)
+    return _watch.paused()          # the config's switch, or the migration's pass holding the board (`migrate_write` in service/migrations.py)
 
 
 def cold_call_on() -> bool:
@@ -391,7 +391,7 @@ def handoff_repair_one(gid: str, p: Any, apply: bool, now: float) -> dict[str, A
 
 def handoff_repair_pass() -> int:
     """Once per start, before any thread starts and before the wake pass (idempotent, so every start runs it; a store with no stale record writes nothing): the repair of handoff_repair,
-    applied. It runs after the migrations that change a mover (_migrate_owner_mover, _mover_backfill_pass), whose quiet saves leave a record they find naming another mover. Skipped while
+    applied. It runs after the migrations that change a mover (`migrate_owner_mover` in service/migrations.py, _mover_backfill_pass), whose quiet saves leave a record they find naming another mover. Skipped while
     [model] handoff is false. One stderr line with the count. → the number of items repaired."""
     if not handoff_on():
         return 0

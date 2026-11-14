@@ -103,6 +103,8 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import fleet_events as fleetev
+from stackshot.service import page_debt as pdebt_svc
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import route as _wt_route
@@ -575,9 +577,9 @@ check("…or to the audit's page call while it is live", server._debt_mover("pro
 server._page_debt.live = _pdl
 _op = _cfg.CFG.setdefault("fleet", {}).get("operator_session")
 _cfg.CFG["fleet"]["operator_session"] = "work-osprey"
-check("fleet recovery: a retired name-line session named as the operator resolves to its project's keeper, never to itself", server._fleet_builder() == "work-osprey-x", server._fleet_builder())
+check("fleet recovery: a retired name-line session named as the operator resolves to its project's keeper, never to itself", fleetev.fleet_builder() == "work-osprey-x", fleetev.fleet_builder())
 _cfg.CFG["fleet"]["operator_session"] = _op or ""
-p_f = len(pushes()); to_f = server._page_debt_fallback("projects/alpha", {S: {"ts": time.time(), "item": "a1", "moved": True}}, [("a1", "changed", "work-osprey-main")], "the call failed", time.time()); settle()
+p_f = len(pushes()); to_f = pdebt_svc.page_debt_fallback("projects/alpha", {S: {"ts": time.time(), "item": "a1", "moved": True}}, [("a1", "changed", "work-osprey-main")], "the call failed", time.time()); settle()
 check("page debt fallback: a project's page update goes to its builder, unmarked, not to the -main agent or the retired name-line session",
       to_f == "work-osprey-x" and [x[0] for x in pushes()[p_f:]] == ["work-osprey-x"] and "[for Oliver]" not in pushes()[p_f][1] and "yours to write" in pushes()[p_f][1], (to_f, pushes()[p_f:]))
 check("anchor-hub: a log-only line is kept as the hub wrote it for every project (there is no keeper's digest to promise it to)",
@@ -688,7 +690,7 @@ r_ = telling.pilot_relay("ops/note-x", "a30", server._load("a30"), "changed (nex
 ln_ = routing.read("ops/note-x")[n_log:]
 check("a nameless page: the board relay is held for the router (live line, stashed, nobody pushed)", "charged to the router" in r_ and len(ln_) == 1 and ln_[0].get("live") is True and ln_[0]["to"] == "" and live.stashed(ln_[0]["id"]) and len(pushes()) == p_n, (r_, ln_, pushes()[p_n:]))
 p_n = len(pushes()); n_log = len(routing.read("ops/note-x"))
-to_n = server._page_debt_fallback("ops/note-x", {S: {"ts": time.time(), "item": "a30", "moved": True}}, [("a30", "changed", "work-osprey-x")], "the call failed", time.time()); settle()
+to_n = pdebt_svc.page_debt_fallback("ops/note-x", {S: {"ts": time.time(), "item": "a30", "moved": True}}, [("a30", "changed", "work-osprey-x")], "the call failed", time.time()); settle()
 ln_ = routing.read("ops/note-x")[n_log:]
 check("page debt fallback on a page with no `session:` line: the debt is delivered to the general -main agent with the mark, in a routing line ruled passed to it; it is not held for the router and forgotten",
       to_n == "heron-main" and [x[0] for x in pushes()[p_n:]] == ["heron-main"] and pushes()[p_n][1].startswith("[for Oliver]") and "yours to write" in pushes()[p_n][1]

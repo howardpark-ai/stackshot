@@ -63,6 +63,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import fleet_events as fleetev
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -79,7 +80,7 @@ check("…a tail with no turn in it: nothing known", server._pane_stuck(U["home-
 (TR / f"{U['home-far']}.jsonl").unlink()
 got = []
 for op in ("home-stew", "home-crew", ""):
-    server._cfg.CFG.setdefault("fleet", {})["operator_session"] = op; got.append(server._fleet_builder())
+    server._cfg.CFG.setdefault("fleet", {})["operator_session"] = op; got.append(fleetev.fleet_builder())
 check("the notice of a stopped pane goes to the fleet's builder, [fleet] operator_session; with none set, nobody; there is no [idle] stuck_to",
       got == ["home-stew", "home-crew", ""] and not hasattr(server, "_stuck_to") and "stuck_to" not in (server._cfg.CFG.get("idle") or {}), got)
 server._cfg.CFG["fleet"]["operator_session"] = "home-stew"

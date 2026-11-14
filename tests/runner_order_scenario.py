@@ -41,7 +41,7 @@ def check(name, cond, got=None):
 from stackshot.core import runner as R
 from stackshot.core import config as _cfg
 from stackshot.web import server
-from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff as handoff_svc, fleet_events as fleetev
 from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
 from stackshot.service import runner as runner_svc
 from stackshot.service import stall_tick as stalltick_svc
@@ -61,10 +61,10 @@ EXPECT = ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick"
 TEN = ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"]          # the ten-minute set: right after the minute set in the round that finds it due
 ORDER = EXPECT + TEN
 SERVER_FNS = {"wake_pass": "minute_wake_pass", "anchor_pass": "minute_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "evwait_tick", "check_tick": "check_tick", "proof_tick": "proof_tick",
-              "balance_tick": "_balance_tick", "handoff_tick": "handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick",
+              "balance_tick": "_balance_tick", "handoff_tick": "handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "clients_tick",
               "pilot_fallback_tick": "_pilot_fallback_tick", "stall_tick": "stall_tick",
               "handback_tick": "handback_tick", "fleet_publish": "fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return {"handoff_tick": handoff_svc, "handback_tick": telling, "fleet_publish": runner_svc, "minute_wake_pass": wakes_svc, "minute_anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc}.get(fn, server)       # the owner of a tick function: the hand-back tick is the telling's, the publish step is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the rest are the server's
+def own(fn): return {"clients_tick": fleetev, "handoff_tick": handoff_svc, "handback_tick": telling, "fleet_publish": runner_svc, "minute_wake_pass": wakes_svc, "minute_anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc}.get(fn, server)       # the owner of a tick function: the hand-back tick is the telling's, the publish step is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the rest are the server's
 clk = Clock()
 log: list[tuple[str, float]] = []
 saved = {}
