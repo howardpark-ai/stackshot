@@ -65,6 +65,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import agents as _agents
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.core import readonly as _ro
 from stackshot.core import config as _cfg
@@ -77,6 +78,7 @@ from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
+from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.service import telling
 from stackshot.audit import hourly as HR, hand_idle as HI, silence as SL, busy_tell as BT
 from stackshot.waits import stall as ST, handoff as HO
@@ -91,7 +93,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
+CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _pane_recovery.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -282,23 +284,23 @@ check("5 …and with its lines it is (the same item, the front agent itself)", t
 
 # ================================================================ 6. -main
 wipe(); put(1, act=400, log=SEVEN)
-real_main = server._main_agent; server._main_agent = lambda p: ""
+real_main = _agents._main_agent; _agents._main_agent = lambda p: ""
 try:
     with _Err() as err: got = tick(now0)
     check("6 a project with no -main agent is a log line, tells nobody and never raises", got == [] and sent == [] and "no -main agent to tell" in err.text and "busy_tell" not in mt(1) and history(1) == [], (got, err.text))
     with _Err() as err2: tick(now0 + 10 * MIN)
     check("6 …the line is logged once an hour per item, not at every tick", err2.text == "", err2.text)
-finally: server._main_agent = real_main
+finally: _agents._main_agent = real_main
 check("6 …and when a -main agent appears the item is told of then, while its newest line is still fresh (nothing was marked)", tick(now0 + 12 * MIN) == ["a1"] and len(to_main()) == 1)
 wipe(); put(1, act=400, log=SEVEN)
-server._main_agent = lambda p: "Oliver"
+_agents._main_agent = lambda p: "Oliver"
 try: got = tick(now0)
-finally: server._main_agent = real_main
+finally: _agents._main_agent = real_main
 check("6 a -main agent that is the owner is no one to tell", got == [] and sent == [], (got, sent))
 wipe(); put(1, mover="team-back", act=400, log=SEVEN)
-server._main_agent = lambda p: "team-back"
+_agents._main_agent = lambda p: "team-back"
 try: got = tick(now0)
-finally: server._main_agent = real_main
+finally: _agents._main_agent = real_main
 check("6 a mover that is itself the project's -main agent is told in the front wording, once", got == ["a1"] and len(sent) == 1 and S0()[1] == U["team-back"] and "no write on it but the hourly audit lines" in S0()[2], (got, sent))
 wipe(); put(1, mover="team-back", act=400, log=SEVEN); put(2, mover="team-aux", act=400, log=SEVEN); put(3, mover="team-aux", act=0, log=[])
 got = tick(now0)

@@ -8,7 +8,7 @@ Covers, through stackshot_create and stackshot_update (a session's write):
       clear_next); a close is exempt; an item that had no open step before is not refused for an unrelated write
   N7  a commit id, a test count, a past-tense status, a since-time stamp, "at work since" and a mid-line status word are noted in the reply and the write goes through; "release PR #16", "merge PR #12
       after green CI", a condition and a `Oliver:` line are quiet
-Internal writers (server._update, _wt_create._create, create_item, the answer, the hold and the wake pass) are not judged: only the two tools mark a session's write.
+Internal writers (_update in service/update.py, _wt_create._create, create_item, the answer, the hold and the wake pass) are not judged: only the two tools mark a session's write.
 
     tests/run-suite next_rules        → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, time
@@ -72,6 +72,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.github import ghsync as _gh
 from stackshot.core import config as _cfg
@@ -147,7 +149,7 @@ with noguards():
     check("update: an outside party's name opens a step", "Kim: send the contract" in mt(4)["next"], (r, mt(4)))
 
 # N1 is the one rule while [model] guards is ON (the production default): the model guard next_unnamed lets any `<name>:` through, an outside party's among them, and an unnamed line is refused once, by N1
-check("guards are on for these checks (the production default)", server._model_guards_on(), None)
+check("guards are on for these checks (the production default)", _item_read._model_guards_on(), None)
 r = mk(next="home-agent: build it\nKim: send the contract")
 check("guards ON, create: an outside party's name opens a step and the item is created", r.startswith("created"), r)
 r = mk(next="Anthropic support: answer the ticket\nhome-agent: build it")
@@ -319,21 +321,21 @@ check("the flag is off outside the tools", not getattr(writes.SESSION_NEXT, "on"
 # the older model guard (next_unnamed) judges every write while [model] guards is on, the server's own among them: these checks run with it off so that the rule under test is N1/N3/N6
 _ng = noguards(); _ng.__enter__()
 try:
-    r = server._update("a44", next="build it, no name on the line", sender="home-agent", dropped=[1])
-    check("internal: server._update with an unnamed line is not refused (a script's, the router's and the server's own writes read the line as they always did)", "build it, no name" in mt(44)["next"], (r, mt(44)))
+    r = _update_svc._update("a44", next="build it, no name on the line", sender="home-agent", dropped=[1])
+    check("internal: _update with an unnamed line is not refused (a script's, the router's and the server's own writes read the line as they always did)", "build it, no name" in mt(44)["next"], (r, mt(44)))
 except ToolError as e:
-    check("internal: server._update with an unnamed line is not refused", False, str(e))
+    check("internal: _update with an unnamed line is not refused", False, str(e))
 try:
-    server._update("a45", next="home-agent: write the docs", sender="home-agent", dropped=[1])
-    r = server._update("a45", next="home-agent: write the docs, now at work since 23:28", sender="home-agent", dropped=[2])
-    check("internal: server._update is not held to N3 (an old step plus words is accepted as before)", "at work since 23:28" in mt(45)["next"], (r, mt(45)))
+    _update_svc._update("a45", next="home-agent: write the docs", sender="home-agent", dropped=[1])
+    r = _update_svc._update("a45", next="home-agent: write the docs, now at work since 23:28", sender="home-agent", dropped=[2])
+    check("internal: _update is not held to N3 (an old step plus words is accepted as before)", "at work since 23:28" in mt(45)["next"], (r, mt(45)))
 except ToolError as e:
-    check("internal: server._update is not held to N3", False, str(e))
+    check("internal: _update is not held to N3", False, str(e))
 try:
-    r = server._update("a46", next="none", sender="home-agent", dropped=[1])
-    check("internal: server._update that leaves no open step is not refused (N6 is a session's write only)", rd(46)["status"] == "open", (r, mt(46)))
+    r = _update_svc._update("a46", next="none", sender="home-agent", dropped=[1])
+    check("internal: _update that leaves no open step is not refused (N6 is a session's write only)", rd(46)["status"] == "open", (r, mt(46)))
 except ToolError as e:
-    check("internal: server._update that leaves no open step is not refused", False, str(e))
+    check("internal: _update that leaves no open step is not refused", False, str(e))
 try:
     r = _wt_create._create(subject="[home] made by the server", description=DESC, project="projects/alpha", owner="home-agent", next="")
     check("internal: _wt_create._create with no next is not refused (the router, the cold call and the recycle write create items this way)", str(r).startswith("created"), r)

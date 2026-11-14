@@ -224,7 +224,7 @@ use = "nothing: the board and the brief carry no stuck list; a hand-off nobody c
 allow = []
 
 # ---- the stuck state: a hand-off nobody could take was marked stuck on its record, put on a list and raised to the owner with a "Nag again" button.
-# Retired: the ladder's last rung is one message to the fleet's builder (`server._recovery_tell`), the item stays with its mover, and nothing waits on the owner's click.
+# Retired: the ladder's last rung is one message to the fleet's builder (`_recovery_tell` in `service/pane_recovery.py`), the item stays with its mover, and nothing waits on the owner's click.
 # The `stuck` words that remain are other things and are not these terms: a router notice's ruling status `stuck`, a failed wait's `wait_failed` stuck mark and the
 # `stuck` notice kind, the audit's `stuck-elsewhere` finding, and the pane-error detection (`_pane_stuck`). None of them is a state of a hand-off record.
 [[term]]

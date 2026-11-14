@@ -64,6 +64,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.service import checks as checks_svc; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.github import ghsync; from stackshot.model import model
+from stackshot.service import update as _update_svc
 from stackshot.anchors import anchors as _anc
 from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
@@ -85,7 +86,7 @@ raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
 FRONT, BACK, OTHER, NOBODY = "home-front", "team-back", "home-other", "home-nobody"
 RULE = "does not watch handed-off work itself"
 REASON = "no push reaches me: the builder runs on a box that never messages"
-def upd(i, sender, **kw): return server._update(f"a{i}", sender=sender, **kw)
+def upd(i, sender, **kw): return _update_svc._update(f"a{i}", sender=sender, **kw)
 def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, (was, raw(i)))
 

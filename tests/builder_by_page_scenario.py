@@ -46,6 +46,7 @@ def rd(g):
     return json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import agents as _agents
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -82,13 +83,13 @@ conf({})
 check("an empty map is today's behaviour", filed("projects/delta/ui", 2) == CORE)
 for odd in ("not a table", ["projects/delta/ui"], {"projects/delta/ui": 7, "": SCREEN, 5: SCREEN}):
     conf(odd)
-    check(f"a malformed map ({odd!r}) reads as empty: the first builder", filed("projects/delta/ui", 3) == CORE and server._builder_by_page() == {}, server._builder_by_page())
+    check(f"a malformed map ({odd!r}) reads as empty: the first builder", filed("projects/delta/ui", 3) == CORE and _agents._builder_by_page() == {}, _agents._builder_by_page())
 _cfg.CFG["handoff"] = "not a table"; telling.FALLBACK_CACHE.clear()
-check("a [handoff] that is not a table reads as empty", server._builder_by_page() == {} and telling.fallback_mover("projects/delta/ui") == CORE)
+check("a [handoff] that is not a table reads as empty", _agents._builder_by_page() == {} and telling.fallback_mover("projects/delta/ui") == CORE)
 
 # ---- the map
 conf(MAP)
-check("the config reads back as the map", server._builder_by_page() == MAP, server._builder_by_page())
+check("the config reads back as the map", _agents._builder_by_page() == MAP, _agents._builder_by_page())
 check("an item filed on the mapped page goes to its mapped builder", filed("projects/delta/ui", 4) == SCREEN)
 check("an item filed on a sub-page of the mapped page goes to its mapped builder too", filed("projects/delta/ui/panel", 5) == SCREEN)
 check("an unmapped page goes to the first builder", filed("projects/delta/core", 6) == CORE)

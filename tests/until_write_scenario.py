@@ -59,6 +59,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.service import item_read as _item_read
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
 from stackshot.web import render as _rmod
@@ -280,7 +281,7 @@ check("5.6 get tags a wait on a date alone as on hold, and never a decision item
 st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
 held_ = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
 check("5.6 the session items listing says held for it, as the board draws it", held_.get("a60") is True, held_)
-check("5.6 _is_parked is the renderers' rule: a date-only wait, a hold flag and never a decision item", server._is_parked(rd(60)) and not server._is_parked(rd(61)) and server._is_parked(dict(rd(60), metadata={"hold": True, "needs": [BACK]})), None)
+check("5.6 _is_parked is the renderers' rule: a date-only wait, a hold flag and never a decision item", _item_read._is_parked(rd(60)) and not _item_read._is_parked(rd(61)) and _item_read._is_parked(dict(rd(60), metadata={"hold": True, "needs": [BACK]})), None)
 
 # 5.7 until given to an item that already stores an open after link (no kind, no hold, no after in this write) is that link's backstop, as create stores it
 item(62, needs=[BACK], after=["a53"])
@@ -325,7 +326,7 @@ check("5.10 listing: a decision with an until is held False, a date-only wait Tr
 (T / "board.md").write_text("", encoding="utf-8")
 brief10 = _wt_brief.stackshot_brief(); act10, _, hold10 = brief10.partition("\n\nOn hold (")
 check("5.10 brief: a decision with an until is among the active items, a date-only wait among the parked", "a67 [open" in act10 and "a67 [open" not in hold10 and "a68 [open" in hold10 and "a68 [open" not in act10, (act10[-300:], hold10[:300]))
-check("5.10 all three read the one rule: _is_parked is render.is_held", server._is_parked(rd(68)) and not server._is_parked(rd(67)) and server._is_parked(rd(68)) == _rmod.is_held(rd(68)) and server._is_parked(rd(67)) == _rmod.is_held(rd(67)), None)
+check("5.10 all three read the one rule: _is_parked is render.is_held", _item_read._is_parked(rd(68)) and not _item_read._is_parked(rd(67)) and _item_read._is_parked(rd(68)) == _rmod.is_held(rd(68)) and _item_read._is_parked(rd(67)) == _rmod.is_held(rd(67)), None)
 
 # 5.11 the alias window's own end is read from the config: a missing [model] wait_alias_until is said once at the start
 import contextlib, io as _io

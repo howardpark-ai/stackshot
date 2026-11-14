@@ -92,6 +92,7 @@ def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -113,7 +114,7 @@ def refused(name, f, *want, i=None):
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
 def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-here", **kw)
 def upa(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
-def upi(i, **kw): return server._update(f"a{i}", sender="home-agent", **kw)           # the server's own write: N6 (an open item keeps an open step) judges a session's write only
+def upi(i, **kw): return _update_svc._update(f"a{i}", sender="home-agent", **kw)           # the server's own write: N6 (an open item keeps an open step) judges a session's write only
 def st(i): return [(x["status"], S.first_line(x["text"])) for x in S.view(mt(i), closed=rd(i)["status"] == "completed")]
 OPEN = lambda t: ("open", t)
 
@@ -154,7 +155,7 @@ check("get marks a dropped step", re.search(r"2\. \[dropped · home-here · [^\]
 r = upd(3, done=[4])
 check("a mark alone leaves the other open steps in next", mt(3)["next"] == "Oliver: In PowerShell run `ssh -t box-a 'ls'`" and st(3)[3][0] == "done", (mt(3), st(3)))
 refused("the last open step checked by a session on an item that stays open is refused (N6)", lambda: upd(3, done=[3]), "no open step in next", i=3)
-r = server._update("a3", sender="home-here", done=[3])        # the server's own write is not judged by N6
+r = _update_svc._update("a3", sender="home-here", done=[3])        # the server's own write is not judged by N6
 check("the last open step checked: next is gone, the checklist stays", "next" not in mt(3) and [s for s, _ in st(3)] == ["done", "dropped", "done", "done"], (mt(3), st(3)))
 snap()
 
@@ -517,7 +518,7 @@ check("two rewords to two different new texts, neither one a text a step holds n
 item(61); item(62)
 r = upd(61, reword={1: "home-agent: re-check 0109c0de0"})
 check("the advisory notes run over the reworded text as over next: a commit hash in it draws the report note", "(step 1 reworded:" in r and "next reads like a report (a commit hash (0109c0de0))" in r, r)
-r = server._update("a62", sender="home-here", reword={1: "home-agent: read https://example.com/x"})
+r = _update_svc._update("a62", sender="home-here", reword={1: "home-agent: read https://example.com/x"})
 check("…and a naked URL in it draws the naked-URL note (a script's write is not refused for it)", "a naked URL (https://example.com/x)" in r, r)
 vm = S.view({"next": L4})
 check("steps.resolve_reword: positions, texts and JSON keys; a no-op is left out; nothing is changed in the checklist given",

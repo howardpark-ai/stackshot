@@ -60,7 +60,7 @@ class Tick:
 
 class Runner:
     """The minute set. `ticks` run in the order given. `holding()` says the board is held; `wake_wait()` says how many seconds the runner may sleep before the next event round (called after
-    each event round). `event` is the wake event `server._update` sets (a fresh one when not given). `clock` is for tests."""
+    each event round). `event` is the wake event `update._update` sets (a fresh one when not given). `clock` is for tests."""
 
     def __init__(self, ticks: list[Tick], *, holding: Callable[[], bool] | None = None, wake_wait: Callable[[], float] | None = None,
                  event: threading.Event | None = None, pace: float = PACE, ten_pace: float = TEN_PACE, clock: Callable[[], float] = time.time, label: str = "runner") -> None:

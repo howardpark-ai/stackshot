@@ -43,6 +43,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.waits import handoff as _ho
 from stackshot.core import config as _cfg
@@ -65,7 +66,7 @@ DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 def create(next, sender=MAIN, **kw):
     r = _wt_create.stackshot_create(subject="[home] a thing", description=DESC, project=STK, sender=sender, next=next, **kw)
     return _model_ids._norm_id(r.split()[1])
-def upd(gid, sender, **kw): return server._update(gid, sender=sender, **kw)
+def upd(gid, sender, **kw): return _update_svc._update(gid, sender=sender, **kw)
 def rd(gid): return json.loads(_service_store._path(gid).read_text())
 def nx(gid): return rd(gid)["metadata"].get("next")
 def who(gid):
@@ -182,7 +183,7 @@ check("the sender by transcript id is the same writer as by name", lines(g4) == 
 # ================================================================ a write with no sender is the keeper's
 g5 = create(K1)
 upd(g5, GEN, next=A1)
-server._update(g5, next=f"{MAIN}: server-side")
+_update_svc._update(g5, next=f"{MAIN}: server-side")
 check("a write that names no sender is the keeper of record's: it replaces the keeper's line", lines(g5) == [f"{MAIN}: server-side", A1], nx(g5))
 
 # ================================================================ close and reopen

@@ -130,6 +130,8 @@ check("5 a damaged page registry file reads as no pages: front-only", A.front_on
 
 # ---------------------------------------------------------------- 6. agreement with the older tests, and the two server rules
 from stackshot.web import server  # noqa: E402
+from stackshot.model import holders as _holders  # noqa: E402
+from stackshot.service import item_read as _item_read  # noqa: E402
 from stackshot.web import publish as _web_publish
 from stackshot.service import handoff as handoff_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -147,7 +149,7 @@ SHAPES = {
     "projects/lone": page(title="Lone", name="Lone"),
 }
 (T / "store/projects.json").write_text(json.dumps({"pages": SHAPES}))
-old_no_builder = lambda p: not (handoff_svc.handoff_builder(p) or server._hub_sessions(p)[2][:1])      # what server._project_builders was
+old_no_builder = lambda p: not (handoff_svc.handoff_builder(p) or _item_read._hub_sessions(p)[2][:1])      # what server._project_builders was
 rows = {p: (A.front_only(p), old_no_builder(p)) for p in SHAPES}
 check("6 on every fixture project front_only agrees with the older hand-off builder / first background agent test", all(a == b for a, b in rows.values()), rows)
 check("6 the fixture holds both kinds of project", {a for a, _ in rows.values()} == {True, False}, rows)
@@ -155,7 +157,7 @@ check("6 the fixture holds both kinds of project", {a for a, _ in rows.values()}
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 nm = A.names()
 roles = A.session_roles()
-fp = lambda sender, key, project: server._front_pair_ok(sender, key, project)
+fp = lambda sender, key, project: _holders._front_pair_ok(sender, key, project)
 check("6 front agents of a front-only project may hand an item to each other", fp(SMAIN, SDESK, "projects/sigma") is True and fp(SDESK, SMAIN, "projects/sigma/sub") is True, roles.get(SMAIN))
 check("6 ...not in a project that has a builder", fp(DMAIN, DDESK, "projects/delta") is False and fp(DMAIN, DDESK, "projects/delta/sub") is False)
 check("6 ...not across projects, and not from a session no page lists", fp(SMAIN, DDESK, "projects/sigma") is False and fp("home-nobody", SDESK, "projects/sigma") is False)

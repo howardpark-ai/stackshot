@@ -103,6 +103,9 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import agents as _agents
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.router import page_debt as _page_debt
 from stackshot.web import publish as _web_publish
@@ -557,14 +560,14 @@ try: gates.gate_needs_session("work-osprey", "projects/alpha", ""); e = ""
 except ToolError as x: e = str(x)
 check("needs: a retired name-line session is refused, naming who can act", "retired name-line session of projects/alpha" in e and "work-osprey-x" in e and "work-osprey-main" not in e.split("For projects/alpha:")[-1], e)
 check("needs: …a background agent is allowed", gates.gate_needs_session("work-osprey-x", "projects/alpha", "") == "work-osprey-x")
-check("_hub_sessions: no page offers a keeper any more", all(server._hub_sessions(k)[1] == "" for k in ("projects/alpha", "projects/beta", "projects/delta", "projects/eta")), [server._hub_sessions(k)[1] for k in ("projects/alpha", "projects/beta")])
+check("_hub_sessions: no page offers a keeper any more", all(_item_read._hub_sessions(k)[1] == "" for k in ("projects/alpha", "projects/beta", "projects/delta", "projects/eta")), [_item_read._hub_sessions(k)[1] for k in ("projects/alpha", "projects/beta")])
 cfg(live=False)
 try: gates.gate_needs_session("work-osprey", "projects/alpha", ""); e = ""
 except ToolError as x: e = str(x)
 check("needs: [router] live = false does not open the keeper again (e)", "retired name-line session of projects/alpha" in e, e)
 cfg()
 check("builder: alpha's builder, none for gamma (-main only), none for a page with no agents (beta)", live.builder("projects/alpha") == "work-osprey-x" and live.builder("projects/gamma") == "" and live.builder("projects/beta") == ""
-      and server._builder_agent("projects/alpha") == "work-osprey-x")
+      and _agents._builder_agent("projects/alpha") == "work-osprey-x")
 check("message gate: an unmarked message to a front agent is sent to the project, where the router rules it (no keeper named)",
       "the project, where the router rules it (to='projects/alpha')" in server._project_takes("projects/alpha") and "steward" not in server._project_takes("projects/alpha"), server._project_takes("projects/alpha"))
 try: server._message("work-osprey-main", "unmarked", "home-beta"); e = ""
@@ -810,7 +813,7 @@ _cfg.CFG.setdefault("board", {})["handback_hold_seconds"] = 0      # a hand-back
 HB_NEXT = "Oliver: Review the PR and merge it\nOliver: then tell the site"
 def hb(i, needs=None, sender=BK, **kw):      # next opens with Oliver, so the stored state is his (step= stores your-step), not an agent's
     kw.setdefault("step", "Review the PR and merge it")
-    return server._update(f"a{i}", needs=needs or [A], next=kw.pop("next", HB_NEXT), sender=sender, **kw)
+    return _update_svc._update(f"a{i}", needs=needs or [A], next=kw.pop("next", HB_NEXT), sender=sender, **kw)
 def hb_pushes(i, since, who=A, name="work-osprey-main"): return [x for x in pushes()[since:] if x[0] in (who, name) and f"a{i}" in x[1]]       # the server pushes by id, the router by name
 def hb_notes(i, since_n): return [n for n in routing.read("projects/alpha")[since_n:] if n.get("label") == f"hand-back a{i}"]
 def hb_dropall(since_n=0):
@@ -848,7 +851,7 @@ item(67, "projects/alpha", A, then=A, needs=[X, "work-osprey-docs"], next=f"{BK}
 out67a = hb(67, ["work-osprey-docs"]); settle()
 check("(a) a builder takes itself out of needs while another session stays: nothing is pushed to the front agent owner and no hand-back is recorded",
       not hb_pushes(67, p67) and not hb_notes(67, n67) and "told at once" not in out67a and "back with them alone" not in out67a, (pushes()[p67:], out67a[-300:]))
-out67b = server._update("a67", work={"state": "done"}, sender=BK); settle()
+out67b = _update_svc._update("a67", work={"state": "done"}, sender=BK); settle()
 check("(b) the builder marks the status of its own last step done: nothing is pushed to the front agent owner, a background owner's item alike (for_you_scenario)",
       not hb_pushes(67, p67) and not hb_notes(67, n67) and "told at once" not in out67b, (pushes()[p67:], out67b[-300:]))
 held.take(BK)
@@ -876,7 +879,7 @@ item(57, "projects/alpha", A, then=A, needs=[X]); p57 = len(pushes()); n57 = len
 out57 = _wt_complete.stackshot_complete("a57", outcome="done", reason="finished", description=NEWD, sender=BK); settle()
 check("a close by the builder is no hand-back (the owner's own close line is another thing)", not hb_notes(57, n57) and "back with them alone" not in out57 and not [x for x in hb_pushes(57, p57) if "back with you alone" in x[1]], (hb_notes(57, n57), out57[-200:]))
 item(58, "projects/alpha", A, "completed", then=A, needs=[X]); p58 = len(pushes()); n58 = len(routing.read("projects/alpha"))
-out58 = server._update("a58", status="open", needs=[A], next=HB_NEXT, sender=BK, step="Review the PR and merge it"); settle()
+out58 = _update_svc._update("a58", status="open", needs=[A], next=HB_NEXT, sender=BK, step="Review the PR and merge it"); settle()
 check("a reopen by the builder that leaves the owner alone is no hand-back (the owner's keeper hears reopens, as before)", not hb_notes(58, n58) and "back with them alone" not in out58 and not hb_pushes(58, p58), (hb_notes(58, n58), pushes()[p58:], out58[-200:]))
 item(59, "projects/alpha", A, then=A); p59 = len(pushes()); n59 = len(routing.read("projects/alpha")); out59 = hb(59); settle()
 check("needs empty before: naming the owner alone is no hand-back, the older silence stays", not hb_notes(59, n59) and "back with them alone" not in out59 and not hb_pushes(59, p59) and "not told; the board shows it" in out59, (pushes()[p59:], out59[-200:]))
@@ -890,7 +893,7 @@ item(62, "projects/alpha", A, then=A, needs=[DC]); p62 = len(pushes()); out62 = 
 check("the owner stored as a name and needs by id, and the owner stored as an id and needs by name: each fires once, to the builder, as a line for its next turn",
       t61.count("a61 is back with") == 1 and t62.count("a62 is back with") == 1 and not hb_pushes(61, p61, X, BK) and not hb_pushes(62, p62, X, BK) and not hb_pushes(61, p61) and not hb_pushes(62, p62)
       and out61.count("not them") == 1 and out62.count("not them") == 1, (t61, t62, pushes()[p61:], out61[-200:], out62[-200:]))
-item(63, "projects/eta", EM, then=EM, needs=[B]); p63 = len(pushes()); n63 = len(routing.read("projects/eta")); out63 = server._update("a63", needs=["home-eta-main"], next=HB_NEXT, sender="home-beta", step="Review the PR and merge it"); hb_tick()
+item(63, "projects/eta", EM, then=EM, needs=[B]); p63 = len(pushes()); n63 = len(routing.read("projects/eta")); out63 = _update_svc._update("a63", needs=["home-eta-main"], next=HB_NEXT, sender="home-beta", step="Review the PR and merge it"); hb_tick()
 d63 = [x for x in pushes()[p63:] if x[0] in (EM, "home-eta-main") and "a63" in x[1]]
 check("a project with a front agent owner and no builder (projects/eta): the hand-back is told to nobody, the item stays with its mover, the routing log holds a line ruled `held` that says the project lists no builder, and the reply says so",
       a.pilot_root("projects/eta") == "projects/eta" and not d63 and "nobody is told" in out63 and "stays with them" in out63
@@ -1124,7 +1127,7 @@ fake("good", answer([(m18["id"], "passed", "work-osprey-docs", False)])); p0 = l
 check("18 hand-off: the router passes the notice to the page's keeper (a background agent), delivered", rule_of(m18["id"])["ruling"] == "passed" and rule_of(m18["id"])["ruled_to"] == "work-osprey-docs"
       and any(x[0] == "work-osprey-docs" and m18["id"] in x[1] for x in pushes()[p0:]), (rule_of(m18["id"]), pushes()[p0:]))
 ZONE_HOURS = 4                                    # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
-p0 = len(pushes()); server._update("a40", sender="work-osprey-docs", mover="home-beta", next="home-beta: answer the vendor about the quote", check="unit_active watchtest.service"); time.sleep(1.0); settle()
+p0 = len(pushes()); _update_svc._update("a40", sender="work-osprey-docs", mover="home-beta", next="home-beta: answer the vendor about the quote", check="unit_active watchtest.service"); time.sleep(1.0); settle()
 h18 = json.loads((T / "store/a/40.json").read_text())["metadata"].get("handoff") or {}
 check("18 hand-off: that session hands the item on: a hand-off record to home-beta from it, told once and delivered", h18.get("to") == "home-beta" and h18.get("from") == "work-osprey-docs" and isinstance(h18.get("delivered_at"), float)
       and len([x for x in pushes()[p0:] if x[0] in ("home-beta", B) and "a40" in x[1]]) == 1, (h18, pushes()[p0:]))

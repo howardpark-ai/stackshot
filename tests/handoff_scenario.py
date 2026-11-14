@@ -86,6 +86,8 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.anchors import anchors as _anc
 from stackshot.router import router as _router
@@ -170,7 +172,7 @@ ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no dayligh
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
 CHK = "unit_active watchtest.service"      # a hand-off by a session that is not a front agent needs a check or a date (wake or until): the hand() helper uses the check; the date forms are in the 15.1b block
 ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
-def upd(i, sender, **kw): return server._update(f"a{i}", sender=sender, **kw)
+def upd(i, sender, **kw): return _update_svc._update(f"a{i}", sender=sender, **kw)
 def tick(at, *ids):
     """One pass of the hand-off clock at `at` (None: now) over the named items only (none named: the whole board)."""
     return handoff_svc.handoff_tick(now=at, only=[f"a{i}" for i in ids] or None)
@@ -439,7 +441,7 @@ check("5 cold: a close whose outcome text the gate refuses leaves the item open 
       and "refused" in json.dumps(ho(88)) and ho(88).get("to") == "home-send", (rd(88)["status"], rd(88)["description"], ho(88)))
 # a write of the ladder's own that the server refuses (the answer was valid, `_update` still said no: the board item's ask on an item in state doing) is tried once more; refused again the item is
 # stuck with the refusal text (the brief lists it), not returned to its sender; the refusals are in the journal
-_real_update = server._update
+_real_update = _update_svc._update
 LADDER_WRITES = []; LADDER_KW = []; REFUSE = {"left": 0, "between": None, "boom": False}
 def _ladder_update(gid, *a, **kw):
     if kw.get("sender") == H.COLD:
@@ -454,7 +456,7 @@ def _ladder_update(gid, *a, **kw):
 def stored_edit(i, fn):
     """Edit the stored metadata of item a<i> on disk, as another writer would between two attempts."""
     p = T / f"store/a/{i}.json"; d = json.loads(p.read_text()); fn(d["metadata"]); p.write_text(json.dumps(d))
-server._update = _ladder_update
+_update_svc._update = _ladder_update
 item(38, project="projects/gamma", owner=U["home-gamma-front"], needs=[])
 hand(38, "home-peer"); drain(); d_n = ho(38)["delivered_at"]; before_b = rd(38)["description"]
 cold({"action": "close", "outcome": "done", "reason": "the work is finished", "description": "- The thing is done and in use\n- It lives here"})
@@ -517,7 +519,7 @@ check("5 ladder write: an error inside the write that is no refusal leaves the i
       rd(49)["status"] == "open" and rd(49)["description"] == before_c and bool(ho(49).get("recovery_at")) and "failed with an error" in ho(49).get("recovery_reason", "") and "RuntimeError: the store broke (test)" in ho(49).get("recovery_reason", "") and len(recovery_pushes("a49")) == 1
       and ho(49).get("to") == "home-peer" and ho(49).get("via") != "return" and not pushes_to("home-send", "a49") and LADDER_WRITES == ["a49"]
       and "a49 the cold call's close failed on attempt 1 of 2: RuntimeError: the store broke (test)" in journal.getvalue(), (rd(49)["status"], ho(49), LADDER_WRITES, journal.getvalue()[-300:]))
-server._update = _real_update
+_update_svc._update = _real_update
 # 5b: a bad answer falls on to the sender, then (sender gone) the fleet's builder is asked
 item(43, project="projects/gamma", owner=U["home-gamma-front"], needs=[])
 hand(43, "home-peer"); drain(); d43 = ho(43)["delivered_at"]
@@ -690,7 +692,7 @@ with contextlib.redirect_stderr(err):
 check("11 cold race: …handed to someone else meanwhile (a new record): dropped too", rd(101).get("written_by") == "home-send" and ho(101).get("to") == "home-peer2" and mt(101).get("mover") == "home-peer2"
       and "no longer the one" in err.getvalue(), (ho(101), err.getvalue()[-300:]))
 d_g = gamma(16)
-cold_during(ANS, lambda: server._update("a16", status="completed", outcome="done", reason="finished meanwhile", description="- The thing is done\n- It lives here", sender="home-peer"))
+cold_during(ANS, lambda: _update_svc._update("a16", status="completed", outcome="done", reason="finished meanwhile", description="- The thing is done\n- It lives here", sender="home-peer"))
 err = io.StringIO()
 with contextlib.redirect_stderr(err):
     tick(d_g + 11 * MIN, 16); drain()
@@ -971,7 +973,7 @@ for n_, kw_ in ((140, {"wake": FUT}), (141, {"until": FUT}), (142, {"wake": FUT,
     item(n_); _wt_update.stackshot_update(f"a{n_}", sender="home-send", mover="home-peer", next="home-peer: do the thing", **kw_); drain()
     m_ = mt(n_)
     check(f"15.1b a{n_} a hand-off with {'/'.join(sorted(kw_))}: the record names the new mover and the item is not parked", ho(n_).get("to") == "home-peer" and m_.get("mover") == "home-peer" and not stale_now(n_) and not m_.get("until") and not m_.get("hold"), m_)
-    check(f"15.1b a{n_} …the date stays as the hand-off's backstop (a wake), and the board draws the item alive", m_.get("wake") == FUT and not server._is_parked(rd(n_)) and not server._date_parked(rd(n_)), m_)
+    check(f"15.1b a{n_} …the date stays as the hand-off's backstop (a wake), and the board draws the item alive", m_.get("wake") == FUT and not _item_read._is_parked(rd(n_)) and not _item_read._date_parked(rd(n_)), m_)
 item(143); out143 = upd(143, "home-send", mover="home-peer", next="home-peer: do the thing", wake=FUT)
 check("15.1b the reply names no wait note for the backstop", "alone is a wait" not in out143 and "put on hold" not in out143 and "until" not in out143.split("\n", 1)[0], out143[-400:])
 item(146); out146 = _wt_update.stackshot_update("a146", sender="home-send", mover="home-peer", next="home-peer: do the thing", wake=FUT)      # through the tool: the whole reply, the alias note included
@@ -983,7 +985,7 @@ check("15.1b an ask_by backstop says so in the whole reply too", f"stored as ask
 item(148); out148 = _wt_update.stackshot_update("a148", sender="home-send", next="home-send: do the thing now", wake=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")      # control: no hand-off, the alias note is the plain one
 check("15.1b control: with no hand-off the alias note says the date is stored as until", f"stored as until={FUT}" in out148 and "backstop" not in out148, out148[-500:])
 item(144); upd(144, "home-send", next="home-send: do the thing now", wake=FUT)       # no hand-off: the same bare date is a wait, and the item is parked on its date
-check("15.1b control: the same date with no hand-off is a wait stored as until", mt(144).get("until") == FUT and "wake" not in mt(144) and server._is_parked(rd(144)), mt(144))
+check("15.1b control: the same date with no hand-off is a wait stored as until", mt(144).get("until") == FUT and "wake" not in mt(144) and _item_read._is_parked(rd(144)), mt(144))
 try:
     item(145); upd(145, "home-send", mover="home-peer", next="home-peer: do the thing"); e145 = ""
 except Exception as e_:
@@ -995,28 +997,28 @@ item(151, needs=["home-send"]); out151 = _wt_update.stackshot_update("a151", sen
 item(152); out152 = upd(152, "home-send", mover="home-peer", next="home-peer: do the thing", check=CHK, ask_by=FUT); drain()
 for n_, who_ in ((150, "team-back"), (151, "team-back"), (152, "home-peer")):
     m_ = mt(n_)
-    check(f"15.1c a{n_} the hand-off to {who_} with a bare date is recorded and the item is not parked", ho(n_).get("to") == who_ and not stale_now(n_) and not m_.get("until") and not m_.get("hold") and not server._is_parked(rd(n_)) and not server._date_parked(rd(n_)), m_)
+    check(f"15.1c a{n_} the hand-off to {who_} with a bare date is recorded and the item is not parked", ho(n_).get("to") == who_ and not stale_now(n_) and not m_.get("until") and not m_.get("hold") and not _item_read._is_parked(rd(n_)) and not _item_read._date_parked(rd(n_)), m_)
 check("15.1c a150 …the date is kept as the wake, the backstop", mt(150).get("wake") == FUT and mt(151).get("wake") == FUT, (mt(150), mt(151)))
 check("15.1c a152 …the date given as ask_by stays as it was given (the backstop)", mt(152).get("ask_by") == FUT and not mt(152).get("wake"), mt(152))
 item(153, needs=["home-send"]); upd(153, "home-send", needs=["team-back"], next="team-back: do the thing", wake=FUT, check=CHK); drain()
-check("15.1c control: needs, a next line and a check with the date is a hand-off too (as it was)", ho(153).get("to") == "team-back" and not server._is_parked(rd(153)), mt(153))
+check("15.1c control: needs, a next line and a check with the date is a hand-off too (as it was)", ho(153).get("to") == "team-back" and not _item_read._is_parked(rd(153)), mt(153))
 item(154, mover="home-send"); upd(154, "home-send", next="home-send: do the thing now", wake=FUT)
-check("15.1c control: a bare date on an item whose mover does not change is still a wait, stored as until", mt(154).get("until") == FUT and server._is_parked(rd(154)), mt(154))
+check("15.1c control: a bare date on an item whose mover does not change is still a wait, stored as until", mt(154).get("until") == FUT and _item_read._is_parked(rd(154)), mt(154))
 # 15.1d a hand-off write on an item a bare until had parked ends that wait, keeps the date as the backstop, and the reply says so; a write that hands nothing on leaves the park alone
 item(155, mover="home-front"); _wt_update.stackshot_update("a155", sender="home-front", until=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")
-check("15.1d the item is parked on its until before the hand-off", mt(155).get("until") == FUT and server._is_parked(rd(155)), mt(155))
+check("15.1d the item is parked on its until before the hand-off", mt(155).get("until") == FUT and _item_read._is_parked(rd(155)), mt(155))
 out155 = _wt_update.stackshot_update("a155", sender="home-send", mover="home-peer", next="home-peer: do the thing", check=CHK); drain()
-check("15.1d the hand-off ends the wait: the record is made, the date stays as the wake, the item is active", ho(155).get("to") == "home-peer" and mt(155).get("wake") == FUT and not mt(155).get("until") and not server._is_parked(rd(155)) and not stale_now(155), mt(155))
+check("15.1d the hand-off ends the wait: the record is made, the date stays as the wake, the item is active", ho(155).get("to") == "home-peer" and mt(155).get("wake") == FUT and not mt(155).get("until") and not _item_read._is_parked(rd(155)) and not stale_now(155), mt(155))
 check("15.1d …and the reply says so, with the date", f"the item was waiting until {FUT}" in out155 and "this hand-off ends that wait" in out155 and "backstop" in out155, out155[-600:])
 item(156, mover="home-front"); _wt_update.stackshot_update("a156", sender="home-front", until=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")
 upd(156, "home-send", next="home-front: do the thing again"); drain()
-check("15.1d control: a write by another session that hands nothing on leaves the park as it was (no record, still parked on its until)", mt(156).get("until") == FUT and server._is_parked(rd(156)) and not ho(156), mt(156))
+check("15.1d control: a write by another session that hands nothing on leaves the park as it was (no record, still parked on its until)", mt(156).get("until") == FUT and _item_read._is_parked(rd(156)) and not ho(156), mt(156))
 # 15.1e one rule for a park: the keeper relay's put-on-hold (_date_parked) agrees with the board's (_is_parked), a decision on his call included
 item(157, needs=["decision"], until=FUT, ask=ASK)
-check("15.1e an item waiting on his decision with an until is parked by neither reading", not server._is_parked(rd(157)) and not server._date_parked(rd(157)), mt(157))
+check("15.1e an item waiting on his decision with an until is parked by neither reading", not _item_read._is_parked(rd(157)) and not _item_read._date_parked(rd(157)), mt(157))
 for n_, kw_ in ((158, {"until": FUT}), (159, {"until": FUT, "wait_kind": "time"}), (160, {"until": FUT, "wait_kind": "relay"}), (161, {"hold": True, "wake": FUT}), (162, {})):
     item(n_, mover="home-front", **kw_)
-    check(f"15.1e a{n_} {sorted(kw_)}: _date_parked is _is_parked for an item with no hold flag, and neither parks a decision", (server._date_parked(rd(n_)) == server._is_parked(rd(n_))) or bool(mt(n_).get("hold")), mt(n_))
+    check(f"15.1e a{n_} {sorted(kw_)}: _date_parked is _is_parked for an item with no hold flag, and neither parks a decision", (_item_read._date_parked(rd(n_)) == _item_read._is_parked(rd(n_))) or bool(mt(n_).get("hold")), mt(n_))
 # 15.1f the backstop reading fails closed: when handoff.detect raises inside _hands_on (service/update.py), the date stays the hand-off's backstop (the item stays active) and the failure is logged
 import contextlib as _cl
 from stackshot.service import update as _upd_svc
@@ -1035,7 +1037,7 @@ finally:
     H.detect = _real_detect
 check("15.1f a reading that fails counts as a hand-off (fail closed)", direct_ is True, direct_)
 check("15.1f …the failure is logged, naming that the date stays a backstop", "backstop not judged: RuntimeError: forced" in _err.getvalue() and "the item stays active" in _err.getvalue(), _err.getvalue()[-300:])
-check("15.1f …and a write whose reading fails keeps its date as the wake and leaves the item active", mt(149).get("wake") == FUT and not mt(149).get("until") and not server._is_parked(rd(149)), mt(149))
+check("15.1f …and a write whose reading fails keeps its date as the wake and leaves the item active", mt(149).get("wake") == FUT and not mt(149).get("until") and not _item_read._is_parked(rd(149)), mt(149))
 # 15.1g a failed reading leaves a stored bare until untouched (no "ends that wait") and the reply says the reading failed
 item(163, mover="home-front"); _wt_update.stackshot_update("a163", sender="home-front", until=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")
 H.detect = _raising_detect
@@ -1044,7 +1046,7 @@ try:
         out163 = _wt_update.stackshot_update("a163", sender="home-send", needs=["team-back"])      # a hand-off the derived mover shows: no hand-off line in next, so the reading itself runs
 finally:
     H.detect = _real_detect
-check("15.1g the stored until stays as it was, and the item stays parked on it", mt(163).get("until") == FUT and not mt(163).get("wake") and server._is_parked(rd(163)), mt(163))
+check("15.1g the stored until stays as it was, and the item stays parked on it", mt(163).get("until") == FUT and not mt(163).get("wake") and _item_read._is_parked(rd(163)), mt(163))
 check("15.1g …the reply says the hand-off reading failed and the wait was kept, never that the hand-off ends it",
       "the hand-off reading failed" in out163 and f"the wait until {FUT} is kept as it was" in out163 and "this hand-off ends that wait" not in out163, out163[-500:])
 item(164); H.detect = _raising_detect

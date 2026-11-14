@@ -61,6 +61,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import states
+from stackshot.service import update as _update_svc
 from stackshot.model import model as _model
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -80,7 +81,7 @@ telling.front_sender = lambda who: False
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
 BACK = "team-back"
-def upd(i, **kw): return server._update(f"a{i}", sender="home-front", **kw)
+def upd(i, **kw): return _update_svc._update(f"a{i}", sender="home-front", **kw)
 def raw(i): return (T / f"store/a/{i}.json").read_text()
 def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
@@ -148,7 +149,7 @@ refused("others: a wake past the 7-day cap is still refused without his words", 
 NOTE_HEAD = "reads as a wait"
 NOTE_CALL = "update(hold=true, until="
 OVERNIGHT = "box-g's first nightly run ends overnight; kestrel-hosting records its counts and cost in the morning"
-def bupd(i, **kw): return server._update(f"a{i}", sender=BACK, **kw)
+def bupd(i, **kw): return _update_svc._update(f"a{i}", sender=BACK, **kw)
 def doing_next(k, why):
     """item k (new) written to doing with next = why by its mover: (the reply, "") or ("", the refusal): the next_wait guard, which is stricter than the note's matcher, may refuse a line first"""
     item(k, needs=[BACK], state="doing")
@@ -213,7 +214,7 @@ check("wait note: 'waiting on the 09:00 timer' on a doing item gets the note or 
 # ================================================================ 6c. a wake alone whose next waits for that date gets a note; a window the work needs is parked
 WN_HEAD = "alone is a wait until that date, and this item's next waits for that date"
 w2 = time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET + 2 * DAY))
-def bupd(i, **kw): return server._update(f"a{i}", sender=BACK, **kw)
+def bupd(i, **kw): return _update_svc._update(f"a{i}", sender=BACK, **kw)
 item(120, needs=[BACK], next=f"team-back: collect logs until {w2}, then review")
 out = bupd(120, wake=w2)
 check("window note: a wake alone on an item whose next says 'collect logs until <the wake day>, then review' is stored, and the reply carries one note", wk_(mt(120)) == w2 and "hold" not in mt(120) and out.count(WN_HEAD) == 1, out)

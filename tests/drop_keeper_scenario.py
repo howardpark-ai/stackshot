@@ -47,6 +47,8 @@ def put(i, status="open", project="projects/alpha", creator=MAIN, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": creator, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
@@ -98,7 +100,7 @@ check("start pass, dry run: writes nothing", all((T / f"store/a/{i}.json").read_
 rows = server._mover_backfill_pass(apply=True)
 check("start pass: stores the builder / the -main agent as the mover; the creator never", rd(1)["metadata"].get("mover") == BUILD and rd(2)["metadata"].get("mover") == BMAIN and rd(2)["metadata"].get("owner") == REVIEW, (rd(1)["metadata"], rd(2)["metadata"]))
 check("start pass: a project naming no agent leaves the item alone: no mover stored, the item's mover reads empty and is never its creator (BMAIN)", "mover" not in rd(3)["metadata"]
-      and {r["gid"]: r["mover"] for r in rows}.get("a3", "") == "" and server._model_of({**rd(3), "gid": "a3"}).mover == "" and telling.holder(rd(3)) == "" and rd(3)["metadata"].get("owner") == BMAIN,
+      and {r["gid"]: r["mover"] for r in rows}.get("a3", "") == "" and _item_read._model_of({**rd(3), "gid": "a3"}).mover == "" and telling.holder(rd(3)) == "" and rd(3)["metadata"].get("owner") == BMAIN,
       (rd(3)["metadata"], telling.holder(rd(3)), [r for r in rows if r["gid"] == "a3"]))
 check("start pass: needs, a hold, Oliver's call, a stored mover and a closed item are untouched", all((T / f"store/a/{i}.json").read_bytes() == before[i] for i in range(4, 9)))
 check("start pass: the clocks stay (a filing edit)", rd(1)["state_updated"] == now0 - 60 and rd(2)["state_updated"] == now0 - 60, (rd(1), rd(2)))
@@ -113,12 +115,12 @@ to_ = [o for t, g, o, n in told if g == "a10"]
 check("close: told to the item's mover (the builder) alone, never to its creator", to_ and set(map(SID, to_)) == {SID(BUILD)} and SID(REVIEW) not in map(SID, to_), told)
 check("close: no reply and no notice names a keeper of record", NOKEEP(res) and all(NOKEEP(n) for t, g, o, n in told), res)
 told.clear()
-res = server._update("a10", status="open", next=f"{BUILD}: look again", sender=MAIN); time.sleep(0.6)
+res = _update_svc._update("a10", status="open", next=f"{BUILD}: look again", sender=MAIN); time.sleep(0.6)
 check("reopen: the creator is told nothing, and nothing says 'keeper of record'", SID(REVIEW) not in [SID(o) for t, g, o, n in told] and NOKEEP(res) and all(NOKEEP(n) for t, g, o, n in told), (told, res))
 
 # ---- 4. D4: no refiling to the creator's project; D6: the item page, get and History say 'created by', never 'keeper of record'
 put(11, project="projects/alpha", creator=MAIN, mover=MAIN)
-res = server._update("a11", project="projects/beta", sender=MAIN)
+res = _update_svc._update("a11", project="projects/beta", sender=MAIN)
 check("move to another project: the project written is the project stored, no refile back to the creator's, no note about it", rd(11)["metadata"]["project"] == "projects/beta" and "refiled" not in res and "(note:" not in res and NOKEEP(res), res)
 bd = ui_render.Board(str(T / "store"))
 row = bd.item("a11")
@@ -139,10 +141,10 @@ check("board: Oliver's item with no `then` sits in the 'no agent' group, not und
 # ---- 6. D9: `then` defaults to the builder doing the work
 ASK = "Decide: pick a vendor · Recommend: yes · Stakes: B costs a month · By: no date"
 put(14, project="projects/alpha", creator=MAIN, needs=[REVIEW])
-res = server._update("a14", needs=["decision"], ask=ASK, sender=REVIEW)
+res = _update_svc._update("a14", needs=["decision"], ask=ASK, sender=REVIEW)
 check("D9: a background mover that hands the item to Oliver becomes its `then`", rd(14)["metadata"].get("then") == REVIEW and "then" in res, (rd(14)["metadata"], res[-300:]))
 put(15, project="projects/alpha", creator=MAIN, mover=MAIN, next=f"{BUILD}: building the fix\nOliver: pick the vendor")
-res = server._update("a15", needs=["decision"], ask=ASK, sender=MAIN)
+res = _update_svc._update("a15", needs=["decision"], ask=ASK, sender=MAIN)
 check("D9: a front agent relaying an item whose next names the builder as building gets the builder as `then`, not itself", rd(15)["metadata"].get("then") == BUILD, (rd(15)["metadata"], res[-300:]))
 r = _wt_create.stackshot_create(subject="[home] builder's own decision", description=DESC, project="projects/alpha", sender=BUILD, needs=["decision"], ask=ASK)
 g9 = r.split()[1]

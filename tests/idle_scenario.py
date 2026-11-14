@@ -64,6 +64,8 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import pane_recovery as _pane_recovery
+from stackshot.service import update as _update_svc
 from stackshot.waits import waiting as _wt
 from stackshot.web import answers as _web_answers
 from stackshot.core import config as _cfg
@@ -122,9 +124,9 @@ check("Park until … with a day written in the box: that day is the wake, his n
 check("…and the park is his own word for that wake: recorded as such (cap_ok), so the wake stands past the cap", m6.get("cap_ok", {}).get("wake") == later and m6["cap_ok"]["by"] == "a board answer"
       and _wt.cap_words(m6, "wake"), m6)
 check("a day in the past in the box falls back to the option's day, and an option's day that has passed to [idle] park_days from now; a time of day is kept",
-      server._idle_park_at(park, "2020-01-01 was too early") == park and server._idle_park_at("2020-01-02", "") == (_pages.zone_now() + dt.timedelta(days=3)).strftime("%Y-%m-%d")
-      and server._idle_park_at(park, f"after {later} 14:30 then") == f"{later}T14:30",
-      (server._idle_park_at(park, "2020-01-01 was too early"), server._idle_park_at("2020-01-02", ""), server._idle_park_at(park, f"after {later} 14:30 then")))
+      _pane_recovery._idle_park_at(park, "2020-01-01 was too early") == park and _pane_recovery._idle_park_at("2020-01-02", "") == (_pages.zone_now() + dt.timedelta(days=3)).strftime("%Y-%m-%d")
+      and _pane_recovery._idle_park_at(park, f"after {later} 14:30 then") == f"{later}T14:30",
+      (_pane_recovery._idle_park_at(park, "2020-01-01 was too early"), _pane_recovery._idle_park_at("2020-01-02", ""), _pane_recovery._idle_park_at(park, f"after {later} 14:30 then")))
 check("a session's write cannot carry a wake on an option: the gate drops the key, so no write of a session parks through an option",
       "wake" not in server._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}])[0],
       server._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}]))
@@ -137,8 +139,8 @@ check("there is no \"Nag again\" any more: the word is not an option of any rais
 
 # ---- 3. a state change drops the stored idle record; a keeper parks an item it does not own
 it1 = rd(1); it1["metadata"]["idle"] = {"poked": clock[0] - 600, "to": "home-stew", "recovery": clock[0] - 300}; (T / "store/a/1.json").write_text(json.dumps(it1))      # what the retired pass stored
-server._update("a1", clear_needs=True, ask="none", next="home-owner: picked up again", sender="home-owner")
+_update_svc._update("a1", clear_needs=True, ask="none", next="home-owner: picked up again", sender="home-owner")
 check("a state change drops metadata.idle", "idle" not in rd(1)["metadata"], rd(1)["metadata"])
-server._update("a6", hold=True, wake="2099-01-02", sender="home-stew")
+_update_svc._update("a6", hold=True, wake="2099-01-02", sender="home-stew")
 check("a keeper parks an item it does not own with sender=", rd(6)["metadata"].get("until") == "2099-01-02" and "idle" not in rd(6)["metadata"], rd(6)["metadata"])
 print(("ok" if not fails else "FAILED") + f": idle scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

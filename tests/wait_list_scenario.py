@@ -63,6 +63,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.router import routing as _routing
 from stackshot.core import config as _cfg
 from stackshot.projects import pages as _pages
@@ -242,7 +244,7 @@ check("seams: a caller still cannot pass wait_kind=list (the five kinds are what
 # ================================================================ the model
 lst(100, [Tm(day(3)), It("a901"), Re("the lease")], mode="all", until=day(9))
 item(901, subject="[home] a blocker")
-def mod_of(i, **kw): return server._model_of({**rd(i), "gid": f"a{i}", **kw})
+def mod_of(i, **kw): return _item_read._model_of({**rd(i), "gid": f"a{i}", **kw})
 u0 = model.UNSTAMPED["count"]
 md = mod_of(100)
 check("model: wait_kind=list reads as a waiting item with a wait of that kind: the backstop is the item's `until`, the mover is the post-wake mover", md.state == "waiting" and md.wait.kind == "list" and md.wait.backstop == day(9) and md.wait.by_until
@@ -575,10 +577,10 @@ check("backstop: a turn that cannot be made is backed off (noted on the item), t
 check("backstop: …and the scheduler looks at it again after the back-off, not at once", wk.next_moment(mt(198)) >= mt(198)["watch"]["failed_at"] + wk.BACKOFF - 1, wk.next_moment(mt(198)))
 # a closed item drops the list with the rest
 lst(199, [Tm(day(5)), It("a901")], mode="all")
-server._update("a199", sender=FRONT, status="completed", outcome="done", reason="finished", description="- The thing works now\n- It lives here\n- Finished when it ships")
+_update_svc._update("a199", sender=FRONT, status="completed", outcome="done", reason="finished", description="- The thing works now\n- It lives here\n- Finished when it ships")
 check("close: a closed item loses the list (waits and wait_mode go with the rest of the wait)", rd(199)["status"] == "completed" and all(k not in mt(199) for k in GONE), mt(199))
 lst(200, [Tm(day(5)), It("a901")], mode="all")
-server._update("a200", sender=FRONT, clear_wait=True)
+_update_svc._update("a200", sender=FRONT, clear_wait=True)
 check("clear_wait: it drops the list with the rest of the wait", all(k not in mt(200) for k in GONE), mt(200))
 
 # ================================================================ the review lows of the first part

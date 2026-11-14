@@ -99,12 +99,12 @@ class Hooks:
     parse_wake: Callable[..., Any]
     relaunch: Any            # the sentence a refused close ends with (server._RELAUNCH)
     role_of: Callable[..., Any]
-    same_sess: Callable[..., Any]            # page_debts._same_sess (web/)
+    same_sess: Callable[..., Any]            # fleet/sessions_registry._same_sess
     scoped_anchors: Callable[..., Any]
     session_id: Callable[..., Any]            # page_debts._session_id (web/)
     session_roster: Callable[..., Any]
     shown_ref: Callable[..., Any]            # page_debts._shown_ref (web/)
-    store_ref: Callable[..., Any]            # page_debts._store_ref (web/)
+    store_ref: Callable[..., Any]            # fleet/sessions_registry._store_ref
     wake_at: Callable[..., Any]
     when_words: Callable[..., Any]            # web/render.when_words: a time in words
     zone: Callable[..., Any]            # the board's time zone as server.py holds it (ZONE, read when a refusal says a time)

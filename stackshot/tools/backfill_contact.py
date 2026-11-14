@@ -67,7 +67,7 @@ def run(a: argparse.Namespace) -> dict:
         from stackshot.web import server  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
         _web_publish._publish = lambda: None
-        return server._contact_backfill(dry=True)
+        return server._contacts._contact_backfill(dry=True)
 
 
 def main(argv: list[str] | None = None) -> int:

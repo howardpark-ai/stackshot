@@ -57,6 +57,8 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -165,7 +167,7 @@ check("2 …model.view reads a closed item as dead with the phase stored or not"
 def created(out):
     m = re.search(r"created ([a-z]\d+)", out); assert m, out
     return _model_ids._norm_id(m.group(1))
-def uptd(gid, **kw): return server._update(gid, sender="home-front", **kw)
+def uptd(gid, **kw): return _update_svc._update(gid, sender="home-front", **kw)
 out = _wt_create._create(subject="[home] phase create alive", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK])
 gid = created(out)
 check("3 a create of a doing item stores phase alive and no wait_kind", _service_store._load(gid)["metadata"].get("phase") == "alive" and "wait_kind" not in _service_store._load(gid)["metadata"], _service_store._load(gid)["metadata"])
@@ -332,7 +334,7 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
             except Exception as e:  # noqa: BLE001
                 rows.append((gid, None, f"load: {e}")); continue
             it = dict(it, gid=gid)
-            after = lambda i_: server._after_open(i_.get("metadata") or {})
+            after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
             old = _model.view(bare(it), _model.derive(bare(it), now_, after_open=after, anchored=lambda i: False), now_, after, check=False)
             stamped = copy.deepcopy(it)
             server._phase_stamp(gid, stamped)
@@ -360,7 +362,7 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
     by_kind = collections.Counter(_model.shown_pair(old)[1] or "-" for g, it, (old, *_r) in opens if _model.shown_pair(old)[0] == "waiting")
     by_state = collections.Counter(old.today or "-" for g, it, (old, *_r) in opens)
     stored_kind_n = sum(1 for g, it, r in opens if (it["metadata"].get("wait_kind") or ""))
-    view_only = sum(1 for g, it, (old, *_r) in opens if _model.derive(bare(it), now_, after_open=lambda i_: server._after_open(i_.get('metadata') or {}), anchored=lambda i: False).state == _model.ALIVE and old.state == _model.WAITING)
+    view_only = sum(1 for g, it, (old, *_r) in opens if _model.derive(bare(it), now_, after_open=lambda i_: _item_read._after_open(i_.get('metadata') or {}), anchored=lambda i: False).state == _model.ALIVE and old.state == _model.WAITING)
     print(f"replay: {len(got)} items read, {len(opens)} open, {len(got) - len(opens)} closed; identical {len(same_state)}/{len(got)} (open {sum(1 for g, it, (old, new, *_r) in opens if old == new)}/{len(opens)}); "
           f"open by phase {dict(by_phase)}; waiting by kind {dict(by_kind)}; open by state read {dict(by_state)}; storing a wait_kind {stored_kind_n}; waiting only by the view {view_only}")
 else:

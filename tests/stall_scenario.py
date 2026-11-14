@@ -89,6 +89,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.core import config as _cfg
 from stackshot.github import ghsync as _gh
@@ -209,7 +211,7 @@ check("3 recovery: …exactly one message went to the project's -main agent (bet
       len(rp) == 1 and rp[0][1].startswith(f"[for {OWN}]\n[stackshot] a3 ") and "home-peer3" in rp[0][1] and "decide" in rp[0][1] and "no reply is owed" in rp[0][1] and not recovery_pushes("a3"), rp)
 check("3 recovery: …nothing went to the quiet session or the project's front, and the item is not on the owner's list: no decision in needs, no ask, no options, no idle raise, and the model keeps its session as the mover",
       len(pushes_to("home-peer3", "a3")) == 1 and "decision" not in (m3.get("needs") or []) and not m3.get("ask") and not m3.get("options") and not (m3.get("idle") or {}).get("raised")
-      and not server._model_of({**rd(3), "gid": "a3"}).owner_moves, (pushes_to("home-peer3", "a3"), m3))
+      and not _item_read._model_of({**rd(3), "gid": "a3"}).owner_moves, (pushes_to("home-peer3", "a3"), m3))
 T3 = T2 + 21.0
 check("3 recovery: a second pass sends nothing, and neither do later ones: still one message, no raise, the entry carries no stuck mark", stk(T3) == [] and stk(T3 + 5 * 3600) == [] and len(main_recovery_pushes("a3")) == 1 and "decision" not in (mt(3).get("needs") or []), (main_recovery_pushes("a3"), mt(3)))
 # the guard is the record's, not the pass's memory: with the pass's entry for the item lost (a file wiped, a restart that lost it) the ladder walks its steps again from the top and must not ask a second time
@@ -220,7 +222,7 @@ check("3 recovery: …and the request is once per record, not per pass: with the
       and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 1, (walked, main_recovery_pushes("a3"), log_of(3)))
 check("3 recovery: …the journal-side brief and the board list no stuck line for it", "stuck" not in handoff_svc.handoff_brief().lower() and all("stuck" not in ln for ln in H.brief_lines({"a3": rd(3)}, time.time())), handoff_svc.handoff_brief()[-300:])
 # the mover writing to the item ends the episode: the ladder starts over, and a later episode may ask again (one message for each)
-server._update("a3", sender="home-peer3", next="home-peer3: back at it")
+_update_svc._update("a3", sender="home-peer3", next="home-peer3: back at it")
 floor3 = rd(3)["updated"]
 check("3 episode: the mover's own write ends the episode: the request is cleared from the record", not ho(3).get("recovery_at") and not ho(3).get("recovery_reason") and len(main_recovery_pushes("a3")) == 1, ho(3))
 at3 = max(floor3, ho(3).get("at") or 0)      # the stall record's own stamp (a pass at a time ahead of the clock made it) counts as the item reaching its mover
@@ -366,7 +368,7 @@ close(91); cli_row("home-peer", "idle", IDLE0)
 # ================================================================ 7. a write restarts the ladder
 item(22); cli_row("home-peer", "idle", IDLE0)
 stk(T1)
-server._update("a22", sender="home-peer", next="home-peer: still on it")
+_update_svc._update("a22", sender="home-peer", next="home-peer: still on it")
 w22 = rd(22)["updated"]
 check("7 write: a write to the item restarts the ladder (the version moved): no step at the old time", w22 > B and stk(T1 + 11 * MIN) == [], w22)
 done = stk(w22 + 10 * MIN + 5)
@@ -494,9 +496,9 @@ item(63, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
 set_cfg(cold_call=False)
 stk(T1); stk(T2)
 check("15 flag: (setup) the item went to the builder as a stall record", ho(63).get("to") == "team-back" and ho(63).get("stall") is True and not ho(63).get("taken_at"), ho(63))
-server._update("a63", sender="team-back", next="team-back: on it now")
+_update_svc._update("a63", sender="team-back", next="team-back: on it now")
 check("15 flag: …a note by the builder is no start: still not taken, the flag stays", not ho(63).get("taken_at") and ho(63).get("stall") is True, ho(63))
-server._update("a63", sender="team-back", work={"text": "doing it", "state": "in progress"})
+_update_svc._update("a63", sender="team-back", work={"text": "doing it", "state": "in progress"})
 check("15 flag: …the builder starting work on it: taken, and the stall flag is gone from its record", ho(63).get("taken_at") and "stall" not in ho(63), ho(63))
 close(63); set_cfg()
 

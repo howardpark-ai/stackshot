@@ -53,6 +53,7 @@ def put(i, status="open", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server; from stackshot.service import projects as _psvc
+from stackshot.service import contacts as _contacts
 from stackshot.core import instance as _core_instance
 from stackshot.github import ghsync as _gh
 from stackshot.core import config as _cfg
@@ -177,23 +178,23 @@ check("an update that does not re-file the item leaves the contact", ct(6) == SI
 # ---- the contact retires, or is renamed
 for p_ in (T / "store").glob("?/*.json"): p_.unlink()
 put(7, contact=SIDE); put(8, contact=SIDE, project="projects/delta/sub"); put(9, status="completed", contact=SIDE, outcome="done", reason="done"); put(10, contact=MAIN)
-moved = server._contact_fall_retired(SIDE)
+moved = _contacts._contact_fall_retired(SIDE)
 check("retire: an open item whose contact retired falls to its project's -main agent", ct(7) == MAIN and ct(8) == MAIN, (rd(7)["metadata"], rd(8)["metadata"]))
 check("retire: the answer names the items changed; a closed item and another contact are left", sorted(moved) == [sh("a7"), sh("a8")] and ct(9) == SIDE and ct(10) == MAIN, moved)
 check("retire: it is a filing write (no clock moved)", rd(7)["state_updated"] == now0 - 60 and rd(7)["updated"] == now0 - 60, rd(7))
 put(11, contact=MAIN)
-moved = server._contact_fall_retired(MAIN)
+moved = _contacts._contact_fall_retired(MAIN)
 check("retire of the -main agent itself: the next front agent of the page (the page is read without it)", ct(11) == SIDE, rd(11)["metadata"])
-check("retire: the endpoint's answer gains contact_moved only when items moved", server._contact_after_agent((200, {"result": "line removed"}), "retire", "nobody-here") == (200, {"result": "line removed"})
-      and server._contact_after_agent((409, {"error": "x"}), "retire", SIDE) == (409, {"error": "x"}))
+check("retire: the endpoint's answer gains contact_moved only when items moved", _contacts._contact_after_agent((200, {"result": "line removed"}), "retire", "nobody-here") == (200, {"result": "line removed"})
+      and _contacts._contact_after_agent((409, {"error": "x"}), "retire", SIDE) == (409, {"error": "x"}))
 put(12, contact=SIDE)
-st, body = server._contact_after_agent((200, {"result": "line removed"}), "retire", SIDE)
+st, body = _contacts._contact_after_agent((200, {"result": "line removed"}), "retire", SIDE)
 check("retire: contact_moved lists the items", st == 200 and sh("a12") in body.get("contact_moved", []) and ct(12) == MAIN, (st, body))
 put(13, contact="home-delta-oldname")
-moved = server._contact_follow_rename("home-delta-oldname", SIDE)
+moved = _contacts._contact_follow_rename("home-delta-oldname", SIDE)
 check("rename: a contact stored as the old plain name is followed to the new name", moved == [sh("a13")] and ct(13) == SIDE, (moved, rd(13)["metadata"]))
 put(14, status="completed", contact="home-delta-oldname", outcome="done", reason="done")
-check("rename: a closed item is left", server._contact_follow_rename("home-delta-oldname", SIDE) == [] and rd(14)["metadata"].get("contact") == "home-delta-oldname")
+check("rename: a closed item is left", _contacts._contact_follow_rename("home-delta-oldname", SIDE) == [] and rd(14)["metadata"].get("contact") == "home-delta-oldname")
 
 # ---- the same through the two endpoints (sala's retire and rename of a session, which edit the project's page)
 class PageIO:
@@ -247,19 +248,19 @@ put(24, owner=SIDE, status="completed", outcome="done", reason="done")   # close
 put(25, owner=BUILD, project="projects/golf")           # a project with no -main agent
 put(26, owner=ECHO, project="projects/delta")           # created by a front agent of another project
 snap = {i: bytes_of(f"a{i}") for i in range(20, 27)}
-out = server._contact_backfill(dry=True)
+out = _contacts._contact_backfill(dry=True)
 check("backfill dry run: counts by rule", out["counts"] == {"creator_front": 2, "main": 1, "retired_contact": 1, "has_contact": 1, "no_main": 1, "closed": 1} and out["dry_run"] is True and out["written"] == 0, out["counts"])
 check("backfill dry run: writes nothing", all(bytes_of(f"a{i}") == snap[i] for i in range(20, 27)))
 rows = {r["item"]: r for r in out["items"]}
 check("backfill dry run: one row per item that would change, naming the rule and the contact",
       rows[sh("a20")]["rule"] == "creator_front" and rows[sh("a20")]["to"] == SIDE and rows[sh("a21")]["to"] == MAIN and rows[sh("a23")]["rule"] == "retired_contact" and rows[sh("a23")]["to"] == MAIN
       and rows[sh("a26")]["rule"] == "creator_front" and rows[sh("a26")]["to"] == ECHO and sh("a22") not in rows and sh("a24") not in rows, rows)
-out = server._contact_backfill(dry=False)
+out = _contacts._contact_backfill(dry=False)
 check("backfill: written", out["written"] == 4 and ct(20) == SIDE and ct(21) == MAIN and ct(22) == SIDE
       and ct(23) == MAIN and ct(26) == ECHO and "contact" not in rd(25)["metadata"] and "contact" not in rd(24)["metadata"], out)
 check("backfill: a filing write (clocks, status and the rest stay)", rd(20)["state_updated"] == now0 - 60 and rd(20)["updated"] == now0 - 60 and rd(20)["status"] == "open")
 snap2 = {i: bytes_of(f"a{i}") for i in range(20, 27)}
-out = server._contact_backfill(dry=False)
+out = _contacts._contact_backfill(dry=False)
 check("backfill: a second run writes nothing", out["written"] == 0 and all(bytes_of(f"a{i}") == snap2[i] for i in range(20, 27)) and out["counts"]["has_contact"] == 5, out["counts"])
 
 # ---- the item page: the side column's second row, "Owner" (the Mover row is the first)

@@ -16,12 +16,12 @@ from typing import Any, Callable
 @dataclass(frozen=True)
 class Hooks:
     """What the stall pass and the one ladder still reach outside service/, by the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
-    after_open: Callable[..., Any]  # server._after_open
-    main_agent: Callable[..., Any]  # server._main_agent
+    after_open: Callable[..., Any]  # item_read._after_open
+    main_agent: Callable[..., Any]  # agents._main_agent
     next_report_all: Callable[..., Any]  # tools/next_report.load_all
     publish: Callable[..., Any]  # web.publish._publish
     queue_map: Callable[..., Any]  # server._queue_map
-    role_name: Callable[..., Any]  # server._role_name
+    role_name: Callable[..., Any]  # sessions_registry._role_name
     session_id: Callable[..., Any]  # server._session_id
     silence_clock: Callable[..., Any]  # audit/silence.clock
     silence_minutes: Callable[..., Any]  # audit/silence.minutes
