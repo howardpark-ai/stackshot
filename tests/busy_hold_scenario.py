@@ -56,6 +56,8 @@ from stackshot.web import publish as _web_publish
 from stackshot.service import gates, telling, update as update_svc
 from stackshot.tools import next_report as _nr
 from stackshot.web.tools import update as _wt_update
+from stackshot.web.ui import releasing as _rel
+_rel._run = lambda argv: ""      # the second proof (a release of a pull request tied to the item, tests/busy_release_scenario.py) reads the release units: here none runs, never the host's
 
 @contextlib.contextmanager
 def patched(owner, **kv):
@@ -376,7 +378,8 @@ check("4 the refusal text carries no id of the board and is plain words", not re
 check("4 the proof reads the audit's own helpers (subagent_tie.tied_to, the hourly audit's item view), not a second tie", "_tie.tied_to(" in pathlib.Path(STACK, "stackshot/audit/busy_hold.py").read_text(encoding="utf-8"))
 bh_tree = ast.parse(pathlib.Path(STACK, "stackshot/audit/busy_hold.py").read_text(encoding="utf-8"))
 bh_imports = sorted({n.module or "" for n in ast.walk(bh_tree) if isinstance(n, ast.ImportFrom)} | {a.name for n in ast.walk(bh_tree) if isinstance(n, ast.Import) for a in n.names})
-check("4 the proof reads nothing from GitHub and starts no process: it imports only the audit's own readers", bh_imports == ["__future__", "stackshot.audit", "typing"], bh_imports)
+check("4 the proof reads nothing from GitHub and starts no process: it imports only the audit's own readers, the pure model helpers, the config and the standard library's re and pathlib (the release arm's log read)",
+      bh_imports == ["__future__", "pathlib", "re", "stackshot.audit", "stackshot.core", "stackshot.model", "typing"], bh_imports)
 ex = (pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
 check("4 the example config carries the switch, on", re.search(r"(?m)^busy_hold_guard = true\b", ex) is not None)
 

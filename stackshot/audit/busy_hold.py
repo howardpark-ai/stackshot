@@ -28,9 +28,9 @@ from stackshot.audit import subagent_tie as _tie
 from stackshot.core import config as _cfg
 from stackshot.model import merge_tie as _mt
 from stackshot.model import steps as _steps
-from stackshot.service import gates as _gates
 
 DESC_MAX = 80      # characters of a subagent's description the refusal quotes
+RELEASE_WORDS = "your release of PR #"      # what the words of a running release begin with: service/gates.py `BUSY_RELEASE_PREFIX` is the same string (the gate picks the release refusal by it; gates.py imports no audit/ module, so each side holds it and the suite compares them)
 RELEASE_FRESH_S = 15 * 60.0      # a release unit counts while its log was written within this long: a release in mode off writes at least every 5 minutes (the longest gap seen was 13), so an older log is a stuck release
 LOG_TAIL_BYTES = 8192      # of a release's log at most this much of its end is read for the stage
 STAGE_LINES = 4      # the stage is read from the newest of this many timestamped lines of the log that names one
@@ -187,6 +187,6 @@ def live_release(gid: str, *, units: Callable[[], Any], anchored: Callable[[], d
             return ""
         age, n, stage = best
         read = f"unit stackshot-release-{n}.service, its log written {_since(age)}" + (f", {stage}" if stage else "")
-        return f"{_gates.BUSY_RELEASE_PREFIX}{n} is running on it ({read})"
+        return f"{RELEASE_WORDS}{n} is running on it ({read})"
     except Exception:  # noqa: BLE001  — unknown is never a refusal
         return ""

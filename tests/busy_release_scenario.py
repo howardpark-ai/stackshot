@@ -152,6 +152,9 @@ ok = lambda got: got == ("ok", None)
 A77 = {"a1": {f"{OWN}#77"}}
 RELWORDS = lambda got: got[0] == "refused" and got[1].startswith("Refused: this item is being moved now: your release of PR #")
 def reset(): put(1, mover=BACK)
+def setdesc(i, text):
+    """The item's own description (put() puts keyword arguments in the metadata)."""
+    it = read(i); it["description"] = text; (T / f"store/a/{i}.json").write_text(json.dumps(it), encoding="utf-8")
 
 # ---------------------------------------------------------------- 1. refuses
 want = ("Refused: this item is being moved now: your release of PR #77 is running on it (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1)), so it is not paused. "
@@ -181,9 +184,9 @@ check("1 a running release of the pull request an open step's proof names refuse
 put(1, mover=BACK, step_proof={_steps.key(f"{BACK}: do it"): f"pr_merged {OWN}#81"})
 check("1 …a pr_merged proof ties as a pr_released one does", RELWORDS(gate(rel_live(units=(81,)))), gate(rel_live(units=(81,))))
 # tied by the item's own words (merge_tie)
-put(1, mover=BACK, description=f"- Fixes the export, https://github.com/{OWN}/pull/82")
+put(1, mover=BACK); setdesc(1, f"- Fixes the export, https://github.com/{OWN}/pull/82")
 check("1 a running release of the pull request the item's description links by URL refuses", RELWORDS(gate(rel_live(units=(82,)))), gate(rel_live(units=(82,))))
-put(1, mover=BACK, description="- Fixes the export in PR 83")
+put(1, mover=BACK); setdesc(1, "- Fixes the export in PR 83")
 check("1 a number written `PR 83` ties only an item that speaks of this repository (its project page holds an anchor in it): a project of another repository does not", ok(gate(rel_live(units=(83,), pages={}))), gate(rel_live(units=(83,), pages={})))
 check("1 …and one of this repository's project does", RELWORDS(gate(rel_live(units=(83,), pages={OWN: {PROJECT}}))), gate(rel_live(units=(83,), pages={OWN: {PROJECT}})))
 check("1 …and an item with a pull request of the repository anchored to it speaks of it too", RELWORDS(gate(rel_live(units=(83,), anch={"a1": {f"{OWN}#5"}}))), gate(rel_live(units=(83,), anch={"a1": {f"{OWN}#5"}})))
@@ -234,16 +237,13 @@ put(1, mover=BACK, next=f"{BACK}: release https://github.com/{OTHERREPO}/pull/77
 check("2 …a step's URL of another repository's pull request with the same number", ok(gate(rel_live())) and _rel.step_prs(read(1)["metadata"]) == set(), (gate(rel_live()), _rel.step_prs(read(1)["metadata"])))
 put(1, mover=BACK, next=f"{BACK}: wait for {OTHERREPO} PR #77")
 check("2 …`other/repo PR #77` in a step", ok(gate(rel_live())) and _rel.step_prs(read(1)["metadata"]) == set(), (gate(rel_live()), _rel.step_prs(read(1)["metadata"])))
-put(1, mover=BACK, description=f"- See https://github.com/{OTHERREPO}/pull/77")
+put(1, mover=BACK); setdesc(1, f"- See https://github.com/{OTHERREPO}/pull/77")
 check("2 …a description that links another repository's pull request 77", ok(gate(rel_live(pages={OWN: {PROJECT}}))), gate(rel_live(pages={OWN: {PROJECT}})))
-put(1, mover=BACK, next=f"{BACK}: do it\n{BACK}: PR #77 is released")
-st = read(1)["metadata"]; st["next"] = f"{BACK}: do it"; (T / "store/a/1.json").write_text(json.dumps({**read(1), "metadata": st}))
-check("2 a pull request number in no word of the item ties nothing", ok(gate(rel_live())))
-put(1, mover=BACK, next=f"{BACK}: do it\n[x] {BACK}: PR #77 released", state="doing")
-check("2 an unrelated number, `PR 770`, does not tie 77 (the number is read whole)", ok(gate(rel_live(pages={OWN: {PROJECT}}))) or True)
-put(1, mover=BACK, description="- Done in PR 770", next=f"{BACK}: do it")
+reset()
+check("2 a pull request number in no word of the item ties nothing", ok(gate(rel_live(pages={OWN: {PROJECT}}))))
+put(1, mover=BACK); setdesc(1, "- Done in PR 770")
 check("2 …whole: `PR 770` in the item's words does not tie unit 77", ok(gate(rel_live(pages={OWN: {PROJECT}}))), gate(rel_live(pages={OWN: {PROJECT}})))
-put(1, mover=BACK, description="- Done in PR 77", next=f"{BACK}: do it")
+put(1, mover=BACK); setdesc(1, "- Done in PR 77")
 check("2 …and `PR 77` does tie it (the same fixture, the whole number)", RELWORDS(gate(rel_live(pages={OWN: {PROJECT}}))), gate(rel_live(pages={OWN: {PROJECT}})))
 reset()
 check("2 an item whose project page holds no anchor in the repository is not tied by a bare number in its words", ok(gate(rel_live(pages={OWN: {"projects/elsewhere"}}))) )
@@ -282,10 +282,10 @@ check("3 a write that is no hold and no date is not refused", ok(gate(L77, hold=
 check("3 a wait that names its blocker is not refused (wait_kind, after, needs, ask_by)", ok(gate(L77, wait_kind="relay")) and ok(gate(L77, wait_kind="event")) and ok(gate(L77, after=["a2"])) and ok(gate(L77, needs=["external"])) and ok(gate(L77, ask_by=FUT)))
 check("3 a hand-off to another session (mover=, a next line that hands it on) is not the mover's hold", ok(gate(L77, mover=OTHER)) and ok(gate(L77, next_text=f"{OTHER}: take it from here")))
 check("3 a next line of the mover's own steps does not lift the refusal", RELWORDS(gate(L77, next_text=f"{BACK}: write the tests")))
-put(4, status="completed", mover=BACK, outcome="done")
+put(4, status="completed", mover=BACK, outcome="done"); put(7, mover=OWNER)
 check("3 a completed item, an item that does not exist, and an item the owner moves are not refused", ok(gate(rel_live(anch={"a4": {f"{OWN}#77"}}), gid="a4")) and ok(gate(L77, gid="a99999")) and ok(gate(rel_live(anch={"a7": {f"{OWN}#77"}}), gid="a7")))
-put(1, mover=BACK, hold=True, wait_kind="anchor")
-check("3 an item whose stored wait names its blocker (an anchor wait) is not parked again by this check", ok(gate(L77)) or True)
+put(1, mover=BACK, hold=True, wait_kind="event", wait_event=f"pr_released {OWN}#77")
+check("3 an item whose stored wait names its blocker (an event wait) is not parked again by this check", ok(gate(L77)), gate(L77))
 reset()
 
 # ---------------------------------------------------------------- 4. both arms
@@ -350,7 +350,7 @@ with patched(server, _mover_subagents=fake_server_subs), patched(server._rlive, 
     reset()
     SUBS[:] = [sub("Build @1: the export fix")]
     got = update(1, **HOLD)
-    check("5 both live through the tool: the subagent is named, with its own text", refused(got) and 'your subagent "Build @1: the export fix"' in got[1] and "your release" not in got[1], got)
+    check("5 both live through the tool: the subagent is named, with its own text", refused(got) and X('your subagent "Build @1: the export fix"') in got[1] and "your release" not in got[1], got)
     reset(); SUBS[:] = []
     # the units cannot be listed at all: a box with no systemd, the failover box
     def no_systemd(argv): raise FileNotFoundError("systemctl")
@@ -413,16 +413,18 @@ UNITS_OUT["v"] = ""
 calls = []
 check("6 with no unit running nothing else is read: no item, no pages, no log", ok(gate(rel_live(units=(), anch=A77, calls=calls))) and calls == ["units"], calls)
 calls.clear()
-check("6 an item tied by an anchor: one unit read, the item once, the log of that pull request only, and no page read", RELWORDS(gate(rel_live(units=(77, 91), anch=A77, calls=calls, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 60.0, QUEUED)}))) and calls.count("units") == 1 and calls.count("log91") == 0 and "pages" not in calls and calls.count("log77") == 1, calls)
+check("6 an item tied by an anchor to the one unit that runs: one unit read, the item once, that pull request's log once, and no page read", RELWORDS(gate(rel_live(units=(77,), anch=A77, calls=calls))) and sorted(calls) == ["item", "log77", "units"], calls)
+calls.clear()
+check("6 …with another unit beside it the item's words and the project pages are read once, and only the tied pull request's log", RELWORDS(gate(rel_live(units=(77, 91), anch=A77, calls=calls, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 60.0, QUEUED)}))) and sorted(calls) == ["item", "log77", "pages", "units"], calls)
 calls.clear()
 check("6 a unit tied to nothing reads no log", ok(gate(rel_live(units=(99,), calls=calls))) and not [c for c in calls if c.startswith("log")], calls)
 calls.clear()
 check("6 an own-repository that cannot be named reads no item and no log", ok(gate(rel_live(anch=A77, own="", calls=calls))) and calls == ["units"], calls)
 gsrc = pathlib.Path(STACK, "stackshot/service/gates.py").read_text(encoding="utf-8")
 check("6 gates.py names no audit/ module (the proof is handed in as a callable)", "stackshot.audit" not in gsrc and "from stackshot import audit" not in gsrc)
-check("6 the gate chooses the release refusal by the words' own prefix, and that prefix is what live_release writes", gates.BUSY_RELEASE_PREFIX == "your release of PR #" and busy_hold.live_release.__code__.co_consts.count(0) >= 0 and "BUSY_RELEASE_PREFIX" in pathlib.Path(STACK, "stackshot/audit/busy_hold.py").read_text(encoding="utf-8"))
+check("6 the gate chooses the release refusal by the words' own prefix, and that prefix is what live_release writes", gates.BUSY_RELEASE_PREFIX == busy_hold.RELEASE_WORDS == "your release of PR #" and gate(rel_live(anch=A77))[1].count(gates.BUSY_RELEASE_PREFIX + "77 is running on it") == 1)
 check("6 the units are the release script's own (stackshot-release-<n>.service), listed by the board's own reader", "stackshot-release-" in pathlib.Path(STACK, "stackshot/web/ui/releasing.py").read_text(encoding="utf-8") and busy_hold.RELEASE_FRESH_S == 15 * 60.0)
-check("6 the tool names wait_event kinds that exist: pr_released and pr_merged are in the update text", all(k in " ".join(pathlib.Path(STACK, "stackshot/web/tools/text/update.md").read_text(encoding="utf-8").split()) for k in ("pr_released", "pr_merged")))
+check("6 the refusal names wait_event kinds that exist: pr_released and pr_merged are in the tools' shared text", all(k in " ".join(pathlib.Path(STACK, "stackshot/web/tools/text/shared.md").read_text(encoding="utf-8").split()) for k in ("pr_released", "pr_merged")))
 check("6 the log's end is read through a bounded tail, a unit's number through int", busy_hold.LOG_TAIL_BYTES <= 64 * 1024 and busy_hold.STAGE_LINES == 4)
 big = RELDIR / "pr-95.log"; big.write_text("x" * 200000 + "\n" + tail("deploying b1"), encoding="utf-8")
 got = busy_hold.release_log(95)
