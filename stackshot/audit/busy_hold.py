@@ -132,7 +132,7 @@ def tied_releases(gid: str, running: set[int], *, anchored: Callable[[], dict[st
     stored proof, releasing.step_prs), or one the item's own words name as the merge pass reads them (merge_tie: its URL, or its number for an item that speaks of this repository). A pull request of another
     repository never counts, whatever its number: the units are this repository's. Raises what its callers raise."""
     own = canon(own_repo() or "")
-    if not own or not running:
+    if not own:
         return set()
     it = item(gid) or {}
     meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
