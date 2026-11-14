@@ -95,6 +95,37 @@ def stored_picker(meta: dict[str, Any]) -> str:
     return norm_who((meta or {}).get(LEGACY_PICKER_KEY)) or pick_who((meta or {}).get("mover"))
 
 
+def store_picker(meta: dict[str, Any], who: str) -> None:
+    """The one writer of a waiting item's picker: `mover` takes `who`, and a stored legacy key goes, so it can never outvote what was just written (stored_picker reads the legacy key first)."""
+    meta["mover"] = who
+    meta.pop(LEGACY_PICKER_KEY, None)
+
+
+def settle_picker_keys(meta: dict[str, Any], setv: Any, drop: Any, was_waiting: bool = False, waits_now: bool | None = None) -> None:
+    """The one save rule for the picker's two stored keys, run on `meta` after a write has applied its sets and drops (`setv`: the fields it set, `drop`: the fields it dropped; `was_waiting`: the item
+    waited before the write; `waits_now`: it waits as the write leaves it, read from `meta` when not given). A write that names the legacy key itself is left as written (the old parameter keeps working as it did).
+      a write that sets `mover` on an item that waits → the stored legacy key goes (the new mover wins, never the old key)
+      clear_mover (`mover` dropped) → the legacy key goes with it, so it cannot become the picker once the mover is gone
+      clear_wait (every field of WAIT_GROUP dropped) → the legacy key goes with the wait (it is in WAIT_GROUP), and a stored `mover` that is the owner goes with it, when the item waited and the write set no mover
+        (he picked the item up when the wait ended: no wait, no pick-up); an agent's stored `mover` stays as the live mover."""
+    if LEGACY_PICKER_KEY in setv:
+        return
+    if "mover" in drop:
+        meta.pop(LEGACY_PICKER_KEY, None)
+    if "mover" in setv and (waits_stored(meta) if waits_now is None else waits_now):
+        meta.pop(LEGACY_PICKER_KEY, None)
+    if set(WAIT_GROUP) <= set(drop) and was_waiting and "mover" not in setv and is_owner(norm_who(meta.get("mover"))):
+        meta.pop("mover", None)
+
+
+def waits_stored(meta: dict[str, Any]) -> bool:
+    """Does the item read as waiting on what `meta` stores (a stored kind or a stored until, or a waiting state)? A caller reads it before a write for settle_picker_keys' `was_waiting`."""
+    try:
+        return derive({"status": "open", "metadata": meta}).state == WAITING
+    except Exception:  # noqa: BLE001  — a reading that fails leaves the keys as they are
+        return False
+
+
 @dataclass(frozen=True)
 class Wait:
     """What a waiting item waits on. `kind` is the stored wait_kind or the one the item's fields read as; `until` is the date the wait is read to end (a wake, a verifying

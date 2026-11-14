@@ -311,7 +311,7 @@ m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"a
 (T / "store/a/50.json").write_text(json.dumps(it))
 server._answer("a50", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer")
 m = mt(50)
-check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and ab_(m) == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("post_wake_mover") == BACK
+check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and ab_(m) == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("mover") == BACK and "post_wake_mover" not in m      # an old snapshot holds the old key: the wait goes back with the picker stored as `mover`
       and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and "then" not in m, m)
 check("relay answer: …and the loop's next moment is that date", wakes_svc.next_wake().strftime("%Y-%m-%d") <= day(10), wakes_svc.next_wake())
 item(52, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay to arrive")

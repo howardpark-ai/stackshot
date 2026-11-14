@@ -6,7 +6,7 @@ it cannot it asks the mover a specific question; a wait for an event no type rep
 
   1  detect     each kind of gap, and what is no gap: a negated wait, an "or", several items, another session's step, the owner's step, a held item, an item that already names the wait
   2  findings   the wait-end finding names the line and what to say; the settle window; modes fix | ask | off; the event-missing finding goes to the builder
-  3  fix        the pass sets `after`, an event wait (pull request, machine), an anchor wait, a step proof, a backstop day: stored waiting, the mover as post_wake_mover, History, one message
+  3  fix        the pass sets `after`, an event wait (pull request, machine), an anchor wait, a step proof, a backstop day: stored waiting, the mover stored as `mover` (never the old key), History, one message
   4  send back  clear_after, clear_wait and step_proof "none" are the mover's no: the server leaves that line alone, a changed line is a new fact
   5  never      nothing closed, no ask written, an item the owner moves or a front agent's item is left alone, at most ten fixes a pass, a second pass changes nothing
   6  after      a line the server fixed is not asked about again once the wait ended; a stored day that is no date is no backstop; a refused gate leaves the anchors list as it was;
@@ -210,7 +210,7 @@ wipe()
 r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
 m = mt(9201)
 check("3 after: the pass sets after on the item it waits for", m.get("after") == ["g9202"], m)
-check("3 …the item waits on an item's close, with the mover as post_wake_mover and no stored mover", MODEL.derive(rd(9201)).state == MODEL.WAITING and m.get("post_wake_mover") == BACK and "mover" not in m and m.get("wait_kind") == "item", m)
+check("3 …the item waits on an item's close, with the mover stored as `mover` and no old key", MODEL.derive(rd(9201)).state == MODEL.WAITING and m.get("mover") == BACK and "post_wake_mover" not in m and m.get("wait_kind") == "item", m)
 check("3 …a backstop day is set (now plus cap_days), and the stored phase is waiting on an item", bool(ab_(m)) and (m.get("phase"), m.get("waits_on")) == ("waiting", "item"), m)
 check("3 …History has one line saying what was set and how to send it back", len(log(9201)) == 1 and "after=" in log(9201)[0] and "clear_after" in log(9201)[0], log(9201))
 check("3 …the fix is recorded, and the wait-end finding is not sent (the message is the audit's retired)", any(SF.mark_tokens(m, SF.WAIT_END)) and not [x for x in sent if "· wait-end ·" in x[1]], (m.get(SF.MARK), sent))
@@ -231,7 +231,7 @@ for i in (9211, 9212, 9213, 9214, 9215, 9216):
     mt_ = rd(i); mt_["metadata"].pop("state", None) if i == 9216 else None; (T / f"store/g/{i}.json").write_text(json.dumps(mt_))
 wipe()
 r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
-check("3 pull request: an event wait pr_merged on the pull request, mover as post_wake_mover", mt(9211).get("wait_kind") == "event" and mt(9211).get("wait_event") == "pr_merged other/repo#7" and mt(9211).get("post_wake_mover") == BACK and MODEL.derive(rd(9211)).state == MODEL.WAITING, mt(9211))
+check("3 pull request: an event wait pr_merged on the pull request, mover stored as `mover` and no old key", mt(9211).get("wait_kind") == "event" and mt(9211).get("wait_event") == "pr_merged other/repo#7" and mt(9211).get("mover") == BACK and "post_wake_mover" not in mt(9211) and MODEL.derive(rd(9211)).state == MODEL.WAITING, mt(9211))
 check("3 machine: a box_online event wait", mt(9212).get("wait_kind") == "event" and mt(9212).get("wait_event") == "box_online hp-box", mt(9212))
 check("3 link: an anchor wait, with the link added to the anchors scoped to the item", mt(9213).get("wait_kind") == "anchor" and mt(9213).get("wait_anchor", "").endswith("/issues/5")
       and any(e["url"].endswith("/issues/5") and "g9213" in (e.get("items") or []) for e in json.loads((T / "store/anchors.json").read_text()).get("projects/alpha", [])), (mt(9213), (T / "store/anchors.json").read_text()))

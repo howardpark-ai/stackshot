@@ -49,7 +49,7 @@ OUTCOME_FIELDS = frozenset({"outcome", "reason", "superseded_by"})
 OPEN_SET_FIELDS = frozenset({"mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "next", "cap_ok", "wait_basis", "wake", "hold", "hold_set", "after",
                              "needs"})
 SET_FIELDS = OPEN_SET_FIELDS | OUTCOME_FIELDS
-DROP_FIELDS = frozenset({"hold", "hold_set", "state", "mover", "then", *_states.CARRY_FIELDS})
+DROP_FIELDS = frozenset({"hold", "hold_set", "state", "mover", "then", _model.LEGACY_PICKER_KEY, *_states.CARRY_FIELDS})
 MODEL_KEYS = ("mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")
 DEFINING = (*MODEL_KEYS, "wake", "hold", "hold_set", "after", "cap_ok", "wait_basis", "needs")     # what defines an item's state: stripped from a write the guards would refuse
 RESIDUE_GUARDS = ("wait_input", "no_end", "snooze", "mover", "post_wake")                   # the guards whose refusal means the state cannot be written whole
@@ -491,7 +491,7 @@ def _fill_wait(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model.
                 plan.note(gid, "relay_post", f"no agent on its record (mover, hand-off, needs, then) can move it now: the project's background agent {env.label(who)} is its post-wake mover", hand=False)
         if who:
             plan.relay_post[gid] = (who, src)
-            out["post_wake_mover"] = who
+            out["mover"] = who
             want = ""
         else:
             plan.relay_post[gid] = ("", "none")
@@ -499,7 +499,7 @@ def _fill_wait(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model.
             want = ""
     if want:
         post, _swapped = _take(env, plan, gid, want, project, "post-wake mover")
-        out["post_wake_mover"] = post
+        out["mover"] = post
     end_day = day_of(m.get("ask_by")) or day_of(m.get("chase"))
     event = clean(m.get("wait_event")) or clean(m.get("party"))
     if w.kind == "anchor":
@@ -587,7 +587,8 @@ def _plan_alive(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model
             ans = read.get("answer")
             if ans and ans.get("wait") == "yes" and ans.get("confident"):
                 ch = env.choices(gid, it, mod)
-                post = ch.get(ans["post_wake_mover"], ans["post_wake_mover"])
+                who_ = ans.get("mover") or ans.get("post_wake_mover") or ""      # a read kept from before the answer was translated at the cold call's edge still holds the old key
+                post = ch.get(who_, who_)
                 kind = ans["kind"]
                 if kind == "relay" and _model.is_owner(post):       # never <owner>: he relays the news, the last agent mover moves on it
                     who, src = env.relay_post(it, project)
@@ -596,7 +597,7 @@ def _plan_alive(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model
                         plan.relay_post[gid] = (who, src)
                 elif kind == "relay":
                     plan.relay_post[gid] = (post, "the call's read")
-                set_.update(wait_kind=kind, post_wake_mover=post)
+                set_.update(wait_kind=kind, mover=post)
                 if kind == "time":
                     set_.update(wake=ans["wake"], hold=True, hold_set={"at": env.now, "by": AUTHOR}, wait_basis={"text": ans["basis"], "wake": ans["wake"], "by": AUTHOR, "at": env.now})
                 elif kind == "anchor":
@@ -605,7 +606,7 @@ def _plan_alive(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model
                     set_.update(after=ans["after"], ask_by=ans["end"])
                 else:
                     set_.update(wait_event=ans["event"], ask_by=ans["end"])
-                drop += [k for k in ("mover", "then", "state", *_states.CARRY_FIELDS) if k in m]
+                drop += [k for k in ("then", "state", *_states.CARRY_FIELDS, _model.LEGACY_PICKER_KEY) if k in m]      # the mover is set below (a set replaces a stored mover); a stored old key goes with the wait it stood for
                 rec["applied"] = True
                 notes.append("a wait read from its next")
                 _commit(env, plan, gid, it, f"{today_state} → waiting on {_model.KIND_WORDS[kind].format(owner=_model.owner_display())} (read from its next)", set_, drop, notes, env.label(post))
@@ -706,6 +707,8 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
                     return
     fill, extra = _fill_wait(env, plan, gid, it, mod)
     set_.update(fill)
+    if "mover" in fill and _model.LEGACY_PICKER_KEY in m:      # the one save rule: a write that sets the mover on a wait drops a stored old key, which would outvote it
+        drop.append(_model.LEGACY_PICKER_KEY)
     probe = problems(env, gid, after_state(it, set_, drop))
     lacking = [p for p in probe if p.key in ("wait_input", "no_end")]
     read = env.reads.get(gid)
@@ -747,7 +750,7 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
     for k in list(set_):
         if k in MODEL_KEYS and clean(m.get(k)) == clean(set_[k]):
             set_.pop(k)
-    _commit(env, plan, gid, it, f"{today_state} → waiting on {_model.KIND_WORDS[w.kind].format(owner=_model.owner_display())}", set_, drop, notes, _wait_label(env, it, today_state, set_.get("post_wake_mover") or w.post_wake_mover))
+    _commit(env, plan, gid, it, f"{today_state} → waiting on {_model.KIND_WORDS[w.kind].format(owner=_model.owner_display())}", set_, drop, notes, _wait_label(env, it, today_state, set_.get("mover") or w.mover))
     _anchor_seen(env, plan, gid, it, set_)
     if dflt:
         if plan.outcome.get(gid) == "left":     # the state was not written, so no default is stored: the owner is told what it would have been

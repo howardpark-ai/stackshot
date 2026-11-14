@@ -971,6 +971,8 @@ def update_unlocked(
                 _needs_store(meta, _canon_needs([new_mv if is_prev(x) else x for x in held], nm_now))
                 needs_replaced.append(new_mv)
     h.model_apply(meta, str(item.get("status") or ""), model_set, model_drop)   # goal, mover, then and the wait's fields: a filing edit
+    _model.settle_picker_keys(meta, model_set, model_drop, was_until or _model.waits_stored(item_was.get("metadata") or {}),
+                              _model.waits_stored(meta) or bool(was_until and (meta.get("wake") or meta.get("ask_by"))))      # the one save rule (a stored until is unfolded into a wake for this write): a new mover, clear_mover and clear_wait never leave the old key or his pick-up standing
     if "wait_kind" in model_drop:
         h.wait_end_sent_back(meta, (_we.PR, _we.BOX, _we.URL, _we.STORED))      # clear_wait on a wait the server set from the line's words
         if was_until and not (wake or hold):

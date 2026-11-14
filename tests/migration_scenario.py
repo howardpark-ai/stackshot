@@ -220,7 +220,7 @@ w = {M.shown(x.gid): x for x in plan1.writes}
 check("plan: alive items store their mover; a your-call item stores Oliver (no `then` is made up from the creator)", w["board#2"].set.get("mover") == BACK and w["board#1"].set.get("mover") == OLIVER, (w["board#2"].set, w["board#1"].set))
 check("plan: a waiting item stores its kind and its post-wake mover (a relay's is the last agent that moved it, else its owner: never Oliver), the anchor scoped to it, the party as the event, the ask-by from its chase day",
       w["board#4"].set.get("wait_kind") == "anchor" and w["board#4"].set.get("wait_anchor") == AURL and w["board#4"].set.get("wait_event") == "CI"
-      and w["board#5"].set.get("wait_kind") == "relay" and w["board#5"].set.get("post_wake_mover") == UF and w["board#5"].set.get("ask_by") == day(3) and w["board#5"].set.get("wait_event") == "Acme legal"
+      and w["board#5"].set.get("wait_kind") == "relay" and w["board#5"].set.get("mover") == UF and w["board#5"].set.get("ask_by") == day(3) and w["board#5"].set.get("wait_event") == "Acme legal"
       and w["board#6"].set.get("wait_kind") == "item" and w["board#7"].set.get("wait_kind") == "time", {k: w[k].set for k in ("board#4", "board#5", "board#6", "board#7")})
 rd_ = {(r.kind, M.shown(r.gid)) for r in plan1.residue}
 check("plan: a wait with no input (an anchor wait with no anchor) and one with no end are listed, and the cold call is asked to read them",
@@ -264,7 +264,7 @@ check("reads: a read that is not confident is listed with its confidence, never 
       and any(p["item"] == "board#12" and not p["applied"] for p in plan.proposals), plan.proposals)
 check("reads: a read that finds no wait leaves the item with the default backstop (a relay with its party and no end: 14 days from the pass)", w2["board#13"].set.get("ask_by") == iso(14) and ("default_end", "board#13") in {(r.kind, M.shown(r.gid)) for r in plan.residue}, w2.get("board#13"))
 check("reads: a confident time wait read from next is set with its hold, wake, basis and the post-wake mover (a hidden wait made explicit)", w2["board#16"].set.get("wait_kind") == "time" and w2["board#16"].set.get("hold") is True
-      and w2["board#16"].set.get("wake") == iso(6) and w2["board#16"].set.get("post_wake_mover") == BACK and w2["board#16"].set.get("wait_basis"), w2.get("board#16"))
+      and w2["board#16"].set.get("wake") == iso(6) and w2["board#16"].set.get("mover") == BACK and w2["board#16"].set.get("wait_basis"), w2.get("board#16"))
 check("reads: an unsure (medium) read of a hidden wait is listed, not set", "wait_kind" not in w2.get("board#17", M.Write("g17", "")).set and ("hidden_wait", "board#17") in {(r.kind, M.shown(r.gid)) for r in plan.residue}, plan.residue)
 cplan = M.Plan()
 CR = {g: MM.read_closed(g, items, env2, "") for g in ("g20", "g21", "g22", "g24", "g25", "g27", "g28", "g29", "g37")}
@@ -321,7 +321,7 @@ check("apply: every planned write is applied or reported; none is forced", res1[
 refusals = [r for r in res1["results"] if r["action"] != "set"]
 check("apply: the fixture's writes all pass the guards, as the plan judged them", not refusals, refusals)
 m2, m4 = mt(2), mt(4)
-check("apply: a mover and a wait are stored as planned", m2.get("mover") == BACK and m4.get("wait_kind") == "anchor" and m4.get("wait_anchor") == AURL and m4.get("post_wake_mover") and mt(1).get("mover") == OLIVER, (m2, m4))
+check("apply: a mover and a wait are stored as planned", m2.get("mover") == BACK and m4.get("wait_kind") == "anchor" and m4.get("wait_anchor") == AURL and m4.get("mover") == "home-front" and "post_wake_mover" not in m4 and mt(1).get("mover") == OLIVER, (m2, m4))
 check("apply: the author is `migration`, and no clock moves (updated and the state clock stay)", rd(2).get("written_by") == "migration" and abs(rd(2)["updated"] - st0[2]["updated"]) < 1e-6
       and abs(rd(2)["state_updated"] - st0[2]["state_updated"]) < 1e-6, {k: rd(2).get(k) for k in ("written_by", "updated", "state_updated")})
 check("apply: no hand-off is recorded, no notice is sent, nobody is woken", all(ho.KEY not in mt(g) for g in (1, 2, 3, 4, 9, 14, 15)) and not SENT, (SENT, [ho.KEY in mt(g) for g in (1, 2, 15)]))
@@ -420,22 +420,36 @@ check("swap: …stored by the apply, with no rank", mt(38).get("needs") == [BACK
 
 # ---- F11: a relay wait's post-wake mover is the last agent that moved it, else its owner, never Oliver
 relay_w = [x for x in plan.writes if x.set.get("wait_kind") == "relay"]
-check("relay: every relay wait the pass writes has an agent as post-wake mover, never Oliver", len(relay_w) >= 4 and all(x.set.get("post_wake_mover") and not model.is_owner(x.set["post_wake_mover"]) for x in relay_w),
-      [(M.shown(x.gid), x.set.get("post_wake_mover")) for x in relay_w])
-check("relay: …the session its hand-off record names when it has one (the last agent that moved it)", w2["board#40"].set.get("post_wake_mover") == BACK and plan.relay_post["g40"] == (BACK, "hand-off"), (w2["board#40"].set, plan.relay_post.get("g40")))
-check("relay: …else its owner", w2["board#5"].set.get("post_wake_mover") == UF and plan.relay_post["g5"] == (UF, "owner") and plan.relay_post["g13"] == (UF, "owner"), plan.relay_post)
+check("relay: every relay wait the pass writes has an agent as post-wake mover, never Oliver", len(relay_w) >= 4 and all(x.set.get("mover") and not model.is_owner(x.set["mover"]) for x in relay_w),
+      [(M.shown(x.gid), x.set.get("mover")) for x in relay_w])
+check("relay: …the session its hand-off record names when it has one (the last agent that moved it)", w2["board#40"].set.get("mover") == BACK and plan.relay_post["g40"] == (BACK, "hand-off"), (w2["board#40"].set, plan.relay_post.get("g40")))
+check("relay: …else its owner", w2["board#5"].set.get("mover") == UF and plan.relay_post["g5"] == (UF, "owner") and plan.relay_post["g13"] == (UF, "owner"), plan.relay_post)
 check("relay: …and when nothing on its record can move it, the project's background agent, said in a note and listed as dealt with",
-      w2["board#41"].set.get("post_wake_mover") == BACK and plan.relay_post["g41"] == (BACK, "background agent") and ("relay_post", "board#41") in {(r.kind, M.shown(r.gid)) for r in plan.residue}
+      w2["board#41"].set.get("mover") == BACK and plan.relay_post["g41"] == (BACK, "background agent") and ("relay_post", "board#41") in {(r.kind, M.shown(r.gid)) for r in plan.residue}
       and not [r for r in plan.residue if r.kind == "relay_post"][0].hand, (w2["board#41"].set, plan.relay_post.get("g41")))
 sm = MM.summary_of(plan, {g: {"state": "waiting", "kind": "relay", "mover": "", "post": "", "today": ""} for g in ("g5", "g40", "g41")}, plan.residue, env2, items, M)
 check("relay: the report counts relay post-wake movers by where the record has them and by what they are: none is Oliver", sm["relay_post_owner"] == 0 and sm["relay_post_by_source"].get("hand-off") == 1 and sm["relay_post_by_source"].get("owner", 0) >= 2
       and sm["waits_by_kind"] == {"relay": 3} and set(sm["backstops_added"]) >= {"board#13"}, sm)
 # a relay the cold call reads from next: never Oliver
 alive_i = dict(items["g17"]); alive_i["metadata"] = {**alive_i["metadata"], "handoff": {"to": BACK, "to_id": UB, "from": "home-front", "at": now0 - 5 * DAY, "delivered_at": now0 - 5 * DAY, "taken_at": now0 - 5 * DAY}}
-rl = {"g17": {"status": "ok", "answer": {"wait": "yes", "kind": "relay", "event": "the landlord's call", "end": iso(5), "post_wake_mover": OLIVER, "confident": True, "confidence": "high", "reason": "r"}, "why": ""}}
+rl = {"g17": {"status": "ok", "answer": {"wait": "yes", "kind": "relay", "event": "the landlord's call", "end": iso(5), "mover": OLIVER, "confident": True, "confidence": "high", "reason": "r"}, "why": ""}}
 pl17 = M.plan_items({"g17": alive_i}, M.Env({"g17": alive_i}, ctx, anc, today, reads=rl))
-check("relay: …a relay wait read out of next whose post-wake mover the call named Oliver gets the last agent mover instead", pl17.writes and pl17.writes[0].set.get("wait_kind") == "relay" and pl17.writes[0].set.get("post_wake_mover") == BACK
+check("relay: …a relay wait read out of next whose post-wake mover the call named Oliver gets the last agent mover instead", pl17.writes and pl17.writes[0].set.get("wait_kind") == "relay" and pl17.writes[0].set.get("mover") == BACK
       and pl17.relay_post["g17"] == (BACK, "hand-off"), (pl17.writes[0].set if pl17.writes else None, pl17.relay_post))
+
+# a read kept from before the answer was translated at the cold call's edge (rows.json after a crash) still holds the old key: the plan takes it all the same
+rl_old = {"g17": {"status": "ok", "answer": {"wait": "yes", "kind": "relay", "event": "the landlord's call", "end": iso(5), "post_wake_mover": OLIVER, "confident": True, "confidence": "high", "reason": "r"}, "why": ""}}
+pl17_old = M.plan_items({"g17": alive_i}, M.Env({"g17": alive_i}, ctx, anc, today, reads=rl_old))
+check("relay: …a read that still names its picker under the old key is taken as it was (a relay picker that is Oliver gets the last agent mover)", pl17_old.writes and pl17_old.writes[0].set.get("mover") == BACK and "post_wake_mover" not in pl17_old.writes[0].set,
+      pl17_old.writes[0].set if pl17_old.writes else None)
+# an item that waits with the old key stored: the plan sets `mover` and drops the old key (the one save rule), and the route's write leaves one picker
+legacy_i = json.loads(json.dumps(items["g6"])); legacy_i["metadata"]["post_wake_mover"] = FRONT
+pl6 = M.plan_items({**items, "g6": legacy_i}, M.Env({**items, "g6": legacy_i}, ctx, anc, today))
+w6 = next((x for x in pl6.writes if x.gid == "g6"), None)
+check("plan: a waiting item that stores the old key gets `mover` and the old key is dropped in the same write", w6 is not None and w6.set.get("mover") == FRONT and "post_wake_mover" in w6.drop and "post_wake_mover" not in w6.set, (w6.set, w6.drop) if w6 else None)
+pl6b = M.plan_items(items, M.Env(items, ctx, anc, today))
+w6b = next((x for x in pl6b.writes if x.gid == "g6"), None)
+check("plan: …an item with no old key drops none", w6b is not None and w6b.set.get("mover") == FRONT and "post_wake_mover" not in w6b.drop, (w6b.set, w6b.drop) if w6b else None)
 
 # ---- F12: the pass keeps the last mover as the item records it, a front agent included
 pj = "projects/alpha"

@@ -2164,7 +2164,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
     """The ten-minute filing pass's fix of a wait a next line states in words (audit_run.wait_end_pass; server_fixes.WAIT_END; wait_end.py): the item is read again under the lock and the gap found again
     from its words (a line that changed, a wait the mover sent back, a decision on the owner, a held item: nothing is written), then the plan is set through the gates a write passes: `after`
     (gates.gate_after), an event wait (_evwait_gate), an anchor wait (the link is added to the anchors scoped to the item, _anchor_wait_gate) or a step proof (proofs.step_proof_set), a backstop day (the wake or ask_by it
-    has, else now plus [waiting] cap_days), and a History line (server_fixes.record). A waiting item takes its mover as post_wake_mover. The server's own save: no writer. A gate's refusal leaves the item as
+    has, else now plus [waiting] cap_days), and a History line (server_fixes.record). A waiting item keeps its mover as the one who picks it up (`mover`). The server's own save: no writer. A gate's refusal leaves the item as
     it was. Never closes an item and writes no ask. -> {"fixed": bool, "what": str, "why": str}."""
     tok, op = str(plan.get("token") or ""), str(plan.get("op") or "")
 
@@ -2210,8 +2210,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 print(f"wait end: {gid} anchor not taken back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
         def waiting_as(kind: str) -> None:
-            meta.pop("mover", None)
-            meta["post_wake_mover"] = mover
+            _model.store_picker(meta, mover)
             meta["wait_kind"] = kind
             if not has_back:
                 meta["until"] = back        # the one date the wait ends on (until_write.py); an item that stores its date as wake or ask_by keeps it as it is
@@ -5501,7 +5500,7 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
     An item that still reads as waiting after the answer (`waiting`; a park, a pick carrying a wake, is one) has no mover: a stored mover that is he goes, and a stored `then` is kept for
     whoever ends the wait only where the code that ends that wait hands it over. By what the wait is:
       an open `after` link: `then` stays; _wakes.release_after hands the item to it when the last prerequisite closes (_hand_stored_then), with its usual notice;
-      a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and post_wake_mover=`then` (watch.set_at stamped, as an update does), `then` cleared,
+      a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and mover=`then` (the one who picks it up; watch.set_at stamped, as an update does), `then` cleared,
         so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold. With `[model] watchers = false` no time wait is stored: the park stays as it was, `then`
         with it, and the old wake pass hands the item to it when the hold ends (_hand_stored_then);
       `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would sit on the item unread); the wait's own
@@ -5524,9 +5523,10 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
             elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
                 if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
                     if _wt.stored_until(meta):
-                        meta["post_wake_mover"] = then       # a wait on the date alone stores no kind (until is the whole of it)
+                        _model.store_picker(meta, then)       # a wait on the date alone stores no kind (until is the whole of it)
                     else:
-                        meta["wait_kind"], meta["post_wake_mover"] = "time", then
+                        meta["wait_kind"] = "time"
+                        _model.store_picker(meta, then)
                     meta["watch"] = {**(meta["watch"] if isinstance(meta.get("watch"), dict) else {}), "set_at": now or time.time()}
                     meta.pop("then", None)
                 # [model] watchers = false: no watcher would wake it, so no time wait is stored. The old park stays with `then` on it, and the old wake pass hands the item over when the hold ends (_hand_stored_then)

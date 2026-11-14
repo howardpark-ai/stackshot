@@ -361,7 +361,7 @@ def validate_hidden(answer: dict[str, Any], today: dt.date, movers: list[str], s
     hit = next((n for n in movers if n.casefold() == who.casefold()), "")
     if not hit:
         return None, f"post-wake mover {who!r} is not on the list given"
-    res["post_wake_mover"] = hit
+    res["mover"] = hit      # the call's answer key stays `post_wake_mover` (what the model is asked for); what the plan stores is `mover`
     if kind == "time":
         wake = _real_date(inp.get("wake"), today)
         if not wake:

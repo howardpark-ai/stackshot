@@ -303,6 +303,7 @@ def migrate_one(w: dict[str, Any]) -> dict[str, Any]:
                 for k in drops:
                     meta.pop(k, None)
                 meta.update({k: v for k, v in sets.items() if k not in ("cap_ok", "wait_basis")})
+                _model.settle_picker_keys(meta, sets, drops, _model.waits_stored(json.loads(was)))      # the one save rule: a mover set on a wait leaves no old key beside it
                 if "next" in sets or "next" in drops:
                     _nl.carry(json.loads(was), meta, str(meta.get("owner") or ""))      # the lines it named keep their writers (by position), else the keeper's
                 if "cap_ok" in sets:        # his words are copied from the item's own stored answers, here: a value the caller sends is never taken as it comes
