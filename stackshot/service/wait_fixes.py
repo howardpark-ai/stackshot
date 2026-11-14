@@ -259,8 +259,8 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 print(f"wait end: {gid} anchor not taken back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
         def waiting_as(kind: str) -> None:
-            # Still stores the old key, on purpose (deferred to the later steps with the other writers of a wait's picker): a later `clear_wait`, `clear_hold` or `clear_wake` drops the old key with the
-            # wait group and the item ends alive on its default mover with no hand-off; stored as `mover` an agent that is not the default would stay as the live mover, a design choice for later.
+            # One of three writers that still store the old key, on purpose, for a later step (this one, the hand-over in answer_handover.py and remember/restore_wait in waits/watchers.py): a later `clear_wait`,
+            # `clear_hold` or `clear_wake` drops the old key with the wait group, so the item ends as it does on main; stored as `mover` an agent that is not the default would stay as the live mover, which is a choice for later.
             meta.pop("mover", None)
             meta["post_wake_mover"] = mover
             meta["wait_kind"] = kind

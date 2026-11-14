@@ -473,6 +473,12 @@ def _take(env: Env, plan: Plan, gid: str, who: str, project: str, what: str) -> 
     return who, False
 
 
+def _restated(env: Env, old: Any, new: Any) -> bool:
+    """Does `new` name the session the stored old key `old` names (the same name in any letter case, or a session's id and its name, as the pass's labels read them)? Then setting it is no change."""
+    a, b = clean(old), clean(new)
+    return bool(a) and bool(b) and (a.lower() == b.lower() or env.label(a).lower() == env.label(b).lower())
+
+
 def _fill_wait(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model.Model") -> tuple[dict[str, Any], list[str]]:
     """The wait fields a waiting item should store, from what the item itself holds: its kind, the post-wake mover (the project's background agent when it is gone), an anchor scoped to it
     (the one, or the one its text names), the party as the event, the chase day or the wake day as the end. → (the fields, notes on what could not be chosen)."""
@@ -607,7 +613,7 @@ def _plan_alive(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model
                 else:
                     set_.update(wait_event=ans["event"], ask_by=ans["end"])
                 drop += [k for k in ("then", "state", *_states.CARRY_FIELDS) if k in m]      # the mover is set above (a set replaces a stored mover)
-                if _model.LEGACY_PICKER_KEY in m and clean(m.get(_model.LEGACY_PICKER_KEY)).lower() != clean(post).lower():
+                if _model.LEGACY_PICKER_KEY in m and not _restated(env, m.get(_model.LEGACY_PICKER_KEY), post):
                     drop.append(_model.LEGACY_PICKER_KEY)      # a stored old key that names another picker would outvote the one set here; one that names the same picker stays (a restated picker changes nothing)
                 rec["applied"] = True
                 notes.append("a wait read from its next")
@@ -708,7 +714,7 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
                     _commit(env, plan, gid, it, f"{today_state} → alive, {who} (snooze: none of his words found)", set_, drop, notes, env.label(mover))
                     return
     fill, extra = _fill_wait(env, plan, gid, it, mod)
-    if "mover" in fill and clean(m.get(_model.LEGACY_PICKER_KEY)) and clean(fill["mover"]).lower() == clean(m.get(_model.LEGACY_PICKER_KEY)).lower():
+    if "mover" in fill and _restated(env, m.get(_model.LEGACY_PICKER_KEY), fill["mover"]):
         fill = {k: v for k, v in fill.items() if k != "mover"}      # the picker the old key already names: nothing to set, as the plan read before (it dropped a field equal to the stored one), so the old key stays
     set_.update(fill)
     if "mover" in fill and _model.LEGACY_PICKER_KEY in m:      # the one save rule: a write that sets a different mover on a wait drops a stored old key, which would outvote it

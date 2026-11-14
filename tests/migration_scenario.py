@@ -462,6 +462,15 @@ stray_same = {**alive_i, "metadata": {**alive_i["metadata"], "post_wake_mover": 
 pl17t = M.plan_items({"g17": stray_same}, M.Env({"g17": stray_same}, ctx, anc, today, reads=rl))
 w17t = pl17t.writes[0] if pl17t.writes else None
 check("plan: …and an old key that already names the picker the call read stays (it is not in the drop list)", w17t is not None and w17t.set.get("mover") == BACK and "post_wake_mover" not in w17t.drop, (w17t.set, w17t.drop) if w17t else None)
+# the same session written another way is the same picker: another letter case, or its id for its name (the pass's labels read both as one)
+ctx_env = M.Env({"g17": alive_i}, ctx, anc, today)
+check("plan: a restated picker is one session by name in any letter case, or by its id and its name", M._restated(ctx_env, BACK.upper(), BACK) and M._restated(ctx_env, BACK, BACK.upper()) and M._restated(ctx_env, UB, BACK) and M._restated(ctx_env, BACK, UB)
+      and not M._restated(ctx_env, BACK, FRONT) and not M._restated(ctx_env, "", BACK) and not M._restated(ctx_env, BACK, ""), (ctx_env.label(UB), ctx_env.label(BACK.upper())))
+for label, stray in (("by its id", UB),):      # (a name in another letter case names no live session: the plan leaves such an item as it is, a case the earlier checks cover)
+    stray_alt = {**alive_i, "metadata": {**alive_i["metadata"], "post_wake_mover": stray}}
+    pl17a = M.plan_items({"g17": stray_alt}, M.Env({"g17": stray_alt}, ctx, anc, today, reads=rl))
+    w17a = pl17a.writes[0] if pl17a.writes else None
+    check(f"plan: a wait read from next on an alive item whose old key names the same session {label}: the old key stays (it is not in the drop list)", w17a is not None and w17a.set.get("mover") == BACK and "post_wake_mover" not in w17a.drop, (w17a.set, w17a.drop) if w17a else None)
 pl6b = M.plan_items(items, M.Env(items, ctx, anc, today))
 w6b = next((x for x in pl6b.writes if x.gid == "g6"), None)
 check("plan: …an item with no old key drops none", w6b is not None and w6b.set.get("mover") == FRONT and "post_wake_mover" not in w6b.drop, (w6b.set, w6b.drop) if w6b else None)

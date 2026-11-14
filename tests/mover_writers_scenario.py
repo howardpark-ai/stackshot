@@ -1,7 +1,8 @@
 """Scenario test for the server's own writers of a waiting item's picker — fixture data, no live store, no network, no server socket.
 
-Every place the server itself stores who picks a waiting item up when the wait ends stores it as `mover`, never as the old key `post_wake_mover`; every read of it is as before (the same picker, the same
-session told, the same arrival). One rule holds on every save that names the picker: a write that sets `mover` on a waiting item drops a stored old key (the old key reads first, so it would outvote the new
+Three places store who picks a waiting item up when the wait ends as `mover`, no longer as the old key `post_wake_mover`: the state migration's plan, the cold call's answer and the save rule. Three writers stay on the old key
+on purpose, because storing `mover` there would change what a later clear_hold, clear_wait or clear_wake leaves: the wait-end fix, the answer hand-over and `remember`/`restore_wait`. Every read of the picker is as before (the same
+picker, the same session told, the same arrival). On every save that names the picker, a write that sets a different `mover` on a waiting item drops a stored old key (the old key reads first, so it would outvote the new
 mover), `clear_mover` and `clear_wait` drop both keys, and `clear_wait` also drops a stored `mover` that is he (the pick-up went with the wait) while an agent's `mover` stays as the live mover. Covered:
 
   1  wait-end fix    each op of the filing pass's wait fix (after, event, anchor) stores the picker as it did (the old key): deferred on purpose, see 9
@@ -390,6 +391,17 @@ for wl, kw in (("relay", dict(ask_by=day(9))), ("relay", dict(post_wake_mover=BA
     m_ = mt(n7)
     check(f"7 {wl} wait, an update of {sorted(kw)[0]}: the wait is new, so its clock is stamped and its chases start over (as on main)", "chases" not in m_ and (m_.get("watch") or {}).get("set_at", 0) > SET_AT, m_)
 
+# the old parameter naming the very session the old key already holds (the same text, another letter case, the session's id) is nothing new for the wait
+for wl, wmeta in WAITS.items():
+    for stored, given in ((HELP, HELP), (HELP, HELP.upper()), (HELP.upper(), HELP), (HELP, U[HELP])):
+        n7 += 1
+        item(n7, subject=f"[zed] clock {n7}", needs=[BACK], watch={"set_at": SET_AT}, chases=CHASES, **wmeta, **{LEG: stored})
+        try:
+            upd(n7, post_wake_mover=given); err = ""
+        except Exception as e:  # noqa: BLE001
+            err = str(e)[:200]
+        m_ = mt(n7)
+        check(f"7 {wl} wait, old key {stored!r}, the old parameter names it again as {given!r}: the chases and the wait's clock stay{(' (refused: ' + err + ')') if err else ''}", not err and m_.get("chases") == CHASES and (m_.get("watch") or {}).get("set_at") == SET_AT, (m_, err))
 n7 += 1
 item(n7, subject=f"[zed] clock {n7}", needs=[BACK], watch={"set_at": SET_AT}, chases=CHASES, **WAITS["relay"], **{LEG: HELP})
 try:
@@ -414,6 +426,21 @@ for label, extra, kw, keeps in (("the same session as the old key", {LEG: HELP},
     check(f"8 external in needs, a wait on a date alone, the old key stored, an update sets mover to {label}: the old key {'stays' if keeps else 'goes'}", (m_.get(LEG) == HELP) == keeps and (LEG not in m_) == (not keeps), m_)
     check(f"8 …and the item ends as {'it did on main (turned alive to the old key agent)' if keeps else 'the new mover has it (a choice of this change: it ends on its date, external still in needs)'}",
           (r_["after"]["needs"] == [HELP]) if keeps else (r_["after"]["needs"] == [BACK, "external"]), r_)
+for label, stored, given in (("its id, the update gives its name", U[HELP], HELP), ("its name, the update gives its id", HELP, U[HELP])):
+    n7 += 1
+    item(n7, subject=f"[zed] by id {n7}", **EXT, **{LEG: stored})
+    upd(n7, mover=given)
+    m_ = mt(n7)
+    r_ = after_wake(n7 + 100, m_)
+    check(f"8 external in needs, a wait on a date alone, the old key holds {label}: the same session, so the old key stays and the item ends as on main", m_.get(LEG) == stored and r_["after"]["needs"] == [stored], (m_, r_))
+n7 += 1
+item(n7, subject=f"[zed] relay by id {n7}", **{**WAITING_KEYS, LEG: U[HELP]})
+upd(n7, mover=HELP)
+check("8 a relay wait whose old key holds the session's id: an update of mover to its name leaves the old key", mt(n7).get(LEG) == U[HELP] and mt(n7).get("mover") == HELP, mt(n7))
+check("8 the rule at the function: the same session by id and name is one only when the caller says so; the same name in any case always is",
+      applied({**RELAY, LEG: U[HELP]}, setv={"mover": HELP}).get(LEG) is None and model.settle_picker_keys.__defaults__ is not None, None)
+m_ = dict({**RELAY, LEG: U[HELP], "mover": HELP}); model.settle_picker_keys(m_, {"mover": HELP}, set(), True, True, same=lambda a, b: {a, b} == {U[HELP], HELP})
+check("8 …and with the caller's comparison of ids and names the old key stays", m_.get(LEG) == U[HELP], m_)
 n7 += 1
 item(n7, subject=f"[zed] both, equal {n7}", **{**WAITING_KEYS, LEG: HELP, "mover": BACK})
 upd(n7, mover=HELP)
@@ -427,8 +454,9 @@ check("8 the rule at the function: a mover equal to the old key (any case) leave
 # the migration route, too: a write that sets the mover the old key already names leaves the old key
 guards(True)
 try:
-    for n_, sets, label, gone in ((40, {"mover": HELP}, "a set mover equal to the old key leaves it", False), (41, {"mover": BACK}, "a different one drops it", True)):
-        item(n_, subject=f"[zed] migrate {n_}", needs=[BACK], wait_kind="relay", wait_event="the reply", ask_by=day(5), **{LEG: HELP})
+    for n_, sets, label, gone, stored in ((40, {"mover": HELP}, "a set mover equal to the old key leaves it", False, HELP), (41, {"mover": BACK}, "a different one drops it", True, HELP),
+                                          (42, {"mover": HELP}, "a set mover that is the old key's session by id leaves it", False, U[HELP])):
+        item(n_, subject=f"[zed] migrate {n_}", needs=[BACK], wait_kind="relay", wait_event="the reply", ask_by=day(5), **{LEG: stored})
         it_ = rd(n_)
         out = migsvc.migrate_one({"item": f"a{n_}", "set": sets, "drop": [], "expect": it_["updated"], "expect_sig": list(migsvc.migrate_sig(f"a{n_}", it_)), "kind": "test", "note": "t"})
         check(f"8 migration route: {label}", out["action"] in ("set", "already") and ((LEG not in mt(n_)) == gone) and mt(n_).get("mover") == sets["mover"], (out, mt(n_)))

@@ -136,6 +136,11 @@ _GHREPO = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+?)/?(?:#notification
 _NOTION = re.compile(r"https?://(?:www\.|app\.)?notion\.(?:so|com)/(?:[\w-]+/)*(?:p/)?(?:[\w%-]*?-)?([0-9a-f]{32})(?:[?#].*)?$")
 
 
+def same_session(a: Any, b: Any, nm: dict[str, str] | None = None) -> bool:
+    """Do two references name the same session: the same name in any letter case, or a session's id and its name (canonical: one identity per session)? False when either is empty."""
+    x, y = str(a or "").strip(), str(b or "").strip()
+    return bool(x) and bool(y) and (x.lower() == y.lower() or canonical(x, nm) == canonical(y, nm))
+
 def _canon_gh(a: str) -> str:
     """A github:<owner/repo>(#<n>|@releases|@notifications) id with its repo name through [github.moved] (config.canon_name), so an old and
     a new name of one repository are one anchor; any other id, and a name the table does not know, as given. Matching only: the

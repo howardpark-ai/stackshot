@@ -141,8 +141,8 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
                 pass
             elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
                 if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
-                    # The one writer that still stores the old key (deferred to the later steps, on purpose): a later `clear_hold`, `clear_wait` or `clear_wake` drops the old key with the wait group, and the
-                    # item ends alive on its default mover with no hand-off, as it always did; stored as `mover` the agent would stay as the live mover, a design choice for later, not for this change.
+                    # One of three writers that still store the old key, on purpose, for a later step (this one, the wait-end fix in wait_fixes.py and remember/restore_wait in waits/watchers.py): a later
+                    # `clear_hold`, `clear_wait` or `clear_wake` drops the old key with the wait group, so the item ends as it does on main; stored as `mover` an agent that is not the default would stay as the live mover, which is a choice for later.
                     if _wt.stored_until(meta):
                         meta["post_wake_mover"] = then       # a wait on the date alone stores no kind (until is the whole of it)
                     else:
