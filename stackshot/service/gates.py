@@ -1046,16 +1046,41 @@ def _given(v: Any) -> bool:
     return bool(v.strip()) if isinstance(v, str) else bool(v)
 
 
+def _busy_mover(gid: str, *, mover: str = "", next_text: str = "", clear_needs: bool = False, clear_after: bool = False, clear_next: bool = False) -> "tuple[dict[str, Any], Any, str]":
+    """The open item `gid` as a write that passes these leaves its mover → (the item, the model's reading of it, who moves it): "" for who when nobody the board can name, the owner, or a hand-off to another session
+    (a next line that hands it on is the work moving: nothing of the mover's is paused; a `mover=` is the one who moves it from this write on, compared to the sender by the caller). An item already waiting has no mover while it waits: the one who picks it up is
+    whose item it is. Raises what `_load` raises; a caller treats any failure as unknown."""
+    hk = _hooks()
+    item = _load(gid)
+    if item.get("status") != "open":
+        return item, None, ""
+    meta = dict(item.get("metadata") or {})
+    if _given(mover):
+        meta["mover"] = _model.norm_who(mover)
+    if clear_needs:
+        meta.pop("needs", None)
+    if clear_after:
+        meta.pop("after", None)
+    mod = _model.derive({**item, "metadata": meta}, after_open=lambda i_: hk.after_open(i_.get("metadata") or {}), anchored=lambda i_: False)
+    who = mod.mover or mod.picker
+    if not who or _model.is_owner(who):
+        return item, mod, ""
+    if next_text.strip() and not clear_next and [h for h in hk.handoffs_in(next_text, hk.session_roster()) if not _handoff.ho_same(h, who)]:
+        return item, mod, ""                                          # a hand-off to another session: the work moves, nothing of the mover's is paused
+    return item, mod, who
+
+
 def gate_busy_hold(gid: str, sender: str, *, hold: bool = False, wake: str = "", ask_by: str = "", wait_kind: str = "", needs: Any = "", after: Any = "", mover: str = "",
                    next_text: str = "", status: str = "", done: Any = None, clear_hold: bool = False, clear_wake: bool = False, clear_wait: bool = False, clear_needs: bool = False,
                    clear_after: bool = False, clear_next: bool = False, live: Callable[[str, str], str] | None = None) -> None:
     """Refuse (ToolError) a hold the item's mover sets on an item it is moving at this moment: an item an agent is working on is kept in hand, never paused. An item already on hold counts (its mover is the one who
     picks it up). `live(item, mover)` is the server's proof (audit/busy_hold.py): the words for what of the mover's own is running on the item (`your subagent "<description>"`), "" when nothing is or nothing can
-    be told; None passes every write. A write that parks is a hold, or a date alone (a wake or an until: the write turns it into a hold), with no named blocker (a wait_kind, an after link, a needs, a relay's
-    ask_by) and no clear_* of the park. Never refused: the guard off (`[model] busy_hold_guard`), an owner's write, a write by anyone but the item's mover, a closed item or a write that closes it or ticks a step
-    (done=), a hand-off to another session, and anything that cannot be read: a failure of the check itself passes the write, as `gate_self_wait` does. `gid` = the stored item."""
-    hk = _hooks()
+    be told; None passes every write. A write that parks is a hold, or a date alone (a wake or an until: the write turns it into a hold), with no named blocker: neither in this write (a wait_kind other than time,
+    an after link, a needs, a relay's ask_by) nor already stored on the item (an anchor, relay, item or event wait, an open `after`, a `needs` that names someone outside: any wait the model reads as other than a
+    plain wait on a time), and no clear_* of the park. Never refused: the guard off (`[model] busy_hold_guard`), an owner's write, a write by anyone but the item's mover, a closed item or a write that closes it or
+    ticks a step (done=), a hand-off to another session, and anything that cannot be read: a failure of the check itself passes the write, as `gate_self_wait` does. `gid` = the stored item."""
     try:
+        hk = _hooks()
         if live is None or not _cfg.model_busy_hold_guard() or not sender.strip() or _model.is_owner(sender) or str(status or "").strip().lower() in ("completed", "closed"):
             return
         wake_set = _given(wake) and wake.strip().lower() not in hk.ask_none
@@ -1063,28 +1088,42 @@ def gate_busy_hold(gid: str, sender: str, *, hold: bool = False, wake: str = "",
             return
         if wait_kind.strip().lower() not in ("", "time") or _given(ask_by) or _given(after) or _given(needs):
             return                                                    # a wait on something else, named: someone's step, another item, an event, an outside party
-        item = _load(gid)
-        if item.get("status") != "open":
+        item, mod, who = _busy_mover(gid, mover=mover, next_text=next_text, clear_needs=clear_needs, clear_after=clear_after, clear_next=clear_next)
+        if not who or not _handoff.ho_same(who, sender):
             return
-        meta = dict(item.get("metadata") or {})
-        if _given(mover):
-            meta["mover"] = mover.strip()
-        if clear_needs:
-            meta.pop("needs", None)
-        if clear_after:
-            meta.pop("after", None)
-        mod = _model.derive({**item, "metadata": meta}, after_open=lambda i_: hk.after_open(i_.get("metadata") or {}), anchored=lambda i_: False)
-        who = mod.mover or mod.picker                                  # an item already on hold has no mover while it waits: the one who picks it up is whose item it is
-        if not who or _model.is_owner(who) or not _handoff.ho_same(who, sender):
-            return
-        if next_text.strip() and not clear_next and [h for h in hk.handoffs_in(next_text, hk.session_roster()) if not _handoff.ho_same(h, sender)]:
-            return                                                    # a hand-off to another session: the work moves, nothing of the sender's is paused
-        what = live(gid, who)
+        if mod.wait is not None and mod.wait.kind != "time":
+            return                                                    # the item already stores its blocker (an anchor, a relay, an item, an event, a list): a write that parks it again names it already
+        stored = _telling.holder(item)
+        what = live(gid, stored if stored and _handoff.ho_same(stored, who) else sender.strip())      # who is the sender's own session (ho_same, any spelling): the proof asks for it by the spelling the item stores, else the sender's
     except Exception as e:  # noqa: BLE001  — the rule is an extra: a failure in it (or an unreadable subagent) lets the write through, never a 500
         print(f"busy hold guard: {gid} not judged: {e.__class__.__name__}: {e}; the write passes", file=sys.stderr, flush=True)
         return
     if what:
         raise ToolError(BUSY_HOLD_REFUSAL.format(live=what))
+
+
+def busy_note_answer(gid: str, *, hold: bool = False, next_text: str = "", reword: Any = None, mover: str = "", live: Callable[[str, str], str] | None = None) -> "str | None":
+    """What of the holder's own runs on item `gid` (the words, "" for nothing), asked BEFORE the item lock, for the reply note that tells the holder of a doing item whose next reads as a wait to park it
+    (service/update.py `_doing_wait_note`): while a running subagent of the holder is tied to the item the wait wording is about its own run, work in hand. None when the note cannot be made (the guard off, no proof, a
+    hold, an item that is not open and doing, no line of this call that reads as a wait) and when anything cannot be read: the note then stays as it is. The proof is asked only when the note could be made, and the
+    holder is looked up only then."""
+    try:
+        if live is None or hold or not _cfg.model_busy_hold_guard():
+            return None
+        if not (_mg.reads_as_wait(next_text) or (reword and _mg.reads_as_wait(json.dumps(reword, ensure_ascii=False, default=str)))):
+            return None
+        item = _load(gid)
+        meta = item.get("metadata") or {}
+        if item.get("status") != "open" or meta.get("hold") or meta.get("state") != "doing":
+            return None
+        stored = _telling.holder(item)
+        who = _model.norm_who(mover) if _given(mover) and not (stored and _handoff.ho_same(mover, stored)) else stored      # the holder by the spelling the registry holds: mover= naming the one who holds it already adds nothing
+        if not who:
+            return None
+        return live(gid, who) or ""
+    except Exception as e:  # noqa: BLE001  — unknown: the note stays
+        print(f"busy hold note: {gid} not judged: {e.__class__.__name__}: {e}; the note stays", file=sys.stderr, flush=True)
+        return None
 
 
 _ASK_HELD_TEXT_KEYS = ("steps", "work", "wait_basis")      # records of lines: only the `text` of each is held, never its status, state, name or time ("open", "done", "dropped" are not the item's text)

@@ -4361,7 +4361,6 @@ _update_svc.install(_update_svc.Hooks(
     ask_owed=_late("_ask_owed"),
     basis_put=_late("_basis_put"),
     basis_words=_BASIS_WORDS,
-    busy_live=_late("_busy_live"),
     cap_ok_drop=_late("_cap_ok_drop"),
     cap_ok_put=_late("_cap_ok_put"),
     contact_alive=_late_in(_contacts, "_contact_alive"),

@@ -210,9 +210,12 @@ def stackshot_update(
     alias_ends = _wait_alias_gate(alias_used)
     _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
-    _gates.gate_busy_hold(_norm_id(item_id, bare=_bare_id_ok(status)), sender, hold=hold, wake=wake, ask_by=ask_by, wait_kind="list" if list_in else wait_kind, needs=needs, after=after or "",
+    gid_ = _norm_id(item_id, bare=_bare_id_ok(status))
+    live_ = (lambda g_, who_: _busy_live(g_, who_)) if _busy_live is not None else None
+    _gates.gate_busy_hold(gid_, sender, hold=hold, wake=wake, ask_by=ask_by, wait_kind="list" if list_in else wait_kind, needs=needs, after=after or "",
                           mover=mover, next_text=next, status=status, done=done, clear_hold=clear_hold, clear_wake=clear_wake, clear_wait=clear_wait, clear_needs=clear_needs, clear_after=clear_after,
-                          clear_next=clear_next, live=(lambda g_, who_: _busy_live(g_, who_)) if _busy_live is not None else None)      # before the item lock: an item its mover is moving is not paused
+                          clear_next=clear_next, live=live_)      # before the item lock: an item its mover is moving is not paused
+    busy_note = _gates.busy_note_answer(gid_, hold=hold, next_text=next, reword=reword, mover=mover, live=live_)      # …and the proof for the reply note of a doing item whose next reads as a wait, read here, never under the item lock
     ask_pre = _gates.ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
     with _writes.session_write():
         out = _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
@@ -221,7 +224,8 @@ def stackshot_update(
                        expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
                        goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,
                        clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
-                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes, waits=waits, wait_mode=wait_mode) + fix_note
+                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes, waits=waits, wait_mode=wait_mode,
+                       **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note
         if alias_used:
             out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
         return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))

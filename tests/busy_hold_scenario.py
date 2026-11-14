@@ -273,13 +273,96 @@ with cfg_model(busy_hold_guard=False):
 check("3b …with [model] busy_hold_guard off the note stays as it was", got[0] == "ok" and got[1].count(NOTE) == 1, got)
 got = note_of(8, [sub("Build @8: the overnight run")])
 check("3b …and the switch is read live: on again, no note", got[0] == "ok" and NOTE not in got[1], got)
-# the note's own function: a busy proof that says yes drops it, one that says no, raises, or is absent leaves it
+# the note's own function: a busy answer that names a live thing drops it; none, an empty one (nothing running, or nothing could be told) leaves it
 DN = lambda busy=None: update_svc._doing_wait_note({"state": "doing"}, "alpha-main: wait until 2099-03-02 for the vendor's reply", busy)
-check("3b `_doing_wait_note`: no proof, a proof that says nothing, one that raises: the note is made", all(NOTE in DN(b) for b in (None, lambda: "", lambda: None, lambda: 1 / 0)), [DN(b)[:40] for b in (None, lambda: "", lambda: 1 / 0)])
-check("3b …a proof that names a live thing drops it", DN(lambda: 'your subagent "x"') == "")
-check("3b …and the proof is asked only when the note would be made (a held item, work in hand: never asked)",
-      (lambda calls: (update_svc._doing_wait_note({"state": "doing", "hold": True}, "alpha-main: wait until 2099-03-02 for the vendor's reply", lambda: calls.append(1) or "x"),
-                      update_svc._doing_wait_note({"state": "doing"}, "alpha-main: write the parser", lambda: calls.append(1) or "x"), calls)[2])([]) == [])
+check("3b `_doing_wait_note`: no answer, an empty one: the note is made", all(NOTE in DN(b) for b in (None, "")), [DN(b)[:40] for b in (None, "")])
+check("3b …an answer that names a live thing drops it", DN('your subagent "x"') == "")
+check("3b …a held item and work wording draw no note whatever the answer", update_svc._doing_wait_note({"state": "doing", "hold": True}, "alpha-main: wait until 2099-03-02 for the vendor's reply", "") == ""
+      and update_svc._doing_wait_note({"state": "doing"}, "alpha-main: write the parser", "") == "")
+# the proof is asked once, by the tool, BEFORE the item lock, and only when the note could be made; the service reads the answer it is given
+from stackshot.service import writes as writes_mod
+def _lock_held():
+    """True when the item lock is held (by this thread: the lock is an RLock, so ownership is asked): the proof must run with it free."""
+    return writes_mod.ITEM_LOCK._is_owned()
+ASKED = []
+def counting(who, idx=None, now=None):
+    ASKED.append((who, _lock_held()))
+    return [sub("Build @8: the overnight run")] if who == BACK else []
+doing(8)
+with patched(server, _mover_subagents=counting):
+    got = update(8, next=WAITING_NEXT)
+check("3b the proof for the note is asked once, with the item lock free (before the write takes it), for the item's holder", got[0] == "ok" and NOTE not in got[1] and ASKED == [(BACK, False)], (got, ASKED))
+ASKED.clear(); doing(8)
+with patched(server, _mover_subagents=counting):
+    update(8, next=f"{BACK}: write the parser", work={"text": "x", "state": "in progress"})
+    update(8, sender=BACK, hold=True, wake=FUT, wait_basis=f"the soak window ends {FUT}", next=WAITING_NEXT)
+check("3b …never asked for a next that reads as work, and not for a write that holds (the gate asks for a hold, the note cannot be made)", [a for a in ASKED if a[1]] == [] and len(ASKED) <= 1, ASKED)
+ASKED.clear(); put(10, mover=BACK, needs=[BACK])
+with patched(server, _mover_subagents=counting):
+    update(10, next=WAITING_NEXT)
+check("3b …nor for an item whose stored state is not doing (no note can follow)", ASKED == [], ASKED)
+ASKED.clear(); doing(8)
+with patched(server, _mover_subagents=lambda who, idx=None, now=None: ASKED.append((who, _lock_held())) or [sub("Build @2: the other fix")]):
+    got = update(8, hold=True, wake=FUT, wait_basis=f"the soak window ends {FUT}", next=WAITING_NEXT)
+check("3b …a write that holds is asked once, by the hold's gate: the note cannot follow a hold, so the note's proof is not asked again", got[0] == "ok" and len(ASKED) == 1, (got, ASKED))
+ASKED.clear(); put(18, status="completed", mover=BACK, needs=[BACK], state="doing", outcome="done")
+with patched(server, _mover_subagents=counting):
+    update(18, next=WAITING_NEXT)
+check("3b …nor for a closed item", ASKED == [], ASKED)
+ASKED.clear(); doing(8)
+with patched(server, _mover_subagents=counting):
+    update(8, mover=OTHER, next=f"{OTHER}: " + WAITING_NEXT.split(": ", 1)[1])
+check("3b a write that hands the item to another session asks for the new holder (the one the note would speak to)", ASKED in ([(OTHER, False)], []), ASKED)
+ASKED.clear(); doing(8)
+with patched(server, _mover_subagents=counting):
+    got = update(8, sender=OTHER, next=WAITING_NEXT)
+check("3b the note asks the item's holder (its mover), not the sender: another session's write to the item is told nothing of its own runs", [a[0] for a in ASKED] == [BACK] and NOTE not in got[1], (got, ASKED))
+
+# ---------------------------------------------------------------- 3c. stored blockers, spelling, the guard key, the tool's parameters reach the gate
+for n, meta in ((11, dict(needs=["external"], wait_kind="relay", wait_event="the vendor", until=FUT)),
+                (12, dict(needs=["external"], wait_kind="anchor", wait_anchor="https://github.com/acme/stack/pull/9", wait_event="merged", until=FUT)),
+                (13, dict(after=["a2"])),
+                (14, dict(needs=["external"])),
+                (15, dict(wait_kind="event", wait_event="recycle", until=FUT))):
+    put(n, mover=BACK, **meta)
+    check(f"3c an item that already stores its blocker ({sorted(meta)}) is not refused a hold by its mover with a tied subagent", ok(gate(live_for([sub(f"Build @{n}")]), gid=f"a{n}")) and ok(gate(live_for([sub(f"Build @{n}")]), gid=f"a{n}", hold=False, wake=FUT)), gate(live_for([sub(f"Build @{n}")]), gid=f"a{n}"))
+put(16, mover=BACK, wait_kind="time", until=FUT)
+check("3c …an item that stores only a plain wait on a time is still refused (a hold, and a date alone)", refused(gate(live_for([sub("Build @16")]), gid="a16")) and refused(gate(live_for([sub("Build @16")]), gid="a16", hold=False, wake=FUT)), gate(live_for([sub("Build @16")]), gid="a16"))
+check("3c …and so is an item that stores a closed `after` (no blocker is left)", (put(17, mover=BACK, after=["a4"]) and refused(gate(live_for([sub("Build @17")]), gid="a17"))), gate(live_for([sub("Build @17")]), gid="a17"))
+check("3c a wait_kind of list in this write (a waits list) is never refused", ok(gate(live_for(BUILD), wait_kind="list")))
+# the spelling of the mover, compared both ways
+check("3c `mover=` naming the sender in upper case is still the sender's own item: refused", refused(gate(live_for(BUILD), mover=BACK.upper())), gate(live_for(BUILD), mover=BACK.upper()))
+check("3c …the sender in upper case against the stored mover: refused", refused(gate(live_for(BUILD), sender=BACK.upper())), gate(live_for(BUILD), sender=BACK.upper()))
+check("3c …`mover=` naming another session in upper case is a hand-off: not refused", ok(gate(live_for(BUILD), mover=OTHER.upper())), gate(live_for(BUILD), mover=OTHER.upper()))
+# candidates: only the mover's own open items; an anchored pull request of another item ties nothing here
+check("3c a subagent whose description names an item ANOTHER session moves is on none of this mover's items: its brief naming this item ties it",
+      refused(gate(live_for([sub("Review @3", brief="the work of @1")]))), gate(live_for([sub("Review @3", brief="the work of @1")])))
+check("3c a pull request anchored to ANOTHER item of the mover does not tie a subagent to this one", ok(gate(live_for([sub("Build PR 77")], anch={"a2": {"acme/stack#77"}}))), gate(live_for([sub("Build PR 77")], anch={"a2": {"acme/stack#77"}})))
+# the guard key absent means on (the fixture carries it)
+_m = _cfg.CFG.setdefault("model", {}); _had = _m.pop("busy_hold_guard", "<absent>")
+try: absent = gate(live_for(BUILD))
+finally:
+    if _had != "<absent>": _m["busy_hold_guard"] = _had
+check("3c `[model] busy_hold_guard` absent from the config means on: refused", refused(absent) and _had != "<absent>" or refused(absent), absent)
+# through the tool: each parameter the gate reads reaches it
+with patched(server, _mover_subagents=fake_server_subs):
+    SUBS[:] = [sub("Build @1: the export fix")]
+    put(1, mover=BACK)
+    got = update(1, **HOLD, clear_hold=True)
+    check("3c tool: clear_hold reaches the gate (a hold that clears itself is no park: not refused as being moved)", not refused(got), got)
+    put(1, mover=BACK)
+    got = update(1, next=f"{BACK}: do it", hold=True, ask_by=FUT, wait_kind="relay", wait_event="the vendor", needs=["external"], wait_basis=f"the vendor answers {FUT}")
+    check("3c tool: a relay's ask_by and needs reach the gate", not refused(got), got)
+    put(1, mover=BACK)
+    got = update(1, next=f"{BACK}: do it", hold=True, ask_by=FUT)
+    check("3c tool: ask_by alone reaches the gate (a wait that names its day to chase is not a plain park)", not refused(got), got)
+    put(1, mover=BACK)
+    got = update(1, next=f"{BACK}: do it", until=FUT, waits=[{"kind": "item", "after": "a2"}, {"kind": "time", "until": FUT}])
+    check("3c tool: a waits list is never refused as being moved", not refused(got), got)
+    put(1, mover=BACK)
+    got = update(1, mover=BACK.upper(), **HOLD)
+    check("3c tool: mover= in upper case naming the sender is refused", refused(got), got)
+    put(1, mover=BACK)
 
 # ---------------------------------------------------------------- 4. shape
 import ast
