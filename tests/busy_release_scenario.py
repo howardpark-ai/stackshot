@@ -1,5 +1,5 @@
 """Scenario test for the second proof of the refusal of a hold on an item its mover is moving: a release of a pull request tied to the item that is running (stackshot/audit/busy_hold.py `live_release`,
-stackshot/service/gates.py `gate_busy_hold` and `BUSY_RELEASE_REFUSAL`, the server's `_busy_live`) — a scratch store, fixture items, fake units and release logs, no server socket, no network, no model call, no GitHub.
+stackshot/service/gates.py `gate_busy_hold` and `BUSY_RELEASE_REFUSAL`, web/wiring.py's `_busy_live`) — a scratch store, fixture items, fake units and release logs, no server socket, no network, no model call, no GitHub.
 
 release.sh runs each release as the user unit stackshot-release-<n>.service, which stays active through the checks, the merge queue, the merge, the deploy and main's run. A hold from the item's mover is refused while
 the unit of a pull request TIED TO THIS ITEM is active and its log (<state>/releases/pr-<n>.log) was written within 15 minutes; an older log is a stuck release, and a mover is never trapped. Unknown is never a refusal.
@@ -10,7 +10,7 @@ the unit of a pull request TIED TO THIS ITEM is active and its log (<state>/rele
   3  passes      no unit, a unit read that raises, a log older than 15 minutes (the bound itself included), no log, a log that cannot be read, no own repository, anchors or an item that cannot be read; the same
                  early exits as the subagent proof: guard off, the owner, a sender that is not the mover, a closing write, done=, clear_*, a named blocker, a hand-off, an item that is not open, no `live`
   4  both arms   a subagent live OR a release live refuses (the subagent is named first), neither passes; a failing subagent read still lets the release arm speak
-  5  tool        through the real update tool and `server._busy_live` (the unit list, the anchors and the logs read as the server reads them): the refused hold stores nothing, the same write passes once the unit
+  5  tool        through the real update tool and `wiring._busy_live` (the unit list, the anchors and the logs read as the server reads them): the refused hold stores nothing, the same write passes once the unit
                  has ended or its log has gone quiet, work= passes; the reply note of a doing item is dropped while a tied release runs and stays when it does not
   6  shape       the log is never read while no unit runs, the check costs one unit read and the item, gates.py names no audit/ module, the text of the refusal
 
@@ -51,6 +51,7 @@ from fastmcp.exceptions import ToolError
 from stackshot.audit import busy_hold, subagent_tie
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.web import wiring    # `_busy_live` is web/wiring.py's
 from stackshot.web import publish as _web_publish
 from stackshot.service import audit_ticks as audit_ticks_svc, gates, telling, update as update_svc
 from stackshot.tools import next_report as _nr
@@ -145,7 +146,7 @@ def rel_live(units=(77,), anch=None, own=OWN, logs=None, raises=None, now=None, 
                                       step_prs=step_prs or _rel.step_prs, log=L, now=lambda: NOW if now is None else now)
     return live
 def both_for(subs=None, **kw):
-    """The server's `_busy_live` as a callable over fakes: the subagent proof first, the release proof second."""
+    """web/wiring.py's `_busy_live` as a callable over fakes: the subagent proof first, the release proof second."""
     a, b = live_for(subs or [], anch=kw.get("anch")), rel_live(**kw)
     return lambda g, w: a(g, w) or b(g, w)
 ok = lambda got: got == ("ok", None)
@@ -357,7 +358,7 @@ def broken_subs(gid, mover):
 check("4 a mover whose subagents cannot be read (unknown) still lets a live release speak", RELWORDS(gate(lambda g, w: broken_subs(g, w) or rel_live(anch=A77)(g, w))))
 check("4 …and when neither can be told it passes", ok(gate(lambda g, w: broken_subs(g, w) or rel_live(anch=A77, raises=OSError("x"))(g, w))))
 
-# ---------------------------------------------------------------- 5. tool: the real update tool, the real `server._busy_live`
+# ---------------------------------------------------------------- 5. tool: the real update tool, the real `wiring._busy_live`
 SUBS = []
 def fake_server_subs(who, idx=None, now=None):
     if who != BACK: return []
@@ -426,12 +427,12 @@ with patched(server._rlive, released_anchors=lambda: 1 / 0), patched(audit_ticks
 UNITS_OUT["v"] = ""
 # the failover box: a stale copy of a log and no unit
 logfile(77, QUEUED, age=30.0)
-check("5 a stale log with no unit (the failover box's stale copies) is never read as a release", server._busy_live("a1", BACK) == "")
+check("5 a stale log with no unit (the failover box's stale copies) is never read as a release", wiring._busy_live("a1", BACK) == "")
 # the real proof, nothing but the unit list replaced
 UNITS_OUT["v"] = units_text(77)
 with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
-    check("5 server._busy_live answers the words of the release for an item whose anchored pull request is released now", server._busy_live("a1", BACK).startswith("a release of PR #77 tied to this item is running (unit stackshot-release-77.service"), server._busy_live("a1", BACK))
-    check("5 …and \"\" for another item of the mover", server._busy_live("a2", BACK) == "")
+    check("5 wiring._busy_live answers the words of the release for an item whose anchored pull request is released now", wiring._busy_live("a1", BACK).startswith("a release of PR #77 tied to this item is running (unit stackshot-release-77.service"), wiring._busy_live("a1", BACK))
+    check("5 …and \"\" for another item of the mover", wiring._busy_live("a2", BACK) == "")
 UNITS_OUT["v"] = ""
 
 # the reply note

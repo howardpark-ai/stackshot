@@ -195,6 +195,28 @@ _start_order = [c for c in _start_calls if c in ("_migrations.migrate_holds", "_
 check("2 the start passes run in the order they always did (holds, needs, session ids, owner mover, retire ranks, mover backfill, hand-off repair, close marks, wake pass, phase sweep), then the runner starts",
       _start_order == ["_migrations.migrate_holds", "_migrations.migrate_needs", "_migrations._session_ids_pass", "_migrations.migrate_owner_mover", "_migrations._retire_rank_pass", "_migrations._mover_backfill_pass",
                        "_handoff.handoff_repair_pass", "_migrations._close_marks_pass", "_wakes.wake_pass", "_stamp_svc._phase_tick", "_runner.start"], _start_order)
+# the order the server's import wires itself in (web/wiring.py: the write path's steps, the GitHub mirror's two hooks, the default mover, the page gate's switch, the router's and the queue's switches, THEN the MCP build, THEN
+# the hand-off clock's name and the thirteen other hook tables) is the order it had in server.py before the move: read from the source of both files, in the order the statements run
+_wiring_tree = _ast.parse(pathlib.Path(STACK, "stackshot/web/wiring.py").read_text(encoding="utf-8"))
+def _wiring_step(st):
+    if isinstance(st, _ast.Expr) and isinstance(st.value, _ast.Call) and isinstance(st.value.func, _ast.Attribute) and st.value.func.attr in ("install", "configure") and isinstance(st.value.func.value, _ast.Name):
+        return f"{st.value.func.attr} {st.value.func.value.id}"
+    if isinstance(st, _ast.Assign) and isinstance(st.targets[0], _ast.Attribute) and isinstance(st.targets[0].value, _ast.Name):
+        return f"set {st.targets[0].value.id}.{st.targets[0].attr}"
+    if isinstance(st, _ast.Return) and isinstance(st.value, _ast.Call) and _ast.unparse(st.value.func) == "_app.build":
+        return "build"
+    return None
+_wiring_seq = [(fn.name, [w for w in map(_wiring_step, fn.body) if w]) for fn in _wiring_tree.body if isinstance(fn, _ast.FunctionDef) and fn.name in ("install_early", "build", "install_late")]
+_server_tree = _ast.parse(pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
+_server_steps = [(_ast.unparse(st.value.func) if isinstance(st, _ast.Expr) else "mcp = " + _ast.unparse(st.value.func)) for st in _server_tree.body
+                 if (isinstance(st, _ast.Expr) and isinstance(st.value, _ast.Call) and _ast.unparse(st.value.func) in ("_wiring.install_early", "_wiring.install_late"))
+                 or (isinstance(st, _ast.Assign) and isinstance(st.value, _ast.Call) and _ast.unparse(st.value.func) == "_wiring.build" and _ast.unparse(st.targets[0]) == "mcp")]
+check("2 the wiring runs its statements in the order they had in server.py (the write path's steps, the mirror's two hooks, the default mover, the page gate's switch, the router's and the queue's switches; the build; the hand-off clock's name and the fourteen tables, the item readers first and the update's last), and the server calls its three steps once each, at the top of its module, in that order",
+      _wiring_seq == [("install_early", ["install _writes", "set _gh.on_rekey", "set _gh.on_comment", "set _wt.FALLBACK_MOVER", "set _pages.LOCAL_ONLY", "configure _router_live", "configure _queued"]),
+                      ("build", ["build"]),
+                      ("install_late", ["set _ho.SERVER", "install _item_read", "install _telling", "install _runner", "install _wake_hooks", "install _handoff_hooks", "install _stall_hooks", "install _checks_hooks", "install _passes_hooks",
+                                        "install _foryou_hooks", "install _save_hooks", "install _create_svc", "install _gates", "install _update_svc"])]
+      and _server_steps == ["_wiring.install_early", "mcp = _wiring.build", "_wiring.install_late"], (_wiring_seq, _server_steps))
 
 # ---- 3. no item lock unless something is stamped
 res = {}

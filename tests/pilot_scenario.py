@@ -2622,7 +2622,7 @@ check("recycle: the board's test is the predicate the server's recycle-wanted ca
       render.recycle_due(next(r for r in r1.rows if r["gid"] == "a88"), [])
       and not render.recycle_due(next(r for r in r1.rows if r["gid"] == "a84"), []) and not render.recycle_due(next(r for r in r1.rows if r["gid"] == "a89"), ["a86"])
       and "_hooks().rmod_recycle_due(" in open(os.path.join(STACK, "stackshot/service/recycle.py"), encoding="utf-8").read() and "_hooks().rmod_held_only_for_recycle(" in open(os.path.join(STACK, "stackshot/service/recycle.py"), encoding="utf-8").read()
-      and "_rmod.recycle_due(*a" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read() and "_rmod.held_only_for_recycle(*a" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read())
+      and "_rmod.recycle_due(*a" in open(os.path.join(STACK, "stackshot/web/wiring.py"), encoding="utf-8").read() and "_rmod.held_only_for_recycle(*a" in open(os.path.join(STACK, "stackshot/web/wiring.py"), encoding="utf-8").read())
 check("recycle: the line is out of Need your call (agents) and sits under the Machines heading, above the machine matrix",
       '<p id="recycle"' not in w1 and "Pane recycle" not in w1 and 0 < x1.find("</h2>") < x1.find('<p id="recycle"') < x1.find('<div class="matrix"'), (w1[:600], x1[:600]))
 check("recycle: no ask or call styling: no warning box, no icon, no call colour",
