@@ -1,4 +1,4 @@
-"""merge_tie.py: which open items a merged pull request is tied to, for the merge pass (the server's `_merge_progress_tick` reads the hub's merge log and asks here; what it records feeds the last-activity record).
+"""merge_tie.py: which open items a merged pull request is tied to, for the merge pass (`_merge_progress_tick` of service/merge_progress.py reads the hub's merge log and asks here; what it records feeds the last-activity record).
 
 The pure half: no server import, no file, no clock. A pull request is tied to an item when one of three things says so:
 

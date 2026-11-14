@@ -63,6 +63,7 @@ def refused(name, f, *want):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.anchors import anchors as _anc
@@ -389,7 +390,7 @@ _cfg.CFG["model"]["switchover"] = False
 md_ = render.render(str(T / "store"), "full")
 check("board.md: …and the switchover setting no longer changes it (the board speaks of the mover)", re.search(r"(?m)^- mover: `", md_) is not None and re.search(r"(?m)^- session: ", md_) is None, None)
 _cfg.CFG["model"]["switchover"] = _sw
-facts_ = json.loads(server._client_item_facts("home-front", "a32")[2])["items"]["a32"]
+facts_ = json.loads(client_reads_svc._client_item_facts("home-front", "a32")[2])["items"]["a32"]
 check("item-facts says who moves the item, for the hook's note on a Board line about another session's item", facts_["mover"] == "team-back", facts_)
 # the what-changed line: shown for 7 days after its date, then gone
 cf = T / "history.json"; cf.write_text(json.dumps([{"date": "2099-03-03", "text": "the tools say mover."}, {"date": "2098-12-01", "text": "an old change"}, {"date": "bad", "text": "x"}, {"text": "no date"}]))

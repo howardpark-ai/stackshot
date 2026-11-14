@@ -198,7 +198,7 @@ def display_of(server: Any, it: dict[str, Any], gid: str, stored: bool = False) 
     probe = {**it, "gid": gid}
     mod = _model.view(probe, server._item_read._model_of(probe), after_open=lambda i_: server._item_read._after_open(i_.get("metadata") or {}), check=stored)
     return {"today": mod.today or "", "state": mod.state, "kind": mod.wait.kind if mod.wait else "", "until": mod.wait.until if mod.wait else "", "backstop": mod.wait.backstop if mod.wait else "",
-            "conflicts": list(mod.conflicts), "list": server._item_list(probe), "model": server._tool_notes._model_lines(probe, short=True), "fmt": server._tool_get._fmt(probe), "brief": server._tool_get._fmt(probe, brief=True)}
+            "conflicts": list(mod.conflicts), "list": server._client_reads._item_list(probe), "model": server._tool_notes._model_lines(probe, short=True), "fmt": server._tool_get._fmt(probe), "brief": server._tool_get._fmt(probe, brief=True)}
 
 
 def ends_within(mod_until: str, backstop: str, tz: Any, now: float) -> bool:

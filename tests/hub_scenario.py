@@ -109,6 +109,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 # ---- 2. the server's note
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.web import page_debts as _pdebts
@@ -162,11 +163,11 @@ r = _update_svc._update(h3, mover="falcon-anchors", sender="falcon-main")
 check("mover: a plain mover change within the project leaves the creator alone", _service_store._load(h3)["metadata"]["mover"] == "falcon-anchors" and own_of(h3) == SID("falcon-main") and "keeper of record" not in r, r)
 r = _update_svc._update(h3, mover="OLIVER", project="projects/side", sender="falcon-main")
 check("mover: Oliver as mover leaves the creator alone, and the project written is the project stored (no refile)", own_of(h3) == SID("falcon-main") and _service_store._load(h3)["metadata"]["project"] == "projects/side" and _service_store._load(h3)["metadata"]["mover"] == _model.owner_display(), r)
-facts_ = json.loads(server._client_item_facts("falcon-anchors", h1 + "," + h3)[2])["items"]
+facts_ = json.loads(client_reads_svc._client_item_facts("falcon-anchors", h1 + "," + h3)[2])["items"]
 check("item-facts: says who moves each item, and whether it is the asking session (the hook's note on a Board line leaves that session's own item out)",
       facts_[h1]["mover"] == "home-side-main" and facts_[h1]["mover_me"] is False and facts_[h3]["mover"] == _model.owner_display(), facts_)
 r = _update_svc._update(h3, mover="falcon-anchors", sender="falcon-main")
-facts_ = json.loads(server._client_item_facts("falcon-anchors", h3)[2])["items"][h3]
+facts_ = json.loads(client_reads_svc._client_item_facts("falcon-anchors", h3)[2])["items"][h3]
 check("item-facts: the mover that is not in needs is told it moves the item", facts_["mover_me"] is True and facts_["agent"] is False, facts_)
 if _ho_was is None: _cfg.CFG["model"].pop("handoff", None)
 else: _cfg.CFG["model"]["handoff"] = _ho_was
@@ -210,7 +211,7 @@ _stale = json.loads(RJ.read_text()); _stale["generated"] = "2026-01-01T00:00:00Z
 _projects_registry._roles_sync_safe()
 check("roles.json: a stale file is refreshed by the pass the runner runs every minute (with the board held too)", json.loads(RJ.read_text())["generated"] > "2026-01-02"
       and [(t.group, t.board) for t in runner_svc.ticks() if t.name == "roles_sync_safe"] == [("fleet", False)] and "_roles_sync_safe()" in inspect.getsource(_web_publish._publish_now), json.loads(RJ.read_text())["generated"])
-st, ct, body = server._client_get("roles", {})
+st, ct, body = client_reads_svc._client_get("roles", {})
 check("client read `roles`: the file as written", (st, ct) == (200, "application/json") and body == RJ.read_text() and json.loads(body)["sessions"]["home-side-main"]["role"] == "front", (st, ct, body[:200]))
 from stackshot.fleet import client as _client
 check("client.py knows the read", "roles" in _client.READS)

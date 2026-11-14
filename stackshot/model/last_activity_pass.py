@@ -9,7 +9,7 @@ Where the time comes from (`signals`):
   asks `progress.moved`): a step marked done or dropped, a state change, a pull request recorded as merged, and the first version as the item being created. Whether a version was someone's write about the work
   (progress.moved's `real`) is read from the item's own `activity` clock, which a real write moves and the server's bookkeeping leaves: a version whose clock is later than what the version before it read as
   (activity.at) was real. The version's time is its own (`updated` or `confirmed`, else the commit's); a version of the file on disk the store has not committed yet is the last one.
-  the hub's logs of pull request events, merge log and event log, tied to the item as the live pass ties them (`server._merge_tied`, the same anchors, bodies and words), each at the time the hub saw it.
+  the hub's logs of pull request events, merge log and event log, tied to the item as the live pass ties them (`service/merge_progress.py`'s `_merge_tied`, the same anchors, bodies and words), each at the time the hub saw it.
 The record is the newest of them; of two at the same time the later given wins. Nothing is made up: an item whose History cannot be read, or holds a time ahead of the clock, is refused and listed.
 
 What it leaves alone: an item that already has a record (one that reads; a torn one, or one stamped further ahead of the clock than last_activity.SKEW_S, is no record and is replaced, its old value kept in the undo
@@ -159,7 +159,7 @@ def replay(versions: list[tuple[float, dict[str, Any]]], now: float) -> tuple[li
 
 
 def tie_signals(rows: list[dict[str, Any]], tied: list[tuple[dict[str, Any], str, dict[str, str]]], now: float) -> dict[str, list[dict[str, Any]]]:
-    """The signals of the hub's logged events by item: `tied` is the server's `_merge_tied(rows, now)` (each line with the items it is tied to); a line is one signal of the kind event_log gives it (a merge-log line is a
+    """The signals of the hub's logged events by item: `tied` is the `_merge_tied(rows, now)` of service/merge_progress.py (each line with the items it is tied to); a line is one signal of the kind event_log gives it (a merge-log line is a
     merge), at the time the hub saw it; a line stamped more than SKEW_S ahead of `now` is torn and dropped, as the live pass drops it."""
     out: dict[str, list[dict[str, Any]]] = {}
     for row, _key, ids in sorted(tied, key=lambda t: _num(t[0].get("ts"))):
@@ -200,7 +200,7 @@ def pr_rows(S: Any, now: float) -> tuple[list[dict[str, Any]], list[str]]:
 
 
 def ties(S: Any, now: float) -> tuple[dict[str, list[dict[str, Any]]], str]:
-    """The logged pull request events tied to the open items → (signals by item id, "") or ({}, why the logs or the items could not be read). The server's `_merge_tied`: anchors scoped to the item, a merge's body, the
+    """The logged pull request events tied to the open items → (signals by item id, "") or ({}, why the logs or the items could not be read). The `_merge_tied` of service/merge_progress.py: anchors scoped to the item, a merge's body, the
     item's own words; an item that waits or is held is not on the ladder and gets none. Not swallowed: without the ties an item is filled from its History alone, and a pull request event newer than that would be
     left out of its record, so the dry run warns and the real pass refuses (`write_op`) until they read."""
     try:
@@ -209,7 +209,7 @@ def ties(S: Any, now: float) -> tuple[dict[str, list[dict[str, Any]]], str]:
             return {}, "; ".join(problems)
         if not rows:
             return {}, ""
-        tied = S._merge_tied(rows, now)
+        tied = S._merge_progress._merge_tied(rows, now)
         problem = getattr(tied, "problem", "")      # the anchors that could not be read: the ties by anchor are missing, so an item would be filled without them (the live pass logs it and carries on)
         if problem:
             return {}, problem

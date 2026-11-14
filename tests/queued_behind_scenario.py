@@ -13,7 +13,7 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
   6  the shared reading (silence.reading, which the hourly line, the idle hand-over and the stall pass use) leaves a queued item off the agents as it does a waiting one and still reads the item in hand on agent; the gate off reads both
   7  the hourly audit line (hourly.due, hourly.pass_, service/audit_ticks._hourly_tick) writes no line on a queued item and one on the item in hand
   8  the stall pass (stalltick_svc.stall_tick) takes no step on a queued item and still takes it on the item in hand
-  9  the items sheet's list word (server._item_list) says waiting for a queued item
+  9  the items sheet's list word (client_reads_svc._item_list) says waiting for a queued item
   4b the words: board.md and the brief (the head's waiting lines and the cards) say `queued behind <item>` for a queued item, never `waiting on another item's close`; the item page and the home row say it too;
      the wait a session stored as an item wait keeps its words
   4c the front test the board and the passes use: the one the server installed is the one used; a front test that cannot answer counts as front (nothing is queued on a guess), in the queue path only; the
@@ -65,6 +65,7 @@ from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.web.tools import notes as _notes_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import messaging as _messaging
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
@@ -100,7 +101,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
+CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"; _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
@@ -402,9 +403,9 @@ def at_now0():
     finally: CLK.t = was
 base(); on(); audit_ticks_svc._QUEUE_CACHE.update(at=0.0, map={})
 with at_now0():
-    check("9 _item_list: waiting for a queued item, agents for the item in hand and for a mover's only item", server._item_list(dict(rd(2), gid="a2")) == home.WAITING and server._item_list(dict(rd(1), gid="a1")) == home.AGENTS and server._item_list(dict(rd(4), gid="a4")) == home.AGENTS)
+    check("9 _item_list: waiting for a queued item, agents for the item in hand and for a mover's only item", client_reads_svc._item_list(dict(rd(2), gid="a2")) == home.WAITING and client_reads_svc._item_list(dict(rd(1), gid="a1")) == home.AGENTS and client_reads_svc._item_list(dict(rd(4), gid="a4")) == home.AGENTS)
     check("9 _queue_map: {a2: a1} and nothing for the others", audit_ticks_svc._queue_map(now0, items()) == {"a2": "a1"}, audit_ticks_svc._queue_map(now0, items()))
-    off(); check("9 …and {} with the gate off", audit_ticks_svc._queue_map(now0, items()) == {} and server._item_list(dict(rd(2), gid="a2")) == home.AGENTS)
+    off(); check("9 …and {} with the gate off", audit_ticks_svc._queue_map(now0, items()) == {} and client_reads_svc._item_list(dict(rd(2), gid="a2")) == home.AGENTS)
 
 # ================================================================ 10. revert-proof: each rule mutated, the guard must fail
 def observe():

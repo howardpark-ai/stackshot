@@ -54,6 +54,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.model import holders as _holders
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -149,7 +150,7 @@ def reads():
     out = {}
     out["get"] = "\n".join(_get_tool._fmt({**rd(i), "gid": f"a{i}"}) for i in (1, 2, 3, 4, 6))
     out["brief"] = _wt_brief.stackshot_brief()
-    out["client"] = json.dumps(json.loads(server._client_items(UB)[2])["items"]) + json.dumps(json.loads(server._client_items(UO)[2])["items"])
+    out["client"] = json.dumps(json.loads(client_reads_svc._client_items(UB)[2])["items"]) + json.dumps(json.loads(client_reads_svc._client_items(UO)[2])["items"])
     B_ = r2.Board(str(T / "store"))
     out["page"] = "\n".join(B_.item_html(f"a{i}") for i in (1, 2, 3, 4, 6))
     for tag, mod in (("render.py", render), ("ui/render.py", r2)):
@@ -161,7 +162,7 @@ WORDS = re.compile(r"rank(?!s after)|work order|queue of |Builder queues|\bqueue
 def seen(txt): return WORDS.findall(plain(txt))
 for name, txt in reads().items():
     check(f"read: {name} shows no rank, work order, builder queue or queued state for items that still store them", not seen(txt), [m.group(0) for m in re.finditer(r".{0,40}(?:rank|queued|work order).{0,40}", plain(txt), re.I)][:3])
-cl = json.loads(server._client_items(UB)[2])["items"]
+cl = json.loads(client_reads_svc._client_items(UB)[2])["items"]
 check("read: the client items carry no rank key", cl and all("rank" not in x for x in cl), cl[:1])
 check("read: render keeps no rank helpers", not any(hasattr(render, n) or hasattr(r2, n) for n in ("rank_of", "builder_of", "queue_key", "queues", "rank_words", "rank_badge")) and not hasattr(server, "_rank_queues"), None)
 

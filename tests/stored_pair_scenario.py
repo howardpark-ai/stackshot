@@ -59,6 +59,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
 from stackshot.anchors import anchors as _anc
@@ -150,9 +151,9 @@ def surfaces(store, t, on):
             it = items[g]; probe = dict(it, gid=g)
             out[f"display {g}"] = json.dumps(SP.display_of(server, it, g, stored=on), sort_keys=True, ensure_ascii=False)
             out[f"named {g}"] = "\n".join(_get_tool._next_names_lines(probe))
-            out[f"wire {g}"] = json.dumps([server._item_list(probe), server._basis_wait_of(probe), server._wait_fields(g, it, ctx)], sort_keys=True, default=str)
+            out[f"wire {g}"] = json.dumps([client_reads_svc._item_list(probe), client_reads_svc._basis_wait_of(probe), client_reads_svc._wait_fields(g, it, ctx)], sort_keys=True, default=str)
         for k in ("team-back", "home-front", "home-other", "home-owner", OWN):
-            out[f"items? {k}"] = server._client_items(k)[2]
+            out[f"items? {k}"] = client_reads_svc._client_items(k)[2]
         out["world"] = _wt_brief._world_waits_text()
         now = dt.datetime.fromtimestamp(t, ZONE)
         ub = ui_render.Board(str(store), now=now)
@@ -230,7 +231,7 @@ check("2 …reading writes nothing (store bytes equal)", hashes(STORE) == H0, No
 def one_read(g, stored, t=T0):
     """(list word, unstamped reads counted, the shown (phase, kind)) for one read of item g at clock t, the decision from the stored pair (stored) or the fields alone."""
     with frozen(t), reading(stored):
-        u0 = counters(); it = _service_store._load(g); w = quietly(server._item_list, it); u1 = counters()
+        u0 = counters(); it = _service_store._load(g); w = quietly(client_reads_svc._item_list, it); u1 = counters()
         m = _model.view(dict(it, gid=g), _item_read._model_of(dict(it, gid=g)), t, lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=True)
     return w, u1 - u0, _model.shown_pair(m)
 W = {g: (one_read(g, True), one_read(g, False)) for g in ("g43", "g44", "g45", "g46", "g47", "g48", "g49", "g50")}
@@ -283,7 +284,7 @@ shift_proof("fixture", STORE, SHIFTS)
 w_old, _u, p_old = one_read("g1", True, T0 + 6 * H); w_fld, _u2, p_fld = one_read("g1", False, T0 + 6 * H)
 check("4 a dated wait the clock has outdated (g1, six hours on) lists as waiting on its stored pair until the sweep, and as the fields give it (agents) after it", w_old == "waiting" and p_old == ("waiting", "time") and w_fld == "agents" and p_fld == ("alive", ""), (w_old, p_old, w_fld, p_fld))
 def after_sweep(store, done, derived, items, opens):
-    with frozen(T0 + 6 * H): return quietly(server._item_list, _service_store._load("g1")), "g1" in done
+    with frozen(T0 + 6 * H): return quietly(client_reads_svc._item_list, _service_store._load("g1")), "g1" in done
 check("4 …and one sweep at that clock stamps it alive", swept_at(STORE, T0 + 6 * H, after_sweep) == ("agents", True), None)
 src = pathlib.Path(os.environ.get("PHASE_REPLAY_STORE") or "/nonexistent").expanduser()
 if src.is_dir() and any(q.is_dir() and len(q.name) == 1 for q in src.iterdir()):

@@ -1,4 +1,4 @@
-"""merge_log.py: the hub's record of the pull requests it saw merge, read by the server's merge pass (`server._merge_progress_tick`).
+"""merge_log.py: the hub's record of the pull requests it saw merge, read by the server's merge pass (`service/merge_progress.py`'s `_merge_progress_tick`).
 
 Why a file of its own. The hub notices a pull request closing as merged at its source, from a read it makes anyway (an anchored pull request's own poll, a thread of a repository anchor's
 notifications), and that read already holds the pull request's body. The routing log does not carry the event in one shape (a routine event on the fleet's own pull request is logged with no

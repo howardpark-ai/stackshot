@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.model import retire_fields as RF; from stackshot.tools import retire_fields_report as RR; from stackshot.tools import stamp_phase as SP
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -103,7 +104,7 @@ def reading(i):
     with SP.fields_only(server):
         mod = _item_read._model_of(it)
         shown = _model.view(it, mod, None, lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=False)
-        return [list(_model.shown_pair(shown)), server._item_list(it), shown.mover if shown.state == _model.ALIVE else ""]
+        return [list(_model.shown_pair(shown)), client_reads_svc._item_list(it), shown.mover if shown.state == _model.ALIVE else ""]
 
 BASIS_DAY = day(12)
 END_WAKE = BASIS_DAY + "T23:59"
