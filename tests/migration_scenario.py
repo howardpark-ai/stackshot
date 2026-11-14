@@ -443,11 +443,25 @@ rl_old = {"g17": {"status": "ok", "answer": {"wait": "yes", "kind": "relay", "ev
 pl17_old = M.plan_items({"g17": alive_i}, M.Env({"g17": alive_i}, ctx, anc, today, reads=rl_old))
 check("relay: …a read that still names its picker under the old key is taken as it was (a relay picker that is Oliver gets the last agent mover)", pl17_old.writes and pl17_old.writes[0].set.get("mover") == BACK and "post_wake_mover" not in pl17_old.writes[0].set,
       pl17_old.writes[0].set if pl17_old.writes else None)
-# an item that waits with the old key stored: the plan sets `mover` and drops the old key (the one save rule), and the route's write leaves one picker
+# an item that waits with the old key stored: the old key already names its picker, so the plan sets nothing for it and drops nothing (as before: a field equal to the stored one is no write)
 legacy_i = json.loads(json.dumps(items["g6"])); legacy_i["metadata"]["post_wake_mover"] = FRONT
 pl6 = M.plan_items({**items, "g6": legacy_i}, M.Env({**items, "g6": legacy_i}, ctx, anc, today))
 w6 = next((x for x in pl6.writes if x.gid == "g6"), None)
-check("plan: a waiting item that stores the old key gets `mover` and the old key is dropped in the same write", w6 is not None and w6.set.get("mover") == FRONT and "post_wake_mover" in w6.drop and "post_wake_mover" not in w6.set, (w6.set, w6.drop) if w6 else None)
+check("plan: a waiting item whose old key names its picker: no `mover` is set and the old key stays (a restated picker changes nothing)", w6 is not None and "mover" not in w6.set and "post_wake_mover" not in w6.drop and "post_wake_mover" not in w6.set, (w6.set, w6.drop) if w6 else None)
+# a waiting item whose old key names a session that cannot move it: the plan replaces the picker with `mover` and drops the old key in that same write
+gone_i = json.loads(json.dumps(items["g6"])); gone_i["metadata"]["post_wake_mover"] = "retired-agent"
+pl6g = M.plan_items({**items, "g6": gone_i}, M.Env({**items, "g6": gone_i}, ctx, anc, today))
+w6g = next((x for x in pl6g.writes if x.gid == "g6"), None)
+check("plan: …the replaced picker is set as `mover` and the old key is in the same write's drop list", w6g is not None and w6g.set.get("mover") == "team-back" and "post_wake_mover" in w6g.drop and "post_wake_mover" not in w6g.set, (w6g.set, w6g.drop) if w6g else None)
+# an alive item whose next reads as a relay wait (the cold call's read), with an old key left on it: the plan's own drop list says what goes with the wait
+stray_other = {**alive_i, "metadata": {**alive_i["metadata"], "post_wake_mover": "retired-agent"}}
+pl17s = M.plan_items({"g17": stray_other}, M.Env({"g17": stray_other}, ctx, anc, today, reads=rl))
+w17s = pl17s.writes[0] if pl17s.writes else None
+check("plan: a wait read from next on an alive item that stores another old key: `mover` is set and the old key is dropped in the plan's own drop list", w17s is not None and w17s.set.get("mover") == BACK and "post_wake_mover" in w17s.drop and "post_wake_mover" not in w17s.set, (w17s.set, w17s.drop) if w17s else None)
+stray_same = {**alive_i, "metadata": {**alive_i["metadata"], "post_wake_mover": BACK}}
+pl17t = M.plan_items({"g17": stray_same}, M.Env({"g17": stray_same}, ctx, anc, today, reads=rl))
+w17t = pl17t.writes[0] if pl17t.writes else None
+check("plan: …and an old key that already names the picker the call read stays (it is not in the drop list)", w17t is not None and w17t.set.get("mover") == BACK and "post_wake_mover" not in w17t.drop, (w17t.set, w17t.drop) if w17t else None)
 pl6b = M.plan_items(items, M.Env(items, ctx, anc, today))
 w6b = next((x for x in pl6b.writes if x.gid == "g6"), None)
 check("plan: …an item with no old key drops none", w6b is not None and w6b.set.get("mover") == FRONT and "post_wake_mover" not in w6b.drop, (w6b.set, w6b.drop) if w6b else None)

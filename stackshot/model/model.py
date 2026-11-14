@@ -95,12 +95,6 @@ def stored_picker(meta: dict[str, Any]) -> str:
     return norm_who((meta or {}).get(LEGACY_PICKER_KEY)) or pick_who((meta or {}).get("mover"))
 
 
-def store_picker(meta: dict[str, Any], who: str) -> None:
-    """The one writer of a waiting item's picker: `mover` takes `who`, and a stored legacy key goes, so it can never outvote what was just written (stored_picker reads the legacy key first)."""
-    meta["mover"] = who
-    meta.pop(LEGACY_PICKER_KEY, None)
-
-
 def settle_picker_keys(meta: dict[str, Any], setv: Any, drop: Any, was_waiting: bool = False, waits_now: bool | None = None) -> None:
     """The one save rule for the picker's two stored keys, run on `meta` after a write has applied its sets and drops (`setv`: the fields it set, `drop`: the fields it dropped; `was_waiting`: the item
     waited before the write; `waits_now`: it waits as the write leaves it, read from `meta` when not given). A write that names the legacy key itself is left as written (the old parameter keeps working as it did).
