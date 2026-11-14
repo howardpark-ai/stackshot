@@ -95,7 +95,7 @@ def check(name, cond, got=None):
 ID = re.compile(r"^prj_[0-9a-f]{8}$")
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
-from stackshot.web import server
+from stackshot.web import server; from stackshot.service import projects as _psvc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.projects import project_registry as _projects_registry
@@ -223,7 +223,7 @@ class FakeIO:
         if slug not in s.pages or rev != f"r{s.revs.get(slug, 1)}": return "refused", "the page changed since it was read"
         s.pages[slug] = content; s.revs[slug] = s.revs.get(slug, 1) + 1; return "ok", ""
     def add_timeline(s, slug, date, summary, detail, source, request_id=""): s.timeline.append((slug, summary)); return ""
-gio = FakeIO(); server._pform.PAGE_IO = gio
+gio = FakeIO(); _psvc.PAGE_IO = gio
 def mk(key, scope, title="", sender="fleet-web", **kw): return server._client_post("box-c", "project", {"key": key, "scope": scope, "title": title, "sender": sender, **kw})
 st, out = mk("projects/new-one", "work", "New one")
 r = out.get("project", {})
@@ -378,7 +378,7 @@ from stackshot.projects import project_verbs as pverbs; from stackshot.projects 
 def pa(project, name, sender, role="main", front=True, mandate="the main agent"): return server._client_post("box-c", "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender})
 def page_agents(key): return _pg.split_agents(_pg.frontmatter_text(gio.pages[key]).get("agents"))
 locked_seen = []; real_add = pverbs.agent_add
-def spy_add(*a, **k): locked_seen.append(server._PROJECT_LOCK.locked()); return real_add(*a, **k)
+def spy_add(*a, **k): locked_seen.append(_psvc._PROJECT_LOCK.locked()); return real_add(*a, **k)
 pverbs.agent_add = spy_add
 st, out = pa(NEW, "work-new-one-main", "fleet-web")
 check("project-agent: a project just made takes its first agent from the label that made it (the form has no session): 200, listed in the record, no page line owed", st == 200 and out["page_owed"] is False and out["project"] == NEW
@@ -493,7 +493,7 @@ def lam_pending():
     return {n: a for n, a in (pverbs.pr.entries().get(L, {}).get("agents") or {}).items() if a.get("by")}
 CFG0 = server._cfg.CFG.get("project_agent", "absent")
 check("form call: the example config carries the section with the defaults (no sender label: the instance names its form's), and the code's defaults are neutral (no sender, no machine)",
-      CFG0 == {"form_senders": [], "form_machines": ["box-a"]} and server._FORM_SENDERS == [] and server._FORM_MACHINES == [], CFG0)
+      CFG0 == {"form_senders": [], "form_machines": ["box-a"]} and _psvc._FORM_SENDERS == [] and _psvc._FORM_MACHINES == [], CFG0)
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}   # the instance's own config: it names its form's label
 check("form call: the setup is a listed project that has agents (and no session's id is involved)", rec("projects/lambda")["listed"] is True and "home-lambda-main" in rec("projects/lambda")["agents"], rec("projects/lambda"))
 st, out = fpa("box-a", "projects/lambda", "home-lambda-helper", "fleet-web")
@@ -588,13 +588,13 @@ check("form call: refused form calls (hidden, name owned by another project, 409
 # the config: absent section → the defaults; a changed section → the file's lists; a malformed value → nobody
 server._cfg.CFG["project_agent"] = "x"
 check("form call: a section that is not a table (project_agent = \"x\") switches form calls off, it does not fall back to the defaults", fpa("box-a", "projects/lambda", "home-lambda-notable", "fleet-web")[0] == 403 and "home-lambda-notable" not in lam_pending()
-      and server._form_call("box-a", "fleet-web") is False)
+      and _psvc._form_call("box-a", "fleet-web") is False)
 server._cfg.CFG["project_agent"] = ["fleet-web"]
-check("form call: …a list as the section too", server._form_call("box-a", "fleet-web") is False)
+check("form call: …a list as the section too", _psvc._form_call("box-a", "fleet-web") is False)
 server._cfg.CFG["project_agent"] = {"form_machines": ["box-a"]}
-check("form call: a table that sets one key keeps the other's default (no sender label: no form call)", server._form_call("box-a", "fleet-web") is False and server._form_call("box-c", "fleet-web") is False)
+check("form call: a table that sets one key keeps the other's default (no sender label: no form call)", _psvc._form_call("box-a", "fleet-web") is False and _psvc._form_call("box-c", "fleet-web") is False)
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"]}
-check("form call: …and the senders alone keep the default machines (none since the code names no machine), so the form calls nobody", server._form_call("box-a", "fleet-web") is False and server._form_call("box-c", "fleet-web") is False)
+check("form call: …and the senders alone keep the default machines (none since the code names no machine), so the form calls nobody", _psvc._form_call("box-a", "fleet-web") is False and _psvc._form_call("box-c", "fleet-web") is False)
 server._cfg.CFG.pop("project_agent", None)
 st, out = fpa("box-a", "projects/lambda", "home-lambda-nocfg", "fleet-web")
 check("form call: with the config section absent the defaults apply (no sender label: fleet-web on box-a → 403), and the defaults refuse anyone else too", st == 403 and "home-lambda-nocfg" not in lam_pending()
@@ -695,12 +695,12 @@ def in_thread(fn, *a, **k):
         except BaseException as e_: box["exc"] = e_
         box["took"] = time.time() - t0
     t = threading.Thread(target=run, daemon=True); t.start(); return t, box
-blk = BlockIO({"projects/slow-one"}); server._pform.PAGE_IO = blk
+blk = BlockIO({"projects/slow-one"}); _psvc.PAGE_IO = blk
 t1, b1 = in_thread(mk, "projects/slow-one", "home", "Slow one", "fleet-web")
 try:
     entered = blk.entered.wait(10)
     check("slow gbrain: the first make is inside gbrain's create (the Event is held)", entered and t1.is_alive() and blk.started == ["projects/slow-one"], blk.started)
-    check("slow gbrain: the project is in the record already (the record comes first) and the lock itself is free", rec("projects/slow-one") is not None and not server._PROJECT_LOCK.locked(), server._PROJECT_LOCK.locked())
+    check("slow gbrain: the project is in the record already (the record comes first) and the lock itself is free", rec("projects/slow-one") is not None and not _psvc._PROJECT_LOCK.locked(), _psvc._PROJECT_LOCK.locked())
     t2, b2 = in_thread(pa, "projects/alpha", "home-sparrow-quick", U["home-sparrow-main"], role="quick", mandate="quick one"); t2.join(5)
     check("slow gbrain: a project-agent call on another project completes at once while the make waits on gbrain (200, well under the clients' 30 s)", not t2.is_alive() and b2["r"][0] == 200 and b2["took"] < 3 and t1.is_alive(), (b2, t1.is_alive()))
     t3, b3 = in_thread(relist, "projects/eta", sender="fleet-web"); t3.join(5)
@@ -720,13 +720,13 @@ st, out = mk("projects/slow-one", "home", "Slow one third")
 check("slow gbrain: …and a later make of the key is the ordinary 409 'already exists' (post project-list)", st == 409 and "already exists" in out["error"], (st, out))
 class RaisingIO(FakeIO):
     def create(s, slug, content): raise RuntimeError("gbrain exploded")
-server._pform.PAGE_IO = RaisingIO()
+_psvc.PAGE_IO = RaisingIO()
 st, out = mk("projects/boom", "home", "Boom")
 check("slow gbrain: a gbrain call that raises is a 502 (the mirror never raises), and nothing is recorded", st == 502 and rec("projects/boom") is None and "projects/boom" not in idfile()["ids"].values(), (st, out))
-server._pform.PAGE_IO = gio
+_psvc.PAGE_IO = gio
 st, out = mk("projects/boom", "home", "Boom")
 check("slow gbrain: …and the same make said again goes through (the failed one left nothing behind)", st == 200 and rec("projects/boom") is not None, (st, out))
-server._pform.PAGE_IO = gio
+_psvc.PAGE_IO = gio
 
 # ---- 6d. post project-agent-rename: the agent renamed in the project record (its place and mandate kept), the page's agents block written from the record
 class RenameIO:
@@ -760,7 +760,7 @@ ren_page("projects/ren-quo", "type: project\ntitle: Ren quoted\norg: home\ndispl
 ren_page("projects/ren-cli", REN_FRONT.replace("home-ren", "home-rcli").replace("Ren", "Rcli"))
 ren_page("projects/ren-http", REN_FRONT.replace("home-ren", "home-rhttp").replace("Ren", "Rhttp"))
 p.cmd_registry(quiet=True); fresh()
-server._pform.PAGE_IO = rio
+_psvc.PAGE_IO = rio
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
 def rn(project, old, new, sender="fleet-web", machine="box-a", **kw):
     b = {"project": project, "old": old, "new": new, **kw}
@@ -808,10 +808,10 @@ check("rename: …a background entry's retry is the same 200, front false", st =
 gets_before = len(rio.gets)
 bad = [rn("projects/ren", "home-ren-main", "home-ren-chief", sender="other-label"), rn("projects/ren", "home-ren-main", "home-ren-chief", sender=None),
        rn("projects/ren", "home-ren-main", "home-ren-chief", sender="box-a"), rn("projects/ren", "home-ren-main", "home-ren-chief", sender=U["home-sparrow-main"]), rn("projects/ren", "home-ren-main", "home-ren-chief", sender="")]
-check("rename: a sender that is no form label (a stranger's label, none, the machine's name, a session id, empty) → 403, the same text each time, before the page is read", all(s == 403 and o == {"error": server._RENAME_NOT_FORM} for s, o in bad)
+check("rename: a sender that is no form label (a stranger's label, none, the machine's name, a session id, empty) → 403, the same text each time, before the page is read", all(s == 403 and o == {"error": pverbs.RENAME_NOT_FORM} for s, o in bad)
       and len(rio.gets) == gets_before and nothing_changed("not form"), bad)
 bad = [rn("projects/ren", "home-ren-main", "home-ren-chief", machine=m) for m in ("box-c", "box-e", "")]
-check("rename: the form's label from a machine that is not in form_machines (or with no machine proven) → 403, nothing changed", all(s == 403 and o == {"error": server._RENAME_NOT_FORM} for s, o in bad)
+check("rename: the form's label from a machine that is not in form_machines (or with no machine proven) → 403, nothing changed", all(s == 403 and o == {"error": pverbs.RENAME_NOT_FORM} for s, o in bad)
       and len(rio.gets) == gets_before and nothing_changed("wrong machine"), bad)
 server._cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
 check("rename: with no form label in the config (the defaults) nobody may, the form's label included", rn("projects/ren", "home-ren-main", "home-ren-chief")[0] == 403 and nothing_changed("no labels"))
@@ -873,13 +873,13 @@ check("rename: a page that changed between the read and the put (a stale revisio
 # concurrency: the record under the project lock, the page after it; the page key in flight while the page store works
 entered, gate = threading.Event(), threading.Event(); first = []; seen_in_put = []
 def hold(slug):
-    seen_in_put.append((slug, server._PROJECT_LOCK.locked(), set(server._RENAMING)))
+    seen_in_put.append((slug, _psvc._PROJECT_LOCK.locked(), set(_psvc._RENAMING)))
     if not first: first.append(1); entered.set(); gate.wait(30)
 rio.hook = hold
 tA, bA = in_thread(rn, "projects/ren", "home-ren-main", "home-ren-alpha")
 try:
     ok1 = entered.wait(10)
-    check("rename concurrency: while the first rename is inside the page store's put the page key is in flight and the project lock is free", ok1 and tA.is_alive() and seen_in_put == [("projects/ren", False, {"projects/ren"})] and not server._PROJECT_LOCK.locked(), (ok1, seen_in_put))
+    check("rename concurrency: while the first rename is inside the page store's put the page key is in flight and the project lock is free", ok1 and tA.is_alive() and seen_in_put == [("projects/ren", False, {"projects/ren"})] and not _psvc._PROJECT_LOCK.locked(), (ok1, seen_in_put))
     tB, bB = in_thread(rn, "projects/ren", "home-ren-alpha", "home-ren-beta"); tB.join(5)
     check("rename concurrency: a second rename of the same page → 409 'a rename of <page> is in progress; try again' at once, and nothing of it is written",
           not tB.is_alive() and bB["r"] == (409, {"error": "a rename of projects/ren is in progress; try again"}) and bB["took"] < 3 and tA.is_alive() and len(seen_in_put) == 1, (bB, seen_in_put))
@@ -893,27 +893,27 @@ finally:
     gate.set()
 tA.join(15)
 check("rename concurrency: the first one then completes 200 renamed, the key leaves the in-flight set, and the page holds the rename AND the agent added meanwhile (the mirror is recomputed from the record when its put is refused)",
-      not tA.is_alive() and bA["r"][0] == 200 and bA["r"][1]["result"] == "renamed" and server._RENAMING == set()
-      and "home-ren-alpha" in dict(agents_of("projects/ren")[0]) and "home-ren-quick" in dict(agents_of("projects/ren")[0]) and agents_of("projects/ren")[0][:1] == rec_agents(REN)[:1], (bA, server._RENAMING, agents_of("projects/ren")[0]))
+      not tA.is_alive() and bA["r"][0] == 200 and bA["r"][1]["result"] == "renamed" and _psvc._RENAMING == set()
+      and "home-ren-alpha" in dict(agents_of("projects/ren")[0]) and "home-ren-quick" in dict(agents_of("projects/ren")[0]) and agents_of("projects/ren")[0][:1] == rec_agents(REN)[:1], (bA, _psvc._RENAMING, agents_of("projects/ren")[0]))
 st, out = rn("projects/ren", "home-ren-main", "home-ren-alpha")
 check("rename concurrency: …and the retry of the refused one is the ordinary 200 'already renamed'", st == 200 and out["result"] == "already renamed", (st, out))
 pverbs.agent_retire(REN, "home-ren-quick", by="fleet-web", io=rio)
 class RaisingGet(RenameIO):
     def get(s, slug): raise RuntimeError("gbrain exploded")
-server._pform.PAGE_IO = RaisingGet()
+_psvc.PAGE_IO = RaisingGet()
 st, out = rn("projects/ren", "home-ren-alpha", "home-ren-omega")
-check("rename concurrency: a page store call that raises is told (mirror 'failed'), the record is renamed, and the page key is released (a later rename is not stuck on 'in progress')", st == 200 and out["mirror"]["state"] == "failed" and server._RENAMING == set()
+check("rename concurrency: a page store call that raises is told (mirror 'failed'), the record is renamed, and the page key is released (a later rename is not stuck on 'in progress')", st == 200 and out["mirror"]["state"] == "failed" and _psvc._RENAMING == set()
       and rec_agents(REN)[0][0] == "home-ren-omega", (st, out))
-server._pform.PAGE_IO = rio
-check("rename concurrency: …and the next one goes through and writes the page again", rn("projects/ren", "home-ren-omega", "home-ren-final")[0] == 200 and server._RENAMING == set() and agents_of("projects/ren")[0][0][0] == "home-ren-final")
+_psvc.PAGE_IO = rio
+check("rename concurrency: …and the next one goes through and writes the page again", rn("projects/ren", "home-ren-omega", "home-ren-final")[0] == 200 and _psvc._RENAMING == set() and agents_of("projects/ren")[0][0][0] == "home-ren-final")
 st, out = rn("projects/ren", "home-ren-omega", "home-ren-final")
 check("rename: 'already renamed' also carries NEW's front, role and mandate, so the caller can see it is the entry it expects", st == 200 and out["result"] == "already renamed" and out["role"] == "final" and out["mandate"] == "talks to Oliver" and out["front"] is True, (st, out))
-server._pform.PAGE_IO = gio
+_psvc.PAGE_IO = gio
 
 # ---- 6e. post project-agent-retire: sala retired a session; the record drops the agent, the page's agents block follows with a timeline line there (or a leftover pending entry is dropped)
 import copy as _copy
 CFG_PA_6E = _copy.deepcopy(server._cfg.CFG.get("project_agent", None))      # put back at the end of the section
-server._pform.PAGE_IO = rio
+_psvc.PAGE_IO = rio
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 ren_page("projects/rtr", REN_FRONT.replace("home-ren", "home-rtr").replace("Ren", "Rtr"))
 ren_page("projects/rtr-solo", "type: project\ntitle: Rtr solo\norg: home\ndisplay-name: home-rts\nagents:\n  home-rts-main: talks\n  background:\n    home-rts-bg: in the back\nstatus: active")
@@ -932,7 +932,7 @@ check("retire: (setup) the page has two front agents and two background ones, an
 
 # a front entry: gone from the record, the page's block follows, the timeline line is added
 lock_seen = []; real_get = rio.get
-rio.get = lambda slug: (lock_seen.append(server._PROJECT_LOCK.locked()), real_get(slug))[1]
+rio.get = lambda slug: (lock_seen.append(_psvc._PROJECT_LOCK.locked()), real_get(slug))[1]
 rio.puts.clear(); rio.gets.clear()
 try: st, out = rt("projects/rtr", "home-rtr-engineer")
 finally: rio.get = real_get
@@ -1019,13 +1019,13 @@ check("retire: the page written but the timeline line refused → 200, the mirro
 # in flight: the page key is held while the page store works, the project lock is not
 pverbs.agent_add("projects/rtr", "home-rtr-fl", True, "t", by="fleet-web", io=rio)
 seen_put = []
-rio.hook = lambda slug: seen_put.append((server._PROJECT_LOCK.locked(), set(server._RENAMING)))
+rio.hook = lambda slug: seen_put.append((_psvc._PROJECT_LOCK.locked(), set(_psvc._RENAMING)))
 try: rt("projects/rtr", "home-rtr-fl")
 finally: rio.hook = None
-check("retire: while the page store holds the put the page key is in flight and the project lock is free; both are released after", seen_put == [(False, {"projects/rtr"})] and server._RENAMING == set() and not server._PROJECT_LOCK.locked(), (seen_put, server._RENAMING))
-server._RENAMING.add("projects/rtr"); rio.puts.clear()
+check("retire: while the page store holds the put the page key is in flight and the project lock is free; both are released after", seen_put == [(False, {"projects/rtr"})] and _psvc._RENAMING == set() and not _psvc._PROJECT_LOCK.locked(), (seen_put, _psvc._RENAMING))
+_psvc._RENAMING.add("projects/rtr"); rio.puts.clear()
 try: st, out = rt("projects/rtr", "home-rtr-main")
-finally: server._RENAMING.discard("projects/rtr")
+finally: _psvc._RENAMING.discard("projects/rtr")
 check("retire: while a rename or retire of the page is in flight → 409 'in progress; try again', nothing changed", st == 409 and out == {"error": "a rename or retire of projects/rtr is in progress; try again"} and not rio.puts and "home-rtr-main" in dict(rec_agents(RT)), (st, out))
 
 # refusals, each changes nothing
@@ -1040,13 +1040,13 @@ check("retire: …the 400 for a page with a hub: line names the hub page", "proj
 gets_rt = len(rio.gets)
 bad = [rt("projects/rtr", "home-rtr-main", sender="other-label"), rt("projects/rtr", "home-rtr-main", sender=None), rt("projects/rtr", "home-rtr-main", sender="box-a"),
        rt("projects/rtr", "home-rtr-main", sender=U["home-sparrow-main"]), rt("projects/rtr", "home-rtr-main", sender="")]
-check("retire: a sender that is no form label (a stranger's label, none, the machine's name, a session id, empty) → 403, the same text each time, before the page is read", all(s == 403 and o == {"error": server._RETIRE_NOT_FORM} for s, o in bad)
+check("retire: a sender that is no form label (a stranger's label, none, the machine's name, a session id, empty) → 403, the same text each time, before the page is read", all(s == 403 and o == {"error": pverbs.RETIRE_NOT_FORM} for s, o in bad)
       and len(rio.gets) == gets_rt and rt_same(), bad)
 bad = [rt("projects/rtr", "home-rtr-main", machine=m) for m in ("box-c", "box-e", "")]
-check("retire: the form's label from a machine that is not in form_machines (or none proven) → 403, nothing changed", all(s == 403 and o == {"error": server._RETIRE_NOT_FORM} for s, o in bad) and len(rio.gets) == gets_rt and rt_same(), bad)
+check("retire: the form's label from a machine that is not in form_machines (or none proven) → 403, nothing changed", all(s == 403 and o == {"error": pverbs.RETIRE_NOT_FORM} for s, o in bad) and len(rio.gets) == gets_rt and rt_same(), bad)
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
 st, out = rt("projects/rtr", "home-rtr-main")
-check("retire: a label that is not in form_senders (sala-retire missing from the config) → 403, so the live config must name sala-retire", st == 403 and out == {"error": server._RETIRE_NOT_FORM} and rt_same(), (st, out))
+check("retire: a label that is not in form_senders (sala-retire missing from the config) → 403, so the live config must name sala-retire", st == 403 and out == {"error": pverbs.RETIRE_NOT_FORM} and rt_same(), (st, out))
 server._cfg.CFG["project_agent"] = {"form_senders": [], "form_machines": ["box-a"]}
 check("retire: with no form label in the config (the defaults) nobody may", rt("projects/rtr", "home-rtr-main", sender="fleet-web")[0] == 403 and rt_same())
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
@@ -1060,7 +1060,7 @@ check("pages.remove_agent: a longer name that starts with the name is not touche
 check("pages.remove_agent: the entry after a wrapped one, a quoted key and the field after the map are kept as they were", p.remove_agent("---\nagents:\n  \"a\": x\n    wrapped\n  b: y\nowner: z\n---\nbody\n", "a")[0] == "---\nagents:\n  b: y\nowner: z\n---\nbody\n")
 if CFG_PA_6E is None: server._cfg.CFG.pop("project_agent", None)
 else: server._cfg.CFG["project_agent"] = CFG_PA_6E
-server._pform.PAGE_IO = gio
+_psvc.PAGE_IO = gio
 
 # the retire lines an earlier release kept on the ledger: gone, a debt on the same entry stays
 real_page_ts = server._pdebts._page_ts
@@ -1161,7 +1161,7 @@ with TestClient(app) as c:
     check("client.py: …and the list shows the project with that agent, front, as main", len(mine) == 1 and mine[0]["main"] == "ops-by-cli-main" and "page_owed" not in mine[0]["agents"]["ops-by-cli-main"] and mine[0]["listed_by"] == "agents", mine)
     check("client.py: get projects is one of the reads", "projects" in client.READS)
     # post project-agent-rename over HTTP and through client.py (the token's machine is this one: let it be a form machine for the checks, then put the config back)
-    server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": [me]}; server._pform.PAGE_IO = rio
+    server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": [me]}; _psvc.PAGE_IO = rio
     try:
         r = c.post("/client/project-agent-rename", json={"project": "projects/ren-http", "old": "home-rhttp-engineer", "new": "home-rhttp-builder", "sender": "fleet-web"})
         check("http: POST project-agent-rename without a token → 401, nothing written", r.status_code == 401 and "home-rhttp-builder" not in rio.pages["projects/ren-http"], r.status_code)
@@ -1230,7 +1230,7 @@ with TestClient(app) as c:
         with prj._Locked():
             d_ = prj._read(); [d_["pending_agents"].get(k, {}).pop(n, None) for k, n in ((RH, "home-rhttp-pend"), (RC, "home-rcli-pend"))]; prj._write(d_)
     finally:
-        server._pform.PAGE_IO = gio
+        _psvc.PAGE_IO = gio
         if CFG_PA_8 is _NOCFG: server._cfg.CFG.pop("project_agent", None)
         else: server._cfg.CFG["project_agent"] = copy.deepcopy(CFG_PA_8)
 
@@ -1315,7 +1315,7 @@ del cfgps["retired_statuses"]; fresh()
 check("retired: with the key absent the defaults apply", prj.retired_statuses() == set(prj._RETIRED) and rec("projects/live-paused")["retired"] is False)
 cfgps["retired_statuses"] = had; fresh()
 
-server._pform.PAGE_IO = rio
+_psvc.PAGE_IO = rio
 CFG_PA_6F = _copy.deepcopy(server._cfg.CFG.get("project_agent", None))
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 
@@ -1477,7 +1477,7 @@ finally:
 
 if CFG_PA_6F is None: server._cfg.CFG.pop("project_agent", None)
 else: server._cfg.CFG["project_agent"] = CFG_PA_6F
-server._pform.PAGE_IO = gio
+_psvc.PAGE_IO = gio
 
 
 print(("ok" if not fails else "FAILED") + f": projects picker scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

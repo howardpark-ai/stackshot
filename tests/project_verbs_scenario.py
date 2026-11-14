@@ -439,13 +439,13 @@ res = pv.agent_add("projects/deadp", "home-deadp-eng", False, "builds", io=Dead(
 check("a pre-read that fails: the answer carries a warning, the entry comes from the registry's row, and the mirror leaves the page's own agent line alone (guard)",
       "could not be read" in res.get("warning", "") and res["mirror"]["state"] == "failed" and "home-deadp-late" in res["mirror"]["note"] and "home-deadp-late: added a minute ago" in text("projects/deadp"), (res.get("warning"), res["mirror"]))
 # the server's helper path: pre-read before _PROJECT_LOCK
-from stackshot.web import server
+from stackshot.web import server; from stackshot.service import projects as _psvc
 page("projects/srvp.md", "type: project\ntitle: Srv\ndisplay-name: home-srvp\nagents:\n  home-srvp-main: talks\nstatus: active"); p.cmd_registry(quiet=True)
 pre_slow = Slow(IO, NAP); res_pre = {}
 def do_pre(): res_pre["p"] = pv.preread("projects/srvp", pre_slow)
 th = threading.Thread(target=do_pre); th.start(); time.sleep(0.5)
 t0 = time.monotonic(); prj.ensure_ids(["projects/alpha"]); waited = time.monotonic() - t0
-with server._PROJECT_LOCK: pass                       # the server's lock is free while the pre-read waits on the page store
+with _psvc._PROJECT_LOCK: pass                       # the server's lock is free while the pre-read waits on the page store
 waited2 = time.monotonic() - t0
 th.join()
 check("preread: reads the page before any lock: a second record writer and the server's project lock are not held up by the slow read, and it returns the page text by key",

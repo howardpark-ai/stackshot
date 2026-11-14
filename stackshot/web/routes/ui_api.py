@@ -19,7 +19,7 @@ from stackshot.web import i18n as _i18n, uiprefs as _uiprefs, runners as _runner
 from stackshot.web.answers import _answer_same_origin
 from stackshot.web.auth import signin as _signin
 from stackshot.web.auth.signin import _ui_guard, _ui_key, _ui_open
-from stackshot.web.project_form import _FORM_MACHINES, _cfg_names, _form_call
+from stackshot.service.projects import _FORM_MACHINES, _cfg_names, _form_call
 from stackshot.web.publish import _publish
 from stackshot.web.routes.board_pages import _details_key, _ui_mods
 from stackshot.web.routes.client_api import _client_machine

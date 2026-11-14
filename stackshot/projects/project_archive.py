@@ -21,7 +21,7 @@ A retire that found the agent on no list ("not listed") never archives: the proj
 
 `tools/archive_empty_projects.py` lists the projects that meet the rule now (dry run; `--apply` archives them).
 
-The page store is the caller's: an object with get(slug) -> (text, revision), put(slug, text, revision) and add_timeline(...), as project_form._page_io() gives."""
+The page store is the caller's: an object with get(slug) -> (text, revision), put(slug, text, revision) and add_timeline(...), as service/projects.py `_page_io()` gives."""
 from __future__ import annotations
 
 import json

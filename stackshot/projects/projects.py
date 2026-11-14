@@ -29,7 +29,7 @@ the page registry is rebuilt from the pages and could not hold them). Listed = a
 item touched in the last LISTED_DAYS days, or a mark made on purpose (a project made through `post project`, or listed again through
 `post project-list`); everything else is hidden, never deleted. A sub-page (a key with an ancestor key that is itself a page of the
 registry, or a page with a `hub:` line) and a `type: note` page are never listed. A mark also keeps `at` (the last make or re-list) and `by`
-(its label), which window the first agent a label may register (project_form.py `_project_agent`). A project made through `post project` whose page the registry has not read yet is added to the registry
+(its label), which window the first agent a label may register (service/projects.py `_project_agent`). A project made through `post project` whose page the registry has not read yet is added to the registry
 read here (`with_made`), so it has a record at once.
 
 The project entries (project_registry.py, the section `projects` of the same file, keyed by the same ids): when a project has one, `registry()` lays it over the page's lines (title, type,

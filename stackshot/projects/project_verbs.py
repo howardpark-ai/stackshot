@@ -1189,3 +1189,410 @@ def one(project: Any) -> dict | None:
     if recs:
         return recs[0]
     return pageless_rec(project)
+
+
+# ----------------------------------------------------------------------------- the New session form's checks
+# What the form's calls (`post project`, `post project-list`, `post project-agent` and its mandate, rename and retire, `get projects`; service/projects.py) decide before and after
+# they read or write: the shape of a body, who may ask, the name rules, and the words of each refusal and each answer. Nothing here reads the record, the clock, a session or
+# a page: what a rule needs comes in as an argument, and a refusal is `(status, body)`, or None when the call goes on. The reads, the lock and the writes are service/projects.py's.
+AGENT_ROLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}")
+MANDATE_CONTROL = re.compile("[\\u0000-\\u001f\\u007f-\\u009f\\ufffe\\uffff]")      # control characters: a YAML reader refuses or misreads them on the page
+FIRST_AGENT_WINDOW = 3600       # seconds after a make or a re-list in which the label that did it may register the project's first agent
+RENAME_NOT_FORM = ("refused: only the web form may rename an agent's entry on a page: `sender` must be a label in [project_agent] form_senders "
+                   "and the token must be a machine in form_machines")
+RETIRE_NOT_FORM = ("refused: only the web form may retire an agent: `sender` must be a label in [project_agent] form_senders "
+                   "and the token must be a machine in form_machines")
+_NAME_TEXT = "name = the session's name: letters, digits, . _ - (at most 64), starting with a letter or digit"
+_MANDATE_TEXT = "mandate = one line of at most 600 characters, with no control characters"
+_SENDER_TEXT = "sender = the caller's own label: one line of at most 80 characters"
+_SESSION_ID_TEXT = ("refused: sender {sender!r} is a name, and a name proves nothing. Send the asking session's id: its transcript id "
+                    "($CLAUDE_CODE_SESSION_ID, which Claude Code sets in every Bash command) or a cloud session's cse_ id")
+_Refusal = tuple[int, dict[str, Any]]
+
+
+def label_bad(s: str) -> bool:
+    """A sender label that is not one line of at most 80 characters."""
+    return len(s) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in s)
+
+
+def section_names(sec: Any, key: str, default: list[str]) -> list[str]:
+    """`[project_agent] <key>` as a list of strings, from the section as the config holds it: the section or the key absent → `default`; a bare string counts as one
+    name; a section or value of another type reads as an empty list (no form call at all, never a wider rule than the file says)."""
+    if sec is None:
+        return list(default)
+    if not isinstance(sec, dict):
+        return []
+    v = sec.get(key)
+    if v is None:
+        return list(default)
+    if isinstance(v, str):
+        v = [v]
+    return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+
+
+def form_call(machine: str, sender: str, senders: list[str], machines: list[str]) -> bool:
+    """Is this call the New session form's? Only when the `sender` label is in form_senders AND the machine its token proves (`machine`, never the body) is in
+    form_machines: a label alone is not enough, since any token holder can type it."""
+    return bool(machine) and bool(sender) and sender in senders and machine in machines
+
+
+def unwritable(e: Exception, done: str = "changed") -> str:
+    """The text of a 503 when the project record cannot be read or written: `done` is what was not done ("changed", "made")."""
+    return f"the project record cannot be read or written right now, nothing was {done}: {e}"
+
+
+def pick_project(project: str, recs: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, _Refusal | None]:
+    """The one record a project reference names → (record, None), or (None, the refusal): unknown, or ambiguous between two pages."""
+    if not recs:
+        return None, (404, {"error": f"no project {project!r}: an id (prj_<8 hex>), a page key or a bare slug of a page in the registry"})
+    if len(recs) > 1:
+        return None, (400, {"error": f"{project!r} is ambiguous: it names {' and '.join(r['key'] for r in recs)}; write the full key or the id"})
+    return recs[0], None
+
+
+def hub_refusal(rec: dict[str, Any], entry: dict[str, Any], how: str) -> _Refusal | None:
+    """The agents map lives on a hub page: a sub-page, or a page with a `hub:` line, is refused with the page to use; `how` says what to do there."""
+    key = rec["key"]
+    top = "/".join(key.split("/")[:2]); hub = str(entry.get("hub") or "")
+    if key != top or hub:
+        return 400, {"error": f"{key} is not a hub page: the agents map is kept on {hub or top}; {how}"}
+    return None
+
+
+def project_prefixes(rec: dict[str, Any], entry: dict[str, Any], reg: dict[str, Any]) -> list[str]:
+    """The names an agent of the project may start with: the keeper's name for a project with no page, else the page's name, else the page's slug (an agent is always <project>-<role>)."""
+    key = rec["key"]
+    return [rec["keeper"]] if rec.get("pageless") else (prj._name_prefixes(key, entry, reg) or [key.split("/")[-1]])
+
+
+def prefix_refusal(name: str, prefixes: list[str], where: str) -> _Refusal | None:
+    """A name that does not start with the project's name."""
+    if not any(name.startswith(p + "-") and len(name) > len(p) + 1 for p in prefixes):
+        return 400, {"error": f"{name!r} does not start with the project's name: an agent of {where} is called {prefixes[0]}-<role>"}
+    return None
+
+
+def name_clash(name: str, key: str, pid: str, prefixes: list[str], reg: dict[str, Any], entries: dict[str, Any], pending: dict[str, Any], key_of: Callable[[str], str]) -> str:
+    """A name belongs to one project (every path, the form's too): the 409 text when another project's page map or pending list holds `name`, or when it
+    starts with the longer name prefix of another project (team-alpha-docs-main under projects/alpha belongs to a project whose name is team-alpha-docs);
+    "" when the name is free for the project `key` (id `pid`). `entries` is the project record's entries by id, `pending` the pending agents by id, `key_of` an id's page key."""
+    fold = name.casefold()
+    own_pre = {x.casefold() for x in prefixes}
+    longest = max((len(x) for x in prefixes if fold.startswith(x.casefold() + "-")), default=0)
+    for k2, e2 in sorted(reg.items()):
+        if k2 == key or not isinstance(e2, dict): continue
+        if any(str(n).casefold() == fold for n in (e2.get("agents") or {})):
+            return f"{name} is already an agent of {k2}: a name belongs to one project"
+        for q in prj._name_prefixes(k2, e2, reg):
+            if q.casefold() not in own_pre and len(q) > longest and fold.startswith(q.casefold() + "-"):
+                return f"{name} starts with {q}-, the name of {k2}: an agent of {key} cannot take it; a name belongs to one project"
+    for pid2, ent in entries.items():          # the record's lists: a project whose page is gone, or never was, still holds its agents
+        if pid2 != pid and any(str(n).casefold() == fold for n in (ent.get("agents") or {})):
+            return f"{name} is already an agent of {key_of(pid2) or pid2}: a name belongs to one project"
+    for pid2, ag2 in pending.items():
+        if pid2 != pid and any(str(n).casefold() == fold for n in ag2):
+            return f"{name} is already registered for {key_of(pid2) or pid2}: a name belongs to one project"
+    return ""
+
+
+def agents_block_tail(m: dict[str, Any]) -> str:
+    """What an answer adds when the page's agents block was not written (the record is right already): "" when the mirror is in a state that needs no word."""
+    return ("" if m["state"] in ("none", "unchanged", "written", "would-write", "retired") else
+            f" The page's agents block was not updated ({m['note']}); the record is right and the next change to this project writes the page again.")
+
+
+# post project-agent ---------------------------------------------------------
+def agent_fields(body: dict[str, Any]) -> tuple[tuple[str, str, str, str, str, bool] | None, _Refusal | None]:
+    """The body of `post project-agent` → ((project, name, role, mandate, sender, front), None), or (None, the 400)."""
+    project, name, role, mandate, sender = (str(body.get(k) or "").strip() for k in ("project", "name", "role", "mandate", "sender"))
+    front = body.get("front")
+    if not (project and name and role and mandate and sender) or not isinstance(front, bool):
+        return None, (400, {"error": "project, name, role, mandate and sender are required, and front is true (a front agent) or false (a background agent)"})
+    if not NAME_RE.fullmatch(name):
+        return None, (400, {"error": _NAME_TEXT})
+    if not AGENT_ROLE.fullmatch(role):
+        return None, (400, {"error": "role = the name's suffix after the project's name (main, engineer, sessions): letters, digits, . _ - (at most 32)"})
+    if "\n" in mandate or "\r" in mandate or len(mandate) > 600 or MANDATE_CONTROL.search(mandate):
+        return None, (400, {"error": _MANDATE_TEXT})
+    return (project, name, role, mandate, sender, front), None
+
+
+def mark_age(mark: dict[str, Any], now: dt.datetime) -> float:
+    """Seconds since the project's mark was made or renewed (`at`, else `on_purpose`) as of `now` (aware, UTC); infinite when the mark has no readable time."""
+    try:
+        return (now - dt.datetime.strptime(str(mark.get("at") or mark.get("on_purpose") or ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)).total_seconds()
+    except ValueError:
+        return float("inf")
+
+
+def label_paths(rec: dict[str, Any], mark: dict[str, Any], owed: dict[str, Any], listed_by: dict[str, Any], keeper_live: bool, sender: str, age: float) -> tuple[bool, bool]:
+    """The two paths of a label as sender (see service/projects.py `_project_agent_locked`) → (first, more). `owed` is the project's pending agents, `listed_by` the agents the record
+    lists with who listed each, `keeper_live` whether the fleet holds a present session of the keeper's name."""
+    on_page = [n for n, a in rec["agents"].items() if not a.get("page_owed")]
+    first = not rec["agents"] and not keeper_live and 0 <= age <= FIRST_AGENT_WINDOW and bool(mark.get("by")) and mark.get("by") == sender
+    more = not first and bool(sender) and (bool(listed_by) and all(a.get("by") == sender for a in listed_by.values()) or (not on_page and bool(owed) and all(a.get("by") == sender for a in owed.values())))
+    return first, more
+
+
+def front_caller_refusal(sender: str, is_id: bool, names_get: Callable[[str, str], str], rec: dict[str, Any], named: str, action: str) -> _Refusal | None:
+    """A caller that is a session, not a label: `sender` must be a session id that resolves (`names_get`, the fleet's heartbeat names) to the keeper or a listed front agent of the project (`named` is
+    how an answer names it); `action` is what only they may do ("lists a new agent")."""
+    if not is_id:
+        return 403, {"error": _SESSION_ID_TEXT.format(sender=sender)}
+    sname = names_get(sender, "")
+    listed_front = sorted(n for n, a in rec["agents"].items() if a["front"] and not a.get("page_owed"))
+    allowed = {rec["keeper"], *listed_front}
+    allowed.discard("")
+    if not sname and sender not in allowed:
+        return 403, {"error": f"refused: {sender!r} is not a session in the fleet's heartbeat, so it names nobody; run this from the keeper's or a front agent's own session"}
+    if not ({sender, sname} & allowed):
+        return 403, {"error": f"refused: session {sname or sender!r} is neither the keeper ({rec['keeper'] or 'none'}) nor a front agent of {named} "
+                              f"({', '.join(listed_front) or 'none'}); one of them {action}"}
+    return None
+
+
+def agent_caller_refusal(rec: dict[str, Any], key: str, form: bool, first: bool, more: bool, sender: str, is_id: bool, names_get: Callable[[str, str], str]) -> _Refusal | None:
+    """Who may register an agent: a label on the first-agent or further-agents path, or the New session form (`form`), or the keeper or a front agent as a session id."""
+    if (first or more or form) and rec["retired"]:        # a label is the form's word: a retired project takes no agent from it (the keeper's and a front agent's session ids still may)
+        return 403, {"error": f"{key} is retired (page status: {rec['status']}): change the page's status first"}
+    if form and not rec["listed"]:
+        return 403, {"error": f"refused: {key} is hidden, not listed. List it again first with `client.py post project-list --key {key}`, then add the agent"}
+    if first or more or form:
+        if label_bad(sender):
+            return 400, {"error": _SENDER_TEXT}
+        return None
+    return front_caller_refusal(sender, is_id, names_get, rec, key, "lists a new agent")
+
+
+def listed_answer(rec: dict[str, Any], key: str, where: str, name: str, front: bool, mandate: str) -> tuple[str, _Refusal | None]:
+    """A name the page already lists (case-folded) → (the name as listed, the answer): the same side and mandate changes nothing (200), another is a 409; (name, None) when it is not listed."""
+    fold = name.casefold()
+    listed_name = next((n for n, a in rec["agents"].items() if n.casefold() == fold and not a.get("page_owed")), None)     # names compare case-folded
+    if listed_name is None:
+        return name, None
+    name = str(listed_name)
+    cur = rec["agents"][name]
+    if (cur["front"], cur["mandate_line"]) == (front, mandate):          # the role is read from the name: the one asked for is no part of "the same"
+        return name, (200, {"project": rec["id"], "key": key, "agent": {name: cur}, "page_owed": False, "page_yaml": "", "note": f"{name} is already listed on {where}: nothing changed"})
+    return name, (409, {"error": f"{name} is already listed on {where} as {'front' if cur['front'] else 'background'} ({cur['role']}): {cur['mandate_line'][:120]!r}; "
+                                 "to change its mandate line use `client.py post project-agent-mandate`; to change its side, retire it, or rename it, then list it again"})
+
+
+def pending_name(pending: dict[str, Any], name: str) -> str:
+    """A pending entry under another spelling is the same agent: the name as the pending list spells it, else `name`."""
+    fold = name.casefold()
+    return next((n for n in pending if str(n).casefold() == fold), name)
+
+
+def pending_refusal(pend: dict[str, Any], sender: str, name: str, where: str, front: bool, role: str, mandate: str) -> _Refusal | None:
+    """A pending entry another session registered, as something else: only that session changes it."""
+    if pend and pend.get("by") != sender and (pend.get("front"), pend.get("role"), pend.get("mandate_line")) != (front, role, mandate):
+        return 409, {"error": f"{name} was already registered for {where} by another session ({pend.get('by') or 'unknown'}) as "
+                              f"{'front' if pend.get('front') else 'background'} ({pend.get('role')}): {str(pend.get('mandate_line'))[:120]!r}; "
+                              "only that session changes it"}
+    return None
+
+
+def agent_added(rec: dict[str, Any], key: str, where: str, res: dict[str, Any], new: dict[str, Any]) -> _Refusal:
+    """The 200 of a listed agent; `_mirror` is the project's id when its page is to get the agents line (the caller writes it after the lock and pops the key)."""
+    has_page = bool(res["key"])
+    return 200, {"project": rec["id"], "key": key, "agent": {res["name"]: new}, "page_owed": False, "page_yaml": "", "_mirror": rec["id"] if has_page else "",
+                 "note": f"Listed {res['name']} on {where} in the project record" + (f"; its page {key} gets the agents line from the record." if has_page else " (the project has no page).")
+                 + (f" Note: {res['warning']}." if res.get("warning") else "")}
+
+
+def agent_mirror_tail(m: dict[str, Any]) -> str:
+    """What the answer of `post project-agent` adds for a mirror that failed or has no page."""
+    if m["state"] == "failed":
+        return f" The page's agents block was not updated ({m['note']}); the record holds the agent, and the next change to this project writes the page again."
+    if m["state"] == "no-page":
+        return f" Its page {m['key']} is not in the page store, so no page was written."
+    return ""
+
+
+# post project-agent-mandate -------------------------------------------------
+def mandate_fields(body: dict[str, Any]) -> tuple[tuple[str, str, str, str] | None, _Refusal | None]:
+    """The body of `post project-agent-mandate` → ((project, name, mandate, sender), None), or (None, the 400)."""
+    project, name, mandate, sender = (str(body.get(k) or "").strip() for k in ("project", "name", "mandate", "sender"))
+    if not (project and name and sender):
+        return None, (400, {"error": "project, name and sender are required: the project, the listed agent's name and the asking session's id; the new line goes in `mandate`"})
+    if not NAME_RE.fullmatch(name):
+        return None, (400, {"error": _NAME_TEXT})
+    if not mandate:
+        return None, (400, {"error": "mandate is empty: give the agent's new line (one line of at most 600 characters, what it does); to take the agent off the map use `post project-agent-retire`"})
+    if "\n" in mandate or "\r" in mandate or len(mandate) > 600 or MANDATE_CONTROL.search(mandate):
+        return None, (400, {"error": _MANDATE_TEXT})
+    if "\\" in mandate:
+        return None, (400, {"error": "a mandate line cannot contain a backslash; write it without (the page's agents block could not be read back with one)"})
+    return (project, name, mandate, sender), None
+
+
+def mandate_answer(rec: dict[str, Any], key: str, where: str, res: dict[str, Any], m: dict[str, Any], role: str) -> _Refusal:
+    """The 200 of a changed (or unchanged) mandate line; `m` is the page mirror's state, `role` the agent's role read from its name."""
+    tail = (f" The page's agents block was not updated ({m['note']}); the record holds the new line, and the next change to this project writes the page again." if m["state"] == "failed" else "")
+    return 200, {"project": rec["id"], "key": key, "agent": {res["name"]: {"front": res["front"], "role": role, "mandate_line": res["mandate"]}}, "previous": res["previous"], "mirror": m,
+                 "note": (f"{res['name']} on {where} already has this mandate line: nothing changed." if not res["changed"] and m["state"] in ("none", "unchanged") else
+                          f"{res['name']} on {where} already had this mandate line in the project record; the page {key} was written from the record." if not res["changed"] and m["state"] == "written" else
+                          f"{res['name']} on {where} already has this mandate line in the project record." if not res["changed"] else
+                          f"Changed the mandate line of {res['name']} on {where} in the project record" + (f"; the page {key} gets it from the record." if key else " (the project has no page).")) + tail}
+
+
+# post project-agent-rename and -retire -------------------------------------
+def rename_fields(machine: str, body: dict[str, Any], is_form: Callable[[str, str], bool]) -> tuple[tuple[str, str, str, str] | None, _Refusal | None]:
+    """The gate and the names of `post project-agent-rename` → ((project, old, new, sender), None), or (None, the refusal). `is_form` is the form-call test of the instance's config."""
+    project, old, new = (str(body.get(k) or "").strip() for k in ("project", "old", "new"))
+    sender = str(body.get("sender") or "").strip() or machine
+    if not (project and old and new):
+        return None, (400, {"error": "project, old and new are required: the project, the agent's name now and its new name"})
+    if label_bad(sender):
+        return None, (400, {"error": _SENDER_TEXT})
+    if not is_form(machine, sender):
+        return None, (403, {"error": RENAME_NOT_FORM})
+    for nm in (old, new):
+        if not NAME_RE.fullmatch(nm):
+            return None, (400, {"error": "old and new = the session's name: letters, digits, . _ - (at most 64), starting with a letter or digit"})
+    if old.casefold() == new.casefold():
+        return None, (400, {"error": "old and new are the same name (names compare case-folded): nothing to rename"})
+    return (project, old, new, sender), None
+
+
+def rename_pending_refusal(pending: dict[str, Any], rec: dict[str, Any], where: str, old: str, new: str) -> _Refusal | None:
+    """NEW is registered for the project as a pending agent whose page line is owed, and OLD is not listed: that entry is not this call's to change."""
+    pend = next(((n, a) for n, a in pending.items() if str(n).casefold() == new.casefold()), None)
+    if pend and not any(str(n).casefold() == old.casefold() for n in rec["agents"]):
+        return 409, {"error": f"{new} is already registered for {where} as a pending agent (by {pend[1].get('by') or 'unknown'}), its page line still owed: nothing was changed; "
+                              "that entry is not this call's to change"}
+    return None
+
+
+def rename_answer(rec: dict[str, Any], key: str, where: str, res: dict[str, Any], old: str, new: str, prefixes: list[str]) -> _Refusal:
+    """The 200 of `post project-agent-rename` (renamed, or already renamed: a retry after a lost reply)."""
+    m = res["mirror"]
+    tail = agents_block_tail(m)
+    if res["result"] == "already renamed":
+        return 200, {"project": rec["id"], "key": key, "result": "already renamed", "old": old, "new": res["new"], "front": res["front"],
+                     "role": prj.role_of(res["new"], prefixes), "mandate": res["mandate"], "mirror": m, "note": "already renamed"}
+    return 200, {"project": rec["id"], "key": key, "result": "renamed", "old": res["old"], "new": new, "front": res["front"], "role": prj.role_of(new, prefixes), "mandate": res["mandate"], "mirror": m,
+                 "note": f"Renamed {res['old']} to {new} on {where}: the entry in the project's agents map is renamed in place (same place in the map, same mandate)"
+                         + (f", and the page {key} follows from the record." if key else " (the project has no page).") + tail}
+
+
+def retire_fields(machine: str, body: dict[str, Any], is_form: Callable[[str, str], bool]) -> tuple[tuple[str, str, str] | None, _Refusal | None]:
+    """The gate and the names of `post project-agent-retire` → ((project, name, sender), None), or (None, the refusal)."""
+    project, name = (str(body.get(k) or "").strip() for k in ("project", "name"))
+    sender = str(body.get("sender") or "").strip() or machine
+    if not (project and name):
+        return None, (400, {"error": "project and name are required: the project and the retired agent's name"})
+    if label_bad(sender):
+        return None, (400, {"error": _SENDER_TEXT})
+    if not is_form(machine, sender):
+        return None, (403, {"error": RETIRE_NOT_FORM})
+    if not NAME_RE.fullmatch(name):
+        return None, (400, {"error": _NAME_TEXT})
+    return (project, name, sender), None
+
+
+def retire_answer(rec: dict[str, Any], key: str, where: str, res: dict[str, Any], name: str, extra: dict[str, Any]) -> _Refusal:
+    """The 200 of `post project-agent-retire`: nothing to remove, a pending entry dropped, or the line removed. `extra` is the archive step's answer (`{}` where none ran)."""
+    m = res["mirror"]
+    tail = agents_block_tail(m)
+    if res["result"] == "not listed":
+        return 200, {"project": rec["id"], "key": key, "result": "not listed", "agent": name, "page_owed": False, "mirror": m,
+                     "reason": f"{name} is not on {where}'s agents map and not pending in the record: nothing to remove.", "note": f"{name} is not listed on {where}: nothing to do."}
+    if res["result"] == "dropped":
+        return 200, {"project": rec["id"], "key": key, "result": "dropped", "agent": res["name"], "page_owed": False, "mirror": m,
+                     "note": f"{res['name']} was only pending for {where}: dropped from the record, so no page update is owed for it.", **extra}
+    return 200, {"project": rec["id"], "key": key, "result": "line removed", "agent": res["name"], "front": res["front"], "page_owed": False, "mirror": m,
+                 "note": f"Took {res['name']} off {where}'s agents map in the project record" + (f"; the page {key} follows from the record, with a timeline line." if key else " (the project has no page).") + tail,
+                 **extra}
+
+
+# get projects, post project and post project-list ---------------------------
+def list_params(params: dict[str, str], scopes: list[str]) -> tuple[tuple[str, str] | None, tuple[int, str, str] | None]:
+    """The query of `get projects` → ((scope, q), None), or (None, the 400 as (status, type, text)). `scopes` are the instance's scope names."""
+    scope = str(params.get("scope") or "").strip().lower()
+    q = str(params.get("q") or "").strip()
+    if scope and scope != "all" and scope not in scopes:
+        return None, (400, "text/plain", f"scope = {' | '.join(scopes)} | all")
+    if len(q) > 200 or any(ord(c) < 32 for c in q):
+        return None, (400, "text/plain", "q = a search text of one line, at most 200 characters")
+    return (scope, q), None
+
+
+def new_project_fields(machine: str, body: dict[str, Any], scopes: list[str], dirs: list[str]) -> tuple[dict[str, Any] | None, _Refusal | None]:
+    """The body of `post project` → ({legacy, page, make_page, scope, title, name, sender, key}, None), or (None, the 400). `scopes` are the instance's scope names, `dirs` its page dirs."""
+    legacy = str(body.get("key") or "").strip().strip("/")
+    page = legacy or str(body.get("page") or "").strip()
+    if page.endswith(".md"): page = page[:-3]
+    mp = body.get("make_page")
+    make_page = bool(legacy) if mp is None else bool(mp)          # the form's `key` makes its page, as it always did; a `page` pointer makes one only on request
+    scope = str(body.get("scope") or "").strip().lower()
+    title = " ".join(str(body.get("title") or "").split())
+    name = " ".join(str(body.get("name") or "").split())
+    sender = str(body.get("sender") or "").strip() or machine
+    if not scope or not (page or name):
+        return None, (400, {"error": "scope and a name or a page key (projects/<slug> or infra/<slug>) are required"})
+    if scope not in scopes:
+        return None, (400, {"error": f"scope = {' | '.join(scopes)}"})
+    key = ""
+    if page and (legacy or ("://" not in page and not re.search(r"\s", page))):          # `key` is always a page key; `page` may be a link to another knowledge base
+        key = page
+        top, _, slug = key.partition("/")
+        if top not in dirs or not slug or (make_page and (not prj.SLUG_RE.fullmatch(slug) or len(slug) > 60)):
+            return None, (400, {"error": f"key = {' or '.join(d + '/<slug>' for d in dirs)}, one level, the slug lowercase letters, digits and dashes (at most 60): got {key[:80]!r}"})
+    if len(title) > 120 or any(ord(c) < 32 or c in '"\\' for c in title):
+        return None, (400, {"error": "title = one line of at most 120 characters, with no quotation marks or backslashes (the pages checkout's reader takes the frontmatter as it stands)"})
+    if label_bad(sender):
+        return None, (400, {"error": _SENDER_TEXT})
+    return {"legacy": legacy, "page": page, "make_page": make_page, "scope": scope, "title": title, "name": name, "sender": sender, "key": key}, None
+
+
+def exists_text(key: str) -> str:
+    """The 409 for a page that exists already (or has sub-pages, or some project points at it)."""
+    return f"{key} already exists: list it again with `client.py post project-list --key {key}` (a hidden project keeps its page, agents and history)"
+
+
+def create_refusal(status: int, message: str, key: str, exists: str, store: str) -> str:
+    """The text of a refused `create` verb: a 409 on a page names `post project-list`; the page store is named as this instance calls it (`store`)."""
+    return (message if status != 409 or not key else f"{message}; {exists}").replace("the page store", store)
+
+
+def new_project_answer(rec: dict[str, Any], name: str, scope: str, pid: str, key: str, make_page: bool, m: dict[str, Any], store: str) -> _Refusal:
+    """The 200 of `post project`: `m` is the page mirror's state, `store` what a note names as the page store."""
+    state = "ok" if m["state"] in ("written", "unchanged") else m["state"]
+    note = (f"Made {name} ({pid}) in scope {scope}: its entry is in the project record and the project is listed" + (f"; its page {key} is written through {store}." if make_page and state == "ok" else
+            f"; its page is {key}." if key else "; it has no page.") + f" Add the first agent with `client.py post project-agent {pid} {name}-main --role main --front --mandate \"…\"`.")
+    if make_page and state != "ok":
+        note += (f" The page {key} was not made ({m['note']}); the record holds the project." if state == "retired" else
+                 f" The page {key} was not made ({m['note']}); the record is right, and the next change to the project makes it.")
+    return 200, {"project": rec, "created": True, "page": {"key": key, "state": state, "display_name": name}, "page_yaml": "", "mirror": m, "note": note}
+
+
+def list_fields(machine: str, body: dict[str, Any], scopes: list[str]) -> tuple[tuple[str, str, str] | None, _Refusal | None]:
+    """The body of `post project-list` → ((project, scope, sender), None), or (None, the 400)."""
+    project = str(body.get("key") or body.get("project") or "").strip()
+    scope = str(body.get("scope") or "").strip().lower()
+    sender = str(body.get("sender") or "").strip() or machine
+    if not project:
+        return None, (400, {"error": "key = the project: its id (prj_<8 hex>), its page key or its bare slug"})
+    if scope and scope not in scopes:
+        return None, (400, {"error": f"scope = {' | '.join(scopes)}"})
+    if label_bad(sender):
+        return None, (400, {"error": _SENDER_TEXT})
+    return (project, scope, sender), None
+
+
+def list_refusal(rec: dict[str, Any], up: str) -> _Refusal | None:
+    """A project that cannot be listed: a sub-page (`up` is the page above it, "" when none is found), a retired project, a note page."""
+    if rec["sub_page"]:
+        return 400, {"error": f"{rec['key']} is a sub-page of {up or 'a project'} (or has a hub: line), and a sub-page is never listed: list {up or 'the project above it'}"}
+    if rec["retired"]:
+        return 400, {"error": f"{rec['key']} is retired (page status: {rec['status']}): change the page's status first"}
+    if rec["type"] == "note":
+        return 400, {"error": f"{rec['key']} is a `type: note` page, and a note is never listed; a project page has `type: project`"}
+    return None
+
+
+def list_answer(rec: dict[str, Any], changed: bool) -> _Refusal:
+    """The 200 of `post project-list`."""
+    return 200, {"project": rec, "changed": changed, "note": f"{rec['key']} is listed on purpose from now on." if changed else f"{rec['key']} was already listed on purpose: nothing changed (its first-agent window is renewed)."}

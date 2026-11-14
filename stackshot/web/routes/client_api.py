@@ -22,7 +22,7 @@ from stackshot.model.ids import _norm_id
 from stackshot.projects import brains as _brains
 from stackshot.service.store import _load
 from stackshot.service import foryou as _fy
-from stackshot.web.project_form import _form_call
+from stackshot.service.projects import _form_call
 from stackshot.web.publish import _publish
 
 
