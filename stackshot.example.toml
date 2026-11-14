@@ -690,6 +690,12 @@ owner_param_until = "2099-12-31"
 # (until_write.ALIAS_UNTIL) and the server says so once at its start. An instance's own file lists the key, so the start is silent. (The test suites start from this file with the window held open
 # by their own fixture, so no suite starts failing on this date.)
 wait_alias_until = "2026-11-25"
+#
+# The old parameter post_wake_mover is an alias of `mover`: on an item that waits it is stored as `mover` (the one who takes the item when the wait ends), on an item that waits on nothing it is dropped
+# with a note naming `mover`, and a call that passes both with different values is refused. It is accepted up to and including this date (the date as first set is 14 days after the release that opens
+# the window), and the notice in the reply names it. Read at every call, so moving the date needs no release. With no key the code's default stands (model.PICKER_ALIAS_UNTIL) and the server says so
+# once at its start. An instance's own file lists the key, so the start is silent.
+post_wake_alias_until = "2026-11-29"
 
 # [handoff.builder_by_page]                         # the builder of an area: a new item with no mover is handed to the project's FIRST builder (the first background agent whose mandate builds); this table
                                                     # sends the items filed on a page to another builder of the same project. Key = a project page key, matched as a prefix on the page the item is filed on (the page itself and

@@ -286,6 +286,22 @@ for g_ in (False, True):
     check(f"F7 clear_wait and clear_hold on a relay wait with no hold flag: {HELP} is kept as mover, the old key is gone {tag}", stores_mover(m_, HELP) and "wait_kind" not in m_, m_)
     m_, mod_, sent = cleared({**BASE, "wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT, LEG: HELP}, clear_hold=True)
     check(f"F7 …a clear_hold alone on it changes nothing: the wait and the old key stay {tag}", m_.get("wait_kind") == "relay" and m_.get(LEG) == HELP and "mover" not in m_, m_)
+    # F8 an item that waits on his answer (decision in needs): clear_hold does not hand it to the old key's agent; he stays the mover and nobody is told (the skip guard in the update path)
+    m_, mod_, sent = cleared({**BASE, "needs": ["decision"], "hold": True, "wake": FUT, LEG: HELP}, clear_hold=True)
+    check(f"F8 decision in needs, the old key {HELP}, clear_hold: no picker is kept, {HELP} is not made the mover {tag}", m_.get("mover") != HELP, m_)
+    check(f"F8 …he stays the mover of the item {tag}", model.is_owner(model.norm_who(mod_.mover)), (mod_.state, mod_.mover, m_))
+    check(f"F8 …and no notice goes out {tag}", not sent, sent)
+    # F8 again with the picker stored as `mover` (the form every item stores now): the same guard has to hold, or clear_hold hands the item from him to the agent
+    if not g_:      # with the guards on, a decision beside a hold is refused whatever the write is, so the stored shape is only reachable (an older item) with them off
+        m_, mod_, sent = cleared({**BASE, "needs": ["decision"], "hold": True, "wake": FUT, "wait_kind": "time", "wait_basis": {"text": f"the soak ends {FUT}", "wake": FUT, "by": BACK, "at": now0}, "mover": HELP}, clear_hold=True)
+        check(f"F8 decision in needs, the picker stored as `mover`={HELP}, clear_hold: {HELP} is not kept as the mover {tag}", m_.get("mover") != HELP, m_)
+        check(f"F8 …he stays the mover of the item, and no notice goes out {tag}", model.is_owner(model.norm_who(mod_.mover)) and not sent, (mod_.state, mod_.mover, m_, sent))
+        m_, mod_, sent = cleared({**BASE, "needs": ["decision"], "hold": True, "wake": FUT, "wait_kind": "time", "wait_basis": {"text": f"the soak ends {FUT}", "wake": FUT, "by": BACK, "at": now0}, "mover": HELP}, clear_wait=True)
+        check(f"F8 …clear_wait too {tag}", m_.get("mover") != HELP and model.is_owner(model.norm_who(mod_.mover)) and not sent, (mod_.state, mod_.mover, m_, sent))
+    # F9 an alive item that stores a stale old key (it waits on nothing): clear_wait and clear_hold keep no picker, the mover it has stays (keep_picker acts only on an item that waited before the write)
+    for clear in ("clear_wait", "clear_hold"):
+        m_, mod_, sent = cleared({**BASE, "mover": BACK, LEG: HELP}, **{clear: True})
+        check(f"F9 an alive item with a stale old key {HELP}, {clear}: the mover {BACK} stays, {HELP} is not made the mover {tag}", m_.get("mover") == BACK and mod_.mover == BACK, (m_, mod_.state, mod_.mover, sent))
 guards(False)
 
 clear_g()

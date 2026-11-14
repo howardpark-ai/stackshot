@@ -330,7 +330,7 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
 
 
 # ---------------------------------------------------------------------------------------------------------------- the arrival
-LIVE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle", "after", "recycle", "recycle_at", *_model.WAIT_GROUP)      # what the end of a wait clears (watch_reason: a front agent's reason for watching belonged to this wake, as the old wake pass dropped it)
+LIVE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle", "after", "recycle", "recycle_at", *_model.WAIT_GROUP, _model.LEGACY_PICKER_KEY)      # what the end of a wait clears (watch_reason: a front agent's reason for watching belonged to this wake, as the old wake pass dropped it)
 
 
 def end_wait(meta: dict[str, Any]) -> None:

@@ -169,8 +169,9 @@ owes no page. A check does not set the item's due time.
 The item model (design: docs/design): an item is dead (closed), alive (someone in the perimeter is working: one mover)
 or waiting (nothing happens until something outside arrives). mover is how an item says whose move it is (the sender
 of a create is recorded as its creator). Optional fields, stored as given (each parameter says how it is set):
-goal=<the end-state in one sentence, what {{OWNER}} would ask "is it done?" about>; mover=<who moves an alive item
-now: {{OWNER}}, a session name or the project's background agent; a front agent (a session {{OWNER}} talks to) only by
+goal=<the end-state in one sentence, what {{OWNER}} would ask "is it done?" about>; mover=<who moves the item: on
+an alive item now, on a waiting item whoever takes it when the wait ends; {{OWNER}}, a session name or the project's
+background agent; a front agent (a session {{OWNER}} talks to) only by
 itself: a create or update from another session that sets mover to one gets the project's builder instead, and the
 reply and History say so (send the same mover again to keep it; with no builder it is refused)>; then=<who takes it
 after {{OWNER}}'s answer or step; then=<front agent> from another session gets the builder the same way>;
@@ -178,10 +179,10 @@ wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor a
 on the project's anchors list first (add it with the anchors tool, scoped to this item), else the write is refused;
 wait_event=<what you expect there (an anchor wait), or the party or event {{OWNER}} relays (a relay wait), or the
 fleet event an event wait watches: {{EVENT_FORMS}}>; ask_by=YYYY-MM-DD (a relay wait's end day; an event, item or
-anchor wait's backstop day, as a wake is); post_wake_mover=<who moves it when the wait ends; a front agent only by
-itself, as for mover>. An event wait is how an item whose mover waits in the background for something the fleet does
+anchor wait's backstop day, as a wake is); post_wake_mover, the old name of mover, is still read as mover for a while
+(the reply says so; on an item that waits on nothing it is dropped, and a different mover beside it is refused). An event wait is how an item whose mover waits in the background for something the fleet does
 says so: update(wait_kind="event", wait_event="pr_released <n>" (this repository's pull request number), ask_by=<the
-day it comes back anyway, required>, post_wake_mover=<who takes it then>). Live for now: pr_released, pr_merged,
+day it comes back anyway, required>, mover=<who takes it then>). Live for now: pr_released, pr_merged,
 box_online, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day.
 box_online <machine> waits for a machine to be online (its puller checking in, within the minutes the server counts as
 online): the server reads it itself and the item turns within a minute or two of the machine's return, so an item
@@ -196,13 +197,13 @@ then). The mirror is refused too: a write that leaves an open item with mover={{
 it has no step and no ask, is refused: pass step=<one line>, or needs=["decision"] with ask=…, or give the item to a
 session (mover=<session>) and write his part in a next line that starts `{{OWNER}}:`. A waiting item, a close, a
 rename, a priority or project write and a re-bullet are not judged by it. A wait that replaces his state drops the
-mover and keeps then as the post-wake mover. "none" clears a field; clear_goal, clear_mover and clear_then clear
-theirs, clear_wait the wait's five (wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover). A close drops the
+mover and keeps then as the one who takes it when the wait ends. "none" clears a field; clear_goal, clear_mover and
+clear_then clear theirs, clear_wait the wait's four (wait_kind, wait_anchor, wait_event, ask_by). A close drops the
 mover and the wait and keeps the goal. The wait ends by itself when its kind's event comes: a time at its wake; an
 item when the last `after` item closes; an anchor when the anchor watcher's notice for wait_anchor reaches the server,
 and any new notice at the anchor that reaches the server and passes the project's keeper wakes the item; an event when
 the server is told of it; a relay on its ask_by day, when it comes to {{OWNER}} as a question (arrived / not yet, ask
-again on a date / drop); a date beside it is its backstop. The item then turns alive with its post_wake_mover. A moved
+again on a date / drop); a date beside it is its backstop. The item then turns alive with its mover. A moved
 ask_by or wake resets the backstop. Several waits at once are a list: waits (2 to 8 lines), wait_mode all | any, until as its backstop day; the item is
 back when every line has arrived (all) or the first has (any), at its until at the latest. Example:
 update(waits=[{"kind": "item", "after": "board#N"}, {"kind": "event", "event": "pr_merged <n>"}], wait_mode="any",
@@ -316,7 +317,7 @@ hold, wait_basis or clear_*. Replaces the list: send the remaining lines, [] end
 With waits: all (the default, or the stored list's) = every line has arrived; any = the first has.
 
 ## param WAIT_EVENT
-The event the wait expects. An anchor wait: what you expect at the anchor, which the post-wake mover checks, since any
+The event the wait expects. An anchor wait: what you expect at the anchor, which the mover who takes it checks, since any
 new notice there that reaches the server and passes the project's keeper wakes the item; a wait_event naming a merge,
 close, landing or completion is not woken by a routine push or CI line on the fleet's own PR (only by one that says
 merged or closed). A relay wait: the party or event {{OWNER}} relays. An event wait: the fleet event, one of
@@ -326,7 +327,8 @@ a machine the fleet does not know; an item waiting on a date for an offline mach
 <machine>" with that date as ask_by instead). "none" clears it.
 
 ## param MOVER
-Who moves the item now: {{OWNER}}, a session name or id, or the project's background agent. A front agent (a session
+Who moves the item now: {{OWNER}}, a session name or id, or the project's background agent. On an item that waits it
+is who takes the item when the wait ends. A front agent (a session
 {{OWNER}} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets
 mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again
 and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's
@@ -339,9 +341,11 @@ project's background agent. A front agent only by itself: a create or update fro
 then=<front agent> gets the project's builder instead, as for mover.
 
 ## param POST_WAKE
-Who moves the item when its wait ends (it becomes the mover then): {{OWNER}}, a session name or id, or the project's
-background agent. A front agent only by itself: a create or update from another session that sets
-post_wake_mover=<front agent> gets the project's builder instead, as for mover.
+The old name of mover, read as mover for a while (the reply says so). On an item that waits it is who takes the item
+when the wait ends, as mover=<who> is; "none" clears that pick-up. On an item that waits on nothing it is dropped
+with a line in the reply: pass mover=<who> to hand the item over now. Beside a mover that differs it is refused.
+A front agent only by itself: a create or update from another session that sets post_wake_mover=<front agent> gets
+the project's builder instead, as for mover.
 
 ## param CONTACT
 The item's contact: the front agent (a user-facing agent) that {{OWNER}} talks to about it, by its name. Leave it out

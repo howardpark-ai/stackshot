@@ -403,7 +403,7 @@ async def tools():
 tl = asyncio.run(tools())
 ud, cd = tl["update"].description, tl["create"].description
 check("text: update's description says a doing item carries no expected time, that the old fields are accepted and not kept, and the park calls, and no ladder",
-      "carries no expected time (the item shows how long it has run)" in ud and "expected_by and expected_reason, which older calls pass, are accepted and not kept" in ud and "update(hold=true, until=" in ud and 'wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, post_wake_mover and needs=["external"]' in ud
+      "carries no expected time (the item shows how long it has run)" in ud and "expected_by and expected_reason, which older calls pass, are accepted and not kept" in ud and "update(hold=true, until=" in ud and 'wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, mover=<who takes it then> and needs=["external"]' in ud
       and "ladder" not in ud and "stuck list" not in ud and "3 hours from this write" not in ud and "at most 12 hours ahead" not in ud, None)
 check("text: update's parameters still include expected_reason, a string (so an older call is not rejected)", tl["update"].parameters["properties"].get("expected_reason", {}).get("type") == "string", tl["update"].parameters["properties"].get("expected_reason"))
 check("text: create's description says agent work carries no expected time, and no tool text derives one or says past due for a wait",

@@ -23,7 +23,7 @@ _STATE_WORDS = {
     "doing": "work in hand needs no word: say whose move it is with mover=<a session, the project's builder or {owner}> and keep an open step in next",
     "your-call": "needs=[\"decision\"] with ask=<the ask line> asks {owner}",
     "your-step": "step=<one line, no command> with mover={owner} (what he runs goes in a next line that starts `{owner}:`)",
-    "outside": "wait_kind=\"relay\" with wait_event=<who or what is waited on>, ask_by=<the day to chase, YYYY-MM-DD> and post_wake_mover=<who takes it then> (and needs=[\"external\"])",
+    "outside": "wait_kind=\"relay\" with wait_event=<who or what is waited on>, ask_by=<the day to chase, YYYY-MM-DD> and mover=<who takes it then> (and needs=[\"external\"])",
     "blocked": "after=[\"board#N\"] names the item it waits on, with ask_by=<the day to look again, YYYY-MM-DD> (supplies=<one line: what that item gives this one> says what it takes from it)",
     "parked": "hold=true with wake=<YYYY-MM-DD or YYYY-MM-DDTHH:MM> and wait_basis=<what it waits for, with its date YYYY-MM-DD>",
     "verifying": "wake=<the day the check ends> with wait_basis=<what it waits for, with its date YYYY-MM-DD>, and mover=<the session that checks>",
@@ -32,7 +32,7 @@ _STATE_WORDS = {
 }
 _FIELD_HOW = {
     "clear_state": "there is no state to clear: an item stores alive or waiting directly, so drop what it waits on instead (clear_wait=true for a stored wait, clear_wake=true, clear_hold=true, clear_after=true; step=\"none\" for his step)",
-    "chase": "ask_by=YYYY-MM-DD is the day to chase, on a relay wait (wait_kind=\"relay\", wait_event=<who or what is waited on>, post_wake_mover=<who takes it then>)",
+    "chase": "ask_by=YYYY-MM-DD is the day to chase, on a relay wait (wait_kind=\"relay\", wait_event=<who or what is waited on>, mover=<who takes it then>)",
     "chase_note": "a chase is no longer logged by hand: a relay or anchor wait comes back to its mover on its ask_by day, so move ask_by to chase later",
     "party": "wait_event=<who or what is waited on>, with wait_kind=\"relay\" (news only {owner} relays) or \"anchor\" (an event at an anchor)",
     "end": "wake=<YYYY-MM-DD or YYYY-MM-DDTHH:MM> with wait_basis=<what it waits for, with its date YYYY-MM-DD>: the end day of a check is a time wait",
@@ -69,7 +69,7 @@ def refusal(arguments: Any, owner: str = "the owner") -> str:
         if k == "state":
             word = str(args.get("state") or "").strip().lower()
             how = _STATE_WORDS.get(word) or ("alive or waiting is stored directly: whose move it is with mover=<who>; a park with hold=true, wake and wait_basis; a wait on another item with after=[\"board#N\"]; "
-                                             "a wait on something outside with wait_kind, wait_event, ask_by and post_wake_mover; {owner}'s call with needs=[\"decision\"] and ask")
+                                             "a wait on something outside with wait_kind, wait_event, ask_by and mover (who takes it then); {owner}'s call with needs=[\"decision\"] and ask")
             lines.append(f"state={word or '…'}: {how}")
         else:
             lines.append(f"{k}: {_FIELD_HOW[k]}")
@@ -82,4 +82,4 @@ def client_refusal(owner: str = "the owner") -> str:
     """The answer of POST /client/state, a route that only set or cleared a state."""
     return ("Refused: POST /client/state is retired: an item stores alive or waiting directly now, so a script has no state to set or clear (the item model: docs/design). "
             "Pass the fields that say it through update: mover=<who moves it>, hold=true with wake and wait_basis for a park, after=[\"board#N\"] for another item, "
-            f"wait_kind with wait_event, ask_by and post_wake_mover for a wait on something outside, needs=[\"decision\"] with ask for {owner}'s call.")
+            f"wait_kind with wait_event, ask_by and mover (who takes it then) for a wait on something outside, needs=[\"decision\"] with ask for {owner}'s call.")

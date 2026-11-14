@@ -164,7 +164,7 @@ check("2 …or the date of the item it waits after", W.stored_until(mt(13)) == w
 item(14, needs=[BACK])
 out = bupd(14, wait_kind="relay", wait_event="the vendor's reply")
 check("2 nothing gives a date: tomorrow, and the reply says so and how to change it", W.stored_until(mt(14)) == w(1) and "set to tomorrow" in out and "clear_wait=true" in out and no_old(mt(14)), (out[-400:], mt(14)))
-for kind, extra, idx in (("event", dict(wait_event="recycle", post_wake_mover=BACK, mover="none"), 16), ("time", {}, 17)):
+for kind, extra, idx in (("event", dict(wait_event="recycle", post_wake_mover=BACK), 16), ("time", {}, 17)):
     item(idx, needs=[BACK])
     try:
         out = bupd(idx, wait_kind=kind, **extra); ok = True

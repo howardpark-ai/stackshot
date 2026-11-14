@@ -394,8 +394,9 @@ _NOT_PASSED = ("until", "waits", "wait_mode")      # in the wait group, but not 
 def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict[str, str], set[str]]:
     """The model fields a write passes (model.py): goal, mover, then, wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover → (the fields to set, whitespace
     collapsed and the owner's name and wait_kind normalised, the fields to drop). A value of none, clear or - drops that field; clear_goal, clear_mover, clear_then drop theirs
-    and clear_wait the wait's five (wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover; the wake and after keep their own flags). A clear does not go with a new value
-    for what it drops. Only the form is judged here (model.check_fields): whether an alive item names a mover or a wait its post-wake mover is for the write guards."""
+    and clear_wait the wait's four (wait_kind, wait_anchor, wait_event, ask_by, and the old picker key stored beside them; the wake and after keep their own flags). A clear does not go with a new value
+    for what it drops. post_wake_mover is the old name of mover (an alias in its window, the service folds it, model.fold_picker_alias): passed beside a different mover it is refused here, naming mover.
+    Only the form is judged here (model.check_fields): whether an alive item names a mover or a wait its mover is for the write guards."""
     h = _hooks()
     setv: dict[str, str] = {}
     drop: set[str] = set()
@@ -405,7 +406,15 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
             drop.add(k)
         elif v:
             setv[k] = v
-    for flag, fields in (("goal", ("goal",)), ("mover", ("mover",)), ("then", ("then",)), ("wait", _model.WAIT_GROUP)):
+    pw_, mv_ = _model.clean(vals.get("post_wake_mover")), _model.clean(vals.get("mover"))
+    if pw_ and mv_ and mv_.lower() not in h.ask_none:      # the old name beside a named mover: the same value is one value, a different one is the one real contradiction (mover=none beside it is the old way to say "no live mover, and this one takes it when the wait ends": the old name then wins as the picker)
+        a_, b_ = ("none" if pw_.lower() in h.ask_none else _model.norm_who(pw_).lower()), _model.norm_who(mv_).lower()
+        if a_ != b_:
+            raise ToolError(f"Refused: mover and post_wake_mover differ (mover={mv_}, post_wake_mover={pw_}); post_wake_mover is the old name of mover, the one who moves the item "
+                            "(on a waiting item, the one who takes it when the wait ends): pass mover=<who> alone")
+    if clears.get("mover") and pw_ and pw_.lower() not in h.ask_none:      # clear_mover and a named old-name picker contradict each other (the alias would store it as mover, over the explicit clear)
+        raise ToolError(f"Refused: clear_mover and post_wake_mover={pw_} contradict each other (post_wake_mover is the old name of mover): clear_mover drops the mover, mover=<who> sets one; pass one of them")
+    for flag, fields in (("goal", ("goal",)), ("mover", ("mover",)), ("then", ("then",)), ("wait", (*_model.WAIT_GROUP, _model.LEGACY_PICKER_KEY))):
         if clears.get(flag):
             clash = [k for k in fields if k in setv]
             if clash:
@@ -420,6 +429,25 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
     if probs:
         raise ToolError("Refused: " + "; ".join(probs))
     return setv, drop
+
+
+def post_wake_alias_until() -> dt.date:
+    """[model] post_wake_alias_until (YYYY-MM-DD, default the code's, model.PICKER_ALIAS_UNTIL): the last day the parameter post_wake_mover is still accepted as an alias of mover. A value that is not a date reads as
+    the default. Read at each call, so moving it needs no release."""
+    v = str(_cfg.get("model", "post_wake_alias_until", default=_model.PICKER_ALIAS_UNTIL) or _model.PICKER_ALIAS_UNTIL).strip()
+    try:
+        return dt.date.fromisoformat(v)
+    except ValueError:
+        return dt.date.fromisoformat(_model.PICKER_ALIAS_UNTIL)
+
+
+def post_wake_alias_check() -> None:
+    """At the server's start: one stderr warning when [model] post_wake_alias_until is missing or not a date, so the code's own default end of the alias window (model.PICKER_ALIAS_UNTIL) never stands in silently."""
+    v = str(_cfg.get("model", "post_wake_alias_until", default="") or "").strip()
+    try:
+        dt.date.fromisoformat(v)
+    except ValueError:
+        print(f"config: [model] post_wake_alias_until is {'missing' if not v else 'not a date (' + v + ')'}: the old parameter post_wake_mover stays accepted as mover to the code's default, {_model.PICKER_ALIAS_UNTIL}", file=sys.stderr, flush=True)
 
 
 @dataclass
@@ -851,7 +879,7 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
         return
     if list_end_words:
         raise ToolError(f"{list_end_words}, or change something real in the same write: {real}.")
-    event = ("the event-wait form (wait_kind=\"event\", wait_event=<the event>, ask_by=<the backstop day>, post_wake_mover=<who takes it when it happens>)")
+    event = ("the event-wait form (wait_kind=\"event\", wait_event=<the event>, ask_by=<the backstop day>, mover=<who takes it when it happens>)")
     if _waits_decision(meta):
         ways = f"Change something real in the same write: {real}. An item on {OWNER}'s decision cannot be held, so the date stays as it is until a step or the reason changes."
     elif str(m0.get("wait_kind") or "").lower() == "event":
@@ -1043,7 +1071,7 @@ BUSY_HOLD_REFUSAL = ("Refused: this item is being moved now: {live} is running o
 
 BUSY_RELEASE_PREFIX = "a release of PR #"      # what the words of a running release begin with (audit/busy_hold.py `live_release`): the refusal that names one is BUSY_RELEASE_REFUSAL
 BUSY_RELEASE_REFUSAL = ("Refused: this item is being moved now: {live}, so it is not paused. Keep it in hand and write where its step stands (work=<one line>, state in progress), "
-                        "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, post_wake_mover=<who takes it then>). "
+                        "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, mover=<who takes it then>). "
                         "Park it with a hold only once nothing is running on it.")
 
 
