@@ -87,6 +87,7 @@ def refused(name, f, *want, none=()):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
 from stackshot.service import item_read as _item_read
+from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.anchors import anchors as _anc
@@ -840,7 +841,7 @@ check("12 close: a close through update (status=completed, the step marked in th
       and {k: v for k, v in last_an.items() if k not in ("ended", "ended_at")} == pre_as[2] and "handoff:" not in _wt_get.stackshot_get("a35"), (mt(35), ho(35), pre_as[2]))
 shut = json.loads(json.dumps(rd(35))); shut["metadata"].update(mover="team-back", needs=["decision"], ask=ASK, handoff=dict(pre_as[2]))
 check("12 close: the hooks themselves leave a closed item alone: _settle_mover_on_save on a closed item with a stored agent mover beside his state changes nothing",
-      server._settle_mover_on_save(shut, rd(35)) is False and shut["metadata"]["mover"] == "team-back", shut["metadata"])
+      _mover_steps._settle_mover_on_save(shut, rd(35)) is False and shut["metadata"]["mover"] == "team-back", shut["metadata"])
 check("12 close: …and handoff_svc.handoff_his_over on a closed item with a not-taken record to him ends nothing (pending_his is None for a closed item)",
       handoff_svc.handoff_his_over("a35", shut) is False and not shut["metadata"]["handoff"].get("taken_at"), shut["metadata"]["handoff"])
 to_him(36)

@@ -5,7 +5,7 @@ to reach the notices through hooks. This suite holds what is true now:
 
   1  flags       no thread-local is made in web/ (a `threading.local` call or reference), the five per-write flags the gates and the services read are on service/writes.py, the telling's four
                  are on service/telling.py, and no other service module makes one
-  2  tables      the thirteen hook tables the server installs (the item readers', the For you rows', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, at the top of the module (not inside a function), once each
+  2  tables      the fourteen hook tables the server installs (the item readers', the For you rows', the save steps' and the owner's words', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, at the top of the module (not inside a function), once each
   3  values      what a table takes as a plain value (not a function, not a late lookup) is a constant of the module that cannot change after the install, so a copy taken at the install cannot go stale; a late
                  lookup (`_late("name")`, a call) is a lookup by name made when the hook runs, so it captures nothing, and each one must name a function or value the server module defines; a late lookup on an
                  owner module (`_late_in(module, "name")`) is the same lookup on that module, and must name a function or value that module defines
@@ -37,10 +37,10 @@ check("1 no other service module keeps one", not any(others.values()), {k: v for
 
 # ---------------------------------------------------------------- 2. tables
 SERVER = parse("web/server.py")
-TABLES = ("_writes", "_telling", "_create_svc", "_gates", "_update_svc", "_runner", "_wake_hooks", "_handoff_hooks", "_stall_hooks", "_checks_hooks", "_passes_hooks", "_foryou_hooks", "_item_read")
+TABLES = ("_writes", "_telling", "_create_svc", "_gates", "_update_svc", "_runner", "_wake_hooks", "_handoff_hooks", "_stall_hooks", "_checks_hooks", "_passes_hooks", "_foryou_hooks", "_save_hooks", "_item_read")
 installs = [(n, n.value.func.value.id) for n in SERVER.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "install"
             and isinstance(n.value.func.value, ast.Name)]
-check("2 the server installs the thirteen tables, each once, at the top of the module", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
+check("2 the server installs the fourteen tables, each once, at the top of the module", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
 inside = [n.lineno for fn in ast.walk(SERVER) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.walk(fn)
           if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "install" and isinstance(n.func.value, ast.Name) and n.func.value.id in TABLES]
 check("2 …and no function of the server installs one (a table is never replaced while the server runs)", not inside, inside)
@@ -112,17 +112,20 @@ check("3 the done check's table holds only late lookups and lambdas (a function 
 passes_tab = next((n.value.args[0] for n, t in installs if t == "_passes_hooks"), None)
 passes_plain = [kw.arg for kw in passes_tab.keywords if not is_late(kw.value) and not isinstance(kw.value, ast.Lambda)] if isinstance(passes_tab, ast.Call) else ["no table"]
 check("3 the page-debt, migration and fleet-event table holds only late lookups and lambdas (a function replaced on the server is the one the passes call), never a value copied at the install", not passes_plain, passes_plain)
+save_tab = next((n.value.args[0] for n, t in installs if t == "_save_hooks"), None)
+save_plain = [kw.arg for kw in save_tab.keywords if not is_late(kw.value) and not isinstance(kw.value, ast.Lambda)] if isinstance(save_tab, ast.Call) else ["no table"]
+check("3 the save steps' table holds only late lookups and lambdas (a function replaced on its owner is the one the steps call), never a value copied at the install", not save_plain, save_plain)
 expected = {"_ASK_NONE", "_BASIS_WORDS", "_CLOSE_REFUSAL", "_MODEL_PAGE", "OUTCOMES", "_RELAUNCH"}
 check("3 the values captured are the six the tool text and the gates share (an eighth is a decision: say here why it cannot go stale)", set(captured) == expected, sorted(set(captured) ^ expected))
 
 # ---------------------------------------------------------------- 4. telling
 telling_public = {n.name for n in parse("service/telling.py").body if isinstance(n, ast.FunctionDef) and not n.name.startswith("_")} - {"install"}
 held = {}
-for rel in ("service/create.py", "service/gates.py", "service/update.py", "service/runner.py", "service/wake_hooks.py", "service/handoff_hooks.py", "service/stall_hooks.py", "service/checks_hooks.py", "service/passes_hooks.py"):
+for rel in ("service/create.py", "service/gates.py", "service/update.py", "service/runner.py", "service/wake_hooks.py", "service/handoff_hooks.py", "service/stall_hooks.py", "service/checks_hooks.py", "service/passes_hooks.py", "service/save_hooks.py"):
     for n in parse(rel).body:
         if isinstance(n, ast.ClassDef) and n.name == "Hooks":
             held[rel] = sorted(a.target.id for a in n.body if isinstance(a, ast.AnnAssign) and isinstance(a.target, ast.Name) and a.target.id in telling_public)
-check("4 no table of create, gates, update, the runner, the wake passes, the hand-off passes, the stall pass, the done check, the page-debt call, the migrations or the fleet events holds a field named for a telling function (they call service/telling.py on the module)", not any(held.values()), held)
+check("4 no table of create, gates, update, the runner, the wake passes, the hand-off passes, the stall pass, the done check, the page-debt call, the migrations, the fleet events or the save steps holds a field named for a telling function (they call service/telling.py on the module)", not any(held.values()), held)
 used = {rel: sorted({n.attr for n in ast.walk(parse(rel)) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "_telling"}) for rel in ("service/create.py", "service/gates.py", "service/update.py", "service/runner.py", "service/wakes.py", "service/watching.py", "service/event_waits.py", "service/handoff.py", "service/handoff_cold.py", "service/stall.py", "service/ladder.py", "service/stall_tick.py", "service/checks.py", "service/proofs.py", "service/page_debt.py", "service/migrations.py", "service/fleet_events.py")}
 check("4 each of the seventeen services calls the telling on its module, and every name it takes is public there", all(used.values()) and not [a for v in used.values() for a in v if a not in telling_public and not a.isupper() and a not in ("CLOSE_WAS",)], used)
 

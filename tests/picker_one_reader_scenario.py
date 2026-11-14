@@ -57,6 +57,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk
+from stackshot.service import mover_steps as _mover_steps
 from stackshot.waits import handoff as _ho
 from stackshot.audit import audit_run as AR
 from stackshot.core import config as _cfg
@@ -243,11 +244,11 @@ guards(True)
 try:
     before = its(needs=["decision"], mover=OWN, then=BACK, ask="Decide: x")
     after_ = its(needs=[BACK], mover=OWN, then=BACK, until=FUT)
-    check("3 _settle_mover_on_save: a waiting item that stood his keeps its stored mover and then (nothing settled)", server._settle_mover_on_save(after_, before) is False and after_["metadata"]["mover"] == OWN and after_["metadata"]["then"] == BACK, after_)
+    check("3 _settle_mover_on_save: a waiting item that stood his keeps its stored mover and then (nothing settled)", _mover_steps._settle_mover_on_save(after_, before) is False and after_["metadata"]["mover"] == OWN and after_["metadata"]["then"] == BACK, after_)
     alive_ = its(needs=[BACK], mover=OWN, then=BACK)
-    check("3 _settle_mover_on_save: …an alive agent's item still hands back as before", server._settle_mover_on_save(alive_, before) is True and alive_["metadata"].get("mover") == BACK and "then" not in alive_["metadata"], alive_)
+    check("3 _settle_mover_on_save: …an alive agent's item still hands back as before", _mover_steps._settle_mover_on_save(alive_, before) is True and alive_["metadata"].get("mover") == BACK and "then" not in alive_["metadata"], alive_)
     inhis = its(needs=["decision"], mover=BACK, ask="Decide: x")
-    check("3 _settle_mover_on_save: …and an agent mover on his item still becomes he", server._settle_mover_on_save(inhis, None) is True and inhis["metadata"]["mover"] == OWN and inhis["metadata"]["then"] == BACK, inhis)
+    check("3 _settle_mover_on_save: …and an agent mover on his item still becomes he", _mover_steps._settle_mover_on_save(inhis, None) is True and inhis["metadata"]["mover"] == OWN and inhis["metadata"]["then"] == BACK, inhis)
     # the real save path
     item(30, needs=[BACK], mover=BACK)
     it_ = _service_store._load("a30"); it_["metadata"]["needs"] = ["decision", BACK]; it_["metadata"]["ask"] = "Decide: x"
@@ -274,17 +275,17 @@ try:
     was_ = {"id": "40", "status": "open", "metadata": {"project": "projects/zedwork", "needs": ["decision"], "mover": OWN, "then": BACK, "ask": "Decide: x"}}
     now_ = {"id": "40", "status": "open", "metadata": {"project": "projects/zedwork", "needs": [BACK], "mover": OWN, "then": BACK, "until": FUT}}
     meta_ = dict(now_["metadata"])
-    note = server._owner_state_mover({**now_, "metadata": meta_}, meta_, False, was_)
+    note = _mover_steps._owner_state_mover({**now_, "metadata": meta_}, meta_, False, was_)
     check("4 update path: the stale mover=he is replaced by the agent in then, then goes, and the model reads the agent as the picker", meta_.get("mover") == BACK and "then" not in meta_ and "mover" in note
           and model.derive({**now_, "metadata": meta_}).wait.mover == BACK, (meta_, note))
     meta_ = {**now_["metadata"], "post_wake_mover": HELP}
-    server._owner_state_mover({**now_, "metadata": meta_}, meta_, False, was_)
+    _mover_steps._owner_state_mover({**now_, "metadata": meta_}, meta_, False, was_)
     check("4 update path: …with the legacy key stored, only the mover goes", "mover" not in meta_ and meta_.get("post_wake_mover") == HELP and meta_.get("then") == BACK, meta_)
     meta_ = dict(now_["metadata"])
-    note = server._owner_state_mover({**now_, "metadata": meta_}, meta_, True, was_)
+    note = _mover_steps._owner_state_mover({**now_, "metadata": meta_}, meta_, True, was_)
     check("4 update path: a write that names a mover itself is left alone (named)", note == "" and meta_["mover"] == OWN and meta_["then"] == BACK, (meta_, note))
     meta_ = {k: v for k, v in now_["metadata"].items() if k != "then"}
-    server._owner_state_mover({**now_, "metadata": meta_}, meta_, False, was_)
+    _mover_steps._owner_state_mover({**now_, "metadata": meta_}, meta_, False, was_)
     check("4 update path: …no agent in then: only the mover goes", "mover" not in meta_, meta_)
 finally:
     guards(False)

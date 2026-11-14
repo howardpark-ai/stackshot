@@ -162,9 +162,9 @@ check("6 front agents of a front-only project may hand an item to each other", f
 check("6 ...not in a project that has a builder", fp(DMAIN, DDESK, "projects/delta") is False and fp(DMAIN, DDESK, "projects/delta/sub") is False)
 check("6 ...not across projects, and not from a session no page lists", fp(SMAIN, DDESK, "projects/sigma") is False and fp("home-nobody", SDESK, "projects/sigma") is False)
 meta = lambda **k: {"owner": SMAIN, "contact": SDESK, "project": "projects/sigma", **k}
-check("6 the answer of a front-only project goes to its contact", server._builderless_answer_to(meta(), "projects/sigma") == SDESK, server._builderless_answer_to(meta(), "projects/sigma"))
-check("6 ...a project with a builder keeps the old fallback", server._builderless_answer_to(meta(project="projects/delta", contact=DDESK), "projects/delta") == "")
-check("6 ...an empty project keeps it too", server._builderless_answer_to(meta(), "") == "")
+check("6 the answer of a front-only project goes to its contact", _holders._builderless_answer_to(meta(), "projects/sigma") == SDESK, _holders._builderless_answer_to(meta(), "projects/sigma"))
+check("6 ...a project with a builder keeps the old fallback", _holders._builderless_answer_to(meta(project="projects/delta", contact=DDESK), "projects/delta") == "")
+check("6 ...an empty project keeps it too", _holders._builderless_answer_to(meta(), "") == "")
 
 # ---------------------------------------------------------------- 7. where front_only and the older test differ, pinned as the intended results
 # (a) a background agent whose mandate lacks the build words; (b) a sub-page with a map of front agents under a hub that lists a background agent; (c) a sub-page whose `hub:` line points at a page

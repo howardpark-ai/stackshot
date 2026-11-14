@@ -32,7 +32,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.model import said; from stackshot.tools import next_report as NR
+from stackshot.service import gates; from stackshot.web import server; from stackshot.service import owner_words as _owner_words; from stackshot.model import said; from stackshot.tools import next_report as NR
 
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -77,7 +77,7 @@ check("a queued message of his is refused as his words, and the refusal says to 
 got, why = gate(acted(13))
 check("a human queued_command after a tool result is accepted as acted: checked, tag Done-by, kind acted, the entry's time",
       got and got[0]["checked"] and got[0]["tag"] == "Done-by" and got[0]["kind"] == "acted" and got[0]["ts"] == said.entry_ts(queued(13, 12)) and got[0]["session"] == SESS, (got, why))
-check("the reply line says it is proof he did a step, not his words", "kind acted" in server._said_note(got or []) and "not his words" in server._said_note(got or []), server._said_note(got or []))
+check("the reply line says it is proof he did a step, not his words", "kind acted" in _owner_words._said_note(got or []) and "not his words" in _owner_words._said_note(got or []), _owner_words._said_note(got or []))
 got, why = gate(acted(19, quote="second note:   Thanks for\nwriting   in."))
 check("a human queued_command after a meta user entry is accepted too (and the quote is compared whitespace aside)", got and got[0]["checked"], (got, why))
 for n, how, frag in ((14, "a queued_command of peer origin", "origin is peer"), (15, "a queued_command of task-notification origin", "origin is task-notification"),
@@ -129,7 +129,7 @@ acted_rec = {"tag": "Done-by", "kind": "acted", "quote": "refund of 12 dollars",
 check("owner_words_by (N4's words) does not read an acted entry", NR.owner_words_by({"said": [acted_rec]}, ACT_TS + 60) == "")
 check("…even one stored with a words tag beside kind acted: entries_of reads it as Done-by, kind acted",
       said.entries_of({"said": [{**acted_rec, "tag": "Acked-by"}]})[0]["tag"] == "Done-by" and NR.owner_words_by({"said": [{**acted_rec, "tag": "Acked-by"}]}, ACT_TS + 60) == "")
-check("the server's decision words (a wake past the cap) are not satisfied by an acted entry", server._owner_words_on({"metadata": {}}, [{**acted_rec, "ts": time.time() - 60}], 30.0) == "")
+check("the server's decision words (a wake past the cap) are not satisfied by an acted entry", _owner_words._owner_words_on({"metadata": {}}, [{**acted_rec, "ts": time.time() - 60}], 30.0) == "")
 check("the server's close words are not satisfied by an acted entry", said._owner_words({"metadata": {"said": [acted_rec]}}) == "")
 
 # ---- N4

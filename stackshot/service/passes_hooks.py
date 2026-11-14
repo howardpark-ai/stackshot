@@ -22,7 +22,7 @@ class Hooks:
     main_agent: Callable[..., Any]  # agents._main_agent
     model_guards_on: Callable[..., Any]  # item_read._model_guards_on
     model_of: Callable[..., Any]  # item_read._model_of
-    outcomes: Callable[[], Any]  # server.OUTCOMES
+    outcomes: Callable[[], Any]  # owner_words.OUTCOMES
     owed_lock: Callable[[], Any]  # server._OWED_LOCK
     owed_load: Callable[..., Any]  # server._owed_load
     owed_readable: Callable[..., Any]  # server._owed_readable
@@ -32,11 +32,11 @@ class Hooks:
     publish: Callable[..., Any]  # web.publish._publish
     retire_write_op: Callable[..., Any]  # server._retire_write_op
     scoped_anchors: Callable[..., Any]  # item_read._scoped_anchors
-    script_sender: Callable[..., Any]  # server._script_sender
-    sender_not_owner: Callable[..., Any]  # server._sender_not_owner
+    script_sender: Callable[..., Any]  # owner_words._script_sender
+    sender_not_owner: Callable[..., Any]  # owner_words._sender_not_owner
     server_module: Callable[[], Any]  # the server module itself
     session_id: Callable[..., Any]  # server._session_id
-    settle_apply: Callable[..., Any]  # server._settle_apply
+    settle_apply: Callable[..., Any]  # holders._settle_apply
     shown_needs: Callable[..., Any]  # server._shown_needs
     stamp_write_op: Callable[..., Any]  # server._stamp_write_op
     switchover_on: Callable[..., Any]  # item_read._switchover_on

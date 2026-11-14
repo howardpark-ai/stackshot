@@ -135,6 +135,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
 from stackshot.service import item_read as _item_read
+from stackshot.service import owner_words as _owner_words
 from stackshot.service import update as _update_svc
 from stackshot.router import routing as _routing
 from stackshot.github import ghsync as _gh
@@ -565,9 +566,9 @@ call("begin")
 r_ = call("apply", writes=[{"item": "board#91", "set": {"cap_ok": {"wake": day(9), "quote": "x"}}, "expect": E(91), "expect_sig": S(91)}])["results"][0]
 call("end")
 check("button: the server copies the button's line as the quote of cap_ok, whatever the caller sent", r_["action"] == "set" and mt(91)["cap_ok"]["quote"] == "wait_oct28: Wait for Oct 28th", (r_, mt(91).get("cap_ok")))
-wk91, hit91 = server._cap_words_entry("g91", {"ts": BTN["ts"]}, rd(91))
+wk91, hit91 = _owner_words._cap_words_entry("g91", {"ts": BTN["ts"]}, rd(91))
 check("button: the cap-words job takes the same entry (the same rule)", hit91.get("choice_line") == "Wait for Oct 28th" and wk91 == day(9), (wk91, hit91))
-refused("button: …and refuses a button that is no park, as it refuses a typed \"Approve\"", lambda: server._cap_words_entry("g92", {"ts": OLDEST - 20}, rd(92)), "own words")
+refused("button: …and refuses a button that is no park, as it refuses a typed \"Approve\"", lambda: _owner_words._cap_words_entry("g92", {"ts": OLDEST - 20}, rd(92)), "own words")
 # the table: typed words park by park_words alone; a button parks only by park_words or a wait word in its option and line (a date, \"Approve\", \"Go\" are no park)
 TABLE = [({"text": "Approve, ship by Nov 3rd"}, False), ({"text": "I will review it tomorrow"}, False), ({"text": "承認, 3日以内に配布"}, False), ({"text": "Approve"}, False),
          ({"text": "park it until after the trip"}, True), ({"choice": "Approve", "choice_line": "Approve and ship on Nov 3rd"}, False), ({"choice": "Go", "choice_line": "Go: start next week"}, False),
@@ -578,7 +579,7 @@ tab = []
 for k_, (ent, want) in enumerate(TABLE):
     item(98, hold=True, hold_set={"at": OLDEST, "by": "home-front"}, wake=day(9), su=now0 - 5 * DAY, needs=[BACK], owner=UB, subject="[home] the words table",
          answers=[{"kind": "decision", "ts": OLDEST - 20, "via": "board", **ent}])
-    try: server._cap_words_entry("g98", {"ts": OLDEST - 20}, rd(98)); cw = True
+    try: _owner_words._cap_words_entry("g98", {"ts": OLDEST - 20}, rd(98)); cw = True
     except Exception: cw = False
     tab.append((ent, want, _wt.answer_parks(rd(98)["metadata"]["answers"][0]), M.park_quote(rd(98), time.time()) is not None, cw))
 check("words table: what parks and what does not agrees in the plan's park_quote, the cap-words job and waiting.answer_parks",

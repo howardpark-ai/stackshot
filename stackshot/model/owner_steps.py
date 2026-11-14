@@ -7,7 +7,7 @@ The rules of the Next design this module serves (N2, N4 and N5, for the owner's 
   N4  a step of his is ticked only by his answer, which the step shows: `<owner>: <what to decide> → <the option he picked>`. A session cannot tick it (an update whose `done` names it is
       refused); it may withdraw its ask or step, which drops the step.
   N5  the checklist and the item's state agree: an open the owner step exists exactly when the item waits on him. The stored fields (needs, ask, options, state, step) stay what decides
-      that, and the server keeps the step in line with them on EVERY save (server._owner_steps_on_save, beside the mover settle), so the two cannot drift.
+      that, and the server keeps the step in line with them on EVERY save (mover_steps._owner_steps_on_save, beside the mover settle), so the two cannot drift.
 
 THE STORAGE. A step the server made is an ordinary line of `next` (written by the server, `stackshot`, so no session's update replaces it) and an ordinary step of `metadata.steps`. Beside them
 `metadata.owner_step` holds that line's text, the one thing that tells the server's own step from a `<owner>:` line a session wrote: a changed ask rewords the server's step (the old one is dropped,
