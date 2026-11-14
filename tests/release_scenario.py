@@ -1275,7 +1275,7 @@ def plan(*files):
     r = subprocess.run(["bash", str(pbx / "deploy.sh"), "--dry-run"], cwd=pbx, env={**genv, "PATH": os.environ.get("PATH", "")}, capture_output=True, text=True, timeout=60)
     return r.returncode, [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("restarts:")], r.stdout + r.stderr
 S_, H_, P_ = "stackshot.service", "anchor-hub.service", "stackshot-puller.service"
-# the whole table of deploy.sh: what a change restarts, as the set of units (the server is always first when it is in the plan)
+# the table of deploy.sh: one row per rule of its file map (a pattern of each case line, and the exclusions of the *.py default), what a change restarts, as the set of units (the server is always first when it is in the plan)
 for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), {S_, H_}), ("uv.lock alone", ("uv.lock",), {S_, H_}),
                           ("stackshot/cli.py", ("stackshot/cli.py",), {S_, H_}), ("an icon (the server only)", ("icons/a.png",), {S_}), ("a doc only", ("docs/notes.md",), set()),
                           ("stackshot/__init__.py: every program starts through it", ("stackshot/__init__.py",), {S_, H_, P_}), ("stackshot/__main__.py", ("stackshot/__main__.py",), {S_, H_, P_}),
@@ -1285,7 +1285,18 @@ for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), {S_, H_}
                           ("config.py, the root forwarder: all three", ("config.py",), {S_, H_, P_}), ("pages.py, the root forwarder: the server", ("pages.py",), {S_}), ("stackshot/anchors/anchor_hub.py: the hub only", ("stackshot/anchors/anchor_hub.py",), {H_}),
                           ("stackshot/anchors/anchors.py: the server and the hub", ("stackshot/anchors/anchors.py",), {S_, H_}), ("a module of the server (stackshot/web/server.py)", ("stackshot/web/server.py",), {S_}),
                           ("a suite (tests/x_scenario.py)", ("tests/x_scenario.py",), set()), ("a module the server never runs (stackshot/projects/rename_page.py)", ("stackshot/projects/rename_page.py",), set()),
-                          ("units/anchor-hub.service.in: the hub only", ("units/anchor-hub.service.in",), {H_}), ("units/stackshot-puller.service.in: the puller only", ("units/stackshot-puller.service.in",), {P_})):
+                          ("units/anchor-hub.service.in: the hub only", ("units/anchor-hub.service.in",), {H_}), ("units/stackshot-puller.service.in: the puller only", ("units/stackshot-puller.service.in",), {P_}),
+                          ("units/stackshot.service.in: the server only", ("units/stackshot.service.in",), {S_}), ("units/stackshot-reload.path: the server only", ("units/stackshot-reload.path",), {S_}), ("install.sh: the server only", ("install.sh",), {S_}),
+                          ("stackshot/core/retired_inputs.py: the server and the puller (client.py imports it)", ("stackshot/core/retired_inputs.py",), {S_, P_}),
+                          ("stackshot/anchors/merge_log.py: the server and the hub", ("stackshot/anchors/merge_log.py",), {S_, H_}), ("stackshot/anchors/event_log.py: the server and the hub", ("stackshot/anchors/event_log.py",), {S_, H_}),
+                          ("a font (the server only)", ("fonts/code.woff2",), {S_}), ("shared/colortool.js (the server only)", ("shared/colortool.js",), {S_}), ("a tools text file (stackshot/web/tools/text/brief.md: the server only)", ("stackshot/web/tools/text/brief.md",), {S_}),
+                          ("stackshot/anchors/anchorhub/x.py: the hub only", ("stackshot/anchors/anchorhub/x.py",), {H_}),
+                          ("stackshot/projects/project_registry.py: the server and the hub", ("stackshot/projects/project_registry.py",), {S_, H_}), ("stackshot/projects/projects.py: the server and the hub", ("stackshot/projects/projects.py",), {S_, H_}),
+                          ("stackshot/fleet/fleet.py: the server and the hub", ("stackshot/fleet/fleet.py",), {S_, H_}), ("stackshot/fleet/liveness.py: the server and the hub", ("stackshot/fleet/liveness.py",), {S_, H_}),
+                          ("stackshot/router/routing.py: the server and the hub", ("stackshot/router/routing.py",), {S_, H_}), ("stackshot/fleet/inbox.py: the server and the hub", ("stackshot/fleet/inbox.py",), {S_, H_}),
+                          ("stackshot/fleet/sessions_registry.py: the server and the hub", ("stackshot/fleet/sessions_registry.py",), {S_, H_}), ("stackshot/core/interp.py: the server and the hub", ("stackshot/core/interp.py",), {S_, H_}),
+                          ("stackshot/projects/page_keeper.py: nothing (a one-off script)", ("stackshot/projects/page_keeper.py",), set()), ("stackshot/anchors/anchor_hub_google_auth.py: nothing (a one-off script)", ("stackshot/anchors/anchor_hub_google_auth.py",), set()),
+                          ("connectors.py, the root forwarder: the server", ("connectors.py",), {S_})):
     rc, got, out = plan(*files)
     units = got[0].split()[1:] if got and got[0] != "restarts: none" else []
     check(f"deploy.sh plan: {what} restarts exactly {sorted(want) or 'nothing'}, the server first", rc == 0 and len(got) == 1 and set(units) == want and len(units) == len(want) and (not units or S_ not in units or units[0] == S_), (rc, got, out[-300:]))

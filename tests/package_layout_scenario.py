@@ -38,18 +38,25 @@ KEEP = set(PLUGIN_FORWARDERS)
 def unexpected(found, keep):
     """the forwarders that should not be there and the kept ones that are gone"""
     return sorted(set(found) ^ set(keep))
+# the `_TARGET` line of a forwarder: either quote, spaces around the `=`, and a trailing comment all still make a forwarder
+TARGET_RX = re.compile(r"""^_TARGET\s*=\s*(?P<q>["'])(?P<t>stackshot[\w.]*)(?P=q)\s*(?:#.*)?$""", re.M)
 FWD = {}      # old path (relative) -> target module
 _SKIP_DIRS = {".git", ".venv", "__pycache__", "node_modules", "stackshot", "tests"}
 for f in sorted(ROOT.rglob("*.py")):
     rel = f.relative_to(ROOT)
     if _SKIP_DIRS & set(rel.parts[:-1]): continue
-    m = re.search(r'^_TARGET = "(stackshot[\w.]*)"$', f.read_text(encoding="utf-8"), re.M)
+    m = TARGET_RX.search(f.read_text(encoding="utf-8"))
     if m:
-        FWD[rel.as_posix()] = m.group(1)
+        FWD[rel.as_posix()] = m.group("t")
 check("the forwarders are exactly the four of PLUGIN_FORWARDERS: no file outside the package and the tests holds a `_TARGET = \"stackshot....\"` line but those", len(KEEP) == 4 and not unexpected(FWD, KEEP) and all(FWD[k].startswith("stackshot.") for k in KEEP), unexpected(FWD, KEEP))
 rootpy = sorted(f.name for f in ROOT.glob("*.py"))
 check("... and no other .py file at the root (a root script is a forwarder or a program that belongs in the package)", rootpy == sorted(KEEP), unexpected(rootpy, KEEP))
 check("a fifth root forwarder (and the loss of a kept one) is seen by that rule", unexpected(list(KEEP) + ["server.py"], KEEP) == ["server.py"] and unexpected(sorted(KEEP)[1:], KEEP) == [sorted(KEEP)[0]] and unexpected(KEEP, ()) == sorted(KEEP))
+
+# a forwarder is a forwarder however its line is written (single quotes, a trailing comment, no spaces): each of these files would be a fifth one
+fifth = {"a.py": '_TARGET = "stackshot.core.x"\n', "b.py": "_TARGET = 'stackshot.core.x'\n", "c.py": '_TARGET = "stackshot.core.x"  # moved\n', "d.py": "_TARGET='stackshot.core.x' # moved\n", "e.py": 'import sys\n_TARGET = "stackshot.core.x"\nsys.exit(0)\n'}
+seen = {k: bool(TARGET_RX.search(v)) for k, v in fifth.items()}
+check("a forwarder whose _TARGET line has single quotes, a trailing comment or no spaces is still seen, and a line that names no package module is not", all(seen.values()) and not TARGET_RX.search('_TARGET = "elsewhere.x"\n') and not TARGET_RX.search('# _TARGET = "stackshot.core.x"\n') and unexpected([k for k, v in seen.items() if v] + sorted(KEEP), KEEP) == sorted(fifth), seen)
 
 # each of the four reaches its module: the same module object (state and monkeypatching are shared), a body of no code, and the file mode and shebang it had
 missing = [k for k in sorted(KEEP) if not (ROOT / (FWD.get(k, "x").replace(".", "/") + ".py")).is_file()]
@@ -161,7 +168,8 @@ NAMES = sorted(set(FORMER) | {n.replace("_", "-") for n in FORMER if "_" in n}, 
 FORMER_SET = set(FORMER)
 _N = "|".join(re.escape(n) for n in NAMES)
 PATH_RX = re.compile(r"(?P<dir>(?:[^\s\"'`=(){}|;,<>]*/)+)(?P<mod>" + _N + r")\.py\b(?!\.lock)")
-RUN_RX = re.compile(r"(?:\bpython3?(?:\.\d+)?|--script|\bexec|\$PY|\buv run)\s+(?:-\w+\s+)*[\"']?(?:\./)?(?P<mod>" + _N + r")\.py\b(?!\.lock)")
+_OPT = r"(?:-[XW]\s+\S+\s+|--(?:project|directory|python|with|extra|group)\s+\S+\s+|--?[\w-]+(?:=\S+)?\s+)*"      # `-X utf8`, `--locked`, `--project "$HERE"`, `-u` in front of the script
+RUN_RX = re.compile(r"(?:\bpython3?(?:\.\d+)?|--script|\bexec|\$PY|\buv run)\s+" + _OPT + r"[\"']?(?:\./)?(?P<mod>" + _N + r")\.py\b(?!\.lock)")
 IMP_RX = re.compile(r"(?:^|[;'\"`(]|\s;)\s*(?:import\s+(?P<imp>[\w.]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w.]+(?:\s+as\s+\w+)?)*)|from\s+(?P<frm>[\w.]+)\s+import\b)")
 CTX_RX = re.compile(r"sys\.executable|subprocess|Popen|check_output|runpy|spec_from_file_location|\bpython3?\b|os\.path\.join|Path\(|\b(?:STACK|ROOT|SCR|HERE)\b\s*[/,]|\bexec\b")
 def _in_package(d: str) -> bool:
@@ -194,9 +202,11 @@ def scan_text(name: str, text: str) -> list:
 MUST = [("u.sh", 'exec python3 "$(dirname "$0")/../server.py"'), ("u.sh", "python3 $REPO/client.py get brief"), ("u.sh", "~/stackshot/config.py get a.b"), ("u.sh", "ExecStart=/usr/bin/python3 @CHECKOUT@/puller.py"),
         ("u.sh", "python3 - <<'E'\nimport config\nE"), ("u.sh", "python3 -c \"import json; from render import x\""), ("t.py", 'subprocess.run([sys.executable, "-c", "import config"])'),
         ("t.py", 'r = run("from stackshot.core import x; import ghsync as G; G.f()")'), ("t.py", "import server\n"), ("u.sh", "uv run --script anchor-hub.py status"), ("u.sh", "ssh h '<checkout>/anchor-hub-google-auth.py x'"),
-        ("u.sh", "python3 tools/cap_words.py --help"), ("t.py", 'p = ["python3", "x/ui/render.py"]'), ("t.py", "import ui.render")]
+        ("u.sh", "python3 tools/cap_words.py --help"), ("t.py", 'p = ["python3", "x/ui/render.py"]'), ("t.py", "import ui.render"),
+        ("u.sh", "uv run --locked server.py"), ("u.sh", "python3 -X utf8 server.py"), ("u.sh", 'uv run --project "$HERE" --locked client.py get x'), ("u.sh", "python3 -u -X utf8 -W error ./publish.py bump")]
 MUSTNOT = [("u.sh", 'python3 "$HERE/stackshot/core/config.py" get a'), ("u.sh", "# python3 server.py"), ("t.py", "from stackshot.web import server\nimport json"), ("u.sh", "python3 -m stackshot.tools.cap_words --help"),
-           ("t.py", 'cmd = "from stackshot.core import config; print(config.CFG)"'), ("u.sh", "python3 ~/stackshot/stackshot/fleet/client.py get x"), ("t.py", "from fastmcp.server.auth import cimd"), ("u.sh", "`pages.py` reads the page")]
+           ("t.py", 'cmd = "from stackshot.core import config; print(config.CFG)"'), ("u.sh", "python3 ~/stackshot/stackshot/fleet/client.py get x"), ("t.py", "from fastmcp.server.auth import cimd"), ("u.sh", "`pages.py` reads the page"),
+           ("u.sh", "uv run --locked stackshot publish publish"), ("u.sh", "python3 -X utf8 stackshot/web/server.py"), ("u.sh", "uv run --project \"$HERE\" --locked python tests/x_scenario.py")]
 missed = [t for n, t in MUST if not scan_text(n, t)]; wrong = [t for n, t in MUSTNOT if scan_text(n, t)]
 check("the scan for callers of a root script catches each shape it is for (a path outside the package, a bare name after a run word, a -c import, a heredoc import, an import in a suite)", not missed, missed)
 check("... and leaves the package's own paths, a comment, a module of the package and prose alone", not wrong, wrong)
