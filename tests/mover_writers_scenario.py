@@ -300,8 +300,8 @@ m_ = applied({**RELAY, "mover": OWN, "then": HELP}, drop={"ask_by"})
 check("5 one wait field dropped is no clear_wait: a mover that is he stays", m_.get("mover") == OWN and "ask_by" not in m_, m_)
 m_ = applied({**RELAY, "mover": OWN, "then": HELP}, setv={"mover": OWN}, drop=set(model.WAIT_GROUP))
 check("5 clear_wait beside a mover the same write sets: the mover the write names stays, whoever it is", m_.get("mover") == OWN and "wait_kind" not in m_, m_)
-m_ = applied({**RELAY, LEG: HELP}, setv={"mover": BACK, LEG: BACK})
-check("5 a write that names the old key itself (the old parameter) is stored as written, beside its mover", m_.get("mover") == BACK and m_.get(LEG) == BACK, m_)
+m_ = applied({**RELAY, LEG: HELP}, setv={"mover": BACK, LEG: FRONT})
+check("5 a write that names the old key itself (the old parameter) is stored as written, beside its mover", m_.get("mover") == BACK and m_.get(LEG) == FRONT, m_)
 m_ = applied({**RELAY, LEG: HELP}, setv={"mover": BACK})
 check("5 …and one that names only the mover drops the old key", stores_mover(m_, BACK), m_)
 m_ = applied({**RELAY, LEG: HELP, "mover": HELP}, drop={"mover"})
@@ -389,6 +389,15 @@ for wl, kw in (("relay", dict(ask_by=day(9))), ("relay", dict(post_wake_mover=BA
     upd(n7, **kw)
     m_ = mt(n7)
     check(f"7 {wl} wait, an update of {sorted(kw)[0]}: the wait is new, so its clock is stamped and its chases start over (as on main)", "chases" not in m_ and (m_.get("watch") or {}).get("set_at", 0) > SET_AT, m_)
+
+n7 += 1
+item(n7, subject=f"[zed] clock {n7}", needs=[BACK], watch={"set_at": SET_AT}, chases=CHASES, **WAITS["relay"], **{LEG: HELP})
+try:
+    upd(n7, mover=FRONT, post_wake_mover="none"); err = ""
+except Exception as e:  # noqa: BLE001
+    err = str(e)[:200]
+m_ = mt(n7)
+check(f"7 relay wait, the old key cleared on purpose beside a mover (post_wake_mover=none): the wait is new, so its clock is stamped and its chases start over (as on main){(' (refused: ' + err + ')') if err else ''}", not err and LEG not in m_ and "chases" not in m_ and (m_.get("watch") or {}).get("set_at", 0) > SET_AT, (m_, err))
 
 # ================================================================ 8. a mover that restates the old key changes nothing
 def after_wake(n, meta):

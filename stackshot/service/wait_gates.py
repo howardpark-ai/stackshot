@@ -315,14 +315,12 @@ def _anchor_wait_gate(old: dict[str, Any], meta: dict[str, Any], gid: str = "", 
 
 
 def _old_key_changed(old: dict[str, Any], meta: dict[str, Any], model_set: dict[str, str], model_drop: set[str]) -> bool:
-    """Did the write change the old picker key (`post_wake_mover`) on purpose? The save rule drops a stored old key beside a new `mover` and on `clear_mover`: that vanishing is the rule's own
+    """Did the write change the old picker key (`post_wake_mover`) on purpose? The save rule drops a stored old key beside a new `mover` and on `clear_mover` (a clear_wait ends the wait, so it never gets here): that vanishing is the rule's own
     doing, not a change to the wait (the awaited date, anchor or picker as the writer meant it), so it neither restamps the wait's clock nor starts the chases over, as on main, where the key stayed."""
     k = _model.LEGACY_PICKER_KEY
     if meta.get(k) == old.get(k):
         return False
-    if k not in meta and k not in model_set and k not in model_drop and ("mover" in model_set or "mover" in model_drop):
-        return False
-    return True
+    return k in model_set or k in model_drop      # named by the write (set or cleared): on purpose; gone without being named: the save rule dropped it
 
 
 def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], model_set: dict[str, str], model_drop: set[str], writer: str, session_write: bool) -> str:
