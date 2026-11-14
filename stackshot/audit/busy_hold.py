@@ -10,8 +10,8 @@ of one running, so a refusal on it would rest on a guess; the release script's o
 
 A second proof: a release of a pull request tied to THIS item that is running (`live_release`). release.sh runs each release as the user unit stackshot-release-<n>.service and it stays active from its checks through
 the merge queue, the merge, the deploy and main's run, so "that unit is active" is "a release of PR n is running" (the unit list web/ui/releasing.py `release_units` reads for the board's Queued for release label; the caller passes it in). The pull request is
-tied to the item as the board ties it and the merge pass does (an anchor scoped to the item, an open step's proof or words, the item's own words by merge_tie), never to every item; an anchored pull request with no running
-unit never counts, and a pull request that no anchor and no word of the item names ties nothing (a false negative, never a false refusal). A running unit with a log that has not been written for `RELEASE_FRESH_S`
+tied to the item by three things only (an anchor scoped to the item, an open step's URL, `PR #n` or stored proof, the status line of an open step), never to every item and never by free text (the description, a done step or a mention elsewhere ties nothing); an anchored pull request with no running
+unit never counts, and a pull request that none of those names ties nothing (a false negative, never a false refusal). A running unit with a log that has not been written for `RELEASE_FRESH_S`
 is a release that is stuck, so it counts for nothing and the mover is never trapped. Nothing is read from GitHub; no log is read while no unit runs.
 
 Unknown is never a refusal: a mover whose subagents cannot be read (`subagent_tie.Unreadable`, a transcript this box does not hold, a sessions index that cannot be read), a subagent whose files cannot be read,
@@ -26,7 +26,6 @@ from typing import Any, Callable
 from stackshot.audit import audit_checks as _ac
 from stackshot.audit import subagent_tie as _tie
 from stackshot.core import config as _cfg
-from stackshot.model import merge_tie as _mt
 from stackshot.model import steps as _steps
 
 DESC_MAX = 80      # characters of a subagent's description the refusal quotes
@@ -119,38 +118,50 @@ def _stage(tail: str) -> str:
     return ""
 
 
-def _words(item: dict[str, Any], meta: dict[str, Any]) -> str:
-    """The item's own words as the merge pass reads them (server `_merge_tied`): its description, its steps, the tag of each open step and the lines of its next."""
-    cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))
-    tags = [t["text"] for t in (_steps.tag_of(c) for c in cl if c.get("status") == _steps.OPEN) if t]
-    return "\n".join([str(item.get("description") or ""), *(c["text"] for c in cl), *tags, str(meta.get("next") or "")])
+_PR_URL = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)", re.I)
+_PR_NUM = re.compile(r"(?<![\w/#.-])(?:PR|pull request)\s*#(\d+)(?!\d)", re.I)      # "PR #12", "pull request #12" (the number written with its #: a bare "PR 12" or "#12" ties nothing)
+_OTHER_PR = re.compile(r"[\w.-]+/[\w.-]+\s+(?:PR|pull request)\s*#\d+", re.I)      # "owner/repo PR #12": that repository's, taken out before the words are read
+
+
+def named_prs(text: str, own: str, canon: Callable[[str], str]) -> set[int]:
+    """The numbers of this repository's (`own`, already through `canon`) pull requests a line names: its URL, or `PR #n` / `pull request #n` (a number without a repository is this repository's only). Nothing else ties: not a
+    bare `#n`, not `PR n`, not another repository's pull request."""
+    t = str(text or "")
+    out = {int(n) for r, n in _PR_URL.findall(t) if canon(r) == own}
+    out.update(int(n) for n in _PR_NUM.findall(_OTHER_PR.sub(" ", _PR_URL.sub(" ", t))))
+    return out
+
+
+def work_prs(meta: dict[str, Any], own: str, canon: Callable[[str], str]) -> set[int]:
+    """The pull requests the status line of an OPEN step names (the open work line: `work=` writes it, steps.tag_of reads it; a line whose state is done belongs to a ticked step and is skipped)."""
+    out: set[int] = set()
+    for c in _steps.view(meta, keeper=str(meta.get("owner") or "")):
+        if c.get("status") != _steps.OPEN:
+            continue
+        t = _steps.tag_of(c)
+        if t and t["state"] != "done":
+            out |= named_prs(t["text"], own, canon)
+    return out
 
 
 def tied_releases(gid: str, running: set[int], *, anchored: Callable[[], dict[str, Any]], item: Callable[[str], dict[str, Any]], own_repo: Callable[[], str], canon: Callable[[str], str],
-                  step_prs: Callable[[dict[str, Any]], Any], pages: Callable[[], dict[str, set[str]]]) -> set[int]:
-    """The pull requests of this repository, of the ones whose release unit runs (`running`), that are tied to item `gid`: one an anchor scoped to the item names, one an open step of the item names (its URL, `PR #n`, or its
-    stored proof, releasing.step_prs), or one the item's own words name as the merge pass reads them (merge_tie: its URL, or its number for an item that speaks of this repository). A pull request of another
-    repository never counts, whatever its number: the units are this repository's. Raises what its callers raise."""
+                  step_prs: Callable[[dict[str, Any]], Any]) -> set[int]:
+    """The pull requests of this repository, of the ones whose release unit runs (`running`), that are tied to item `gid` by one of three things and nothing else: an anchor scoped to the item; an OPEN step of the item that
+    names it (its URL, `PR #n`, or its stored proof: `step_prs`, releasing.step_prs, which reads open steps only); the status line of an open step (`work_prs`). Free text never ties: the description, a done or dropped step and a
+    pull request only mentioned somewhere else are not read, so a refusal is never a wrong one (an item that names its pull request nowhere passes: a missed refusal). A pull request of another repository never counts,
+    whatever its number: the units are this repository's. Raises what its callers raise."""
     own = canon(own_repo() or "")
     if not own:
         return set()
     it = item(gid) or {}
     meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
-    keys = set(str(k) for k in ((anchored() or {}).get(gid) or ()))
     out: set[int] = set()
-    for k in keys:
-        repo, _, n = k.rpartition("#")
+    for k in (anchored() or {}).get(gid) or ():
+        repo, _, n = str(k).rpartition("#")
         if n.isdigit() and canon(repo) == own and int(n) in running:
             out.add(int(n))
     out |= {int(n) for n in (step_prs(meta) or ()) if str(n).isdigit() and int(n) in running}
-    rest = running - out
-    if rest:
-        text = _words(it, meta)
-        pg = pages() or {}
-        project = str(meta.get("project") or "")
-        for n in sorted(rest):
-            if gid in _mt.tied(f"{own}#{n}", (), {gid: keys}, {gid: text}, {gid: project}, pg, canon):
-                out.add(n)
+    out |= work_prs(meta, own, canon) & running
     return out
 
 
@@ -160,7 +171,7 @@ def _since(age: float) -> str:
 
 
 def live_release(gid: str, *, units: Callable[[], Any], anchored: Callable[[], dict[str, Any]], item: Callable[[str], dict[str, Any]], own_repo: Callable[[], str],
-                 canon: Callable[[str], str], step_prs: Callable[[dict[str, Any]], Any], pages: Callable[[], dict[str, set[str]]], log: Callable[[int], "tuple[float, str] | None"],
+                 canon: Callable[[str], str], step_prs: Callable[[dict[str, Any]], Any], log: Callable[[int], "tuple[float, str] | None"],
                  now: Callable[[], float]) -> str:
     """The words for a release of a pull request tied to item `gid` that is running ("your release of PR #12 is running on it (unit stackshot-release-12.service, its log written 3 min ago, in the merge queue (QUEUED position 1))"),
     "" when none is or none can be told. Running = the unit `stackshot-release-<n>.service` is active (`units()`, web/ui/releasing.py `release_units`: one systemctl call, an empty set on any failure) AND its log was written within
@@ -171,7 +182,7 @@ def live_release(gid: str, *, units: Callable[[], Any], anchored: Callable[[], d
         running = {int(n) for n in (units() or ())}
         if not running:
             return ""      # no release anywhere: nothing is read, no log and no item
-        tied = tied_releases(gid, running, anchored=anchored, item=item, own_repo=own_repo, canon=canon, step_prs=step_prs, pages=pages)
+        tied = tied_releases(gid, running, anchored=anchored, item=item, own_repo=own_repo, canon=canon, step_prs=step_prs)
         t_now = now()
         best: "tuple[float, int, str] | None" = None
         for n in sorted(tied):

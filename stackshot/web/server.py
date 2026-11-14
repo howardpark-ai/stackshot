@@ -761,13 +761,13 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
 def _busy_live(gid: str, mover: str) -> str:
     """What of `mover`'s own runs on the item `gid` right now, in the words of the refusal of a hold on it (audit/busy_hold.py, service/gates.py `gate_busy_hold`): a running subagent of the mover tied to the item as the hourly audit
     ties one (`_mover_subagents`, the anchors `_rlive.released_anchors`), else a release of a pull request tied to the item that is running (its unit `stackshot-release-<n>` active and its log written within 15 minutes: `release_units`,
-    the anchors, the item's open steps and its own words). "" when none is, or when it cannot be told (a mover whose subagents cannot be read is unknown, never a refusal)."""
+    the anchors, the item's open steps and their status lines). "" when none is, or when it cannot be told (a mover whose subagents cannot be read is unknown, never a refusal)."""
     from stackshot.audit import busy_hold as _bh
     from stackshot.tools import next_report as _nr
     from stackshot.web.ui import releasing as _relu
     what = _bh.live_work(gid, mover, subagents=lambda who: _mover_subagents(who), items=lambda: _nr.load_all(None), anchored=_rlive.released_anchors, same=_handoff.ho_same, shown=_nr.shown)
     return what or _bh.live_release(gid, units=_relu.release_units, anchored=_rlive.released_anchors, item=lambda g: _svcstore._load(g), own_repo=_relu.own_repo, canon=_cfg.canon_repo,
-                                    step_prs=_relu.step_prs, pages=lambda: _mtie.repo_pages(_anc.load(), _anchor_repo), log=_bh.release_log, now=time.time)
+                                    step_prs=_relu.step_prs, log=_bh.release_log, now=time.time)
 
 
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,

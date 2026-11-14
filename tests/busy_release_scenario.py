@@ -4,7 +4,7 @@ stackshot/service/gates.py `gate_busy_hold` and `BUSY_RELEASE_REFUSAL`, the serv
 release.sh runs each release as the user unit stackshot-release-<n>.service, which stays active through the checks, the merge queue, the merge, the deploy and main's run. A hold from the item's mover is refused while
 the unit of a pull request TIED TO THIS ITEM is active and its log (<state>/releases/pr-<n>.log) was written within 15 minutes; an older log is a stuck release, and a mover is never trapped. Unknown is never a refusal.
 
-  1  refuses     the unit of a pull request the item is tied to by an anchor, by an open step's URL, by `PR #n` in a step, by a step's stored proof, or by its own words (merge_tie) refuses a hold and a date
+  1  refuses     the unit of a pull request the item is tied to by an anchor, by an open step's URL, by `PR #n` in a step, by a step's stored proof, or by the status line of an open step refuses a hold and a date
                  alone; the text names the release, the unit, the log's age and its stage, and tells the mover to keep the item in hand or wait on the event by name; the stage is read from the log's own lines
   2  ties        what does NOT tie: another item's pull request, an anchored pull request with no unit, a unit of another repository's pull request with the same number, a pull request the item does not name
   3  passes      no unit, a unit read that raises, a log older than 15 minutes (the bound itself included), no log, a log that cannot be read, no own repository, anchors or an item that cannot be read; the same
@@ -126,7 +126,7 @@ QUEUED = STAMP + "in the merge queue (QUEUED position 1): 3 min since the enqueu
 def tail(*lines): return "".join(STAMP + l + "\n" for l in lines)
 def logfile(n, text=QUEUED, age=120.0):
     p = RELDIR / f"pr-{n}.log"; p.write_text(text, encoding="utf-8"); os.utime(p, (time.time() - age, time.time() - age)); return p
-def rel_live(units=(77,), anch=None, own=OWN, logs=None, pages=None, raises=None, now=None, calls=None, step_prs=None, item=None):
+def rel_live(units=(77,), anch=None, own=OWN, logs=None, raises=None, now=None, calls=None, step_prs=None, item=None):
     """The gate's `live` callable as the server builds the release arm (audit/busy_hold.py `live_release`), over the scratch store, fake units and fake logs (a dict {n: (mtime, tail)}; absent = no log)."""
     logs = {n: (NOW - 120.0, QUEUED) for n in units} if logs is None else logs
     def count(k):
@@ -142,7 +142,7 @@ def rel_live(units=(77,), anch=None, own=OWN, logs=None, pages=None, raises=None
         return v
     def live(gid, mover):
         return busy_hold.live_release(gid, units=U, anchored=lambda: anch or {}, item=item or (lambda g: count("item") or server._svcstore._load(g)), own_repo=lambda: own, canon=_cfg.canon_repo,
-                                      step_prs=step_prs or _rel.step_prs, pages=lambda: count("pages") or (pages or {}), log=L, now=lambda: NOW if now is None else now)
+                                      step_prs=step_prs or _rel.step_prs, log=L, now=lambda: NOW if now is None else now)
     return live
 def both_for(subs=None, **kw):
     """The server's `_busy_live` as a callable over fakes: the subagent proof first, the release proof second."""
@@ -187,15 +187,45 @@ check("1 (fixture) an open step's stored proof pr_released of this repository re
 check("1 a running release of the pull request an open step's proof names refuses", RELWORDS(gate(rel_live(units=(80,)))), gate(rel_live(units=(80,))))
 put(1, mover=BACK, step_proof={_steps.key(f"{BACK}: do it"): f"pr_merged {OWN}#81"})
 check("1 …a pr_merged proof ties as a pr_released one does", RELWORDS(gate(rel_live(units=(81,)))), gate(rel_live(units=(81,))))
-# tied by the item's own words (merge_tie)
-put(1, mover=BACK); setdesc(1, f"- Fixes the export, https://github.com/{OWN}/pull/82")
-check("1 a running release of the pull request the item's description links by URL refuses", RELWORDS(gate(rel_live(units=(82,)))), gate(rel_live(units=(82,))))
-put(1, mover=BACK); setdesc(1, "- Fixes the export in PR 83")
-check("1 a number written `PR 83` ties only an item that speaks of this repository (its project page holds an anchor in it): a project of another repository does not", ok(gate(rel_live(units=(83,), pages={}))), gate(rel_live(units=(83,), pages={})))
-check("1 …and one of this repository's project does", RELWORDS(gate(rel_live(units=(83,), pages={OWN: {PROJECT}}))), gate(rel_live(units=(83,), pages={OWN: {PROJECT}})))
-check("1 …and an item with a pull request of the repository anchored to it speaks of it too", RELWORDS(gate(rel_live(units=(83,), anch={"a1": {f"{OWN}#5"}}))), gate(rel_live(units=(83,), anch={"a1": {f"{OWN}#5"}})))
-put(1, mover=BACK, next=f"{BACK}: do it\n{BACK}: wait for #84 to be released")
-check("1 …`#84` in the next lines ties likewise (merge_tie's own reading of a number)", RELWORDS(gate(rel_live(units=(84,), pages={OWN: {PROJECT}}))), gate(rel_live(units=(84,), pages={OWN: {PROJECT}})))
+# tied by the status line of an open step (the open work line)
+def setsteps(*steps, nxt=f"{BACK}: do it"):
+    """The item with these stored steps ({text, status, tag}) beside its next."""
+    put(1, mover=BACK, next=nxt, steps=list(steps))
+OPENSTEP = f"{BACK}: do it"
+setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": "PR #83 in the merge queue", "state": "in progress"}})
+check("1 a running release of the pull request the status line of an open step names (`PR #83`) refuses", RELWORDS(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
+setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": f"https://github.com/{OWN}/pull/82 released", "state": "in progress"}})
+check("1 …by the pull request's URL in the status line", RELWORDS(gate(rel_live(units=(82,)))), gate(rel_live(units=(82,))))
+setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": "PR #83 up", "state": "defined"}})
+check("1 …a status line in any state but done counts", RELWORDS(gate(rel_live(units=(83,)))))
+reset()
+
+# the description, a done step, a dropped step and any other free text never tie (a refusal is never a wrong one)
+setdesc(1, "- Fixes the export in PR 83, see PR #83 and https://github.com/%s/pull/83" % OWN)
+check("2 a description that names `PR 83`, `PR #83` and its URL while PR 83 is released under another item ties nothing: the hold passes", ok(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
+reset(); setsteps({"text": OPENSTEP, "status": "open"}, {"text": f"{BACK}: land PR #83", "status": "done"}, {"text": f"{BACK}: try https://github.com/{OWN}/pull/83", "status": "dropped"})
+check("2 a DONE step and a dropped step that name PR #83 (words and URL) tie nothing", ok(gate(rel_live(units=(83,)))) and _rel.step_prs(read(1)["metadata"]) == set(), (gate(rel_live(units=(83,))), _rel.step_prs(read(1)["metadata"])))
+reset(); setsteps({"text": OPENSTEP, "status": "open"}, {"text": f"{BACK}: land it", "status": "done", "tag": {"text": "PR #83 released", "state": "done"}})
+check("2 the status line of a done step ties nothing", ok(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
+reset(); setsteps({"text": OPENSTEP, "status": "open", "tag": {"text": "PR #83 released", "state": "done"}})
+check("2 …nor a status line whose state is done", ok(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
+put(1, mover=BACK, next=f"{BACK}: do it", wait_note="PR #83 is in review")
+check("2 a mention in another field of the item (a note, a wait's text) ties nothing", ok(gate(rel_live(units=(83,)))))
+put(1, mover=BACK, next=f"{BACK}: wait for #83 to be released")
+check("2 a bare `#83` in an open step ties nothing (the number is read only as `PR #83` or by its URL)", ok(gate(rel_live(units=(83,)))) and _rel.step_prs(read(1)["metadata"]) == set(), _rel.step_prs(read(1)["metadata"]))
+put(1, mover=BACK, next=f"{BACK}: take PR 83 from here")
+check("2 …nor `PR 83` written without the #", ok(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
+put(1, mover=BACK, next=f"{BACK}: open the follow-up to PR #83")
+check("2 an OPEN step that says `follow-up to PR #83` is an open step naming it: it refuses while that unit runs (accepted: the unit is the mover's, a hold would be false)", RELWORDS(gate(rel_live(units=(83,)))), gate(rel_live(units=(83,))))
+reset(); setdesc(1, "- Follow-up to PR 83 and PR #83")
+check("2 …the same while another item (a2) is the one anchored to PR 83: the hold on this item passes", ok(gate(rel_live(units=(83,), anch={"a2": {f"{OWN}#83"}}))), gate(rel_live(units=(83,), anch={"a2": {f"{OWN}#83"}})))
+check("2 named_prs reads only this repository's URL and `PR #n` / `pull request #n`", busy_hold.named_prs(f"PR #5, pull request #6, https://github.com/{OWN}/pull/7 https://github.com/{OTHERREPO}/pull/8 {OTHERREPO} PR #9 PR 10 #11", OWN, _cfg.canon_repo) == {5, 6, 7}, busy_hold.named_prs(f"PR #5, pull request #6, https://github.com/{OWN}/pull/7 https://github.com/{OTHERREPO}/pull/8 {OTHERREPO} PR #9 PR 10 #11", OWN, _cfg.canon_repo))
+put(1, mover=BACK, next=f"{BACK}: open the follow-up to PR #83")
+check("2 …and passes when no unit of PR 83 runs (the mover has none)", ok(gate(rel_live(units=(99,)))), gate(rel_live(units=(99,))))
+put(1, mover=BACK, next=f"{BACK}: open the follow-up to PR #83")
+check("2 …and when the unit's log is quiet", ok(gate(rel_live(units=(83,), logs={83: (NOW - 1200.0, QUEUED)}))))
+put(1, mover=BACK, next=f"{BACK}: read {OTHERREPO} PR #83")
+check("2 …another repository's `other/repo PR #83` in an open step ties nothing", ok(gate(rel_live(units=(83,)))))
 reset()
 
 # the stage: the log's own words
@@ -242,15 +272,14 @@ check("2 …a step's URL of another repository's pull request with the same numb
 put(1, mover=BACK, next=f"{BACK}: wait for {OTHERREPO} PR #77")
 check("2 …`other/repo PR #77` in a step", ok(gate(rel_live())) and _rel.step_prs(read(1)["metadata"]) == set(), (gate(rel_live()), _rel.step_prs(read(1)["metadata"])))
 put(1, mover=BACK); setdesc(1, f"- See https://github.com/{OTHERREPO}/pull/77")
-check("2 …a description that links another repository's pull request 77", ok(gate(rel_live(pages={OWN: {PROJECT}}))), gate(rel_live(pages={OWN: {PROJECT}})))
+check("2 …a description that links another repository's pull request 77", ok(gate(rel_live())))
 reset()
-check("2 a pull request number in no word of the item ties nothing", ok(gate(rel_live(pages={OWN: {PROJECT}}))))
-put(1, mover=BACK); setdesc(1, "- Done in PR 770")
-check("2 …whole: `PR 770` in the item's words does not tie unit 77", ok(gate(rel_live(pages={OWN: {PROJECT}}))), gate(rel_live(pages={OWN: {PROJECT}})))
-put(1, mover=BACK); setdesc(1, "- Done in PR 77")
-check("2 …and `PR 77` does tie it (the same fixture, the whole number)", RELWORDS(gate(rel_live(pages={OWN: {PROJECT}}))), gate(rel_live(pages={OWN: {PROJECT}})))
+check("2 a pull request number in no word of the item ties nothing", ok(gate(rel_live())))
+put(1, mover=BACK, next=f"{BACK}: do it, PR #770")
+check("2 the number is read whole: `PR #770` in an open step does not tie unit 77", ok(gate(rel_live())) and _rel.step_prs(read(1)["metadata"]) == {770}, gate(rel_live()))
+put(1, mover=BACK, next=f"{BACK}: do it, PR #77")
+check("2 …and `PR #77` does tie it (the same fixture, the whole number)", RELWORDS(gate(rel_live())), gate(rel_live()))
 reset()
-check("2 an item whose project page holds no anchor in the repository is not tied by a bare number in its words", ok(gate(rel_live(pages={OWN: {"projects/elsewhere"}}))) )
 put(3, mover=OTHER)
 check("2 an item another session moves (a3) is not refused even with its pull request live", ok(gate(rel_live(anch={"a3": {f"{OWN}#77"}}), gid="a3")), gate(rel_live(anch={"a3": {f"{OWN}#77"}}), gid="a3"))
 
@@ -266,7 +295,7 @@ check("3 a unit with no log passes (unknown)", ok(gate(rel_live(anch=A77, logs={
 check("3 a log that cannot be read passes", ok(gate(rel_live(anch=A77, logs={77: OSError("denied")}))), gate(rel_live(anch=A77, logs={77: OSError("denied")})))
 check("3 a repository this checkout cannot name passes", ok(gate(rel_live(anch=A77, own=""))), gate(rel_live(anch=A77, own="")))
 check("3 anchors that cannot be read pass", ok(outcome(lambda: gates.gate_busy_hold("a1", BACK, hold=True, live=lambda g, w: busy_hold.live_release(g, units=lambda: {77}, anchored=lambda: 1 / 0, item=server._svcstore._load, own_repo=lambda: OWN,
-      canon=_cfg.canon_repo, step_prs=_rel.step_prs, pages=lambda: {}, log=lambda n: (NOW - 60.0, QUEUED), now=lambda: NOW)))))
+      canon=_cfg.canon_repo, step_prs=_rel.step_prs, log=lambda n: (NOW - 60.0, QUEUED), now=lambda: NOW)))))
 check("3 an item that cannot be read passes", ok(gate(rel_live(anch=A77, item=lambda g: 1 / 0))), gate(rel_live(anch=A77, item=lambda g: 1 / 0)))
 check("3 an unreadable step reader passes", ok(gate(rel_live(anch=A77, step_prs=lambda m: 1 / 0))))
 check("3 a pull request the unit list gives that is no number is no unit", ok(gate(rel_live(units=("x",), anch=A77))))
@@ -275,7 +304,7 @@ check("3 a `live` that raises passes the write, and no `live` at all passes", ok
 direct = lambda **kw: rel_live(**kw)("a1", BACK)
 check("3 the proof answers \"\" itself, never raising, when the unit list raises, the anchors raise, the item raises, the log raises or the repository cannot be named",
       direct(anch=A77, raises=OSError("x")) == "" and direct(anch=A77, logs={77: OSError("denied")}) == "" and direct(anch=A77, item=lambda g: 1 / 0) == "" and direct(anch=A77, own="") == ""
-      and busy_hold.live_release("a1", units=lambda: {77}, anchored=lambda: 1 / 0, item=server._svcstore._load, own_repo=lambda: OWN, canon=_cfg.canon_repo, step_prs=_rel.step_prs, pages=lambda: {}, log=lambda n: (NOW, QUEUED), now=lambda: NOW) == "")
+      and busy_hold.live_release("a1", units=lambda: {77}, anchored=lambda: 1 / 0, item=server._svcstore._load, own_repo=lambda: OWN, canon=_cfg.canon_repo, step_prs=_rel.step_prs, log=lambda n: (NOW, QUEUED), now=lambda: NOW) == "")
 check("3 …and its words, when it can tell, are the refusal's start", direct(anch=A77).startswith("your release of PR #77 is running on it (unit stackshot-release-77.service"), direct(anch=A77))
 check("3 an anchored pull request that is not running is not counted although its log is fresh (only a unit proves it)", ok(gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))), gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)})))
 check("3 a step's pull request that is not running is not counted although its log is fresh", ok(gate(rel_live(units=(99,), step_prs=lambda m: {78}, logs={78: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))))
@@ -425,11 +454,11 @@ UNITS_OUT["v"] = ""
 
 # ---------------------------------------------------------------- 6. shape and cost
 calls = []
-check("6 with no unit running nothing else is read: no item, no pages, no log", ok(gate(rel_live(units=(), anch=A77, calls=calls))) and calls == ["units"], calls)
+check("6 with no unit running nothing else is read: no item, no log", ok(gate(rel_live(units=(), anch=A77, calls=calls))) and calls == ["units"], calls)
 calls.clear()
-check("6 an item tied by an anchor to the one unit that runs: one unit read, the item once, that pull request's log once, and no page read", RELWORDS(gate(rel_live(units=(77,), anch=A77, calls=calls))) and sorted(calls) == ["item", "log77", "units"], calls)
+check("6 an item tied by an anchor to the one unit that runs: one unit read, the item once, that pull request's log once", RELWORDS(gate(rel_live(units=(77,), anch=A77, calls=calls))) and sorted(calls) == ["item", "log77", "units"], calls)
 calls.clear()
-check("6 …with another unit beside it the item's words and the project pages are read once, and only the tied pull request's log", RELWORDS(gate(rel_live(units=(77, 91), anch=A77, calls=calls, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 60.0, QUEUED)}))) and sorted(calls) == ["item", "log77", "pages", "units"], calls)
+check("6 …with another unit beside it: still the item once, and only the tied pull request's log", RELWORDS(gate(rel_live(units=(77, 91), anch=A77, calls=calls, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 60.0, QUEUED)}))) and sorted(calls) == ["item", "log77", "units"], calls)
 calls.clear()
 check("6 a unit tied to nothing reads no log", ok(gate(rel_live(units=(99,), calls=calls))) and not [c for c in calls if c.startswith("log")], calls)
 calls.clear()
