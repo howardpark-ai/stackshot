@@ -44,7 +44,7 @@ def _one_line(text: Any, limit: int = MANDATE_MAX) -> str:
 
 def fronts(project: str, reg: dict[str, dict[str, Any]] | None = None) -> dict[str, str]:
     """The user-facing agents of an item's project → {name: mandate line, one line}: the `agents:` entries outside `background:` of the project's page, of its top-level page and of its
-    hub, as server._hub_sessions reads them, and the agents only the project record holds (their page line still owed, projects.with_pending). {} when the project names none."""
+    hub, as item_read._hub_sessions reads them, and the agents only the project record holds (their page line still owed, projects.with_pending). {} when the project names none."""
     from stackshot.projects import projects as _prj
     reg = _prj.with_pending(_anc.registry() if reg is None else reg, made=True)
     key = str(project or "").strip().strip("/")

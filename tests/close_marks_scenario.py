@@ -62,6 +62,7 @@ def sts(i): return [(x["status"], x.get("by") or "") for x in rd(i)["metadata"].
 def kinds(i): return [k for k, _ in sts(i)]
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -74,7 +75,7 @@ told: list = []
 telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
 telling.tell_check_closed = lambda gid, item, label: []
 def close(i, outcome="done", sup="", **kw):
-    return server._update(f"board#{i}", status="completed", outcome=outcome, reason="it ended", description=NEW, superseded_by=sup, sender="home-front", **kw)
+    return _update_svc._update(f"board#{i}", status="completed", outcome=outcome, reason="it ended", description=NEW, superseded_by=sup, sender="home-front", **kw)
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
@@ -92,11 +93,11 @@ close(2, "dropped")
 check("close dropped: every step is dropped, by the closer", kinds(2) == ["dropped"] * 3 and {b for _, b in sts(2)} == {"home-front"}, sts(2))
 close(3, "superseded", sup="board#1")
 check("close superseded: every step is dropped, by the closer", kinds(3) == ["dropped"] * 3 and {b for _, b in sts(3)} == {"home-front"}, sts(3))
-server._update("board#4", status="completed", outcome="dropped", reason="it ended", description=NEW, sender="home-front", done=[1])
+_update_svc._update("board#4", status="completed", outcome="dropped", reason="it ended", description=NEW, sender="home-front", done=[1])
 check("a mark passed with the close wins for its step: done=[1] with outcome dropped → done, dropped, dropped", kinds(4) == ["done", "dropped", "dropped"], sts(4))
-server._update("board#5", status="completed", outcome="done", reason="it ended", description=NEW, sender="home-front", dropped=["home-front: test it"])
+_update_svc._update("board#5", status="completed", outcome="done", reason="it ended", description=NEW, sender="home-front", dropped=["home-front: test it"])
 check("a mark passed with the close wins for its step: dropped=[text] with outcome done → done, dropped, done", kinds(5) == ["done", "dropped", "done"], sts(5))
-server._update("board#6", sender="home-front", done=[1])                       # one step done earlier, by update: the close leaves it as it is, marks the rest
+_update_svc._update("board#6", sender="home-front", done=[1])                       # one step done earlier, by update: the close leaves it as it is, marks the rest
 at6 = rd(6)["metadata"]["steps"][0]["at"]
 close(6, "dropped")
 check("a step marked before the close is untouched (by, at, status); the others follow the outcome", kinds(6) == ["done", "dropped", "dropped"] and rd(6)["metadata"]["steps"][0]["at"] == at6, rd(6)["metadata"]["steps"])
@@ -108,7 +109,7 @@ check("a stored open step whose line already left next reads dropped (view), the
 
 item(9); item(12)
 mb9, mb12 = rd(9)["metadata"], rd(12)["metadata"]
-server._update("board#9", status="completed", outcome="done", reason="it ended", description=NEW, sender="home-front", dropped=[2])
+_update_svc._update("board#9", status="completed", outcome="done", reason="it ended", description=NEW, sender="home-front", dropped=[2])
 close(12, "done")
 check("History and the mirror's comment (steps.changes): the mark a close puts by itself is no event, a step marked the other way in the same call is",
       S.changes(mb12, rd(12)["metadata"], True) == [] and S.changes(mb9, rd(9)["metadata"], True) == [("dropped", "home-front: test it")], (S.changes(mb12, rd(12)["metadata"], True), S.changes(mb9, rd(9)["metadata"], True)))
@@ -121,12 +122,12 @@ it11 = rd(11); server._watch_close(it11, "dropped on his answer", time.time())
 check("a watcher ask's drop marks the open steps dropped, by the server", [x["status"] for x in it11["metadata"]["steps"]] == ["dropped"] * 3 and it11["metadata"]["outcome"] == "dropped", it11["metadata"])
 
 # ================================================================ 3. reopening and the closed item's checklist
-refused("a mark on a closed item is refused: reopen it first", lambda: server._update("board#1", sender="home-front", done=[1]), "closed", "reopen")
+refused("a mark on a closed item is refused: reopen it first", lambda: _update_svc._update("board#1", sender="home-front", done=[1]), "closed", "reopen")
 check("…and the refusal wrote nothing", kinds(1) == ["done"] * 3, sts(1))
-server._update("board#1", status="open", next="home-front: a fresh start", sender="home-front")
+_update_svc._update("board#1", status="open", next="home-front: a fresh start", sender="home-front")
 check("reopening: the marks the close made stay, the new next is the one open step", [x["status"] for x in S.view(rd(1)["metadata"])] == ["done"] * 3 + ["open"], rd(1)["metadata"])
 item(9187, status="completed", outcome="dropped", reason="old", steps=[{"text": "home-front: old one", "status": "open"}, {"text": "home-front: old two", "status": "done", "by": "home-front", "at": now0 - 100}], next=None)
-server._update(f"board#{BID_E}", status="open", next="home-front: back again", sender="home-front")
+_update_svc._update(f"board#{BID_E}", status="open", next="home-front: back again", sender="home-front")
 check("reopening an OLD close (steps left open) is unchanged: the steps left open are dropped, the new next is the open step",
       [x["status"] for x in S.view(rd(9187)["metadata"])] == ["dropped", "done", "open"], rd(9187)["metadata"])
 

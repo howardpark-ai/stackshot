@@ -71,6 +71,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import home
+from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -80,7 +81,7 @@ from stackshot.web.ui import render as r2
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
-upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
+upd = lambda i, sender="home-front", **kw: _update_svc._update(f"a{i}", sender=sender, **kw)
 mk = lambda **kw: _wt_create._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
                                     "next": "Oliver: answer the ask", "needs": ["decision"], "ask": ASK, **kw})
 WANT = ("Refused", "mockup", "[mockup](", "Decide part")

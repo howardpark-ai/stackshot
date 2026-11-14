@@ -68,6 +68,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.web import answers as _web_answers
 from stackshot.router import routing as _routing
 from stackshot.anchors import anchors as _anc
@@ -160,7 +162,7 @@ reset()
 woke = wakes_svc.wake_pass()
 m = mt(10)
 check("time: the wake that passed turns the item alive with the post-wake mover", "a10" in woke and m.get("mover") == BACK and "wake" not in m and "hold" not in m and "wait_kind" not in m and "post_wake_mover" not in m and m.get("needs") == [BACK], m)
-mod = server._model_of({**rd(10), "gid": "a10"})
+mod = _item_read._model_of({**rd(10), "gid": "a10"})
 check("time: …the model reads it as alive, the mover the post-wake mover", mod.state == "alive" and mod.mover == BACK and mod.mover_explicit and not mod.conflicts, mod)
 check("time: …and records what arrived, once", m.get("woke", {}).get("what") == f"its wake {day(-1)} came" and m["woke"]["to"] == BACK, m.get("woke"))
 check("time: the mover is told in one line: the item, what it waited on, that it is theirs", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "is yours now" in sent("watch")[0][2] and "its wake" in sent("watch")[0][2]
@@ -248,14 +250,14 @@ check("anchor: the minute pass finds a keeper-passed notice in the routing log f
 _anc.save({"projects/alpha": [{"url": AURL, "items": None, "added": now0, "by": "x"}]})
 item(47, subject="[home] about to wait on the anchor", su=now0 - 3600, needs=[BACK])
 _routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="PR #5 got a review comment", anchor="github:o/r#5", pilot=True, ts=now0 - 600)
-out = server._update("a47", sender=FRONT, wait_kind="anchor", wait_anchor=AURL, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, then="", mover="none")
+out = _update_svc._update("a47", sender=FRONT, wait_kind="anchor", wait_anchor=AURL, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, then="", mover="none")
 check("anchor: at wait-set the reply says what anchor-hub already recorded on the anchor since the item's last move", "anchor-hub already recorded" in out and "PR #5 got a review comment" in out, out)
 check("anchor: …and the wait is stamped (a notice older than it is not its arrival)", mt(47).get("watch", {}).get("set_at", 0) >= now0 and mt(47).get("wait_kind") == "anchor", mt(47))
 item(48, subject="[home] quiet anchor", su=now0 - 3600, needs=[BACK])
-refused("anchor: an anchor that is not on the project's list cannot be set as the wait (anchor_wait_refusal has the rest)", lambda: server._update("a48", sender=FRONT, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"), "anchors list", "anchors(project=\"projects/alpha\"")
+refused("anchor: an anchor that is not on the project's list cannot be set as the wait (anchor_wait_refusal has the rest)", lambda: _update_svc._update("a48", sender=FRONT, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"), "anchors list", "anchors(project=\"projects/alpha\"")
 out = server._watch_anchor_seen("projects/alpha", "https://github.com/o/r/pull/9", now0 - 3600)
 check("anchor: …the report for a stored wait, nothing recorded, says so, and an anchor anchor-hub does not watch for the project is named", "recorded nothing" in out and "does not watch" in out and "anchors(project=\"projects/alpha\"" in out, out)
-out = server._update("a47", sender=FRONT, ask_by=day(8))
+out = _update_svc._update("a47", sender=FRONT, ask_by=day(8))
 check("anchor: moving the awaited date (ask_by) resets the backstop's stamp, and says nothing more of the anchor", mt(47)["watch"]["set_at"] >= now0 and "anchor-hub already" not in out, out)
 rel = wakes_svc.anchor_release("projects/alpha", notice("older than the wait", ts=now0 - 56))
 check("anchor: a notice from before the wait was set is not its arrival", mt(47).get("wait_kind") == "anchor", mt(47))
@@ -268,11 +270,11 @@ reset(); woke = wakes_svc.wake_pass()
 m = mt(50)
 check("relay: the ask-by day turns the item to the owner with the fixed ask", "a50" in woke and m.get("ask") == RASK and m.get("needs") == ["decision"] and m.get("then") == BACK and "wait_kind" not in m, m)
 check("relay: …its three options map to the board's buttons", [o["label"] for o in render.options_of(rd(50))] == ["arrived", "not yet, ask again on <date>", "drop"], m.get("options"))
-check("relay: …the item reads alive with the owner as mover, then the post-wake mover", server._model_of({**rd(50), "gid": "a50"}).owner_moves and server._model_of({**rd(50), "gid": "a50"}).then == BACK, server._model_of({**rd(50), "gid": "a50"}))
+check("relay: …the item reads alive with the owner as mover, then the post-wake mover", _item_read._model_of({**rd(50), "gid": "a50"}).owner_moves and _item_read._model_of({**rd(50), "gid": "a50"}).then == BACK, _item_read._model_of({**rd(50), "gid": "a50"}))
 check("relay: …nobody is messaged (his queue is the board)", not sent("watch"), sent())
 g = _wt_get.stackshot_get("a50")
 check("relay: get shows the question and what turned it", "countersigned NDA" in g and re.search(r"woke: .*ask-by day .* came → the owner", g), g)
-check("relay: …a write by a session is not nagged for the ask's shape", "[ask]" not in server._update("a50", sender=FRONT, next="team-back: look at it"), None)
+check("relay: …a write by a session is not nagged for the ask's shape", "[ask]" not in _update_svc._update("a50", sender=FRONT, next="team-back: look at it"), None)
 check("relay: the item that is not due is untouched", mt(51).get("wait_kind") == "relay", mt(51))
 br = _wt_brief.stackshot_brief()
 check("relay: the brief lists the relay waits as waiting on the world: what, ask-by date", "Waiting on the world (1;" in br and f"the lease, ask by {day(4)}" in br, br[:1500])
@@ -289,7 +291,7 @@ check("relay answer: …the ask-back quotes the note and offers three days count
       and [o["label"] for o in render.options_of(rd(50))][:3] == [wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=7)), wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=14)), wk.ASK_AGAIN + wk.day_words(wk._add_months(TODAY, 1))]
       and [o["label"] for o in render.options_of(rd(50))][3:] == ["arrived", "not yet, ask again on <date>", "drop"], (m["ask"], m.get("options")))
 check("relay answer: …it is his move still, and the page has lines for it",
-      server._model_of({**rd(50), "gid": "a50"}).owner_moves and '"askedback":' in open(os.path.join(STACK, "stackshot/web/render.py"), encoding="utf-8").read()
+      _item_read._model_of({**rd(50), "gid": "a50"}).owner_moves and '"askedback":' in open(os.path.join(STACK, "stackshot/web/render.py"), encoding="utf-8").read()
       and "askedback" in render.Board._SENT and "stalenote" in render.Board._SENT and "closednote" in render.Board._SENT and "needdate" not in render.Board._SENT, (m, sent()))
 out = server._answer("a50", wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=14)), "", "answer")
 m = mt(50)
@@ -391,7 +393,7 @@ item(60, wait_kind="relay", wait_event="the signed copy", ask_by=day(4), post_wa
 reset()
 g = _wt_get.stackshot_get("a60")
 check("chase: get shows chases: n with the last note of a stored chase", "chases: 1 (last by team-back: mailed Robin a reminder)" in g, g)
-out = server._update("a60", sender=BACK, ask_by=day(5))
+out = _update_svc._update("a60", sender=BACK, ask_by=day(5))
 check("chase: a moved ask_by resets the backstop and the chases (they were about the old date)", "chases" not in mt(60) and ab_(mt(60)) == day(5), mt(60))
 it = rd(60); it["metadata"].pop("until", None); it["metadata"]["ask_by"] = day(-1); it["metadata"]["chases"] = [{"at": 1.0, "by": BACK, "note": "one"}, {"at": 2.0, "by": BACK, "note": "two"}]; (T / "store/a/60.json").write_text(json.dumps(it))
 reset(); woke = wakes_svc.wake_pass()
@@ -418,7 +420,7 @@ check("chase: an anchor that stayed silent after two chases comes to the owner a
 server._answer("a63", "keep waiting until <date>", f"{day(7)}", "answer")
 check("chase: …keep waiting restores the anchor wait with its anchor and event", mt(63).get("wait_kind") == "anchor" and mt(63).get("wait_anchor") == AURL and mt(63).get("wait_event") == "a reply" and ab_(mt(63)) == day(7), mt(63))
 item(64, subject="[home] closes with chases", chases=[{"at": 1.0, "by": BACK, "note": "a"}], woke={"what": "x", "to": BACK, "at": 1.0}, watch={"set_at": 1.0}, needs=[BACK])
-server._update("a64", sender=BACK, status="completed", outcome="dropped", reason="not wanted any more", description="- Dropped: it was not wanted any more")
+_update_svc._update("a64", sender=BACK, status="completed", outcome="dropped", reason="not wanted any more", description="- Dropped: it was not wanted any more")
 check("chase: a close drops the chases, the arrival and the wait's record", not any(k in mt(64) for k in ("chases", "woke", "watch")), mt(64))
 
 # ================================================================ one message per recipient, and the pause
@@ -482,18 +484,18 @@ check("gate: an `after` close does not turn a watched wait of another kind", mt(
 # ================================================================ display: the arrival is shown until a session writes
 g = _wt_get.stackshot_get("a10")
 check("display: get shows woke: what arrived → the mover", re.search(r"woke: its wake \S+ came → team-back", g) is not None, g)
-server._update("a10", sender=BACK, next="team-back: take it")
+_update_svc._update("a10", sender=BACK, next="team-back: take it")
 check("display: …until a session writes to the item", "woke" not in mt(10) and "woke:" not in _wt_get.stackshot_get("a10"), mt(10))
 check("display: a closed item shows none of it", "chases:" not in _wt_get.stackshot_get("a64") and "woke:" not in _wt_get.stackshot_get("a64"), None)
 
 # ================================================================ the write guards still read a watched wait (a real write, guards on)
 cfg(guards=True)
 item(90, subject="[home] guarded relay", needs=[BACK], su=now0 - 3600)
-out = server._update("a90", sender=FRONT, wait_kind="relay", wait_event="the courier's parcel", ask_by=day(6), post_wake_mover=BACK, mover="none", next="team-back: nothing until it comes")
+out = _update_svc._update("a90", sender=FRONT, wait_kind="relay", wait_event="the courier's parcel", ask_by=day(6), post_wake_mover=BACK, mover="none", next="team-back: nothing until it comes")
 check("guards: a relay wait with its event, ask-by day and post-wake mover is accepted", mt(90).get("wait_kind") == "relay" and "model: waiting on news" in out, out)
-out = server._update("a71", sender=BACK, next="team-back: take it from here")
+out = _update_svc._update("a71", sender=BACK, next="team-back: take it from here")
 check("guards: the post-wake mover's first write on the item that turned alive passes the write guards", "updated a71" in out and "model: alive · mover team-back" in out and "model conflict" not in out, out)
-out = server._update("a52", sender=BACK, next="team-back: got it, working")
+out = _update_svc._update("a52", sender=BACK, next="team-back: got it, working")
 check("guards: …so does the one on an item the owner answered 'arrived' on", "updated a52" in out and "model conflict" not in out, out)
 cfg(guards=False)
 
@@ -555,7 +557,7 @@ def _ans():
     except Exception as e: errs.append(repr(e))
 def _upd():
     try:
-        for i in range(40): server._update("a67", sender=BACK, next=f"team-back: step {i}")
+        for i in range(40): _update_svc._update("a67", sender=BACK, next=f"team-back: step {i}")
     except Exception as e: errs.append(repr(e))
 ths = [threading.Thread(target=f, daemon=True) for f in (_ans, _upd)]
 for t in ths: t.start()
@@ -572,7 +574,7 @@ server._answer("a16", "", "not yet, try next Friday", "answer")
 m = mt(16)
 check("review 4: a box-only answer on the relay ask hands the item to the post-wake mover, alive", m.get("mover") == BACK and m.get("needs") == [BACK] and "then" not in m, m)
 check("review 4: …the ask, the options and watch.asked are gone, the wait's own fields too, and no conflict is left", not any(k in m for k in ("ask", "options", "wait_kind", "post_wake_mover")) and "asked" not in (m.get("watch") or {})
-      and not server._model_of({**rd(16), "gid": "a16"}).conflicts and server._model_of({**rd(16), "gid": "a16"}).mover == BACK, m)
+      and not _item_read._model_of({**rd(16), "gid": "a16"}).conflicts and _item_read._model_of({**rd(16), "gid": "a16"}).mover == BACK, m)
 check("review 4: …the wait's record stays in watch.was, so the mover can put the wait back", (m.get("watch") or {}).get("was", {}).get("wait_kind") == "relay" and m["watch"]["was"].get("wait_event") == "the lease", m.get("watch"))
 check("review 4: …the arrival line is neutral: his words, and nothing claims an arrival", m["woke"]["what"] == f'{_core_instance.OWNER} answered in words: "not yet, try next Friday"' and "arrived" not in m["woke"]["what"].replace("answered", "") and m["woke"]["to"] == BACK, m.get("woke"))
 check("review 4: …and the mover is told with his words", any(x[1] == UB and x[3] == "answer" and "not yet, try next Friday" in x[2] for x in SENT), sent("answer"))
@@ -612,9 +614,9 @@ check("review 6: the brief lists the waits no watcher can end", "Waits no watche
 cfg(guards=True)
 item(23, wait_kind="relay", wait_event="the badge", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] second-mover guard")
 wakes_svc.wake_pass()
-mod = server._model_of({**rd(23), "gid": "a23"})
+mod = _item_read._model_of({**rd(23), "gid": "a23"})
 check("review 8: the turned item's needs is decision alone, the post-wake mover is `then`, and the model reads no conflict", mt(23).get("needs") == ["decision"] and mt(23).get("then") == BACK and mod.owner_moves and not mod.conflicts, (mt(23), mod))
-out = server._update("a23", sender=FRONT, next="home-front: read his answer on the board")
+out = _update_svc._update("a23", sender=FRONT, next="home-front: read his answer on the board")
 check("review 8: a session's write on it passes the write guards", "updated a23" in out and "model conflict" not in out, out)
 cfg(guards=False)
 

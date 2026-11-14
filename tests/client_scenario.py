@@ -45,6 +45,9 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.model import holders as _holders
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.web import render as _rmod
 from stackshot.service import store as _service_store
 from stackshot.core import instance as _core_instance
@@ -112,12 +115,12 @@ BAS = "visit on " + (_pg_self.zone_now() + dt.timedelta(days=9)).strftime("%Y-%m
 for i in range(2, 12): mk(i)
 mk(20)                                                             # an item that others wait on
 res, err = upd(2, hold=True, recycle=True)
-check("hold=true behaves as before: a session's hold for a pane recycle is accepted", not err and server._is_held(_service_store._load("a2")), (err, rdm(2)))
+check("hold=true behaves as before: a session's hold for a pane recycle is accepted", not err and _holders._is_held(_service_store._load("a2")), (err, rdm(2)))
 hs = rdm(2).get("hold_set") or {}
 check("…and records who set it and when, nothing more (the reason is the wait_basis, not in the hold record)", set(hs) == {"at", "by"} and hs["by"] == "sparrow" and abs(hs["at"] - _t.time()) < 60, hs)
 check("get shows who set the hold and when", "hold: set by sparrow " in _wt_get.stackshot_get("a2"), _wt_get.stackshot_get("a2"))
 upd(2, clear_hold=True)
-check("clear_hold releases it and drops the record", not server._is_held(_service_store._load("a2")) and "hold_set" not in rdm(2), rdm(2))
+check("clear_hold releases it and drops the record", not _holders._is_held(_service_store._load("a2")) and "hold_set" not in rdm(2), rdm(2))
 res, err = upd(3, hold=True)
 check("a hold with no wake and nothing holding it is still refused as an indefinite park (the rule of main)", err.startswith("Refused: a hold names what it waits for; an unconditional or indefinite park is refused."), err)
 check("the update tool's text no longer invites a session to park its own item: no \"without asking\", no \"park it to the date\", no \"nearest date to check\"",
@@ -125,11 +128,11 @@ check("the update tool's text no longer invites a session to park its own item: 
       _wt_update._UPDATE_DESC[:200])
 # the server's own holds are untouched: the board button records the board as the setter
 mk(12)
-server._update("a12", hold=True, recycle=True, sender="sparrow")
-check("the core write (what the server's own paths use) holds as before", server._is_held(_service_store._load("a12")), rdm(12))
+_update_svc._update("a12", hold=True, recycle=True, sender="sparrow")
+check("the core write (what the server's own paths use) holds as before", _holders._is_held(_service_store._load("a12")), rdm(12))
 
 # the report: read only, a hold nothing holds now
-_sa = server._scoped_anchors; server._scoped_anchors = lambda proj, gid: [{"url": "https://github.com/example-owner/stackshot/pull/9", "items": [gid]}] if gid == "a10" else _sa(proj, gid)
+_sa = _item_read._scoped_anchors; _item_read._scoped_anchors = lambda proj, gid: [{"url": "https://github.com/example-owner/stackshot/pull/9", "items": [gid]}] if gid == "a10" else _sa(proj, gid)
 mk(13, hold=True, wake="2026-11-19")                                              # stored before the record, nothing holds it: listed
 mk(14, hold=True, wake="2026-11-20", hold_set={"at": _t.time() - 7200, "by": "sparrow"})                    # recorded, nothing holds it: listed
 mk(15, hold=True, wake="2026-11-21", hold_set={"at": _t.time() - 7200, "by": "sparrow", "why": ["said"]})   # a stored reason is never trusted: listed
@@ -141,7 +144,7 @@ mk(19, status="completed", hold=True)                                           
 mk(21, hold=True, wake="2026-11-26", hold_set={"at": "garbage", "by": "sparrow"}); mk(22, hold=True, wake="2026-11-27", hold_set="oops")   # malformed records
 before = {f.name: f.read_text() for f in (T / "store/a").glob("*.json")}
 try: rows = server._holds_unexplained(); rep = server._holds_report()
-finally: server._scoped_anchors = _sa
+finally: _item_read._scoped_anchors = _sa
 gids = [r["gid"] for r in rows]
 check("the report lists a hold nothing holds now (stored before the record, recorded, or with a stored reason), and none that an after, a recycle, needs external or an anchor holds",
       {"a13", "a14", "a15"} <= set(gids) and not {"a16", "a17", "a18", "a10", "a19", "a1", "a2"} & set(gids), gids)
@@ -182,11 +185,11 @@ check("a hold_set.by with newlines is collapsed to one line before it reaches bo
 # a hold's record goes when the hold ends: by the wake pass, by an after closing, by a release
 mk(40, hold=True, wake=(_pg_self.zone_now() - dt.timedelta(days=1)).strftime("%Y-%m-%d"), hold_set={"at": _t.time() - 3600, "by": "sparrow"})
 wakes_svc.wake_pass()
-check("the wake pass that releases a hold drops its record too", not server._is_held(_service_store._load("a40")) and "hold_set" not in rdm(40) and "hold" not in rdm(40), rdm(40))
+check("the wake pass that releases a hold drops its record too", not _holders._is_held(_service_store._load("a40")) and "hold_set" not in rdm(40) and "hold" not in rdm(40), rdm(40))
 mk(41, hold=True, wake=WK, after=["a42"], hold_set={"at": _t.time() - 3600, "by": "sparrow"}); mk(42)
 check("while its after item is open, nothing is unexplained about the hold", "a41" not in [r["gid"] for r in server._holds_unexplained()])
 _wt_complete.stackshot_complete("a42", sender="sparrow", outcome="done", reason="finished", description="- Finished: the thing is done")
-check("an after item closing releases the hold and drops its record", not server._is_held(_service_store._load("a41")) and "hold_set" not in rdm(41) and "hold" not in rdm(41) and "after" not in rdm(41), rdm(41))
+check("an after item closing releases the hold and drops its record", not _holders._is_held(_service_store._load("a41")) and "hold_set" not in rdm(41) and "hold" not in rdm(41) and "after" not in rdm(41), rdm(41))
 mk(43, hold=True, wake=WK, after=["a44"]); mk(44, status="completed"); mk(45, hold=True, wake=WK, after=["a46"])
 check("a held item whose after item is already closed, or missing, is listed as unexplained: nothing open holds it",
       {"a43", "a45"} <= {r["gid"] for r in server._holds_unexplained()}, [r["gid"] for r in server._holds_unexplained()])
@@ -209,7 +212,7 @@ head = _wt_brief.stackshot_brief()
 check("the brief tool's head carries the section (it reads board.md up to the first lane)", head.find("## New holds") != -1 and head.find("## New holds") < head.find("All open items in full"), head[:300])
 check("a hold_set whose time is no number never raises in the renderer or in get", _rmod.hold_at({"metadata": {"hold_set": {"at": "x"}}}) == 0.0 and _rmod.hold_at({"metadata": {"hold_set": {"at": float("nan")}}}) == 0.0
       and "hold: set by sparrow" in _wt_get.stackshot_get("a21") and _wt_get.stackshot_get("a22"), _wt_get.stackshot_get("a21"))
-server._update("a3", clear_hold=True, sender="sparrow")
+_update_svc._update("a3", clear_hold=True, sender="sparrow")
 check("a released hold is no longer new", "[a3]" not in _rmod.render(str(_core_store.STORE), "full").split("Shared by every")[0].split("## New holds")[-1])
 for i in range(2, 50): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 
@@ -414,7 +417,7 @@ check("items: list is your-move for an item Oliver moves, agents for one an agen
       {g: r.get("list") for g, r in rows.items()})
 check("items: every row of the list is one of the three words", rows and all(r.get("list") in ("your-move", "agents", "waiting") for r in rows.values()), {g: r.get("list") for g, r in rows.items()})
 check("items: list is the home page's own reading of the item (home.list_of on the model)",
-      all(r["list"] == _home.list_of(server._model_of(dict(json.loads((T / f"store/a/{g[1:]}.json").read_text()), gid=g))) for g, r in rows.items()), rows)
+      all(r["list"] == _home.list_of(_item_read._model_of(dict(json.loads((T / f"store/a/{g[1:]}.json").read_text()), gid=g))) for g, r in rows.items()), rows)
 for n in (21, 22, 23): (T / f"store/a/{n}.json").unlink()        # the later sections count the fixture's items
 (T / "fleet/a/sessions.json").write_text(json.dumps({U: {"name": "sparrow", "machine": "a"}, V: {"name": "home-other", "machine": "a"}}))
 
@@ -423,22 +426,22 @@ for n in (21, 22, 23): (T / f"store/a/{n}.json").unlink()        # the later sec
 W = "cccccccc-3333-4333-8333-333333333333"                  # a uuid the fleet does not know
 md = lambda n: json.loads((T / f"store/a/{n}.json").read_text())["metadata"]
 item(8, V, meta={"owner_name": "home-other"}); item(9, V, meta={"owner_name": "home-other"})
-server._update("a8", owner=U, sender="home-other"); m = md(8)
+_update_svc._update("a8", owner=U, sender="home-other"); m = md(8)
 check("owner change: to a known session's uuid without owner_name, owner_name becomes the name the fleet knows", m["owner"] == U and m["owner_name"] == "sparrow", m)
 st, ct, b = server._client_get("items", {"key": V}); st2, ct2, b2 = server._client_get("items", {"key": "home-other"})
 check("owner change: the board check follows the mover, not the creator: the session that moves the item still lists it, by uuid or by name", "a8" in gids(b) and "a8" in gids(b2), (b[:300], b2[:300]))
 st, ct, b = server._client_get("items", {"key": U}); check("owner change: …and the session named as creator now lists nothing for it", "a8" not in gids(b), b[:300])
-server._update("a8", owner="home-other", sender="sparrow"); m = md(8)
+_update_svc._update("a8", owner="home-other", sender="sparrow"); m = md(8)
 check("owner change: to a pane name, stored as its uuid and the name as owner_name", m["owner"] == V and m["owner_name"] == "home-other", m)
 _ho_was = dict(_cfgm.CFG.get("model") or {}); _cfgm.CFG["model"] = {**_ho_was, "handoff": False}      # this one check needs a session no pane of which exists: the hand-off's send-time guard (handoff suite) would refuse it
-server._update("a8", owner=W, sender="home-other"); m = md(8)
+_update_svc._update("a8", owner=W, sender="home-other"); m = md(8)
 check("owner change: to a uuid the fleet does not know, the old owner_name goes", m["owner"] == W and "owner_name" not in m, m)
-server._update("a9", owner="home-retired", sender="home-other"); m = md(9)
+_update_svc._update("a9", owner="home-retired", sender="home-other"); m = md(9)
 _cfgm.CFG["model"] = _ho_was
 check("owner change: to a name no live session carries, stored as given and as owner_name", m["owner"] == "home-retired" and m["owner_name"] == "home-retired", m)
-server._update("a8", owner=U, owner_name="X", sender="home-other"); m = md(8)
+_update_svc._update("a8", owner=U, owner_name="X", sender="home-other"); m = md(8)
 check("owner change with owner_name: the given name is kept", m["owner"] == U and m["owner_name"] == "X", m)
-server._update("a7", owner="cse_0123456789abcdef", sender="sparrow"); m = md(7)
+_update_svc._update("a7", owner="cse_0123456789abcdef", sender="sparrow"); m = md(7)
 check("owner re-passed unchanged without owner_name: the name it carries stays (a chat's name is only its owner_name)", m["owner_name"] == "sparrow", m)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

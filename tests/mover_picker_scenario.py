@@ -56,6 +56,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk; from stackshot.web import render
+from stackshot.service import item_read as _item_read
 from stackshot.core import config as _cfg
 from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
@@ -190,7 +191,7 @@ check("relay fire: …a wait stored under the old name records it as it was", "a
 server._answer("a20", "not yet, ask again on <date>", f"ask again on {day(9)}", "answer")
 m = mt(20)
 check("relay not yet: the wait is back on the date he gave with its picker kept as the mover", m.get("wait_kind") == "relay" and m.get("ask_by") == day(9) and m.get("mover") == HELP and "then" not in m and "ask" not in m, m)
-check("relay not yet: …and the model reads the picker", server._model_of({**rd(20), "gid": "a20"}).wait.mover == HELP and server._model_of({**rd(20), "gid": "a20"}).mover == "", None)
+check("relay not yet: …and the model reads the picker", _item_read._model_of({**rd(20), "gid": "a20"}).wait.mover == HELP and _item_read._model_of({**rd(20), "gid": "a20"}).mover == "", None)
 SENT.clear(); server._answer("a21", "arrived", "", "answer")
 m = mt(21)
 check("relay arrived: a record of the wait under the old name is still read: the item goes to that agent", m.get("mover") == HELP and m.get("needs") == [HELP] and "ask" not in m, m)

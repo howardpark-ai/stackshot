@@ -15,6 +15,7 @@ Imports point down only: this module imports the domain and core and the store's
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import json
 import sys
 import threading
@@ -1303,7 +1304,7 @@ def _handover_by_hand(gid: str, done: list[str]) -> str:
 def update_item(*args: Any, **kwargs: Any) -> str:
     """update_unlocked under the item lock (a failed delivery's record writes items from another thread; an
     update reads, changes and saves, so they take turns). The one entry of the update write: the update and complete tools, and every write of an item that the server makes (a wake, a cold call, a script's row)
-    come through it (server.py's `_update` calls it)."""
+    come through it (`_update`, below, calls it)."""
     h = _hooks()
     h.evwait_preread(kwargs.get("wait_kind"), kwargs.get("wait_event"))      # an event wait's facts (GitHub, git) are read before the lock, not under it
     for phrase_ in _wlw.event_phrases(kwargs.get("waits")):      # …and those of every event line of a list
@@ -1315,9 +1316,15 @@ def update_item(*args: Any, **kwargs: Any) -> str:
             _telling.CLOSE_WAS.item = None
 
 
+@functools.wraps(update_unlocked)      # the tool's own signature stays visible to anything that reads it
+def _update(*args: Any, **kwargs: Any) -> str:
+    """The update write (`update_item`) under the item lock; the update and complete tools and every write the server makes itself come through here: the name the hook tables look up (a suite that replaces it here reaches all of them)."""
+    return update_item(*args, **kwargs)
+
+
 def complete_item(item_id: str, outcome: str = "", reason: str = "", description: str = "", superseded_by: str = "", sender: str = "", said: list[dict[str, Any]] | str | None = None,
                   outcome_text: str = "") -> str:
-    """Close an item with how it ended: the complete tool without its identity and sender checks (the tool's own). It makes the update with status=completed, through server.py's `_update` (reached by its hook, so a suite
+    """Close an item with how it ended: the complete tool without its identity and sender checks (the tool's own). It makes the update with status=completed, through `_update` in service/update.py (reached by its hook, so a suite
     that replaces it there still reaches the close), then adds the prompt about the anchors that were scoped to the item. The fields default to empty so that a pane with an older cached schema gets the refusal
     that says what is missing and how to close through the portal, not a schema error."""
     h = _hooks()

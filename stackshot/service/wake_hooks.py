@@ -17,17 +17,17 @@ from typing import Any, Callable
 @dataclass(frozen=True)
 class Hooks:
     """What the wake passes still reach in server.py, in the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
-    after_open: Callable[..., Any]  # server._after_open
+    after_open: Callable[..., Any]  # item_read._after_open
     event_activity_tick: Callable[..., Any]  # server._event_activity_tick
     follow_superseded: Callable[..., Any]  # server._follow_superseded
     hand_stored_then: Callable[..., Any]  # server._hand_stored_then
-    hold_flag: Callable[..., Any]  # server._hold_flag
-    is_held: Callable[..., Any]  # server._is_held
+    hold_flag: Callable[..., Any]  # holders._hold_flag
+    is_held: Callable[..., Any]  # holders._is_held
     item_mover_model: Callable[..., Any]  # server._item_mover_model
-    load_or_none: Callable[..., Any]  # server._load_or_none
+    load_or_none: Callable[..., Any]  # item_read._load_or_none
     merge_progress_tick: Callable[..., Any]  # server._merge_progress_tick
-    model_of: Callable[..., Any]  # server._model_of
-    old_wait_off: Callable[..., Any]  # server._old_wait_off
+    model_of: Callable[..., Any]  # item_read._model_of
+    old_wait_off: Callable[..., Any]  # item_read._old_wait_off
     own_repo: Callable[..., Any]  # server._own_repo
     publish: Callable[..., Any]  # web.publish._publish
     rmod_confirmed_at: Callable[..., Any]  # server._rmod.confirmed_at
@@ -36,7 +36,7 @@ class Hooks:
     rmod_parse_ask: Callable[..., Any]  # server._rmod.parse_ask
     rmod_whose: Callable[[], Any]  # server._rmod.WHOSE
     session_id: Callable[..., Any]  # server._session_id
-    state_end: Callable[..., Any]  # server._state_end
+    state_end: Callable[..., Any]  # holders._state_end
     zone: Callable[[], Any]  # server.ZONE
 
 

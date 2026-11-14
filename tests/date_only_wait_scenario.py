@@ -60,6 +60,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import telling
@@ -71,7 +72,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.front_sender = lambda who: False
 BACK = "team-back"
-def bupd(i, **kw): return server._update(f"a{i}", sender=BACK, **kw)
+def bupd(i, **kw): return _update_svc._update(f"a{i}", sender=BACK, **kw)
 def stamped(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
 local_day = lambda ts: dt.datetime.fromtimestamp(ts + ZONE_OFFSET, dt.timezone.utc).strftime("%Y-%m-%d")
 w2 = local_day(now0 + 2 * DAY)
@@ -144,7 +145,7 @@ check("2 …the note (a wake passed as the old parameter keeps it)", out.count(S
 item(14, needs=[BACK], next=f"home-other: review the draft")
 stays("2 another party's step in flight: not parked", 14, next=f"{TIMED}", wake=f"{w2}T08:00")
 item(15, needs=[BACK], next="")
-out = server._update("a15", sender="home-front", next=TIMED, wake=f"{w2}T08:00")
+out = _update_svc._update("a15", sender="home-front", next=TIMED, wake=f"{w2}T08:00")
 check("2 a sender who is not the mover is not parked (the date is stored as until, no hold)", PARK not in out and _WT.stored_until(mt(15)) and "hold" not in mt(15), out)
 item(16, needs=[BACK], next="")
 out = bupd(16, next=TIMED, hold=True, wake=f"{w2}T08:00", wait_basis=f"the config window opens {w2}")

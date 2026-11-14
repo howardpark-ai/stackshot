@@ -51,6 +51,7 @@ def put(i, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.audit import audit_run as AR
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
@@ -128,7 +129,7 @@ check("4 dropping a line while the held front step stays passes", r == "", r)
 
 # ---- 5. not judged: the server's own write, a script, a failing roles read
 put(5, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
-r = server._update("a5", next=f"{BUILD}: build it\n{MAIN}: look at it", sender=BUILD, check="item_closed a1")
+r = _update_svc._update("a5", next=f"{BUILD}: build it\n{MAIN}: look at it", sender=BUILD, check="item_closed a1")
 check("5 the server's internal update is not judged by the tool gate", "Refused" not in r and MAIN in stored_next(5), r)
 put(6, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
 real_roles = _anc.session_roles

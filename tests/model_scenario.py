@@ -62,6 +62,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.anchors import anchors as _anc
 from stackshot.core import instance as _core_instance
@@ -100,7 +101,7 @@ FUT, PAST = day(5), day(-3)
 ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 mt = lambda i, letter="a": rd(i, letter)["metadata"]
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
-def upd(i, **kw): return server._update(f"a{i}", sender="home-front", **kw)
+def upd(i, **kw): return _update_svc._update(f"a{i}", sender="home-front", **kw)
 def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 def I(status="open", **meta):
@@ -253,24 +254,24 @@ check("update: clear_goal, clear_then and clear_mover each drop theirs", not any
 upd(1, goal="again", then="none")
 check("update: \"none\" clears one field and leaves the others", mt(1)["goal"] == "again" and "then" not in mt(1), mt(1))
 item(3, needs=[BACK], subject="[home] closing", mover="team-back", then="home-front", goal="The close drops the mover", wait_kind="time", wait_event="x", ask_by=FUT, post_wake_mover="team-back")
-server._update("a3", sender="home-front", status="completed", outcome="done", reason="finished", description="- Goal: The thing is done and closed")
+_update_svc._update("a3", sender="home-front", status="completed", outcome="done", reason="finished", description="- Goal: The thing is done and closed")
 m = mt(3)
 check("close: the mover and the wait are dropped, the goal stays", m["goal"] == "The close drops the mover" and not any(k in m for k in ("mover", "then", "wait_kind", "wait_event", "ask_by", "post_wake_mover")) and m["outcome"] == "done", m)
 check("close: get shows the goal and `model: dead`", "goal: The close drops the mover" in _wt_get.stackshot_get("a3") and "model: dead" in _wt_get.stackshot_get("a3"), _wt_get.stackshot_get("a3"))
-refused_nw("close: a mover on a closed item is refused (a goal alone may be set)", 3, lambda: server._update("a3", sender="home-front", mover="team-back"), "has no mover and waits on nothing")
-server._update("a3", sender="home-front", goal="The close drops the mover and keeps the goal")
+refused_nw("close: a mover on a closed item is refused (a goal alone may be set)", 3, lambda: _update_svc._update("a3", sender="home-front", mover="team-back"), "has no mover and waits on nothing")
+_update_svc._update("a3", sender="home-front", goal="The close drops the mover and keeps the goal")
 check("close: …a goal on a closed item is allowed", mt(3)["goal"].endswith("keeps the goal"), mt(3))
-server._update("a3", sender="home-front", status="open", next="home-front: reopened")
+_update_svc._update("a3", sender="home-front", status="open", next="home-front: reopened")
 check("close: a reopen keeps the goal", mt(3)["goal"].endswith("keeps the goal") and "outcome" not in mt(3), mt(3))
 
 # ================================================================ review fixes
 # a write of the model fields alone is filing: it does not name the writer in needs
 item(20, needs=[BACK], subject="[home] filing only")
-server._update("a20", sender="home-other", mover="team-back", then="home-front", wait_kind="relay", wait_event="x", ask_by=FUT, post_wake_mover="team-back")
-server._update("a20", sender="home-other", clear_wait=True, clear_then=True)
-server._update("a20", sender="home-other", goal=NEW_GOAL)
+_update_svc._update("a20", sender="home-other", mover="team-back", then="home-front", wait_kind="relay", wait_event="x", ask_by=FUT, post_wake_mover="team-back")
+_update_svc._update("a20", sender="home-other", clear_wait=True, clear_then=True)
+_update_svc._update("a20", sender="home-other", goal=NEW_GOAL)
 check("filing: a write of the model fields alone (and the clear flags) does not add its writer to needs", mt(20)["needs"] == [BACK], mt(20))
-server._update("a20", sender="home-other", next="home-other: do the thing")
+_update_svc._update("a20", sender="home-other", next="home-other: do the thing")
 check("filing: ...the control: a plain write of next by that background agent does name it", len(mt(20)["needs"]) == 2, mt(20))
 # a done-check close drops what a session's close drops
 item(21, needs=[BACK], subject="[home] check close", goal="Closed by its check", mover="team-back", then="home-front", wait_kind="anchor", wait_anchor="https://x/pull/1", wait_event="merged", ask_by=FUT, post_wake_mover="team-back", check="item_closed a3")
@@ -300,9 +301,9 @@ check("brief: ...none for a closed item in a brief format", not any(l.startswith
 # ================================================================ every revision records its author
 def wb(i): r = rd(i); return r.get("written_by"), r.get("written_by_id")
 item(10, needs=[BACK], subject="[home] who wrote")
-server._update("a10", sender="home-front", next="team-back: look at it")
+_update_svc._update("a10", sender="home-front", next="team-back: look at it")
 check("author: an update by a session records its name and its id", wb(10) == ("home-front", U["home-front"]), wb(10))
-server._update("a10", sender="home-other", next="team-back: look at it again")
+_update_svc._update("a10", sender="home-other", next="team-back: look at it again")
 check("author: …the next writer replaces the last in the file (the store's history keeps each revision's)", wb(10) == ("home-other", U["home-other"]), wb(10))
 _wt_complete.stackshot_confirm("a10", sender="team-back")
 check("author: a confirm records its sender", wb(10) == ("team-back", U["team-back"]), wb(10))
@@ -312,8 +313,8 @@ check("author: a server act (no writer) leaves the item byte for byte as it was:
 it_ = _service_store._load("a10"); writes.save("a10", it_)
 it_ = _service_store._load("a10"); writes.save("a10", it_)
 check("author: ...a second server save changes nothing either", raw(10) == before_srv, rd(10))
-server._update("a10", sender="home-front", next="team-back: after a server act")
-server._update("a10", sender="home-front", next="team-back: after a server act")
+_update_svc._update("a10", sender="home-front", next="team-back: after a server act")
+_update_svc._update("a10", sender="home-front", next="team-back: after a server act")
 check("author: ...the next real write names its writer", wb(10) == ("home-front", U["home-front"]), rd(10))
 item(11, needs=[BACK], subject="[home] never written by a session"); writes.save("a11", _service_store._load("a11"))
 item(11, needs=[BACK], subject="[home] never written by a session"); before11 = raw(11); writes.save("a11", _service_store._load("a11"))
@@ -322,7 +323,7 @@ check("author: a server save of an item no session wrote adds nothing: no writer
       and rd(11).get("activity") == max(json.loads(before11)["updated"], json.loads(before11)["state_updated"]), rd(11))
 it_ = _service_store._load("a10"); writes.save("a10", it_, note="answered", author=(_core_instance.OWNER, "board"))
 check("author: the owner's answer on the board records his name and `board`", wb(10) == (_core_instance.OWNER, "board"), wb(10))
-server._update("a10", sender="home-front", status="completed", outcome="done", reason="finished", description="- Goal: The thing is done and closed")
+_update_svc._update("a10", sender="home-front", status="completed", outcome="done", reason="finished", description="- Goal: The thing is done and closed")
 check("author: a close records its writer", wb(10) == ("home-front", U["home-front"]), wb(10))
 check("author: a create records the owner (the writer of a create)", rd(cid, "s").get("written_by") == "home-front" and rd(cid, "s").get("written_by_id") == U["home-front"], rd(cid, "s"))
 it_ = _service_store._load("a10"); it_["written_by"] = "someone else"; writes.save("a10", it_, writer=U["home-other"])

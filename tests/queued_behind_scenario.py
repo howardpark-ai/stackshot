@@ -72,6 +72,7 @@ from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
+from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
@@ -91,7 +92,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = stall_svc.time = stalltick_svc.time = CLK
+CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _pane_recovery.time = stall_svc.time = stalltick_svc.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"; _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]

@@ -2718,7 +2718,7 @@ class Board:
         msg = self.sent_msg(k, taken_by)
         return f'<p class="isent {cls}" role="status">{esc(msg)}</p>'
     def contact_name(self, r, contact=None) -> str:
-        """The item's contact as the side column's first row names it: `contact` as the server derived it (an open item's live contact, server._contact_label), else the stored metadata.contact as the session's name now; "" when none."""
+        """The item's contact as the side column's first row names it: `contact` as the server derived it (an open item's live contact, contacts._contact_label), else the stored metadata.contact as the session's name now; "" when none."""
         stored = str((r.get("metadata") or {}).get("contact") or "").strip()
         return str(contact).strip() if contact is not None else (self.mover_name(stored) if stored else "")
     def row_contact(self, r) -> str:
@@ -2734,7 +2734,7 @@ class Board:
     def owner_row(self, r, contact=None) -> tuple:
         """The side column's first row → (the "Owner" label with its hover text, the value), or ("", "") when the item has no contact (no row). The value is the contact's session
         name, drawn as every session on the page is (sess_html): a link to the fleet tool's view ([client] session_view) while the session has a live pane, plain text otherwise. `contact`: the name as the server
-        derived it (an open item's live contact, server._contact_label); None reads the stored metadata.contact as the session's name now."""
+        derived it (an open item's live contact, contacts._contact_label); None reads the stored metadata.contact as the session's name now."""
         name = self.contact_name(r, contact)
         if not name: return ("", "")
         val = self.sess_html(name, arrow=True)      # the page's one rule: a link to the session's view while its pane lives, plain text otherwise
@@ -2764,7 +2764,7 @@ class Board:
         observers) sit in a closed "More details" fold below them. The History is one line per revision with its author. Rendered on request; KeyError for an unknown id.
         answer: the server's {"action", "token", "sent"} for a signed-in viewer: the answer box under the Ask (an item the owner does not move has the comment box in the same place, open).
         watch (the For you list): the server's {"action", "token", "flag", "watched", "why"} for a signed-in viewer: the Watch / Mute control in the sidebar.
-        contact: the item's contact as the server derives it (server._contact_label), the sidebar's second row, "Owner" (after Mover); None reads the stored one; no contact, no row."""
+        contact: the item's contact as the server derives it (contacts._contact_label), the sidebar's second row, "Owner" (after Mover); None reads the stored one; no contact, no row."""
         r = self.item(gid); m = r["metadata"]; e = esc
         done = r.get("status") == "completed"
         L = lambda x: self.linkify(x, r["gid"])       # session-written free text: links, and item and session mentions

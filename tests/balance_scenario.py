@@ -62,6 +62,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import agents as _agents
+from stackshot.service import update as _update_svc
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.core import readonly as _ro
 from stackshot.anchors import anchors as _anc
@@ -76,6 +78,7 @@ from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
+from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
@@ -94,7 +97,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
+CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _pane_recovery.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -166,6 +169,7 @@ def mutated(patches, probe):
         for o, n, v in old: setattr(o, n, v)
 def rule(name, probe, patches):
     """The rule holds as the code is, and fails once `patches` revert it (a check that cannot fail proves nothing)."""
+    for o_, n_, _v in patches: getattr(o_, n_)       # a patch of a name that is gone must fail here, not read as a reverted rule
     try: held = probe()
     except Exception as e_: held = f"raised {e_!r}"
     check(name, held is True, held)
@@ -511,15 +515,15 @@ def probe_batched():
     return len(to_main()) == 1 and to_main()[0][2].count("\n- ") == 3
 check("7 several items that stay are one message to -main, one line each", probe_batched() is True)
 def probe_no_main():
-    none_setup(); real = server._main_agent; server._main_agent = lambda p: ""
+    none_setup(); real = _agents._main_agent; _agents._main_agent = lambda p: ""
     try: tick()
-    finally: server._main_agent = real
+    finally: _agents._main_agent = real
     return sent == [] and len(history(1)) == 1 and "the project has no -main agent to tell" in history(1)[0]
 check("7 a project with no -main agent gets the History line alone", probe_no_main() is True)
 def probe_owner_main():
-    none_setup(); real = server._main_agent; server._main_agent = lambda p: "Oliver"
+    none_setup(); real = _agents._main_agent; _agents._main_agent = lambda p: "Oliver"
     try: tick()
-    finally: server._main_agent = real
+    finally: _agents._main_agent = real
     return not any(x[1] in ("Oliver", _web_page_debts._session_id("Oliver")) for x in sent)
 rule("7 a page that names the owner as -main tells him nothing", probe_owner_main, [(_model, "is_owner", lambda who: False)])
 
@@ -800,31 +804,31 @@ def moved_item():
 check("18 the balancer's own write names only the new holder in `needs` (the one it left is dropped from it)", moved_item() == ["a1"] and mt(1)["needs"] == ["team-aux"] and mover_of(1) == "team-aux", mt(1).get("needs"))
 def probe_handback(**kw):
     moved_item()
-    server._update("a1", sender="home-stew", mover="team-back", **kw)
+    _update_svc._update("a1", sender="home-stew", mover="team-back", **kw)
     return mover_of(1) == "team-back" and mt(1)["needs"] == ["team-back"]
 check("18 an item handed back by `mover=` names the new holder in `needs` and not the one it came from", probe_handback() is True, mt(1).get("needs"))
 check("18 …with a `next` line beside it", probe_handback(next="team-back: take it back") is True, mt(1).get("needs"))
 def probe_handback_keeps_kinds():
     moved_item()
-    server._update("a1", sender="home-stew", needs=["external", "team-aux"])
-    server._update("a1", sender="home-stew", mover="team-back")
+    _update_svc._update("a1", sender="home-stew", needs=["external", "team-aux"])
+    _update_svc._update("a1", sender="home-stew", mover="team-back")
     return mt(1)["needs"] == ["external", "team-back"]
 check("18 a kind in `needs` (external) stays when the holder is replaced", probe_handback_keeps_kinds() is True, mt(1).get("needs"))
 def probe_handback_needs_given():
     moved_item()
-    server._update("a1", sender="home-stew", mover="team-back", needs=["team-back", "team-aux"])
+    _update_svc._update("a1", sender="home-stew", mover="team-back", needs=["team-back", "team-aux"])
     return mt(1)["needs"] == ["team-back", "team-aux"]
 check("18 a write that sets `needs` itself is taken as given", probe_handback_needs_given() is True, mt(1).get("needs"))
 
 def probe_handback_notices():
     moved_item(); sent.clear()
-    server._update("a1", sender="home-stew", mover="team-back")
+    _update_svc._update("a1", sender="home-stew", mover="team-back")
     mine = to_builder("team-back")
     return mover_of(1) == "team-back" and mt(1)["needs"] == ["team-back"] and len(mine) == 1 and mine[0][3] != "needs" and not told("needs", "team-back")
 check("18 the new mover of a `mover=` hand-back hears one notice (the hand-off's), not also a `now needs you` for the needs entry the write itself made", probe_handback_notices() is True, [(x[3], x[2][:60]) for x in to_builder("team-back")])
 def probe_handback_notices_old():      # the control: a session named in `needs` by the writer's own `needs=` is still told that it is needed
     moved_item(); sent.clear()
-    server._update("a1", sender="home-stew", needs=["team-aux", "team-back"])
+    _update_svc._update("a1", sender="home-stew", needs=["team-aux", "team-back"])
     return len(told("needs", "team-back")) == 1
 check("18 …while a session the writer names in `needs=` is still told", probe_handback_notices_old() is True)
 
