@@ -244,6 +244,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.service import recycle as recycle_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import update as _update_svc
@@ -508,7 +509,7 @@ check("an anchor's notice releases the hold (stored); nothing is sent", rel == [
 g_rc, n_rc = made("[home] waits for a recycle"); _update_svc._update(g_rc, recycle=True, sender="home-here")
 g_rh, n_rh = made("[home] held for a recycle"); _update_svc._update(g_rh, recycle=True, sender="home-here"); _update_svc._update(g_rh, hold=True, sender="home-here")
 G.drain(GH, STORE, say=lambda s: None); log0 = len(F.log)
-r = server._recycled("testbox", "recycle", 0, "ok", []); G.drain(GH, STORE, say=lambda s: None)
+r = recycle_svc._recycled("testbox", "recycle", 0, "ok", []); G.drain(GH, STORE, say=lambda s: None)
 check("a recycle done clears the waits and releases the held one (stored); nothing is sent", sorted(r["cleared"]) == sorted([g_rc, g_rh]) and len(F.log) == log0 and not comments(n_rc) and not comments(n_rh)
       and issue(n_rh)["labels"] == [], (r, F.log[log0:]))
 check("the queue is empty after the passes", qlen() == 0, G.pending())
@@ -527,7 +528,7 @@ _wt_update.stackshot_update(g_ns, next="home-here: the sender's step", sender="h
 check("with a sender the update goes through (a next line is not on the issue: no job, no call)", rd(g_ns[0], int(g_ns[1:]))["metadata"]["next"] == "home-here: the sender's step" and qlen() == 0 and len(F.log) == log_ns, (qlen(), F.log[log_ns:]))
 _wt_complete.stackshot_confirm(g_ns, sender="home-here")
 check("with a sender the confirm goes through", qlen() == 0 and len(F.log) == log_ns)
-r_due = server._recycle_due("testbox", item=g_ns); G.drain(GH, STORE, say=lambda s: None)
+r_due = recycle_svc._recycle_due("testbox", item=g_ns); G.drain(GH, STORE, say=lambda s: None)
 check("the client API's recycle-due (no session sender) is not refused", r_due["items"][0]["action"] == "set" and qlen() == 0, r_due)
 _wt_complete.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- In", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("with a sender the complete goes through: the issue is closed, still no comment", issue(n_ns)["state"] == "closed" and not comments(n_ns), (issue(n_ns)["state"], comments(n_ns)))
@@ -912,7 +913,7 @@ check("a move to decision on a non-front owner's item tells the owner, unmarked,
 g_r1 = mk("[home] waits for a recycle too"); _update_svc._update(g_r1, recycle=True, sender="home-here")
 g_r2 = mk("[home] held for a recycle too"); _update_svc._update(g_r2, recycle=True, sender="home-here"); _update_svc._update(g_r2, hold=True, sender="home-here")
 G.drain(GH, STORE, say=lambda s: None); told.clear()
-server._recycled("testbox", "recycle", 0, "ok", []); G.drain(GH, STORE, say=lambda s: None)
+recycle_svc._recycled("testbox", "recycle", 0, "ok", []); G.drain(GH, STORE, say=lambda s: None)
 rc = [t for t in told if t[3] == "recycle"]
 b1, b2 = f"board#{num(g_r1)}", f"board#{num(g_r2)}"
 check("a recycle notice names its items board#<n>, the released one too; the stderr tag keeps g<n>",

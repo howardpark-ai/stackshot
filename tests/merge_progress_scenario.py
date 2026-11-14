@@ -1,5 +1,5 @@
 """Scenario test for the merge pass: a pull request merged for an item is recorded on it (`metadata.merged_seen`, a History line, a save of the server's own with activity kind `event`), whether or not the merge
-settles a step. The hub writes one line per merge to its merge log (anchors/merge_log.py, read by `server._merge_progress_tick`), and a merge is tied to open items by merge_tie (an anchor scoped to the item, the
+settles a step. The hub writes one line per merge to its merge log (anchors/merge_log.py, read by `mprog_svc._merge_progress_tick`), and a merge is tied to open items by merge_tie (an anchor scoped to the item, the
 pull request's body naming the item, the item's own words naming it). Fixture items, panes that are files in a temp folder, a fake clock (every pass is given its `now`, and the saves are stamped from a fake `time`),
 no live store, no network, no model call.
 
@@ -71,6 +71,7 @@ from stackshot.web import server; from stackshot.web.tools import anchors as _wt
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.web.tools import notes as _notes_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -143,7 +144,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK; writes.time = CLK
+CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp is the one a live write takes."""
     d_ = _service_store._load(f"a{i}"); mutate(d_); CLK.t = ts
@@ -166,7 +167,7 @@ def shown(i): return f"board#{i}"
 def merge_pass(now):
     """One merge pass at `now`, the saves stamped at it; the board id board#<n> is the fixture item a<n> for the pass (the fixtures are a<n>: [github] issues_letter), and the other sections' ids are left as they were."""
     gh_ = _cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
-    try: return server._merge_progress_tick(now)
+    try: return mprog_svc._merge_progress_tick(now)
     finally:
         CLK.t = None
         if had is None: gh_.pop("issues_letter", None)
@@ -228,8 +229,8 @@ check("…each was saved at the pass's time, recorded the key in merged_seen, an
       ([rd(i).get("updated") for i in (200, 201, 204, 205)], [mt(i).get("merged_seen") for i in (200, 201, 204, 205)], log_of(201)))
 check("a project-wide anchor's merge (a202's project holds #22 for nobody), an unrelated merge (#99), a bare number in an item of another project (a206: its PR number may be another repository's), a closed item named by the body (a208) and an anchored item the board shows held (a212) or ordered after an open item (a213) move nothing: the clock stays and nothing is written",
       all(rd(i)["updated"] == now0 - 30 * MIN and rd(i)["activity"] == now0 - 30 * MIN and "merged_seen" not in mt(i) for i in (202, 203, 206, 207, 208, 212, 213)) and rd(208).get("status") == "completed" and rd(202)["updated"] == now0 - 30 * MIN, [rd(i).get("updated") for i in (202, 203, 206, 207, 208)])
-check("the pass keeps where it stopped: a second pass reads no line again and saves nothing", merge_pass(now0 + 22 * MIN) == [] and ML.read(server._merge_progress_offset())[0] == [], server._merge_progress_offset())
-check("…and a line a pass sees again (the offset lost) is not saved twice: the item holds the key already", (server._merge_progress_save(0), merge_pass(now0 + 23 * MIN))[1] == [] and mt(200).get("merged_seen") == ["acme/widgets#21"] and rd(200)["updated"] == now0 + 21 * MIN, mt(200))
+check("the pass keeps where it stopped: a second pass reads no line again and saves nothing", merge_pass(now0 + 22 * MIN) == [] and ML.read(mprog_svc._merge_progress_offset())[0] == [], mprog_svc._merge_progress_offset())
+check("…and a line a pass sees again (the offset lost) is not saved twice: the item holds the key already", (mprog_svc._merge_progress_save(0), merge_pass(now0 + 23 * MIN))[1] == [] and mt(200).get("merged_seen") == ["acme/widgets#21"] and rd(200)["updated"] == now0 + 21 * MIN, mt(200))
 close(200, 201, 202, 203, 204, 205, 206, 207, 211, 212, 213)
 
 # the first pass on a state directory with no offset reads only lines the pass could use (six hours back); the offset file is then written
@@ -238,17 +239,17 @@ fixture(209, project="projects/alpha"); fixture(210, project="projects/alpha")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/50", "items": ["a209"]}, {"url": f"{W_}/pull/51", "items": ["a210"]}]}))
 ML.append({"ts": now0 - 7 * H, "repo": "acme/widgets", "n": 50, "refs": []}); ML.append({"ts": now0 - 1 * H, "repo": "acme/widgets", "n": 51, "refs": []})
 saved = merge_pass(now0)
-check("the first pass: a merge older than six hours is skipped (a209), a recent one counts (a210); the offset is kept", saved == ["a210"] and "merged_seen" not in mt(209) and server._merge_progress_offset() == ML.read(0)[1], (saved, server._merge_progress_offset()))
+check("the first pass: a merge older than six hours is skipped (a209), a recent one counts (a210); the offset is kept", saved == ["a210"] and "merged_seen" not in mt(209) and mprog_svc._merge_progress_offset() == ML.read(0)[1], (saved, mprog_svc._merge_progress_offset()))
 close(209, 210)
 
 # a shorter or replaced merges.jsonl (the offset is past its end): read from the start with the first run's time filter, never a full replay
 fixture(214, project="projects/alpha"); fixture(215, project="projects/alpha")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/52", "items": ["a214"]}, {"url": f"{W_}/pull/53", "items": ["a215"]}]}))
-off_before = server._merge_progress_offset()
+off_before = mprog_svc._merge_progress_offset()
 ML.path().write_text(json.dumps({"ts": now0 - 7 * H, "repo": "acme/widgets", "n": 52, "refs": []}) + "\n" + json.dumps({"ts": now0 - 1 * H, "repo": "acme/widgets", "n": 53, "refs": []}) + "\n", encoding="utf-8")
 saved = merge_pass(now0)
 check("the file replaced by a shorter one (offset past its end): read from the start, only the lines the clock could use (a merge 7 hours old is skipped, one an hour old counts), the offset is the new end",
-      off_before > ML.size() and saved == ["a215"] and "merged_seen" not in mt(214) and server._merge_progress_offset() == ML.size(), (off_before, ML.size(), saved, server._merge_progress_offset()))
+      off_before > ML.size() and saved == ["a215"] and "merged_seen" not in mt(214) and mprog_svc._merge_progress_offset() == ML.size(), (off_before, ML.size(), saved, mprog_svc._merge_progress_offset()))
 close(214, 215)
 
 # one item that cannot be read or saved does not abort the pass: the others are saved, the failure is logged, the offset is stored
@@ -272,8 +273,8 @@ try:
 finally:
     writes.save, _service_store._load = _real_save, _real_load
 check("an item whose save fails (a216) or whose read fails (a218) is logged and skipped; the other (a217) is saved, and the offset is stored so the pass does not repeat",
-      saved == ["a217"] and "merged_seen" not in mt(216) and "merged_seen" not in mt(218) and mt(217).get("merged_seen") == ["acme/widgets#54"] and "a216 not saved" in errs.getvalue() and server._merge_progress_offset() == ML.size(),
-      (saved, errs.getvalue()[-300:], server._merge_progress_offset(), ML.size()))
+      saved == ["a217"] and "merged_seen" not in mt(216) and "merged_seen" not in mt(218) and mt(217).get("merged_seen") == ["acme/widgets#54"] and "a216 not saved" in errs.getvalue() and mprog_svc._merge_progress_offset() == ML.size(),
+      (saved, errs.getvalue()[-300:], mprog_svc._merge_progress_offset(), ML.size()))
 close(216, 217, 218)
 
 # a malformed line between two good ones is logged and skipped, and the offset moves past it (it never stops the pass)
@@ -289,8 +290,8 @@ ML.append(line(71, at=-60))
 errs = _io.StringIO()
 with _cl.redirect_stderr(errs): saved = merge_pass(now0)
 check("a bad line (a ts or a pull request number that is none, a repository that is none, a torn line) between two good ones is logged and skipped: both good ones are saved and the offset moves to the end",
-      sorted(saved) == ["a219", "a220"] and errs.getvalue().count("line skipped") == 3 and server._merge_progress_offset() == ML.size(), (saved, errs.getvalue()[-400:], server._merge_progress_offset(), ML.size()))
-check("…and the pass after it reads nothing again (the offset is past the bad lines)", merge_pass(now0 + 60) == [] and server._merge_progress_offset() == ML.size(), None)
+      sorted(saved) == ["a219", "a220"] and errs.getvalue().count("line skipped") == 3 and mprog_svc._merge_progress_offset() == ML.size(), (saved, errs.getvalue()[-400:], mprog_svc._merge_progress_offset(), ML.size()))
+check("…and the pass after it reads nothing again (the offset is past the bad lines)", merge_pass(now0 + 60) == [] and mprog_svc._merge_progress_offset() == ML.size(), None)
 close(219, 220)
 
 # the backlog of a downtime: on every pass (not only the first), a merge older than six hours is no news now, and is not recorded
@@ -299,7 +300,7 @@ for i in (221, 222): fixture(i, project="projects/alpha")
 ML.append(line(72, at=-30 * H)); ML.append(line(73, at=-60))
 saved = merge_pass(now0)
 check("a backlog line from 30 hours ago (the server was down) is not stamped on a pass that is not the first, a recent one is; the offset moves past both",
-      saved == ["a222"] and "merged_seen" not in mt(221) and rd(221)["updated"] == now0 - 30 * MIN and server._merge_progress_offset() == ML.size(), (saved, server._merge_progress_offset(), ML.size()))
+      saved == ["a222"] and "merged_seen" not in mt(221) and rd(221)["updated"] == now0 - 30 * MIN and mprog_svc._merge_progress_offset() == ML.size(), (saved, mprog_svc._merge_progress_offset(), ML.size()))
 close(221, 222)
 
 # the floor is the pass's own six hours and nothing else: a merge a little under it counts, one a little over it does not, whatever `[ladder] main_hours` (a retired key nothing reads) says
@@ -513,12 +514,12 @@ check("merge_log: the link pattern's lookahead is what refuses an eleven-digit n
       and ML._GITHUB_PATH.search(_eleven) is None and ML.pull_of("", _eleven) == ("", 0), (_no_look and _no_look.groups(), ML.pull_of("", _eleven)))
 check("merge_log.normal: the message of a refused line holds no more than the start of a long repo (it rides into a log line)", msg_.startswith("not a merge line: repo='zzz") and "z" * 41 not in msg_ and len(msg_) < 120, msg_)
 errs = _io.StringIO()
-with _cl.redirect_stderr(errs): kept = attempt(lambda: server._merge_rows([{"ts": now0, "repo": deep, "n": 5, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": 6, "refs": []}], now0))
+with _cl.redirect_stderr(errs): kept = attempt(lambda: mprog_svc._merge_rows([{"ts": now0, "repo": deep, "n": 5, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": 6, "refs": []}], now0))
 logged = [l_ for l_ in errs.getvalue().splitlines() if "line skipped" in l_]
 check("_merge_rows: a line whose repo nests too deep for str() is logged as its exception class and a bounded look (one short line), and the line after it is kept",
       isinstance(kept, list) and [r_["n"] for r_ in kept] == [6] and len(logged) == 1 and "TypeError" in logged[0] and len(logged[0]) < 300, (kept, logged and logged[0][:300]))
 errs = _io.StringIO()
-with _cl.redirect_stderr(errs): kept = attempt(lambda: server._merge_rows([{"ts": now0, "repo": "not-a-repo", "n": 7, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": "x" * 50, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": 8, "refs": []}], now0))
+with _cl.redirect_stderr(errs): kept = attempt(lambda: mprog_svc._merge_rows([{"ts": now0, "repo": "not-a-repo", "n": 7, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": "x" * 50, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": 8, "refs": []}], now0))
 logged = [l_ for l_ in errs.getvalue().splitlines() if "line skipped" in l_]
 check("_merge_rows: the log line carries the start of the exception's message beside its class (the repo that was refused; the text int() choked on), cut at 80, and the line after is kept",
       isinstance(kept, list) and [r_["n"] for r_ in kept] == [8] and len(logged) == 2 and "ValueError: not a merge line: repo='not-a-repo'" in logged[0] and "ValueError: invalid literal for int()" in logged[1]
@@ -527,7 +528,7 @@ check("_merge_rows: the log line carries the start of the exception's message be
 # (4) the whole pass: first with the lines handed in from memory (no parse, so no interpreter's parse depth matters), then through the file (the lines are parsed, or dropped by read, whichever this interpreter does)
 for i in (240, 241, 242, 243): fixture(i, project="projects/alpha")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/{90 + k}", "items": [f"a{240 + k}"]} for k in range(4)]}))
-ML.path().unlink(missing_ok=True); server._merge_progress_save(0)
+ML.path().unlink(missing_ok=True); mprog_svc._merge_progress_save(0)
 SENT = 4321
 _real_read = ML.read
 ML.read = lambda offset=0, file=None: ([{"ts": now0, "repo": "acme/widgets", "n": 95, "refs": [deep, 12, "g12"]}, {"ts": now0, "repo": deep, "n": 96, "refs": []}, line(93, at=-30)], SENT)
@@ -537,9 +538,9 @@ try:
 finally:
     ML.read = _real_read
 check("the pass, lines nested too deep for str() handed in: it does not stop, the line after them moves its item's clock, and the offset is saved",
-      saved == ["a243"] and server._merge_progress_offset() == SENT and mt(243).get("merged_seen") == ["acme/widgets#93"] and rd(243)["updated"] == now0 and errs.getvalue().count("line skipped") == 1,
-      (saved, server._merge_progress_offset(), errs.getvalue()[-300:]))
-server._merge_progress_save(0)
+      saved == ["a243"] and mprog_svc._merge_progress_offset() == SENT and mt(243).get("merged_seen") == ["acme/widgets#93"] and rd(243)["updated"] == now0 and errs.getvalue().count("line skipped") == 1,
+      (saved, mprog_svc._merge_progress_offset(), errs.getvalue()[-300:]))
+mprog_svc._merge_progress_save(0)
 
 # Where the lines of the next two checks go wrong is the interpreter's: json parses to a depth of its own and str() fails at another. On Python 3.14 json parses what str() cannot follow (json fails at 57,947
 # levels, str at 47,413), so a deep line reaches `normal` and the handler through the file; on 3.12 and 3.13 both fail near 9,998, so `read` drops the line as unparseable and the handler never sees it. The checks
@@ -555,11 +556,11 @@ ML.append(line(91, at=-60)); ML.append(line(92, at=-30))
 errs = _io.StringIO()
 with _cl.redirect_stderr(errs): saved = attempt(lambda: merge_pass(now0))
 check(f"the pass, the lines nested too deep for str() in the file: the offset is saved at its end, and the lines before and after them move their items' clocks [{through_file}]",
-      isinstance(saved, list) and sorted(saved) == ["a240", "a241", "a242"] and server._merge_progress_offset() == ML.size() and all(rd(i)["updated"] == now0 for i in (240, 241, 242)), (saved, server._merge_progress_offset(), ML.size(), errs.getvalue()[-300:]))
+      isinstance(saved, list) and sorted(saved) == ["a240", "a241", "a242"] and mprog_svc._merge_progress_offset() == ML.size() and all(rd(i)["updated"] == now0 for i in (240, 241, 242)), (saved, mprog_svc._merge_progress_offset(), ML.size(), errs.getvalue()[-300:]))
 errs = _io.StringIO()
 with _cl.redirect_stderr(errs): again = attempt(lambda: merge_pass(now0 + 60))
 check(f"…and the pass after it does not read the deep lines again: nothing is saved, nothing is logged, the offset stays at the end [{through_file}]",
-      again == [] and "line skipped" not in errs.getvalue() and server._merge_progress_offset() == ML.size(), (again, errs.getvalue()[-300:]))
+      again == [] and "line skipped" not in errs.getvalue() and mprog_svc._merge_progress_offset() == ML.size(), (again, errs.getvalue()[-300:]))
 
 # (3) the documented behaviour of read: a line that is not JSON, or too deep to parse, is dropped with no log line (the doc says so)
 ML.path().unlink(missing_ok=True)

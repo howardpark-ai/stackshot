@@ -88,6 +88,7 @@ for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
 from stackshot.web import server; from stackshot.service import mover_steps as _mover_steps; from stackshot.service import projects as _psvc; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
 from stackshot.anchors import anchors as _A
 from stackshot.service import store as _service_store
@@ -356,9 +357,9 @@ check("message: …and it is on the project's routing log under the key, with no
 try: _messaging._message("prj_00000000", "x", "home-outsider"); r8 = ""
 except ToolError as e: r8 = str(e)
 check("message: an unknown id is refused like an unknown session", r8.startswith("Refused"), r8)
-check("the client API: items?key= is a session's, not a project's — unchanged (a project id is no session)", server._client_get("items", {"key": "home-sparrow-main"})[0] == 200
-      and json.loads(server._client_get("items", {"key": A_ID})[2])["items"] == [])
-check("the client API's read list names project", "project?key=" in server._client_get("nothing", {})[2])
+check("the client API: items?key= is a session's, not a project's — unchanged (a project id is no session)", client_reads_svc._client_get("items", {"key": "home-sparrow-main"})[0] == 200
+      and json.loads(client_reads_svc._client_get("items", {"key": A_ID})[2])["items"] == [])
+check("the client API's read list names project", "project?key=" in client_reads_svc._client_get("nothing", {})[2])
 
 # ---- 8. a damaged or lost id file never re-mints (review of the first build: a torn file once minted every id afresh)
 REC = T / "store/project-record.json"

@@ -103,6 +103,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 from stackshot.web import server
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc
 from stackshot.service import released as released_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import agent_names as _agent_names
@@ -1878,10 +1879,10 @@ check("needs: …a session alone → on agent", gd in [r["gid"] for r in ui_rend
 _cfg.CFG.setdefault("model", {})["handoff"] = True
 e = refusal(lambda: _update_svc._update(gd, needs=["decision", "nope"], ask=ASK, sender="work-osprey"))
 check("needs: an unknown word among the entries is refused as a session name, nothing stored", "nope is not a background agent" in e and rd(gd)["metadata"].get("needs") == ["home-beta-ops"], e)
-st_, _ct, body = server._client_items(_web_page_debts._session_id("home-beta")); st2, _ct2, body2 = server._client_items(S)
+st_, _ct, body = client_reads_svc._client_items(_web_page_debts._session_id("home-beta")); st2, _ct2, body2 = client_reads_svc._client_items(S)
 check("items: a session's list carries the items its needs names, marked role agent; the keeper's list does not", st_ == 200
       and not [x for x in json.loads(body)["items"] if x["gid"] == gd] and not [x for x in json.loads(body2)["items"] if x["gid"] == gd and x.get("role") == "agent"], (body, body2))
-ok_ = [x for x in json.loads(server._client_items("home-beta-ops")[2])["items"] if x["gid"] == gd]
+ok_ = [x for x in json.loads(client_reads_svc._client_items("home-beta-ops")[2])["items"] if x["gid"] == gd]
 check("items: …the named session's list has it, with role agent and needs as a list", len(ok_) == 1 and ok_[0].get("role") == "agent" and ok_[0].get("needs") == ["home-beta-ops"], ok_)
 _update_svc._update(gd, needs="none", sender="work-osprey")
 check("needs: needs=\"none\" empties the list", "needs" not in rd(gd)["metadata"], rd(gd)["metadata"])
@@ -1958,11 +1959,11 @@ check("an item wakes its mover alone, whoever it is (a front agent or a session 
 for i in (47, 48): (T / f"store/a/{i}.json").unlink()
 # sala's recycle-done notice: an item a front agent owns goes to its project's keeper instead, unmarked, naming the owner;
 # a no-role owner is told itself, and a pilot item's linked agent as before (the fleet test is stubbed, recycles.json restored after)
-_rp = server._recycles_path(); _rp0 = _rp.read_text() if _rp.exists() else None; _om = server._on_machine
-server._on_machine = lambda m: (a.names(), lambda o: True)
+_rp = recycle_svc._recycles_path(); _rp0 = _rp.read_text() if _rp.exists() else None; _om = recycle_svc._on_machine
+recycle_svc._on_machine = lambda m: (a.names(), lambda o: True)
 for i, pr, ow in ((50, "projects/beta", "home-beta-main"), (51, "projects/beta", "nobody-roleless"), (52, "projects/alpha", A)):
     item(i, pr, ow); it = rd(f"a{i}"); it["metadata"].update(recycle=True, recycle_at=1.0); (T / f"store/a/{i}.json").write_text(json.dumps(it))
-n0 = len(wait_push(0)); rr = server._recycled("testbox", "recycle", time.time(), "ok", []); pw = wait_push(n0 + 3)[n0:]
+n0 = len(wait_push(0)); rr = recycle_svc._recycled("testbox", "recycle", time.time(), "ok", []); pw = wait_push(n0 + 3)[n0:]
 r50 = [m for m in pw if "a50" in m[1]]; r51 = [m for m in pw if "a51" in m[1]]; r52 = [m for m in pw if "a52" in m[1]]
 _sid = _web_page_debts._session_id
 check("a recycle done is told to the item's mover alone, whoever it is (a front agent, a session with no role, the page's -main agent), with no keeper of record named; the recycle flag goes",
@@ -1971,7 +1972,7 @@ check("a recycle done is told to the item's mover alone, whoever it is (a front 
 check("…a session with no role hears its own", len(r51) == 1 and r51[0][0] == "nobody-roleless" and "re-read a51 and resume." in r51[0][1], pw)
 check("…and the -main agent that moves a52 hears it, nobody else", len(r52) == 1 and r52[0][0] == _sid("work-osprey-main") and "re-read a52 and resume." in r52[0][1] and _wt_text._FOR_OWNER not in r52[0][1], pw)
 check("the recycle's report counts the three, told to the three movers", rr["cleared"] == ["a50", "a51", "a52"] and sorted(rr["told"]) == sorted([_sid("work-osprey-main"), "home-beta-main", "nobody-roleless"]), rr)
-server._on_machine = _om
+recycle_svc._on_machine = _om
 for i in (50, 51, 52): (T / f"store/a/{i}.json").unlink()
 if _rp0 is None: _rp.unlink(missing_ok=True)
 else: _rp.write_text(_rp0)
@@ -2619,7 +2620,8 @@ check("recycle: completed items and falsy values are not on the line", all(f"/it
 check("recycle: the board's test is the predicate the server's recycle-wanted calls",
       render.recycle_due(next(r for r in r1.rows if r["gid"] == "a88"), [])
       and not render.recycle_due(next(r for r in r1.rows if r["gid"] == "a84"), []) and not render.recycle_due(next(r for r in r1.rows if r["gid"] == "a89"), ["a86"])
-      and "_rmod.recycle_due(" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read() and "_rmod.held_only_for_recycle(" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read())
+      and "_hooks().rmod_recycle_due(" in open(os.path.join(STACK, "stackshot/service/recycle.py"), encoding="utf-8").read() and "_hooks().rmod_held_only_for_recycle(" in open(os.path.join(STACK, "stackshot/service/recycle.py"), encoding="utf-8").read()
+      and "_rmod.recycle_due(*a" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read() and "_rmod.held_only_for_recycle(*a" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read())
 check("recycle: the line is out of Need your call (agents) and sits under the Machines heading, above the machine matrix",
       '<p id="recycle"' not in w1 and "Pane recycle" not in w1 and 0 < x1.find("</h2>") < x1.find('<p id="recycle"') < x1.find('<div class="matrix"'), (w1[:600], x1[:600]))
 check("recycle: no ask or call styling: no warning box, no icon, no call colour",
@@ -3646,14 +3648,14 @@ try:
     put_anchors49(oldpr49(300), ["a71"])
     check("_pr_items: an old-name anchor is found by the new-name PR URL, keyed by the stored URL", released_svc._pr_items([newpr49(300)]) == {oldpr49(300): ["a71"]}, released_svc._pr_items([newpr49(300)]))
     check("_pr_items: …and by the old-name URL, with /files after it; another PR finds nothing", released_svc._pr_items([oldpr49(300) + "/files"]) == {oldpr49(300): ["a71"]} and released_svc._pr_items([newpr49(301)]) == {})
-    r_due = server._recycle_due("testbox", pr=newpr49(300))
+    r_due = recycle_svc._recycle_due("testbox", pr=newpr49(300))
     check("recycle_due --pr: the new-name URL finds the item anchored under the old name", [(x["item"], x["action"]) for x in r_due["items"]] == [("a71", "set")], r_due)
     put_anchors49(newpr49(310), ["a73"])
-    r_due2 = server._recycle_due("testbox", pr=oldpr49(310))
+    r_due2 = recycle_svc._recycle_due("testbox", pr=oldpr49(310))
     check("recycle_due --pr: …and the reverse (anchored under the new name, asked by the old)", [(x["item"], x["action"]) for x in r_due2["items"]] == [("a73", "set")], r_due2)
     moved49(None)
     refused49 = ""
-    try: server._recycle_due("testbox", pr=newpr49(300))
+    try: recycle_svc._recycle_due("testbox", pr=newpr49(300))
     except ToolError as e: refused49 = str(e)
     check("recycle_due --pr, no table: the new-name URL finds no item anchored under the old name (refused as before)", "no open item is anchored" in refused49, refused49)
     check("_pr_items, no table: nothing crosses names", released_svc._pr_items([newpr49(300)]) == {} and released_svc._pr_items([oldpr49(300)]) == {oldpr49(300): ["a71"]})

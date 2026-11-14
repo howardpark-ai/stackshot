@@ -30,7 +30,7 @@ def _same(a: str, b: str) -> bool:
     return (a == b) if t is None else t
 
 
-OWNER_KIND = _cfg.OWNER_KIND      # the mover kind of an item that is the owner's move, inside the code (the items API words it by [items_api] owner_mover_kind: server._wait_fields)
+OWNER_KIND = _cfg.OWNER_KIND      # the mover kind of an item that is the owner's move, inside the code (the items API words it by [items_api] owner_mover_kind: service/client_reads._wait_fields)
 DEFAULTS = {"cap_days": 7.0, "cap_needs_owner": True, "basis_weekday": 0.0, "dated_wait_min_hours": 1.0}
 MAX_EPOCH = 32503680000.0     # Jan 1st 3000: a date beyond it is not a date (the stored value is garbage), so it counts as no date at all
 _WAKE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?$")
@@ -205,7 +205,7 @@ def fallback_mover(project: str) -> str:
 
 
 def mover_of(m: dict[str, Any]) -> dict[str, str]:
-    """Whose move it is by the item's own needs: {"kind": "owner" | "outside" | "session", "who"} (the items API names the owner's kind by [items_api] owner_mover_kind: see server._wait_fields). Decision first, then external,
+    """Whose move it is by the item's own needs: {"kind": "owner" | "outside" | "session", "who"} (the items API names the owner's kind by [items_api] owner_mover_kind: see service/client_reads._wait_fields). Decision first, then external,
     then the first session needs names, else the stored picker (model.stored_picker: the stored post_wake_mover, the old name of a waiting item's mover, which wins while it is stored, else the stored mover), else the project's builder,
     else its -main agent (never the item's creator)."""
     from stackshot.model import model as _model  # noqa: PLC0415  (lazy: model imports this module)

@@ -90,6 +90,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.service import foryou as fy, foryou_events as fyev, foryou_slack as fyslack; from stackshot.notify import foryou as fy_rules
 from stackshot.web import server
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
@@ -565,7 +566,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     (T / "store/g/9160.json").unlink(); fy.set_flag("g9160", "default"); fy.set_flag("a51", "mute"); fy.seen("all")
     for r in keep_rows: fy.add(key=r["key"] + ":restored", kind=r["kind"], gid=r["gid"], item=r["item"], project=r["project"], what=r["what"], url=r["url"], urgent=r["urgent"], ts=r["ts"])
     _cfg.CFG.pop("project_agent", None)
-check("the server's own read gives the same", server._client_get("for-you", {})[0] == 200 and json.loads(server._client_get("for-you", {})[2])["flags"] == fy.flags())
+check("the server's own read gives the same", client_reads_svc._client_get("for-you", {})[0] == 200 and json.loads(client_reads_svc._client_get("for-you", {})[2])["flags"] == fy.flags())
 
 # ---- 9. a Slack post that failed is tried again on the next pass, then marked; at most three tries; only young rows; only with a Slack path
 fy.seen("all")
@@ -660,7 +661,7 @@ check("a file that is not text: moved aside too, no crash", rs == [] and len(sor
 fp.write_text("[1, 2]", encoding="utf-8"); rs = fy.rows()
 check("valid JSON of the wrong shape: moved aside too", rs == [] and len(sorted(fp.parent.glob("for-you.json.bad-*"))) == 4)
 fp.write_text("{", encoding="utf-8")
-check("the surfaces survive a corrupt file: the board section, the client read and a new row", "nothing new for you" in ui_render.Board(str(T / "store")).for_you_html() and server._client_get("for-you", {})[0] == 200
+check("the surfaces survive a corrupt file: the board section, the client read and a new row", "nothing new for you" in ui_render.Board(str(T / "store")).for_you_html() and client_reads_svc._client_get("for-you", {})[0] == 200
       and fy.add(key="c:3", kind="closed", what="still works") is not None)
 
 # ---- 12. a close with his words whose row could not be written still reaches the owner, the old way, and the reply says so
@@ -698,7 +699,7 @@ rs14 = fy.rows(); pl14 = fy.payload(_gh.shown)
 check("an old file with a release_failed row: the row is not in rows() or the payload, the other row is",
       [r["id"] for r in rs14] == [40] and [r["id"] for r in pl14["rows"]] == [40] and pl14["rows"][0]["what"] == "closed by x: old row", (rs14, pl14))
 html14 = ui_render.Board(str(T / "store")).for_you_html()
-check("…the board's section draws the old row and not the stale one, and the client read serves it", "old row" in html14 and "PR #27" not in html14 and server._client_get("for-you", {})[0] == 200, html14)
+check("…the board's section draws the old row and not the stale one, and the client read serves it", "old row" in html14 and "PR #27" not in html14 and client_reads_svc._client_get("for-you", {})[0] == 200, html14)
 check("…the flags and keys are untouched by the drop", fy.flags() == {"a9": "mute"} and fy.has_key("release:abc:1") and fy.has_key("a1:closed:1"), fy.flags())
 r14 = fy.add(key="n:1", kind="closed", gid="a1", item="a1", project="p", what="new")
 on_disk = json.loads(fp.read_text())

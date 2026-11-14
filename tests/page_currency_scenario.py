@@ -240,6 +240,7 @@ d.pop(N); fs.write_text(json.dumps(d))
 
 # ---- 5. the server's ledger
 from stackshot.web import server
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
@@ -409,7 +410,7 @@ class _Items(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path); what = u.path.rsplit("/", 1)[-1]; q = dict(urllib.parse.parse_qsl(u.query))
         CALLS.append((what, q.get("key", "")))
         if not _rt_client._client_machine(self.headers.get("Authorization", "")): st, body = 401, "unauthorized"
-        else: st, _, body = server._client_get(what, q)
+        else: st, _, body = client_reads_svc._client_get(what, q)
         b = body.encode(); self.send_response(st); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 IS = ThreadingHTTPServer(("127.0.0.1", 0), _Items); IS.daemon_threads = True; threading.Thread(target=IS.serve_forever, daemon=True).start()
 os.environ["STACKSHOT_URL"] = f"http://127.0.0.1:{IS.server_address[1]}"
@@ -569,7 +570,7 @@ rc, err = bstop(A, transcript("ship it", COMMIT, f"Pushed.\nBoard s5: no change,
 check("bullets: linked and temporary ids in bullets, beside a one-line verdict, pass as the store ids", rc == 0 and blog("verdict")[-1]["items"] == ["g12", "l3", "s5", "s6"], (rc, err[:400], blog("verdict")[-1:]))
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard [board#12](https://board.example.org/items/12), [s5](https://board.example.org/items/s5): no change, the commit was elsewhere"))
 check("bullets: the linked one-line list still passes", rc == 2 and "board#12 " not in err and "s5 " not in err and "s6 " in err and "Not accepted" not in err, err[:400])
-st_, _, body_ = server._client_get("items", {"key": A}); rows_ = {i["gid"]: i for i in json.loads(body_)["items"]}
+st_, _, body_ = client_reads_svc._client_get("items", {"key": A}); rows_ = {i["gid"]: i for i in json.loads(body_)["items"]}
 check("the items read says how each item is shown", rows_["g12"]["shown"] == "board#12" and rows_["l3"]["shown"] == f"{TMP}#3" and rows_["s5"]["shown"] == "s5", rows_)
 def fstop2(final):
     p.save_state(A, {}); CALLS.clear(); bstop(A, transcript("report", [], final), mode="note"); return nnag(A)
@@ -577,7 +578,7 @@ out = fstop2("Done.\nBoard board#13: no change, its owner runs it")
 check("a Board line about another session's item, written as board#<n>: the note names it so, the log the store id",
       "[board] About your last turn's Board lines: board#13 is moved by home-beta; leave it out, or say why it's yours to report." in out and "g13" not in out
       and blog("foreign")[-1]["items"] == ["g13"], (out[:400], blog("foreign")[-1:]))
-st_, _, body_ = server._client_get("item-facts", {"key": A, "ids": "g13,s5"}); f_ = json.loads(body_)["items"]
+st_, _, body_ = client_reads_svc._client_get("item-facts", {"key": A, "ids": "g13,s5"}); f_ = json.loads(body_)["items"]
 check("item-facts says how each item is shown", f_["g13"]["shown"] == "board#13" and f_["s5"]["shown"] == "s5", f_)
 check("a page debt names the item that changed as shown", p.describe("projects/alpha", {"ts": int(time.time()), "task": "g12"}).startswith("board item board#12 changed")
       and p.describe("projects/alpha", {"ts": int(time.time()), "task": "s9"}).startswith("board item s9 changed"), p.describe("projects/alpha", {"ts": int(time.time()), "task": "g12"}))
@@ -630,10 +631,10 @@ rc, err, out = fstop([], "Done.\nBoard s99: no change, an id nobody has")
 check("foreign: an unknown id is left alone", "Board lines" not in out, out[:300])
 rc, err, out = fstop([], "Done.\nBoard s40: no change, its owner runs it", mode="off")
 check("foreign: board check off: nothing", "Board lines" not in out and not CALLS, (out[:200], CALLS))
-st, _, body = server._client_get("item-facts", {"key": A, "ids": "s40,s41,s42,s99"}); f = json.loads(body)["items"]
+st, _, body = client_reads_svc._client_get("item-facts", {"key": A, "ids": "s40,s41,s42,s99"}); f = json.loads(body)["items"]
 check("foreign: item-facts says mover, then (mine), agent and the close", st == 200 and f["s40"]["mine"] is False and f["s41"]["mine"] is False
       and f["s41"]["outcome"] == "done" and f["s42"]["agent"] is True and "s99" not in f, f)
-check("foreign: item-facts refuses a bad id list", server._client_get("item-facts", {"key": A, "ids": "x; rm"})[0] == 400)
+check("foreign: item-facts refuses a bad id list", client_reads_svc._client_get("item-facts", {"key": A, "ids": "x; rm"})[0] == 400)
 items((10, S, {}))
 (T / "touch" / f"{S}.json").write_text(json.dumps({"touches": {"projects/beta": {"ts": int(time.time()) + 1000, "task": "s9"}}}))
 rc, err = bstop(S, transcript("ship it", COMMIT))

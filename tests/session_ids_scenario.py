@@ -75,6 +75,7 @@ from stackshot.fleet import sessions_registry as sr; from stackshot.anchors impo
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.web import page_debts as _pdebts
@@ -246,17 +247,17 @@ check("rename: the web page shows the new name, the board.md the new name", "hom
 check("rename: the item page never shows the bare id", S["main"] not in ui_render.Board(str(_core_store.STORE)).item_html(g1))
 check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", sr._same_sess("home-sparrow-main", meta(g1)["owner"]) and sr._same_sess("home-sparrow-lead", meta(g1)["owner"]) and sr._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
 check("rename: the client API lists the item for the session by its new name, its old name, its id and its first transcript", all(
-      g1 in {i["gid"] for i in json.loads(server._client_items(k)[2])["items"]} for k in ("home-sparrow-lead", "home-sparrow-main", S["main"], Tr["main_a"], Tr["main_b"])))
-check("rename: the client API names the needs by name", [i for i in json.loads(server._client_items("home-sparrow-docs")[2])["items"] if i["gid"] == g2][0]["needs"] == ["site-builder"])
+      g1 in {i["gid"] for i in json.loads(client_reads_svc._client_items(k)[2])["items"]} for k in ("home-sparrow-lead", "home-sparrow-main", S["main"], Tr["main_a"], Tr["main_b"])))
+check("rename: the client API names the needs by name", [i for i in json.loads(client_reads_svc._client_items("home-sparrow-docs")[2])["items"] if i["gid"] == g2][0]["needs"] == ["site-builder"])
 check("rename: an update with the old name as owner= keeps the stored id, no change of owner", (_update_svc._update(g1, owner="home-sparrow-main"), meta(g1)["owner"])[1] == S["main"])
 put_registry(); put_fleet(FLEET)
 
 # ---- 5. a fresh start left the owner pointing at a finished transcript
 gt = create("home-sparrow-docs").split()[1]; it = item(gt); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; writes.save(gt, it)       # an old item: owner stored as the first transcript of home-sparrow-main
 check("old transcript owner: shown as the session's name", "mover: home-sparrow-main" in _wt_get.stackshot_get(gt), _wt_get.stackshot_get(gt))
-check("old transcript owner: found by the session's current transcript, which is another one", gt in {i["gid"] for i in json.loads(server._client_items(Tr["main_b"])[2])["items"]})
+check("old transcript owner: found by the session's current transcript, which is another one", gt in {i["gid"] for i in json.loads(client_reads_svc._client_items(Tr["main_b"])[2])["items"]})
 check("old transcript owner: compared by sala id (the update by the session's id is its owner's)", "Refused" not in _update_svc._update(gt, next="home-sparrow: mine", sender=S["main"]))
-fa = json.loads(server._client_item_facts(Tr["main_b"], gt)[2])["items"][gt]
+fa = json.loads(client_reads_svc._client_item_facts(Tr["main_b"], gt)[2])["items"][gt]
 check("old transcript owner: item-facts says it is mine and gives the name", fa["mover_me"] is True and fa["mover"] == "home-sparrow-main", fa)
 
 # ---- 6. delivery
@@ -482,7 +483,7 @@ it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["m
 # ---- 9. a registry that disappears again: everything reads as stored, nothing raises
 SALA.unlink()
 check("registry gone: get shows the stored value", "mover: " + S["main"] in _wt_get.stackshot_get(mig["name"]) or "mover: home-sparrow-main" in _wt_get.stackshot_get(mig["name"]), _wt_get.stackshot_get(mig["name"]))
-check("registry gone: the client API still lists the item for the id (the stored form)", mig["name"] in {i["gid"] for i in json.loads(server._client_items(S["main"])[2])["items"]})
+check("registry gone: the client API still lists the item for the id (the stored form)", mig["name"] in {i["gid"] for i in json.loads(client_reads_svc._client_items(S["main"])[2])["items"]})
 check("registry gone: the web page still renders", "<html" in ui_render.Board(str(_core_store.STORE)).item_html(mig["name"]).lower())
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

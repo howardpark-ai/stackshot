@@ -55,7 +55,7 @@ def reading(server: Any, it: dict[str, Any], gid: str, now: float) -> dict[str, 
     with SP.frozen(now), SP.fields_only(server):
         r = server._retire_reading(gid, it)
         mod = server._item_read._model_of(probe)
-        return {**r, "list": server._item_list(probe), "word": mod.today}
+        return {**r, "list": server._client_reads._item_list(probe), "word": mod.today}
 
 
 def dry_run(a: argparse.Namespace) -> int:

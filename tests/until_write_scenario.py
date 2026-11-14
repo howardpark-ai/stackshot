@@ -61,6 +61,7 @@ logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -280,7 +281,7 @@ item(60, needs=[BACK], until=w(3))
 item(61, needs=["decision"], until=w(3))
 fm60, fm61 = _get_tool._fmt(dict(rd(60), gid="a60")).splitlines()[0], _get_tool._fmt(dict(rd(61), gid="a61")).splitlines()[0]
 check("5.6 get tags a wait on a date alone as on hold, and never a decision item", "on hold" in fm60 and "on hold" not in fm61, (fm60, fm61))
-st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
+st_, ct_, body_ = client_reads_svc._client_get("items", {"key": U["team-back"]})
 held_ = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
 check("5.6 the session items listing says held for it, as the board draws it", held_.get("a60") is True, held_)
 check("5.6 _is_parked is the renderers' rule: a date-only wait, a hold flag and never a decision item", _item_read._is_parked(rd(60)) and not _item_read._is_parked(rd(61)) and _item_read._is_parked(dict(rd(60), metadata={"hold": True, "needs": [BACK]})), None)
@@ -322,7 +323,7 @@ item(67, needs=["decision", BACK], until=w(3), ask="Decide: ship the thing now Â
 item(68, needs=[BACK], until=w(3))
 f67, f68 = _get_tool._fmt(dict(rd(67), gid="a67")).splitlines()[0], _get_tool._fmt(dict(rd(68), gid="a68")).splitlines()[0]
 check("5.10 tag: a decision with an until is not on hold, a date-only wait is", "on hold" not in f67 and "on hold" in f68, (f67, f68))
-st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
+st_, ct_, body_ = client_reads_svc._client_get("items", {"key": U["team-back"]})
 held10 = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
 check("5.10 listing: a decision with an until is held False, a date-only wait True", held10.get("a67") is False and held10.get("a68") is True, held10)
 (T / "board.md").write_text("", encoding="utf-8")

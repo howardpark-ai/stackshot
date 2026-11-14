@@ -65,6 +65,7 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.model import model as _model
@@ -306,7 +307,7 @@ check("brief: …no line of the session-start brief carries one of the seven sta
 check("brief: …render and states agree: a stored state has its word, a derived one none", render.state_words(next(r for r in B_.rows if r["gid"] == "a46")) == ""
       and render.state_words(next(r for r in B_.rows if r["gid"] == "a50")) == "state: doing", None)
 # the client API's items read
-def items_for(key): return json.loads(server._client_items(key)[2])["items"]
+def items_for(key): return json.loads(client_reads_svc._client_items(key)[2])["items"]
 mine = {x["shown"]: x for k in ("home-front", BACK) for x in items_for(U[k])}      # an item is listed under its mover (or its then), not its creator
 check("client items: an item that stores no state carries no state, state_fields, state_derived or state_hint", all(k not in mine["a40"] for k in ("state", "state_fields", "state_derived", "state_hint")), mine.get("a40"))
 check("client items: …a stored doing one carries its state and no carry field", mine["a50"]["state"] == "doing" and "state_derived" not in mine["a50"] and mine["a50"]["state_fields"] == {}, mine.get("a50"))
@@ -368,7 +369,7 @@ day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET + n * 8
 g(29, needs=[BACK], state="doing", expected_by=day(3))                                                              # a bare date 3 days out reads as the end of that day: long, wake = the start of the next day
 g(28, needs=[BACK], state="doing")                                                                                   # stored without any time (how a doing item is stored now)
 now_ = time.time()
-lst = lambda n: server._item_list(dict(rd(n, "g"), gid=f"g{n}"))
+lst = lambda n: client_reads_svc._item_list(dict(rd(n, "g"), gid=f"g{n}"))
 check("far-by list: every stored doing item is listed under Agents at work, a far stored expected_by or none alike: the time is not read, so none reads as Waiting",
       all(lst(n) == "agents" for n in (20, 21, 22, 23, 24, 25, 26, 27, 28, 29)), {n: lst(n) for n in (20, 21, 22, 23, 24, 25, 26, 27, 28, 29)})
 mod = _model.derive(dict(rd(21, "g"), gid="g21"), now_, after_open=lambda it: [], anchored=lambda it: False)

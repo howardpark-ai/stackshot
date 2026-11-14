@@ -51,6 +51,7 @@ def put(i, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.audit import audit_run as AR
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.anchors import anchors as _anc
@@ -97,7 +98,7 @@ check("2 create: an item the owner moves, with a front agent's next on it, is no
 put(9, mover=BUILD, needs=[BUILD], next=f"{BUILD}: the item a check can name")
 put(1, project="projects/solo", needs=[], next=f"{MAIN}: look at the page")           # a project with no builder and no -main agent: nobody moves the item
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=SIDE, next=f"{MAIN}: look at the page\n{MAIN}: and the other page"))
-check("2 update: a front agent's new step on an item nobody moves is accepted", r == "" and "other page" in stored_next(1), (r, server._item_mover(rd(1))))
+check("2 update: a front agent's new step on an item nobody moves is accepted", r == "" and "other page" in stored_next(1), (r, client_reads_svc._item_mover(rd(1))))
 
 # ---- 3. update
 put(2, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")

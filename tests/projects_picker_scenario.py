@@ -96,6 +96,7 @@ ID = re.compile(r"^prj_[0-9a-f]{8}$")
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.service import projects as _psvc; from stackshot.service import audit_ticks as audit_ticks_svc
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.core import config as _cfg
 from stackshot.anchors import anchors as _anc
@@ -109,7 +110,7 @@ def idfile(): return json.loads((T / "store/project-record.json").read_text())
 def pj(): return json.loads((T / "state/projects.json").read_text())
 def fresh(): prj._RECENT.clear()
 def lst(scope="", q=""):
-    fresh(); st, ctype, body = server._client_get("projects", {"scope": scope, "q": q})
+    fresh(); st, ctype, body = client_reads_svc._client_get("projects", {"scope": scope, "q": q})
     return st, (json.loads(body) if ctype == "application/json" else body)
 def keys(scope="", q=""):
     st, d = lst(scope, q); return [r["key"] for r in d["projects"]] if st == 200 else d
@@ -1277,7 +1278,7 @@ rows = {r["key"]: r for r in d["projects"]}
 check("retired: every row of get projects carries retired (false) and status; a retired project is in none", st == 200 and all(r["retired"] is False and isinstance(r["status"], str) for r in d["projects"])
       and not any(k in rows for k in ("projects/ark", "projects/ret-agents", "projects/ret-marked", "projects/ret-keeper", "projects/ret-done"))
       and rows["projects/live-active"]["status"] == "active" and rows["projects/live-nostatus"]["status"] == "", [(r["key"], r["status"]) for r in d["projects"]][:6])
-st, ctype, body = server._client_get("project", {"key": "projects/ark"}); one = json.loads(body)
+st, ctype, body = client_reads_svc._client_get("project", {"key": "projects/ark"}); one = json.loads(body)
 check("retired: get project still answers for a retired project, with retired true and its status", st == 200 and one["retired"] is True and one["status"] == "archived" and one["listed"] is False, (st, body[:200]))
 _projects_registry._projects_sync(now=NOW + 2, force=True)
 check("retired: the published file carries both fields", pj()["projects"][R["ark"]["id"]]["retired"] is True and pj()["projects"][R["live-active"]["id"]]["status"] == "active")
