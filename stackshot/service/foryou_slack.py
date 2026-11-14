@@ -1,11 +1,10 @@
 """foryou_slack.py: the For you list's one Slack hook, the part of the list that needs nothing of server.py: whether a Slack path is configured (`[for_you] slack_command`), the queue and the worker thread
 that post an urgent row (so no write waits on a command), and `_for_you_slack_post`, the hook itself.
 
-server.py is being split into one module per area (CONTRIBUTING.md, Layout). The rows a change of an item makes (whether an item is watched, the row a save makes, the due-date pass) are foryou_events.py's,
-and they are what call `_foryou_slack` here; what service/telling.py keeps of the list is the close fallback (`tell_close_owner` and the notices after it, with `_FORYOU_FELL`), which reads foryou_events.py's
-`_FORYOU_FAILED`. A suite that stubs the hook (`_for_you_slack_post`, `_for_you_slack_on`) or shortens the command's timeout (`_FORYOU_SLACK_TIMEOUT`) sets it on
-this module (`server._fyslack._for_you_slack_post = ...`), the one place the readers look it up: the server's own read of `_for_you_slack_on` goes through the module as well, and is not imported
-back. `_foryou_slack` and `_foryou_slack_wait` are imported back by server.py, so `server._foryou_slack` and `server._foryou_slack_wait` stay the names the row and the tests use."""
+The words of a post (the line a row makes, the reasons and log lines of a post that failed) are notify/slack.py's. The rows a change of an item makes (whether an item is watched, the row a save makes, the due-date pass) are
+service/foryou_events.py's, and they are what call `_foryou_slack` here; what service/telling.py keeps of the list is the close fallback (`tell_close_owner` and the notices after it, with `_FORYOU_FELL`), which reads
+service/foryou_events.py's `_FORYOU_FAILED`. A suite that stubs the hook (`_for_you_slack_post`, `_for_you_slack_on`) or shortens the command's timeout (`_FORYOU_SLACK_TIMEOUT`) sets it on
+this module (`foryou_slack._for_you_slack_post = ...`), the one place the readers look it up: the due-date pass's read of `_for_you_slack_on` goes through the module as well."""
 from __future__ import annotations
 
 import os
@@ -18,7 +17,8 @@ import threading
 from typing import Any
 
 from stackshot.core import config as _cfg
-from stackshot.web import foryou as _fy
+from stackshot.notify import slack as _slack
+from stackshot.service import foryou as _fysvc
 
 # The Slack post never runs on a thread that does other work (the runner, the /client/message pool): _foryou_slack only queues the
 # row, and a worker thread of its own posts it. A post that failed or timed out is tried again by the due-date pass (_foryou_tick), at most
@@ -70,22 +70,20 @@ def _foryou_slack_wait() -> None:
 
 
 def _foryou_slack_one(rid: int) -> None:
-    row = _fy.row_by_id(rid)
+    row = _fysvc.row_by_id(rid)
     if row is None or row.get("slacked"):
         return                             # marked seen meanwhile, or already posted
     try:
-        text = f"[stackshot] For you (urgent): {row['item'] + ' ' if row.get('item') else ''}{row['what']}" + (f" → {row['url']}" if row.get("url") else "")
-        err = _for_you_slack_post(text)
+        err = _for_you_slack_post(_slack.message(row))
     except Exception as e:  # noqa: BLE001
         err = f"{e.__class__.__name__}: {e}"
-    tries = _fy.slack_result(rid, not err)
+    tries = _fysvc.slack_result(rid, not err)
     if err:
-        left = "tried again on a later pass" if tries < _fy.SLACK_TRIES else "no more tries"
-        print(f"for-you: row {rid} not posted to Slack (try {tries} of {_fy.SLACK_TRIES}, {left}): {err}", file=sys.stderr, flush=True)
+        print(_slack.not_posted(rid, tries, err), file=sys.stderr, flush=True)
 
 
 def _for_you_slack_post(text: str) -> str:
-    """THE SLACK HOOK of the For you list. stackshot has no Slack posting path of its own (anchor-hub only receives Slack, and holds no
+    """THE SLACK HOOK of the For you list. stackshot has no Slack posting path of its own (the Slack receiver only receives Slack, and holds no
     posting credential), and this adds no credential: `[for_you] slack_command` names an argv (a script that already posts, such as the
     one a briefing already uses) that gets the text on its standard input; empty (the default) = no Slack path, the row is on the list only.
     The command runs in a session of its own and its output goes to a file, so a child it leaves behind holds no pipe of ours; past
@@ -93,7 +91,7 @@ def _for_you_slack_post(text: str) -> str:
     import shlex
     cmd = str(_cfg.get("for_you", "slack_command") or "").strip()
     if not cmd:
-        return "no Slack path configured ([for_you] slack_command is empty)"
+        return _slack.NO_PATH
     with tempfile.TemporaryFile() as err:
         try:
             p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)
@@ -115,9 +113,9 @@ def _for_you_slack_post(text: str) -> str:
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 pass
-            return f"{cmd.split()[0]} did not finish in {_FORYOU_SLACK_TIMEOUT:g} s; killed"
+            return _slack.timed_out(cmd, _FORYOU_SLACK_TIMEOUT)
         if p.returncode == 0:
             return ""
         err.seek(0)
         tail = err.read(300).decode("utf-8", "replace").strip().splitlines()
-        return f"{cmd.split()[0]} exited {p.returncode}" + (f": {tail[-1]}" if tail else "")
+        return _slack.exited(cmd, p.returncode, tail)

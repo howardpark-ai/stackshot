@@ -62,7 +62,8 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg
 from stackshot.audit import audit_overview as ov
 from stackshot.router import routing
-from stackshot.web import foryou, i18n, landed as ld, server
+from stackshot.service import foryou, landed as ld
+from stackshot.web import i18n, server
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import complete as _wt_complete

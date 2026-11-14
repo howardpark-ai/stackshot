@@ -745,7 +745,7 @@ item(24, "projects/alpha", A); item(25, "projects/alpha", A, answers=[{"ts": 1.0
 item(31, "projects/alpha", A, answers=ANS)
 cfg(live=True)
 p13 = len(pushes()); n13 = len(routing.read("projects/alpha"))
-from stackshot.web import foryou as fy
+from stackshot.service import foryou as fy
 fy_rows = lambda g, kind="closed": [r for r in fy.rows() if r.get("gid") == g and r["kind"] == kind]
 out20 = cl(20); settle()
 new13 = routing.read("projects/alpha")[n13:]; c20 = [n for n in new13 if n.get("label") == "close a20"]

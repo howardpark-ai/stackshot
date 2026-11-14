@@ -33,8 +33,8 @@ ROOT = Path(__file__).resolve().parent.parent
 PAGE_MODULES = (            # the page code: one per page, then the shared renderers
     "stackshot/web/itempage.py",
     "stackshot/web/home.py",
-    "stackshot/web/foryou.py",
-    "stackshot/web/landed.py",
+    "stackshot/notify/foryou.py",
+    "stackshot/notify/landed.py",
     "stackshot/web/ui/groups.py",
     "stackshot/web/ui/releasing.py",
     "stackshot/web/ui/runners.py",
@@ -45,7 +45,7 @@ PAGE_MODULES = (            # the page code: one per page, then the shared rende
 )
 GROUPS = (                  # the three lines the report is read in
     ("item page", ("stackshot/web/itempage.py",)),
-    ("other pages", ("stackshot/web/home.py", "stackshot/web/foryou.py", "stackshot/web/landed.py", "stackshot/web/ui/groups.py", "stackshot/web/ui/releasing.py",
+    ("other pages", ("stackshot/web/home.py", "stackshot/notify/foryou.py", "stackshot/notify/landed.py", "stackshot/web/ui/groups.py", "stackshot/web/ui/releasing.py",
                      "stackshot/web/ui/runners.py", "stackshot/web/ui/search.py", "stackshot/web/ui/colortool.py")),
     ("shared render code", ("stackshot/web/ui/kit.py", "stackshot/web/ui/render.py")),
 )

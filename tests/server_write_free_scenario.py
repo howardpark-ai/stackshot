@@ -5,7 +5,7 @@ to reach the notices through hooks. This suite holds what is true now:
 
   1  flags       no thread-local is made in web/ (a `threading.local` call or reference), the five per-write flags the gates and the services read are on service/writes.py, the telling's four
                  are on service/telling.py, and no other service module makes one
-  2  tables      the eleven hook tables the server installs (the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, at the top of the module (not inside a function), once each
+  2  tables      the twelve hook tables the server installs (the For you rows', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, at the top of the module (not inside a function), once each
   3  values      what a table takes as a plain value (not a function, not a late lookup) is a constant of the module that cannot change after the install, so a copy taken at the install cannot go stale; a late
                  lookup (`_late("name")`, a call) is a lookup by name made when the hook runs, so it captures nothing, and each one must name a function or value the server module defines
   4  telling     no table of a service module holds a field that the telling answers: create, gates and update call service/telling.py on the module
@@ -36,10 +36,10 @@ check("1 no other service module keeps one", not any(others.values()), {k: v for
 
 # ---------------------------------------------------------------- 2. tables
 SERVER = parse("web/server.py")
-TABLES = ("_writes", "_telling", "_create_svc", "_gates", "_update_svc", "_runner", "_wake_hooks", "_handoff_hooks", "_stall_hooks", "_checks_hooks", "_passes_hooks")
+TABLES = ("_writes", "_telling", "_create_svc", "_gates", "_update_svc", "_runner", "_wake_hooks", "_handoff_hooks", "_stall_hooks", "_checks_hooks", "_passes_hooks", "_foryou_hooks")
 installs = [(n, n.value.func.value.id) for n in SERVER.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "install"
             and isinstance(n.value.func.value, ast.Name)]
-check("2 the server installs the eleven tables, each once, at the top of the module", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
+check("2 the server installs the twelve tables, each once, at the top of the module", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
 inside = [n.lineno for fn in ast.walk(SERVER) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.walk(fn)
           if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "install" and isinstance(n.func.value, ast.Name) and n.func.value.id in TABLES]
 check("2 …and no function of the server installs one (a table is never replaced while the server runs)", not inside, inside)

@@ -11,8 +11,8 @@ The per-write state the telling keeps on a thread (`CLOSE_WAS`, the item as it s
 `HO_STATE`, the hand-offs the write has just recorded) lives here, and a suite that sets one sets it on this module. The thread-locals that belong to the gates (`QUESTION`, `REFORMAT`, `TERMINAL_ROW`,
 `SESSION_NEXT`) live in service/writes.py.
 
-What stays in server.py is what needs the web layer or the live pane list: the hand-off record's own functions (the pane a hand-off went to, what it said), the page keeper lookups of a project's agents, the For you
-list's row keys and flags, the page debt's marks, and the time zone. They are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it);
+What stays in server.py is what needs the web layer or the live pane list: the hand-off record's own functions (the pane a hand-off went to, what it said), the page keeper lookups of a project's agents, the
+page debt's marks, and the time zone. They are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it);
 a hook is looked up on server.py when a notice is told, so a suite that replaces one there still reaches the telling. A suite that replaces a function of the telling patches it on this module.
 
 Imports point down only: this module imports the domain, core and the write path (service/writes.py, service/store.py), never web/ or audit/."""
@@ -45,7 +45,7 @@ from stackshot.model.ids import _GID, _item_url
 from stackshot.model.needs import _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_of, _needs_sessions, _observers_of
 from stackshot.model.said import _owner_words
 from stackshot.router import router_live as _router_live, routing as _routing
-from stackshot.service import writes as _writes
+from stackshot.service import foryou as _fy, foryou_events as _fyev, writes as _writes
 from stackshot.service.store import _load, _path
 from stackshot.waits import handoff as _ho, held as _held, quiet as _frontq
 
@@ -53,18 +53,14 @@ from stackshot.waits import handoff as _ho, held as _held, quiet as _frontq
 
 @dataclass(frozen=True)
 class Hooks:
-    """What the telling still reaches in server.py (the hand-off record's functions, the page keepers of a project's agents, the For you list, the page debt's marks and the time zone), in the names they have
+    """What the telling still reaches in server.py (the hand-off record's functions, the page keepers of a project's agents, the page debt's marks and the time zone), in the names they have
     there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     back_agent: Callable[..., Any]  # server._back_agent
     builder_for: Callable[..., Any]  # server._builder_for
     check_changed: Callable[..., Any]  # server lambda to checks.check_changed
     check_lane_shown: Callable[..., Any]  # server lambda to checks.check_lane_shown
     debt_mover: Callable[..., Any]  # server._debt_mover
-    foryou_failed: Callable[[], Any]  # server._FORYOU_FAILED
-    foryou_key: Callable[..., Any]  # server._foryou_key
     front_handed_by_peer: Callable[..., Any]  # service/handoff.py: front_handed_by_peer
-    fy_flag: Callable[..., Any]  # server._fy.flag
-    fy_has_key: Callable[..., Any]  # server._fy.has_key
     grace_min: Callable[..., Any]  # server._grace_min
     handoff_builder: Callable[..., Any]  # service/handoff.py: handoff_builder
     handoff_on: Callable[..., Any]  # service/handoff.py: handoff_on
@@ -621,11 +617,11 @@ def tell_close_owner(gid: str, item: dict[str, Any], owner: str, project: str, w
     signal = _owner_words(item)
     if not signal:
         return ""
-    key = h.foryou_key(gid, "closed", item)
-    if h.fy_has_key(key):
+    key = _fyev._foryou_key(gid, "closed", item)
+    if _fy.has_key(key):
         return signal
-    if key in h.foryou_failed():           # the row could not be written (the list's file, the disk): the close must still reach someone
-        h.foryou_failed().discard(key)
+    if key in _fyev._FORYOU_FAILED:           # the row could not be written (the list's file, the disk): the close must still reach someone
+        _fyev._FORYOU_FAILED.discard(key)
         if close_owner_notice(gid, item, owner, project, writer, by, signal):
             _FORYOU_FELL.add(key)
             if len(_FORYOU_FELL) > 500:
@@ -687,7 +683,7 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
     if front:
         words = tell_close_owner(gid, item, owner, project, writer) if close else ""       # a close with his words on it is the one thing a front agent mover hears
         row_note = f"{OWNER}'s words are on it ({words}), so it is a row on his For you list"     # no "not told;" in it: the mover's part is settled (owner_reached); the mover itself is told by tell_owner_close
-        if words and h.foryou_key(gid, "closed", item) in _FORYOU_FELL:
+        if words and _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
             row_note = f"{OWNER}'s words are on it ({words}), but the For you list could not be written, so the old notice marked {_FOR_OWNER} was sent to {_session_label(owner)} instead"
         if not stew or h.session_id(stew) == h.session_id(writer):
             return f"\n(its {word} {_session_label(owner)} is a front agent: {row_note})" if words else quiet_line(item, owner)
@@ -1171,8 +1167,8 @@ def tell_owner_check_closed(gid: str, item: dict[str, Any], told: list[str]) -> 
     if not tell_owner_on() or not _owner_is_session(owner):
         return False
     oid = h.session_id(owner)
-    if not oid or oid in {h.session_id(t) for t in told} or h.fy_flag(gid) == "mute" or not front_keeper(owner, project)[0] \
-            or h.foryou_key(gid, "closed", item) in _FORYOU_FELL:
+    if not oid or oid in {h.session_id(t) for t in told} or _fy.flag(gid) == "mute" or not front_keeper(owner, project)[0] \
+            or _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
         return False
     by = "stackshot's done check"
     tell_kind("close", gid, oid, f"{_FOR_OWNER} [stackshot] {_gh.shown(gid)} {item.get('subject') or ''}: {_closed_by(item, by)} \u2192 {notice_link(gid)}", tag="owner")      
@@ -1203,9 +1199,9 @@ def tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool,
     if not tell_owner_on() or not _owner_is_session(owner):
         return ""
     oid, wid = hk.session_id(owner), hk.session_id(writer)
-    if not oid or not wid or wid == oid or oid in {hk.session_id(h) for h in heard} or hk.fy_flag(gid) == "mute":
+    if not oid or not wid or wid == oid or oid in {hk.session_id(h) for h in heard} or _fy.flag(gid) == "mute":
         return ""
-    if not front_keeper(owner, project)[0] or hk.foryou_key(gid, "closed", item) in _FORYOU_FELL:
+    if not front_keeper(owner, project)[0] or _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
         return ""
     who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
     tell_kind("close", gid, oid, f"{_FOR_OWNER} [stackshot] {_gh.shown(gid)} {subject}: {_closed_by(item, who)} \u2192 {notice_link(gid)}", tag="owner")      
@@ -1620,7 +1616,7 @@ def tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
         told.append(oid)
     elif not oid:
         print(f"check: {gid} closed, and nobody moves it to tell", file=sys.stderr, flush=True)
-    if front and h.foryou_key(gid, "closed", item) in h.foryou_failed():       # the row could not be written: the old notice, so the close still reaches someone
+    if front and _fyev._foryou_key(gid, "closed", item) in _fyev._FORYOU_FAILED:       # the row could not be written: the old notice, so the close still reaches someone
         if tell_close_owner(gid, item, owner, project, "", by=f"stackshot's done check ({label})"):
             told.append(oid)
     try:

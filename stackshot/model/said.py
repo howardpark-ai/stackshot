@@ -465,7 +465,7 @@ def recorded_words(entries: list[dict[str, Any]]) -> str:
 
 
 # A close with the owner's own words on the item was told to a
-# front agent mover in one line, and no other close was; that close is a row on his For you list (foryou.py),
+# front agent mover in one line, and no other close was; that close is a row on his For you list (notify/foryou.py),
 # and the same words make an item watched there (_foryou_watched). The front agent mover is told of any close by another
 # session, his words or not, in its own marked line (tell_owner_close), beside that row. His words are on it when (1) a `said` entry is (metadata.said: his sentences
 # cut from his own message, checked against his transcript), or (2) the description or the close's reason quotes him: his name and a colon

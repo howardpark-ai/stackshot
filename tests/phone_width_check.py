@@ -221,13 +221,13 @@ for j, (lab, who, txt) in enumerate([("Slack #stackshot", "Dana", "can the proje
          "a notice with a long unbroken token: tests/fixtures/a/very/long/path/name/without/any/space.json")]):
     routing.record("projects/alpha", kind="anchor", to="ops-falcon", label=lab, who=who, text=txt, url="https://example.invalid/n", target="project-wide", pilot=True, ts=time.time() - 600 * (j + 1))
 # the Landed list: closes of agents in long-named projects, by sessions with long names, one by the server's own done check, five uncleared and one cleared, some with a long close reason: the header's Landed link and the Landed page are measured
-from stackshot.web import landed
+from stackshot.service import landed; from stackshot.notify import landed as landed_rules
 for k, (n, by) in enumerate([("project-with-a-very-long-example-name-01", LONG), ("project-with-a-very-long-example-name-02", "ops-falcon-main"), ("infrastructureandtoolingwithoutanyhyphensatallverylongname", ""),
                              ("alpha", LONG), ("alpha", "ops-falcon-engineer"), ("short-project", LONG)]):
     gid = 180 + k; pk = f"projects/{n}"
     item(gid, X, pk, f"[home] landed item {k} with a long subject that wraps at phone width: {LONG} /opt/example/very/long/path/that/does/not/break/anywhere/x.json", status="completed", age=(k + 1) * H, outcome="dropped" if k % 3 == 1 else "done", reason=(f"PR {k} is live and the nightly run is green {LONG} /opt/example/very/long/path/that/does/not/break/anywhere/x.json" if k % 2 == 0 else "done"), contact=LONG if k % 2 == 0 else "ops-falcon-main")      # a long owner name on the Closed page's project line, and a live one
     landed.record(f"a{gid}", (now - (k + 1) * H).timestamp(), "dropped" if k % 3 == 1 else "done", by=by, project=pk)
-landed.clear([landed.key(f"a{gid}", (now - 6 * H).timestamp())], now=now.timestamp())      # the last of the six (gid, k=5) is the cleared one
+landed.clear([landed_rules.key(f"a{gid}", (now - 6 * H).timestamp())], now=now.timestamp())      # the last of the six (gid, k=5) is the cleared one
 b = render.Board(str(T / "store"), now=now)
 OUT = T / "out"
 (OUT / "index.html").write_text(b.html(), encoding="utf-8")

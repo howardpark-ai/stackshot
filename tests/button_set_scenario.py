@@ -51,7 +51,7 @@ item(5, "[home] closed one", status="completed", su=now - 2 * H, outcome="done",
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web.ui import render, search
-from stackshot.web import landed as ld; from stackshot.web import foryou as fy; from stackshot.web import i18n_catalog
+from stackshot.service import landed as ld; from stackshot.service import foryou as fy; from stackshot.web import i18n_catalog
 bd = render.Board(f"{tmp}/store")
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 for k, (g, w) in enumerate((("a50", "older row"), ("a51", "newer row"))):

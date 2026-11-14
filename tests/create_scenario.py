@@ -36,6 +36,7 @@ from fastmcp.exceptions import ToolError
 from stackshot.core import store as cstore
 from stackshot.github import ghsync as gh
 from stackshot.service import create, gates, telling, writes
+from stackshot.service import foryou_events as fyev
 cstore.STORE = T / "store"
 check("0 the module's request map sits in the instance's state folder", str(create.REQUESTS) == f"{tmp}/state/requests.json", create.REQUESTS)
 
@@ -86,8 +87,9 @@ def make_hooks(**over):
     kw.update(over)
     return create.Hooks(**kw)
 
-STEPS = ("settle_mover", "owner_steps", "ask_stamp", "handoff_on_save", "handoff_his_over", "handoff_follow", "phase_stamp", "foryou_on_save", "landed_on_save", "search_touch", "handback_drop", "answer_ack")
+STEPS = ("settle_mover", "owner_steps", "ask_stamp", "handoff_on_save", "handoff_his_over", "handoff_follow", "phase_stamp", "search_touch", "handback_drop", "answer_ack")
 writes.install(writes.Steps(**{n: (lambda *a, **k: None) for n in STEPS}))
+fyev._foryou_on_save = fyev._landed_on_save = lambda *a, **k: None      # the For you and Landed lists are service/foryou_events.py's: a save calls them there, so the stubs are set there
 real_save = writes.save
 def save(gid, item, **kw):
     LOG.append(("save", (gid,), dict(kw, subject=item.get("subject"), had_id=item.get("id"))))
