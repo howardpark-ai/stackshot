@@ -46,6 +46,8 @@ from stackshot.waits import waiting as W, watchers as WK, stall as ST, dated_wai
 from stackshot.model import model as M, states as S
 from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
+from stackshot.service import wait_fixes as _wait_fixes_svc
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -234,13 +236,13 @@ for label, mod_ in (("web.render", RR), ("web.ui.render", UR)):
           and mod_.wake_of({"metadata": {"until": "someday", "wake": day(5)}}) is None and mod_.wake_of({"metadata": {"until": "  ", "wake": day(5)}}) == dt.date.fromisoformat(day(5)))
     check(f"{label}.wake_key: sorts an until by its minute, no date last", mod_.wake_key({"metadata": {"until": day(2)}}) < mod_.wake_key({"metadata": {"until": day(3)}}) < mod_.wake_key({"metadata": {}}))
 fmt_it = {**item(until=at(2, "09:30"), needs=[BACK], state="doing"), "metadata": {"project": "projects/quill", "until": at(2, "09:30"), "next": f"{BACK}: do it", "state": "doing", "needs": [BACK]}}
-out = server._fmt(fmt_it)
+out = _get_tool._fmt(fmt_it)
 check("get: an `until:` line beside the model line when the item stores one", f"until: {at(2, '09:30')}" in out.splitlines() and "model: waiting on a time (until " in out, out)
-out2 = server._fmt({**fmt_it, "metadata": {k: v for k, v in fmt_it["metadata"].items() if k != "until"}})
+out2 = _get_tool._fmt({**fmt_it, "metadata": {k: v for k, v in fmt_it["metadata"].items() if k != "until"}})
 check("get: no `until:` line when the item stores none", not any(l.startswith("until:") for l in out2.splitlines()), out2)
 bw = item(until=day(3), wait_basis={"text": f"vendor ships {day(3)}", "wake": day(3), "by": "quill-agent", "at": 1.0}, cap_ok={"wake": day(3), "by": "x", "quote": "park it"})
 bw["status"] = "open"
-out3 = server._fmt(bw)
+out3 = _get_tool._fmt(bw)
 check("get: the wait basis and the owner's words are read for the very until", f"for the wake {day(3)} only" in out3 and f"behind the wake {day(3)}" in out3, out3)
 check("the basis and the words are read for the date they were given for only", W.basis_of({"until": day(4), "wait_basis": {"text": f"x {day(3)}", "wake": day(3)}}) == "" and W.basis_of({"wake": day(3), "wait_basis": {"text": f"x {day(3)}", "wake": day(3)}}) == f"x {day(3)}"
       and W.cap_words({"until": day(3), "cap_ok": {"wake": day(3)}}, "wake") and not W.cap_words({"until": day(4), "cap_ok": {"wake": day(3)}}, "wake") and W.words_of({"until": day(3), "cap_ok": {"wake": day(3), "quote": "q"}})["quote"] == "q"
@@ -311,9 +313,9 @@ check("_wake_pass releases a hold that stood on an until, and drops the until wi
 check("_wake_pass treats an until on an item not on hold as a reminder, and the until goes", w2 in woke and "until" not in smt(912) and srd(912)["status"] == "open", (woke, smt(912)))
 check("_wake_pass leaves an until still ahead alone", w3 not in woke and smt(913).get("until") == day(3) and smt(913).get("hold"), (woke, smt(913)))
 w4 = sitem(914, until=day(3), needs=[BACK], mover=BACK)
-pk = server._wake_park(w4, now)
+pk = _wait_fixes_svc._wake_park(w4, now)
 check("_wake_park reads an until as the wake: it gets past 'no wake' to judge the wait", pk["why"] != "not an open item with a wake and no hold", pk)
-check("_wake_park: an item with no date at all is still 'no wake'", server._wake_park(sitem(915, needs=[BACK], mover=BACK), now)["why"] == "not an open item with a wake and no hold")
+check("_wake_park: an item with no date at all is still 'no wake'", _wait_fixes_svc._wake_park(sitem(915, needs=[BACK], mover=BACK), now)["why"] == "not an open item with a wake and no hold")
 _cfg.CFG["model"]["watchers"] = True
 
 # the arrival text through the server's own turn

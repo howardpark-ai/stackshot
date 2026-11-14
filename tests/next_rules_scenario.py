@@ -72,6 +72,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
@@ -314,7 +315,7 @@ r = upd(i, next="home-agent: build it\nOliver: merged to main, run `uptime` to c
 check("N7: a `Oliver:` line is exempt from the signals", "next reads like a report" not in r and "Oliver: merged" in mt(i)["next"], r)
 r = mk(next="home-agent: merged to main, 015cc0de01")
 check("N7: a create notes it too and still creates", r.startswith("created") and "next reads like a report" in r, r)
-check("N7: the note says a step is an action and sends results to the project page", "project page" in server._report_note("home-agent: merged to main") and "never a status" in server._report_note("home-agent: merged to main"), None)
+check("N7: the note says a step is an action and sends results to the project page", "project page" in _notes_tool._report_note("home-agent: merged to main") and "never a status" in _notes_tool._report_note("home-agent: merged to main"), None)
 
 # ---- internal writers are not judged: only the two tools mark a session's write
 check("the flag is off outside the tools", not getattr(writes.SESSION_NEXT, "on", False), None)

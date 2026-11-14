@@ -77,6 +77,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import owner_words as _owner_words; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.github import ghsync as _gh
@@ -797,14 +798,14 @@ check("report: the brief line is one line of counts", line.startswith("model gua
 text = mg.full_text(rep, _gh.shown)
 check("report: the full text lists the ids per guard, an example refusal each, the flags and the defaults", "mover: 2: a2, a3" in text and "closed without an outcome: 2: a15, a16" in text and "e.g. a2:" in text and "flagged for broad wait words in next (when, once, after, until; accepted, not refused): 1: a12" in text and "resting on a default" in text, text)
 check("report: a clean board says nothing", mg.brief_line(mg.report({"a1": rd(1), "a14": rd(14)}, ctx)) == "", None)
-server._GUARD_REPORT.update(at=0.0, rep=None)
+_notes_tool._GUARD_REPORT.update(at=0.0, rep=None)
 brief = _wt_brief.stackshot_brief()
 check("report: stackshot_brief carries the line (the store's items, read only)", "model guards would refuse on existing items: mover 2" in brief and brief.count("model guards would refuse") == 1, brief[:600])
-set_cfg(guards=False); server._GUARD_REPORT.update(at=0.0, rep=None)
+set_cfg(guards=False); _notes_tool._GUARD_REPORT.update(at=0.0, rep=None)
 check("report: …with the guards off it still reads, and says they are off", "(the guards are off: [model] guards = false)" in _wt_brief.stackshot_brief(), None)
-set_cfg(); server._GUARD_REPORT.update(at=0.0, rep=None)
+set_cfg(); _notes_tool._GUARD_REPORT.update(at=0.0, rep=None)
 snap = {p.name: p.read_text() for p in (T / "store/a").glob("*.json")}
-server._model_report(0)
+_notes_tool._model_report(0)
 check("report: existing items are only read: no file changed", snap == {p.name: p.read_text() for p in (T / "store/a").glob("*.json")}, None)
 cli = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"})
 check("report: tools/model_guard_report.py prints the full report", cli.returncode == 0 and "model guards on 14 open and 3 closed items" in cli.stdout and "mover: 2: board#2, board#3" in cli.stdout, (cli.returncode, cli.stdout[:500], cli.stderr[-500:]))

@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
@@ -136,7 +137,7 @@ passes("a link in next counts by its text", lambda: create(next=f"home-other: re
 passes("a long command line of the owner's is not judged", lambda: create(next=f"{_core_instance.OWNER}: `" + "x " * 150 + "`"))
 r, g = create(next="ops-x: merged 0109c0de0, 12 tests passed")
 check("the report notes stay notes: the item is created and the reply carries the note", "next reads like a report" in r and _service_store._path(g).exists(), r)
-check("a line over 200 characters is no longer a note", server._report_note("ops-x: " + "word " * 60) == "", server._report_note("ops-x: " + "word " * 60))
+check("a line over 200 characters is no longer a note", _notes_tool._report_note("ops-x: " + "word " * 60) == "", _notes_tool._report_note("ops-x: " + "word " * 60))
 
 # ---- 3. updates judge only the text written in the call
 prose_item(30)
@@ -397,7 +398,7 @@ check("clip: a lone long link keeps its link (words clipped) and passes the gate
 d_cfg["require_bullets"] = False
 LONGN = "home-other: " + "word " * 60
 passes("require_bullets = false: a next line over 200 characters is taken again", lambda: _fg._gate_next(LONGN))
-check("…and read as the old note", "a line over 200 characters" in server._report_note(LONGN), server._report_note(LONGN))
+check("…and read as the old note", "a line over 200 characters" in _notes_tool._report_note(LONGN), _notes_tool._report_note(LONGN))
 dq, whyq = server._question_text("Real line one\n1. numbered\n" + "z " * 100, "box", "q")
 check("require_bullets = false: the question route keeps its old form (lines as written, then a blank line and the plain provenance line)",
       whyq == "" and dq.endswith("\n\nFiled by q (a script on box)") and dq.startswith("Real line one\n1. numbered\n"), (dq[-80:], whyq))
@@ -407,7 +408,7 @@ check("…and the question route bullets again", server._question_text("Real lin
 was_next = n_cfg.get("line_max")
 n_cfg["line_max"] = 0
 passes("[metadata.next] line_max = 0 means off: a long next line is taken", lambda: _fg._gate_next(LONGN))
-check("…and the old note returns", "a line over 200 characters" in server._report_note(LONGN), server._report_note(LONGN))
+check("…and the old note returns", "a line over 200 characters" in _notes_tool._report_note(LONGN), _notes_tool._report_note(LONGN))
 passes("…while the description gate still holds", lambda: _fg._gate_description("- ok"))
 if was_next is None: del n_cfg["line_max"]
 else: n_cfg["line_max"] = was_next

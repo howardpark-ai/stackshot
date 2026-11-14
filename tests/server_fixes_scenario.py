@@ -4,8 +4,8 @@ Four facts-only fixes, each with the audit message or refusal it retires. A fixe
 ten-minute pass, one message to the mover) says what was wrong. A mover who disagrees sends that fix back and the server leaves the field alone. Never by the server: closing an item, writing an
 ask, changing an item the owner moves. Checked against a scratch store and config (no port, no real server, no model call):
 
-  1  wake_park     the write that parks a wake which is the whole of the mover's wait (server `_date_only_wait`) is a History line and records the fix; clear_hold sends it back and neither the write nor the
-                   pass parks that wake again (a different wake is a new fact); the ten-minute pass parks the same shape set in the store (server `_wake_park` through audit_run.Env.wake_park) and tells the
+  1  wake_park     the write that parks a wake which is the whole of the mover's wait (service/wait_fixes `_date_only_wait`) is a History line and records the fix; clear_hold sends it back and neither the write nor the
+                   pass parks that wake again (a different wake is a new fact); the ten-minute pass parks the same shape set in the store (service/wait_fixes `_wake_park` through audit_run.Env.wake_park) and tells the
                    mover once, so the why-not-now finding for it is no longer sent; a run with no writer (the command line, --dry-run) still lists the finding
   2  front_mover   another session's mover, then or post_wake_mover set to a front agent becomes the project's builder, with the reply and History saying so; sending the same value again keeps it as sent;
                    a project with no builder is refused as before; the sender naming itself, the owner and a background agent are as they were
@@ -65,6 +65,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import update as _wt_update; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.service import wait_fixes as _wait_fixes_svc
+from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.service import store as _service_store
@@ -130,13 +132,13 @@ def env(**kw): return AR.Env(roles=ROLES, fallback=lambda p: "alpha-main", build
 shape = dict([aitem(9031), aitem(9071)])
 fs, _f = AC.filing_findings(shape, {}, now, env())
 check("1 (as before) the check itself still finds the shape, for a run that cannot write", sorted(re.sub(r"\D", "", f["id"]) for f in fs if f["category"] == "why-not-now") == ["9031", "9071"], fs)
-dry = AR.filing_pass(now=now, items=shape, anchors={}, env=env(wake_park=server._wake_park), dry=True)
+dry = AR.filing_pass(now=now, items=shape, anchors={}, env=env(wake_park=_wait_fixes_svc._wake_park), dry=True)
 check("1 --dry-run lists them and parks nothing", dry["findings"] == 2 and not hd_(mt(9031)) and not sent, (dry, sent))
 r0 = AR.filing_pass(now=now, items=shape, anchors={}, env=env())
 check("1 a pass with no writer (the command line) sends the finding as it always did", r0["fresh"] == 2 and sent and "· why-not-now ·" in sent[0][1], (r0, sent))
 sent.clear(); (T / "state/audit/filing.json").unlink(missing_ok=True)
 w9031 = wk_(mt(9031))
-r1 = AR.filing_pass(now=now, items=shape, anchors={}, env=env(wake_park=server._wake_park))
+r1 = AR.filing_pass(now=now, items=shape, anchors={}, env=env(wake_park=_wait_fixes_svc._wake_park))
 check("1 the pass parks each item itself: on hold with the wake as it was, a wait_basis from the step, stored waiting on a time", all(hd_(mt(i)) is True and wk_(mt(i)) for i in (9031, 9071))
       and "text" in (mt(9031).get("wait_basis") or {}) and stamped(9031) == ("waiting", "time"), (mt(9031), stamped(9031)))
 check("1 …History has a line for each, and the fix is recorded", len(log(9031)) == 1 and "parked" in log(9031)[0] and "clear_hold" in log(9031)[0] and SF.marked(mt(9031), SF.WAKE_PARK, w9031), (log(9031), mt(9031).get(SF.MARK)))
@@ -144,7 +146,7 @@ check("1 …the why-not-now finding is not sent (the audit message is retired): 
       and not [m for m in sent if "· why-not-now ·" in m[1]] and len(sent) == 1 and sent[0][0] == "team-back" and sent[0][2] is True and "clear_hold" in sent[0][1] and all(str(i) in sent[0][1] for i in (9031, 9071)), (r1, sent))
 check("1 …the record says what the pass did", [re.sub(r"\D", "", x) for x in r1.get("wake_park", {}).get("parked", [])] == ["9031", "9071"], r1)
 sent.clear()
-r2 = AR.filing_pass(now=now + 600, items={"a9031": rd(9031), "a9071": rd(9071)}, anchors={}, env=env(wake_park=server._wake_park))
+r2 = AR.filing_pass(now=now + 600, items={"a9031": rd(9031), "a9071": rd(9071)}, anchors={}, env=env(wake_park=_wait_fixes_svc._wake_park))
 check("1 the next pass finds nothing to do and sends nothing", r2["findings"] == 0 and not sent, (r2, sent))
 _update_svc._update("a9031", sender="team-back", clear_hold=True, next="team-back: write the report now")
 check("1 clear_hold on the pass's park is the mover's no: recorded as declined", SF.declined(mt(9031), SF.WAKE_PARK, w9031) and not hd_(mt(9031)), mt(9031))
@@ -152,7 +154,7 @@ back_ = dict([aitem(9031, nxt=f"team-back: at {w9031[-5:]} run the nightly check
 back_["a9031"]["metadata"]["wake"] = w9031; back_["a9031"]["metadata"]["fix_declined"] = {"wake_park": [w9031]}
 (T / "store/a/9031.json").write_text(json.dumps(back_["a9031"]))
 sent.clear()
-r3 = AR.filing_pass(now=now + 1200, items=back_, anchors={}, env=env(wake_park=server._wake_park))
+r3 = AR.filing_pass(now=now + 1200, items=back_, anchors={}, env=env(wake_park=_wait_fixes_svc._wake_park))
 check("1 a declined wake is left alone by the pass: not parked, no finding, no message", not hd_(mt(9031)) and r3["findings"] == 0 and not sent, (r3, sent, mt(9031)))
 
 # ================================================================ 2. front_mover
@@ -239,18 +241,18 @@ check("4 (as before) a hold whose words wait on the owner's decision is mislabel
 check("4 a hold that records a pick the owner already made is not", "mislabeled-state" not in br(f"the export ships {w2}; {o} picked option A on the board") and "mislabeled-state" not in br(f"the export ships {w2}; {o} has approved the release"), br(f"the export ships {w2}; {o} picked option A"))
 check("4 …nor one that quotes his words", "mislabeled-state" not in br(f'the export ships {w2}; his answer was "{o} approves B"') and "mislabeled-state" not in br(f"the export ships {w2}; his note, 'waiting on {o} was over'"), None)
 check("4 …but a pick recorded beside a present wait on him is still found", "mislabeled-state" in br(f"{o} picked A; waiting on {o} for the date, after {w2}"), None)
-note_q = server._form_notes(parked=True, meta={"next": f'{BACK}: his answer was "wait until {_core_instance.OWNER} decides"; carry out A'}, gid="a1")
-note_p = server._form_notes(parked=True, meta={"next": f"{BACK}: wait until {_core_instance.OWNER} decides"}, gid="a1")
+note_q = _notes_tool._form_notes(parked=True, meta={"next": f'{BACK}: his answer was "wait until {_core_instance.OWNER} decides"; carry out A'}, gid="a1")
+note_p = _notes_tool._form_notes(parked=True, meta={"next": f"{BACK}: wait until {_core_instance.OWNER} decides"}, gid="a1")
 check("4 the server's hold note is quiet for a quoted past answer and still speaks for a present wait on him", "waits on" not in note_q and "waits on" in note_p, (note_q, note_p))
 
 # ================================================================ 5. never by the server
 sent.clear()
 aitem(9100, mover=OWN, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", nxt=f"{OWN}: at 08:00 pick one", state="your-call")
 raw_ = (T / "store/a/9100.json").read_bytes()
-res_ = server._wake_park("a9100", now)
+res_ = _wait_fixes_svc._wake_park("a9100", now)
 check("5 the pass does not park an item the owner moves: byte for byte as it was", res_.get("parked") is False and (T / "store/a/9100.json").read_bytes() == raw_, (res_, mt(9100)))
 _k, d9 = aitem(9101, nxt="team-back: at 08:00 run it"); d9["status"] = "completed"; (T / "store/a/9101.json").write_text(json.dumps(d9))
-check("5 …nor a closed item", server._wake_park("a9101", now).get("parked") is False and rd(9101)["status"] == "completed", rd(9101))
+check("5 …nor a closed item", _wait_fixes_svc._wake_park("a9101", now).get("parked") is False and rd(9101)["status"] == "completed", rd(9101))
 fixed_ids = (101, 201, 202, 301, 302, 9071)
 check("5 no fix closed an item or wrote an ask: every item the fixes touched is still open, and none carries an ask it was not given",
       all(rd(i)["status"] == "open" for i in fixed_ids) and all(not mt(i).get("ask") for i in fixed_ids if i != 202), None)
@@ -274,7 +276,7 @@ _k, d_ = aitem(9200)
 d_["written_by"] = "someone-else"; d_["activity"] = now - 5 * H; (T / "store/a/9200.json").write_text(json.dumps(d_))
 _web_answers._answers_save({"a9200": {"told": [_web_page_debts._session_id(BACK)], "kind": "decision"}})
 before_ = rd(9200)
-res_ = server._wake_park("a9200", now)
+res_ = _wait_fixes_svc._wake_park("a9200", now)
 after_ = rd(9200)
 check("6.2 the pass parks it", res_.get("parked") is True and hd_(after_["metadata"]) is True and "text" in (after_["metadata"].get("wait_basis") or {}), (res_, after_["metadata"]))
 check("6.2 …written_by and written_at are as they were", after_.get("written_by") == "someone-else" and after_.get("written_at") == before_.get("written_at"), (before_.get("written_by"), after_.get("written_by")))
@@ -299,7 +301,7 @@ check("6.3 …while the same session within the day sending it again is kept as 
 # 6.4 a negation, a waiting word before the name and his name alone in quotes still wait on him
 check("6.4 'wait until <owner> has not yet decided' is still a wait on him", o in settled(f"wait until {o} has not yet decided") and o in settled(f"{o} hasn't decided"), settled(f"wait until {o} has not yet decided"))
 check("6.4 'parked until <owner> confirmed or rejected' is still a wait on him", o in settled(f"parked until {o} confirmed or rejected") and o in settled(f"waiting on {o} picked one"), settled(f"parked until {o} confirmed or rejected"))
-check("6.4 a quoted <owner> name alone ('blocked on <owner> approval') is the name, not a quoted answer", o in settled(f"blocked on '{o}' approval") and server._waits_on_owner(f"blocked on '{_core_instance.OWNER}' approval"), settled(f"blocked on '{o}' approval"))
+check("6.4 a quoted <owner> name alone ('blocked on <owner> approval') is the name, not a quoted answer", o in settled(f"blocked on '{o}' approval") and _notes_tool._waits_on_owner(f"blocked on '{_core_instance.OWNER}' approval"), settled(f"blocked on '{o}' approval"))
 check("6.4 …the readers find them: the board report calls each hold mislabeled", all("mislabeled-state" in br(f"{t} (after {w2})") for t in (f"wait until {o} has not yet decided", f"parked until {o} confirmed or rejected", f"blocked on '{o}' approval")), None)
 check("6.4 (as before) a past pick with nothing waiting before it is still blanked", o not in settled(f"the export ships; {o} has approved it") and o not in settled(f"{o} picked A"), None)
 
@@ -317,7 +319,7 @@ check("6.5 …and the finding for it is still raised", any(f["category"] == "why
 check("6.7 wait_end is one of the fixes", SF.WAIT_END == "wait_end" and SF.WAIT_END in SF.FIXES)
 meta_ = {}
 SF.mark(meta_, SF.WAIT_END, "item:board#" "1|aaaaaaaa"); SF.mark(meta_, SF.WAIT_END, "pr:o/r#7|bbbbbbbb")
-server._wait_end_sent_back(meta_, ("item",))
+_wait_fixes_svc._wait_end_sent_back(meta_, ("item",))
 check("6.7 a send-back of the item kind unmarks and declines only that kind", SF.declined(meta_, SF.WAIT_END, "item:board#" "1|aaaaaaaa") and not SF.marked(meta_, SF.WAIT_END, "item:board#" "1|aaaaaaaa")
       and SF.marked(meta_, SF.WAIT_END, "pr:o/r#7|bbbbbbbb") and not SF.declined(meta_, SF.WAIT_END, "pr:o/r#7|bbbbbbbb"), meta_)
 

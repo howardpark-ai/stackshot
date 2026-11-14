@@ -234,7 +234,7 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
                 return refusal
             h0 = S._stamp_sha(data)
             meta = raw["metadata"]
-            keeps = bool({"anchor", "recycle"} & set(S._hold_held_by(gid, meta))) if meta.get("hold") else False
+            keeps = bool({"anchor", "recycle"} & set(S._wait_fixes._hold_held_by(gid, meta))) if meta.get("hold") else False
             plan = plan_for(meta, keeps)
             if not plan["edits"]:
                 return {"item": shown, "action": "kept" if plan["listed"] else "same", "why": plan["kept"], "form": plan["form"], "new": "", "before": {}, "after": {}, "due": False, "newly": "", "how": "", "differs": "", "sha256_before": h0}

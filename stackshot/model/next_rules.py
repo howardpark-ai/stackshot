@@ -6,7 +6,7 @@ The rules of the Next design this module serves (N1, N3, N6 and N7; N2, N4 and N
   N3  nothing leaves the list: a step is marked done or dropped, or kept; a reworded open step drops the old and adds the new, so the text is never rewritten to carry progress
       (the old text plus added words is refused: that is the rewrite)
   N6  an open item has an open step: a session write that leaves no open step on an item that stays open is refused (his server-made step counts; a close is exempt)
-  N7  a step is an action, never a status: results, commit hashes, test counts and "at work since" stamps are noted, never refused (server._report_note carries the matcher)
+  N7  a step is an action, never a status: results, commit hashes, test counts and "at work since" stamps are noted, never refused (web/tools/notes._report_note carries the matcher)
 
 Pure text functions, no server import. Only a session's write through the create and update tools is judged (`SESSION_NEXT` of `service/writes.py`); a script's, the router's and the server's own writes are not,
 and a line already stored is read as it is (a line naming no one still counts as his in steps.is_his): no data is changed here."""
@@ -111,7 +111,7 @@ def moves(old_steps: list[dict[str, Any]], done_ix: list[int], drop_ix: list[int
 
 
 # ---------------------------------------------------------------------------------------------------------------- N7: a step is an action, never a status
-# The matchers of the report note (server._report_note), kept here so that the daily audit's tool (tools/next_report.py) reads a step with the same eyes and imports no server.
+# The matchers of the report note (web/tools/notes._report_note), kept here so that the daily audit's tool (tools/next_report.py) reads a step with the same eyes and imports no server.
 # A markdown link's URL and a naked URL are cut out by the caller (link_free) before a line is read.
 RX_LINK_URL = re.compile(r"\[([^\]]*)\]\([^)\s]*\)")
 _RX_NAKED = re.compile(r"(?<!\]\()https?://[^\s)\]>]+")

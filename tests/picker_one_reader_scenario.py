@@ -57,6 +57,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk
+from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.service import mover_steps as _mover_steps
 from stackshot.waits import handoff as _ho
 from stackshot.audit import audit_run as AR
@@ -341,7 +342,7 @@ gitem(9202, "zed-helper: build the thing")
 gitem(9201, "zed-back: wait for board#" "9202 to close, then write the summary")
 (T / "state/audit").mkdir(parents=True, exist_ok=True)
 items_ = {f"g{p.stem}": json.loads(p.read_text()) for p in (T / "store/g").glob("*.json")}
-r = AR.filing_pass(now=now0, items=items_, anchors={}, env=env(wait_end=server._wait_end_fix, wait_facts=server._wait_end_facts))
+r = AR.filing_pass(now=now0, items=items_, anchors={}, env=env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=_wait_fixes_svc._wait_end_facts))
 m_ = mt(9201, "g")
 check("4 _wait_end_fix: the wait is stored with the mover as the picker and no stored mover=he; the model reads it as waiting on the agent",
       m_.get("after") == ["g9202"] and "mover" not in m_ and m_.get("post_wake_mover") == BACK and model.derive(rd(9201, "g"), now0).state == "waiting" and model.derive(rd(9201, "g"), now0).wait.mover == BACK, (m_, r.get("wait_end")))

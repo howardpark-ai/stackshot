@@ -87,6 +87,7 @@ def check(name, cond, got=None):
 logging.disable(logging.INFO)
 from stackshot.core import config as _cfg
 from stackshot.web.ui import render; from stackshot.web import server, i18n; from stackshot.model import model
+from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import item_read as _item_read
 from stackshot.web import publish as _web_publish
 _web_publish._publish = lambda: None
@@ -195,7 +196,7 @@ check("strings: …the who line carries the watchers through the table too", "[x
 _cfg.CFG["ui"].pop("locale_dir", None); i18n._WARNED.clear(); i18n._LOADED.clear()
 
 # ================================================================ the `model:` line of get
-def get_line(g): return [l for l in server._model_lines({**json.loads((T / f"store/a/{g[1:]}.json").read_text()), "gid": g}) if l.startswith("model:")][0]
+def get_line(g): return [l for l in _notes_tool._model_lines({**json.loads((T / f"store/a/{g[1:]}.json").read_text()), "gid": g}) if l.startswith("model:")][0]
 ZLAB = zoneinfo.ZoneInfo("Asia/Dubai").tzname(NOW)      # the zone's own label, as the refusals that give a time name it (the instance zone pinned above)
 g312 = get_line("a312")
 check("get: the model line says the mode, how many have arrived, each line ticked [x] or open [ ] (an arrival with its words and its time), the backstop and the mover",
@@ -230,31 +231,31 @@ for at_ in NOT_A_DATE:
     bad = dataclasses.replace(m312, waits=tuple(dataclasses.replace(ln, arrived_at=at_) if ln.arrived else ln for ln in m312.waits))
     try: hr_, hp_ = b.wait_list_html(r312, bad, page=False), b.wait_list_html(r312, bad, page=True); why_ = ""
     except Exception as ex_: hr_ = hp_ = ""; why_ = f"{ex_.__class__.__name__}: {ex_}"
-    try: wd_ = model.words(bad, when=server._arrival_when); why_w = ""
+    try: wd_ = model.words(bad, when=_notes_tool._arrival_when); why_w = ""
     except Exception as ex_: wd_ = ""; why_w = f"{ex_.__class__.__name__}: {ex_}"
     check(f"hostile model ({at_!r}): the row and the page of a model handed it draw, ticked and keeping the arrival words with no time; get's words keep the words with no empty bracket",
           bool(hr_) and bool(hp_) and box_on(hr_)[:2] == [True, True] and "its date came" in plain(hp_) and "arrived · arrived" not in plain(hp_) and "arrived arrived" not in plain(hp_) and "arrived" in plain(hr_)
           and "(its date came)" in wd_ and "()" not in wd_, why_ or why_w or (plain(hp_), wd_))
     bare = dataclasses.replace(m312, waits=tuple(dataclasses.replace(ln, arrived_at=at_, arrived_what="") if ln.arrived else ln for ln in m312.waits))
-    try: wb_ = model.words(bare, when=server._arrival_when); hb_ = b.wait_list_html(r312, bare, page=True)
+    try: wb_ = model.words(bare, when=_notes_tool._arrival_when); hb_ = b.wait_list_html(r312, bare, page=True)
     except Exception as ex_: wb_ = hb_ = f"{ex_.__class__.__name__}: {ex_}"
     check(f"hostile model ({at_!r}): an arrival with no words and no time to say reads as ticked alone: get's words carry no empty bracket, the page says \"arrived\" once", "[x] the date " in wb_ and "[x] the close of a300;" in wb_ and "()" not in wb_ and "( )" not in wb_
           and plain(hb_).count("arrived arrived") == 0 and "arrived · arrived" not in plain(hb_), (wb_, plain(hb_)[:300]))
-check("hostile: the time of an arrival is empty (never an error) for a time no date can show, in the server's `model:` line, and the zone follows a real one", all(server._arrival_when(x) == "" for x in (float("inf"), 1e20, 1e300, 253402300800.0, float("nan")))
-      and server._arrival_when(GOT) == f"{day(0)} 08:30 {ZLAB}" and b.arrival_when(float("inf")) == "" and b.arrival_when(GOT) == W_(GOT), (server._arrival_when(float("inf")), server._arrival_when(GOT)))
+check("hostile: the time of an arrival is empty (never an error) for a time no date can show, in the server's `model:` line, and the zone follows a real one", all(_notes_tool._arrival_when(x) == "" for x in (float("inf"), 1e20, 1e300, 253402300800.0, float("nan")))
+      and _notes_tool._arrival_when(GOT) == f"{day(0)} 08:30 {ZLAB}" and b.arrival_when(float("inf")) == "" and b.arrival_when(GOT) == W_(GOT), (_notes_tool._arrival_when(float("inf")), _notes_tool._arrival_when(GOT)))
 # the brief's model line (short) carries the arrival time of a line as get's does: the same time formatter
-sh312 = server._model_lines({**json.loads((T / "store/a/312.json").read_text()), "gid": "a312"}, short=True)
+sh312 = _notes_tool._model_lines({**json.loads((T / "store/a/312.json").read_text()), "gid": "a312"}, short=True)
 check("brief: the short model line of a list with arrived lines carries the time of each arrival and the zone's name, as get's line does (one line, no conflicts)",
       len(sh312) == 1 and f"(its date came, {day(0)} 08:30 {ZLAB})" in sh312[0] and sh312[0].startswith("model: waiting on several things (all of 6, 2 arrived: "), sh312)
 # the time and its zone's name come from one source, read at the call (the instance zone can change under a running server, ZONE is fixed at import)
 _tz0 = _cfg.CFG["instance"]["timezone"]
 try:
     _cfg.CFG["instance"]["timezone"] = "Asia/Tokyo"
-    at_tokyo = server._arrival_when(GOT)
+    at_tokyo = _notes_tool._arrival_when(GOT)
 finally:
     _cfg.CFG["instance"]["timezone"] = _tz0
 tk = datetime.datetime.fromtimestamp(GOT, zoneinfo.ZoneInfo("Asia/Tokyo"))
-check("zone: the arrival time is drawn in the zone the instance has at the call, with that zone's own name (never the clock of one zone with the name of another)", at_tokyo == f"{tk:%Y-%m-%d %H:%M} JST" and server._arrival_when(GOT) == f"{day(0)} 08:30 {ZLAB}", (at_tokyo, server._arrival_when(GOT)))
+check("zone: the arrival time is drawn in the zone the instance has at the call, with that zone's own name (never the clock of one zone with the name of another)", at_tokyo == f"{tk:%Y-%m-%d %H:%M} JST" and _notes_tool._arrival_when(GOT) == f"{day(0)} 08:30 {ZLAB}", (at_tokyo, _notes_tool._arrival_when(GOT)))
 # an item id of a megabyte in a line is clipped everywhere it is drawn
 c347, p347, h347, g347 = wait_cell("a347"), page_wait("a347"), b.item_html("a347"), get_line("a347")
 check("clip: a line that names an item with a one-megabyte id is drawn with the id clipped (the home cell, the item page, get's model line), never the megabyte", len(c347) < 4000 and len(p347) < 8000 and len(h347) < len(b.item_html("a310")) + 5000 and len(g347) < 2000
