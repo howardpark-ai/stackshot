@@ -25,7 +25,7 @@ An alive item has one mover. A write that changes it to a session other than the
     tests/run-suite handoff        → exit 0 / 1"""
 import contextlib, datetime, io, json, os, re, subprocess, sys, pathlib, tempfile, threading, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _midnight
 tmp = _scratch.mkdtemp(prefix="handofftest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
@@ -42,6 +42,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "store/g", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x", "cli"): (T / d).mkdir(parents=True)
 NAMES = ("home-front", "team-back", "home-docs", "home-peer", "home-peer2", "home-send", "home-dead", "home-beta-front", "home-gamma-front", "home-gamma-bg", "home-idle", "home-send-dead", "home-stew", "home-beta-stew", "home-gamma-stew", "home-gamma-docs", "home-fleet")
 U = {n: f"00000000-0000-4000-8000-0000000000{i:02d}" for i, n in enumerate(NAMES, 1)}
+_midnight.wait_out("Asia/Dubai")      # a local midnight inside the run would move the "today" and "tomorrow" the checks read: start on the far side of one that is close
 now0 = time.time()
 DEAD_ISO = datetime.datetime.fromtimestamp(now0 - 3 * 3600, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # gone three hours: past [client] dead_after_minutes
 GONE = {"home-dead", "home-gamma-bg", "home-send-dead"}

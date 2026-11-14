@@ -19,7 +19,7 @@ stored line (waits/wait_list.py), judges the new ones as their single waits are 
     tests/run-suite wait_list_write        -> exit 0 / 1"""
 import datetime as dt, json, logging, os, pathlib, re, sys, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _midnight
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools"))
 tmp = _scratch.mkdtemp(prefix="waitlistwrite-"); T = pathlib.Path(tmp)
 toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
@@ -37,6 +37,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "fleet/a", "state", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 NAMES = ("home-owner", "home-stew", "team-back", "home-front", "home-other")
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1)}
+_midnight.wait_out("Asia/Dubai")      # a local midnight inside the run would move the "today" and "tomorrow" the checks read: start on the far side of one that is close
 now0 = time.time()
 DAY, HOUR = 86400.0, 3600.0
 ZONE_OFFSET = 4 * HOUR                       # the instance timezone (Asia/Dubai, "timezone" above): UTC+4, no DST
@@ -339,6 +340,10 @@ check("4 …and a new list replaces it", listed(mt(60)) and len(mt(60)["waits"])
 # a close drops the list with the rest of the wait
 out = _wt_update.stackshot_update("a20", sender=BACK, status="completed", outcome="done", reason="the work is done", outcome_text="- done")
 check("4 a close drops the list, its mode and its backstop with the wait", not any(k in mt(20) for k in ("waits", "wait_mode", "wait_kind", "until")), mt(20))
+fresh(955, [Re("a"), Re("b")])
+out955 = _wt_update.stackshot_update("a955", sender=BACK, status="completed", outcome="done", reason="the work is done", outcome_text="- done", waits=[])
+check("4 …a close that also sends waits=[] on a stored list closes it and adds no line about a wait to the reply (a closed item waits on nothing: _list_note says nothing for it)",
+      rd(955)["status"] == "completed" and not any(k in mt(955) for k in ("waits", "wait_mode", "wait_kind", "until")) and "the wait on a list is cleared" not in out955 and "wait list:" not in out955, out955[-400:])
 # the watchers end a list the tool wrote
 from stackshot.service import telling
 SENT = []; telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
