@@ -62,6 +62,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.service import telling
@@ -174,7 +175,7 @@ upd(11, status="open", next="home-front: back again")
 check("close: …a reopen does not bring it back", "state" not in mt(11), mt(11))
 item(27, needs=[BACK], state="doing", expected_by=hrs(2), check="item_closed a99")
 with contextlib.redirect_stderr(io.StringIO()):
-    server._check_close("a27", server._load("a27"), "item_closed a99", time.time())
+    checks_svc.check_close("a27", server._load("a27"), "item_closed a99", time.time())
 check("close: a close on a done check drops it too", rd(27)["status"] == "completed" and "state" not in mt(27) and "expected_by" not in mt(27), mt(27))
 item(28, needs=[BACK], after=["a29"], state="blocked", supplies="the numbers"); item(29, needs=[OTHER], subject="[home] what 28 waits on")
 upd(29, status="completed", outcome="done", reason="finished", description="- The thing is done and live")

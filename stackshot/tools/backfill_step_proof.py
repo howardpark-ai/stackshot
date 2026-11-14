@@ -2,7 +2,7 @@
 
 An open step that names the event which finishes it (`release PR #4`, `merge PR #4`, or a `step_proof` on the item) is ticked by the server when the event happens. Items written before
 that ticking existed still carry such steps although the pull request is long since merged and live. This finds them and says what the server would do for each, exactly as the server's
-own pass would (it runs the server's `_sweep_proofs` in-process, on a COPY of the store, so nothing live is read for writing or written):
+own pass would (it runs the server's `sweep_proofs` (service/proofs.py) in-process, on a COPY of the store, so nothing live is read for writing or written):
 
   tools/backfill_step_proof.py                      dry run (the default, also `--dry-run`): one line per item, then the counts; writes nothing, needs no server
   tools/backfill_step_proof.py --json               the same as JSON ({"counts", "head", "good", "items": [{item, action, kind, pr, step, ...}]})
@@ -113,17 +113,18 @@ def run(a: argparse.Namespace) -> dict:
         os.environ.pop("STACKSHOT_URL", None)
         import logging
         logging.disable(logging.INFO)
+        from stackshot.service import checks as _checks, proofs as _proofs, released_live as _live  # noqa: PLC0415
         from stackshot.web import server  # noqa: PLC0415
         server._publish = lambda: None
-        server._HERE = Path(a.checkout).expanduser().resolve() if a.checkout else ROOT
+        server._HERE = _live.HERE = Path(a.checkout).expanduser().resolve() if a.checkout else ROOT
         server._OWN_REPO[:] = []
         unread: set[str] = set()
         if not a.github:
             def _offline(ref: str, now: float, gh_st: dict) -> tuple[bool, str]:
-                unread.add(server._check_ref(ref))
+                unread.add(_checks.check_ref(ref))
                 return False, "not read (no --github)"
-            server._pr_merged = _offline
-        out = server._sweep_proofs(dry=True)
+            _checks.pr_merged = _offline
+        out = _proofs.sweep_proofs(dry=True)
         out["unread"] = sorted(unread)
         return out
 

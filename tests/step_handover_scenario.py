@@ -1,4 +1,4 @@
-"""Scenario test for the hand-over of a finished step (handover.py, server._handover / service/update.py _handover_by_hand / service/gates.py gate_step_gap, step_proof.proof_gaps, audit_checks.check_step_handover) — fixture data,
+"""Scenario test for the hand-over of a finished step (handover.py, proofs_svc.handover / service/update.py _handover_by_hand / service/gates.py gate_step_gap, step_proof.proof_gaps, audit_checks.check_step_handover) — fixture data,
 no live store, no network (GitHub's answers are a table, the pane notices go to a fake push).
 
 Covers: the pure rules (the first open step decides; the owner, a front agent, an unknown name and the mover's own step move nothing; a session that is down falls back once; a step handed over is not
@@ -72,6 +72,7 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import needs as _model_needs
+from stackshot.service import checks as checks_svc, proofs as proofs_svc, released_live as rlive_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
@@ -102,13 +103,13 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def raw(i): return (T / f"store/a/{i}.json").read_text()
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]
-server._HERE = T / "repo"
+server._HERE = rlive_svc.HERE = T / "repo"
 GH = {key(11): ("merged", "")}
 def fake_pr_merged(ref, now_, gh_st):
-    ref = server._check_ref(ref); st, err = GH.get(ref, ("open", ""))
+    ref = checks_svc.check_ref(ref); st, err = GH.get(ref, ("open", ""))
     gh_st[ref] = {"next": now_ + 300, "back": 0.0, "err": err, "merged": st == "merged"}
     return st == "merged", err
-server._pr_merged = fake_pr_merged
+checks_svc.pr_merged = fake_pr_merged
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
@@ -125,12 +126,12 @@ def pushes(): drain(); return [json.loads(l) for l in PUSHLOG.read_text().splitl
 def pushes_for(gid, to=None): return [p for p in pushes() if p[1].startswith(f"[stackshot] {gid}") and (to is None or p[0] == U.get(to, to))]
 def mover_of(i): return server._session_label(telling.holder({**rd(i), "gid": f"a{i}"}))
 check("the fixture: home-builder is a front agent, home-one and home-two are background sessions with a pane, home-gone has none",
-      telling.front_sender(U["home-builder"]) and server._handover_kind("home-two") == HO.SESSION and server._handover_kind("home-builder") == HO.FRONT and server._handover_kind(OWNER) == HO.OWNER
-      and server._handover_kind("nobody-here") == HO.OTHER and not server._handover_down("home-two") and server._handover_down("home-gone"), (server._handover_kind("home-two"), server._handover_down("home-gone")))
+      telling.front_sender(U["home-builder"]) and proofs_svc.handover_kind("home-two") == HO.SESSION and proofs_svc.handover_kind("home-builder") == HO.FRONT and proofs_svc.handover_kind(OWNER) == HO.OWNER
+      and proofs_svc.handover_kind("nobody-here") == HO.OTHER and not proofs_svc.handover_down("home-two") and proofs_svc.handover_down("home-gone"), (proofs_svc.handover_kind("home-two"), proofs_svc.handover_down("home-gone")))
 s_before = {i: raw(i) for i in IDS}
 
 # ---- 3. a two-session item end to end: one's step is ticked by its proof, two is reached with no message from anyone
-d = server._sweep_proofs()
+d = proofs_svc.sweep_proofs()
 rows = {x["item"]: x for x in d["items"]}
 a1 = rd(1); m1 = a1["metadata"]
 check("two sessions: one's step is ticked by the server (the proof is its PR) and the step after it stays open", [(s["text"], s["status"]) for s in m1["steps"]] == [("home-one: merge PR #11", "done"), ("home-two: verify the pages", "open")]
@@ -190,18 +191,18 @@ check("item 8: needs name another session beside the mover: left alone, as a tic
 
 # ---- 7. an event seen twice, a hand-over asked twice
 snap = {i: raw(i) for i in IDS}; p0 = len(pushes())
-server._sweep_proofs()
+proofs_svc.sweep_proofs()
 check("idempotent: a second pass changes no item and tells nobody", all(raw(i) == snap[i] for i in IDS) and len(pushes()) == p0, [i for i in IDS if raw(i) != snap[i]])
-r = server._handover("a1", time.time(), ["home-one: merge PR #11"])
+r = proofs_svc.handover("a1", time.time(), ["home-one: merge PR #11"])
 check("…a hand-over asked again for the session that holds the item does nothing", r and r["action"] == "none" and mover_of(1) == "home-two" and raw(1) == snap[1], r)
 back = rd(1); back["metadata"]["mover"] = "home-one"; back["metadata"]["needs"] = ["home-one"]; (T / "store/a/1.json").write_text(json.dumps(back)); p0 = len(pushes())
-r = server._handover("a1", time.time(), ["home-one: merge PR #11"])
+r = proofs_svc.handover("a1", time.time(), ["home-one: merge PR #11"])
 check("…and one asked for a step on record as handed over does nothing, whoever holds the item now", r and r["action"] == "none" and "already" in r["why"] and mover_of(1) == "home-one" and len(pushes()) == p0, r)
-p0 = len(pushes()); r = server._handover("a2", time.time(), ["x"])
+p0 = len(pushes()); r = proofs_svc.handover("a2", time.time(), ["x"])
 check("…nor a second fallback (the mover was told already)", r["action"] == "none" and "told already" in r["why"] and len(pushes()) == p0, r)
 (T / "fleet/a/sessions.json").write_text(json.dumps({**{U[n]: {"name": n, "machine": "a", "seen": time.time()} for n in U}, "00000000-0000-4000-8000-0000000000ff": {"name": "home-gone", "machine": "a", "seen": time.time()}}))
 server._sessions_index.cache_clear() if hasattr(server._sessions_index, "cache_clear") else None
-r = server._handover("a2", time.time(), ["home-one: merge PR #11"])
+r = proofs_svc.handover("a2", time.time(), ["home-one: merge PR #11"])
 check("…and a session that came back is handed the item the next time the hand-over is asked (a fallback is not a final answer)", r["action"] == "moved" and mover_of(2) == "home-gone" and rd(2)["metadata"]["handover"]["kind"] == HO.MOVED, r)
 (T / "fleet/a/sessions.json").write_text(json.dumps({U[n]: {"name": n, "machine": "a", "seen": time.time()} for n in U}))
 

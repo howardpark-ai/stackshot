@@ -78,6 +78,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
@@ -155,7 +156,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = stall_svc.time = stalltick_svc.time = CLK; writes.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = stall_svc.time = stalltick_svc.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp the progress clock takes is the one a live write takes."""
     d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts

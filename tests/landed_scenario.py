@@ -72,6 +72,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.service import checks as checks_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import complete as _wt_complete
@@ -181,7 +182,7 @@ writes.save("a5", it5, writer="Oliver")
 check("Oliver's own close makes no record, whether it is his board answer or a write whose sender is he", "a4" not in recs() and "a5" not in recs() and rd(4)["status"] == rd(5)["status"] == "completed", recs())
 # the server's own close on a done check: a record with no closer
 item(6, check="item_closed a1")
-server._check_close("a6", server._load("a6"), "item_closed a1", time.time())
+checks_svc.check_close("a6", server._load("a6"), "item_closed a1", time.time())
 check("the server's own close on a done check is a record with no closer, shown as stackshot", "a6" in recs() and recs()["a6"]["by"] == "" and recs()["a6"]["outcome"] == "done", recs().get("a6"))
 cl(9, sender="home-beta")
 check("a close in another project is a record too", set(recs()) == {"a1", "a2", "a6", "a9"}, set(recs()))

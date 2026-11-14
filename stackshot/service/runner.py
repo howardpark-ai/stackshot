@@ -31,8 +31,10 @@ from stackshot.core.instance import OWNER
 from stackshot.fleet import fleet as _fl
 from stackshot.projects import pages as _pages
 from stackshot.router import routing as _routing
+from stackshot.service import checks as _checks
 from stackshot.service import event_waits as _evwaits
 from stackshot.service import handoff as _handoff
+from stackshot.service import proofs as _proofs
 from stackshot.service import stall_tick as _stalltick
 from stackshot.service import telling as _telling
 from stackshot.service import wakes as _wakes
@@ -43,8 +45,6 @@ from stackshot.waits import watchers as _watch
 class Hooks:
     """What the minute set still reaches in server.py: the tick functions and the publish, in the names they have there without the leading underscore. server.py builds one and gives it to `install`."""
     phase_tick: Callable[[], Any]  # server._phase_tick
-    check_tick: Callable[[], Any]  # server._check_tick
-    proof_tick: Callable[[], Any]  # server._proof_tick
     balance_tick: Callable[[], Any]  # server._balance_tick
     answer_tick: Callable[[], Any]  # server._answer_tick
     roles_sync_safe: Callable[[], Any]  # server._roles_sync_safe
@@ -106,8 +106,8 @@ def ticks() -> "list[_minute.Tick]":
         T("anchor_pass", lambda: _wakes.minute_anchor_pass(), "settle", "event"),
         T("phase_sweep", lambda: _hooks().phase_tick(), "settle", board=True),
         T("evwait_tick", lambda: _evwaits.evwait_tick(), "settle", board=True),
-        T("check_tick", lambda: _hooks().check_tick(), "settle", board=True),
-        T("proof_tick", lambda: _hooks().proof_tick(), "settle", board=True),
+        T("check_tick", lambda: _checks.check_tick(), "settle", board=True),
+        T("proof_tick", lambda: _proofs.proof_tick(), "settle", board=True),
         T("balance_tick", lambda: _hooks().balance_tick(), "handoff", board=True),
         T("handoff_tick", lambda: _handoff.handoff_tick(), "handoff", board=True),
         T("answer_tick", lambda: _hooks().answer_tick(), "answers", board=True),

@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -3260,8 +3261,8 @@ check("green release: the open item anchored to the PR is saved with the item un
       comments == [("a33", True, "", "", 5.0)]
       and rd("a33")["updated"] == 5.0 and rd("a33")["status"] == "open", comments)
 check("green release: no page is owed", json.dumps(server._owed_load(), sort_keys=True) == owed0, server._owed_load())
-_prm = server._pr_merged; server._pr_merged = lambda ref, now, gh_st: (ref == "example-owner/stackshot#113", "")
-server._CHECK_LAST[0] = 0; closed47 = server._check_tick(); server._pr_merged = _prm; time.sleep(0.3)
+_prm = checks_svc.pr_merged; checks_svc.pr_merged = lambda ref, now, gh_st: (ref == "example-owner/stackshot#113", "")
+checks_svc.CHECK_LAST[0] = 0; closed47 = checks_svc.check_tick(); checks_svc.pr_merged = _prm; time.sleep(0.3)
 check("green release: the item waiting on the PR still closes on its pr_merged check",
       "a33" in closed47 and rd("a33")["status"] == "completed" and rd("a33")["metadata"].get("reason") == "done check passed: pr_merged example-owner/stackshot#113", (closed47, rd("a33")))
 check("…and the close releases the item after it", rd("a39")["status"] == "open" and "after" not in rd("a39")["metadata"], rd("a39")["metadata"])
@@ -3486,8 +3487,8 @@ server._update("a54", hold=False, sender="work-osprey-main")
 # an item whose done check is pr_merged, and the item after it: untouched by the log-only path, closed by the check as before
 item48(57, check="pr_merged example-owner/stackshot#116", next="work-osprey-x: merge PR #116"); item48(58, after=["a57"], next="after the merge")
 got, ln = ev48(A48, "pr_merged", "merged it"); auto48.append(ln["id"])
-_prm = server._pr_merged; server._pr_merged = lambda ref, now, gh_st: (ref == "example-owner/stackshot#116", "")
-server._CHECK_LAST[0] = 0; closed48 = server._check_tick(); server._pr_merged = _prm; time.sleep(0.3)
+_prm = checks_svc.pr_merged; checks_svc.pr_merged = lambda ref, now, gh_st: (ref == "example-owner/stackshot#116", "")
+checks_svc.CHECK_LAST[0] = 0; closed48 = checks_svc.check_tick(); checks_svc.pr_merged = _prm; time.sleep(0.3)
 check("pr_merged: the item checked on the PR closes on its check as before, and the item after it is released",
       "a57" in closed48 and rd("a57")["status"] == "completed" and rd("a58")["status"] == "open" and "after" not in rd("a58")["metadata"], (closed48, rd("a58")["metadata"]))
 wait_push(0)
@@ -3646,17 +3647,17 @@ try:
     calls49 = []
     class _Cl49:
         def request(self, method, path, **kw): calls49.append((method, path)); return {"merged": True, "state": "closed"}
-    _cg49 = server._check_gh; server._check_gh = lambda repo: (calls49.append(("client", repo)), _Cl49())[1]
+    _cg49 = checks_svc.check_gh; checks_svc.check_gh = lambda repo: (calls49.append(("client", repo)), _Cl49())[1]
     try:
-        gh49 = {}; ok1 = server._pr_merged(f"{OLD49}#7", 1000.0, gh49); ok2 = server._pr_merged(f"{NEW49}#7", 1001.0, gh49)
-    finally: server._check_gh = _cg49
+        gh49 = {}; ok1 = checks_svc.pr_merged(f"{OLD49}#7", 1000.0, gh49); ok2 = checks_svc.pr_merged(f"{NEW49}#7", 1001.0, gh49)
+    finally: checks_svc.check_gh = _cg49
     check("pr_merged: the old and the new name of one PR share one GET (at the current name) and one kept answer", ok1 == (True, "") and ok2 == (True, "") and list(gh49) == [f"{NEW49}#7"]
           and calls49 == [("client", NEW49), ("GET", f"/repos/{NEW49}/pulls/7")], (calls49, list(gh49)))
     gh49 = {f"{NEW49}#8": {"dead": "its pull request was closed without being merged"}}
-    check("pr_merged: a check written with the old name reads the answer kept under the new one (dead check, kept refs)", server._check_dead(f"pr_merged {OLD49}#8", gh49).startswith("its pull request")
-          and server._check_ref(f"{OLD49}#8") == f"{NEW49}#8" and server._check_ref("Foo/Bar#8") == "Foo/Bar#8" and server._check_ref("nonsense") == "nonsense")
+    check("pr_merged: a check written with the old name reads the answer kept under the new one (dead check, kept refs)", checks_svc.check_dead(f"pr_merged {OLD49}#8", gh49).startswith("its pull request")
+          and checks_svc.check_ref(f"{OLD49}#8") == f"{NEW49}#8" and checks_svc.check_ref("Foo/Bar#8") == "Foo/Bar#8" and checks_svc.check_ref("nonsense") == "nonsense")
     moved49(None)
-    check("pr_merged, no table: the ref is kept exactly as written", server._check_ref(f"{OLD49}#8") == f"{OLD49}#8" and server._check_dead(f"pr_merged {OLD49}#8", {f"{NEW49}#8": {"dead": "x"}}) == "")
+    check("pr_merged, no table: the ref is kept exactly as written", checks_svc.check_ref(f"{OLD49}#8") == f"{OLD49}#8" and checks_svc.check_dead(f"pr_merged {OLD49}#8", {f"{NEW49}#8": {"dead": "x"}}) == "")
 
     # release-green, log-only: origin old and PR new, and the reverse
     moved49(TBL49); server._OWN_REPO[:] = [OLD49]

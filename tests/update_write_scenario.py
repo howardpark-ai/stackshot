@@ -392,7 +392,7 @@ for node in ast.walk(srv_tree):
         LATE[node.func.value.id] = [c.args[0].value for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_late" and c.args and isinstance(c.args[0], ast.Constant)]
 missing = {t: [n for n in names_ if not hasattr(server, n)] for t, names_ in LATE.items()}
 check("10 every name the server's create table and update table look up late (`_late(\"<name>\")`) is an attribute of the server module (a renamed gate would otherwise fail only when a write reaches it)",
-      set(LATE) == {"_create_svc", "_update_svc"} and all(len(v) > 40 for v in LATE.values()) and not any(missing.values()), ({t: len(v) for t, v in LATE.items()}, missing))
+      set(LATE) == {"_create_svc", "_update_svc"} and len(LATE.get("_create_svc", ())) >= 40 and len(LATE.get("_update_svc", ())) >= 72 and not any(missing.values()), ({t: len(v) for t, v in LATE.items()}, missing))
 # the helpers that moved with the write, called directly on inputs where each differs from its default and on an edge, through the table the server builds. The expected values are what main's own version of each
 # function returned for the same input (server.py before the move, run on a scratch config); a roster, the contact lookups and the wait-basis gate are the server's names replaced for a case, the way a suite does.
 H = update

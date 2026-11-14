@@ -40,6 +40,7 @@ DESC = "- A thing\n- It lives here\n- Done when done"
 OUT = "- The thing works now\n- It lives here\n- Finished when it ships"
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL
+from stackshot.service import checks as checks_svc
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.tools import complete as _wt_complete
 OWNER = server.OWNER
@@ -172,7 +173,7 @@ check("a close the closer does not mark, with a step of its own and the other's 
 
 # ================================================================ 3. the server's own closes
 item(20); item(21); item(22)
-server._check_close("g20", rd(20), "a done check", time.time())
+checks_svc.check_close("g20", rd(20), "a done check", time.time())
 check("a done check's close settles every open step, by the server (unchanged)", kinds(20) == ["done", "done"] and {b for _, b in sts(20)} == {server.NAME} and rd(20)["metadata"]["outcome"] == "done", sts(20))
 it21 = rd(21); server._watch_close(it21, "dropped on his answer", time.time())
 check("a watcher ask's drop settles every open step, by the server (unchanged)", [x["status"] for x in it21["metadata"]["steps"]] == ["dropped", "dropped"], it21["metadata"])

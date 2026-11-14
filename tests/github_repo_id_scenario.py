@@ -132,6 +132,7 @@ STORE = T / "store"
 DESC = "- A thing\n- It lives here\n- Finished when it works"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.service import checks as checks_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
@@ -160,7 +161,7 @@ def round_trip(label):
     r2 = G.drain(None, STORE, say=lambda s: None)
     G.client().get_issue(n); G.client().list_issues()
     rp = G.poll_comments(None, STORE, say=lambda s: None)
-    merged, err = server._pr_merged(f"{NAME}#{n}", time.time(), {})
+    merged, err = checks_svc.pr_merged(f"{NAME}#{n}", time.time(), {})
     check(f"{label}: the create took issue #{n}, the edit and the close landed, the reads answered", n > 0 and r1["done"] >= 1 and r1["left"] == 0 and edited and r2["done"] == 1 and not rp.get("down")
           and F.issues[n]["state"] == "closed" and not merged and not err, (out[:200], n, r1, r2, rp, err))
     return gid, n
