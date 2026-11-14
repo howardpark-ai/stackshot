@@ -193,11 +193,11 @@ for _name, _cls in (("root", root_render.Board), ("ui", render.Board)):
           _wl0 and all(" · on " in l for l in _wl0) and len(_wl) == len(_wl0) and all(" · on" not in l and l.endswith("]") for l in _wl), (_wl0, _wl))
 # the Closed card's new badge and the Closed page's New section read one set, the uncleared closes. Mixed data: a done close, a 20-day-old one (past the
 # Last 14 days section, still uncleared, so in New), a close with no outcome, an open item's stale record, a cleared one.
-from stackshot.web import landed as _ld
+from stackshot.service import landed as _ld; from stackshot.notify import landed as _ld_rules
 try:
     _ld.record("a30", now - 2 * D, "done", by="team-back", project="projects/alpha"); _ld.record("a32", now - 20 * D, "done", by="team-back", project="projects/alpha")
     _ld.record("a31", now - 3 * D, "done", by="team-back", project="projects/alpha"); _ld.record("a1", now - 1 * D, "done", by="team-back", project="projects/alpha")
-    _ld.record("a33", now - 4 * D, "done", by="team-back", project="projects/alpha"); _ld.clear([_ld.key("a33", now - 4 * D)], now=now)
+    _ld.record("a33", now - 4 * D, "done", by="team-back", project="projects/alpha"); _ld.clear([_ld_rules.key("a33", now - 4 * D)], now=now)
     def landed_both():
         bb = render.Board(str(T / "store"), now=NOW); hh = bb.html(); cc = hh[hh.find('<nav class="hcards"'):hh.find("</nav>", hh.find('<nav class="hcards"'))]
         new = re.findall(r'<i class="hnew[^"]*">(\d+)<em> new</em></i>', cc)
@@ -205,7 +205,7 @@ try:
     n_card, n_lines, cc = landed_both()
     check("cards: the Closed card's new badge counts exactly the lines of the New section on the Closed page, 2 for mixed data (a close with no outcome, a record of an open item and a cleared one are on neither), not the card's own number",
           n_card == n_lines == 2 and "2 new: closed by an agent, not cleared yet" in cc and cards_of(cc)[-1] == ("/closed", str(ND), "Closed"), (n_card, n_lines, cc))
-    _ld.clear([_ld.key("a30", now - 2 * D)], now=now); n_card, n_lines, cc = landed_both()
+    _ld.clear([_ld_rules.key("a30", now - 2 * D)], now=now); n_card, n_lines, cc = landed_both()
     check("cards: after one Clear both read 1; after Clear all both read 0 and the badge is gone", n_card == n_lines == 1 and (_ld.clear(None, now=now), landed_both())[1][:2] == (0, 0)
           and "hnew" not in landed_both()[2] and cards_of(landed_both()[2])[-1] == ("/closed", str(ND), "Closed"))
 finally:
@@ -451,7 +451,7 @@ gone = {"state tiles": 'class="overview"', "the tiles' links": 'class="stat', "N
         "the Tasks section of the panel": 'id="tasks"', "the old waiting block": '<section id="waiting">'}
 for k, v in gone.items(): check(f"gone: {k}", v not in h, h[h.find(v) - 40:h.find(v) + 120])
 check("gone: no section titled On others or Needs your call", not re.search(r"<h2>(On others|Needs your call)", h))
-check("gone: the rows For you recorded stay recorded (foryou.py is untouched: its module and routes still answer)", hasattr(render, "_fy") and hasattr(render.Board, "for_you_html"))
+check("gone: the rows For you recorded stay recorded (notify/foryou.py is untouched: its module and routes still answer)", hasattr(render, "_fy") and hasattr(render.Board, "for_you_html"))
 panel = h[h.find('<aside id="panel"'):h.find("</aside>")]
 check("stays: the right-hand panel holds Machines, Runners, Anchor hub, Audit and Projects, and nothing else", re.findall(r'<section id="([a-z-]+)">', panel) == ["machines", "runners", "anchorhub", "audit-panel", "projects-panel"] and "<h2 class=\"hdr\">Projects</h2>" in panel and "<h2 class=\"hdr\">Audit</h2>" in panel and "<h2 class=\"hdr\">Machines</h2>" in panel and "<h2 class=\"hdr\">Anchor hub</h2>" in panel
       and h.find('<section id="machines">') > h.find("</main>"), panel[:300])

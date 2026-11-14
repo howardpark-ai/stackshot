@@ -68,7 +68,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-from stackshot.core import config as _cfg; from stackshot.web import landed as ld
+from stackshot.core import config as _cfg; from stackshot.service import landed as ld; from stackshot.notify import landed as ld_rules
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
 from stackshot.service import watching as watching_svc
 from stackshot.web import app as _wapp
@@ -282,7 +282,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("watch from the root: 303 to the item's page", r.status_code == 303 and r.headers["location"] == "/items/a2", (r.status_code, r.headers.get("location"), r.text[:100]))
     r = post("/for-you/seen", {"id": "all"})
     check("Mark seen from the root: 303 to the home", r.status_code == 303 and r.headers["location"] == "/#for-you", (r.status_code, r.headers.get("location")))
-    keys = [ld.key(x["gid"], x["ts"]) for x in ld.records()]
+    keys = [ld_rules.key(x["gid"], x["ts"]) for x in ld.records()]
     check("Landed holds the three closes before the Clear", len(keys) == 3, keys)
     r = post("/landed/clear", {"keys": keys[0]})
     check("Clear on Closed: 303 to /closed, and the same list lost the line", r.status_code == 303 and r.headers["location"] == "/closed" and len(ld.records()) == 2, (r.status_code, r.headers.get("location"), len(ld.records())))

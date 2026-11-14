@@ -110,7 +110,7 @@ for i, oc, why in ((10, "done", "Live at 0168c0d: the sample shows once in the l
 from stackshot.web.ui import render as r2, search as s2
 from stackshot.web import search as sm
 Bd = lambda: r2.Board(str(T / "store"), now=None)
-from stackshot.web import landed as ld
+from stackshot.service import landed as ld; from stackshot.notify import landed as ld_rules
 sm.sync(Bd())
 
 # ---------------------------------------------------------------------------------------------------------------- the checks
@@ -466,7 +466,7 @@ check("cards: 60 px tall at every width, one-line labels, the short form chosen 
 def closed_card(b):
     hh = b.html(); m = re.search(r'<a class="(hcard[^"]*)" href="/closed"([^>]*)><b>(\d+)</b><span>Closed( <i class="hnew">(\d+)<em> new</em></i>)?</span></a>', hh)
     return m and {"cls": m.group(1), "n": int(m.group(3)), "new": int(m.group(5)) if m.group(5) else None, "attrs": m.group(2)}
-_keys = [ld.key(x["gid"], x["ts"]) for x in ld.records()]
+_keys = [ld_rules.key(x["gid"], x["ts"]) for x in ld.records()]
 _c = closed_card(Bd())
 # the number counted by hand from the fixture's files, not from Board.done: completed rows updated within 14 days whose outcome is done, dropped or superseded (the four closed through stackshot_complete and the NMORE batch pieces)
 HAND = sum(1 for _f in (T / "store/a").glob("*.json") for _d in [json.loads(_f.read_text())]
@@ -544,7 +544,7 @@ try:
     for _i, _d in _OLD.items(): ld.record(f"a{_i}", now0 - _d * 86400, "done", by="alpha-builder")
     _old = Bd(); _co = closed_card(_old); _pg = _old.landed_html()
     _gids = {x["gid"] for x in ld.records()}
-    check("landed.py keeps the closes up to 60 days old and drops the 61-day one", {"a90", "a91", "a93"} <= _gids and "a92" not in _gids and len(_gids) == 6, sorted(_gids))
+    check("the Landed list keeps the closes up to 60 days old and drops the 61-day one", {"a90", "a91", "a93"} <= _gids and "a92" not in _gids and len(_gids) == 6, sorted(_gids))
     check("Closed page: an uncleared close 20 days old and one 59 days old are in the New section; the 14-day one is too; the 61-day one is not", _in_new(_pg, "a90") and _in_new(_pg, "a91") and _in_new(_pg, "a93") and not _in_new(_pg, "a92"), re.findall(r'data-key="([^"]+)"', _new_section(_pg)))
     check("Closed card: the badge counts them (the three of the fixture and those three), not the 61-day one", _co and _co["new"] == 6 and "6 new: closed by an agent, not cleared yet" in _co["attrs"], _co)
     check("Closed page: the New section says the same count as the badge", f'<h2 class="lsec">New <span class="count">{_co["new"]}</span></h2>' in _pg and _old.landed_count() == _co["new"] == len(_old.landed_keys()), _co)
@@ -558,7 +558,7 @@ try:
     _row14 = re.search(r'<li[^>]*data-key="a93:[^"]*".*?</li>', _new_section(_pg), re.S)
     check("Closed page: the 14-day close draws the same row as before (reason and Clear)", _row14 and "shipped 14 days back" in _row14.group(0) and "Clear" in _row14.group(0), _row14 and _row14.group(0)[:300])
     # Clear on one line: only that close leaves the badge and the New section
-    _k90 = ld.key("a90", now0 - 20 * 86400)
+    _k90 = ld_rules.key("a90", now0 - 20 * 86400)
     check("Clear: the line's key is the one the row carries", f'data-key="{_k90}"' in _pg, _k90)
     check("Clear: one line cleared", ld.clear([_k90]) == 1, None)
     _c1 = Bd(); _p1 = _c1.landed_html(); _cc = closed_card(_c1)
@@ -567,7 +567,7 @@ try:
     # Clear all: the keys the page carries clear every close on it, the old ones included
     _all = re.search(r'<form class="lmark"[^>]*><input type="hidden" name="keys" value="([^"]*)"', Bd().landed_html())
     _all = _all.group(1).split(",") if _all else []
-    check("Clear all carries the key of every close on the page, the 20-day and the 59-day ones included", len(_all) == 6 and _k90 in _all and ld.key("a91", now0 - 59 * 86400) in _all and not any(k.startswith("a92:") for k in _all), _all)
+    check("Clear all carries the key of every close on the page, the 20-day and the 59-day ones included", len(_all) == 6 and _k90 in _all and ld_rules.key("a91", now0 - 59 * 86400) in _all and not any(k.startswith("a92:") for k in _all), _all)
     check("Clear all: clears them all", ld.clear(_all) == 6 and not ld.records(), len(ld.records()))
     _c2 = Bd(); _p2 = _c2.landed_html(); _z2 = closed_card(_c2)
     check("Clear all: no badge, an empty New section, the Closed number unchanged", _z2["new"] is None and _z2["n"] == HAND + 1 and "Nothing an agent closed is waiting here" in _p2 and 'data-key=' not in _new_section(_p2), _z2)

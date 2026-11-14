@@ -115,7 +115,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
-from stackshot.service import checks as checks_svc
+from stackshot.service import checks as checks_svc, foryou as fy_svc
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -318,7 +318,7 @@ about33 = [x for x in told if x[1] == "a33"]
 check("with his words on the item (a said entry) only the keeper is told; the owner is not (since Sat Oct 24th 2026 that close is a row on his For you list, not a message to the owner)",
       [x[2] for x in about33] == [U["team-back"]] and {x[0] for x in about33} == {"check"}, told)
 check("…and the row is on the list: the item as closed by the server's done check",
-      len([r for r in server._fy.rows() if r["gid"] == "a33" and r["kind"] == "closed"]) == 1, server._fy.rows())
+      len([r for r in fy_svc.rows() if r["gid"] == "a33" and r["kind"] == "closed"]) == 1, fy_svc.rows())
 
 item(37, check="item_closed a38", next="team-back: finish a38", needs=["team-back"], answers=[{"ts": now0 - 30, "kind": "decision", "text": "go ahead", "via": "board"}])
 item(38)
@@ -327,7 +327,7 @@ told.clear()
 check("the pass closes it", tick(1) == ["a37"] and rd(37)["status"] == "completed", rd(37))
 about37 = [x for x in told if x[1] == "a37"]
 check("a board answer alone is not his words about the close: the keeper is told, the owner is not (he answered on it, so it is a row on his list all the same)",
-      [x[2] for x in about37] == [U["team-back"]] and {x[0] for x in about37} == {"check"} and len([r for r in server._fy.rows() if r["gid"] == "a37" and r["kind"] == "closed"]) == 1, told)
+      [x[2] for x in about37] == [U["team-back"]] and {x[0] for x in about37} == {"check"} and len([r for r in fy_svc.rows() if r["gid"] == "a37" and r["kind"] == "closed"]) == 1, told)
 check("_owner_words: a board answer (text or choice) alone is none; a said entry counts", server._owner_words(rd(37)) == "" and server._owner_words({"metadata": {"answers": [{"choice": "Go"}]}}) == "" and server._owner_words(rd(33)) == "a said entry", (server._owner_words(rd(37)), server._owner_words(rd(33))))
 
 # ---- 4. unit_active with a stubbed runner (the argv is what the stub sees: systemctl is never run)

@@ -14,7 +14,8 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 
 from stackshot.audit import audit as _audit, audit_overview as _audit_overview
 from stackshot.core import readonly as _ro, store as _store
-from stackshot.web import i18n as _i18n, uiprefs as _uiprefs, landed as _ld, runners as _runners, colorcombos as _colorcombos
+from stackshot.service import landed as _ld
+from stackshot.web import i18n as _i18n, uiprefs as _uiprefs, runners as _runners, colorcombos as _colorcombos
 from stackshot.web.answers import _answer_same_origin
 from stackshot.web.auth import signin as _signin
 from stackshot.web.auth.signin import _ui_guard, _ui_key, _ui_open
