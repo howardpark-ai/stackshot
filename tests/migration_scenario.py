@@ -134,6 +134,8 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.router import routing as _routing
 from stackshot.github import ghsync as _gh
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
@@ -388,7 +390,7 @@ check("wake: …and an `end` with no residue sends none", (SENT.clear(), call("b
 # unrecorded
 check("unrecorded: the pass wrote it on the closed items the record says nothing about", mt(24).get("outcome") == "unrecorded" and mt(27).get("outcome") == "unrecorded" and rd(24)["status"] == "completed", (mt(24), mt(27)))
 item(90, needs=[BACK], subject="[home] a new close tries unrecorded")
-refused("unrecorded: the guard of a new close refuses it (update with status=completed)", lambda: server._update("g90", sender=BACK, status="completed", outcome="unrecorded", reason="r", description="It ended. It ended here. Done when done."), "only the migration writes it")
+refused("unrecorded: the guard of a new close refuses it (update with status=completed)", lambda: _update_svc._update("g90", sender=BACK, status="completed", outcome="unrecorded", reason="r", description="It ended. It ended here. Done when done."), "only the migration writes it")
 refused("unrecorded: …and the gate itself", lambda: gates.gate_close("g90", rd(90), "unrecorded", "r", "", "new text"), "unrecorded")
 check("unrecorded: …the item is still open", rd(90)["status"] == "open", None)
 check("unrecorded: GitHub's close for it is plain `completed` (a change to nothing); dropped and superseded stay `not_planned`",
@@ -851,15 +853,15 @@ check("script: --dry-run needs --store; the real pass is a separate mode that ne
 # ================================================================ the switchover
 cfg(switchover=False)
 item(70, needs=[BACK], subject="[home] an old item with a wait that has no input", wait_kind="anchor", wait_event="a thing", ask_by=day(5), post_wake_mover=BACK, next="team-back: watch it")
-check("switchover: off by default", server._switchover_on() is False and server._old_wait_off() is False, None)
-out = server._update("g70", sender=BACK, next="team-back: watch it, still")
+check("switchover: off by default", _item_read._switchover_on() is False and _item_read._old_wait_off() is False, None)
+out = _update_svc._update("g70", sender=BACK, next="team-back: watch it, still")
 check("switchover off: an update that touches only next on an old item with residue passes (the guards judge what a write touches)", mt(70)["next"].endswith("still"), out)
 cfg(switchover=True)
-check("switchover: on needs the guards, and only then", server._switchover_on() is True and (cfg(guards=False), server._switchover_on())[1] is False and (cfg(guards=True), server._switchover_on())[1] is True, None)
-refused("switchover on: the same update is refused, the guards judging the whole item: an old item's residue", lambda: server._update("g70", sender=BACK, next="team-back: watch it, again"), "input is missing")
-check("switchover on: a bookkeeping write (a priority) still passes on that item", (server._update("g70", sender=BACK, priority="p3"), mt(70).get("priority") == "p3")[1], mt(70))
+check("switchover: on needs the guards, and only then", _item_read._switchover_on() is True and (cfg(guards=False), _item_read._switchover_on())[1] is False and (cfg(guards=True), _item_read._switchover_on())[1] is True, None)
+refused("switchover on: the same update is refused, the guards judging the whole item: an old item's residue", lambda: _update_svc._update("g70", sender=BACK, next="team-back: watch it, again"), "input is missing")
+check("switchover on: a bookkeeping write (a priority) still passes on that item", (_update_svc._update("g70", sender=BACK, priority="p3"), mt(70).get("priority") == "p3")[1], mt(70))
 cfg(switchover_fallback=True)
-check("switchover on: the old wake pass stands down only when the fallback is off", server._old_wait_off() is False and (cfg(switchover_fallback=False), server._old_wait_off())[1] is True, None)
+check("switchover on: the old wake pass stands down only when the fallback is off", _item_read._old_wait_off() is False and (cfg(switchover_fallback=False), _item_read._old_wait_off())[1] is True, None)
 cfg(switchover_fallback=True)
 item(71, needs=["home-gone"], subject="[home] a mover whose pane is gone, no hand-off record", next="home-gone: the thing", mover="home-gone")
 sess = _fleet_sessions_registry._sessions_index()

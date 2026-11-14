@@ -45,6 +45,7 @@ def put(i, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.anchors import anchors as _anc
 from stackshot.web import publish as _web_publish
@@ -172,7 +173,7 @@ check("roles read fails: the front-mover gate lets the write through and says so
 
 # ---- the server's own moves do not come through the tools' gate
 put(5, mover=BUILD)
-r = server._update("a5", mover=MAIN, sender=BUILD)
+r = _update_svc._update("a5", mover=MAIN, sender=BUILD)
 check("server-side move (the internal update) is not refused by the tool gate", "Refused" not in r and telling.holder(rd(5)) == MAIN, r)
 
 # ---- a refused hand-off is a no-op on the item: mover, state, needs and the hand-off record stay as before the call, and the refusal text still comes back

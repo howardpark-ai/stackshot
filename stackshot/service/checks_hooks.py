@@ -16,19 +16,19 @@ from typing import Any, Callable
 @dataclass(frozen=True)
 class Hooks:
     """What the done check, the release settle and the step proofs still reach outside service/, by the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
-    date_parked: Callable[..., Any]  # server._date_parked
-    hold_flag: Callable[..., Any]  # server._hold_flag
-    is_held: Callable[..., Any]  # server._is_held
+    date_parked: Callable[..., Any]  # item_read._date_parked
+    hold_flag: Callable[..., Any]  # holders._hold_flag
+    is_held: Callable[..., Any]  # holders._is_held
     own_repo: Callable[..., Any]  # server._own_repo
     pr_key: Callable[..., Any]  # server._pr_key
     pr_url: Callable[[], Any]  # server._PR_URL
     publish: Callable[..., Any]  # web.publish._publish
     rmod_needs_kind: Callable[..., Any]  # server._rmod.needs_kind
-    role_name: Callable[..., Any]  # server._role_name
-    same_sess: Callable[..., Any]  # server._same_sess
-    session_down: Callable[..., Any]  # server._session_down
+    role_name: Callable[..., Any]  # sessions_registry._role_name
+    same_sess: Callable[..., Any]  # sessions_registry._same_sess
+    session_down: Callable[..., Any]  # pane_recovery._session_down
     session_id: Callable[..., Any]  # server._session_id
-    session_roster: Callable[..., Any]  # server._session_roster
+    session_roster: Callable[..., Any]  # agents._session_roster
     wait_end_sent_back: Callable[..., Any]  # server._wait_end_sent_back
 
 

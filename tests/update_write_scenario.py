@@ -405,7 +405,7 @@ for node in ast.walk(srv_tree):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "Hooks" and isinstance(node.func.value, ast.Name) and node.func.value.id in ("_create_svc", "_update_svc"):
         LATE[node.func.value.id] = [(None, c.args[0].value) for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_late" and c.args and isinstance(c.args[0], ast.Constant)] \
             + [(c.args[0].id, c.args[1].value) for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_late_in" and len(c.args) == 2 and isinstance(c.args[0], ast.Name) and isinstance(c.args[1], ast.Constant)]
-OWNERS = {"_pubmod": "stackshot.web.publish", "_pdebts": "stackshot.web.page_debts"}      # the owner modules the server's `_late_in` lookups name, as the server imports them
+OWNERS = {"_pubmod": "stackshot.web.publish", "_pdebts": "stackshot.web.page_debts", "_rmod": "stackshot.web.render", "_update_svc": "stackshot.service.update", "_item_read": "stackshot.service.item_read", "_agents": "stackshot.service.agents", "_contacts": "stackshot.service.contacts", "_pane_recovery": "stackshot.service.pane_recovery", "_holders": "stackshot.model.holders", "_sr": "stackshot.fleet.sessions_registry"}      # the owner modules the server's `_late_in` lookups name, as the server imports them
 missing = {t: [(a, n) for a, n in names_ if not hasattr(server if a is None else sys.modules[OWNERS[a]], n)] for t, names_ in LATE.items()}
 check("10 every name the server's create table and update table look up late (`_late(\"<name>\")`, or `_late_in(<owner>, \"<name>\")` on the owner module) is an attribute of the server module or of its owner (a renamed gate would otherwise fail only when a write reaches it)",
       set(LATE) == {"_create_svc", "_update_svc"} and len(LATE.get("_create_svc", ())) >= 23 and len(LATE.get("_update_svc", ())) >= 55 and not any(missing.values()) and all(a is None or a in OWNERS for v in LATE.values() for a, _n in v),
@@ -418,14 +418,17 @@ import contextlib
 Q = "?"
 ROSTER = {"alpha-main", "beta-builder", "gamma-engineer"}
 
+from stackshot.service import agents as _agents, contacts as _contacts
+_ROSTER_OWNERS = {"_session_roster": _agents, "_main_agent": _agents, "_contact_fronts": _contacts, "_contact_alive": _contacts, "_contact_same": _contacts}      # the names that left the server: their owner modules
 @contextlib.contextmanager
 def patched(**kv):
-    """The server's own names replaced for a case (the service looks each one up when it is called), put back after."""
-    old = {k: getattr(server, k) for k in kv}
-    for k, v in kv.items(): setattr(server, k, v)
+    """The server's own names (and the owner modules' of the roster and contact readers) replaced for a case (the service looks each one up when it is called), put back after."""
+    owner = lambda k: _ROSTER_OWNERS.get(k, server)
+    old = {k: getattr(owner(k), k) for k in kv}
+    for k, v in kv.items(): setattr(owner(k), k, v)
     try: yield
     finally:
-        for k, v in old.items(): setattr(server, k, v)
+        for k, v in old.items(): setattr(owner(k), k, v)
 
 def stale(was, new, writer, naming=(), passed=False, old_mark=None):
     meta = dict(new)
@@ -517,12 +520,12 @@ try: update.update_item(put(990001), subject="[home] changed by the patched gate
 except ToolError as e: via_gate = str(e)
 finally: _fg._gate_subject = real_gate
 check("10 the field and decision rules are model/'s, called on their modules at each call (a suite's patch of the owner reaches the update), and none is a hook", via_gate == "<patched gate>" and not ({f.name for f in dataclasses.fields(update.Hooks)} & set(MOVED)) and len(MOVED) >= 16, (via_gate, sorted(MOVED)))
-real_upd = server._update
-server._update = lambda *a, **k: "<patched update>"
+real_upd = update._update
+update._update = lambda *a, **k: "<patched update>"
 try:
     try: via_update = tbl.update("a1")
     except Exception as e: via_update = f"raised {e!r}"
-finally: server._update = real_upd
+finally: update._update = real_upd
 check("10 the complete reaches the server's `_update` by a late lookup (a suite that replaces it there still reaches the close)", via_update == "<patched update>", via_update)
 check("10 no flag and no notice is a hook of the update: the flags are service/writes.py's and the notices service/telling.py's, each read on its module", not ({"session_next", "reformat", "terminal_row", "question", "close_was_set"} | set(REAL_TELLING) | {"quiet"}) & {f.name for f in dataclasses.fields(update.Hooks)}, sorted({f.name for f in dataclasses.fields(update.Hooks)} & ({"session_next", "reformat", "terminal_row", "question", "close_was_set", "quiet"} | set(REAL_TELLING))))
 check("10 the zone the confirm reply is told in is the server's own ZONE, looked up when the reply is made", tbl.zone() is _wt_text.ZONE, tbl.zone())
@@ -550,14 +553,15 @@ _tool_src_of = {}
 tools = {}
 for _rel, _src in _tool_src.items():
     for n in ast.parse(_src).body:
-        if isinstance(n, ast.FunctionDef) and n.name in ("stackshot_complete", "stackshot_confirm", "stackshot_update", "_update"):
+        if isinstance(n, ast.FunctionDef) and n.name in ("stackshot_complete", "stackshot_confirm", "stackshot_update"):
             tools[n.name] = n; _tool_src_of[n.name] = _src
 def calls(fn): return {f"{c.func.value.id}.{c.func.attr}" for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name)}
 check("11 the complete tool is a thin wrapper: its identity checks, then the service's complete", "_update_svc.complete_item" in calls(tools["stackshot_complete"]), calls(tools["stackshot_complete"]))
 check("11 the confirm tool is a thin wrapper: its identity checks, then the service's confirm", "_update_svc.confirm_item" in calls(tools["stackshot_confirm"]), calls(tools["stackshot_confirm"]))
-check("11 the server's `_update` is a thin wrapper over the service's entry", "_update_svc.update_item" in calls(tools["_update"]), calls(tools["_update"]))
+_upd_fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_update"), None)
+check("11 `_update` is a thin wrapper over the service's entry, and lives in service/update.py (the server keeps none)", _upd_fn is not None and "update_item" in {c.func.id for c in ast.walk(_upd_fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)} and "_update" not in defs, None)
 check("11 the update tool still goes through `_update` (its own checks stay on the server)", any(isinstance(c, ast.Name) and c.id == "_update" for c in ast.walk(tools["stackshot_update"])), None)
-check("11 the tools' bodies stay short", all(len(ast.get_source_segment(_tool_src_of[n], tools[n]).splitlines()) < 400 for n in ("stackshot_complete", "stackshot_confirm", "_update")), None)
+check("11 the tools' bodies stay short", all(len(ast.get_source_segment(_tool_src_of[n], tools[n]).splitlines()) < 400 for n in ("stackshot_complete", "stackshot_confirm")) and len(ast.get_source_segment(src, _upd_fn).splitlines()) < 12, None)
 
 writes.save = real_save
 print(f"update write scenario: {len(ran) - len(fails)}/{len(ran)} checks")

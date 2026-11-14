@@ -65,6 +65,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import model as MODEL; from stackshot.waits import server_fixes as SF; from stackshot.waits import wait_end as WE; from stackshot.core import config as CFG; from stackshot.waits import watchers as WATCH
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -242,7 +243,7 @@ check("3 …the mover gets one message for all the items", len([x for x in sent 
 
 # ================================================================ 4. send back
 sent.clear()
-server._update("g9201", sender=BACK, clear_after=True, clear_wait=True, mover=BACK)
+_update_svc._update("g9201", sender=BACK, clear_after=True, clear_wait=True, mover=BACK)
 check("4 clear_after sends the server's after back: the line is recorded as declined and no longer marked", not mt(9201).get("after") and any(SF.declined(mt(9201), SF.WAIT_END, t) for t in [WE.token("item", "board#" "9202", "team-back: wait for board#" "9202 to close, then write the summary")] + list((mt(9201).get(SF.DECLINED) or {}).get(SF.WAIT_END, []))) and not SF.mark_tokens(mt(9201), SF.WAIT_END), mt(9201))
 fix_len = len(log(9201))
 r = AR.filing_pass(now=now + 900, items=store_items(), anchors={}, env=env(**FIXING))
@@ -250,11 +251,11 @@ check("4 …the next pass leaves that line alone and asks nothing about it", not
 d9201 = rd(9201); d9201["metadata"]["next"] = "team-back: wait for board#" "9202 to close, then write the final summary"; (T / "store/g/9201.json").write_text(json.dumps(d9201))      # a legacy line: a write of this shape is refused now
 r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(**FIXING))
 check("4 …a changed line is a new fact: the server sets the wait again", mt(9201).get("after") == ["g9202"], mt(9201))
-server._update("g9212", sender=BACK, clear_wait=True, mover=BACK)
+_update_svc._update("g9212", sender=BACK, clear_wait=True, mover=BACK)
 check("4 clear_wait sends a server-set event wait back: declined, wait gone", not mt(9212).get("wait_kind") and any(t.startswith("box:") for t in (mt(9212).get(SF.DECLINED) or {}).get(SF.WAIT_END, [])), mt(9212))
 r = AR.filing_pass(now=now + 900, items=store_items(), anchors={}, env=env(**FIXING))
 check("4 …and is not set again", not mt(9212).get("wait_kind"), mt(9212))
-server._update("g9215", sender=BACK, step_proof=[{"step": 1, "proof": "none"}])
+_update_svc._update("g9215", sender=BACK, step_proof=[{"step": 1, "proof": "none"}])
 check("4 step_proof none sends a server-set proof back: no proof, declined", not mt(9215).get("step_proof") and any(t.startswith("delivery:") for t in (mt(9215).get(SF.DECLINED) or {}).get(SF.WAIT_END, [])), mt(9215))
 r = AR.filing_pass(now=now + 900, items=store_items(), anchors={}, env=env(**FIXING))
 check("4 …and is not set again", not mt(9215).get("step_proof"), mt(9215))

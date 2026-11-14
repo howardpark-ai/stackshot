@@ -90,6 +90,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.service import foryou as fy, foryou_events as fyev, foryou_slack as fyslack; from stackshot.notify import foryou as fy_rules
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.waits import waiting as _wt
 from stackshot.github import ghsync as _gh
@@ -193,30 +194,30 @@ for live in (True,):      # the router rules every project since the "router off
     check(f"…{mode}: the reply says so, and not the quiet 'not told' line", "told at once that it was closed" in out and "not told" not in out, out)
     p0 = len(pushes()); out = cl(b + 1, sender="osprey-main"); settle()
     check(f"owner told, {mode}: a close by the owner itself tells the owner nothing", not to_owner(A, g(1), p0) and "told at once" not in out, (pushes()[p0:], out))
-    p0 = len(pushes()); out = server._update(g(2), needs=["external"], next="Oliver: builder done; review it", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
+    p0 = len(pushes()); out = _update_svc._update(g(2), needs=["external"], next="Oliver: builder done; review it", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
     check(f"no step line, {mode}: the builder takes itself off needs (`external` stays in it; the owner is not named): nothing is pushed to the front agent owner, and the reply promises nothing",
           not to_front_of(g(2), p0) and "told at once" not in out and "step came back" not in out and "not told" not in out, (pushes()[p0:], out))
-    p0 = len(pushes()); out = server._update(g(3), work={"state": "done"}, sender="osprey-x"); settle()
+    p0 = len(pushes()); out = _update_svc._update(g(3), work={"state": "done"}, sender="osprey-x"); settle()
     check(f"no step line, {mode}: the builder marks its last step done by a status done (needs unchanged, X still named): nothing is pushed to the front agent owner, and the write is on the item",
           not to_front_of(g(3), p0) and "told at once" not in out and rd(b + 3)["metadata"]["needs"] == ["osprey-x"]
           and [l["status"] for l in rd(b + 3)["metadata"]["steps"]] == ["done"], (pushes()[p0:], out, rd(b + 3)["metadata"]))
-    p0 = len(pushes()); out = server._update(g(4), next="osprey-x: halfway there", sender="osprey-x"); settle()
+    p0 = len(pushes()); out = _update_svc._update(g(4), next="osprey-x: halfway there", sender="osprey-x"); settle()
     check(f"{mode}: an update by the builder that only sets next (still named, no work done) tells the owner nothing", not to_front_of(g(4), p0) and "told at once" not in out, (pushes()[p0:], out))
-    p0 = len(pushes()); out = server._update(g(5), subject="[home] item %d renamed" % (b + 5), sender="osprey-x"); settle()
+    p0 = len(pushes()); out = _update_svc._update(g(5), subject="[home] item %d renamed" % (b + 5), sender="osprey-x"); settle()
     check(f"…{mode}: nor does a filing edit", not to_owner(A, g(5), p0), pushes()[p0:])
-    p0 = len(pushes()); out = server._update(g(6), needs=["osprey-main"], next="osprey-main: over to you", sender="osprey-x"); settle()
+    p0 = len(pushes()); out = _update_svc._update(g(6), needs=["osprey-main"], next="osprey-main: over to you", sender="osprey-x"); settle()
     hb = [x for x in to_owner(A, g(6), p0)]
     check(f"owner told, {mode}: the builder hands the item back to the owner alone: stackshot hands nothing to a front agent by itself, and the builder is the writer, so nobody is told; the reply says so and nothing is recorded or pushed",
           "nobody is told: a front agent is not handed an item on stackshot's own motion" in out and "told it is back with them alone" not in out and "told at once" not in out and not hb
           and not [x for x in pushes()[p0:] if "back with" in x[1]], (pushes()[p0:], out))
-    fy.set_flag(g(5), "mute"); p0 = len(pushes()); out = server._update(g(5), needs=["external"], next="Oliver: builder done", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
+    fy.set_flag(g(5), "mute"); p0 = len(pushes()); out = _update_svc._update(g(5), needs=["external"], next="Oliver: builder done", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
     check(f"{mode}: a muted item hands a step back, and nobody tells the owner", not to_owner(A, g(5), p0) and "told at once" not in out, (pushes()[p0:], out))
     item(b + 9, needs=["osprey-x"]); fy.set_flag(g(9), "mute"); p0 = len(pushes()); out = cl(b + 9); settle()
     check(f"…{mode}: nor does a muted item's close", not to_owner(A, g(9), p0) and "told at once" not in out, (pushes()[p0:], out))
     p0 = len(pushes()); out = cl(b + 7); settle()
     check(f"owner that is not a front agent, {mode}: a close by the builder is told as before, once, unmarked (the older notice; this change adds no second line)",
           len(to_owner(B, g(7), p0)) == 1 and "[for Oliver]" not in to_owner(B, g(7), p0)[0], (pushes()[p0:], out))
-    p0 = len(pushes()); out = server._update(g(8), work={"state": "done"}, sender="osprey-x"); settle()
+    p0 = len(pushes()); out = _update_svc._update(g(8), work={"state": "done"}, sender="osprey-x"); settle()
     check(f"no step line, {mode}: a step marked done by a status done on an item a background owner owns hands nothing back and tells the owner nothing (its mover gets the same board notice as for done=[n] on its last step, which it always got)",
           not [x for x in pushes()[p0:] if re.search(rf"\b{g(8)}\b", x[1]) and "handed back" in x[1]] and not to_owner(B, g(8), p0) and "told at once" not in out
           and all(x[1].startswith("[board]") and "removed their next lines" in x[1] for x in pushes()[p0:]), (pushes()[p0:], out))
@@ -225,11 +226,11 @@ cfg(live=True)
 item(90, needs=["osprey-x"], next="osprey-x: one\nosprey-x: two\nosprey-x: three"); item(91, needs=["osprey-x"], next="osprey-x: mine\nosprey-docs: theirs")
 p0 = len(pushes()); outs = []
 for k in ("one", "two", "three"):
-    outs.append(server._update("a90", work={"state": "done"}, sender="osprey-x")); settle()
+    outs.append(_update_svc._update("a90", work={"state": "done"}, sender="osprey-x")); settle()
     check(f"work lines, {k} of three marked done: nothing is pushed to the owner", not to_front_of("a90", p0) and "told at once" not in outs[-1], (pushes()[p0:], outs[-1]))
 check("...the third (the builder's whole step is done): still nothing pushed to the front agent owner, and every line is done on the item", not to_front_of("a90", p0)
       and [l["status"] for l in rd(90)["metadata"]["steps"]] == ["done"] * 3 and "step came back" not in outs[-1], (pushes()[p0:], outs[-1]))
-p0 = len(pushes()); out = server._update("a91", work={"state": "done"}, sender="osprey-x"); settle()
+p0 = len(pushes()); out = _update_svc._update("a91", work={"state": "done"}, sender="osprey-x"); settle()
 check("...a line of another agent still open: the builder's own last line done pushes nothing either", not to_front_of("a91", p0), (pushes()[p0:], out))
 # (a) to (c): a builder leaving needs while another session stays, its last work line, and the hand-back's one line, are in router_live_scenario (it has a second background agent)
 # (d) another session closes the item while a second session is still named in its needs: the owner still gets the close line
@@ -256,37 +257,37 @@ check("…the owner Oliver, or a name that is no session: nobody is marked for i
 # the other small gaps: [board] tell_owner off, and an owner that is Oliver or no session, on a close and on a handed-back step
 _cfg.CFG.setdefault("board", {})["tell_owner"] = False
 item(97, needs=["osprey-x"], next="osprey-x: only"); item(98, needs=["external", "osprey-x"])
-p0 = len(pushes()); checks_svc.check_close("a96", _service_store._load("a96"), CHK, time.time()); out = cl(97); outh = server._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
+p0 = len(pushes()); checks_svc.check_close("a96", _service_store._load("a96"), CHK, time.time()); out = cl(97); outh = _update_svc._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
 check("tell_owner off: a done check's close, a session's close and an item back with the owner alone tell the front agent owner nothing", not [x for x in pushes()[p0:] if x[0] == A and re.search(r"a9[678]\b", x[1]) and x[1].startswith("[for Oliver]")]
       and "told at once" not in out + outh, (pushes()[p0:], out, outh))
 _cfg.CFG["board"]["tell_owner"] = True
 item(99, owner="Oliver", needs=["osprey-x"], next="osprey-x: only"); item(64, owner="an-outside-party", needs=["osprey-x"], next="osprey-x: only")
-p0 = len(pushes()); outs = [server._update("a99", work={"state": "done"}, sender="osprey-x"), server._update("a64", work={"state": "done"}, sender="osprey-x"), cl(99), cl(64)]; settle()
+p0 = len(pushes()); outs = [_update_svc._update("a99", work={"state": "done"}, sender="osprey-x"), _update_svc._update("a64", work={"state": "done"}, sender="osprey-x"), cl(99), cl(64)]; settle()
 check("an owner that is Oliver or no session (an outside party's name): a close tells nobody marked, and the reply does not say it told one", not [x for x in pushes()[p0:] if re.search(r"a(99|64)\b", x[1]) and x[1].startswith("[for Oliver]")]
       and not any("told at once" in o for o in outs), (pushes()[p0:], outs))
 cfg(live=True)
 
 # ---- 3. a decision row; his own board answer takes it off and makes none
 settle(); cfg(live=True); p0 = len(pushes())
-server._update("a10", needs=["decision"], ask=ASK, next="Oliver: make the call", sender="osprey-x"); settle()
+_update_svc._update("a10", needs=["decision"], ask=ASK, next="Oliver: make the call", sender="osprey-x"); settle()
 d10 = of("a10", "decision")
 check("needs=decision on an item with no words on it: a decision row with the question", len(d10) == 1 and d10[0]["what"] == "needs your decision: whether to ship", d10)
 check("…nothing is pushed to the front agent for it", not to_front(p0), pushes()[p0:])
-server._update("a11", needs=["decision"], ask=ASK, next="Oliver: wait", sender="osprey-x"); mute_before = len(rows())
-fy.set_flag("a12", "mute"); server._update("a12", needs=["decision"], ask=ASK, next="Oliver: wait", sender="osprey-x")
+_update_svc._update("a11", needs=["decision"], ask=ASK, next="Oliver: wait", sender="osprey-x"); mute_before = len(rows())
+fy.set_flag("a12", "mute"); _update_svc._update("a12", needs=["decision"], ask=ASK, next="Oliver: wait", sender="osprey-x")
 check("…a muted item with a decision asked makes no row", not of("a12"), of("a12"))
-server._update("a10", needs=[], next="osprey-x: back on the owner", sender="osprey-x")
+_update_svc._update("a10", needs=[], next="osprey-x: back on the owner", sender="osprey-x")
 check("the decision leaves the item's needs another way (a session cleared it): its row goes", not of("a10", "decision"), of("a10"))
 d11 = of("a11", "decision"); check("a11's decision row is there", len(d11) == 1)
 
 # ---- 4. reopen, a failed check
-server._update("a1", status="open", next="osprey-x: one more thing", sender="osprey-x")
+_update_svc._update("a1", status="open", next="osprey-x: one more thing", sender="osprey-x")
 check("a reopen of a watched item: a reopened row", len(of("a1", "reopened")) == 1 and of("a1", "reopened")[0]["what"].startswith("reopened by osprey-x"), of("a1"))
 it21 = _service_store._load("a21"); n21 = len(of("a21"))
 checks_svc.check_fail("a21", it21, "pr_merged https://example.invalid/pr/1", "the pull request was closed unmerged", time.time())
 c21 = of("a21", "check_failed")
 check("a check that can no longer pass: a check_failed row naming it and why", len(c21) == 1 and "can no longer end: the pull request was closed unmerged" in c21[0]["what"], c21)
-check("an unrelated save of the same item makes no second one", (server._update("a21", next="osprey-x: again", sender="osprey-x"), len(of("a21", "check_failed")))[1] == 1, of("a21"))
+check("an unrelated save of the same item makes no second one", (_update_svc._update("a21", next="osprey-x: again", sender="osprey-x"), len(of("a21", "check_failed")))[1] == 1, of("a21"))
 
 # ---- 5. a due date within 24 h: one urgent row, one Slack post
 import datetime as dt
@@ -427,8 +428,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("seen clears that row only, then 303 to the board's For you section", s_ok.status_code == 303 and s_ok.headers["location"] == "/#for-you" and [r["what"] for r in rows()] == ["two"], (s_ok.status_code, s_ok.headers.get("location"), rows()))
     s_all = post("/for-you/seen", {"id": "all"}); check("seen all clears the list", s_all.status_code == 303 and rows() == [])
     # his own board answer: a decision row goes, none is made
-    cfg(live=True); server._update("a52", needs=["decision"], ask=YESNO, next="Oliver: wait", sender="osprey-x")
-    server._update("a53", needs=["decision"], ask=YESNO, next="Oliver: wait", sender="osprey-x")
+    cfg(live=True); _update_svc._update("a52", needs=["decision"], ask=YESNO, next="Oliver: wait", sender="osprey-x")
+    _update_svc._update("a53", needs=["decision"], ask=YESNO, next="Oliver: wait", sender="osprey-x")
     check("(setup) a52 and a53 each have a decision row", len(of("a52", "decision")) == 1 and len(of("a53", "decision")) == 1, rows())
     n_rows = len(rows())
     r_ans = post("/items/a52/answer", {"token": atok("a52"), "act": "answer", "text": "go ahead"})

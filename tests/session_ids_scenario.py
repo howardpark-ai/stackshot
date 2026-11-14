@@ -75,6 +75,7 @@ from stackshot.fleet import sessions_registry as sr; from stackshot.anchors impo
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.service import store as _service_store
 from stackshot.web import render as _rmod
@@ -204,8 +205,8 @@ check("delivery: a row with no name goes to its latest transcript, never a bare 
 iid = inbox.put(uid(153), "to a nameless row", "msg", sender="tester"); got = [i for i in inbox._items("msg") if i["id"] == iid][0]
 check("inbox.put to a nameless sala id: `to` is its latest transcript, not the id", got["to"] == Tr["fresh"], got)
 roles_t = {"home-sparrow": {"role": "x"}, "home-other": {"role": "y"}}
-check("_role_name: a retired row never takes a live row's roles entry by alias", _pdebts._role_name(roles_t, uid(152)) == "" and _pdebts._role_name(roles_t, S["main"]) == "home-sparrow"
-      and _pdebts._role_name(roles_t, uid(151)) == "home-other", (_pdebts._role_name(roles_t, uid(152)), _pdebts._role_name(roles_t, S["main"])))
+check("_role_name: a retired row never takes a live row's roles entry by alias", sr._role_name(roles_t, uid(152)) == "" and sr._role_name(roles_t, S["main"]) == "home-sparrow"
+      and sr._role_name(roles_t, uid(151)) == "home-other", (sr._role_name(roles_t, uid(152)), sr._role_name(roles_t, S["main"])))
 put_registry()
 
 # ---- 3. what an item stores, and what people read
@@ -229,10 +230,10 @@ check("a name two live sessions carry is not resolved: the gate refuses it as it
 # an owner the registry cannot tell: written straight (as an old item) and read back
 gk = create("home-sparrow-docs").split()[1]; it = item(gk); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-twin"; writes.save(gk, it)
 check("an owner the registry cannot tell is shown as stored", "mover: home-twin" in _wt_get.stackshot_get(gk), _wt_get.stackshot_get(gk))
-check("update by the owner as the sala id (the session writes under its permanent id) passes", "Refused" not in server._update(g1, next="home-sparrow: the next step", sender=S["main"]))
-check("update by the old name passes too", "Refused" not in server._update(g1, next="home-sparrow: the next step again", sender="home-sparrow"))
-check("a work line by the engineer named in needs: by the sala id and by the old name", "Refused" not in server._update(g2, work={"text": "building", "state": "in progress"}, sender=S["eng"])
-      and "Refused" not in server._update(g2, work={"text": "tests", "state": "in progress"}, sender="site-builder"))
+check("update by the owner as the sala id (the session writes under its permanent id) passes", "Refused" not in _update_svc._update(g1, next="home-sparrow: the next step", sender=S["main"]))
+check("update by the old name passes too", "Refused" not in _update_svc._update(g1, next="home-sparrow: the next step again", sender="home-sparrow"))
+check("a work line by the engineer named in needs: by the sala id and by the old name", "Refused" not in _update_svc._update(g2, work={"text": "building", "state": "in progress"}, sender=S["eng"])
+      and "Refused" not in _update_svc._update(g2, work={"text": "tests", "state": "in progress"}, sender="site-builder"))
 
 # ---- 4. a rename: the item is untouched, the readings follow
 before = hashlib.sha256(_service_store._path(g1).read_bytes()).hexdigest()
@@ -242,18 +243,18 @@ check("rename: the stored item did not change", hashlib.sha256(_service_store._p
 check("rename: get shows the new name", "mover: home-sparrow-lead" in _wt_get.stackshot_get(g1), _wt_get.stackshot_get(g1))
 check("rename: the web page shows the new name, the board.md the new name", "home-sparrow-lead" in ui_render.Board(str(_core_store.STORE)).item_html(g1) and "home-sparrow-lead" in _rmod.render(str(_core_store.STORE), "full"))
 check("rename: the item page never shows the bare id", S["main"] not in ui_render.Board(str(_core_store.STORE)).item_html(g1))
-check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", _pdebts._same_sess("home-sparrow-main", meta(g1)["owner"]) and _pdebts._same_sess("home-sparrow-lead", meta(g1)["owner"]) and sr._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
+check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", sr._same_sess("home-sparrow-main", meta(g1)["owner"]) and sr._same_sess("home-sparrow-lead", meta(g1)["owner"]) and sr._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
 check("rename: the client API lists the item for the session by its new name, its old name, its id and its first transcript", all(
       g1 in {i["gid"] for i in json.loads(server._client_items(k)[2])["items"]} for k in ("home-sparrow-lead", "home-sparrow-main", S["main"], Tr["main_a"], Tr["main_b"])))
 check("rename: the client API names the needs by name", [i for i in json.loads(server._client_items("home-sparrow-docs")[2])["items"] if i["gid"] == g2][0]["needs"] == ["site-builder"])
-check("rename: an update with the old name as owner= keeps the stored id, no change of owner", (server._update(g1, owner="home-sparrow-main"), meta(g1)["owner"])[1] == S["main"])
+check("rename: an update with the old name as owner= keeps the stored id, no change of owner", (_update_svc._update(g1, owner="home-sparrow-main"), meta(g1)["owner"])[1] == S["main"])
 put_registry(); put_fleet(FLEET)
 
 # ---- 5. a fresh start left the owner pointing at a finished transcript
 gt = create("home-sparrow-docs").split()[1]; it = item(gt); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; writes.save(gt, it)       # an old item: owner stored as the first transcript of home-sparrow-main
 check("old transcript owner: shown as the session's name", "mover: home-sparrow-main" in _wt_get.stackshot_get(gt), _wt_get.stackshot_get(gt))
 check("old transcript owner: found by the session's current transcript, which is another one", gt in {i["gid"] for i in json.loads(server._client_items(Tr["main_b"])[2])["items"]})
-check("old transcript owner: compared by sala id (the update by the session's id is its owner's)", "Refused" not in server._update(gt, next="home-sparrow: mine", sender=S["main"]))
+check("old transcript owner: compared by sala id (the update by the session's id is its owner's)", "Refused" not in _update_svc._update(gt, next="home-sparrow: mine", sender=S["main"]))
 fa = json.loads(server._client_item_facts(Tr["main_b"], gt)[2])["items"][gt]
 check("old transcript owner: item-facts says it is mine and gives the name", fa["mover_me"] is True and fa["mover"] == "home-sparrow-main", fa)
 
@@ -353,7 +354,7 @@ mig = {}
 mig["tr"] = create("home-sparrow-docs").split()[1]; it = item(mig["tr"]); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; it["metadata"]["needs"] = ["decision", "site-builder", "home-twin", "cse_0123456789abcdefghijklmn", "some-outsider"]
 it["metadata"]["observers"] = ["home-sparrow-docs", S["docs"]]; writes.save(mig["tr"], it)
 mig["name"] = create("home-sparrow-docs").split()[1]; it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-sparrow-main"; it["metadata"]["owner_name"] = "kept as it is"; writes.save(mig["name"], it)
-mig["closed"] = create("home-sparrow-docs").split()[1]; server._update(mig["closed"], status="completed", sender="home-sparrow-docs", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
+mig["closed"] = create("home-sparrow-docs").split()[1]; _update_svc._update(mig["closed"], status="completed", sender="home-sparrow-docs", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
 it = item(mig["closed"]); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-sparrow-main"; it["metadata"]["needs"] = ["site-builder"]; writes.save(mig["closed"], it)
 mig["good"] = g1
 files = {k: _service_store._path(g) for k, g in mig.items()}

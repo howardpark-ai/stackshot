@@ -26,7 +26,7 @@ an owner pointing at a finished transcript. This module is the one lookup that t
 The file is read again only when it changes (inode, mtime, size). A file that stops reading (torn, mid-rewrite) is served from its last good
 read for up to STALE seconds (30 minutes, counted from the first failed read), then dropped; a file that is missing, or reads but is another schema, is not stood in for. With no
 registry every lookup is None, so nothing downstream changes from what it did before the registry existed. Never raises.
-The helpers at the end tell a session's name for a reference (`_session_label`) and read the heartbeat index by transcript id or by permanent id (`_sessions_index`, `_Index`).
+The helpers at the end tell a session's name for a reference (`_session_label`), the name a project page lists it under (`_role_name`), the form an item stores it in (`_store_ref`) and whether two stored references name one session (`_same_sess`), and read the heartbeat index by transcript id or by permanent id (`_sessions_index`, `_Index`).
 Stdlib only; config.py, fleet.py and liveness.py (and clients.py for the directory) are its imports, the same as anchors.py."""
 from __future__ import annotations
 
@@ -351,6 +351,31 @@ def _session_label(value: str) -> str:
         return n
     x = _sessions_index().get(v) or {}
     return str(x.get("name") or v)
+
+
+def _role_name(roles: dict[str, Any], who: str, *extra: str) -> str:
+    """The name a project page lists `who` under, as `roles` (anchors.session_roles) has it: who as given, its name now, the old names the fleet tool
+    kept for it (a page may still list the name before a rename), then any `extra`. "" when no page lists it."""
+    who = str(who or "").strip()
+    if not who:
+        return ""
+    sid = resolve(who)
+
+    def mine(n: str) -> bool:        # a name the registry gives this session counts only when it resolves back to it: a retired row never takes a live row's entry by alias
+        return not sid or n == who or n in extra or resolve(n) == sid
+    return next((n for n in (who, _session_label(who), *names_of(who), *extra) if n and n in roles and mine(n)), "")
+
+
+def _store_ref(value: str) -> str:
+    """The form a session reference is stored in on an item: its permanent id when the registry resolves it, else the value unchanged."""
+    v = str(value or "").strip()
+    return resolve(v) or v if v else v
+
+
+def _same_sess(a: str, b: str) -> bool:
+    """Do two stored references name one session? As permanent ids when the registry resolves both, else as the strings stand."""
+    t = same(a, b)
+    return (a == b) if t is None else t
 
 
 class _Index(dict):

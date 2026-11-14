@@ -46,6 +46,7 @@ from stackshot.waits import waiting as W, watchers as WK, stall as ST, dated_wai
 from stackshot.model import model as M, states as S
 from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
+from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
@@ -267,19 +268,19 @@ _, dropped = gates.gate_model_args({}, {"wait": True})
 check("clear_wait still drops the whole wait group, `until` among it", "until" in dropped and "wait_kind" in dropped, dropped)
 
 g1 = sitem(901, wait_kind="time", until=day(3), needs=[BACK], mover=BACK)
-server._update(g1, sender=BACK, clear_wait=True)
+_update_svc._update(g1, sender=BACK, clear_wait=True)
 check("clear_wait: the stored until goes with the wait kind", "until" not in smt(901) and "wait_kind" not in smt(901), smt(901))
 g2 = sitem(902, until=day(3), needs=[BACK], mover=BACK)
-server._update(g2, sender=BACK, clear_wait=True)
+_update_svc._update(g2, sender=BACK, clear_wait=True)
 check("clear_wait: an until with no kind (a wait on the date alone) goes too, and the item reads alive", "until" not in smt(902) and M.derive(srd(902), now).state == M.ALIVE, smt(902))
 g3 = sitem(903, until=day(3), needs=[BACK], mover=BACK)
-server._update(g3, sender=BACK, status="completed", outcome="done", reason="ok", description="- Done")
+_update_svc._update(g3, sender=BACK, status="completed", outcome="done", reason="ok", description="- Done")
 check("a close removes the stored until from the item", srd(903)["status"] == "completed" and "until" not in smt(903), smt(903))
 g4 = sitem(904, hold=True, until=day(3), needs=[BACK], mover=BACK)
-server._update(g4, sender=BACK, clear_hold=True)
+_update_svc._update(g4, sender=BACK, clear_hold=True)
 check("clear_hold: the hold and the until it stood on go together", "hold" not in smt(904) and "until" not in smt(904), smt(904))
 g5 = sitem(905, until=day(3), needs=[BACK], mover=BACK)
-server._update(g5, sender=BACK, clear_wake=True)
+_update_svc._update(g5, sender=BACK, clear_wake=True)
 check("clear_wake: the date of the wait goes with it, and the item reads alive", "until" not in smt(905) and M.derive(srd(905), now).state == M.ALIVE, smt(905))
 
 for kind, extra in (("anchor", {"wait_anchor": "https://example.test/x"}), ("event", {"wait_event": "pr_merged quill/widgets#5"})):

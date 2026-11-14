@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _core_instance
@@ -138,14 +139,14 @@ check("a line over 200 characters is no longer a note", server._report_note("ops
 
 # ---- 3. updates judge only the text written in the call
 prose_item(30)
-passes("an update without description or next on a prose item is not refused", lambda: server._update("a30", priority="p2", sender=MAIN))
-passes("…nor one that sets a due date", lambda: server._update("a30", due="2026-12-01", sender=MAIN))
+passes("an update without description or next on a prose item is not refused", lambda: _update_svc._update("a30", priority="p2", sender=MAIN))
+passes("…nor one that sets a due date", lambda: _update_svc._update("a30", due="2026-12-01", sender=MAIN))
 check("…and the stored text is untouched", _service_store._load("a30")["description"] == "A thing. It lives here. Done when done." and len(_service_store._load("a30")["metadata"]["next"]) > 200)
-refused("an update that carries a prose description is refused", lambda: server._update("a30", description="Reworded. Still prose.", sender=MAIN), "not a `- ` bullet")
-refused("an update that carries a long next line is refused", lambda: server._update("a30", next=n_long, sender=MAIN), "a line of next is 201 characters")
-passes("an update that carries a bullet description passes", lambda: server._update("a30", description="- Goal: Reworded\n- As bullets", sender=MAIN))
+refused("an update that carries a prose description is refused", lambda: _update_svc._update("a30", description="Reworded. Still prose.", sender=MAIN), "not a `- ` bullet")
+refused("an update that carries a long next line is refused", lambda: _update_svc._update("a30", next=n_long, sender=MAIN), "a line of next is 201 characters")
+passes("an update that carries a bullet description passes", lambda: _update_svc._update("a30", description="- Goal: Reworded\n- As bullets", sender=MAIN))
 prose_item(31)
-passes("an update that carries only a short next passes although the stored description is prose", lambda: server._update("a31", next="home-other: do it", dropped=[1], sender=MAIN))
+passes("an update that carries only a short next passes although the stored description is prose", lambda: _update_svc._update("a31", next="home-other: do it", dropped=[1], sender=MAIN))
 check("…and the stored prose description is untouched", _service_store._load("a31")["description"] == "A thing. It lives here. Done when done.")
 
 # ---- 4. a close judges its new description
@@ -154,7 +155,7 @@ refused("complete with a prose description is refused", lambda: _wt_complete.sta
 check("…and the item stays open", _service_store._load("a32")["status"] == "open")
 passes("complete with bullets passes", lambda: _wt_complete.stackshot_complete("a32", outcome="done", reason="finished", outcome_text="- It is done\n- In use", sender=MAIN))
 refused("update with status=completed and a prose description is refused",
-        lambda: server._update("a33", status="completed", outcome="done", reason="finished", description="Done and in use.", sender=MAIN), "not a `- ` bullet")
+        lambda: _update_svc._update("a33", status="completed", outcome="done", reason="finished", description="Done and in use.", sender=MAIN), "not a `- ` bullet")
 refused("complete with a bullet over 120 characters is refused", lambda: _wt_complete.stackshot_complete("a34", outcome="done", reason="finished", outcome_text=bullet(130), sender=MAIN),
         "outcome_text bullet is 130 characters")
 
@@ -421,15 +422,15 @@ def long_subject_item(i, subject):
                                                     "updated": now, "state_updated": now, "confirmed": now, "metadata": {"owner": MAIN, "project": STK, "next": "home-other: do it"}}))
 OLD_LONG = subj(137)
 long_subject_item(60, OLD_LONG)
-refused("update: a new subject of 81 characters is refused", lambda: server._update("a60", subject=subj(81), sender=MAIN), "the subject is 81 characters and the limit is 80")
+refused("update: a new subject of 81 characters is refused", lambda: _update_svc._update("a60", subject=subj(81), sender=MAIN), "the subject is 81 characters and the limit is 80")
 check("…and the stored subject is untouched", json.loads((T / "store/a/60.json").read_text())["subject"] == OLD_LONG)
-passes("update: a subject of 80 characters passes", lambda: server._update("a60", subject=subj(80), sender=MAIN))
+passes("update: a subject of 80 characters passes", lambda: _update_svc._update("a60", subject=subj(80), sender=MAIN))
 check("…and it is stored", json.loads((T / "store/a/60.json").read_text())["subject"] == subj(80))
 long_subject_item(61, OLD_LONG)
-passes("update: an unrelated write on an item with a stored 137-character subject passes", lambda: server._update("a61", priority="p2", sender=MAIN))
-passes("…so does one that sets the very subject it has", lambda: server._update("a61", subject=OLD_LONG, sender=MAIN))
+passes("update: an unrelated write on an item with a stored 137-character subject passes", lambda: _update_svc._update("a61", priority="p2", sender=MAIN))
+passes("…so does one that sets the very subject it has", lambda: _update_svc._update("a61", subject=OLD_LONG, sender=MAIN))
 check("…and the stored subject stays as it was", json.loads((T / "store/a/61.json").read_text())["subject"] == OLD_LONG)
-refused("update: a subject without a scope prefix is still refused first", lambda: server._update("a61", subject="no prefix", sender=MAIN), "subject must start with one of")
+refused("update: a subject without a scope prefix is still refused first", lambda: _update_svc._update("a61", subject="no prefix", sender=MAIN), "subject must start with one of")
 s_cfg = _cfg.CFG["subject"]; was_s = s_cfg.get("max_length")
 s_cfg["max_length"] = 30
 refused("config: [subject] max_length is the limit", lambda: create(subject=subj(31)), "is 31 characters and the limit is 30")
@@ -449,13 +450,13 @@ refused("complete: a reason of 121 characters is refused, with its length, the l
         "Refused: the reason is 121 characters and the limit is 120", "Shorten it", "outcome_text bullets")
 check("…and the item stays open", json.loads((T / "store/a/62.json").read_text())["status"] == "open")
 passes("complete: a reason of 120 characters passes", lambda: _wt_complete.stackshot_complete("a62", outcome="done", reason=why(120), outcome_text=GOOD, sender=MAIN))
-refused("update status=completed: a reason of 121 characters is refused", lambda: server._update("a63", status="completed", outcome="done", reason=why(121), outcome_text=GOOD, sender=MAIN),
+refused("update status=completed: a reason of 121 characters is refused", lambda: _update_svc._update("a63", status="completed", outcome="done", reason=why(121), outcome_text=GOOD, sender=MAIN),
         "the reason is 121 characters and the limit is 120")
-passes("update status=completed: a reason of 120 characters passes", lambda: server._update("a63", status="completed", outcome="done", reason=why(120), outcome_text=GOOD, sender=MAIN))
+passes("update status=completed: a reason of 120 characters passes", lambda: _update_svc._update("a63", status="completed", outcome="done", reason=why(120), outcome_text=GOOD, sender=MAIN))
 # a reopen is unaffected, and an old close with a long stored reason is left as it is
 d64 = json.loads((T / "store/a/64.json").read_text()); d64["status"] = "completed"; d64["metadata"] = {"owner": MAIN, "project": STK, "outcome": "done", "reason": why(300)}
 (T / "store/a/64.json").write_text(json.dumps(d64))
-passes("a reopen is unaffected by a stored 300-character reason", lambda: server._update("a64", status="open", next=f"{MAIN}: take it up again", sender=MAIN))
+passes("a reopen is unaffected by a stored 300-character reason", lambda: _update_svc._update("a64", status="open", next=f"{MAIN}: take it up again", sender=MAIN))
 check("…the reason is dropped by the reopen as before", "reason" not in json.loads((T / "store/a/64.json").read_text())["metadata"])
 # the server's own closes keep to the limit by cutting, and never fail
 check("_fit: text within the limit is returned as one line", _fg._fit("a  b\nc", 10) == "a b c")

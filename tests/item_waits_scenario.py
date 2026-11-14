@@ -64,6 +64,7 @@ def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model_guards as mg
+from stackshot.service import update as _update_svc
 from stackshot.router import router_live as _router_live
 from stackshot.router import routing as _routing
 from stackshot.model import model as _model
@@ -79,7 +80,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 told: list[tuple[str, str, str, str]] = []           # every notice the server sends: (gid(s), recipient, note, tag)
 telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
 def close_told(since=0): return [t for t in told[since:] if t[3] == "close"]
-def upd(i, **kw): return server._update(f"board#{i}", sender="home-front", **kw)
+def upd(i, **kw): return _update_svc._update(f"board#{i}", sender="home-front", **kw)
 OWN = _model.owner_display()
 ZONE_HOURS = 4                                  # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * DAY + ZONE_HOURS * 3600))
@@ -230,7 +231,7 @@ check("2 close: …and names the movers told", "home-peer" in out.split("name bo
 # an item Oliver moves: the sessions its notices go to hear it (here the page keeper home-front), unless they closed it
 item(28, subject="[home] closed by home-peer", needs=[PEER]); item(9142, needs=["decision"], mover=OWN, ask="Decide: x · Recommend: y · Stakes: z · By: no date", subject="[home] his item names it", next="Oliver: check board#28 first")
 n6 = len(told)
-server._update("board#28", status="completed", outcome="done", reason="finished", description=NEW, sender="home-peer")
+_update_svc._update("board#28", status="completed", outcome="done", reason="finished", description=NEW, sender="home-peer")
 c6 = close_told(n6)
 check("2 close: an item Oliver moves → the sessions its notices go to hear the close (the keeper of its page)", [(t[1], t[0]) for t in c6] == [(FRONT, "g9142")], c6)
 # a close with nobody naming it says nothing, a second close of the same item (reopen and close again) is a new close
@@ -255,11 +256,11 @@ check("2 close: a dropped item says dropped", len(dt_) == 1 and "closed (dropped
 item(26, subject="[home] closes by update", needs=[PEER])
 item(9140, needs=[PEER], mover="home-peer", subject="[home] names it", next="home-peer: build on board#26")
 n4 = len(told)
-server._update("board#26", status="completed", outcome="done", reason="finished", description=NEW, sender="home-peer")
+_update_svc._update("board#26", status="completed", outcome="done", reason="finished", description=NEW, sender="home-peer")
 check("2 close: update(status=completed) tells too, and the closer (home-peer, mover of 9140) is not told", close_told(n4) == [], close_told(n4))
 item(9141, needs=[OTHER], mover="home-other", subject="[home] names it too", next="home-other: build on board#27"); item(27, subject="[home] closes by update 2", needs=[PEER])
 n5 = len(told)
-server._update("board#27", status="completed", outcome="done", reason="finished", description=NEW, sender="home-peer")
+_update_svc._update("board#27", status="completed", outcome="done", reason="finished", description=NEW, sender="home-peer")
 check("2 close: …and another mover is told", [t[1] for t in close_told(n5)] == [OTHER], close_told(n5))
 # a failure of the notice never fails the close
 orig = telling.tell_close_mentions
@@ -327,7 +328,7 @@ item(9145, needs=[BACK], mover="team-back", subject="[home] clear wait, stale li
 o_b = upd(9145, clear_wait=True)
 check("5 cleared: clear_wait with a line that defers on the board#N its wait named → noted", notes(o_b) == [f"(note: next line 1 still waits on board#61, {NOTE}"] and "wait_kind" not in rd(9145)["metadata"], (notes(o_b), rd(9145)["metadata"]))
 item(7, needs=[BACK], mover="team-back", subject="[home] a line of another session", after=["g61"], next="team-back: tidy the docs")
-server._update("board#7", sender="home-peer", next="home-peer: build once board#61 closes")
+_update_svc._update("board#7", sender="home-peer", next="home-peer: build once board#61 closes")
 check("5 cleared: …the fixture holds a line written by the other session", "home-peer: build once board#61 closes" in rd(7)["metadata"]["next"], rd(7)["metadata"])
 o7 = upd(7, clear_after=True)
 check("5 cleared: a line another session wrote is named too", len(notes(o7)) == 1 and "board#61" in notes(o7)[0], notes(o7))

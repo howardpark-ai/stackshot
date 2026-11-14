@@ -87,6 +87,7 @@ def check(name, cond, got=None):
 logging.disable(logging.INFO)
 from stackshot.core import config as _cfg
 from stackshot.web.ui import render; from stackshot.web import server, i18n; from stackshot.model import model
+from stackshot.service import item_read as _item_read
 from stackshot.web import publish as _web_publish
 _web_publish._publish = lambda: None
 b = render.Board(str(T / "store"), now=NOW)
@@ -202,7 +203,7 @@ check("get: the model line says the mode, how many have arrived, each line ticke
       and "[ ] a fleet event (recycle testbox)" in g312 and "[ ] news of the lease; until " + day(6) + ") · mover team-back" in g312, g312)
 check("get: …nothing arrived: every line open, 0 arrived", get_line("a310") == f"model: waiting on several things (all of 2, 0 arrived: [ ] news of SK's final ticket and its feedback; [ ] news of the signing order the team agrees; until {day(4)}) · mover team-back", get_line("a310"))
 check("get: …a single wait's line is what it was", get_line("a320") == f"model: waiting on a time (wake {day(5)}) · mover team-back", get_line("a320"))
-check("get: …the model's words without a time formatter name no time (the brief and other callers)", "(its date came)" in model.words(next(m_ for m_ in [server._model_of({**json.loads((T / "store/a/312.json").read_text()), "gid": "a312"})]), derived=False), None)
+check("get: …the model's words without a time formatter name no time (the brief and other callers)", "(its date came)" in model.words(next(m_ for m_ in [_item_read._model_of({**json.loads((T / "store/a/312.json").read_text()), "gid": "a312"})]), derived=False), None)
 
 # ================================================================ a stored arrival time no date can show; an arrival with no words
 check("zone: the arrival time of get's model line names the zone, the way the refusals that give a time do (the label is the instance zone's, and not empty)", bool(ZLAB) and ZLAB == _cfg.tz_abbr(NOW) and f"08:30 {ZLAB})" in g312, (ZLAB, g312))

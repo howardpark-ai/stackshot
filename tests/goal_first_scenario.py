@@ -42,6 +42,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import bullet_text as BT; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -150,7 +151,7 @@ check("update passes: a reopen without a description", stored("a44")["status"] =
 
 # ---- 5. what is not the create and update tools' own call is never refused
 legacy(45)
-out = server._update("a45", description="- A rewrite with no label\n- Second", sender="home-other")
+out = _update_svc._update("a45", description="- A rewrite with no label\n- Second", sender="home-other")
 check("a server-side _update with an unlabeled description is written", stored("a45")["description"].startswith("- A rewrite"), out)
 out = _wt_create._create(subject="[home] built by the server", description="- No label here\n- Second", project=STK, owner=MAIN, next=f"{MAIN}: carry on")
 check("the server's own _create is filed whatever its first bullet", out.startswith("created"), out)
@@ -171,7 +172,7 @@ try:
     writes.REFORMAT.on = True
     legacy(47)
     with writes.session_write():
-        out = server._update("a47", description="- Re-bulleted, same words\n- Second", sender="rebullet")
+        out = _update_svc._update("a47", description="- Re-bulleted, same words\n- Second", sender="rebullet")
 finally:
     writes.REFORMAT.on = False
 check("the re-bullet route's filing edit is not judged, inside a session write too", stored("a47")["description"].startswith("- Re-bulleted"), out)

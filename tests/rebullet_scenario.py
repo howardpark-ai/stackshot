@@ -61,6 +61,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb; from stackshot.model import ids as _model_ids
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
@@ -72,7 +73,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
-def upd(i, letter="a", **kw): return server._update(f"{letter}{i}", sender="home-front", **kw)
+def upd(i, letter="a", **kw): return _update_svc._update(f"{letter}{i}", sender="home-front", **kw)
 def set_cfg(**kw):
     _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py)
 set_cfg()

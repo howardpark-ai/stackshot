@@ -72,6 +72,7 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import needs as _model_needs
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.model import steps as _steps
@@ -181,7 +182,7 @@ check("…the audit waits the grace first: a step done a minute ago is not yet a
 a3 = rd(3); m3 = a3["metadata"]
 check("parallel: the item moves to the session of the first open step only; the later one is not told", mover_of(3) == "home-two" and len(pushes_for("a3", "home-two")) == 1 and not pushes_for("a3", "home-three"), (mover_of(3), pushes_for("a3")))
 check("…both steps stay open, and the record is the first one's", [s["status"] for s in m3["steps"]] == ["done", "open", "open"] and m3["handover"]["to"] == "home-two", m3["steps"])
-out = server._update("a3", sender="home-two", done=[2])
+out = _update_svc._update("a3", sender="home-two", done=[2])
 a3 = rd(3)
 check("…when home-two marks its step done by hand, the item goes on to home-three and says so in the reply", mover_of(3) == "home-three" and "the next step is home-three's" in out and "home-three" in a3["metadata"].get("handover", {}).get("to", ""), (mover_of(3), out))
 n3 = pushes_for("a3", "home-three")
@@ -213,20 +214,20 @@ check("…and a session that came back is handed the item the next time the hand
 
 # ---- 8. a step marked done by hand
 fixtures(); p0 = len(pushes())
-out = server._update("a9", sender="home-one", done=[1])
+out = _update_svc._update("a9", sender="home-one", done=[1])
 check("by hand: the step marked done hands the item to the session of the next step, the reply says so, and it is told", mover_of(9) == "home-two" and "the next step is home-two's" in out and len(pushes_for("a9", "home-two")) == 1
       and rd(9)["metadata"]["handover"]["kind"] == HO.MOVED, (mover_of(9), out))
 fixtures()
-server._update("a9", sender="home-one", done=[1], mover="home-three")
+_update_svc._update("a9", sender="home-one", done=[1], mover="home-three")
 check("by hand: a write that names the mover makes its own hand-off, and this one does not move the item again", mover_of(9) == "home-three" and "handover" not in rd(9)["metadata"], rd(9)["metadata"])
 fixtures()
-server._update("a9", sender="home-one", done=[1], needs=["home-one"])
+_update_svc._update("a9", sender="home-one", done=[1], needs=["home-one"])
 check("by hand: a write that sets needs is left alone", mover_of(9) == "home-one" and "handover" not in rd(9)["metadata"], rd(9)["metadata"])
 fixtures()
-server._update("a9", sender="home-one", next="home-one: write the thing\nhome-two: review it\nhome-one: wrap up")
+_update_svc._update("a9", sender="home-one", next="home-one: write the thing\nhome-two: review it\nhome-one: wrap up")
 check("by hand: a write that marks no step done hands nothing over", mover_of(9) == "home-one" and "handover" not in rd(9)["metadata"], rd(9)["metadata"])
 fixtures(); n9 = len(pushes_for("a9", "home-two"))
-server._update("a9", sender="home-one", done=[1, 2])
+_update_svc._update("a9", sender="home-one", done=[1, 2])
 check("by hand: marking every open step done leaves no step to hand over: no record, no notice, the mover is the same", "handover" not in rd(9)["metadata"] and len(pushes_for("a9", "home-two")) == n9 and mover_of(9) == "home-one", (rd(9)["metadata"], pushes_for("a9")))
 
 # ---- 9. the write check: a step that delivers a pull request and has another session's step after it needs its proof
@@ -256,10 +257,10 @@ try: _scr(); check("…a script's write (no session's) is not judged", True)
 except ToolError as e: check("…a script's write (no session's) is not judged", False, str(e))
 fixtures()
 item(20, "home-one: write the fix")
-refused("write check: an update that adds such a step is refused the same way", lambda: server._update("a20", sender="home-one", check="pr_merged example-owner/stackshot#11", next="home-one: write the fix\nhome-one: merge PR #19 and restart\nhome-two: verify the pages"), "step 2", "delivers #19")
-accepts("…and passes with the proof", lambda: server._update("a20", sender="home-one", check="pr_merged example-owner/stackshot#11", next="home-one: write the fix\nhome-one: merge PR #19 and restart\nhome-two: verify the pages", step_proof=[{"step": 2, "proof": "pr_merged #19"}]))
+refused("write check: an update that adds such a step is refused the same way", lambda: _update_svc._update("a20", sender="home-one", check="pr_merged example-owner/stackshot#11", next="home-one: write the fix\nhome-one: merge PR #19 and restart\nhome-two: verify the pages"), "step 2", "delivers #19")
+accepts("…and passes with the proof", lambda: _update_svc._update("a20", sender="home-one", check="pr_merged example-owner/stackshot#11", next="home-one: write the fix\nhome-one: merge PR #19 and restart\nhome-two: verify the pages", step_proof=[{"step": 2, "proof": "pr_merged #19"}]))
 item(21, "home-one: merge PR #22 and restart\nhome-two: verify the pages")        # a step written before the check: an update that leaves it alone is not refused for it
-accepts("…a step that was there before the write is not judged again by a write that leaves it alone", lambda: server._update("a21", sender="home-one", description="- Goal: a thing works. It lives here, really."))
+accepts("…a step that was there before the write is not judged again by a write that leaves it alone", lambda: _update_svc._update("a21", sender="home-one", description="- Goal: a thing works. It lives here, really."))
 
 # the delivery must be the step's own leading action: a reviewer, a verifier, a waiter and a checker are no delivery
 for words in ("review the release PR #7 for the notes", "verify the release PR #7 is live", "check merge #7 conflicts"):

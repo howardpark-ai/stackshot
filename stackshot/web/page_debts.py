@@ -1,6 +1,6 @@
 """page_debts.py: the page rule's debts: a board write that changes state owes a project-page update by the session that made it (the ledger `ledger.json` under the state dir, `_owed_load`, `_owed_save`, `_owed_mark`,
 `_owed_settle`), the grace and the slack that settle it (`_grace_min`, `_page_slack`, `_page_ts`), the nag a reply ends with (`_nag`) and the refusal of a write while a debt is past its grace (`_refuse_if_owing`), with the
-helpers they read: how a page is written (`_page_how`), a session's stored reference and its shown name (`_session_id`, `_store_ref`, `_same_sess`, `_shown_ref`, `_shown_needs`, `_role_name`) and the ledger's one lock (`_OWED_LOCK`).
+helpers they read: how a page is written (`_page_how`), a session's stored reference and its shown name (`_session_id`, `_shown_ref`, `_shown_needs`; `_store_ref`, `_same_sess` and `_role_name` are `fleet/sessions_registry.py`'s) and the ledger's one lock (`_OWED_LOCK`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the page and project
 modules, the registry readers (`service/gates.py`), the session helpers (`fleet/sessions_registry.py`) and the instance settings and text clipping (`core/instance.py`, `model/bullet_text.py`). server.py imports the names its own code reads from here (`_owed_mark` and the others it calls), and the suites and
@@ -32,7 +32,7 @@ from stackshot.projects import projects as _prj
 from stackshot.router import page_debt as _page_debt
 from stackshot.web import render as _rmod
 from stackshot.service import gates as _gates
-from stackshot.fleet.sessions_registry import _session_label, _sessions_index
+from stackshot.fleet.sessions_registry import _same_sess, _session_label, _sessions_index
 
 _HERE = _paths.ROOT
 
@@ -127,31 +127,6 @@ def _shown_ref(value: str) -> str:
 def _shown_needs(needs: list[str]) -> list[str]:
     """A needs list for people: decision and external as they are, each session by its current name."""
     return [x if x.lower() in _NEEDS_KINDS else _shown_ref(x) for x in needs]
-
-
-def _role_name(roles: dict[str, Any], who: str, *extra: str) -> str:
-    """The name a project page lists `who` under, as `roles` (anchors.session_roles) has it: who as given, its name now, the old names the fleet tool
-    kept for it (a page may still list the name before a rename), then any `extra`. "" when no page lists it."""
-    who = str(who or "").strip()
-    if not who:
-        return ""
-    sid = _sr.resolve(who)
-
-    def mine(n: str) -> bool:        # a name the registry gives this session counts only when it resolves back to it: a retired row never takes a live row's entry by alias
-        return not sid or n == who or n in extra or _sr.resolve(n) == sid
-    return next((n for n in (who, _session_label(who), *_sr.names_of(who), *extra) if n and n in roles and mine(n)), "")
-
-
-def _store_ref(value: str) -> str:
-    """The form a session reference is stored in on an item: its permanent id when the registry resolves it, else the value unchanged."""
-    v = str(value or "").strip()
-    return _sr.resolve(v) or v if v else v
-
-
-def _same_sess(a: str, b: str) -> bool:
-    """Do two stored references name one session? As permanent ids when the registry resolves both, else as the strings stand."""
-    t = _sr.same(a, b)
-    return (a == b) if t is None else t
 
 
 def _owed_mark(project: str, owner: str, item: str, settle: str = "", moves: str = "", what: str = "") -> None:
