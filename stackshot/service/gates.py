@@ -1109,7 +1109,7 @@ def gate_busy_hold(gid: str, sender: str, *, hold: bool = False, wake: str = "",
 
 def busy_note_answer(gid: str, *, hold: bool = False, next_text: str = "", reword: Any = None, mover: str = "", live: Callable[[str, str], str] | None = None) -> "str | None":
     """What of the holder's own runs on item `gid` (the words, "" for nothing), asked BEFORE the item lock, for the reply note that tells the holder of a doing item whose next reads as a wait to park it
-    (service/update.py `_doing_wait_note`): while a running subagent of the holder is tied to the item the wait wording is about its own run, work in hand. None when the note cannot be made (the guard off, no proof, a
+    (service/update.py `_doing_wait_note`): while a running subagent of the holder, or a running release of a pull request tied to the item, is tied to the item the wait wording is about its own run, work in hand. None when the note cannot be made (the guard off, no proof, a
     hold, an item that is not open and doing, no line of this call that reads as a wait) and when anything cannot be read: the note then stays as it is. The proof is asked only when the note could be made, and the
     holder is looked up only then."""
     try:

@@ -4,12 +4,12 @@ An item its mover is moving is not paused: a hold says "nothing happens here unt
 `live_work(gid, mover, ...)`: is a running subagent of `mover` tied to THIS item? It answers with the words the refusal uses (`your subagent "<description>"`), or "" for nothing.
 
 The proof is the one the hourly audit uses (audit/hourly.py, audit/subagent_tie.py): the subagent's own record on this box, a running one whose description (else its brief) names the item or a pull request
-anchored to it, read against every open item the mover has, so a subagent that works on another item of the mover is not tied to this one. Nothing is read from GitHub. A release queue run or a main CI run of an
-anchored pull request is NOT read: the server records the events of a pull request when they end (a CI result, a merge: model/last_activity.py), never that a run is in flight, and an event record is no proof
-of one running, so a refusal on it would rest on a guess.
+anchored to it, read against every open item the mover has, so a subagent that works on another item of the mover is not tied to this one. Nothing is read from GitHub. A main CI run of an
+anchored pull request and the release queue file are NOT read as proof: the server records the events of a pull request when they end (a CI result, a merge: model/last_activity.py), never that a run is in flight, and an event record is no proof
+of one running, so a refusal on it would rest on a guess; the release script's own unit is the proof of a running release (below).
 
 A second proof: a release of a pull request tied to THIS item that is running (`live_release`). release.sh runs each release as the user unit stackshot-release-<n>.service and it stays active from its checks through
-the merge queue, the merge, the deploy and main's run, so "that unit is active" is "a release of PR n is running" (web/ui/releasing.py `release_units`, the label the board shows as Queued for release). The pull request is
+the merge queue, the merge, the deploy and main's run, so "that unit is active" is "a release of PR n is running" (the unit list web/ui/releasing.py `release_units` reads for the board's Queued for release label; the caller passes it in). The pull request is
 tied to the item as the board ties it and the merge pass does (an anchor scoped to the item, an open step's proof or words, the item's own words by merge_tie), never to every item; an anchored pull request with no running
 unit never counts, and a pull request that no anchor and no word of the item names ties nothing (a false negative, never a false refusal). A running unit with a log that has not been written for `RELEASE_FRESH_S`
 is a release that is stuck, so it counts for nothing and the mover is never trapped. Nothing is read from GitHub; no log is read while no unit runs.
