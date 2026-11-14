@@ -341,7 +341,7 @@ def window_line(text: Any, wake: Any) -> str:
 # ---------------------------------------------------------------------------------------------------------------- a bare date whose own step is timed
 # The window note above reads a next that waits "until / after" the wake's day. Two more ways a mover's step waits and the item sits on agent with a wake alone: the step OPENS with a time at the
 # wake's own hour or day ("at 03:00 install the config", "on Mar 3rd ...", "tomorrow at 9 ..."), or it starts on an outside event ("when the next release lands, check ...", "once the vendor
-# replies ..."). Same kind of note on the reply, never a refusal; the server decides who the mover is and whether another party's step is in flight (server._wake_step_note). A time or day
+# replies ..."). Same kind of note on the reply, never a refusal; the server decides who the mover is and whether another party's step is in flight (service/wait_fixes._wake_step_note). A time or day
 # in the middle of a step ("the cron runs at 03:00 daily; fix the script now", "schedule the job at 03:00") is the step's content, not its trigger, so only the opening phrase (or the one after "then") counts.
 _TZ_OTHER = r"(?!\s*(?:utc|gmt|z)\b)"        # a time said in another zone than the instance's is not the wake's hour
 def _zone_label() -> str:

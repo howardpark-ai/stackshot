@@ -101,6 +101,8 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.web.tools import notes as _notes_tool
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import released as released_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import agent_names as _agent_names
@@ -1205,7 +1207,7 @@ res = _update_svc._update("a75", hold=True, wake=D(2), next=f"- deploy once the 
 check("hold (owner wait): 'until <owner> decides' is noted too", NOTE_OWNER in res and held_("a75"), res)
 res = _update_svc._update("a76", hold=True, wake=D(2), next=f"per {_core_instance.OWNER}'s call of Mon Mar 2nd, deploy after the CI run; tell {_core_instance.OWNER} when it is live", sender="home-beta")
 check("hold (owner wait): a hold that mentions the owner only in passing gets no note", "waits on " + _core_instance.OWNER not in res and held_("a76"), res)
-check("hold (owner wait): the matcher stays narrow", [server._waits_on_owner(t) for t in (f"blocked on {_core_instance.OWNER}", f"pending his answer", f"needs {_core_instance.OWNER}'s go-ahead",
+check("hold (owner wait): the matcher stays narrow", [_notes_tool._waits_on_owner(t) for t in (f"blocked on {_core_instance.OWNER}", f"pending his answer", f"needs {_core_instance.OWNER}'s go-ahead",
       f"for {_core_instance.OWNER} to pick A or B", f"held until {_core_instance.OWNER}'s trip ends, then ship", f"{_core_instance.OWNER}'s decision of Mon: ship it", f"ask {_core_instance.OWNER} about the logo on Thu",
       f"waiting on the CI run {_core_instance.OWNER} asked for")] == [True, True, True, True, False, False, False, False])
 for i in (74, 75, 76): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: the sections below count the held items
@@ -1476,7 +1478,7 @@ check("decision + hold flag: the board shows it in your call, never parked; the 
       and '<span class="badge hold">on hold</span>' not in ip_ and "(on hold" not in b_.markdown().split("a35 · ")[1][:200] if "a35 · " in b_.markdown() else False,
       [r["gid"] for r in b_.held])
 check("decision + hold flag: the server's views agree (get, the brief's lanes)", not _holders._is_held(rd("a35")) and "a35 [open]" in _wt_brief.stackshot_brief().partition("\n\nOn hold (")[0]
-      and "on hold" not in server._fmt({**rd("a35"), "gid": "a35"}).splitlines()[0])
+      and "on hold" not in _get_tool._fmt({**rd("a35"), "gid": "a35"}).splitlines()[0])
 res = _update_svc._update("a35", next="prepping the options", sender="home-beta"); m_ = rd("a35")["metadata"]
 check("decision + hold flag: any write drops the hold, keeps its date, and says so",
       "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its date " + D(4) + " stays, and no date parks an item on his call" in res, res)
@@ -1709,7 +1711,7 @@ setf(go, metadata={**rd(go)["metadata"], "options": OPTS})
 res = _update_svc._update(go, needs="none", next="act on the decision", sender="home-beta"); ip = ui_render.Board(str(T / "store")).item_html(go)
 check("options: decided (decision left the needs): the update reply lists no options", "decision" not in str(rd(go)["metadata"].get("needs") or "")
       and "options:" not in res and rd(go)["metadata"].get("options") == OPTS, res)
-check("options: …nor the get reply", "options:" not in server._fmt(rd(go)), server._fmt(rd(go)))
+check("options: …nor the get reply", "options:" not in _get_tool._fmt(rd(go)), _get_tool._fmt(rd(go)))
 check("options: …nor the item page as an open choice", 'class="iopts"' not in ip and '<b class="osub">' not in ip, ip[ip.find('class="iask"'):ip.find('class="iask"') + 600])
 res = _update_svc._update(go, needs="decision", ask=ASKO, sender="home-beta")
 check("options: back to needs=decision: they are an open choice again", "options:\n- Vendor A (recommended)" in res and 'class="iopts"' in ui_render.Board(str(T / "store")).item_html(go), res)
@@ -2062,7 +2064,7 @@ for g in (gx, gdx): (T / f"store/{g[0]}/{g[1:]}.json").unlink()
 
 # next that reads like a report (a commit hash, a test count, a past-tense report) draws one note, never a refusal; a line over 200 characters is refused (tests/bullets_scenario.py)
 RN = "(note: next reads like a report ("
-def rnote(nx): return server._report_note(nx)
+def rnote(nx): return _notes_tool._report_note(nx)
 for name_, nx_, want_ in (
         ("a bare commit hash", "ops-x: fix landed in 0a0a0a0a0, check it", "a commit hash (0a0a0a0a0)"),
         ("a full 40-character hash", "see 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a now", "a commit hash"),
@@ -2214,14 +2216,14 @@ CF["freshness"] = {"external_days": 5, "call_days": "x", "agent_days": 0.5}
 check("freshness: [freshness] overrides a limit; a value that is not a positive number keeps its default", fr("external", 4 * DAY)[0] == "fresh" and fr("decision", DAY)[0] == "stale" and fr("", DAY / 2)[0] == "stale")
 del CF["freshness"]
 # _fmt's lines
-fm = lambda **kw: server._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"owner": B, "project": "projects/beta", "needs": "decision", "ask": ASK, "priority": "p1"}, **kw})
+fm = lambda **kw: _get_tool._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"owner": B, "project": "projects/beta", "needs": "decision", "ask": ASK, "priority": "p1"}, **kw})
 c_ = time.time() - 2 * DAY - 100; out_ = fm(confirmed=c_)
 out_nw = out_
 check("_fmt: ask after needs, before priority; confirmed in words with its staleness", f"needs: decision\nask: {ASK}\npriority: p1\nconfirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, _wt_text.ZONE))} (stale 2 d)" in out_nw, out_)
 check("_fmt: no waiting line (no expected time is computed): priority is followed by confirmed", "\npriority: p1\nconfirmed: " in out_ and "waiting:" not in out_ and "expected by" not in out_, out_)
 cline = lambda out: out.split("\nconfirmed: ", 1)[1].split("\n", 1)[0]
 check("_fmt: a fresh item says (fresh)", cline(fm(confirmed=time.time() - 600)).endswith(" (fresh)"), fm(confirmed=time.time() - 600))
-check("_fmt: a held item says (held)", server._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"hold": True}, "confirmed": c_}).split("\nconfirmed: ", 1)[1].endswith(" (held)"))
+check("_fmt: a held item says (held)", _get_tool._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"hold": True}, "confirmed": c_}).split("\nconfirmed: ", 1)[1].endswith(" (held)"))
 check("_fmt: an item without confirmed reads its state_updated", f"confirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, _wt_text.ZONE))} (stale 2 d)" in fm(state_updated=c_))
 # the renderer: every row carries its freshness; the session-start line counts the stale active items
 Z = T / "zstore"; (Z / "a").mkdir(parents=True); (Z / "projects.json").write_text((T / "store/projects.json").read_text())

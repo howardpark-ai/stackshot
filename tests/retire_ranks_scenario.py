@@ -53,6 +53,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync
+from stackshot.web.tools import get as _get_tool
 from stackshot.model import holders as _holders
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -104,7 +105,7 @@ check("load: a stored queued reads as the state shown (doing), not as an unknown
 check("load: …it is an agent's state: not held, not after anything", _states.of(rd(1))[0] == "doing" and not _holders._is_held(rd(1)) and not _item_read._after_open(rd(1)["metadata"]), _states.of(rd(1)))
 probs = _states.problems(rd(1)["metadata"], _states.stored(rd(1)), datetime.date.today(), check_dates=False)
 check("load: …problems() asks nothing of it about a rank", not any("rank" in p for p in probs), probs)
-g1 = server._fmt({**rd(1), "gid": "a1"})
+g1 = _get_tool._fmt({**rd(1), "gid": "a1"})
 check("load: get of an item that still stores a rank shows no rank line, no queue and no work order", not re.search(r"rank|queue|work order", g1, re.I), g1[-500:])
 check("load: …and no `queued` state", "state: queued" not in g1 and "queued" not in g1, g1[-500:])
 
@@ -146,7 +147,7 @@ from stackshot.web.ui import render as r2
 def reads():
     """Every surface that used to show the rank → {name: text}"""
     out = {}
-    out["get"] = "\n".join(server._fmt({**rd(i), "gid": f"a{i}"}) for i in (1, 2, 3, 4, 6))
+    out["get"] = "\n".join(_get_tool._fmt({**rd(i), "gid": f"a{i}"}) for i in (1, 2, 3, 4, 6))
     out["brief"] = _wt_brief.stackshot_brief()
     out["client"] = json.dumps(json.loads(server._client_items(UB)[2])["items"]) + json.dumps(json.loads(server._client_items(UO)[2])["items"])
     B_ = r2.Board(str(T / "store"))

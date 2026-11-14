@@ -72,6 +72,7 @@ from stackshot.service import event_waits as evwaits_svc
 from stackshot.service import telling
 from stackshot.service import answer_handover as handover_svc
 from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
+from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.fleet import liveness as LV
 from stackshot.web import home
 from stackshot.web import publish as _web_publish
@@ -116,7 +117,7 @@ ref = lambda n: f"board#{n}"      # an item reference built at run time, so no l
 gid = lambda n: f"g{n}"
 def fix_pass():
     items_ = {f"g{p.stem}": json.loads(p.read_text()) for p in (T / "store/g").glob("*.json")}
-    return AR.filing_pass(now=now0, items=items_, anchors={}, env=env(wait_end=server._wait_end_fix, wait_facts=server._wait_end_facts))
+    return AR.filing_pass(now=now0, items=items_, anchors={}, env=env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=_wait_fixes_svc._wait_end_facts))
 def clear_g():
     for p in (T / "store/g").glob("*.json"): p.unlink()
 (T / "state/audit").mkdir(parents=True, exist_ok=True)

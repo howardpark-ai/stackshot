@@ -134,6 +134,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import owner_words as _owner_words
 from stackshot.service import update as _update_svc
@@ -403,7 +404,7 @@ ln24 = bd.done_row(next(r for r in bd.rows if r["gid"] == "g24"))
 check("unrecorded: the Closed page's row is tagged Closed, with no invented outcome and never the raw word", '<span class="tag t-closed">Closed</span>' in ln24 and "unrecorded" not in ln24, ln24[:600])
 check("unrecorded: the History's completed event never shows the raw word", "completed · <b>unrecorded</b>" not in bd.item_html("g24"), None)
 check("outcome words: done, dropped and superseded read as they are", all(render.outcome_word(w) == w for w in ("done", "dropped", "superseded")) and render.outcome_word("unrecorded") == render.NO_OUTCOME, None)
-check("unrecorded: get says the same", "outcome: closed (no outcome recorded)" in server._fmt({**rd(24), "gid": "g24"}), server._fmt({**rd(24), "gid": "g24"})[:300])
+check("unrecorded: get says the same", "outcome: closed (no outcome recorded)" in _get_tool._fmt({**rd(24), "gid": "g24"}), _get_tool._fmt({**rd(24), "gid": "g24"})[:300])
 check("unrecorded: the guards' report counts it as an outcome (closed_no_outcome is 0 once every closed item has one, written by the pass or not)",
       mg.CLOSED_NO_OUTCOME not in mg.report({"g24": rd(24)}, mg.Ctx()).ids, None)
 

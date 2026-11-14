@@ -37,9 +37,6 @@ def stackshot_x(a, b=1):
 @mcp.tool(name="y", description="d")
 def stackshot_y(a):
     return a
-def _fmt(a):
-    # a comment
-    return "mover: " + a
 # pad 1
 # pad 2
 # pad 3
@@ -57,23 +54,29 @@ def _fmt(a):
 def _other(a):
     return a
 '''
+GET = '''
+def _fmt(a):
+    # a comment
+    return "mover: " + a
+'''      # the output helper `_fmt`, in the file the real HELPERS table lists it in (web/tools/get.py)
 SNAP = {"format": 1, "tools": {"x": {"description": "Make an x. a: the thing. b: the count (default 1).", "parameters": {"a": {"type": "string", "required": True, "description": ""}, "b": {"type": "integer", "required": False, "default": 1, "description": "the count"}}},
                                "y": {"description": "Return y", "parameters": {}},
                                "get": {"description": "Read an item", "parameters": {}, "labels": ["mover:", "state:"]}}}
-(R / "tests").mkdir(); W("stackshot/web/server.py", SERVER); W("stackshot/model/states.py", "def words(i):\n    return 'state: ' + i\n")
+(R / "tests").mkdir(); W("stackshot/web/server.py", SERVER); W("stackshot/web/tools/get.py", GET); W("stackshot/model/states.py", "def words(i):\n    return 'state: ' + i\n")
 (R / "tests" / "tool_text.snapshot.json").write_text(tt.render(SNAP))
 g("add", "-A"); g("commit", "-qm", "base")
 BASE = g("rev-parse", "HEAD")
-def variant(name, server=None, snap=None, states=None):
+def variant(name, server=None, snap=None, states=None, get=None):
     g("checkout", "-q", "-b", name, BASE)
     if server is not None: W("stackshot/web/server.py", server)
     if snap is not None: (R / "tests" / "tool_text.snapshot.json").write_text(tt.render(snap))
     if states is not None: W("stackshot/model/states.py", states)
+    if get is not None: W("stackshot/web/tools/get.py", get)
     g("commit", "-qam", name, "--allow-empty")
     return g("rev-parse", "HEAD")
 H_PARAM = variant("param", SERVER.replace("def stackshot_x(a, b=1):", "def stackshot_x(a, b=2, c=None):"))        # a tool function changed: x
-H_HELPER = variant("helper", SERVER.replace('return "mover: " + a', 'return "keeper: " + a'))                      # an output helper: get, brief, create, update, complete
-H_COMMENT = variant("comment", SERVER.replace("# a comment", "# another comment"))                                   # nothing relevant
+H_HELPER = variant("helper", get=GET.replace('return "mover: " + a', 'return "keeper: " + a'))                      # an output helper: get, brief, create, update, complete
+H_COMMENT = variant("comment", get=GET.replace("# a comment", "# another comment"))                                   # nothing relevant
 H_OTHER = variant("other", SERVER.replace("def _other(a):\n    return a", "def _other(a):\n    return a + a"))        # not watched
 
 H_SNAP = variant("withsnap", SERVER.replace("def stackshot_x(a, b=1):", "def stackshot_x(a, b=2, c=None):"), snap={**SNAP, "tools": {**SNAP["tools"], "x": {**SNAP["tools"]["x"], "description": "Make an x; c is new."}}})
@@ -143,7 +146,7 @@ check("the tool_text.touched gate still reads through the shared changed_since (
 src = "\n".join(pathlib.Path(STACK, f).read_text(encoding="utf-8") for f in ("stackshot/web/server.py", *tt.TOOL_FILES))   # the tools are registered in web/tools/*.py
 names = tc.tool_names(src)
 check("the real server's tool functions map to the snapshot's tool names (stackshot_get -> get ...), every one of them in the snapshot", names["stackshot_get"] == "get" and set(names.values()) <= set(_real["tools"]), sorted(set(names.values()) - set(_real["tools"])))
-check("a changed shared item-line helper reaches the tools that list it", "get" in tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src) or tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src) != [], tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src))
+check("a changed shared item-line helper reaches the tools that list it", "get" in tc.affected_tools(["stackshot/web/tools/notes.py:_mover_lines"], src, src) or tc.affected_tools(["stackshot/web/tools/notes.py:_mover_lines"], src, src) != [], tc.affected_tools(["stackshot/web/tools/notes.py:_mover_lines"], src, src))
 import yaml
 wf_text = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text(encoding="utf-8")
 wf = yaml.safe_load(wf_text)

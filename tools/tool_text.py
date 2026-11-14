@@ -100,23 +100,23 @@ def text_files_at(root: Path, rev: str) -> list[str]:
 # `touched` gate watches every one of them (and every function registered with @mcp.tool, found by itself) for a changed body. A new helper that builds a returned line
 # goes in here, in the same PR: this is the one list.
 _ITEM_LINES = [   # the item as get shows it, which create, update and complete return after their own first line, and the brief returns one per open item
-    ("stackshot/web/server.py", "_fmt"), ("stackshot/web/server.py", "_mover_lines"), ("stackshot/web/server.py", "_model_lines"), ("stackshot/service/handoff.py", "handoff_lines"),
-    ("stackshot/service/mover_steps.py", "_state_check_notes"), ("stackshot/web/server.py", "_next_names_lines"), ("stackshot/service/checks.py", "check_words"), ("stackshot/web/answers.py", "_answer_words"), ("stackshot/web/page_debts.py", "_nag"),
+    ("stackshot/web/tools/get.py", "_fmt"), ("stackshot/web/tools/notes.py", "_mover_lines"), ("stackshot/web/tools/notes.py", "_model_lines"), ("stackshot/service/handoff.py", "handoff_lines"),
+    ("stackshot/service/mover_steps.py", "_state_check_notes"), ("stackshot/web/tools/get.py", "_next_names_lines"), ("stackshot/service/checks.py", "check_words"), ("stackshot/web/answers.py", "_answer_words"), ("stackshot/web/page_debts.py", "_nag"),
     ("stackshot/model/states.py", "words"), ("stackshot/model/states.py", "carry_of"), ("stackshot/model/model.py", "words"), ("stackshot/waits/handoff.py", "words"), ("stackshot/waits/watchers.py", "woke_line"),
     ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"),
 ]
 _WRITE_NOTES = [   # the notes a create or an update reply ends with
-    ("stackshot/web/server.py", "_form_notes"), ("stackshot/service/owner_words.py", "_said_note"), ("stackshot/model/decision_gates.py", "_options_note"), ("stackshot/web/tools/notes.py", "_owner_param"),
+    ("stackshot/web/tools/notes.py", "_form_notes"), ("stackshot/service/owner_words.py", "_said_note"), ("stackshot/model/decision_gates.py", "_options_note"), ("stackshot/web/tools/notes.py", "_owner_param"),
     ("stackshot/service/mover_steps.py", "_owner_then_default"),
 ]
-_GET_ONLY = [("stackshot/web/tools/get.py", "stackshot_get"), ("stackshot/web/server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
+_GET_ONLY = [("stackshot/web/tools/get.py", "stackshot_get"), ("stackshot/web/tools/get.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
 HELPERS: dict[str, list[tuple[str, str]]] = {
     "get": _GET_ONLY + _ITEM_LINES,
-    "brief": [("stackshot/web/tools/brief.py", "stackshot_brief"), ("stackshot/web/server.py", "_model_report_line"), ("stackshot/web/tools/brief.py", "_world_waits_text"),
+    "brief": [("stackshot/web/tools/brief.py", "stackshot_brief"), ("stackshot/web/tools/notes.py", "_model_report_line"), ("stackshot/web/tools/brief.py", "_world_waits_text"),
               ("stackshot/service/handoff.py", "handoff_brief"), ("stackshot/web/whatschanged.py", "lines"), ("stackshot/model/model_guards.py", "brief_line"), ("stackshot/waits/handoff.py", "brief_lines")] + _ITEM_LINES,
     "create": [("stackshot/web/tools/create.py", "stackshot_create"), ("stackshot/web/tools/create.py", "_create"), ("stackshot/service/create.py", "create_item"), ("stackshot/model/similar.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
-    "update": [("stackshot/web/tools/update.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_report_note"),
-               ("stackshot/web/server.py", "_command_note"), ("stackshot/service/wait_gates.py", "_watch_on_write"), ("stackshot/service/telling.py", "mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
+    "update": [("stackshot/web/tools/update.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/tools/notes.py", "_report_note"),
+               ("stackshot/web/tools/notes.py", "_command_note"), ("stackshot/service/wait_gates.py", "_watch_on_write"), ("stackshot/service/telling.py", "mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
     "message": [("stackshot/web/tools/message.py", "stackshot_message"), ("stackshot/service/messaging.py", "_message")],
     "confirm": [("stackshot/web/tools/complete.py", "stackshot_confirm"), ("stackshot/service/update.py", "confirm_item")],      # not labelled in the snapshot (its reply has no label), but watched: the gate sees a changed body
     "complete": [("stackshot/web/tools/complete.py", "stackshot_complete"), ("stackshot/service/update.py", "complete_item"), ("stackshot/service/update.py", "_completion_anchor_prompt"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/service/telling.py", "mentions_reply")]

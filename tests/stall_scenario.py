@@ -89,6 +89,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
@@ -414,7 +415,7 @@ close(26)
 item(27); cli_row("home-peer", "idle", IDLE0)
 stk(T1)
 from stackshot.web import render as R
-shown = server._fmt({**rd(27), "gid": "a27"})
+shown = _get_tool._fmt({**rd(27), "gid": "a27"})
 check("10 get: the last steps are shown on the item", re.search(r"stall: .*sent to it again", shown) is not None, shown[-600:])
 new = S.new_entries({"stall": {"log": []}}, mt(27))
 check("10 history: a new log entry is one History line (new_entries), an old one is not repeated", len(new) == 1 and not S.new_entries(mt(27), mt(27)), new)

@@ -92,6 +92,7 @@ def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from fastmcp.exceptions import ToolError
@@ -134,11 +135,11 @@ check("done=[1]: the first step is checked, by home-here and now, and keeps its 
 check("…and next is the open lines exactly, one per line, as every reader reads it", m1["next"] == "home-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper", m1["next"])
 check("…the reply says which step was checked", "(step 1 done: home-agent: build the thing)" in r, r)
 check("the readers of next read the open lines: the home row's first step, the hand-off names, get's next block",
-      H.first_next(m1["next"], ("home-agent",)) == ("home-agent", "test it") and "next:\nhome-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper" in server._fmt({**rd(1), "gid": "a1"}))
-g1 = server._fmt({**rd(1), "gid": "a1"})
+      H.first_next(m1["next"], ("home-agent",)) == ("home-agent", "test it") and "next:\nhome-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper" in _get_tool._fmt({**rd(1), "gid": "a1"}))
+g1 = _get_tool._fmt({**rd(1), "gid": "a1"})
 check("get lists the checklist once a step is done: every step with its position, status, who and when",
       re.search(r"checklist:\n1\. \[done · home-here · [^\]]+\] home-agent: build the thing\n2\. \[open\] home-agent: test it\n3\. \[open\] Oliver: In PowerShell run `ssh -t box-a 'ls'`\n4\. \[open\] home-agent: tell the keeper", g1) is not None, g1[g1.find("next:"):])
-check("get shows no checklist while every step is open", "checklist:" not in server._fmt({**rd(2), "gid": "a2"}))
+check("get shows no checklist while every step is open", "checklist:" not in _get_tool._fmt({**rd(2), "gid": "a2"}))
 snap()
 
 # ---- 3. done by exact text, by a JSON string and by a digits string; dropped
@@ -151,7 +152,7 @@ check("done as a string of positions", [s for s, _ in st(2)] == ["done", "done",
 r = upd(3, dropped=[2], done=[1])
 check("done and dropped together: each step marked, the open ones left", [s for s, _ in st(3)] == ["done", "dropped", "open", "open"] and mt(3)["next"] == "Oliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper"
       and mt(3)["steps"][1]["by"] == "home-here" and "(step 2 dropped: home-agent: test it)" in r and "(step 1 done: home-agent: build the thing)" in r, (st(3), r))
-check("get marks a dropped step", re.search(r"2\. \[dropped · home-here · [^\]]+\] home-agent: test it", server._fmt({**rd(3), "gid": "a3"})) is not None)
+check("get marks a dropped step", re.search(r"2\. \[dropped · home-here · [^\]]+\] home-agent: test it", _get_tool._fmt({**rd(3), "gid": "a3"})) is not None)
 r = upd(3, done=[4])
 check("a mark alone leaves the other open steps in next", mt(3)["next"] == "Oliver: In PowerShell run `ssh -t box-a 'ls'`" and st(3)[3][0] == "done", (mt(3), st(3)))
 refused("the last open step checked by a session on an item that stays open is refused (N6)", lambda: upd(3, done=[3]), "no open step in next", i=3)
@@ -207,7 +208,7 @@ upd(8, done=[1])
 r = _wt_complete.stackshot_complete("a8", outcome="done", reason="finished", description="- All done", sender="home-here")
 m8 = mt(8)
 check("closing marks the open steps: next is gone, the checklist is done all through, by the closer", "next" not in m8 and [x["status"] for x in m8["steps"]] == ["done", "done", "done", "done"] and all(x["by"] == "home-here" and x["at"] for x in m8["steps"]), m8)
-g8 = server._fmt({**rd(8), "gid": "a8"})
+g8 = _get_tool._fmt({**rd(8), "gid": "a8"})
 check("get on the closed item lists the checklist", "checklist:\n1. [done · home-here" in g8 and "2. [done · home-here" in g8 and "home-agent: test it" in g8, g8[-500:])
 bd = ui_render.Board(str(STORE))
 p8 = bd.item_html("a8")
@@ -357,9 +358,9 @@ check("clear_next with a next: the wipe comes first (the lines become dropped st
 r = upa(33, done=[2], next="home-agent: agent line")
 check("a mark of another session's line together with the sender's own new line: both land, the marked line leaves next",
       st(33) == [OPEN("home-here: keeper line one"), ("done", "Oliver: keeper line two"), OPEN("home-agent: agent line")] and mt(33)["next"] == "home-here: keeper line one\nhome-agent: agent line", (st(33), mt(33)))
-check("get and the home row show the first open step", server._fmt({**rd(33), "gid": "a33"}).count("next:\nhome-here: keeper line one") == 1 and H.first_next(mt(33)["next"], ("home-here",))[1] == "keeper line one", None)
+check("get and the home row show the first open step", _get_tool._fmt({**rd(33), "gid": "a33"}).count("next:\nhome-here: keeper line one") == 1 and H.first_next(mt(33)["next"], ("home-here",))[1] == "keeper line one", None)
 upd(34, done=[1])
-check("get shows the first open step after the first is done: next starts with the second", server._fmt({**rd(34), "gid": "a34"}).find("next:\nOliver: keeper line two") > 0 and H.first_next(mt(34)["next"], ("home-here",))[0] == "Oliver", mt(34))
+check("get shows the first open step after the first is done: next starts with the second", _get_tool._fmt({**rd(34), "gid": "a34"}).find("next:\nOliver: keeper line two") > 0 and H.first_next(mt(34)["next"], ("home-here",))[0] == "Oliver", mt(34))
 refused("a nonsense mark (an index past the list) names the checklist's length", lambda: upa(34, dropped=[9]), "there is no step 9", "the checklist has", i=34)
 
 # ---- 13b. a line kept verbatim is never stored twice (example-site-builder kept "ask Sam" on its list; the line was example-site-main's, so the update added a copy,
@@ -413,7 +414,7 @@ check("the page's Next folds the earlier steps by the time they were marked (dro
       re.findall(r'<span class="cl-t">home-agent: step (.)</span>', n41) == ["D", "B", "E", "A", "C"] and re.findall(r'<li class="cl-(open|done|dropped)">', n41) == ["dropped", "done", "done", "open", "open"], n41[:900])
 check("…while the stored steps, next and the checklist the tools list stay in the stored order",
       [x["text"][-1] for x in mt(41)["steps"]] == list("ABCDE") and mt(41)["next"] == "home-agent: step A\nhome-agent: step C" and [x["text"][-1] for x in S.view(mt(41))] == list("ABCDE"), mt(41))
-g41 = server._fmt({**rd(41), "gid": "a41"})
+g41 = _get_tool._fmt({**rd(41), "gid": "a41"})
 check("…and get's checklist positions are the stored ones",
       re.search(r"checklist:\n1\. \[open\] home-agent: step A\n2\. \[done · home-here · [^\]]+\] home-agent: step B\n3\. \[open\] home-agent: step C\n4\. \[dropped · home-here · [^\]]+\] home-agent: step D\n5\. \[done · home-here · [^\]]+\] home-agent: step E", g41) is not None, g41[g41.find("next:"):])
 item(42, next="home-agent: build option A", steps=[
@@ -430,7 +431,7 @@ check("his decision answers are drawn among the finished rows by time (a pick wi
       and "just a comment" not in n42 and "a note on his step" not in n42, n42[:1400])
 check("…a decided row: a checked box, a hidden 'Decided', 'decided on the board · when' under the text",
       re.search(r'<li class="cl-decided"><span class="cb" aria-hidden="true">✓</span><div class="cl-b"><span class="sr">Decided: </span><span class="cl-t">Oliver: picked Approve</span><span class="cl-by"><b>decided on the board</b> · [^<]+</span></div></li>', n42) is not None, n42[:1400])
-g42 = server._fmt({**rd(42), "gid": "a42"})
+g42 = _get_tool._fmt({**rd(42), "gid": "a42"})
 check("…and get's checklist has the steps alone, at the stored positions, with no row for his decisions",
       re.search(r"checklist:\n1\. \[done · home-agent · [^\]]+\] home-agent: first look\n2\. \[open\] home-agent: build option A\n3\. \[dropped · home-agent · [^\]]+\] home-agent: second look", g42) is not None
       and "picked" not in g42[g42.find("checklist:"):] and [x["text"] for x in S.view(mt(42))] == ["home-agent: first look", "home-agent: build option A", "home-agent: second look"], g42[g42.find("next:"):])

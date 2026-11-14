@@ -59,6 +59,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.service import wait_fixes as _wait_fixes_svc
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -91,7 +93,7 @@ def refused(name, f, *want):
 item(1, needs=[BACK])
 out = bupd(1, wake=w(2))
 check("1 wake alone is stored as until, with no old field, and the reply names until", W.stored_until(mt(1)) == w(2) and no_old(mt(1)) and "wake is now written as until" in out and f"until={w(2)}" in out, (out[-400:], mt(1)))
-check("1 …the reply says when the old parameter stops being accepted", server._wait_alias_until().isoformat() in out and "refused after" in out, out[-400:])
+check("1 …the reply says when the old parameter stops being accepted", _wait_fixes_svc._wait_alias_until().isoformat() in out and "refused after" in out, out[-400:])
 item(2, needs=[BACK])
 out = bupd(2, wait_kind="relay", wait_event="the vendor's reply", ask_by=w(3))
 check("1 ask_by on a relay wait is stored as until (the relay's ask-by day), the kind beside it", W.stored_until(mt(2)) == w(3) and mt(2).get("wait_kind") == "relay" and no_old(mt(2)) and "ask_by is now written as until" in out, (out[-400:], mt(2)))
@@ -125,8 +127,8 @@ m2_ = mof(g2)
 check("1 create: the until parameter is stored as it is, with no note about an old name", W.stored_until(m2_) == w(5) and no_old(m2_) and "now written as until" not in out2, (out2[-300:], m2_))
 
 # the window
-real_gate = server._wait_alias_until
-server._wait_alias_until = lambda: dt.date(2020, 1, 1)
+real_gate = _wait_fixes_svc._wait_alias_until
+_wait_fixes_svc._wait_alias_until = lambda: dt.date(2020, 1, 1)
 try:
     item(6, needs=[BACK])
     refused("1 after [model] wait_alias_until a wake is refused with the way out", lambda: bupd(6, wake=w(2)), "wake is not a parameter any more", "until=")
@@ -134,10 +136,10 @@ try:
     refused("1 …hold with its wake names both", lambda: bupd(6, hold=True, wake=w(2), wait_basis=f"vendor reply {w(2)}"), "wake, hold are not a parameter any more")
     check("1 …and until still works", bupd(6, until=w(2)) and W.stored_until(mt(6)) == w(2), mt(6))
 finally:
-    server._wait_alias_until = real_gate
+    _wait_fixes_svc._wait_alias_until = real_gate
 _held_open = _cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)      # the suites hold the window open (tests/_instance.py); the code's own default is read with the key unset
 try:
-    check("1 the window is a config value read at use: [model] wait_alias_until, the code's default when unset", server._wait_alias_until() == dt.date.fromisoformat(UW.ALIAS_UNTIL), None)
+    check("1 the window is a config value read at use: [model] wait_alias_until, the code's default when unset", _wait_fixes_svc._wait_alias_until() == dt.date.fromisoformat(UW.ALIAS_UNTIL), None)
 finally:
     if _held_open is not None:
         _cfg.CFG["model"]["wait_alias_until"] = _held_open
@@ -207,11 +209,11 @@ check("3 the watchers' end_wait clears until with the kind group", "until" not i
 # ================================================================ 4. the readers that read the old fields only
 from stackshot.model import model_guards as MG
 timed_next = f"{BACK}: collect the logs until {w(2)}, then review them"
-note = server._wake_window_note({"wake": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"})
+note = _wait_fixes_svc._wake_window_note({"wake": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"})
 check("4 the window note prints the date the wait stands for (the legacy wake)", w(2) in note and "alone is a wait until that date" in note, note)
-check("4 …and the same date stored as until with a kind is the wait, not a reminder: no note", server._wake_window_note({"until": w(2), "wait_kind": "time", "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == "", None)
-check("4 …and a kind-less until is a wait too: no reminder note for any stored until", server._wake_window_note({"until": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == ""
-      and not server._wake_alone_on_agent({"until": w(2), "needs": [BACK]}), None)
+check("4 …and the same date stored as until with a kind is the wait, not a reminder: no note", _wait_fixes_svc._wake_window_note({"until": w(2), "wait_kind": "time", "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == "", None)
+check("4 …and a kind-less until is a wait too: no reminder note for any stored until", _wait_fixes_svc._wake_window_note({"until": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == ""
+      and not _wait_fixes_svc._wake_alone_on_agent({"until": w(2), "needs": [BACK]}), None)
 item(40, needs=[BACK], until=w(5), post_wake_mover=BACK, watch={"set_at": now0}, wait_basis={"text": f"the vendor ships {w(5)}", "wake": w(5), "by": BACK, "at": now0})
 bupd(40, clear_hold=True)
 check("4 clear_hold on an item that stores only until releases it: until, the post-wake mover, the watcher stamps and the basis go", not W.stored_until(mt(40)) and not any(k in mt(40) for k in ("post_wake_mover", "watch", "wait_basis", "wait_kind", "ask_by")), mt(40))
@@ -276,7 +278,7 @@ check("5.5 a legacy hold + after given wake= stores the item wait with the date 
 # 5.6 a session reads a wait on a date alone as parked, as the board draws it (get's tag, the session items listing); a decision item is never parked
 item(60, needs=[BACK], until=w(3))
 item(61, needs=["decision"], until=w(3))
-fm60, fm61 = server._fmt(dict(rd(60), gid="a60")).splitlines()[0], server._fmt(dict(rd(61), gid="a61")).splitlines()[0]
+fm60, fm61 = _get_tool._fmt(dict(rd(60), gid="a60")).splitlines()[0], _get_tool._fmt(dict(rd(61), gid="a61")).splitlines()[0]
 check("5.6 get tags a wait on a date alone as on hold, and never a decision item", "on hold" in fm60 and "on hold" not in fm61, (fm60, fm61))
 st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
 held_ = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
@@ -318,7 +320,7 @@ check("5.9 ...a relay's ask-by day is no wake: the cap does not judge it, as on 
 # 5.10 a decision beside an until is never parked: the tag, the brief and the session items listing read it the one way the board does (_is_parked)
 item(67, needs=["decision", BACK], until=w(3), ask="Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date")
 item(68, needs=[BACK], until=w(3))
-f67, f68 = server._fmt(dict(rd(67), gid="a67")).splitlines()[0], server._fmt(dict(rd(68), gid="a68")).splitlines()[0]
+f67, f68 = _get_tool._fmt(dict(rd(67), gid="a67")).splitlines()[0], _get_tool._fmt(dict(rd(68), gid="a68")).splitlines()[0]
 check("5.10 tag: a decision with an until is not on hold, a date-only wait is", "on hold" not in f67 and "on hold" in f68, (f67, f68))
 st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
 held10 = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
@@ -335,16 +337,16 @@ try:
     _cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)
     buf11 = _io.StringIO()
     with contextlib.redirect_stderr(buf11):
-        server._wait_alias_check()
+        _wait_fixes_svc._wait_alias_check()
     miss11 = buf11.getvalue()
     _cfg.CFG["model"]["wait_alias_until"] = "2030-01-01"
     buf11b = _io.StringIO()
     with contextlib.redirect_stderr(buf11b):
-        server._wait_alias_check()
+        _wait_fixes_svc._wait_alias_check()
     _cfg.CFG["model"]["wait_alias_until"] = "soon"
     buf11c = _io.StringIO()
     with contextlib.redirect_stderr(buf11c):
-        server._wait_alias_check()
+        _wait_fixes_svc._wait_alias_check()
 finally:
     _cfg.CFG["model"] = was_model
 check("5.11 a missing [model] wait_alias_until is warned once, naming the default it stands on", "wait_alias_until is missing" in miss11 and UW.ALIAS_UNTIL in miss11 and miss11.count("config:") == 1, miss11)

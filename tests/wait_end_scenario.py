@@ -1,7 +1,7 @@
 """tests/wait_end_scenario.py: an open item whose next line waits in words for something nothing tells the item has happened (wait_end.py).
 
 The ten-minute filing pass reads the lines of an open item's next that say "wait for board#N to close", "once other/repo#7 merges", "when hp-box is back online", "wait for the reply in <link>", and finds the ones
-the item stores no wait for (no `after`, event wait, anchor wait or step proof). Where the server can set the wait with certainty it does (`server._wait_end_fix`, a History line, one message to the mover), and where
+the item stores no wait for (no `after`, event wait, anchor wait or step proof). Where the server can set the wait with certainty it does (`service/wait_fixes._wait_end_fix`, a History line, one message to the mover), and where
 it cannot it asks the mover a specific question; a wait for an event no type reports goes to the builder once. Checked against a scratch store and config (no port, no real server, no model call, no network):
 
   1  detect     each kind of gap, and what is no gap: a negated wait, an "or", several items, another session's step, the owner's step, a held item, an item that already names the wait
@@ -65,6 +65,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import model as MODEL; from stackshot.waits import server_fixes as SF; from stackshot.waits import wait_end as WE; from stackshot.core import config as CFG; from stackshot.waits import watchers as WATCH
+from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
@@ -93,7 +94,7 @@ sent = []
 def deliver(to, text, fyi=False): sent.append((to, text, fyi)); return True, "[200] ok"
 def env(**kw): return AR.Env(roles=ROLES, fallback=lambda p: "home-front", builder=lambda p: "alpha-builder", page_of=lambda p: ("", None), deliver=deliver, sessions=lambda: None,
                              pages=lambda run, deadline: {"enabled": False, "mode": "", "counts": {}}, **kw)
-FIXING = dict(wait_end=server._wait_end_fix, wait_facts=server._wait_end_facts)
+FIXING = dict(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=_wait_fixes_svc._wait_end_facts)
 def wipe(): (T / "state/audit/filing.json").unlink(missing_ok=True); sent.clear()
 def cats(findings, cat): return sorted(re.sub(r"\D", "", f["id"]) for f in findings if f["category"] == cat)
 def store_items(): return {f"g{p.stem}": json.loads(p.read_text()) for p in (T / "store/g").glob("*.json")}
@@ -358,14 +359,14 @@ item(9640, "home-other: build the thing"); item(9641, "team-back: wait for other
 calls = {"facts": 0, "prs": 0}
 def counting_facts():
     calls["facts"] += 1
-    f = server._wait_end_facts()
+    f = _wait_fixes_svc._wait_end_facts()
     def prs(gid): calls["prs"] += 1; return f.item_prs(gid)
     return WE.Facts(machines=f.machines, online=f.online, own_repo=f.own_repo, released=f.released, item_prs=prs, item_anchors=f.item_anchors, anchor_url=f.anchor_url)
-fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=server._wait_end_fix, wait_facts=counting_facts))
+fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=counting_facts))
 check("6 filing_findings builds the facts once for all the open items", calls["facts"] == 1, calls)
 check("6 …and asks for the pull requests an item is anchored to only for the one line that names a bare or foreign pull request", calls["prs"] <= 1, calls)
 def failing_facts(): raise RuntimeError("fleet view unreadable")
-fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=server._wait_end_fix, wait_facts=failing_facts))
+fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=failing_facts))
 check("6 …facts that cannot be read leave the rule reading the items themselves, not the whole pass failing", [f for f in fs if f["category"] == "wait-end"], fs)
 
 # an odd or missing [audit] key reads as the default
@@ -404,7 +405,7 @@ first = [f for f in fs if f["category"] == "wait-end"]
 check("7 setup: the pull request line is a wait-end gap, and the vendor line (a kind the rule has no fix for) reads as a wait", len(first) == 1 and "other/repo#31" in first[0]["detail"]
       and any(f["category"] == "reads-as-wait" and "vendor" in f["detail"] for f in fs), fs)
 check("7 …the generic finding speaks only of the vendor line while the rule words the other", not any(f["category"] == "reads-as-wait" and "other/repo#31" in f["detail"] for f in fs), fs)
-tokens = [g.token for g in WE.item_gaps("g9701", mt(9701), "team-back", "alive", server._wait_end_facts(), lambda ref: "", lambda a, b: a == b, now)]
+tokens = [g.token for g in WE.item_gaps("g9701", mt(9701), "team-back", "alive", _wait_fixes_svc._wait_end_facts(), lambda ref: "", lambda a, b: a == b, now)]
 check("7 setup: one token for the pull request line", len(tokens) == 1, tokens)
 d = rd(9701); SF.mark(d["metadata"], SF.WAIT_END, tokens[0]); (T / "store/g/9701.json").write_text(json.dumps(d))        # the server fixed that line (the wait since ended)
 fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
@@ -416,7 +417,7 @@ fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
 mine = [f for f in fs if f["id"].endswith("9701")]
 check("7 a line the mover sent back is handled the same way", [f["category"] for f in mine] == ["reads-as-wait"] and "vendor" in mine[0]["detail"], mine)
 check("7 the vendor line alone is a reads-as-wait finding", [f["category"] for f in fs if f["id"].endswith("9702")] == ["reads-as-wait"], fs)
-d = rd(9703); SF.mark(d["metadata"], SF.WAIT_END, WE.item_gaps("g9703", mt(9703), "team-back", "alive", server._wait_end_facts(), lambda ref: "", lambda a, b: a == b, now)[0].token)
+d = rd(9703); SF.mark(d["metadata"], SF.WAIT_END, WE.item_gaps("g9703", mt(9703), "team-back", "alive", _wait_fixes_svc._wait_end_facts(), lambda ref: "", lambda a, b: a == b, now)[0].token)
 (T / "store/g/9703.json").write_text(json.dumps(d))
 fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
 check("7 the handled line alone gives nothing", not [f for f in fs if f["id"].endswith("9703")], fs)
@@ -428,9 +429,9 @@ item(9714, "x", needs=[], wait_kind="anchor", post_wake_mover=BACK, state=None)
 d = rd(9714); d["metadata"].pop("state", None); (T / "store/g/9714.json").write_text(json.dumps(d))
 def raising_anchors(gid): raise RuntimeError("anchors file unreadable")
 def bad_facts():
-    f = server._wait_end_facts()
+    f = _wait_fixes_svc._wait_end_facts()
     return WE.Facts(machines=f.machines, online=f.online, own_repo=f.own_repo, released=f.released, item_prs=f.item_prs, item_anchors=raising_anchors, anchor_url=f.anchor_url)
-fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=server._wait_end_fix, wait_facts=bad_facts))
+fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=bad_facts))
 check("7 a Facts whose item_anchors raises: the item that asks for it (a stored anchor wait) is skipped, the pass goes on and finds the other items", not [f for f in fs if f["id"].endswith("9714")]
       and len([f for f in fs if f["category"] == "wait-end"]) >= 1, fs)
 
@@ -468,7 +469,7 @@ check("7 a backstop that does not make the wait endable is refused: nothing writ
 
 # ================================================================ 8. a handled step is its whole text; a handled item line stays handled when its target closes; broad words of other lines
 def toks_of(i, items_open=lambda ref: ""):
-    return [g.token for g in WE.item_gaps(f"g{i}", mt(i), "team-back", "alive", server._wait_end_facts(), items_open, lambda a, b: a == b, now)]
+    return [g.token for g in WE.item_gaps(f"g{i}", mt(i), "team-back", "alive", _wait_fixes_svc._wait_end_facts(), items_open, lambda a, b: a == b, now)]
 def mark_all(i, toks, how="mark"):
     d = rd(i)
     for t in toks: (SF.mark if how == "mark" else SF.decline)(d["metadata"], SF.WAIT_END, t)
@@ -547,18 +548,18 @@ for label, i, line, kinds in (("a bare #n the item is anchored to", 9901, "team-
                               ("a machine the fleet view knows", 9902, "team-back: wait for hp-box to come back online", (WE.BOX,))):
     for p in (T / "store/g").glob("*.json"): p.unlink()
     item(i, line)
-    fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=server._wait_end_fix, wait_facts=EMPTY))
+    fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=EMPTY))
     check(f"9 setup ({label}): with an empty Facts the line is a wait-end question", [f["category"] for f in fs if f["id"].endswith(str(i))].count("wait-end") == 1, fs)
     tk = first_tokens(i, anch, kinds)
     check(f"9 setup: with the facts it was fixed under, the line has a token", len(tk) == 1, tk)
     mark_all(i, tk)
     wipe()
-    fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=server._wait_end_fix, wait_facts=EMPTY))
+    fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=EMPTY))
     check(f"9 {label}, marked, read with an empty Facts: no finding", not [f for f in fs if f["id"].endswith(str(i))], fs)
-    r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(wait_end=server._wait_end_fix, wait_facts=EMPTY))
+    r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=EMPTY))
     check(f"9 …and no message, no fix, nothing written", not [x for x in sent if str(i) in x[1]] and not r["wait_end"]["fixed"] and not mt(i).get("wait_kind") and not log(i), (sent, r.get("wait_end")))
     d = rd(i); d["metadata"].pop(SF.MARK); SF.decline(d["metadata"], SF.WAIT_END, tk[0]); (T / f"store/g/{i}.json").write_text(json.dumps(d))
-    fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=server._wait_end_fix, wait_facts=EMPTY))
+    fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=EMPTY))
     check(f"9 {label}, sent back by the mover, read with an empty Facts: no finding", not [f for f in fs if f["id"].endswith(str(i))], fs)
 
 print(f"{'FAILED' if fails else 'ok'}: wait end scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))

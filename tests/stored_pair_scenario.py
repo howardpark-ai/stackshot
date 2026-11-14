@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
 from stackshot.anchors import anchors as _anc
@@ -148,7 +149,7 @@ def surfaces(store, t, on):
         for g in opens:
             it = items[g]; probe = dict(it, gid=g)
             out[f"display {g}"] = json.dumps(SP.display_of(server, it, g, stored=on), sort_keys=True, ensure_ascii=False)
-            out[f"named {g}"] = "\n".join(server._next_names_lines(probe))
+            out[f"named {g}"] = "\n".join(_get_tool._next_names_lines(probe))
             out[f"wire {g}"] = json.dumps([server._item_list(probe), server._basis_wait_of(probe), server._wait_fields(g, it, ctx)], sort_keys=True, default=str)
         for k in ("team-back", "home-front", "home-other", "home-owner", OWN):
             out[f"items? {k}"] = server._client_items(k)[2]
