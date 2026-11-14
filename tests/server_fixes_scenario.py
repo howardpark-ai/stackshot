@@ -65,6 +65,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import update as _wt_update; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.service import store as _service_store
 from stackshot.web import answers as _web_answers
@@ -80,7 +81,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.front_sender = lambda who: False
 BACK = "team-back"
-def bupd(i, **kw): return server._update(f"a{i}", sender=BACK, **kw)
+def bupd(i, **kw): return _update_svc._update(f"a{i}", sender=BACK, **kw)
 def stamped(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
 local_day = lambda ts: dt.datetime.fromtimestamp(ts + ZONE_OFFSET, dt.timezone.utc).strftime("%Y-%m-%d")
 w2 = local_day(now0 + 2 * DAY)
@@ -145,7 +146,7 @@ check("1 …the record says what the pass did", [re.sub(r"\D", "", x) for x in r
 sent.clear()
 r2 = AR.filing_pass(now=now + 600, items={"a9031": rd(9031), "a9071": rd(9071)}, anchors={}, env=env(wake_park=server._wake_park))
 check("1 the next pass finds nothing to do and sends nothing", r2["findings"] == 0 and not sent, (r2, sent))
-server._update("a9031", sender="team-back", clear_hold=True, next="team-back: write the report now")
+_update_svc._update("a9031", sender="team-back", clear_hold=True, next="team-back: write the report now")
 check("1 clear_hold on the pass's park is the mover's no: recorded as declined", SF.declined(mt(9031), SF.WAKE_PARK, w9031) and not hd_(mt(9031)), mt(9031))
 back_ = dict([aitem(9031, nxt=f"team-back: at {w9031[-5:]} run the nightly check and report")])
 back_["a9031"]["metadata"]["wake"] = w9031; back_["a9031"]["metadata"]["fix_declined"] = {"wake_park": [w9031]}

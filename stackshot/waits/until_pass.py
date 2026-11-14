@@ -203,7 +203,7 @@ def reading(S: Any, gid: str, item: dict[str, Any]) -> dict[str, Any]:
     seen = copy.deepcopy(probe)
     S._legacy_hold(seen); S._legacy_needs(seen)                    # as _retire_reading reads it
     return {**S._retire_reading(gid, item), "held": bool(S._rmod.is_held(probe)), "stamp": list(S._stamp_values(gid, probe)), "date": _wt.until_of(probe.get("metadata") or {}),
-            "conflicts": sorted(S._model_of(seen).conflicts)}
+            "conflicts": sorted(S._item_read._model_of(seen).conflicts)}
 
 
 def same(r0: dict[str, Any], r1: dict[str, Any]) -> str:

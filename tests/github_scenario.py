@@ -244,6 +244,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.waits import waiting as _wt
 from stackshot.core import config as _cfg
@@ -299,7 +300,7 @@ def budget_back(b):
 check("[github] sync is off by default", not G.enabled() and not G.issue_ids())
 out = _wt_create._create(subject="[home] made with the mirror off", description=DESC, project="projects/alpha", owner="home-here", next="x")
 gid0 = re.search(r"created (\S+)", out).group(1); snap("s21 created")
-server._update(gid0, next="y", sender="home-here")
+_update_svc._update(gid0, next="y", sender="home-here")
 check("off: the item was created under the [ids] letter, nothing queued, nothing sent", gid0 == "s21" and qlen() == 0 and not F.log, (gid0, qlen(), F.log))
 B0 = render.Board(str(STORE)); U0 = ui_render.Board(str(STORE)); h0, p0, md0 = U0.html() + "".join(U0.routing_html(k) for k in U0.proj), U0.item_html("s12"), B0.markdown()      # the item lines live on the project pages, the home rows on the board
 check("off: the board writes old ids as before: a row's id a1 at /items/a1, the item page titled s12 with its after link a1, board.md **s12 · …**, no board# anywhere",
@@ -427,34 +428,34 @@ check("the issue link: with sync on but no issues_repo set an item page shows no
 _ghc["issues_repo"] = _repo
 # a change to anything the issue does not carry: stored, no job, no call at all
 log0 = len(F.log)
-server._update("s22", next="second step\nthird step", sender="home-here")
-server._update("s22", needs="none", sender="home-here")
-server._update("s22", hold=True, wake="2027-01-01", sender="home-here")
-server._update("s22", clear_hold=True, sender="home-here")
+_update_svc._update("s22", next="second step\nthird step", sender="home-here")
+_update_svc._update("s22", needs="none", sender="home-here")
+_update_svc._update("s22", hold=True, wake="2027-01-01", sender="home-here")
+_update_svc._update("s22", clear_hold=True, sender="home-here")
 _wt_complete.stackshot_confirm("s22", sender="home-here")
-server._update("s22", needs="decision", ask=ASK, options=OPTS, due="2026-12-24", sender="home-here")
-server._update("s22", work={"text": "migrating the ids"}, sender="home-here")
+_update_svc._update("s22", needs="decision", ask=ASK, options=OPTS, due="2026-12-24", sender="home-here")
+_update_svc._update("s22", work={"text": "migrating the ids"}, sender="home-here")
 m22 = rd("s", 22)["metadata"]
 check("a change of next, needs, a hold and a wake, the ask and options, the due date, a step status or a confirm is stored and queues no job; GitHub is not called at all",
       m22["next"] == "second step\nthird step\nhome-here: migrating the ids" and "decision" in m22["needs"] and m22["due"] == "2026-12-24" and m22["ask"] == ASK and not m22.get("hold") and qlen() == 0 and len(F.log) == log0, (m22, qlen(), F.log[log0:]))
 r = G.drain(GH, STORE, say=lambda s: None)
 check("…and a drain with nothing queued sends nothing", r == {"done": 0, "left": 0, "down": ""} and len(F.log) == log0 and issue(6)["labels"] == [] and not comments(6), (r, F.log[log0:]))
-server._update("s22", description=D("changed text"), sender="home-here")
+_update_svc._update("s22", description=D("changed text"), sender="home-here")
 job = json.loads(G.pending()[0].read_text())
 check("a changed description queues one job (kind changed, not urgent)", qlen() == 1 and job["kind"] == "changed" and job["gid"] == "s22" and not job["urgent"], job)
 r = G.drain(GH, STORE, say=lambda s: None)
 check("…and goes out as one PATCH of the issue, the new description in the body, no comment", r["done"] == 1 and writes()[-1:] == [("PATCH", REPO + "/issues/6")] and mine(6) == [("PATCH", REPO + "/issues/6")]
       and "- changed text" in issue(6)["body"] and not comments(6) and issue(6)["labels"] == [], (r, mine(6), issue(6)["body"][:120]))
-server._update("s22", subject="[home] renamed with the mirror on", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update("s22", subject="[home] renamed with the mirror on", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("a new subject is one more PATCH: the title follows, nothing else is sent", issue(6)["title"] == "[home] renamed with the mirror on" and len(mine(6)) == 2 and not comments(6), (issue(6)["title"], mine(6)))
-server._update("s22", description=D("changed text"), sender="home-here")
+_update_svc._update("s22", description=D("changed text"), sender="home-here")
 check("the same description written again is no change of the issue: no job", qlen() == 0 and len(mine(6)) == 2, (qlen(), mine(6)))
 _wt_complete.stackshot_complete("s22", outcome="done", reason="it shipped", outcome_text="- Shipped and in use", sender="home-here"); job = json.loads(G.pending()[0].read_text()); G.drain(GH, STORE, say=lambda s: None)
 check("a close: urgent, the issue closed as completed; its body is the description the item keeps and then an Outcome section with the outcome text, no comment, no label",
       job["urgent"] is True and issue(6)["state"] == "closed" and issue(6)["state_reason"] == "completed" and "- changed text" in issue(6)["body"]
       and "\n\n## Outcome\n\n- Shipped and in use\n\n<sub>Mirrored from" in issue(6)["body"] and issue(6)["body"].index("- changed text") < issue(6)["body"].index("## Outcome")
       and "it shipped" not in issue(6)["body"] and not comments(6) and issue(6)["labels"] == [], (job, issue(6)))
-server._update("s22", status="open", next="again", sender="home-here"); job = json.loads(G.pending()[0].read_text()); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update("s22", status="open", next="again", sender="home-here"); job = json.loads(G.pending()[0].read_text()); G.drain(GH, STORE, say=lambda s: None)
 check("a reopen is urgent too and reopens the issue; the reason of the close is not on it, and the Outcome section is gone from the body", job["urgent"] is True and issue(6)["state"] == "open" and not comments(6)
       and "## Outcome" not in issue(6)["body"] and "Shipped and in use" not in issue(6)["body"] and "- changed text" in issue(6)["body"], (job, issue(6)["state"], issue(6)["body"][:200]))
 _bo = lambda st, **meta: G.body_of("s22", {"subject": "[home] x", "description": "- Kept background\n- It lives here", "status": st, "metadata": meta})
@@ -480,7 +481,7 @@ def made(subject, **kw):
     out = _wt_create._create(subject=subject, description=DESC, project="projects/alpha", owner="home-here", next="x", **kw)
     g = re.search(r"created (\S+)", out).group(1); G.drain(GH, STORE, say=lambda s: None); return g, G.issue_of(g, STORE)
 # the confirmed pin: an item woken without a `confirmed` field gets one, and nothing goes to GitHub
-g_pin, n_pin = made("[home] held without a confirm"); server._update(g_pin, hold=True, wake="2099-01-01", sender="home-here")
+g_pin, n_pin = made("[home] held without a confirm"); _update_svc._update(g_pin, hold=True, wake="2099-01-01", sender="home-here")
 f_pin = STORE / g_pin[0] / f"{g_pin[1:]}.json"; j = json.loads(f_pin.read_text()); j.pop("confirmed", None); j["metadata"]["until"] = "2020-01-01"; f_pin.write_text(json.dumps(j))
 log0 = len(F.log); wakes_svc.wake_pass(); G.drain(GH, STORE, say=lambda s: None)
 check("a wake that also pins `confirmed` (a re-confirm) is stored and sends nothing", "confirmed" in rd(g_pin[0], int(g_pin[1:])) and rd(g_pin[0], int(g_pin[1:]))["metadata"].get("hold") is None
@@ -494,7 +495,7 @@ check("the last `after` closing releases the item (stored) and the one that stil
       and writes()[w_before:] == [("PATCH", REPO + "/issues/2")] and issue(2)["state"] == "closed" and issue(2)["state_reason"] == "completed" and not comments(n_rel) and not comments(n_two) and not comments(2),
       (writes()[w_before:], comments(n_rel), comments(n_two)))
 # an anchor release: a held item scoped to an anchor, released by its notice
-g_anc, n_anc = made("[home] waits on an anchor"); server._update(g_anc, hold=True, wake="2099-01-01", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+g_anc, n_anc = made("[home] waits on an anchor"); _update_svc._update(g_anc, hold=True, wake="2099-01-01", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 from stackshot.anchors import anchors as _anc
 ANCHOR = "https://github.com/o/other/pull/9"; ast = _anc.load(); _anc.add(ast, "projects/alpha", [ANCHOR], [g_anc], "home-here"); _anc.save(ast)
 log0 = len(F.log)
@@ -502,8 +503,8 @@ rel = wakes_svc.anchor_release("projects/alpha", {"kind": "anchor", "anchor": AN
 G.drain(GH, STORE, say=lambda s: None)
 check("an anchor's notice releases the hold (stored); nothing is sent", rel == [g_anc] and rd(g_anc[0], int(g_anc[1:]))["metadata"].get("hold") is None and len(F.log) == log0 and not comments(n_anc), (rel, F.log[log0:]))
 # a recycle done: one item waiting for it, one whose hold waited only for it
-g_rc, n_rc = made("[home] waits for a recycle"); server._update(g_rc, recycle=True, sender="home-here")
-g_rh, n_rh = made("[home] held for a recycle"); server._update(g_rh, recycle=True, sender="home-here"); server._update(g_rh, hold=True, sender="home-here")
+g_rc, n_rc = made("[home] waits for a recycle"); _update_svc._update(g_rc, recycle=True, sender="home-here")
+g_rh, n_rh = made("[home] held for a recycle"); _update_svc._update(g_rh, recycle=True, sender="home-here"); _update_svc._update(g_rh, hold=True, sender="home-here")
 G.drain(GH, STORE, say=lambda s: None); log0 = len(F.log)
 r = server._recycled("testbox", "recycle", 0, "ok", []); G.drain(GH, STORE, say=lambda s: None)
 check("a recycle done clears the waits and releases the held one (stored); nothing is sent", sorted(r["cleared"]) == sorted([g_rc, g_rh]) and len(F.log) == log0 and not comments(n_rc) and not comments(n_rh)
@@ -532,9 +533,9 @@ check("the mirror has posted no comment on any issue so far", all(not i["_commen
 
 # ---- 3d. step statuses: a change to a step's status is not on the issue (no comment, no call); History reads it from the store's git
 g_w, n_w = made("[home] with step statuses"); snap("work item"); owed_w = _web_page_debts._owed_load(); log_w = len(F.log)
-server._update(g_w, work={"text": "migrating the ids"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work defined")
-server._update(g_w, work={"text": "PR 83 up", "state": "in progress"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work in progress")
-server._update(g_w, work={"state": "done"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work done")
+_update_svc._update(g_w, work={"text": "migrating the ids"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work defined")
+_update_svc._update(g_w, work={"text": "PR 83 up", "state": "in progress"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work in progress")
+_update_svc._update(g_w, work={"state": "done"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work done")
 stw = [x for x in rd(g_w[0], int(g_w[1:]))["metadata"]["steps"] if x["text"].endswith("migrating the ids")]
 check("a step status set, changed and marked done: one step, stored with its status, no job, no call, no comment (the issue's body and labels as they were)",
       len(stw) == 1 and stw[0]["status"] == "done" and stw[0]["tag"]["text"] == "PR 83 up" and stw[0]["tag"]["state"] == "done" and "work" not in rd(g_w[0], int(g_w[1:]))["metadata"]
@@ -559,7 +560,7 @@ def _spy_replace(src, dst):
     _replaced.append((s_, d_, seen, s_.read_text(encoding="utf-8")))
     return _real_replace(src, dst)
 F.down = True; n_out = F.next
-out = server._update("g1", description=D("while GitHub is down"), sender="home-here")
+out = _update_svc._update("g1", description=D("while GitHub is down"), sender="home-here")
 check("the tool answers as always while GitHub is down", out.startswith("updated board#1."), out[:80])
 _q0 = G.pending()[0]; os.replace = _spy_replace
 try:
@@ -597,12 +598,12 @@ g_lost = re.search(r"created (\S+)", out).group(1)
 G.drain(GH, STORE, say=lambda s: None)
 n_lost = G.issue_of(g_lost, STORE)
 mp = G.load_map(STORE); mp["issues"].pop(g_lost); G.save_map(mp, STORE)
-server._update(g_lost, description=D("answer lost y"), sender="home-here")
+_update_svc._update(g_lost, description=D("answer lost y"), sender="home-here")
 p = G.pending()[0]; j = json.loads(p.read_text()); j["tried"] = 1; p.write_text(json.dumps(j))
 r = G.drain(GH, STORE, say=lambda s: None)
 check("a job tried before looks for its marker first: the issue is found, none made twice", r["done"] == 1 and F.next == n_lost + 1 and G.issue_of(g_lost, STORE) == n_lost and "- answer lost y" in issue(n_lost)["body"], (r, F.next, n_lost))
 F.refuse_next = 422
-server._update(g_lost, description=D("refused"), sender="home-here")
+_update_svc._update(g_lost, description=D("refused"), sender="home-here")
 _replaced.clear(); os.replace = _spy_replace
 try:
     r = G.drain(GH, STORE, say=lambda s: None)
@@ -626,7 +627,7 @@ check("reads are not paced: a listing of 100 per page asked for state=all", any(
 
 # the worker thread (the server starts it at boot): a job drains on its own, without a drain() call
 stop = threading.Event(); th = threading.Thread(target=G.worker_loop, args=(stop,), daemon=True); th.start()
-server._update("g1", description=D("through the worker"), sender="home-here")
+_update_svc._update("g1", description=D("through the worker"), sender="home-here")
 for _ in range(100):
     if qlen() == 0 and "through the worker" in issue(1)["body"]: break
     time.sleep(0.05)
@@ -638,7 +639,7 @@ stop.set(); G._EVENT.set(); th.join(timeout=2)
 check("a call's X-RateLimit headers are kept: the newest in memory and <state>/github/ratelimit.json",
       G.rate_seen().get("limit") == 5000 and G.rate_seen().get("resource") == "core" and json.loads(G._cfg.state("github", G.RATE_NAME).read_text())["core"]["limit"] == 5000, (G.rate_seen(), ))
 F.ratelimit = True
-server._update("g1", description=D("meets the limit"), sender="home-here")
+_update_svc._update("g1", description=D("meets the limit"), sender="home-here")
 r = G.drain(GH, STORE, say=lambda s: None)
 check("a drain that meets the limit hands the reset back as retry_after (about 60 s), and the headers of the 403 are recorded",
       r["down"] and 30 < r.get("retry_after", 0) <= 61 and G.rate_seen().get("status") == 403 and G.rate_seen().get("remaining") == 0, (r, G.rate_seen()))
@@ -656,7 +657,7 @@ check("wait_rate_limit: a stop event ends the wait at once", waited < 1 and rm.l
 check("a primary limit (remaining 0, no Retry-After, core) is marked primary in the drain's answer", r.get("primary") is True, r)
 # a secondary limit (Retry-After) is not a primary one: the full time is waited whatever the core bucket says
 F.ratelimit = False; F.secondary = True
-sec = server._update("g1", description=D("meets a secondary limit"), sender="home-here")
+sec = _update_svc._update("g1", description=D("meets a secondary limit"), sender="home-here")
 r2 = G.drain(GH, STORE, say=lambda s: None)
 check("a 403 with Retry-After is not primary: retry_after is GitHub's 1 s and primary False", r2.get("primary") is False and r2.get("retry_after") == 1.0, r2)
 F.secondary = False
@@ -745,7 +746,7 @@ check("get takes board#<n>", _wt_get.stackshot_get(f"board#{nxt}").startswith(f"
 r = G.drain(GH, STORE, say=lambda s: None)
 check("the queued create then only brings the body up (the marker), no comment", r["done"] == 1 and f"<!-- stackshot:g{nxt} -->" in issue(nxt)["body"] and not comments(nxt), (r, issue(nxt)["body"][:60], comments(nxt)))
 check("the [ids] letter sequence was not touched", (STORE / "next-id").read_text().strip() == seq, (STORE / "next-id").read_text())
-server._update(f"#{nxt}", description=D("by the bare form"), sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update(f"#{nxt}", description=D("by the bare form"), sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("update by #<n>: the body follows, no comment", "- by the bare form" in issue(nxt)["body"] and not comments(nxt), (issue(nxt)["body"][-80:], comments(nxt)))
 
 # ---- 6. a create during an outage (the item phase 2 prep): a local id, queued, re-keyed to its issue number when GitHub answers
@@ -779,7 +780,7 @@ check("a bare l1 in a reply is written and linked as board-tmp-boxa#1; a written
 out2 = _wt_create._create(subject="[home] waits on the first", description=DESC, project="projects/alpha", owner="home-here", next="x", after="board-tmp-boxa#1")
 check("a second one is l2, and its after, given as board-tmp-boxa#1, names l1", out2.startswith("created board-tmp-boxa#2 — ") and rd("l", 2)["metadata"]["after"] == ["l1"]
       and G.load_map(STORE)["local_last"] == 2, (out2[:80], rd("l", 2)["metadata"]))
-server._update("board-tmp-boxa#1", description=D("edited while down"), sender="home-here")
+_update_svc._update("board-tmp-boxa#1", description=D("edited while down"), sender="home-here")
 ast = _anc.load(); _anc.add(ast, "projects/alpha", ["https://github.com/o/other/issues/19"], ["l1"], "home-here"); _anc.save(ast)
 with TestClient(server.mcp.http_app()) as c:
     r1 = c.get("/items/board-tmp-boxa-1", follow_redirects=False); r0 = c.get("/items/l1", follow_redirects=False)
@@ -861,7 +862,7 @@ told = []; telling.tell_woken = lambda gid, owner, note, tag="wake": told.append
 num = lambda g: int(g[1:])
 mk = lambda subject, **kw: G.norm(made(subject, **kw)[0])   # the reply says board#<n>; the store id is g<n>
 # a wake: an item on hold whose wake has come
-g_wk = mk("[home] held until a wake"); server._update(g_wk, hold=True, wake="2099-01-01", sender="home-here")
+g_wk = mk("[home] held until a wake"); _update_svc._update(g_wk, hold=True, wake="2099-01-01", sender="home-here")
 f_wk = STORE / g_wk[0] / f"{g_wk[1:]}.json"; j = json.loads(f_wk.read_text())      # the wake come, and a session in needs (the notice with a link)
 j["metadata"].update(until="2020-01-01", needs=["home-other"], mover="home-here"); f_wk.write_text(json.dumps(j))
 told.clear(); wakes_svc.wake_pass(); G.drain(GH, STORE, say=lambda s: None)
@@ -906,8 +907,8 @@ check("a move to decision on a non-front owner's item tells the owner, unmarked,
       and told_dec_n[0][2].startswith(f"[stackshot] board#{num(g_own)} now needs the owner's call (ask: pick one), set by home-other: ") and _wt_text._FOR_OWNER not in told_dec_n[0][2]
       and said_n == "\n(its mover home-here has been told)" and heard_n == [_web_page_debts._session_id("home-here")], (told_dec_n, said_n, heard_n))
 # a recycle done: two items waiting for it, one held only for it
-g_r1 = mk("[home] waits for a recycle too"); server._update(g_r1, recycle=True, sender="home-here")
-g_r2 = mk("[home] held for a recycle too"); server._update(g_r2, recycle=True, sender="home-here"); server._update(g_r2, hold=True, sender="home-here")
+g_r1 = mk("[home] waits for a recycle too"); _update_svc._update(g_r1, recycle=True, sender="home-here")
+g_r2 = mk("[home] held for a recycle too"); _update_svc._update(g_r2, recycle=True, sender="home-here"); _update_svc._update(g_r2, hold=True, sender="home-here")
 G.drain(GH, STORE, say=lambda s: None); told.clear()
 server._recycled("testbox", "recycle", 0, "ok", []); G.drain(GH, STORE, say=lambda s: None)
 rc = [t for t in told if t[3] == "recycle"]
@@ -1044,7 +1045,7 @@ check("ref: an issue-numbered item is #<n>, an alias resolves to its issue, an i
       G.ref(g_first) == f"#{n_first}" and G.ref("l1") == f"#{n1}" and G.ref("l7") == "board-tmp-boxa#7" and G.ref("a1") == "#1", (G.ref(g_first), G.ref("l1"), G.ref("l7"), G.ref("a1")))
 # the body: marker, description, footer, whatever else the item holds
 g_d = mk("[home] a choice for Oliver"); n_d = G.issue_of(g_d, STORE)
-server._update(g_d, needs="decision", ask=ASK, options=OPTS, next="pick one", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update(g_d, needs="decision", ask=ASK, options=OPTS, next="pick one", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 b_dec = issue(n_d)["body"]
 check("an item that waits on his decision shows the issue nothing of it: no Ask, no Options, no Next in the body, and the change made no job", "###" not in b_dec and ASK not in b_dec and "pick one" not in b_dec and "Ship it now" not in b_dec and qlen() == 0, b_dec[-300:])
 full = {"subject": "[home] full", "description": DESC, "status": "open", "metadata": {"next": "a step", "needs": ["decision", "home-other"], "ask": ASK, "options": OPTS, "hold": True, "wake": "2027-01-01", "due": "2026-10-20", "project": "projects/alpha", "owner": OWNER,
@@ -1091,7 +1092,7 @@ check("the resync queues one background job per stale issue, and sends nothing b
 fired = []; _sleep = GH.sleep
 def _live_once(w):
     if not fired:
-        fired.append(1); server._update(g_d, description=D("a live write during the sweep"), sender="home-here")
+        fired.append(1); _update_svc._update(g_d, description=D("a live write during the sweep"), sender="home-here")
     _sleep(w)
 GH.sleep = _live_once; _pace = GH.pace; GH.pace = 0.3     # the second write of the sweep surely waits on the pacer: the live write comes in there
 r1 = G.drain(GH, STORE, say=lambda s: None); GH.sleep = _sleep; GH.pace = _pace
@@ -1112,7 +1113,7 @@ check("the queue is empty after the resync", qlen() == 0, G.pending())
 syn = G._synced(); syn[stale_ids[0]] = "a body of the old form"; G._save_synced(syn)
 check("a forced resync queues the one stale issue", G.resync_bodies(STORE, say=lambda s: None, force=True) == 1 and qlen() == 1, G.pending())
 _budget = GH.budget; GH.budget = GH.recent_writes() + 4          # four writes left this hour: inside the reserve (a quarter of the budget, at least one)
-server._update(g_d, description=D("a live write with the hour nearly spent"), sender="home-here")
+_update_svc._update(g_d, description=D("a live write with the hour nearly spent"), sender="home-here")
 r3 = G.drain(GH, STORE, say=lambda s: None)
 check("with the hour's budget down to the reserve, the live write drains and the background job waits for a later tick",
       r3["left"] == 1 and G.pending()[0].name.startswith(G.BACKGROUND) and "a live write with the hour nearly spent" in issue(n_d)["body"], (r3, [p.name for p in G.pending()]))
@@ -1124,7 +1125,7 @@ F.log.clear()
 G.enqueue({"ts": time.time(), "gid": g_d, "kind": "fields"}, background=True); G.enqueue({"ts": time.time(), "gid": g_d, "kind": "labels"}, background=True)
 r = G.drain(GH, STORE, say=lambda s: None)
 check("a typed-field or label job an older version queued is dropped unread: no call", r["done"] == 2 and qlen() == 0 and not F.log, (r, F.log))
-server._update(g_d, description=D("a legacy job"), sender="home-here")
+_update_svc._update(g_d, description=D("a legacy job"), sender="home-here")
 q_ = G.pending()[0]; j_ = json.loads(q_.read_text()); j_.update(comment="[author: home-here · x]\nnext edited\n\nlegacy", parts=["next"], textonly=True, author="home-here · x"); q_.write_text(json.dumps(j_))
 F.log.clear(); r = G.drain(GH, STORE, say=lambda s: None)
 check("a job an older version queued with a comment still brings the issue up, with one PATCH, and posts no comment", r["done"] == 1 and mine(n_d) == [("PATCH", REPO + f"/issues/{n_d}")] and "a legacy job" in issue(n_d)["body"] and not comments(n_d), (r, mine(n_d), comments(n_d)))
@@ -1170,9 +1171,9 @@ U = lambda n: f"11111111-1111-4111-8111-{n:012d}"
 OWN = _core_instance.OWNER; LINK = lambda n, k: f"https://board.example.org/items/{n}#said-{k}"
 said_of = lambda g: json.loads((STORE / g[0] / f"{g[1:]}.json").read_text())["metadata"].get("said") or []
 g_t = mk("[home] the trailers"); n_t = G.issue_of(g_t, STORE); F.log.clear()
-server._update(g_t, next="first step", sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("before the trailers")   # a git version without his words, for section 7's fallback
+_update_svc._update(g_t, next="first step", sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("before the trailers")   # a git version without his words, for section 7's fallback
 # a checked Acked-by, Remote Control style (origin human, promptSource queued)
-out = server._update(g_t, next="ship it", sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(1)}]); r = G.drain(GH, STORE, say=lambda s: None)
+out = _update_svc._update(g_t, next="ship it", sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(1)}]); r = G.drain(GH, STORE, say=lambda s: None)
 e1 = said_of(g_t)
 check("a checked Acked-by (Remote Control: origin human, promptSource queued): stored with the quote, the session's uuid, the message's uuid and clock, checked, the promptSource for the record, the sender",
       len(e1) == 1 and e1[0] == {"tag": "Acked-by", "quote": "ok, acked-by it is", "session": OWNER, "msg": U(1), "ts": calendar.timegm((2026, 6, 16, 9, 52, 0)), "checked": True, "prompt_source": "queued", "by": OWNER}, e1)
@@ -1186,7 +1187,7 @@ check("the item page: the History line of that write carries the tag 'Acked-by <
 check("…the entry's bullet is the next text alone", '<div class="eb">next: ship it' in p_t, re.findall(r'<div class="eb">.*?</div>', p_t, re.S))
 check("get shows the entry: the tag, the session, the time, checked, the quote", f"Acked-by: {OWN} · home-here · {MSG_AT} · checked · “ok, acked-by it is”" in _wt_get.stackshot_get(g_t), _wt_get.stackshot_get(g_t))
 # a typed one; whitespace aside the quote must be verbatim
-server._update(g_t, sender="home-here", said=[{"tag": "Suggested-by", "quote": "do the second one too   and the third", "msg": U(2)}]); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update(g_t, sender="home-here", said=[{"tag": "Suggested-by", "quote": "do the second one too   and the third", "msg": U(2)}]); G.drain(GH, STORE, say=lambda s: None)
 e2 = said_of(g_t)
 check("a typed one, the quote spanning the message's line break (whitespace collapsed on both sides): checked, promptSource typed; appended after the first",
       len(e2) == 2 and e2[0] == e1[0] and e2[1]["checked"] and e2[1]["prompt_source"] == "typed" and e2[1]["tag"] == "Suggested-by", e2)
@@ -1195,44 +1196,44 @@ check("…the page classes that line ev-said", f'<li class="ev ev-said"><div cla
 # refusals: a readable transcript that fails the check refuses the write, naming the entry and the test; nothing is stored or queued
 k_q, k_c = len(said_of(g_t)), len(comments(n_t))
 S = lambda **kw: [{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(1), **kw}]
-refused("a quote not in the message is refused, naming the test", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is not", "msg": U(1)}]),
+refused("a quote not in the message is refused, naming the test", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is not", "msg": U(1)}]),
         "Refused: said[0] (Acked-by): the quote is not in the message", "cut verbatim", U(1))
-refused("a peer-origin message (another pane's relay) is refused: not his own", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(3)}]),
+refused("a peer-origin message (another pane's relay) is refused: not his own", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(3)}]),
         f"not {OWN}'s own", "its origin is peer, not human")
-refused("an isMeta entry is refused", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "something meta", "msg": U(6)}]), f"not {OWN}'s own", "meta entry")
-refused("a message that starts with sala's marker on a line of its own is refused as injected text", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "Go.", "msg": U(4)}]),
+refused("an isMeta entry is refused", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "something meta", "msg": U(6)}]), f"not {OWN}'s own", "meta entry")
+refused("a message that starts with sala's marker on a line of its own is refused as injected text", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "Go.", "msg": U(4)}]),
         "text a tool typed into the pane", "it starts with the marker '<!-- sala -->' ([said] injected_marker)")
-refused("…the marker first with whitespace around it too", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "indented marker", "msg": U(14)}]), "it starts with the marker '<!-- sala -->'")
-refused("…and sala's one-line form, the marker then a space then the brief (salamander's form)", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "Carry on.", "msg": U(15)}]),
+refused("…the marker first with whitespace around it too", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "indented marker", "msg": U(14)}]), "it starts with the marker '<!-- sala -->'")
+refused("…and sala's one-line form, the marker then a space then the brief (salamander's form)", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "Carry on.", "msg": U(15)}]),
         "it starts with the marker '<!-- sala -->'")
 check("with no [said] injected_marker no marker is looked for (the stopgaps still apply)", _said.injected("<!-- sala -->\nHandle the queue item.", (), (), "") == ""
       and _said.injected("<!-- sala -->\nHandle the queue item.", (), (), "<!-- sala -->") != "" and _said.injected("[auto-note] x", ("[auto-note]",), (), "") != "")
-refused("an injected prefix ([said] injected_prefixes, the stopgap for messages before the marker) is refused as injected text", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "Go ahead.", "msg": U(5)}]),
+refused("an injected prefix ([said] injected_prefixes, the stopgap for messages before the marker) is refused as injected text", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "Go ahead.", "msg": U(5)}]),
         "text a tool typed into the pane", "'[auto-note]'", "injected_prefixes")
-refused("an injected phrase ([said] injected_phrases, spawn's wording, the other stopgap) anywhere in the text is refused too", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "Carry on.", "msg": U(16)}]),
+refused("an injected phrase ([said] injected_phrases, spawn's wording, the other stopgap) anywhere in the text is refused too", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "Carry on.", "msg": U(16)}]),
         "text a tool typed into the pane", "'pasted by the relay tool'", "injected_phrases")
-refused("a claude -p turn (no origin, promptSource sdk) is refused by the origin rule: not his", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "curate it.", "msg": U(17)}]),
+refused("a claude -p turn (no origin, promptSource sdk) is refused by the origin rule: not his", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "curate it.", "msg": U(17)}]),
         f"not {OWN}'s own", "it has no human origin")
-refused("an unknown uuid is refused: no such message in the transcript", lambda: server._update(g_t, sender="home-here", said=S(msg=U(99))), f"no message {U(99)} in the transcript of home-here")
-refused("a tool result is refused", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(7)}]), f"not {OWN}'s own", "it is a tool result")
-refused("an assistant entry is refused", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "an assistant line", "msg": U(10)}]), "not a user message")
-refused("an invalid tag is refused", lambda: server._update(g_t, sender="home-here", said=S(tag="Signed-off-by")), "Refused: said[0]: tag must be one of Acked-by | Suggested-by | Reported-by", "'Signed-off-by'")
-refused("a missing quote is refused for every tag", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "  ", "msg": U(1)}]), "said[0] (Reported-by): quote is required", "verbatim")
-refused("a missing msg is refused", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "x"}]), "said[0] (Reported-by): msg is required", "uuid")
-refused("a msg that is not a uuid is refused", lambda: server._update(g_t, sender="home-here", said=S(msg="home-here")), "msg must be the message's uuid")
-refused("an unknown key is refused", lambda: server._update(g_t, sender="home-here", said=S(text="x")), "unknown key text")
-refused("said that is not a list of objects is refused with the form", lambda: server._update(g_t, sender="home-here", said="ok, acked-by it is"), "not valid JSON", "said=[{tag")
+refused("an unknown uuid is refused: no such message in the transcript", lambda: _update_svc._update(g_t, sender="home-here", said=S(msg=U(99))), f"no message {U(99)} in the transcript of home-here")
+refused("a tool result is refused", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(7)}]), f"not {OWN}'s own", "it is a tool result")
+refused("an assistant entry is refused", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "an assistant line", "msg": U(10)}]), "not a user message")
+refused("an invalid tag is refused", lambda: _update_svc._update(g_t, sender="home-here", said=S(tag="Signed-off-by")), "Refused: said[0]: tag must be one of Acked-by | Suggested-by | Reported-by", "'Signed-off-by'")
+refused("a missing quote is refused for every tag", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "  ", "msg": U(1)}]), "said[0] (Reported-by): quote is required", "verbatim")
+refused("a missing msg is refused", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "x"}]), "said[0] (Reported-by): msg is required", "uuid")
+refused("a msg that is not a uuid is refused", lambda: _update_svc._update(g_t, sender="home-here", said=S(msg="home-here")), "msg must be the message's uuid")
+refused("an unknown key is refused", lambda: _update_svc._update(g_t, sender="home-here", said=S(text="x")), "unknown key text")
+refused("said that is not a list of objects is refused with the form", lambda: _update_svc._update(g_t, sender="home-here", said="ok, acked-by it is"), "not valid JSON", "said=[{tag")
 check("a refused write stored nothing, queued nothing and posted nothing", len(said_of(g_t)) == k_q and len(comments(n_t)) == k_c and qlen() == 0, (len(said_of(g_t)), len(comments(n_t)), qlen()))
 # not refused: the marker mentioned further down or quoted below the first line is his; promptSource never decides
-server._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "is mentioned here, by me", "msg": U(8)}, {"tag": "Reported-by", "quote": "is not the first line", "msg": U(11)}]); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "is mentioned here, by me", "msg": U(8)}, {"tag": "Reported-by", "quote": "is not the first line", "msg": U(11)}]); G.drain(GH, STORE, say=lambda s: None)
 check("the marker mentioned mid-text in his message, or quoted on a later line, is not injected text (only a message that STARTS with it is): both checked", [x["checked"] for x in said_of(g_t)[-2:]] == [True, True], said_of(g_t)[-2:])
-server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "no promptSource at all", "msg": U(9)}, {"tag": "Acked-by", "quote": "from the sdk", "msg": U(13)},
+_update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "no promptSource at all", "msg": U(9)}, {"tag": "Acked-by", "quote": "from the sdk", "msg": U(13)},
                                              {"tag": "Suggested-by", "quote": "parts: ship it as it is", "msg": U(12)}]); G.drain(GH, STORE, say=lambda s: None)
 check("promptSource is recorded for the audit only and never decides: an entry without one and an sdk one are checked like a typed one, their value as found; text parts are joined for the quote",
       [(x["checked"], x["prompt_source"]) for x in said_of(g_t)[-3:]] == [(True, ""), (True, "sdk"), (True, "queued")], said_of(g_t)[-3:])
 check("the stored entries accumulate, never dropped, each at its position", len(said_of(g_t)) == 7 and said_of(g_t)[0] == e1[0] and said_of(g_t)[1] == e2[1], [x["msg"] for x in said_of(g_t)])
 # a missing transcript (a cloud session, another machine): stored unchecked, never refused, shown so
-out = server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "said in the cloud", "msg": U(31), "session": "cse_01ABC"}]); G.drain(GH, STORE, say=lambda s: None)
+out = _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "said in the cloud", "msg": U(31), "session": "cse_01ABC"}]); G.drain(GH, STORE, say=lambda s: None)
 e8 = said_of(g_t)[-1]
 check("a session with no transcript on this box (cse_…): stored unchecked with why, the session as given, no clock, no promptSource",
       e8["checked"] is False and e8["session"] == "cse_01ABC" and e8["ts"] == 0 and e8["prompt_source"] == "" and e8["why"] == "no transcript for this session on this box" and e8["quote"] == "said in the cloud", e8)
@@ -1244,7 +1245,7 @@ check("…and the page's tag itself reads 'Acked-by <owner> · unchecked', with 
       re.findall(r'<details class="said" id="said-8".*?</details>', p_t))   # a cloud session has no pane: its name is text, as any session's without a live pane
 check("…get says unchecked", f"Acked-by: {OWN} · cse_01ABC · unchecked · “said in the cloud”" in _wt_get.stackshot_get(g_t), _wt_get.stackshot_get(g_t))
 # relayed: his words reached the writer through another session; session names where he said it (a pane name, resolved to its transcript)
-server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21), "session": "home-front"}]); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21), "session": "home-front"}]); G.drain(GH, STORE, say=lambda s: None)
 e9 = said_of(g_t)[-1]
 check("relayed: session=home-front (a pane name) resolves to that pane's transcript uuid, the message is found there (under the second configured root): checked, the front session stored, the sender as by",
       e9["checked"] and e9["session"] == FRONT and e9["by"] == OWNER and e9["ts"] == calendar.timegm((2026, 6, 16, 9, 57, 0)), e9)
@@ -1259,13 +1260,13 @@ for sv_ in ("", "https://sala.example.org/#s={name}"):
     check(f"no Discuss button: with [client] session_view {'set' if sv_ else 'unset'}, an open item's page and a completed one draw no idiscuss link, no #side= address and no Discuss text",
           all("idiscuss" not in p_ and "#side=" not in p_ and "Discuss" not in p_ for p_ in pg_d.values()), {t_: ("idiscuss" in p_, "#side=" in p_) for t_, p_ in pg_d.items()})
 _cfg.CFG["client"]["session_view"] = ""
-refused("relayed with the wrong session: the message is not in that transcript", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21)}]), f"no message {U(21)} in the transcript of home-here")
-server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21), "session": FRONT}]); G.drain(GH, STORE, say=lambda s: None)
+refused("relayed with the wrong session: the message is not in that transcript", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21)}]), f"no message {U(21)} in the transcript of home-here")
+_update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21), "session": FRONT}]); G.drain(GH, STORE, say=lambda s: None)
 check("…session given as the transcript uuid itself works the same", said_of(g_t)[-1]["checked"] and said_of(g_t)[-1]["session"] == FRONT, said_of(g_t)[-1])
-server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "said on another box", "msg": U(41), "session": "home-elsewhere"}]); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "said on another box", "msg": U(41), "session": "home-elsewhere"}]); G.drain(GH, STORE, say=lambda s: None)
 check("a session name no live pane carries (another machine): stored unchecked under the name as given", said_of(g_t)[-1]["checked"] is False and said_of(g_t)[-1]["session"] == "home-elsewhere", said_of(g_t)[-1])
 # the parameter as a JSON string (a client whose cached schema sends it as text) and as one object
-server._update(g_t, sender="home-here", said=json.dumps({"tag": "acked-by", "quote": "ok, acked-by it is", "msg": U(1)})); G.drain(GH, STORE, say=lambda s: None)
+_update_svc._update(g_t, sender="home-here", said=json.dumps({"tag": "acked-by", "quote": "ok, acked-by it is", "msg": U(1)})); G.drain(GH, STORE, say=lambda s: None)
 check("said as a JSON string of one object, the tag in any case: parsed, the tag stored in its canonical spelling", said_of(g_t)[-1]["tag"] == "Acked-by" and said_of(g_t)[-1]["checked"], said_of(g_t)[-1])
 # all three tags in one write, on a create and on a complete
 out = _wt_create._create(subject="[home] born with his words", description=DESC, project="projects/alpha", owner="home-here", next="x",
@@ -1293,7 +1294,7 @@ for bad in ({"message": "Moved Permanently", "url": f"{API}/repositories/1/issue
 check("an answer with the number reads as before", G._issue_number({"number": 5}) == 5)
 # the edit path: the issue's PATCH is answered with a redirect
 F.moved = True; F.moved_only = f"/issues/{n_mv}"; F.log.clear()
-server._update(g_mv, description=D("edited while the repo moves"), sender="home-here")
+_update_svc._update(g_mv, description=D("edited while the repo moves"), sender="home-here")
 err_mv = _io.StringIO()
 with _ctx.redirect_stderr(err_mv):
     r_mv = G.drain(GH, STORE, say=lambda s: None)
@@ -1347,7 +1348,7 @@ refused("with the mirror off there is no queue to carry the create, so an outage
         lambda: _wt_create._create(subject="[home] no queue", description=DESC, project="projects/alpha", owner="home-here", next="x"), "GitHub did not answer", "issue_ids")
 F.down = False
 write_toml(sync=False, issue_ids=False); _cfg.reload(); F.log.clear()
-server._update(f"g{n1}", hold=True, wake="2026-12-01", sender="home-here")
+_update_svc._update(f"g{n1}", hold=True, wake="2026-12-01", sender="home-here")
 import datetime as _dt
 woke = wakes_svc.wake_pass(_dt.date(2027, 1, 1))
 check("the issue link: the mirror turned off again, the item's page shows none", not G.enabled() and ghl(ui_render.Board(str(STORE)).item_html(f"g{n1}")) == [],
@@ -1385,14 +1386,14 @@ check("create: g<n> in subject, description, next and the options is stored as b
       dw["subject"] == f"[home] follow up {nk}" and dw["description"] == f"- Waits on {nk}\n- Not `{gk}`, nor g999\n- Finished when it works"
       and dw["metadata"]["next"] == f"ping {nk} owner" and dw["metadata"]["options"][0]["label"] == f"After {nk}" and dw["metadata"]["options"][0]["line"] == f"Wait for {nk} to close", dw)
 check("create: the reply echoes the shown form, never the store id", nk in out and not re.search(rf"(?<![\w#/`-]){gk}(?![\w`])", out), out[:600])
-out = server._update(gw, next=f"after {gk} closes", description=f"- Now waits on {gk}\n- It lives here\n- Done when it works", subject=f"[home] after {gk}",
+out = _update_svc._update(gw, next=f"after {gk} closes", description=f"- Now waits on {gk}\n- It lives here\n- Done when it works", subject=f"[home] after {gk}",
                      ask=f"Decide: whether to wait on {gk} · Recommend: yes · Stakes: none either way · By: no date", work={"text": f"watch {gk}", "state": "in progress"}, sender="home-here")
 dw = rd(gw[0], gw[1:])
 check("update: g<n> in subject, description, next, ask and a step status is stored as board#<n>",
       dw["subject"] == f"[home] after {nk}" and dw["description"].startswith(f"- Now waits on {nk}") and dw["metadata"]["next"].startswith(f"after {nk} closes")
       and f"wait on {nk}" in dw["metadata"]["ask"] and any(x.get("tag", {}).get("text") == f"watch {nk}" for x in dw["metadata"]["steps"]), dw)
 check("update: the reply shows the rewritten form", f"after {nk} closes" in out and f"after {gk}" not in out, out[:600])
-out = server._update(gw, status="completed", outcome="done", reason=f"closed with {gk}", outcome_text=f"- Ended with {gk}\n- It lived here\n- It worked", sender="home-here")
+out = _update_svc._update(gw, status="completed", outcome="done", reason=f"closed with {gk}", outcome_text=f"- Ended with {gk}\n- It lived here\n- It worked", sender="home-here")
 dw = rd(gw[0], gw[1:])
 check("complete: g<n> in the reason and in the outcome text is stored as board#<n>, and the description (stored as board#<n> on its own write) stays as it was",
       dw["metadata"]["reason"] == f"closed with {nk}" and dw["metadata"]["outcome_text"] == f"- Ended with {nk}\n- It lived here\n- It worked"
@@ -1469,10 +1470,10 @@ check("[github] merge_seconds is read live", G.merge_seconds() == 300.0, G.merge
 g_m = mk("[home] merge window"); n_m = G.issue_of(g_m, STORE)
 check("the fixture: the create went out at once (the issue exists, nothing waits)", n_m and qlen() == 0, (n_m, qlen()))
 F.log.clear(); T0 = time.time()
-server._update(g_m, description=D("first words"), sender="home-here")
-server._update(g_m, next="not on the issue", hold=True, wake="2099-01-01", sender="home-here")
-server._update(g_m, subject="[home] merge window renamed", sender="home-here")
-server._update(g_m, description=D("second words"), sender="home-here")
+_update_svc._update(g_m, description=D("first words"), sender="home-here")
+_update_svc._update(g_m, next="not on the issue", hold=True, wake="2099-01-01", sender="home-here")
+_update_svc._update(g_m, subject="[home] merge window renamed", sender="home-here")
+_update_svc._update(g_m, description=D("second words"), sender="home-here")
 jobs_m = [json.loads(q.read_text(encoding="utf-8")) for q in G.pending()]
 check("only the changes the issue carries queue a job (three of the four writes; none is urgent; the timestamps are what the window is read from)",
       len(jobs_m) == 3 and not any(j.get("urgent") for j in jobs_m) and all(j["kind"] == "changed" and j["ts"] >= T0 for j in jobs_m), jobs_m)
@@ -1484,12 +1485,12 @@ check("when the window has run out: ONE PATCH of the issue for the three jobs, c
       (r, mine(n_m), issue(n_m)["title"], comments(n_m)))
 # a change and its undoing inside one window: the fingerprint says the issue is as it was, nothing is sent
 g_v = mk("[home] merge revert"); n_v = G.issue_of(g_v, STORE); F.log.clear(); T1 = time.time()
-server._update(g_v, description=D("temporary"), sender="home-here"); server._update(g_v, description=DESC, sender="home-here")
+_update_svc._update(g_v, description=D("temporary"), sender="home-here"); _update_svc._update(g_v, description=DESC, sender="home-here")
 r = G.drain(GH, STORE, say=lambda s: None, now=T1 + 400)
 check("a change and its undoing in one window: both jobs go, the issue is already as the item is, so no PATCH at all", r["done"] == 2 and qlen() == 0 and mine(n_v) == [], (r, mine(n_v)))
 # a close goes at once, with what waits beside it; a reopening too
 g_mc = mk("[home] merge then close"); n_mc = G.issue_of(g_mc, STORE); F.log.clear(); T2 = time.time()
-server._update(g_mc, description=D("before the close"), sender="home-here")
+_update_svc._update(g_mc, description=D("before the close"), sender="home-here")
 r = G.drain(GH, STORE, say=lambda s: None, now=T2 + 5)
 check("an update inside the window waits", r.get("held") == 1 and mine(n_mc) == [] and qlen() == 1, (r, mine(n_mc)))
 _wt_complete.stackshot_complete(g_mc, outcome="done", reason="it shipped", outcome_text="- Shipped", sender="home-here")
@@ -1497,14 +1498,14 @@ r = G.drain(GH, STORE, say=lambda s: None, now=T2 + 6)
 check("a close goes at once, window or not, and takes the waiting update with it: the issue closed as completed, one PATCH, no comment",
       r["done"] == 2 and qlen() == 0 and issue(n_mc)["state"] == "closed" and issue(n_mc)["state_reason"] == "completed" and [w[0] for w in mine(n_mc)] == ["PATCH"] and "- before the close" in issue(n_mc)["body"] and "## Outcome\n\n- Shipped" in issue(n_mc)["body"] and not comments(n_mc), (r, mine(n_mc)))
 F.log.clear(); T3 = time.time()
-server._update(g_mc, status="open", next="again", sender="home-here")
+_update_svc._update(g_mc, status="open", next="again", sender="home-here")
 r = G.drain(GH, STORE, say=lambda s: None, now=T3 + 1)
 check("a reopening goes at once too: the issue open again, one PATCH, no window", r["done"] == 1 and "held" not in r and issue(n_mc)["state"] == "open" and [w[0] for w in mine(n_mc)] == ["PATCH"] and not comments(n_mc), (r, mine(n_mc)))
 # a create goes at once (here the one that waited out an outage); the update made after it waits its window
 F.down = True; F.log.clear()
 out = _wt_create._create(subject="[home] created at once", description=DESC, project="projects/alpha", owner="home-here", next="x")
 g_n = re.search(r"created (\S+)", out).group(1); T4 = time.time()
-server._update(G.norm(g_n), description=D("after the create"), sender="home-here")
+_update_svc._update(G.norm(g_n), description=D("after the create"), sender="home-here")
 F.down = False; nx0 = F.next
 r = G.drain(GH, STORE, say=lambda s: None, now=T4 + 10)
 check("a create goes at once: the issue is made and the item re-keyed in the first drain; the update made after it waits out its window",
@@ -1513,7 +1514,7 @@ r = G.drain(GH, STORE, say=lambda s: None, now=T4 + 400)
 check("…and goes when it has run out; the issue carries the new description and has no comment", r["done"] == 1 and qlen() == 0 and "- after the create" in issue(nx0)["body"] and not comments(nx0), (r, issue(nx0)["body"][:120]))
 # a restart in the middle of a window: the jobs are files, the window their own timestamps. A fresh client and no memory of the first drain
 g_r = mk("[home] merge restart"); n_r = G.issue_of(g_r, STORE); g_o = mk("[home] merge other issue"); n_o = G.issue_of(g_o, STORE); F.log.clear(); T5 = time.time()
-server._update(g_r, description=D("pending over a restart"), sender="home-here"); server._update(g_o, description=D("an older window"), sender="home-here")
+_update_svc._update(g_r, description=D("pending over a restart"), sender="home-here"); _update_svc._update(g_o, description=D("an older window"), sender="home-here")
 q_o = [q for q in G.pending() if json.loads(q.read_text(encoding="utf-8"))["gid"] == g_o][0]; j_o = json.loads(q_o.read_text(encoding="utf-8")); j_o["ts"] = T5 - 400; q_o.write_text(json.dumps(j_o), encoding="utf-8")
 r = G.drain(GH, STORE, say=lambda s: None)
 check("the issue whose window has run out goes, the other's stays (windows are per issue)", r["done"] == 1 and "an older window" in issue(n_o)["body"] and mine(n_r) == [] and qlen() == 1 and r.get("held") == 1, (r, qlen()))
@@ -1524,7 +1525,7 @@ r = G.drain(GH3, STORE, say=lambda s: None, now=T5 + 400)
 check("…and the new process sends it as one PATCH when the window is over", r["done"] == 1 and qlen() == 0 and "- pending over a restart" in issue(n_r)["body"] and not comments(n_r), (r, mine(n_r)))
 # merge_seconds = 0: every update goes at once, as before
 MERGE_S = 0; write_toml(sync=True, issue_ids=True); _cfg.reload()
-F.log.clear(); server._update(g_r, description=D("no window"), sender="home-here"); r = G.drain(GH, STORE, say=lambda s: None)
+F.log.clear(); _update_svc._update(g_r, description=D("no window"), sender="home-here"); r = G.drain(GH, STORE, say=lambda s: None)
 check("merge_seconds = 0: the update goes in the first drain", r["done"] == 1 and "held" not in r and qlen() == 0 and "- no window" in issue(n_r)["body"], (r, G.merge_seconds()))
 
 # ---- the ledger: the writes and the counted reads, never a 304; shared with another process
@@ -1665,7 +1666,7 @@ set_caps(merge=0)
 # once with a temporary id; its issue is the first job of the queue, made when room appears, and the item is re-keyed to the issue's number
 G._CLIENT.clear(); set_caps(writes=100000)
 bk = [G.norm(made(f"[home] backlog {i}")[0]) for i in range(4)]
-for g_ in bk: server._update(g_, description=D(f"edit of {g_}"), sender="home-here")
+for g_ in bk: _update_svc._update(g_, description=D(f"edit of {g_}"), sender="home-here")
 check("four updates wait in the queue as live jobs", qlen() == 4 and all(json.loads(p_.read_text())["kind"] == "changed" for p_ in G.pending()), [p_.name for p_ in G.pending()])
 c0 = _gb.count("w"); set_caps(writes=c0 + 1); G._CLIENT.clear(); cl_ = G.client()      # one write left this hour
 check("the server's client holds the narrowed budget", cl_.budget == c0 + 1 and cl_.shared, (cl_.budget, c0))
@@ -1727,7 +1728,7 @@ jobs_bg = [(p_.name, json.loads(p_.read_text())) for p_ in G.pending()]
 check("the close repair restores the description and queues its sync as a background body sync: after every live job, and no create or close job",
       any(r_["gid"] == g_bg for r_ in rows_bg) and rd(g_bg[0], int(g_bg[1:]))["description"] == D(f"edit of {G.shown(g_bg)}") and jobs_bg
       and all(n_.startswith(G.BACKGROUND) and j_["kind"] == "sync" for n_, j_ in jobs_bg) and any(j_["gid"] == g_bg for _n, j_ in jobs_bg), (rows_bg, jobs_bg, skip_bg))
-server._update(bk[1], description=D("a live edit behind the repair"), sender="home-here")
+_update_svc._update(bk[1], description=D("a live edit behind the repair"), sender="home-here")
 check("a live update queued after the repair still sorts before its sync jobs", not G.pending()[0].name.startswith(G.BACKGROUND) and json.loads(G.pending()[0].read_text())["gid"] == bk[1], [p_.name for p_ in G.pending()])
 G.drain(GH, STORE, say=lambda s: None)
 check("the repair's body sync reaches the issue (one PATCH), once the live job has gone", "edit of" in issue(G.issue_of(g_bg, STORE))["body"] and qlen() == 0, (qlen(), issue(G.issue_of(g_bg, STORE))["body"][:200]))

@@ -90,9 +90,9 @@ def rows_at(server: Any, store: Path, now: float, label: str) -> list[dict[str, 
     for g in sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num):
         it = items[g]
         probe = {**it, "gid": g}
-        ao = lambda i_: server._after_open(i_.get("metadata") or {})      # noqa: E731
+        ao = lambda i_: server._item_read._after_open(i_.get("metadata") or {})      # noqa: E731
         with SP.frozen(now):
-            mod = server._model_of(probe)
+            mod = server._item_read._model_of(probe)
             fields = model.view(probe, mod, now, ao, check=False)
             stored = model.view(probe, mod, now, ao)
             with SP.fields_only(server):

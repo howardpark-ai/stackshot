@@ -60,6 +60,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.service import store as _service_store
 from stackshot.web import page_debts as _pdebts
@@ -91,7 +92,7 @@ def io_(marker="test_trim:alpha", **kw):
     return server._client_post(me, "item-open", {k: v for k, v in b.items() if v is not None})
 def open_for(marker, project="projects/alpha"): return [g for g, m_ in server._itemopen_open_items(project) if m_ == marker]
 def close(shown):
-    server._update(_model_ids._norm_id(shown), outcome_text="- done", status="completed", outcome="done", reason="the deep scan is done", sender="home-sparrow-builder")
+    _update_svc._update(_model_ids._norm_id(shown), outcome_text="- done", status="completed", outcome="done", reason="the deep scan is done", sender="home-sparrow-builder")
 n0 = len(items())
 
 # ---- 1. open: the item and its shape

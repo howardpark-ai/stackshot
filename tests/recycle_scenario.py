@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.waits import waiting as _wt
 from stackshot.core import config as _cfg
 from fastmcp.exceptions import ToolError
@@ -79,7 +80,7 @@ telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, owne
 owed = lambda: json.dumps(_web_page_debts._owed_load())
 
 # ---- 1. setting, showing, refusing, clearing
-out = server._update("a1", recycle=True)
+out = _update_svc._update("a1", recycle=True)
 m = rd(1)["metadata"]
 check("recycle=true sets the field and when", m.get("recycle") is True and isinstance(m.get("recycle_at"), float) and m["recycle_at"] >= now, m)
 check("it is a filing edit: the state clock and the confirm stay", rd(1)["state_updated"] == now - 3600 and rd(1)["confirmed"] == now - 3600, rd(1))
@@ -87,21 +88,21 @@ check("it owes no page", "a1" not in owed(), owed())
 check("the update's reply shows it", "recycle: waits for a pane recycle (since " in out, out)
 check("get shows it", "recycle: waits for a pane recycle" in _wt_get.stackshot_get("a1"))
 for kw, name in (({"recycle": True, "clear_recycle": True}, "recycle with clear_recycle is refused"),):
-    try: server._update("a1", **kw); check(name, False)
+    try: _update_svc._update("a1", **kw); check(name, False)
     except ToolError: check(name, True)
-server._update("a7", recycle=True); server._update("a7", clear_recycle=True)
+_update_svc._update("a7", recycle=True); _update_svc._update("a7", clear_recycle=True)
 check("clear_recycle takes it off", "recycle" not in rd(7)["metadata"] and "recycle_at" not in rd(7)["metadata"], rd(7)["metadata"])
-server._update("a6", recycle=True); _wt_complete.stackshot_complete("a6", outcome="done", reason="the work landed", description="- The test item's work is in place")
+_update_svc._update("a6", recycle=True); _wt_complete.stackshot_complete("a6", outcome="done", reason="the work landed", description="- The test item's work is in place")
 check("a completion takes it off", rd(6)["status"] == "completed" and "recycle" not in rd(6)["metadata"], rd(6)["metadata"])
-try: server._update("a6", recycle=True); check("a completed item cannot wait for a recycle", False)
+try: _update_svc._update("a6", recycle=True); check("a completed item cannot wait for a recycle", False)
 except ToolError: check("a completed item cannot wait for a recycle", True)
 check("get no longer shows it on a cleared item", "recycle:" not in _wt_get.stackshot_get("a7"))
 
 # ---- 2. sala reports a recycle
-for i in (2, 3, 4): server._update(f"a{i}", recycle=True)
-server._update("a5", recycle=True); server._update("a5", hold=True)
+for i in (2, 3, 4): _update_svc._update(f"a{i}", recycle=True)
+_update_svc._update("a5", recycle=True); _update_svc._update("a5", hold=True)
 started = time.time(); time.sleep(0.01)
-server._update("a2", recycle=True)            # flagged again after the sweep began: the recycle does not cover it
+_update_svc._update("a2", recycle=True)            # flagged again after the sweep began: the recycle does not cover it
 told.clear()
 r = server._recycled("testbox", "recycle", started, "partial", ["home-skipped"])
 check("cleared: the item flagged before, owned here", "a1" in r["cleared"] and "recycle" not in rd(1)["metadata"], r)
@@ -116,7 +117,7 @@ check("the owner's line names its item and says resume", "recycle you waited for
 check("the mover's line for the held item says the hold went with the recycle", "re-read a5 and resume" in held and "a5 waited only for the recycle and is released from hold." in held, held)
 check("the recycle clears without a state change", rd(1)["state_updated"] == now - 3600, rd(1))
 check("wanted: only the item flagged after the last recycle began (the skipped owner's item is not)", server._recycle_wanted("testbox") == ["a2"], server._recycle_wanted("testbox"))
-say(5); server._update("a5", hold=True, wake="2099-01-02"); server._update("a5", recycle=True)            # held again (with a wake), and flagged again
+say(5); _update_svc._update("a5", hold=True, wake="2099-01-02"); _update_svc._update("a5", recycle=True)            # held again (with a wake), and flagged again
 check("wanted: a held item is not counted", server._recycle_wanted("testbox") == ["a2"], server._recycle_wanted("testbox"))
 check("wanted: a machine with no recycle on record counts its owners' items", server._recycle_wanted("otherbox") == ["a4"], server._recycle_wanted("otherbox"))
 told.clear()
@@ -137,7 +138,7 @@ with TestClient(app) as c:
     check("an unknown kind is refused", res.status_code == 400, res.text)
     res = c.get("/client/recycle-wanted", headers=h)
     check("GET /client/recycle-wanted answers \"<count> <ids>\"", res.status_code == 200 and res.text == "0", res.text)
-    server._last_recycle = lambda m: 0.0; server._update("a1", recycle=True)
+    server._last_recycle = lambda m: 0.0; _update_svc._update("a1", recycle=True)
     res = c.get("/client/recycle-wanted", headers=h)
     check("and lists the ids after the count, each with the second its recycle was asked for", res.status_code == 200
           and res.text == f"2 a1@{int(rd(1)['metadata']['recycle_at'])} a3@{int(rd(3)['metadata']['recycle_at'])}", res.text)
@@ -224,7 +225,7 @@ item(8, "home-here"); item(9, "home-skipped")
 PR = "https://github.com/example-owner/stackshot/pull/11"
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": PR, "items": ["a8", "a9"], "added": 1, "by": "t"},
                                                                      {"url": "https://github.com/example-owner/stackshot/pull/12", "items": None, "added": 1, "by": "t"}]}))
-server._update("a1", clear_recycle=True)
+_update_svc._update("a1", clear_recycle=True)
 with TestClient(app) as c:
     h = {"Authorization": "Bearer " + tok}
     n0 = nfiles()
@@ -236,7 +237,7 @@ with TestClient(app) as c:
     check("--pr: the owners come back", [x["owner"] for x in d.get("items", [])] == ["home-here", "home-skipped"], d)
     res = c.post("/client/recycle-due", json={"pr": PR}, headers=h)
     check("--pr again: already, nothing changes", [x["action"] for x in res.json().get("items", [])] == ["already", "already"], res.text)
-    say(9); server._update("a9", hold=True, wake="2099-01-02"); server._update("a9", clear_recycle=True)
+    say(9); _update_svc._update("a9", hold=True, wake="2099-01-02"); _update_svc._update("a9", clear_recycle=True)
     res = c.post("/client/recycle-due", json={"pr": PR}, headers=h)
     check("--pr: a held item is marked and reported as held", [(x["item"], x["action"], x["held"]) for x in res.json().get("items", [])] == [("a8", "already", False), ("a9", "set", True)], res.text)
     at_before = rd(1)["state_updated"]
@@ -312,10 +313,10 @@ check("a refusal exits 1 and says why", rc == 1 and "recycle not marked [400] Re
 # ---- 6b. recycle-wanted counts an item held for the recycle alone (before, every held item was skipped, so sala never
 # recycled for one and it sat there); one held for a wake or an open after as well stays out. (_last_recycle is patched to 0 since section 3.)
 for i in range(20, 28): item(i, "home-skipped" if i >= 26 else "home-here")
-server._update("a20", recycle=True); server._update("a20", hold=True)                                   # held for the recycle alone
-server._update("a21", recycle=True); say(21); server._update("a21", hold=True, wake="2099-01-02")                 # and a wake
-server._update("a22", recycle=True); server._update("a22", after=["a25"], ask_by="2099-01-02"); server._update("a22", hold=True)   # and an open after
-server._update("a23", recycle=True)                                                                     # not held
+_update_svc._update("a20", recycle=True); _update_svc._update("a20", hold=True)                                   # held for the recycle alone
+_update_svc._update("a21", recycle=True); say(21); _update_svc._update("a21", hold=True, wake="2099-01-02")                 # and a wake
+_update_svc._update("a22", recycle=True); _update_svc._update("a22", after=["a25"], ask_by="2099-01-02"); _update_svc._update("a22", hold=True)   # and an open after
+_update_svc._update("a23", recycle=True)                                                                     # not held
 check("6b setup: a20 is held for the recycle alone, a21 has a wake, a22 an open after", server._held_only_for_recycle(rd(20)) and not server._held_only_for_recycle(rd(21))
       and not server._held_only_for_recycle(rd(22)) and rd(21)["metadata"].get("until") and rd(22)["metadata"].get("after") == ["a25"] and rd(22)["metadata"].get("until"),
       [rd(i)["metadata"] for i in (20, 21, 22)])
@@ -335,7 +336,7 @@ with TestClient(app) as c:
 
 # ---- 6c. sala retries a skipped pane and reports `recycled` again with the ORIGINAL start time: the second report is accepted and
 # clears (and releases from a recycle-only hold) what the first kept
-    server._update("a26", recycle=True); server._update("a27", recycle=True); server._update("a27", hold=True)
+    _update_svc._update("a26", recycle=True); _update_svc._update("a27", recycle=True); _update_svc._update("a27", hold=True)
     S = time.time() + 30          # after the flags, and after section 3's report (now + 5), so it is the machine's latest start
     res1 = c.post("/client/recycled", json={"kind": "recycle", "started": S, "result": "partial", "skipped": "home-skipped"}, headers=h)
     k1 = {k["item"]: k["why"] for k in res1.json().get("kept", [])} if res1.status_code == 200 else {}

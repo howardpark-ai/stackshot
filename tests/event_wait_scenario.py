@@ -65,6 +65,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from stackshot.service import store as _service_store
 from stackshot.github import ghsync as _gh
@@ -136,7 +138,7 @@ check("watchers: the backstop (ask_by or wake) is the only date the clock reads 
 
 # ================================================================ the model reads it as waiting
 item(1, wait_kind="event", wait_event=f"pr_released {PR(7)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 7's release")
-m1 = server._model_of({**rd(1), "gid": "a1"})
+m1 = _item_read._model_of({**rd(1), "gid": "a1"})
 check("model: a stored event wait is waiting, with no mover, the event and its post-wake mover", m1.state == model.WAITING and m1.wait is not None and m1.wait.kind == "event" and m1.wait.event == f"pr_released {PR(7)}"
       and m1.wait.post_wake_mover == BACK and not m1.mover and not any("conflict" in str(c).lower() for c in (getattr(m1, "conflicts", None) or [])), (m1.state, m1.wait, m1.mover, getattr(m1, "conflicts", None)))
 check("clocks: the stall pass has no work to look at (not due), and the item is watched, so the idle clock skips it", S.not_due({**rd(1), "gid": "a1"}, now0) != "" and wk.watches(rd(1)), S.not_due({**rd(1), "gid": "a1"}, now0))
@@ -147,17 +149,17 @@ check("display: the item page says what it waits on, who watches it and the back
 # ================================================================ the write
 CAN = {"example-owner/stackshot#7": "x"}
 item(10, mover=BACK, subject="[home] doing, will wait for a release")
-out = server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 7", ask_by=day(5), post_wake_mover=BACK, mover="none")
+out = _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 7", ask_by=day(5), post_wake_mover=BACK, mover="none")
 check("write: an event wait is stored in its canonical form (a bare number is this repository's) and the reply says what the server watches",
       mt(10).get("wait_kind") == "event" and mt(10).get("wait_event") == f"pr_released {PR(7)}" and "event wait: the server watches for PR #7 live" in out and "The stall pass does not run for it" in out, (mt(10), out[-500:]))
 check("write: …the wait is stamped (watch.set_at), so an older reported event is not its arrival", (mt(10).get("watch") or {}).get("set_at"), mt(10))
-refused("write: a phrase that is no event is refused with the forms", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="when it is done", ask_by=day(5), post_wake_mover=BACK), "not an event the server watches", "pr_released")
-refused("write: pr_released for another repository is refused (release.sh releases this one only); pr_merged is the event", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released other/repo#3", ask_by=day(5), post_wake_mover=BACK),
+refused("write: a phrase that is no event is refused with the forms", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="when it is done", ask_by=day(5), post_wake_mover=BACK), "not an event the server watches", "pr_released")
+refused("write: pr_released for another repository is refused (release.sh releases this one only); pr_merged is the event", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released other/repo#3", ask_by=day(5), post_wake_mover=BACK),
         "pr_released is release.sh's event", "pr_merged other/repo#3")
 rlive_svc.released_live_base = lambda: ("goodsha", "headsha")
 rlive_svc.merged_prs = lambda head, limit=3000: {9: ("sha9", now0 - 3600)}
 rlive_svc.released_is_live = lambda sha, good, head: ""
-refused("write: a PR already merged and live is refused (nothing would ever report it)", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 9", ask_by=day(5), post_wake_mover=BACK), "already merged and live")
+refused("write: a PR already merged and live is refused (nothing would ever report it)", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 9", ask_by=day(5), post_wake_mover=BACK), "already merged and live")
 MERGED, DEAD = {PR(9) if False else "o/r#9": True}, {"o/r#4": "its pull request was closed without being merged"}
 from stackshot.core import ghbudget as _gbud
 GH_TAGS = []
@@ -169,16 +171,16 @@ def fake_pr_merged(ref, now, gh_st):
     return rec["merged"], ""
 REAL_PR_MERGED = checks_svc.pr_merged
 checks_svc.pr_merged = fake_pr_merged
-refused("write: a PR already merged is refused for pr_merged", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK), "already merged")
-refused("write: a PR closed without merging is refused", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), post_wake_mover=BACK), "closed without being merged")
+refused("write: a PR already merged is refused for pr_merged", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK), "already merged")
+refused("write: a PR closed without merging is refused", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), post_wake_mover=BACK), "closed without being merged")
 before = rd(10)
-out = server._update("a10", sender=BACK, next="team-back: keep going")
+out = _update_svc._update("a10", sender=BACK, next="team-back: keep going")
 check("write: an unrelated update of the item keeps the wait as stored (the gate reads only a changed wait)", mt(10).get("wait_event") == f"pr_released {PR(7)}" and mt(10).get("wait_kind") == "event", mt(10))
 cfg(guards=True)
 item(11, mover=BACK, subject="[home] doing, no backstop")
-out_ = server._update("a11", sender=BACK, wait_kind="event", wait_event="recycle", post_wake_mover=BACK, mover="none")
+out_ = _update_svc._update("a11", sender=BACK, wait_kind="event", wait_event="recycle", post_wake_mover=BACK, mover="none")
 check("write: an event wait with no backstop day is not refused: until is taken (the item's words, else tomorrow) and the reply says so", mt(11).get("until") and "wait_kind=event came with no date" in out_ and "ask_by" not in mt(11), (out_[-300:], mt(11)))
-refused("write: …and a phrase the guard cannot read as an event", lambda: server._update("a11", sender=BACK, wait_kind="event", wait_event="soonish", ask_by=day(4), post_wake_mover=BACK, mover="none"), "event")
+refused("write: …and a phrase the guard cannot read as an event", lambda: _update_svc._update("a11", sender=BACK, wait_kind="event", wait_event="soonish", ask_by=day(4), post_wake_mover=BACK, mover="none"), "event")
 cfg(guards=False)
 n, g = None, None
 try:
@@ -376,11 +378,11 @@ def spy_pr_merged(ref, now, gh_st):
 checks_svc.pr_merged = spy_pr_merged
 item(63, mover=BACK, subject="[home] will wait for a merge")
 evwaits_svc.EVW_GH.clear()
-out = server._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#11", ask_by=day(5), post_wake_mover=BACK, mover="none")
+out = _update_svc._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#11", ask_by=day(5), post_wake_mover=BACK, mover="none")
 check("gate: the pull request is read on GitHub before the item lock is taken, and the gate under the lock makes no GitHub call", LOCKED_CALLS == [False] and mt(63).get("wait_event") == "pr_merged o/r#11", (LOCKED_CALLS, mt(63)))
 evwaits_svc.EVW_GH.clear(); LOCKED_CALLS.clear()
 item(63, mover=BACK, subject="[home] will wait for a merged PR")
-refused("gate: …and a PR the early read found merged is still refused", lambda: server._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK, mover="none"), "already merged")
+refused("gate: …and a PR the early read found merged is still refused", lambda: _update_svc._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK, mover="none"), "already merged")
 check("gate: …the read for that refusal was also made outside the lock", LOCKED_CALLS == [False], LOCKED_CALLS)
 LOCKED_CALLS.clear(); evwaits_svc.EVW_GH.clear()
 try:
@@ -393,16 +395,16 @@ checks_svc.pr_merged = fake_pr_merged
 
 # ================================================================ review fixes: a backstop must be after now; which events are live
 item(64, mover=BACK, subject="[home] will wait with a past backstop")
-refused("backstop: today's date has already begun (a day falls due at 00:00 in the instance timezone), so it is refused and the reply says why", lambda: server._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(0), post_wake_mover=BACK, mover="none"),
+refused("backstop: today's date has already begun (a day falls due at 00:00 in the instance timezone), so it is refused and the reply says why", lambda: _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(0), post_wake_mover=BACK, mover="none"),
         "is not after now", "00:00 of that day in the instance timezone")
-refused("backstop: …a wake in the past is refused too", lambda: server._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", wake=day(-2), post_wake_mover=BACK, mover="none"), "future")
-out = server._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(1), post_wake_mover=BACK, mover="none")
+refused("backstop: …a wake in the past is refused too", lambda: _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", wake=day(-2), post_wake_mover=BACK, mover="none"), "future")
+out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(1), post_wake_mover=BACK, mover="none")
 check("backstop: tomorrow is accepted, and a recycle wait carries no 'nothing tells the server' line", mt(64).get("wait_kind") == "event" and "Nothing tells the server" not in out, out[-400:])
-refused("backstop: …moving the stored backstop into the past later is refused as well", lambda: server._update("a64", sender=BACK, ask_by=day(-1)), "is not after now")
-out = server._update("a64", sender=BACK, wait_kind="event", wait_event="job_run nightly", ask_by=day(3), post_wake_mover=BACK)
+refused("backstop: …moving the stored backstop into the past later is refused as well", lambda: _update_svc._update("a64", sender=BACK, ask_by=day(-1)), "is not after now")
+out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="job_run nightly", ask_by=day(3), post_wake_mover=BACK)
 check("live: a wait on an event nothing reports yet (a job run) says so in the reply and names its backstop", "Nothing tells the server of this event yet" in out and day(3) in out, out[-500:])
 for ph in ("fleet_op many", "fleet_op provision", "fleet_op lane box-1"):
-    out = server._update("a64", sender=BACK, wait_kind="event", wait_event=ph, ask_by=day(3), post_wake_mover=BACK)
+    out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event=ph, ask_by=day(3), post_wake_mover=BACK)
     check(f"live: a `{ph}` wait is live, so the reply carries no 'nothing tells the server' line", "Nothing tells the server" not in out and "the fleet tool reports the end of each op" in out, out[-500:])
 check("live: …the pure test says which are live (PR kinds, recycle, every fleet_op form) and which are not (job_run)",
       all(EW.live(P(x)) for x in ("pr_released 7", "pr_merged o/r#7", "recycle", "recycle box-1", "fleet_op recycle", "fleet_op reboot", "fleet_op any", "fleet_op many", "fleet_op provision", "fleet_op update box-1", "fleet_op lane")) and not EW.live(P("job_run nightly")), None)

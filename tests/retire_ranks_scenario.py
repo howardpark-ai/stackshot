@@ -53,6 +53,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync
+from stackshot.model import holders as _holders
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.model import states as _states
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -70,7 +73,7 @@ day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFS
 BACK, OTHER, GONE = "team-back", "home-other", "home-gone"      # as the update path stores a name the registry does not know
 UB, UO = U["team-back"], U["home-other"]
 def upd(i, **kw):
-    return server._update(f"a{i}", sender="home-front", **kw)
+    return _update_svc._update(f"a{i}", sender="home-front", **kw)
 
 
 def refused(name, f, *want):
@@ -98,7 +101,7 @@ orig_bytes = {i: (T / f"store/a/{i}.json").read_bytes() for i in range(1, 7)}
 # ================================================================ loads cleanly
 check("load: a stored queued reads as the state shown (doing), not as an unknown value", _states.stored(rd(1)) == "doing" and _states.stored(rd(3)) == "doing"
       and "queued" not in _states.STATES and _states.LEGACY_STATES == {"queued": "doing"}, _states.LEGACY_STATES)
-check("load: …it is an agent's state: not held, not after anything", _states.of(rd(1))[0] == "doing" and not server._is_held(rd(1)) and not server._after_open(rd(1)["metadata"]), _states.of(rd(1)))
+check("load: …it is an agent's state: not held, not after anything", _states.of(rd(1))[0] == "doing" and not _holders._is_held(rd(1)) and not _item_read._after_open(rd(1)["metadata"]), _states.of(rd(1)))
 probs = _states.problems(rd(1)["metadata"], _states.stored(rd(1)), datetime.date.today(), check_dates=False)
 check("load: …problems() asks nothing of it about a rank", not any("rank" in p for p in probs), probs)
 g1 = server._fmt({**rd(1), "gid": "a1"})

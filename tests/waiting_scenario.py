@@ -66,6 +66,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.service import agents as _agents
+from stackshot.service import item_read as _item_read
+from stackshot.service import pane_recovery as _pane_recovery
+from stackshot.service import update as _update_svc
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.core import instance as _core_instance
 from stackshot.core import config as _cfg
@@ -151,7 +155,7 @@ check("waiting.py has no ladder: no steps, no landings, no grace, no record chec
       [n for n in dir(W) if not n.startswith("_")])
 check("the ladder's config keys are gone from the [waiting] defaults", not {"grace_hours", "agent_grace_hours", "stuck_to"} & set(W.DEFAULTS) and "grace_hours" not in toml and "agent_grace_hours" not in toml, sorted(W.DEFAULTS))
 told.clear()
-server._update(f"a{LATE}", next="home-owner: moved on", sender="home-owner")
+_update_svc._update(f"a{LATE}", next="home-owner: moved on", sender="home-owner")
 check("a state change on a late item sends the server's ordinary notices only: none of tag 'wait', and it writes no record under `waiting`", not [t for t in told if t[0] == "wait"] and "waiting" not in rd(LATE)["metadata"], (told, rd(LATE)["metadata"]))
 
 # ---- 4. a close of an `after` item (no failed wait: the item is released, or still waits on the others), a mover that is down
@@ -182,39 +186,39 @@ fleet_gone(True)
 # ---- 4b. a machine counts as unreachable only after its puller has been silent for online_minutes from its last check-in or the server's start
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": False, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now0 - 7200))}}))
 fleet_gone(False)
-real_started = server._STARTED
-server._STARTED = now0 - 60
-check("the server started a minute ago: a puller that reads late because of the server's own downtime is not unreachable", server._machine_unreachable("a", now0) == "", server._machine_unreachable("a", now0))
-server._STARTED = now0 - 3600
-check("the server has been up an hour and the puller last checked in two hours ago: unreachable", "puller is not checking in" in server._machine_unreachable("a", now0), server._machine_unreachable("a", now0))
+real_started = _pane_recovery._STARTED
+_pane_recovery._STARTED = now0 - 60
+check("the server started a minute ago: a puller that reads late because of the server's own downtime is not unreachable", _pane_recovery._machine_unreachable("a", now0) == "", _pane_recovery._machine_unreachable("a", now0))
+_pane_recovery._STARTED = now0 - 3600
+check("the server has been up an hour and the puller last checked in two hours ago: unreachable", "puller is not checking in" in _pane_recovery._machine_unreachable("a", now0), _pane_recovery._machine_unreachable("a", now0))
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": False, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now0 - 60))}}))
-check("…a puller that checked in a minute ago is not (online_minutes is ten)", server._machine_unreachable("a", now0) == "", server._machine_unreachable("a", now0))
+check("…a puller that checked in a minute ago is not (online_minutes is ten)", _pane_recovery._machine_unreachable("a", now0) == "", _pane_recovery._machine_unreachable("a", now0))
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": False, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now0 - 7200))}}))
 nmx, idxx = _anc.names(), _fleet_sessions_registry._sessions_index()
-check("a running session on it reads as unreachable then, with the reason", "is unreachable" in server._session_down(U["home-other"], nmx, idxx, None, now0), server._session_down(U["home-other"], nmx, idxx, None, now0))
+check("a running session on it reads as unreachable then, with the reason", "is unreachable" in _pane_recovery._session_down(U["home-other"], nmx, idxx, None, now0), _pane_recovery._session_down(U["home-other"], nmx, idxx, None, now0))
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
-server._STARTED = real_started
+_pane_recovery._STARTED = real_started
 fleet_gone(True)
 
 # ---- 5. the cap on a wake a session sets
 for i in range(30, 70): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 item(70, su=now0 - DAY)
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
-server._update("a70", wake=day(6), sender="home-owner")
+_update_svc._update("a70", wake=day(6), sender="home-owner")
 check("a wake within the cap (6 days) is accepted", wk_(rd(70)["metadata"]) == day(6), rd(70)["metadata"])
 refused("a wake past the cap (8 days) is refused, naming the cap, the config key, and the ways to his words: ask him to answer on the item (first), or a checked said entry",
-        lambda: server._update("a70", wake=day(8), sender="home-owner"), "at most 7 days", "[waiting] cap_days", "said=", "to answer on the item")
+        lambda: _update_svc._update("a70", wake=day(8), sender="home-owner"), "at most 7 days", "[waiting] cap_days", "said=", "to answer on the item")
 check("…the refusal left the wake as it was", wk_(rd(70)["metadata"]) == day(6), rd(70)["metadata"])
-refused("a hold with a far wake is refused the same way", lambda: server._update("a70", hold=True, wake=day(20), sender="home-owner"), "at most 7 days")
+refused("a hold with a far wake is refused the same way", lambda: _update_svc._update("a70", hold=True, wake=day(20), sender="home-owner"), "at most 7 days")
 _cfg.CFG["waiting"]["cap_days"] = 10
-server._update("a70", wake=day(9), sender="home-owner")
+_update_svc._update("a70", wake=day(9), sender="home-owner")
 check("[waiting] cap_days is a config value, read at use", wk_(rd(70)["metadata"]) == day(9), rd(70)["metadata"])
 _cfg.CFG["waiting"]["cap_days"] = 7
 _cfg.CFG["waiting"]["cap_needs_owner"] = False
-server._update("a70", wake=day(20), sender="home-owner")
+_update_svc._update("a70", wake=day(20), sender="home-owner")
 check("cap_needs_owner = false: a longer wake is allowed", wk_(rd(70)["metadata"]) == day(20), rd(70)["metadata"])
 _cfg.CFG["waiting"]["cap_needs_owner"] = True
-server._update("a70", wake="none", sender="home-owner")
+_update_svc._update("a70", wake="none", sender="home-owner")
 # his words, checked against a real transcript
 TR = T / "transcripts" / "-home-x"
 def entry(uuid, text, kind="human", ts=None):
@@ -222,43 +226,43 @@ def entry(uuid, text, kind="human", ts=None):
 (TR / f"{U['home-owner']}.jsonl").write_text(entry("11111111-1111-4111-8111-000000000001", "keep it on hold for ten days") + "\n"
                                            + entry("11111111-1111-4111-8111-000000000002", "relayed text", kind="peer") + "\n"
                                            + entry("11111111-1111-4111-8111-000000000003", "park it until the end of the month", ts="2026-09-01T00:00:00.000Z") + "\n")
-server._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "keep it on hold for ten days", "msg": "11111111-1111-4111-8111-000000000001"}])
+_update_svc._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "keep it on hold for ten days", "msg": "11111111-1111-4111-8111-000000000001"}])
 check("a longer wake with his words behind it (an Acked-by entry checked against the transcript) is accepted", wk_(rd(70)["metadata"]) == day(10) and rd(70)["metadata"]["said"][-1]["checked"] is True, rd(70)["metadata"])
-server._update("a70", wake="none", sender="home-owner")
+_update_svc._update("a70", wake="none", sender="home-owner")
 refused("an unchecked said entry (a session whose transcript this box cannot read) is not enough for a long wake",
-        lambda: server._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "park it", "msg": "11111111-1111-4111-8111-000000000009", "session": "cse_0123456789abcdef"}]), "at most 7 days")
+        lambda: _update_svc._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "park it", "msg": "11111111-1111-4111-8111-000000000009", "session": "cse_0123456789abcdef"}]), "at most 7 days")
 refused("a said entry that is checked but not tagged Acked-by (Suggested-by) is not his word for a long wait",
-        lambda: server._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Suggested-by", "quote": "keep it on hold for ten days", "msg": "11111111-1111-4111-8111-000000000001"}]), "at most 7 days")
+        lambda: _update_svc._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Suggested-by", "quote": "keep it on hold for ten days", "msg": "11111111-1111-4111-8111-000000000001"}]), "at most 7 days")
 refused("a checked Acked-by entry for a message older than cap_days is not enough either (his words from a month ago)",
-        lambda: server._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "park it until the end of the month", "msg": "11111111-1111-4111-8111-000000000003"}]), "at most 7 days")
+        lambda: _update_svc._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "park it until the end of the month", "msg": "11111111-1111-4111-8111-000000000003"}]), "at most 7 days")
 item(71, su=now0 - DAY, answers=[{"ts": now0 - 3600, "kind": "decision", "text": "wait until after the 30th", "via": "board"}])
-server._update("a71", wake=day(12), sender="home-owner")
+_update_svc._update("a71", wake=day(12), sender="home-owner")
 check("his board answer on the item, given since its last state change, is enough", wk_(rd(71)["metadata"]) == day(12), rd(71)["metadata"])
 item(72, su=now0 - DAY, answers=[{"ts": now0 - 30 * DAY, "kind": "decision", "text": "an old answer", "via": "board"}])
-refused("…an answer from before the item's last state change is not", lambda: server._update("a72", wake=day(12), sender="home-owner"), "at most 7 days")
+refused("…an answer from before the item's last state change is not", lambda: _update_svc._update("a72", wake=day(12), sender="home-owner"), "at most 7 days")
 item(74, su=now0 - DAY, answers=[{"ts": now0 - 3600, "kind": "decision", "text": "ok, wait until after the 30th", "via": "board"}])
-server._update("a74", next="home-owner: moved on a little", sender="home-owner")
-refused("…nor is one the item has moved past since (a session's update after his answer used it up)", lambda: server._update("a74", wake=day(12), sender="home-owner"), "at most 7 days")
+_update_svc._update("a74", next="home-owner: moved on a little", sender="home-owner")
+refused("…nor is one the item has moved past since (a session's update after his answer used it up)", lambda: _update_svc._update("a74", wake=day(12), sender="home-owner"), "at most 7 days")
 item(73, su=now0 - DAY)
-real_scoped = server._scoped_anchors
-server._scoped_anchors = lambda project, gid: [{"url": "https://x", "items": [gid]}]
-server._update("a73", hold=True, wake=day(6), wait_basis=f"visit on {day(8)}", sender="home-owner")
-refused("no wait is exempt: a hold on an anchored thread with a backstop wake past the cap is refused like any long wait", lambda: server._update("a73", hold=True, wake=day(25), sender="home-owner"), "at most 7 days")
-server._scoped_anchors = real_scoped
+real_scoped = _item_read._scoped_anchors
+_item_read._scoped_anchors = lambda project, gid: [{"url": "https://x", "items": [gid]}]
+_update_svc._update("a73", hold=True, wake=day(6), wait_basis=f"visit on {day(8)}", sender="home-owner")
+refused("no wait is exempt: a hold on an anchored thread with a backstop wake past the cap is refused like any long wait", lambda: _update_svc._update("a73", hold=True, wake=day(25), sender="home-owner"), "at most 7 days")
+_item_read._scoped_anchors = real_scoped
 item(75, su=now0 - DAY)
-r75 = server._update("a75", due=day(20), sender="home-owner")
+r75 = _update_svc._update("a75", due=day(20), sender="home-owner")
 check("a due date is a deadline, not a wait: one three weeks out is accepted on update", rd(75)["metadata"].get("due") == day(20), rd(75)["metadata"])
 check("…as it is: the reply says nothing of a cap or an expected-by, and no record of his words is kept for it", "capped" not in r75 and "expected-by" not in r75 and "cap_ok" not in rd(75)["metadata"], r75)
 out = _wt_create._create(subject="[home] far due", description=DESC, project="projects/alpha", owner="home-owner", next="home-owner: x", due=day(30))
 check("…and on create", out.startswith("created ") and "capped" not in out and "expected-by" not in out, out)
 told.clear()
-server._update("a75", next="home-owner: moved on", sender="home-owner")
+_update_svc._update("a75", next="home-owner: moved on", sender="home-owner")
 check("a move leaves the due date as it was", rd(75)["metadata"].get("due") == day(20), rd(75)["metadata"])
 item(77, su=now0 - DAY)
-server._update("a77", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "keep it on hold for ten days", "msg": "11111111-1111-4111-8111-000000000001"}])
+_update_svc._update("a77", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "keep it on hold for ten days", "msg": "11111111-1111-4111-8111-000000000001"}])
 m77 = rd(77)["metadata"]
 check("a wake past the cap accepted on his words records them (cap_ok)", m77.get("cap_ok", {}).get("wake") == day(10) and m77["cap_ok"]["by"] == "a checked said entry" and W.words_of(m77), m77)
-server._update("a77", wake=day(3), sender="home-owner")
+_update_svc._update("a77", wake=day(3), sender="home-owner")
 check("a new wake within the cap drops the record of his words", "cap_ok" not in rd(77)["metadata"], rd(77)["metadata"])
 item(78, su=now0 - DAY, wake=day(10), cap_ok={"wake": day(11), "by": "a board answer"}, hold=True)
 check("words recorded for another wake do not cover this one", not W.words_of(rd(78)["metadata"]), rd(78)["metadata"])
@@ -266,15 +270,15 @@ check("words recorded for another wake do not cover this one", not W.words_of(rd
 
 # ---- 5b. the records of his words behind a wake: kept for that wake, dropped when it changes or goes, and the texts that teach the cap
 item(29, su=now0 - DAY, due=day(20), wake=day(10), hold=True, cap_ok={"wake": day(10), "by": "a board answer", "due": day(20), "due_by": "a board answer"})
-server._update("a29", due=day(22), sender="home-owner")
+_update_svc._update("a29", due=day(22), sender="home-owner")
 co = rd(29)["metadata"].get("cap_ok") or {}
 check("…changing the due leaves the wake's record (no record is kept for a due date any more)", wk_(co) == day(10), rd(29)["metadata"])
-server._update("a29", clear_due=True, sender="home-owner")
+_update_svc._update("a29", clear_due=True, sender="home-owner")
 check("…clearing the due leaves the wake's record", rd(29)["metadata"].get("cap_ok", {}).get("wake") == day(10), rd(29)["metadata"])
-server._update("a29", clear_hold=True, sender="home-owner")
+_update_svc._update("a29", clear_hold=True, sender="home-owner")
 check("…clear_hold drops the wake and its record", "cap_ok" not in rd(29)["metadata"] and "wake" not in rd(29)["metadata"], rd(29)["metadata"])
 item(43, su=now0 - DAY, wake=day(10), cap_ok={"wake": day(10), "by": "a board answer"})
-server._update("a43", clear_wake=True, sender="home-owner")
+_update_svc._update("a43", clear_wake=True, sender="home-owner")
 check("clear_wake drops the record of his words", "cap_ok" not in rd(43)["metadata"] and "wake" not in rd(43)["metadata"], rd(43)["metadata"])
 item(44, su=now0 - DAY, wake=day(10), due=day(20), cap_ok={"wake": day(10), "by": "a board answer", "due": day(20), "due_by": "a board answer"})
 _wt_complete.stackshot_complete("a44", outcome="done", reason="finished", description="- Done", sender="home-owner")
@@ -297,14 +301,14 @@ check("get and brief no longer describe a `waiting:` line or an expected-by, and
 
 # ---- 6. after=[] clears; so do "none" and clear_after=true, through the MCP layer too
 item(80, after=["a81"], su=now0 - DAY); item(81, su=now0 - DAY)
-server._update("a80", after=[], sender="home-owner")
+_update_svc._update("a80", after=[], sender="home-owner")
 check("after=[] clears the list", "after" not in rd(80)["metadata"], rd(80)["metadata"])
-item(80, after=["a81"], su=now0 - DAY); server._update("a80", after="none", sender="home-owner")
+item(80, after=["a81"], su=now0 - DAY); _update_svc._update("a80", after="none", sender="home-owner")
 check('after="none" clears it', "after" not in rd(80)["metadata"], rd(80)["metadata"])
-item(80, after=["a81"], su=now0 - DAY); server._update("a80", clear_after=True, sender="home-owner")
+item(80, after=["a81"], su=now0 - DAY); _update_svc._update("a80", clear_after=True, sender="home-owner")
 check("clear_after=true clears it, the form that survives a client that drops an empty list", "after" not in rd(80)["metadata"], rd(80)["metadata"])
 item(80, after=["a81"], su=now0 - DAY)
-refused("clear_after with a new list is refused", lambda: server._update("a80", clear_after=True, after=["a81"], sender="home-owner"), "clear_after drops the after list")
+refused("clear_after with a new list is refused", lambda: _update_svc._update("a80", clear_after=True, after=["a81"], sender="home-owner"), "clear_after drops the after list")
 from fastmcp import Client
 async def via_mcp():
     async with Client(server.mcp) as c:
@@ -334,7 +338,7 @@ real_tell("a90,a91", "home-stew", "[stackshot] batch", tag="wait").join()
 (T / "failpush.py.mode").write_text("fail")
 real_tell("a90,a91", "home-stew", "[stackshot] batch", tag="wait").join()
 check("a batched notice (several ids) is recorded on each item it was about", len(rd(91)["metadata"].get("undelivered") or []) == 1 and len(rd(90)["metadata"]["undelivered"]) == 5, (rd(90)["metadata"]["undelivered"], rd(91)["metadata"]))
-server._update("a90", next="home-owner: moved", sender="home-owner")
+_update_svc._update("a90", next="home-owner: moved", sender="home-owner")
 check("a state change drops the record (the item has moved since)", "undelivered" not in rd(90)["metadata"], rd(90)["metadata"])
 telling.PUSH = [sys.executable, str(T / "failpush.py")]
 
@@ -358,7 +362,7 @@ check("a due date at the end of time is no date, not an exception: 9999-12-31 an
 item(89, due="9999-12-31", su=now0 - 10 * DAY)
 check("an item with such a due date reads as any item: get shows it, the items API lists it and the board builds", "item 89" in _wt_get.stackshot_get("a89"), _wt_get.stackshot_get("a89")[:200])
 bad = {"id": "9", "subject": "[home] bad", "status": "open", "metadata": 5, "state_updated": "garbage"}
-check("a stored value that makes the mover reading raise gives that row no mover fields and fails no list: the reading is guarded", server._wait_fields("a9", bad, server._WaitCtx(now0)) == {}, server._wait_fields("a9", bad, server._WaitCtx(now0)))
+check("a stored value that makes the mover reading raise gives that row no mover fields and fails no list: the reading is guarded", server._wait_fields("a9", bad, _agents._WaitCtx(now0)) == {}, server._wait_fields("a9", bad, _agents._WaitCtx(now0)))
 check("the board builds with the item of such a due date on it, and shows it", "a89" in ui_render.Board(f"{tmp}/store").markdown(), None)
 
 # ---- 7f. a change to what the item waits on drops a failed wait and an old ladder record (one an earlier version wrote), a filing edit does not
@@ -366,20 +370,20 @@ for i in range(85, 400): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 fail_rec = {"what": "check pr_merged o/r#2", "why": "its pull request was closed without being merged", "at": now0 - 3600}
 ladder_rec = {"since": now0 - 5 * DAY, "eb": now0 - 3600, "step": 2, "at": {"1": now0 - 90000, "2": now0 - 3600}}
 for i in (55, 56, 57, 58, 62, 68, 69): item(i, wait_failed=fail_rec, waiting=ladder_rec, su=now0 - 5 * DAY)
-server._update("a55", check="pr_merged o/r#5", sender="home-owner")
+_update_svc._update("a55", check="pr_merged o/r#5", sender="home-owner")
 check("setting a check alone (a filing edit, no state change) drops the failed wait and the ladder record: the new check is a new wait", not any(k in rd(55)["metadata"] for k in ("wait_failed", "waiting")) and rd(55)["metadata"].get("check"), rd(55)["metadata"])
-server._update("a56", wake=day(2), sender="home-owner")
+_update_svc._update("a56", wake=day(2), sender="home-owner")
 check("a new wake drops them", not any(k in rd(56)["metadata"] for k in ("wait_failed", "waiting")), rd(56)["metadata"])
 item(93, su=now0 - DAY)
-server._update("a57", after=["a93"], ask_by=day(9), sender="home-owner")
+_update_svc._update("a57", after=["a93"], ask_by=day(9), sender="home-owner")
 check("an after list drops them", not any(k in rd(57)["metadata"] for k in ("wait_failed", "waiting")), rd(57)["metadata"])
-server._update("a58", needs=["team-back"], sender="home-owner")
+_update_svc._update("a58", needs=["team-back"], sender="home-owner")
 check("a change of needs drops them", not any(k in rd(58)["metadata"] for k in ("wait_failed", "waiting")), rd(58)["metadata"])
-server._update("a62", hold=True, wake=day(3), wait_basis=f"visit on {day(8)}", sender="home-owner")
+_update_svc._update("a62", hold=True, wake=day(3), wait_basis=f"visit on {day(8)}", sender="home-owner")
 check("a hold drops them", not any(k in rd(62)["metadata"] for k in ("wait_failed", "waiting")), rd(62)["metadata"])
-server._update("a68", recycle=True, hold=True, sender="home-owner")
+_update_svc._update("a68", recycle=True, hold=True, sender="home-owner")
 check("a recycle wait drops them", not any(k in rd(68)["metadata"] for k in ("wait_failed", "waiting")), rd(68)["metadata"])
-server._update("a69", priority="p2", sender="home-owner")
+_update_svc._update("a69", priority="p2", sender="home-owner")
 check("a filing edit that changes none of those (priority) keeps them", "wait_failed" in rd(69)["metadata"] and "waiting" in rd(69)["metadata"], rd(69)["metadata"])
 
 # ---- 8. the surfaces: the items API, the item page, board.md, the brief; a parked item is held, never stale

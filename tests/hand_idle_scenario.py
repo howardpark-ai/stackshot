@@ -64,6 +64,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import agents as _agents
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.core import readonly as _ro
 from stackshot.core import config as _cfg
@@ -77,6 +78,7 @@ from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
+from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -93,7 +95,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
+CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _pane_recovery.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -151,6 +153,7 @@ def mutated(patches, probe):
         for o, n, v in old: setattr(o, n, v)
 def rule(name, probe, patches):
     """The rule holds as the code is, and fails once `patches` revert it (a check that cannot fail proves nothing)."""
+    for o_, n_, _v in patches: getattr(o_, n_)       # a patch of a name that is gone must fail here, not read as a reverted rule
     try: held = probe()
     except Exception as e_: held = f"raised {e_!r}"
     check(name, held is True, held)
@@ -213,14 +216,14 @@ rule("2 the History line says why and names the mover it left", probe_history, [
 def probe_main_told():
     wipe(); on(); put(1, act=90); panes["team-back"] = "idle"; tick()
     return len(to_main()) == 1 and not [x for x in sent if x[1] not in (U["home-main"], U["team-back"])]
-rule("2 -main is told, once, and nobody else is", probe_main_told, [(server, "_main_agent", lambda p: "")])
-_real_main = server._main_agent
-server._main_agent = lambda p: "Oliver"
+rule("2 -main is told, once, and nobody else is", probe_main_told, [(_agents, "_main_agent", lambda p: "")])
+_real_main = _agents._main_agent
+_agents._main_agent = lambda p: "Oliver"
 def probe_owner_main():
     wipe(); on(); put(1, act=90); panes["team-back"] = "idle"; tick()
     return not any(x[1] in ("Oliver", _web_page_debts._session_id("Oliver")) for x in sent)
 rule("2 …a page that names the owner as -main tells him nothing", probe_owner_main, [(_model, "is_owner", lambda who: False)])
-server._main_agent = _real_main
+_agents._main_agent = _real_main
 
 # ================================================================ 3. what is read
 def probe_verified_not_handed():
@@ -437,9 +440,9 @@ check("6 several items with no builder free are one message to -main, one line e
 # a project whose page names no -main agent
 def probe_no_main():
     wipe(); on(); put(1, act=90); all_busy()
-    real = server._main_agent; server._main_agent = lambda p: ""
+    real = _agents._main_agent; _agents._main_agent = lambda p: ""
     try: tick()
-    finally: server._main_agent = real
+    finally: _agents._main_agent = real
     return sent == [] and len(history(1)) == 1 and "the project has no -main agent to tell" in history(1)[0]
 check("6 a project with no -main agent gets the History line alone, and no message", probe_no_main() is True)
 

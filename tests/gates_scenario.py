@@ -76,7 +76,14 @@ def patched(owner, **kv):
     try: yield
     finally:
         for k, v in old.items(): setattr(mod, name(k), v)
-def srv(**kv): return patched(server, **kv)                    # what the hooks look up on the server when a gate runs
+from stackshot.service import item_read as _item_read
+from stackshot.model import holders as _holders
+_SRV_MOVED = {"_model_guards_on": _item_read, "_role_of": _holders}                    # the hook names that left the server: their owner modules
+@contextlib.contextmanager
+def srv(**kv):                    # what the hooks look up on the server (or on the owner of a moved name) when a gate runs
+    with contextlib.ExitStack() as st:
+        for k, v in kv.items(): st.enter_context(patched(_SRV_MOVED.get(k, server), **{k: v}))
+        yield
 FLAGMOD = server if MAIN else writes           # where the per-write flags live: the server on main (`_QUESTION`), service/writes.py here (`QUESTION`)
 def flagname(n): return ("_" + n) if MAIN else n
 def tel(**kv): return patched(server if MAIN else telling, **{("_" + k) if MAIN else k: v for k, v in kv.items()})      # the telling's functions: `_tell_woken` on the server on main, `tell_woken` on service/telling.py here

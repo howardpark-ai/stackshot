@@ -171,6 +171,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.service import update as _update_svc
 from stackshot.web import answers as _web_answers
 from stackshot.waits import watchers as _watch
 from stackshot.core import instance as _core_instance
@@ -571,7 +572,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Done on a step item (mover Oliver, then home-keeper, no needs): needs names the then-mover, and the notice goes to it, not the page's keeper",
           m19.get("needs") == [STEW] and telling.notice_to(m19) == [(STEW, "as a session named in its needs")]
           and _model.derive(rd("a", 19)).mover == "home-keeper", (m19, telling.notice_to(m19)))
-    server._update("a19", next="home-keeper: on it", sender="home-keeper")
+    _update_svc._update("a19", next="home-keeper: on it", sender="home-keeper")
     check("…so no pending answer is left for a19, and the keeper is not told after 30 min that its owner has not written", "a19" not in _web_answers._answers_load(), _web_answers._answers_load())
     # F3: no owner and no session in needs: the project's keeper takes it at once, as mover, and is told
     told.clear(); _kp = telling.project_keeper; telling.project_keeper = lambda project, owner="": "home-keeper"
@@ -759,10 +760,10 @@ st = _web_answers._answers_load()
 check("pending: a1, a2, a6 and a7 (decisions), not the comments", sorted(st) == ["a1", "a2", "a6", "a7"] and st["a1"]["told"] == [AGENT], st)
 told.clear()
 check("before 30 min nothing goes", server._answer_tick(time.time() + 600) == [] and not told, told)
-server._update("a1", next="home-agent: shipping it", dropped=[1], sender="home-agent")             # the session named in needs acts
-server._update("a2", next="home-here: telling Pat", dropped=[1], sender="home-here")               # the owner acts
+_update_svc._update("a1", next="home-agent: shipping it", dropped=[1], sender="home-agent")             # the session named in needs acts
+_update_svc._update("a2", next="home-here: telling Pat", dropped=[1], sender="home-here")               # the owner acts
 check("a write by a session the answer went to settles it (the owner's, or one named in needs)", sorted(_web_answers._answers_load()) == ["a6", "a7"], _web_answers._answers_load())
-server._update("a7", next="home-keeper: someone else wrote", dropped=[1], sender="home-keeper")    # the keeper is not who was told: item 7 stays pending
+_update_svc._update("a7", next="home-keeper: someone else wrote", dropped=[1], sender="home-keeper")    # the keeper is not who was told: item 7 stays pending
 told.clear()
 out = server._answer_tick(time.time() + 1801)
 stew = [t for t in told if t[1] == STEW]
@@ -822,7 +823,7 @@ refused("update: clear_options does not go with a new list", lambda: _wt_update.
 refused("update: clear_ask does not go with a new ask", lambda: _wt_update.stackshot_update("a11", ask=YESNO, clear_ask=True, sender="home-here"), "clear_ask")
 r_ = _wt_update.stackshot_update("a11", options=[], sender="home-here")
 check("update: options=[] clears the options and leaves the ask", r_.startswith("updated a11") and "options" not in rd("a", 11)["metadata"] and rd("a", 11)["metadata"].get("ask") == ASK, r_)
-server._update("a11", options=OPTS, sender="home-here")
+_update_svc._update("a11", options=OPTS, sender="home-here")
 check("fixture: the options are back", rd("a", 11)["metadata"].get("options") == OPTS)
 r_ = _wt_update.stackshot_update("a11", clear_options=True, sender="home-here")
 check("update: clear_options=true clears them too", r_.startswith("updated a11") and "options" not in rd("a", 11)["metadata"] and rd("a", 11)["metadata"].get("ask") == ASK, r_)
@@ -845,7 +846,7 @@ check("F3: the then-mover's notice ends \"It's yours now\" (the owner's does not
       any(t[1] == AGENT and "answered a50 on the board: Yes — go on. It's yours now → " in t[2] for t in told_a50) and not any("yours now" in t[2] for t in told_a50 if t[1] == OWNER), told_a50)
 check("...the pending answer names the then-mover alone",
       _web_answers._answers_load().get("a50", {}).get("told") == [AGENT], _web_answers._answers_load().get("a50"))
-server._update("a50", next="home-agent: on it", sender="home-agent")
+_update_svc._update("a50", next="home-agent: on it", sender="home-agent")
 check("...and the then-mover's write settles it", "a50" not in _web_answers._answers_load(), _web_answers._answers_load())
 told.clear()
 check("a pick among the options with then = home-keeper (not in needs): the item goes to home-keeper, who alone is told, and the model reads clean",
@@ -873,7 +874,7 @@ told.clear()
 check("F1, external still in needs: mover Oliver goes, the item reads waiting (outside), then is dropped (nothing reads it when external ends), needs holds external only, no model conflict",
       server._answer("a59", "Yes", "", "") == "decision" and "mover" not in rd("a", 59)["metadata"] and "then" not in rd("a", 59)["metadata"] and rd("a", 59)["metadata"].get("needs") == ["external"]
       and b(59).state == "waiting" and not b(59).conflicts and not any("yours now" in t[2] for t in told if t[0] == "a59"), (rd("a", 59)["metadata"], b(59), told))
-server._update("a59", needs=[], sender="home-here")
+_update_svc._update("a59", needs=[], sender="home-here")
 check("F1, a59 followed to the end of external: it reads alive with no conflict (the owner's default mover; no stale then)", b(59).state == "alive" and not b(59).conflicts and "then" not in rd("a", 59)["metadata"], (rd("a", 59)["metadata"], b(59)))
 told.clear()
 check("F1, an open after link: mover Oliver goes, the item reads waiting (blocked), then stays for the release, no model conflict",
@@ -912,7 +913,7 @@ check("a park on an item that also has external in needs: no time wait is stored
       and "external" in rd("a", 64)["metadata"].get("needs", []) and not b(64).conflicts, (rd("a", 64)["metadata"], b(64)))
 check("a park with a then stored its post-wake mover; update clear_hold=true releases it and drops the wait's fields with it (wait_kind, post_wake_mover, watch), no refusal, no conflict",
       server._answer("a65", "Park", "", "") == "decision" and rd("a", 65)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 65)["metadata"]
-      and (server._update("a65", clear_hold=True, sender="home-agent") or True) and not any(k in rd("a", 65)["metadata"] for k in ("hold", "wake", "wait_kind", "post_wake_mover", "watch", "then"))
+      and (_update_svc._update("a65", clear_hold=True, sender="home-agent") or True) and not any(k in rd("a", 65)["metadata"] for k in ("hold", "wake", "wait_kind", "post_wake_mover", "watch", "then"))
       and b(65).state == "alive" and not b(65).conflicts, (rd("a", 65)["metadata"], b(65)))
 told.clear()
 wakes_svc.wake_pass()
@@ -935,7 +936,7 @@ check("the board item's shape through an after release: handed to home-agent (st
 before54 = rd("a", 54)["metadata"]["needs"], rd("a", 54)["metadata"]["mover"], rd("a", 54)["metadata"]["then"]
 check("a comment only on such an item: it stays his (decision, mover and then unchanged)",
       server._answer("a54", "", "a question first", "comment") == "comment" and (rd("a", 54)["metadata"]["needs"], rd("a", 54)["metadata"]["mover"], rd("a", 54)["metadata"]["then"]) == before54, rd("a", 54)["metadata"])
-_u74 = server._update("a74", needs=["decision"], ask=YESNO, sender="home-agent")
+_u74 = _update_svc._update("a74", needs=["decision"], ask=YESNO, sender="home-agent")
 m74 = rd("a", 74)["metadata"]
 check("the whole chain, first half: the agent's own ask on an item it moves stores mover Oliver and then home-agent (his state makes him the mover), with no conflict",
       m74.get("mover") == "Oliver" and m74.get("then") == "home-agent" and "decision" in (m74.get("needs") or []) and not b(74).conflicts and b(74).mover == "Oliver", (_u74, m74, b(74)))

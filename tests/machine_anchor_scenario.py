@@ -75,6 +75,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import route as _wt_route; from stackshot.anchors import machine_anchor as MA; from stackshot.anchors import anchors as ANC; from stackshot.service import create as create_svc
+from stackshot.service import update as _update_svc
 from stackshot.github import ghsync as _gh
 from stackshot.core import instance as _core_instance
 from stackshot.core import config as _cfg
@@ -293,37 +294,37 @@ for i in (40, 41, 42, 43, 44, 45, 46):
     (T / f"store/a/{i}.json").unlink(missing_ok=True)
 MA.save({}); go_offline("host-b"); go_offline("host-c")
 item(40, mover=BACK, subject="[home] a step names an offline machine", next="team-back: wait")
-out = server._update("a40", sender=BACK, next="team-back: run the nightly sync on host-b")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run the nightly sync on host-b")
 check("note: an open step naming an offline machine (by hostname) with no anchor ends the reply with one note naming the fix; the write went through",
       "(note: an open step of " + R("a40") + " names box-b" in out and "anchors(project=\"projects/alpha\", add=[\"machine:box-b\"], items=[\"" + R("a40") + "\"])" in out and "run the nightly sync on host-b" in mt(40)["next"] and out.count("(note: an open step of") == 1, out[-700:])
-out = server._update("a40", sender=BACK, next="team-back: run the nightly sync on box-b and box-c")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run the nightly sync on box-b and box-c")
 check("note: two machines in the steps are one note, each named, once per write", out.count("(note: an open step of") == 1 and "box-b" in out.split("(note: an open step of")[1] and "box-c" in out.split("(note: an open step of")[1] and "box-c (last checked in" in out
       and "machine:box-b\", \"machine:box-c\"" in out, out[-700:])
 anchors(add=["machine:box-b"], items=["a40"])
-out = server._update("a40", sender=BACK, next="team-back: run the nightly sync on box-b and box-c")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run the nightly sync on box-b and box-c")
 check("note: an item with a machine anchor for box-b is told about box-c only", "(note: an open step of" in out and "names box-c" in out and "names box-b" not in out, out[-500:])
 anchors(add=["machine:box-c"])
-out = server._update("a40", sender=BACK, next="team-back: run the nightly sync on box-b and box-c")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run the nightly sync on box-b and box-c")
 check("note: ...a project-wide anchor on box-c counts too: no note", "(note: an open step of" not in out, out[-500:])
 anchors(remove=["machine:box-b", "machine:box-c"])
-out = server._update("a40", sender=BACK, next="team-back: run it on box-a")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run it on box-a")
 check("note: a machine that is online now is not named", "(note: an open step of" not in out, out[-400:])
-out = server._update("a40", sender=BACK, next="team-back: run it on box-bx and my-box-b")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run it on box-bx and my-box-b")
 check("note: a name inside a longer one is not a match", "(note: an open step of" not in out, out[-400:])
-out = server._update("a40", sender=BACK, next="team-back: run the sync on box-b", description="- A thing\n- box-c is mentioned only here\n- Done when done")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run the sync on box-b", description="- A thing\n- box-c is mentioned only here\n- Done when done")
 check("note: only open steps are read, not the description", "names box-b" in out and "box-c" not in out.split("(note: an open step of")[1], out[-500:])
 # a done step is not read
 item(41, mover=BACK, subject="[home] steps", next="team-back: first\nteam-back: run it on box-c\nteam-back: last")
-out = server._update("a41", sender=BACK, done=[1])
+out = _update_svc._update("a41", sender=BACK, done=[1])
 check("note: marking another step done leaves the named open step noted", "names box-c" in out, out[-400:])
-out = server._update("a41", sender=BACK, done=[2])
+out = _update_svc._update("a41", sender=BACK, done=[2])
 check("note: a step marked done is no longer read (only the open ones are)", "(note: an open step of" not in out, out[-400:])
 # a box_online wait on that machine is the other way to be told
 item(42, mover=BACK, subject="[home] doing, will wait for box-b", next="team-back: run it on box-b")
-out = server._update("a42", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, mover="none")
-out2 = server._update("a42", sender=BACK, subject="[home] doing, will wait for box-b (reworded)")
+out = _update_svc._update("a42", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, mover="none")
+out2 = _update_svc._update("a42", sender=BACK, subject="[home] doing, will wait for box-b (reworded)")
 check("note: an item with a box_online wait on the machine needs no anchor, and gets no note", "(note: an open step of" not in out2, out2[-400:])
-out = server._update("a40", sender=BACK, next="team-back: run it on box-d")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run it on box-d")
 check("note: a machine that has never checked in is offline and says so", "names box-d (has not checked in yet)" in out, out[-500:])
 # a create
 cout = create_svc.create_item(subject="[home] new item for box-b", description=DESC, project="projects/alpha", owner=U["home-front"], mover=BACK, next="team-back: run the sync on host-b", goal="Done when box-b ran it.", request_id="machanchor-create-1")[1]
@@ -332,11 +333,11 @@ cout = create_svc.create_item(subject="[home] new item with no machine", descrip
 check("note: ...and none when no step names a machine", "(note: an open step of" not in cout, cout[-400:])
 # a closed item is never noted
 item(43, mover=BACK, subject="[home] closing", next="team-back: run it on box-b")
-out = server._update("a43", sender=BACK, status="completed", outcome="done", reason="it ran", outcome_text="- it ran")
+out = _update_svc._update("a43", sender=BACK, status="completed", outcome="done", reason="it ran", outcome_text="- it ran")
 check("note: a close is not noted", "(note: an open step of" not in out, out[-400:])
 # an unreadable clients state is no failure of the write
 (T / "state/clients/state.json").write_text("not json")
-out = server._update("a40", sender=BACK, next="team-back: run it on host-b")
+out = _update_svc._update("a40", sender=BACK, next="team-back: run it on host-b")
 check("note: a clients state that cannot be read leaves the write as it was (no note, no error)", out.startswith("updated"), out[:200])
 write_state()
 

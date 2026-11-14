@@ -34,6 +34,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.core import config as cfg; from stackshot.fleet import fleet; from stackshot.fleet import clients; from stackshot.waits import mover_state; from stackshot.waits import stall; from stackshot.fleet import inbox; from stackshot.fleet import push; from stackshot.fleet import liveness as LV; from stackshot.web import server
+from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.anchors import anchors as _anc
 NOW = float(int(time.time()))        # whole seconds: the stamps below are second-granular, so an edge case lands exactly on the edge
 iso = lambda delta: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW - delta))
@@ -60,20 +61,20 @@ def o_online(m, now=None): return bool(m.get("puller")) and (time.time() if now 
 o_reported_lately = lambda seen, now: now - o_ts(seen) <= o_grace()                                # clients._upsert's claim guard
 o_hook_expired = lambda seen, now: now - o_ts(seen) > o_ttl()                                       # clients._expire
 o_past_horizon = lambda gone, now: now - o_ts(gone) > o_horizon()                                   # clients._expire
-def o_idle_live(who, nm, idx):                                                                      # server._idle_live
+def o_idle_live(who, nm, idx):                                                                      # pane_recovery._idle_live
     sid = _anc.canonical(who, nm); rec = idx.get(sid.lower()) or idx.get(sid)
     return bool(rec) and o_running(rec)
-def o_machine_unreachable(letter, started, now=None):                                               # server._machine_unreachable (started = server._STARTED)
+def o_machine_unreachable(letter, started, now=None):                                               # pane_recovery._machine_unreachable (started = pane_recovery._STARTED)
     on = fleet.read(str(letter or ""), "machine").get("online") if letter else None
     if not (isinstance(on, dict) and on.get("ok") is False): return ""
     now = time.time() if now is None else now
     basis = max(o_ts(on.get("since")), started)
     return "its machine's puller is not checking in" if now - basis >= o_grace() else ""
-def o_session_down(who, nm, idx, stuck, started, now=None):                                         # server._session_down
+def o_session_down(who, nm, idx, stuck, started, now=None):                                         # pane_recovery._session_down
     sid = _anc.canonical(who, nm); rec = idx.get(sid.lower()) or idx.get(sid)
     if not isinstance(rec, dict) or not rec: return ""
     if o_running(rec):
-        why = stuck(sid) if stuck is not None else server._pane_stuck(sid, nm, idx)
+        why = stuck(sid) if stuck is not None else _pane_recovery._pane_stuck(sid, nm, idx)
         if why: return f"is stopped on an error ({why})"
         off = o_machine_unreachable(rec.get("machine"), started, now)
         return f"is unreachable ({off})" if off else ""
@@ -138,7 +139,7 @@ check("alias: fleet presence names are liveness.py's", all(getattr(fleet, n) is 
 check("alias: clients.online and clients._ts are liveness.py's", clients.online is LV.puller_online and clients._ts is LV.ts and clients._online is LV.online_window)
 check("alias: mover_state's pane names are liveness.py's", all(getattr(mover_state, n) is getattr(LV, n) for n in ("pane_row", "status", "is_idle", "idle_since", "idle_seconds", "idle_for", "IDLE")))
 src = lambda f: __import__("inspect").getsource(f)
-check("server: the four readers are one call into liveness.py each", all(f"_lv.{call}(" in src(getattr(server, fn)) for fn, call in
+check("the four readers are one call into liveness.py each", all(f"_lv.{call}(" in src(getattr(server if fn == "_pane_dead" else _pane_recovery, fn)) for fn, call in
       (("_idle_live", "idle_live"), ("_machine_unreachable", "machine_unreachable"), ("_session_down", "session_down"), ("_pane_dead", "pane_dead"))))
 check("stall: the idle test is liveness.py's", "_lv.is_idle(" in src(stall.action) and not hasattr(stall, "_mover_state"))
 
@@ -211,12 +212,12 @@ for started in (0.0, NOW - 60, NOW - 599, NOW - 600, NOW - 7200):
 check("literal: silent for exactly the grace is unreachable, five minutes is not, online and unknown never are",
       [bool(LV.machine_unreachable(L, NOW, 0.0)) for L in "abcdefg"] == [False, True, False, True, False, False, True])
 check("literal: a server up for a minute calls no silent puller unreachable", not any(LV.machine_unreachable(L, NOW, NOW - 60) for L in "abcdefg"))
-server._STARTED = NOW - 7200
-check("server wrapper: _machine_unreachable gives the same, reading _STARTED at the call", all(server._machine_unreachable(L, NOW) == o_machine_unreachable(L, server._STARTED, NOW) for L in ("a", "b", "c", "d", "e", "f", "g", "z", "", None)))
-server._STARTED = NOW - 60
-check("server wrapper: …and follows _STARTED when it moves", server._machine_unreachable("b", NOW) == "" and server._machine_unreachable("b", NOW + 600) != "")
+_pane_recovery._STARTED = NOW - 7200
+check("server wrapper: _machine_unreachable gives the same, reading _STARTED at the call", all(_pane_recovery._machine_unreachable(L, NOW) == o_machine_unreachable(L, _pane_recovery._STARTED, NOW) for L in ("a", "b", "c", "d", "e", "f", "g", "z", "", None)))
+_pane_recovery._STARTED = NOW - 60
+check("server wrapper: …and follows _STARTED when it moves", _pane_recovery._machine_unreachable("b", NOW) == "" and _pane_recovery._machine_unreachable("b", NOW + 600) != "")
 
-# ================================================================= 4. a session that cannot move an item (server._session_down, _idle_live) and the readers beside them
+# ================================================================= 4. a session that cannot move an item (pane_recovery._session_down, _idle_live) and the readers beside them
 UR, UG1, UG2, UG3, UB, UD, UE, UF, UST, UX = (UU(i) for i in range(1, 11))
 def sess(machine_, **kw): return {"name": f"home-{kw.pop('n', 'x')}", "machine": machine_, **kw}
 idx = {UR: sess("a", n="run-online"), UG1: sess("a", n="gone-1s", gone=iso(1)), UG2: sess("a", n="gone-30m", gone=iso(1800)), UG3: sess("a", n="gone-month", gone=iso(86400 * 40)),
@@ -224,14 +225,14 @@ idx = {UR: sess("a", n="run-online"), UG1: sess("a", n="gone-1s", gone=iso(1)), 
        UST: sess("a", n="run-stopped", stopped="Credit balance is too low"), UX: {}}
 stucks = {"unset": None, "quiet": lambda sid: "", "stopped": lambda sid: "usage limit"}
 for started in (0.0, NOW - 60, NOW - 7200):
-    server._STARTED = started
+    _pane_recovery._STARTED = started
     for who in list(idx) + [UU(99), "cse_0123456789abcdef", ""]:
         for sn, stuck in stucks.items():
-            got = server._session_down(who, {}, idx, stuck, NOW); want = o_session_down(who, {}, idx, stuck, started, NOW)
+            got = _pane_recovery._session_down(who, {}, idx, stuck, NOW); want = o_session_down(who, {}, idx, stuck, started, NOW)
             check(f"session_down {idx.get(who, {}).get('name', who)} stuck={sn} started {int(NOW - started)}s ago", got == want, (got, want))
-        check(f"idle_live {idx.get(who, {}).get('name', who)}", server._idle_live(who, {}, idx) == o_idle_live(who, {}, idx), (server._idle_live(who, {}, idx), o_idle_live(who, {}, idx)))
-server._STARTED = NOW - 7200
-down = lambda u, stuck="quiet": server._session_down(u, {}, idx, stucks[stuck], NOW)
+        check(f"idle_live {idx.get(who, {}).get('name', who)}", _pane_recovery._idle_live(who, {}, idx) == o_idle_live(who, {}, idx), (_pane_recovery._idle_live(who, {}, idx), o_idle_live(who, {}, idx)))
+_pane_recovery._STARTED = NOW - 7200
+down = lambda u, stuck="quiet": _pane_recovery._session_down(u, {}, idx, stucks[stuck], NOW)
 check("literal: running on an online machine is up; a puller silent for a day makes it unreachable; one with no puller or no record of its machine is not unreachable",
       down(UR) == "" and down(UB).startswith("is unreachable (its machine's puller is not checking in") and down(UD).startswith("is unreachable") and down(UE) == "" and down(UF) == "")
 check("literal: stopped on an error is down whatever the machine, a relaunch under way is not, a pane gone past the grace is",

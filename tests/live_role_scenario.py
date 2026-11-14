@@ -45,6 +45,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -109,7 +110,7 @@ def run_mw(name, args, call):
         except ToolError as e: out = e
     return out, buf.getvalue()
 def refuse_update():
-    return server._update("a1", sender="home-front", description="no bullet here")      # a real refusal of the server's own
+    return _update_svc._update("a1", sender="home-front", description="no bullet here")      # a real refusal of the server's own
 out, err = run_mw("update", {"item_id": "a1", "sender": "home-front", "description": "no bullet here"}, refuse_update)
 check("2: a refused update logs one line: tool, item, sender and the server's own reason", isinstance(out, ToolError) and err.count("\n") == 1
       and err.startswith("refused: update item=a1 sender=home-front: Refused: description line is not a `- ` bullet"), (out, err))

@@ -40,6 +40,7 @@ DESC = "- A thing\n- It lives here\n- Done when done"
 OUT = "- The thing works now\n- It lives here\n- Finished when it ships"
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.web.tools import text as _web_tools_text
 from fastmcp.exceptions import ToolError
@@ -180,7 +181,7 @@ checks_svc.check_close("g20", rd(20), "a done check", time.time())
 check("a done check's close settles every open step, by the server (unchanged)", kinds(20) == ["done", "done"] and {b for _, b in sts(20)} == {_core_instance.NAME} and rd(20)["metadata"]["outcome"] == "done", sts(20))
 it21 = rd(21); server._watch_close(it21, "dropped on his answer", time.time())
 check("a watcher ask's drop settles every open step, by the server (unchanged)", [x["status"] for x in it21["metadata"]["steps"]] == ["dropped", "dropped"], it21["metadata"])
-server._update(ref(22), status="completed", outcome="done", reason="it ended", outcome_text=OUT, sender="a script on testbox")
+_update_svc._update(ref(22), status="completed", outcome="done", reason="it ended", outcome_text=OUT, sender="a script on testbox")
 check("a script's close (no session's tool call) settles every open step (unchanged)", rd(22)["status"] == "completed" and kinds(22) == ["done", "done"], sts(22))
 
 # ================================================================ 4. the text

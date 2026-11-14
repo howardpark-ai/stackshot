@@ -63,6 +63,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.model import model as _model
 from stackshot.service import store as _service_store
 from stackshot.projects import pages as _pages
@@ -87,7 +89,7 @@ hrs = lambda n: time.strftime("%Y-%m-%d %H:%M", time.gmtime(now0 + n * 3600 + ZO
 BACK, OTHER, GONE = "team-back", "home-other", "home-gone"      # as the update path stores a name the registry does not know
 UB, UO = U["team-back"], U["home-other"]
 def upd(i, **kw):
-    return server._update(f"a{i}", sender="home-front", **kw)
+    return _update_svc._update(f"a{i}", sender="home-front", **kw)
 
 TODAY = day(0)
 ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
@@ -204,7 +206,7 @@ check("alone: …a past date passed now is accepted and not stored, with the not
 
 # ---- a stored state is re-checked only by a write that touches a field it stands on
 item(37, needs=[], state="doing", expected_by=hrs(2))            # a stored state its fields no longer back (hand-edited, or from before a rule)
-server._update("a37", recycle=True, sender="home-front")
+_update_svc._update("a37", recycle=True, sender="home-front")
 check("touched: a recycle mark is not wedged by a stored state its item no longer backs", mt(37).get("recycle") is True and mt(37)["state"] == "doing", mt(37))
 upd(37, priority="p1")
 check("touched: …nor is a filing edit (priority)", mt(37)["priority"] == "p1" and mt(37)["state"] == "doing", mt(37))
@@ -253,7 +255,7 @@ server._answer("a39", f"Park until {day(5)}", "", "")
 check("answer: a park he picks ends a stored state of any kind (doing here), not only your-call", "state" not in mt(39) and "expected_by" not in mt(39) and hd_(mt(39)) is True, mt(39))
 # ================================================================ the derived state
 item(63, needs=["decision", BACK], ask=ASK, state="doing", expected_by=hrs(2))        # a stored state that is not the section's: the brief says it
-D = lambda i, letter="a": states.of(rd(i, letter), lambda it: server._after_open(it.get("metadata") or {}))
+D = lambda i, letter="a": states.of(rd(i, letter), lambda it: _item_read._after_open(it.get("metadata") or {}))
 item(40, needs=["decision"], ask=ASK, then="home-front"); item(41, needs=["external"]); item(42, needs=[BACK], hold=True, wake=day(30), wait_basis={"text": f"visit {day(35)}", "wake": day(30), "by": "x", "at": now0})
 item(43, needs=[BACK], hold=True, wake=day(3)); item(44, needs=[BACK], after=["a18"]); item(45, needs=[BACK], after=["a29"]); item(46, needs=[BACK], rank=2); item(47, needs=[], rank=2)   # a leftover rank on a stored item
 item(48, needs=[BACK]); item(49, status="completed", needs=[BACK], outcome="done"); item(50, needs=[BACK], state="doing", expected_by=hrs(2))

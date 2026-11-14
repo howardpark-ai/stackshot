@@ -68,6 +68,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.service import store as _service_store
 from stackshot.web import page_debts as _pdebts
@@ -231,7 +232,7 @@ check("a question that overruns the next-line limit is filed, cut at a word with
 st, ol3 = tp("open", question=LONG[:150])
 check("…one that fits is kept whole", ol3["repeat"] is True and item(ol2["item"])["metadata"]["next"] == nxt("home-sparrow-builder", LONG[:150]), item(ol2["item"])["metadata"]["next"])
 # another writer's line beside the question survives a changed question; the old question is a dropped step
-server._update(ol2["item"], next=item(ol2["item"])["metadata"]["next"] + "\nhome-sparrow-builder: check the nightly run", sender="home-sparrow-builder")
+_update_svc._update(ol2["item"], next=item(ol2["item"])["metadata"]["next"] + "\nhome-sparrow-builder: check the nightly run", sender="home-sparrow-builder")
 st, ol4 = tp("open", question="Another question?")
 m4 = item(ol2["item"])["metadata"]
 check("a changed question replaces only the terminal's own line: another session's line stays, the old question is a dropped step",
@@ -263,19 +264,19 @@ for i in range(3):
     tp("open", question=f"burst {i}"); tp("clear", "home-sparrow-builder", None); tp("open", question=f"burst again {i}")
 owed = _pdebts._owed_load()
 OWNER_ID = _pdebts._session_id("home-sparrow-main")
-check("a burst of opens and clears leaves the keeper of record owing nothing (its own board writes are not blocked)", not any(_pdebts._same_sess(o, OWNER_ID) for os_ in owed.values() for o in os_), owed)
+check("a burst of opens and clears leaves the keeper of record owing nothing (its own board writes are not blocked)", not any(sr._same_sess(o, OWNER_ID) for os_ in owed.values() for o in os_), owed)
 check("…and no script label is made to owe a page either", not any(("sala-hook" in o or "script" in o) for os_ in owed.values() for o in os_), owed)
 tp("clear", "home-sparrow-builder", None); _pdebts._owed_save({}); _os.utime(T / "brain/projects/alpha.md", None)
 
 # ---- 9. a state write that is refused closes the item again
-real_update = server._update
+real_update = _update_svc._update
 def failing_update(gid_, *a, **kw):
     if kw.get("step"): raise ToolError("Refused: a pretend refusal of the state")
     return real_update(gid_, *a, **kw)
-server._update = failing_update
+_update_svc._update = failing_update
 try:
     before = len(items()); st, of = tp("open", question="Will this half-made item be left?")
-finally: server._update = real_update
+finally: _update_svc._update = real_update
 check("a refused state write answers 400 with the refusal", st == 400 and "pretend refusal" in of.get("error", ""), (st, of))
 check("…and the item that was made for it is closed again, not left half made, so the next open files a clean one", len(items()) == before + 1 and server._terminal_open_items("home-sparrow-builder") == []
       and _service_store._load("s" + str(int(items()[-1])))["metadata"]["outcome"] == "dropped", (items()[-3:], server._terminal_open_items("home-sparrow-builder")))
@@ -287,11 +288,11 @@ tp("clear", "home-sparrow-builder", None)
 def oserror_state(gid_, *a, **kw):
     if kw.get("step"): raise OSError("disk went away")
     return real_update(gid_, *a, **kw)
-server._update = oserror_state
+_update_svc._update = oserror_state
 try:
     try: tp("open", question="OSError on the state"); raised = None
     except OSError as e: raised = e
-finally: server._update = real_update
+finally: _update_svc._update = real_update
 last = _service_store._load("s" + str(int(items()[-1])))
 check("an OSError on the state write propagates and the half-made item is closed (dropped), not left open", raised is not None and last["status"] == "completed" and last["metadata"]["outcome"] == "dropped"
       and server._terminal_open_items("home-sparrow-builder") == [], (raised, last["status"]))

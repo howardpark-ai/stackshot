@@ -56,7 +56,7 @@ class Hooks:
     """What the telling still reaches in server.py (the hand-off record's functions, the page keepers of a project's agents, the page debt's marks and the time zone), in the names they have
     there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     back_agent: Callable[..., Any]  # server._back_agent
-    builder_for: Callable[..., Any]  # server._builder_for
+    builder_for: Callable[..., Any]  # agents._builder_for
     check_changed: Callable[..., Any]  # server lambda to checks.check_changed
     check_lane_shown: Callable[..., Any]  # server lambda to checks.check_lane_shown
     debt_mover: Callable[..., Any]  # server._debt_mover
@@ -69,12 +69,12 @@ class Hooks:
     handoff_text: Callable[..., Any]  # service/handoff.py: handoff_text
     handoff_told_text: Callable[..., Any]  # service/handoff.py: handoff_told_text
     ho_same: Callable[..., Any]  # service/handoff.py: ho_same
-    main_agent: Callable[..., Any]  # server._main_agent
-    model_of: Callable[..., Any]  # server._model_of
+    main_agent: Callable[..., Any]  # agents._main_agent
+    model_of: Callable[..., Any]  # item_read._model_of
     owed_mark: Callable[..., Any]  # server._owed_mark
     rmod_outcome_word: Callable[..., Any]  # server._rmod.outcome_word
-    role_name: Callable[..., Any]  # server._role_name
-    same_sess: Callable[..., Any]  # server._same_sess
+    role_name: Callable[..., Any]  # sessions_registry._role_name
+    same_sess: Callable[..., Any]  # sessions_registry._same_sess
     session_id: Callable[..., Any]  # server._session_id
     shown_needs: Callable[..., Any]  # server._shown_needs
     zone: Callable[[], Any]  # server.ZONE

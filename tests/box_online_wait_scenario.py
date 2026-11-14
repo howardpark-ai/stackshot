@@ -70,6 +70,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.fleet import liveness as _lv
 from stackshot.core import config as _cfg
 from stackshot.service import store as _service_store
@@ -124,21 +126,21 @@ check("watchers: a box_online wait with a backstop is watched; without one it is
 
 # ================================================================ the write
 item(10, mover=BACK, subject="[home] doing, will wait for box-b")
-out = server._update("a10", sender=BACK, wait_kind="event", wait_event="box_online host-b", ask_by=day(5), post_wake_mover=BACK, mover="none")
+out = _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="box_online host-b", ask_by=day(5), post_wake_mover=BACK, mover="none")
 check("write: a machine offline now is accepted, stored under its fleet name (a hostname resolves), and the reply says what the server watches",
       mt(10).get("wait_kind") == "event" and mt(10).get("wait_event") == "box_online box-b" and "event wait: the server watches for box-b coming online" in out and "Nothing tells the server" not in out, (mt(10), out[-500:]))
 check("write: ...the wait is stamped (watch.set_at)", (mt(10).get("watch") or {}).get("set_at"), mt(10))
 item(11, mover=BACK, subject="[home] doing, will wait for box-c")
-server._update("a11", sender=BACK, wait_kind="event", wait_event="BOX_ONLINE Box-C", ask_by=day(5), post_wake_mover=BACK, mover="none")
+_update_svc._update("a11", sender=BACK, wait_kind="event", wait_event="BOX_ONLINE Box-C", ask_by=day(5), post_wake_mover=BACK, mover="none")
 check("write: a machine in the names table that has never checked in is known, and offline: the wait is accepted", mt(11).get("wait_event") == "box_online box-c", mt(11))
 item(12, mover=BACK, subject="[home] doing, will try the wrong machine")
-refused("write: an unknown machine is refused, naming the machines the fleet knows", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-zz", ask_by=day(5), post_wake_mover=BACK, mover="none"),
+refused("write: an unknown machine is refused, naming the machines the fleet knows", lambda: _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-zz", ask_by=day(5), post_wake_mover=BACK, mover="none"),
         "'box-zz' is not one", "box-a, box-b, box-c")
-refused("write: ...a phrase with no machine is refused with the form", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box_online <machine>")
-refused("write: a machine that is online now is refused: there is nothing to wait for (as for a PR already merged)", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-a", ask_by=day(5), post_wake_mover=BACK, mover="none"),
+refused("write: ...a phrase with no machine is refused with the form", lambda: _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box_online <machine>")
+refused("write: a machine that is online now is refused: there is nothing to wait for (as for a PR already merged)", lambda: _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-a", ask_by=day(5), post_wake_mover=BACK, mover="none"),
         "box-a is online now", "nothing to wait for", "last checked in at", "the same write is accepted once 10 minutes have passed", "after ")
 try:
-    server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-a", ask_by=day(5), post_wake_mover=BACK, mover="none"); why = ""
+    _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-a", ask_by=day(5), post_wake_mover=BACK, mover="none"); why = ""
 except Exception as e:
     why = str(e)
 m_seen = re.search(r"last checked in at (\d{4}-\d\d-\d\d \d\d:\d\d) (\S+)\)", why); m_after = re.search(r"that check-in, that is after (\d{4}-\d\d-\d\d \d\d:\d\d) (\S+);", why)
@@ -147,7 +149,7 @@ _seen_ts = _lv.ts(json.loads((T / "state/clients/state.json").read_text())["mach
 check("write: ...the refusal says when the machine last checked in and the time after which the same write is accepted (check-in + online_minutes), in the instance zone, and no UTC beside it",
       m_seen and m_after and m_seen.group(1) == _tfmt(_seen_ts) and m_after.group(1) == _tfmt(_seen_ts + 600) and m_seen.group(2) == m_after.group(2) == _cfg.tz_abbr() and "UTC" not in why, why)
 check("write: ...a refused write leaves the item as it was", "wait_kind" not in mt(12) and mt(12).get("mover") == BACK, mt(12))
-refused("write: ...and the hostname of an online machine is refused the same way", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online host-a", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box-a is online now")
+refused("write: ...and the hostname of an online machine is refused the same way", lambda: _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online host-a", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box-a is online now")
 # two records of one fleet name: the newest check-in speaks for the machine, whichever the file lists first
 def state_with(ms): (T / "state/clients/state.json").write_text(json.dumps({"machines": ms, "sessions": {}}))
 _fresh = {"letter": "d", "fleet": "box-b", "first": iso(now0 - 9 * DAY), "puller": iso(time.time() - 30.0)}
@@ -156,7 +158,7 @@ for order, ms in (("stale first", {"host-b-old": _stale, "host-b": _fresh}), ("f
     state_with(ms)
     bx = evwaits_svc.evw_boxes()
     check(f"duplicates ({order}): the record with the newest check-in speaks for the fleet name, under the fleet name and under both hostnames", all(bx[k][1] == _fresh for k in ("box-b", "host-b", "host-b-old")), bx.get("box-b"))
-    refused(f"duplicates ({order}): so a wait on that machine is refused as online, not accepted on the stale record", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box-b is online now")
+    refused(f"duplicates ({order}): so a wait on that machine is refused as online, not accepted on the stale record", lambda: _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box-b is online now")
 # a clients state that is not a table of records knows no machine and never raises out of the write
 for label, ms in (("a machine record that is not a dict", {"host-b": "garbage", "host-a": 7, "host-x": None}), ("machines that is not a dict", ["host-b"]), ("machines that is a string", "host-b")):
     state_with(ms)
@@ -168,8 +170,8 @@ for label, ms in (("a machine record that is not a dict", {"host-b": "garbage", 
 state_with(["host-b"])
 check("non-dict state: ...a wait on a machine of the names table is accepted (offline), not an error", server._evw_box_spec(EW.parse("box_online box-b")).machine == "box-b", None)
 write_state()
-refused("write: the backstop is still required to be after now", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(0), post_wake_mover=BACK, mover="none"), "is not after now")
-server._update("a10", sender=BACK, next="team-back: keep going")
+refused("write: the backstop is still required to be after now", lambda: _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(0), post_wake_mover=BACK, mover="none"), "is not after now")
+_update_svc._update("a10", sender=BACK, next="team-back: keep going")
 check("write: an unrelated update keeps the wait (the gate reads only a changed wait)", mt(10).get("wait_event") == "box_online box-b", mt(10))
 try:
     g, cout = create_svc.create_item(subject="[home] filed waiting on box-b", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing until box-b is back", goal="Done when box-b ran it.",
@@ -181,7 +183,7 @@ refused("create: ...and a create for a machine online now is refused", lambda: c
         goal="Done when box-a ran it.", wait_kind="event", wait_event="box_online box-a", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="boxon-create-2"), "box-a is online now")
 
 # ================================================================ the model reads it as waiting, and the stall pass leaves it alone
-m10 = server._model_of({**rd(10), "gid": "a10"})
+m10 = _item_read._model_of({**rd(10), "gid": "a10"})
 check("model: the stored wait is waiting, with no mover, the event and its post-wake mover; the stall pass has no work to look at", m10.state == model.WAITING and m10.wait.event == "box_online box-b" and m10.wait.post_wake_mover == BACK
       and not m10.mover and S.not_due({**rd(10), "gid": "a10"}, now0) != "", (m10.state, m10.wait, S.not_due({**rd(10), "gid": "a10"}, now0)))
 check("display: the item page says what it waits on and the until word (its backstop day is stored as until)", itempage.wait_what(m10.wait) == "box-b coming online" and itempage.wait_end_label(m10.wait) == "until", itempage.wait_what(m10.wait))

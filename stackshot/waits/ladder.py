@@ -15,7 +15,7 @@ Two orders, two records (`metadata.handoff` and the stall pass's entry), and an 
              same notice again every `MAIN_EVERY` (4 hours) while the silence lasts. It is no step of its own (the entry stays on its rung, so the cold call and the builder stay reachable if the pane stops
              being live): the entry's `main_at` is its clock
     rung 2  cold     `minutes` (10) later, still no turn and no write: one `claude -p` call names who takes it, or closes the item (it never asks the owner)
-    rung 3  builder  `minutes` later (at once when the cold call named no taker): the project's builder; when none can take it, ONE message asks the fleet's builder to recover the session (a front-only project, one whose `agents:` map lists no background agent, asks its -main agent instead: `server._recovery_target`). The
+    rung 3  builder  `minutes` later (at once when the cold call named no taker): the project's builder; when none can take it, ONE message asks the fleet's builder to recover the session (a front-only project, one whose `agents:` map lists no background agent, asks its -main agent instead: `_recovery_target` in `service/pane_recovery.py`). The
                      item stays with its mover and is not put to the owner
 
 What brings an item to the ladder is still two audits, and they stay apart: the hand-off audit (an untaken hand-off past `handoff_minutes`, a turn that ended with no write, a gone pane, two failed

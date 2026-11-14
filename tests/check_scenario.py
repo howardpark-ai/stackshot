@@ -115,6 +115,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.waits import waiting as _wt
 from stackshot.core import config as _cfg
 from stackshot.model import said as _said
@@ -154,61 +155,61 @@ def gets(n): return [p for m, p in F.log if p == f"/repos/o/r/pulls/{n}"]
 FORMS = "pr_merged <owner>/<repo>#<n>"
 
 # ---- 1. parsing and refusal, each kind
-server._update("a1", check="pr_merged example-owner/stackshot#171", sender="home-owner")
+_update_svc._update("a1", check="pr_merged example-owner/stackshot#171", sender="home-owner")
 check("pr_merged owner/repo#n is stored as given", rd(1)["metadata"].get("check") == "pr_merged example-owner/stackshot#171", rd(1)["metadata"])
-server._update("a1", check="pr_merged https://github.com/example-owner/stackshot/pull/14", sender="home-owner")
+_update_svc._update("a1", check="pr_merged https://github.com/example-owner/stackshot/pull/14", sender="home-owner")
 check("…and by URL, normalised", rd(1)["metadata"].get("check") == "pr_merged example-owner/stackshot#14", rd(1)["metadata"])
-refused("pr_merged without the owner", lambda: server._update("a1", check="pr_merged stackshot#171", sender="home-owner"), "Refused: check", "pr_merged names the pull request as", FORMS, 'check="none" clears it')
-refused("pr_merged with a shell tail", lambda: server._update("a1", check="pr_merged o/r#7; rm -rf /", sender="home-owner"), "Refused: check", FORMS)
+refused("pr_merged without the owner", lambda: _update_svc._update("a1", check="pr_merged stackshot#171", sender="home-owner"), "Refused: check", "pr_merged names the pull request as", FORMS, 'check="none" clears it')
+refused("pr_merged with a shell tail", lambda: _update_svc._update("a1", check="pr_merged o/r#7; rm -rf /", sender="home-owner"), "Refused: check", FORMS)
 for ref in ("./x#1", "../..#1", "a/..#1", "a/.#1", "https://github.com/../x/pull/1"):   # an owner or repo of dots alone is a path, not a repo
-    refused(f"pr_merged {ref}: refused", lambda ref=ref: server._update("a1", check=f"pr_merged {ref}", sender="home-owner"), "Refused: check", "pr_merged names the pull request as")
-server._update("a1", check="pr_merged o/r.js#7", sender="home-owner")
+    refused(f"pr_merged {ref}: refused", lambda ref=ref: _update_svc._update("a1", check=f"pr_merged {ref}", sender="home-owner"), "Refused: check", "pr_merged names the pull request as")
+_update_svc._update("a1", check="pr_merged o/r.js#7", sender="home-owner")
 check("…a repo with a dot in its name is still a repo", rd(1)["metadata"].get("check") == "pr_merged o/r.js#7", rd(1)["metadata"])
-server._update("a1", check="item_closed A3", sender="home-owner")
+_update_svc._update("a1", check="item_closed A3", sender="home-owner")
 check("item_closed stores the normalised id", rd(1)["metadata"].get("check") == "item_closed a3", rd(1)["metadata"])
-refused("item_closed naming the item itself", lambda: server._update("a1", check="item_closed a1", sender="home-owner"), "cannot name the item itself")
-refused("item_closed naming an item that does not exist", lambda: server._update("a1", check="item_closed a99", sender="home-owner"), "a99, which does not exist")
-refused("item_closed with no id", lambda: server._update("a1", check="item_closed zz", sender="home-owner"), "item_closed names a board item by its id")
-server._update("a1", check="  lane   home-x   api ", sender="home-owner")
+refused("item_closed naming the item itself", lambda: _update_svc._update("a1", check="item_closed a1", sender="home-owner"), "cannot name the item itself")
+refused("item_closed naming an item that does not exist", lambda: _update_svc._update("a1", check="item_closed a99", sender="home-owner"), "a99, which does not exist")
+refused("item_closed with no id", lambda: _update_svc._update("a1", check="item_closed zz", sender="home-owner"), "item_closed names a board item by its id")
+_update_svc._update("a1", check="  lane   home-x   api ", sender="home-owner")
 check("lane stores session and lane, whitespace folded", rd(1)["metadata"].get("check") == "lane home-x api", rd(1)["metadata"])
-server._update("a1", check="sala_lane home-y max", sender="home-owner")
+_update_svc._update("a1", check="sala_lane home-y max", sender="home-owner")
 check("sala_lane, the old name, is taken and stored as lane, the old lane word by its current code", rd(1)["metadata"].get("check") == "lane home-y subscription-1", rd(1)["metadata"])
-server._update("a1", check="lane home-x aws-platform", sender="home-owner")
+_update_svc._update("a1", check="lane home-x aws-platform", sender="home-owner")
 check("lane takes aws-platform (a hyphen inside the word)", rd(1)["metadata"].get("check") == "lane home-x aws-platform", rd(1)["metadata"])
-server._update("a1", check="lane home-x awsplatform", sender="home-owner")
+_update_svc._update("a1", check="lane home-x awsplatform", sender="home-owner")
 check("lane awsplatform, the old word, is stored as aws-platform", rd(1)["metadata"].get("check") == "lane home-x aws-platform", rd(1)["metadata"])
 for bad_lane in ("-x", "x-", "a--b", "aws_platform", "Aws-platform"):
-    refused(f"lane {bad_lane}: refused", lambda bl=bad_lane: server._update("a1", check=f"lane home-x {bl}", sender="home-owner"), "lane takes a session name and a lane")
+    refused(f"lane {bad_lane}: refused", lambda bl=bad_lane: _update_svc._update("a1", check=f"lane home-x {bl}", sender="home-owner"), "lane takes a session name and a lane")
 check("a lane check stored before with the old word is shown as aws-platform",
       checks_svc.check_label("lane home-x awsplatform") == "lane home-x aws-platform" and checks_svc.check_label("sala_lane home-x awsplatform") == "sala_lane home-x aws-platform"
       and checks_svc.check_label("lane home-x api") == "lane home-x api" and checks_svc.check_label("unit_active a.service") == "unit_active a.service", checks_svc.check_label("lane home-x awsplatform"))
-refused("lane without a lane", lambda: server._update("a1", check="lane home-x", sender="home-owner"), "lane takes a session name and a lane")
-refused("lane with a lane that is not a lowercase word", lambda: server._update("a1", check="lane home-x API", sender="home-owner"), "lane takes a session name and a lane")
-refused("…with no lane-names file the refusal still names valid lanes (the floor's codes and the plain ones)", lambda: server._update("a1", check="lane home-x API", sender="home-owner"),
+refused("lane without a lane", lambda: _update_svc._update("a1", check="lane home-x", sender="home-owner"), "lane takes a session name and a lane")
+refused("lane with a lane that is not a lowercase word", lambda: _update_svc._update("a1", check="lane home-x API", sender="home-owner"), "lane takes a session name and a lane")
+refused("…with no lane-names file the refusal still names valid lanes (the floor's codes and the plain ones)", lambda: _update_svc._update("a1", check="lane home-x API", sender="home-owner"),
         "lane takes a session name and a lane", "; lanes such as aws-platform, subscription-1, subscription-2, api, sdk")
 check("a re-sent old lane word over a stored one is no changed check; another lane, or a cleared check, is",
       not checks_svc.check_changed("lane home-x max", "lane home-x max") and not checks_svc.check_changed("lane home-x subscription-1", "lane home-x max")
       and not checks_svc.check_changed("lane home-x max", "lane home-x subscription-1") and not checks_svc.check_changed(None, "") and not checks_svc.check_changed("unit_active a.service", "unit_active a.service")
       and checks_svc.check_changed("lane home-x api", "lane home-x max") and checks_svc.check_changed("", "lane home-x max") and checks_svc.check_changed("lane home-y max", "lane home-x max"))
 _cfg.CFG["client"]["lanes_file"] = ""
-refused("lane with no lane record configured (no fleet tool)", lambda: server._update("a1", check="lane home-x api", sender="home-owner"), "[client] lanes_file is empty")
+refused("lane with no lane record configured (no fleet tool)", lambda: _update_svc._update("a1", check="lane home-x api", sender="home-owner"), "[client] lanes_file is empty")
 _cfg.CFG["client"]["lanes_file"] = f"{tmp}/sala/lanes.tsv"
-server._update("a1", check="unit_active stackshot.service", sender="home-owner")
+_update_svc._update("a1", check="unit_active stackshot.service", sender="home-owner")
 check("unit_active stores the unit", rd(1)["metadata"].get("check") == "unit_active stackshot.service", rd(1)["metadata"])
-server._update("a1", check="unit_active example-watch@x.timer", sender="home-owner")
+_update_svc._update("a1", check="unit_active example-watch@x.timer", sender="home-owner")
 check("…an instance unit and a timer too", rd(1)["metadata"].get("check") == "unit_active example-watch@x.timer", rd(1)["metadata"])
-refused("unit_active without a type suffix", lambda: server._update("a1", check="unit_active stackshot", sender="home-owner"), "unit_active takes one systemd user unit name with its type suffix")
-refused("unit_active with two words", lambda: server._update("a1", check="unit_active a b.service", sender="home-owner"), "unit_active takes one")
-refused("unit_active with shell characters", lambda: server._update("a1", check="unit_active x;id.service", sender="home-owner"), "unit_active takes one")
-refused("unit_active with a path", lambda: server._update("a1", check="unit_active ../x.service", sender="home-owner"), "unit_active takes one")
-refused("unit_active with a unit that reads as an option (-H: another host)", lambda: server._update("a1", check="unit_active -Hhost.service", sender="home-owner"), "unit_active takes one")
-refused("unit_active with a unit that reads as a long option", lambda: server._update("a1", check="unit_active --foo.service", sender="home-owner"), "unit_active takes one")
-refused("an unknown kind", lambda: server._update("a1", check="shell true", sender="home-owner"), "not a check the server knows", FORMS, "item_closed <item id>", "lane <session> <lane>", "unit_active <unit>.service")
+refused("unit_active without a type suffix", lambda: _update_svc._update("a1", check="unit_active stackshot", sender="home-owner"), "unit_active takes one systemd user unit name with its type suffix")
+refused("unit_active with two words", lambda: _update_svc._update("a1", check="unit_active a b.service", sender="home-owner"), "unit_active takes one")
+refused("unit_active with shell characters", lambda: _update_svc._update("a1", check="unit_active x;id.service", sender="home-owner"), "unit_active takes one")
+refused("unit_active with a path", lambda: _update_svc._update("a1", check="unit_active ../x.service", sender="home-owner"), "unit_active takes one")
+refused("unit_active with a unit that reads as an option (-H: another host)", lambda: _update_svc._update("a1", check="unit_active -Hhost.service", sender="home-owner"), "unit_active takes one")
+refused("unit_active with a unit that reads as a long option", lambda: _update_svc._update("a1", check="unit_active --foo.service", sender="home-owner"), "unit_active takes one")
+refused("an unknown kind", lambda: _update_svc._update("a1", check="shell true", sender="home-owner"), "not a check the server knows", FORMS, "item_closed <item id>", "lane <session> <lane>", "unit_active <unit>.service")
 check("nothing above changed the stored check", rd(1)["metadata"].get("check") == "unit_active example-watch@x.timer", rd(1)["metadata"])
 g = _wt_get.stackshot_get("a1")
 check("get shows the check and that the server closes on it", "check: unit_active example-watch@x.timer (the server closes the item when it passes)" in g, g)
 check("a check alone is a filing edit: the state clock stays, no page owed", rd(1)["state_updated"] == now0 - 60 and "a1" not in json.dumps(_web_page_debts._owed_load()), (rd(1)["state_updated"], _web_page_debts._owed_load()))
-server._update("a1", check="none", sender="home-owner")
+_update_svc._update("a1", check="none", sender="home-owner")
 check('check="none" clears it', "check" not in rd(1)["metadata"], rd(1)["metadata"])
 out = _wt_create._create(subject="[home] made with a check", description=DESC, project="projects/alpha", owner="home-owner", next="team-back: build it", needs=["team-back"], check="pr_merged o/r#8")
 gid0 = re.search(r"created (\S+)", out).group(1)
@@ -217,61 +218,61 @@ refused("create refuses a bad check", lambda: _wt_create._create(subject="[home]
 
 # ---- 2. the gate: a hand-off is a line of next in the form "<session>: <action>", a list marker before the name at most
 refused("next handing the work to a background agent, no check, no wake: refused, naming the session, the form and the fix",
-        lambda: server._update("a2", next="team-back: merge the PR", sender="home-owner"), "hands a2 to team-back", "a line of next in the form `<session>: <action>`", "check=<what closes it>", FORMS, "wake=YYYY-MM-DD",
+        lambda: _update_svc._update("a2", next="team-back: merge the PR", sender="home-owner"), "hands a2 to team-back", "a line of next in the form `<session>: <action>`", "check=<what closes it>", FORMS, "wake=YYYY-MM-DD",
         "Only when no check fits, add a date, wake=YYYY-MM-DD", "the item stays active in the new mover's lane", "as the backstop of this hand-off", "the date is no wait", "If this tool shows no check parameter", "codemode.stackshot_update({item_id, sender, next, check})")
-try: server._update("a2", next="team-back: merge the PR", sender="home-owner"); _hand = ""
+try: _update_svc._update("a2", next="team-back: merge the PR", sender="home-owner"); _hand = ""
 except ToolError as e: _hand = str(e)
 check("the hand-off refusal steers to check first, the wake only when no check fits, and never mentions a hold or a park (Fri Oct 16th 2026)",
       _hand.index("Add check=") < _hand.index("Only when no check fits") < _hand.index("wake=YYYY-MM-DD") and not re.search(r"hold|park", _hand, re.I), _hand)
 check("the refusal left the item as it was", rd(2)["metadata"].get("next") == "do the thing" and "check" not in rd(2)["metadata"], rd(2)["metadata"])
-server._update("a2", next="team-back: merge the PR", check="pr_merged o/r#7", sender="home-owner")
+_update_svc._update("a2", next="team-back: merge the PR", check="pr_merged o/r#7", sender="home-owner")
 check("…accepted with a check", rd(2)["metadata"].get("next") == "team-back: merge the PR" and rd(2)["metadata"].get("check") == "pr_merged o/r#7", rd(2)["metadata"])
-server._update("a2", next="team-back: merge the PR, then deploy", sender="home-owner")
+_update_svc._update("a2", next="team-back: merge the PR, then deploy", sender="home-owner")
 check("a re-edit of a stored hand-off is not asked again (the check stays)", rd(2)["metadata"].get("next").endswith("deploy") and rd(2)["metadata"].get("check") == "pr_merged o/r#7", rd(2)["metadata"])
-server._update("a2", check="none", sender="home-owner")
+_update_svc._update("a2", check="none", sender="home-owner")
 check("clearing the check on a stored hand-off is not a new hand-off", "check" not in rd(2)["metadata"], rd(2)["metadata"])
-refused("next handing it to the keeper: refused", lambda: server._update("a3", next="home-stew: rule on it", sender="home-owner"), "hands a3 to home-stew")
+refused("next handing it to the keeper: refused", lambda: _update_svc._update("a3", next="home-stew: rule on it", sender="home-owner"), "hands a3 to home-stew")
 # a wake alone is a backstop, not a hold (items kept showing while their work was live): the wake the refusal offers is a backstop, never a hold
 try:
-    server._update("a3", next="home-stew: rule on it", sender="home-owner"); e_h = ""
+    _update_svc._update("a3", next="home-stew: rule on it", sender="home-owner"); e_h = ""
 except ToolError as e:
     e_h = str(e)
 check("the hand-off refusal offers the date as the hand-off's backstop that leaves the item active in the new mover's lane, and never says hold",
       "wake=YYYY-MM-DD" in e_h and "as the backstop of this hand-off" in e_h and "the date is no wait" in e_h and "the item stays active in the new mover's lane" in e_h and "hold" not in e_h.lower(), e_h)
-server._update("a3", next="home-stew: rule on it", wake="2099-01-01", sender="home-owner")
+_update_svc._update("a3", next="home-stew: rule on it", wake="2099-01-01", sender="home-owner")
 check("…accepted with a wake, which parks nothing: it stays the hand-off's backstop (a wake, no until, no hold) and the item stays active", rd(3)["metadata"].get("wake") == "2099-01-01" and "until" not in rd(3)["metadata"]
       and "hold" not in rd(3)["metadata"], rd(3)["metadata"])
-server._update("a3", wake="none", sender="home-owner")
+_update_svc._update("a3", wake="none", sender="home-owner")
 check("wake=\"none\" drops the reminder, nothing else", "wake" not in rd(3)["metadata"] and "hold" not in rd(3)["metadata"] and rd(3)["metadata"].get("next") == "home-stew: rule on it", rd(3)["metadata"])
-server._update("a4", needs=["team-back"], sender="home-owner")
+_update_svc._update("a4", needs=["team-back"], sender="home-owner")
 check("needs naming a session alone is not gated (its turn-end check asks it): accepted, the session told as before", rd(4)["metadata"].get("needs") == ["team-back"] and any(g == "a4" and t == "needs" for t, g, o, n in told), (rd(4)["metadata"], told))
-server._update("a4", next="team-back: merge the PR", sender="home-owner")
+_update_svc._update("a4", next="team-back: merge the PR", sender="home-owner")
 check("next handing it to a session already in needs is not a new hand-off", rd(4)["metadata"].get("next") == "team-back: merge the PR", rd(4)["metadata"])
-server._update("a16", needs=["team-back"], next="team-back: merge the PR", sender="home-owner")
+_update_svc._update("a16", needs=["team-back"], next="team-back: merge the PR", sender="home-owner")
 check("next and needs naming the session in one write: in needs, so its turn-end check asks it; not gated", rd(16)["metadata"].get("needs") == ["team-back"] and rd(16)["metadata"].get("next") == "team-back: merge the PR", rd(16)["metadata"])
-refused("next handing it to one session while needs names another: the one in next is a hand-off", lambda: server._update("a17", needs=["home-owner"], next="team-back: merge the PR", sender="home-owner"), "hands a17 to team-back", "a line of next in the form")
-server._update("a17", needs=["home-owner"], next="team-back: merge the PR", check="item_closed a5", sender="home-owner")
+refused("next handing it to one session while needs names another: the one in next is a hand-off", lambda: _update_svc._update("a17", needs=["home-owner"], next="team-back: merge the PR", sender="home-owner"), "hands a17 to team-back", "a line of next in the form")
+_update_svc._update("a17", needs=["home-owner"], next="team-back: merge the PR", check="item_closed a5", sender="home-owner")
 check("…accepted with a check", rd(17)["metadata"].get("check") == "item_closed a5" and rd(17)["metadata"].get("needs") == ["home-owner"], rd(17)["metadata"])
-server._update("a5", needs=["decision"], ask="Decide: x · Recommend: yes · Stakes: z · By: no date", sender="home-owner")
+_update_svc._update("a5", needs=["decision"], ask="Decide: x · Recommend: yes · Stakes: z · By: no date", sender="home-owner")
 check("needs=decision alone is not a hand-off", rd(5)["metadata"].get("needs") == ["decision"], rd(5)["metadata"])
-server._update("a6", needs=["home-owner"], sender="home-owner")
+_update_svc._update("a6", needs=["home-owner"], sender="home-owner")
 check("needs naming the owner is not a hand-off", rd(6)["metadata"].get("needs") == ["home-owner"], rd(6)["metadata"])
-server._update("a7", next="team-back: merge it", sender="team-back")
+_update_svc._update("a7", next="team-back: merge it", sender="team-back")
 check("next naming the writer itself is not a hand-off (the keeper's legacy line stays beside it)", rd(7)["metadata"].get("next") == "do the thing\nteam-back: merge it", rd(7)["metadata"])
-server._update("a8", next="home-owner: read it back", sender="home-stew")
+_update_svc._update("a8", next="home-owner: read it back", sender="home-stew")
 check("next naming the owner is not a hand-off (the keeper's legacy line stays beside it)", rd(8)["metadata"].get("next") == "do the thing\nhome-owner: read it back", rd(8)["metadata"])
-server._update("a9", next="team-back: do it, then say so", sender="home-owner")
+_update_svc._update("a9", next="team-back: do it, then say so", sender="home-owner")
 check("an item handed over before the rule, re-edited: not retro-refused", rd(9)["metadata"].get("next").endswith("say so"), rd(9)["metadata"])
-server._update("a10", next="home-owner: ask in `team-back` later; see \"home-stew\" for why", sender="home-owner")
+_update_svc._update("a10", next="home-owner: ask in `team-back` later; see \"home-stew\" for why", sender="home-owner")
 check("a name in code or quotes is not a hand-off", rd(10)["metadata"].get("next").startswith("home-owner: ask in"), rd(10)["metadata"])
-server._update("a11", next="home-owner: team-back-main: write the brief", sender="home-owner")
+_update_svc._update("a11", next="home-owner: team-back-main: write the brief", sender="home-owner")
 check("a longer name containing a session's name is not that session", rd(11)["metadata"].get("next").startswith("home-owner: team-back-main"), rd(11)["metadata"])
-server._update("a12", next="home-owner: write the doc", description="- A thing\n- It moved\n- Done when done", due="2026-12-01", sender="home-owner")
+_update_svc._update("a12", next="home-owner: write the doc", description="- A thing\n- It moved\n- Done when done", due="2026-12-01", sender="home-owner")
 check("an update that hands nothing over is unaffected", rd(12)["metadata"].get("next") == "home-owner: write the doc" and rd(12)["metadata"].get("due") == "2026-12-01", rd(12)["metadata"])
-refused("a plain session the fleet knows counts too", lambda: server._update("a14", next="home-other: run the export", sender="home-owner"), "hands a14 to home-other")
-server._update("a14", next="home-other: run the export", check="unit_active export.service", sender="home-owner")
-server._update("a14", check="none", sender="home-owner")           # cleared again: the pass below never runs the box's systemctl
-server._update("a15", next="team-back: ship it", check="item_closed a16", sender="home-owner")
+refused("a plain session the fleet knows counts too", lambda: _update_svc._update("a14", next="home-other: run the export", sender="home-owner"), "hands a14 to home-other")
+_update_svc._update("a14", next="home-other: run the export", check="unit_active export.service", sender="home-owner")
+_update_svc._update("a14", check="none", sender="home-owner")           # cleared again: the pass below never runs the box's systemctl
+_update_svc._update("a15", next="team-back: ship it", check="item_closed a16", sender="home-owner")
 _wt_complete.stackshot_complete("a15", outcome="dropped", reason="not needed", description="- Not needed after all", sender="home-owner")
 check("a close clears the check", "check" not in rd(15)["metadata"] and rd(15)["status"] == "completed", rd(15)["metadata"])
 # A session's name elsewhere in next hands nothing over (the review of the first cut: the plain-word match fired on each of these)
@@ -281,7 +282,7 @@ for label, nx in (("inside a page slug", "update projects/example-site with the 
                   ("before a colon but not at the start of the line", "then team-back: merge it"),
                   ("at the start of the line, no colon", "team-back merges the PR"),
                   ("a name with a colon inside a sentence", "the hand-off goes to team-back: see the page")):
-    server._update("a18", next=f"home-owner: {nx}", sender="home-owner")
+    _update_svc._update("a18", next=f"home-owner: {nx}", sender="home-owner")
     check(f"a session's name {label} is not a hand-off", rd(18)["metadata"].get("next") == f"home-owner: {nx}" and "check" not in rd(18)["metadata"], rd(18)["metadata"])
 for label, nx, who in (("<session>: <action>", "kestrel-engineer: do it", "kestrel-engineer"),
                        ("- <session>: <action>", "- team-back: do it", "team-back"),
@@ -289,7 +290,7 @@ for label, nx, who in (("<session>: <action>", "kestrel-engineer: do it", "kestr
                        ("indented, with the colon spaced", "   team-back : do it", "team-back"),
                        ("on a later line of next", "verify the deploy\n- team-back: merge it", "team-back"),
                        ("two lines, two sessions", "team-back: build it\nhome-stew: rule on it", "home-stew, team-back")):
-    refused(f"{label}: a hand-off, refused without a check or a wake", lambda nx=nx: server._update("a19", next=nx, sender="home-owner"), f"hands a19 to {who}")
+    refused(f"{label}: a hand-off, refused without a check or a wake", lambda nx=nx: _update_svc._update("a19", next=nx, sender="home-owner"), f"hands a19 to {who}")
 check("the refusals left a19 as it was", rd(19)["metadata"].get("next") == "do the thing", rd(19)["metadata"])
 
 # ---- 3. the pass: item_closed; the keeper is told (the one rule), the owner only with his words
@@ -358,7 +359,7 @@ check("active: closed with the reason", tick(1) == ["a23"] and rd(23)["metadata"
 # ---- 4b. a write during the check is not overwritten by the close (the lost update: the check's call can take 20 s)
 item(30, check="unit_active stackshot.service", next="team-back: install it")
 def unit_run_editing(argv):                       # a session's write lands while the check runs; the stub then steps aside
-    calls.append(list(argv)); server._update("a30", next="team-back: install it, then say so", sender="home-owner"); checks_svc.unit_run = unit_run; return UNIT[0]
+    calls.append(list(argv)); _update_svc._update("a30", next="team-back: install it, then say so", sender="home-owner"); checks_svc.unit_run = unit_run; return UNIT[0]
 checks_svc.unit_run = unit_run_editing
 check("an item written while its check ran is not closed on that pass, and the write stands", tick(1) == [] and rd(30)["status"] == "open"
       and rd(30)["metadata"].get("next") == "team-back: install it, then say so" and rd(30)["metadata"].get("check") == "unit_active stackshot.service" and not st()["items"].get("a30", {}).get("err"), (rd(30), st()))
@@ -371,7 +372,7 @@ check("an item a session closed while its check ran keeps that close", tick(1) =
       and rd(31)["metadata"].get("reason") == "not needed" and "a31" not in st()["items"], (rd(31)["metadata"], st()))
 item(32, check="unit_active stackshot.service", next="team-back: install it")
 def unit_run_clearing(argv):                      # a session clears the check while it runs: the pass must not close on a check the item no longer carries
-    calls.append(list(argv)); server._update("a32", check="none", sender="home-owner"); checks_svc.unit_run = unit_run; return UNIT[0]
+    calls.append(list(argv)); _update_svc._update("a32", check="none", sender="home-owner"); checks_svc.unit_run = unit_run; return UNIT[0]
 checks_svc.unit_run = unit_run_clearing
 check("an item whose check was cleared while it ran stays open", tick(1) == [] and rd(32)["status"] == "open" and "check" not in rd(32)["metadata"], rd(32))
 check("…and the next pass, with no check on it, leaves it alone", tick(1) == [] and rd(32)["status"] == "open" and "a32" not in st()["items"], (rd(32), st()))
@@ -464,7 +465,7 @@ lane_names([{"code": "subscription-1", "display": "Made Up One", "aliases": ["ma
 try:
     lane_pairs("lane-names file with aliases", 110)
     lane_defaults("lane-names file with aliases", 122)
-    refused("…a refusal names the tool's lanes with their display names", lambda: server._update("a1", check="lane home-x API", sender="home-owner"), "the tool's lanes: subscription-1 (Made Up One), subscription-2 (Made Up Two), api (Plain)")
+    refused("…a refusal names the tool's lanes with their display names", lambda: _update_svc._update("a1", check="lane home-x API", sender="home-owner"), "the tool's lanes: subscription-1 (Made Up One), subscription-2 (Made Up Two), api (Plain)")
     lane_names([{"code": "max", "display": "Made Up One", "aliases": []}, {"code": "team", "display": "Made Up Two", "aliases": []}, {"code": "api", "display": "Plain", "aliases": []}])
     lane_pairs("lane-names file of the first codes", 140)
     lane_defaults("lane-names file of the first codes", 152)
@@ -550,7 +551,7 @@ check("another needs (external) keeps today's behaviour: the same check closes i
 check("the pass records that it is met", st()["items"]["a63"].get("met") == "item_closed a62" and st()["items"]["a63"]["err"] == "", st())
 check("get says the check is met and waits for the decision", "waiting for" in _wt_get.stackshot_get("a63") and "before it closes the item" in _wt_get.stackshot_get("a63"), _wt_get.stackshot_get("a63"))
 check("later passes, the decision still open: still open and no second line", tick(3) == [] and rd(63)["status"] == "open" and len([1 for g, n in _saves if g == "a63"]) == 1, [(g, n) for g, n in _saves if g == "a63"])
-server._update("a63", clear_needs=True, sender="home-owner")
+_update_svc._update("a63", clear_needs=True, sender="home-owner")
 check("the decision cleared by a write: the item is still open until the pass", rd(63)["status"] == "open" and "needs" not in rd(63)["metadata"], rd(63)["metadata"])
 n_before_close = len(_saves)
 closed = tick(1)
@@ -560,30 +561,30 @@ check("…with no waiting line at the close, and its record gone from the pass's
 # a changed check met under the same open decision says so again
 item(68, check="item_closed a62", needs=["decision"], ask=ASKD, next="home-owner: decide")
 tick(1); n68 = len([1 for g, n in _saves if g == "a68" and "done check met" in n])
-server._update("a68", check="unit_active nothing-here.service", sender="home-owner")
+_update_svc._update("a68", check="unit_active nothing-here.service", sender="home-owner")
 checks_svc.unit_run = lambda argv: "LoadState=loaded\nActiveState=active\n"
 check("a different check met under the same open decision gets its own line", tick(1) == [] and len([1 for g, n in _saves if g == "a68" and "done check met" in n]) == n68 + 1 and "unit_active nothing-here.service" in [n for g, n in _saves if g == "a68"][-1], _saves)
 writes.save = _orig_save
-server._update("a68", clear_check=True, sender="home-owner"); item(68, status="completed", outcome="dropped", reason="out of the passes")
+_update_svc._update("a68", clear_check=True, sender="home-owner"); item(68, status="completed", outcome="dropped", reason="out of the passes")
 
 # clear_check: the flag removes the check, as clear_needs removes needs; check="" is not passed, as needs="" is
 item(69, check="item_closed a70", next="x", needs=["team-back"]); item(70)
 was69 = rd(69)
-out = server._update("a69", clear_check=True, sender="home-owner")
+out = _update_svc._update("a69", clear_check=True, sender="home-owner")
 check("clear_check removes the check and nothing else", "check" not in rd(69)["metadata"] and rd(69)["metadata"].get("next") == "x" and rd(69)["metadata"].get("needs") == ["team-back"], rd(69)["metadata"])
 check("…the returned item no longer shows a check line", "updated a69" in out and "check:" not in out, out)
 check("…and the pass leaves it alone", tick(2) == [] and rd(69)["status"] == "open" and "a69" not in st()["items"], (rd(69), st()))
 out = _wt_update.stackshot_update("a69", clear_check=True, sender="home-owner")
 check("clear_check on an item with no check is a no-op, not an error", "updated a69" in out and "check" not in rd(69)["metadata"], out)
 item(71, check="item_closed a70", next="x", needs=["team-back"])
-server._update("a71", next="home-owner: y", check="", sender="home-owner"); server._update("a71", next="home-owner: z", needs="", sender="home-owner")
+_update_svc._update("a71", next="home-owner: y", check="", sender="home-owner"); _update_svc._update("a71", next="home-owner: z", needs="", sender="home-owner")
 check('check="" is ignored, as needs="" is: both stay', rd(71)["metadata"].get("check") == "item_closed a70" and rd(71)["metadata"].get("needs") == ["team-back"] and rd(71)["metadata"].get("next", "").endswith("z"), rd(71)["metadata"])
-server._update("a71", check="none", sender="home-owner")
+_update_svc._update("a71", check="none", sender="home-owner")
 check('check="none" still clears it (the old way), as needs="none" does', "check" not in rd(71)["metadata"], rd(71)["metadata"])
 item(72, check="item_closed a70", next="x")
-server._update("a72", clear_check=True, check="item_closed a62", sender="home-owner")
+_update_svc._update("a72", clear_check=True, check="item_closed a62", sender="home-owner")
 check("clear_check beside a new check: the new check stands, as clear_needs beside a new needs", rd(72)["metadata"].get("check") == "item_closed a62", rd(72)["metadata"])
-check("the update description and the tool's parameters name clear_check", "clear_check=true" in _wt_update._UPDATE_DESC and "clear_check" in inspect.signature(server._update).parameters
+check("the update description and the tool's parameters name clear_check", "clear_check=true" in _wt_update._UPDATE_DESC and "clear_check" in inspect.signature(_update_svc._update).parameters
       and "clear_check" in inspect.signature(_wt_update.stackshot_update).parameters, _wt_update._UPDATE_DESC[-200:])
 
 # ---- 6d. the waiting line is written once per met check: an error pass or a race keeps the record, a clean "not met" resets it; get shows "met" only while it is true
@@ -607,18 +608,18 @@ check("…so met again after that writes a second line", len(waits("a73")) == 2,
 item(74, check="unit_active w74.service", needs=["decision"], ask=ASKD, next="home-owner: decide")
 UNITS[0] = ACTIVE; tick(1)
 def unit_run_editing74(argv):                     # a session's write lands while the check runs
-    server._update("a74", next="home-owner: decide, please", sender="home-owner"); checks_svc.unit_run = lambda argv: UNITS[0]; return UNITS[0]
+    _update_svc._update("a74", next="home-owner: decide, please", sender="home-owner"); checks_svc.unit_run = lambda argv: UNITS[0]; return UNITS[0]
 checks_svc.unit_run = unit_run_editing74
 tick(1)
 check("a write during the check (a race pass) keeps the record", len(waits("a74")) == 1 and st()["items"]["a74"].get("met") == "unit_active w74.service" and rd(74)["status"] == "open", (_saves, st()))
 tick(1)
 check("…and the next pass writes no second line", len(waits("a74")) == 1, _saves)
-server._update("a74", check="unit_active w74b.service", sender="home-owner")
+_update_svc._update("a74", check="unit_active w74b.service", sender="home-owner")
 check("get shows nothing of the old met right after the check was replaced, though the record still holds it",
       "waiting for" not in _wt_get.stackshot_get("a74") and st()["items"]["a74"].get("met") == "unit_active w74.service", (_wt_get.stackshot_get("a74"), st()))
-server._update("a74", check="unit_active w74.service", sender="home-owner")
+_update_svc._update("a74", check="unit_active w74.service", sender="home-owner")
 check("get shows it again while the check is the one met and the decision is open", "met, and waiting for" in _wt_get.stackshot_get("a74"), _wt_get.stackshot_get("a74"))
-server._update("a74", clear_needs=True, sender="home-owner")
+_update_svc._update("a74", clear_needs=True, sender="home-owner")
 check("…and not once the decision is cleared, before the pass that closes it", "waiting for" not in _wt_get.stackshot_get("a74") and rd(74)["status"] == "open", _wt_get.stackshot_get("a74"))
 writes.save = _orig_save
 for i in (73, 74): item(i, status="completed", outcome="dropped", reason="out of the passes")

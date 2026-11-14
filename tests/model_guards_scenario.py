@@ -77,6 +77,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.github import ghsync as _gh
 from stackshot.anchors import anchors as _anc
@@ -104,7 +105,7 @@ FUT = day(5)
 ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 mt = lambda i, letter="a": rd(i, letter)["metadata"]
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
-def upd(i, **kw): return server._update(f"a{i}", sender="home-front", **kw)
+def upd(i, **kw): return _update_svc._update(f"a{i}", sender="home-front", **kw)
 def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 def set_cfg(**kw):
@@ -423,7 +424,7 @@ check("6d owner mover: …the pure reading agrees: only an alive item with him a
       mg.owner_mover_gap(mt(184), model.derive(rd(184))) == "" and mg.owner_mover_gap(mt(183), model.derive(rd(183))).startswith("its state is doing")
       and mg.owner_mover_gap(mt(173), model.derive(rd(173))) == "" and mg.owner_mover_gap(mt(175), model.derive(rd(175))) == "", None)
 item(41, needs=[BACK], state="doing", mover=OWN, expected_by=day(2))
-server._update("a41", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
+_update_svc._update("a41", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
 check("6d owner mover: a close is never judged", rd(41)["status"] == "completed" and "mover" not in mt(41), rd(41))
 # [model] guards = false skips it
 set_cfg(guards=False)
@@ -584,16 +585,16 @@ refused_nw("7 second mover: …a write that sets a field of the state meets the 
 upd(83, needs=["decision"], then=BACK, wake=day(2))
 check("7 second mover: …and the fix is then=", mt(83)["needs"] == ["decision"] and mt(83)["then"] == BACK and wk_(mt(83)) == day(2), mt(83))
 item(84, needs=["decision"], ask=ASK)
-server._update("a84", sender=BACK, wake=day(2))
+_update_svc._update("a84", sender=BACK, wake=day(2))
 check("7 second mover: a background agent's write that the server names into needs (decision + the writer) is the server's naming, not a second mover the writer made", wk_(mt(84)) == day(2), mt(84))
 # the naming stays in needs: a later write by anyone else is not refused for it (a background agent of the project is never a second mover)
 item(43, needs=["decision"], ask=ASK)
-server._update("a43", sender=BACK, next="team-back: carry on")
+_update_svc._update("a43", sender=BACK, next="team-back: carry on")
 check("7 second mover: …a background agent's plain write names it into needs beside the decision", mt(43)["needs"] == ["decision", BACK], mt(43))
 upd(43, wake=day(2))
 check("7 second mover: …and a front agent's later wake on it passes (the background agent in needs is no second mover)", wk_(mt(43)) == day(2), mt(43))
 item(45, needs=[FRONT])
-server._update("a45", sender=BACK, next="team-back: carry on")
+_update_svc._update("a45", sender=BACK, next="team-back: carry on")
 check("7 second mover: …the same for a front agent in needs and a background write", BACK in mt(45)["needs"] and FRONT in mt(45)["needs"], mt(45))
 upd(45, wake=day(2))
 check("7 second mover: …a later wake passes", wk_(mt(45)) == day(2), mt(45))
@@ -641,7 +642,7 @@ item(89, needs=[BACK], next="home-front: waiting for the build")
 upd(89, description="- A thing\n- It lives here, edited\n- Done when done")
 check("9 next wait: an old alive item with such a line is not blocked by an update that leaves next alone", rd(89)["description"].endswith("edited\n- Done when done"), rd(89))
 item(90, needs=[BACK], next="home-front: waiting for the build", model_flags={"next_wait_words": ["when"]})
-server._update("a90", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
+_update_svc._update("a90", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
 check("9 next wait: a close is never refused, and drops the flag", rd(90)["status"] == "completed" and "model_flags" not in mt(90), mt(90))
 
 # ================================================================ 10. the re-park test: structured fields only
@@ -713,13 +714,13 @@ _wt_complete.stackshot_confirm("a93", sender="home-front")
 check("when: …a confirm", rd(93)["confirmed"] > before["confirmed"], None)
 refused_nw("when: …setting next brings the field's own guards back, and only those (no mover refusal)", 93, lambda: upd(93, next="still no name, a leak"), "next line", "does not say who takes it", "\"leak\"", none=("is alive", "mover"))
 refused_nw("when: …a state field brings the invariants back, and only those (no next refusal)", 93, lambda: upd(93, needs=["decision", "home-beta-bg"], ask=ASK), "needs names more than one mover", none=("does not say who takes it",))
-server._update("a93", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
+_update_svc._update("a93", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
 check("when: a close is never blocked, whatever the old item fails", rd(93)["status"] == "completed", rd(93))
-refused_nw("when: a reopen is a create again: every guard judges it", 93, lambda: server._update("a93", sender="home-front", status="open", next="no name here, a leak"), "next line", "does not say who takes it")
-server._update("a93", sender="home-front", status="open", next="home-front: back again", mover=BACK)
+refused_nw("when: a reopen is a create again: every guard judges it", 93, lambda: _update_svc._update("a93", sender="home-front", status="open", next="no name here, a leak"), "next line", "does not say who takes it")
+_update_svc._update("a93", sender="home-front", status="open", next="home-front: back again", mover=BACK)
 check("when: …with a mover it reopens", rd(93)["status"] == "open" and mt(93)["mover"] == BACK, mt(93))
 item(94, needs=[BACK], mover="home-nobody")
-server._update("a94", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
+_update_svc._update("a94", sender="home-front", status="completed", outcome="done", reason="finished", description="- The thing is done and closed")
 check("when: a close passes with a mover that is no one", rd(94)["status"] == "completed", rd(94))
 
 # ================================================================ the switch

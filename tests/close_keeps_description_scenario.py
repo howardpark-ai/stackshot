@@ -80,6 +80,7 @@ try:
     def mt(i): return rd(i)["metadata"]
 
     from stackshot.web import server
+    from stackshot.service import update as _update_svc
     from fastmcp.exceptions import ToolError
     from stackshot.core import instance as _core_instance
     from stackshot.model import said as _said
@@ -103,12 +104,12 @@ try:
     check("complete: the description is exactly what it was, the outcome text is stored", rd(1)["status"] == "completed" and rd(1)["description"] == DESC and mt(1).get("outcome_text") == NEW, rd(1))
     check("complete: outcome and reason are stored as before", mt(1).get("outcome") == "done" and mt(1).get("reason") == "the export runs from the new bucket", mt(1))
     check("complete: the reply and get show the outcome text under a label, and the description as it was", f"outcome text:\n{NEW}" in out and DESC in out and f"outcome text:\n{NEW}" in _wt_get.stackshot_get("a1"), out)
-    server._update("a2", status="completed", outcome="dropped", reason="not needed after the move", outcome_text="- Not needed: the move made it moot")
+    _update_svc._update("a2", status="completed", outcome="dropped", reason="not needed after the move", outcome_text="- Not needed: the move made it moot")
     check("update status=completed with outcome_text: the same", rd(2)["description"] == DESC and mt(2).get("outcome_text") == "- Not needed: the move made it moot" and mt(2).get("outcome") == "dropped", rd(2))
     refused("a close with no outcome text is refused and names it", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works"), "needs outcome_text")
     refused("an outcome text that is not bullets is refused, named outcome_text", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="It works now."), "outcome_text line is not a `- ` bullet")
     refused("an outcome text over the line limit is refused, named outcome_text", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- " + "long " * 40), "outcome_text bullet is")
-    refused("outcome_text outside a close is refused", lambda: server._update("a3", outcome_text=NEW), "go with a close")
+    refused("outcome_text outside a close is refused", lambda: _update_svc._update("a3", outcome_text=NEW), "go with a close")
     check("…and nothing above touched the open item", rd(3)["status"] == "open" and rd(3)["description"] == DESC and "outcome_text" not in mt(3), rd(3))
     _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- Resolved: the export moved\n- Done: the old bucket is empty")
     check("an outcome text may say what was resolved and done (the forbidden tokens guard live descriptions, not an end state)", mt(3).get("outcome_text", "").startswith("- Resolved:") and rd(3)["description"] == DESC, mt(3))
@@ -117,7 +118,7 @@ try:
     LEGACY = "- The export runs from the new bucket\n- Written by a caller that predates outcome_text"
     _wt_complete.stackshot_complete("a4", outcome="done", reason="finished", description=LEGACY)
     check("complete with a description: stored as the outcome text, the description is not replaced", rd(4)["status"] == "completed" and rd(4)["description"] == DESC and mt(4).get("outcome_text") == LEGACY, rd(4))
-    server._update("a5", status="completed", outcome="done", reason="finished", description=LEGACY)
+    _update_svc._update("a5", status="completed", outcome="done", reason="finished", description=LEGACY)
     check("update status=completed with a description: the same", rd(5)["description"] == DESC and mt(5).get("outcome_text") == LEGACY, rd(5))
     refused("a description and an outcome text together are refused", lambda: _wt_complete.stackshot_complete("a6", outcome="done", reason="finished", description=LEGACY, outcome_text=NEW), "passes both")
     check("…the item is untouched", rd(6)["status"] == "open" and rd(6)["description"] == DESC and "outcome_text" not in mt(6), rd(6))
@@ -137,9 +138,9 @@ try:
 
     # ---- 3. the description of a closed item can still be edited; the outcome text stays; reopening drops it
     EDIT = "- Move the nightly export to the new bucket\n- Owner: home-here\n- The old bucket is deleted since"
-    server._update("a1", description=EDIT)
+    _update_svc._update("a1", description=EDIT)
     check("update on a closed item still edits its description, and leaves the outcome text", rd(1)["description"] == EDIT and mt(1).get("outcome_text") == NEW and rd(1)["status"] == "completed", rd(1))
-    server._update("a2", status="open", next="home-here: pick it up again")
+    _update_svc._update("a2", status="open", next="home-here: pick it up again")
     check("reopening drops outcome, outcome_text and reason and leaves the description", rd(2)["status"] == "open" and rd(2)["description"] == DESC
           and not any(k in mt(2) for k in ("outcome", "outcome_text", "reason", "superseded_by")), rd(2))
 

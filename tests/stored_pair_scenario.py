@@ -58,6 +58,8 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
+from stackshot.service import agents as _agents
+from stackshot.service import item_read as _item_read
 from stackshot.anchors import anchors as _anc
 from stackshot.service import store as _service_store
 from stackshot.waits import watchers as _watch
@@ -142,7 +144,7 @@ def surfaces(store, t, on):
     out = {}
     with frozen(t), reading(on):
         items = SP.load_dir(store); opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
-        ctx = server._WaitCtx(t)
+        ctx = _agents._WaitCtx(t)
         for g in opens:
             it = items[g]; probe = dict(it, gid=g)
             out[f"display {g}"] = json.dumps(SP.display_of(server, it, g, stored=on), sort_keys=True, ensure_ascii=False)
@@ -167,7 +169,7 @@ def counts(store, t, on):
         c = collections.Counter(); w = {}
         for g, it in items.items():
             if it.get("status") != "open": continue
-            m = _model.view(dict(it, gid=g), server._model_of(dict(it, gid=g)), after_open=lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
+            m = _model.view(dict(it, gid=g), _item_read._model_of(dict(it, gid=g)), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=False)
             c[_model.shown_pair(m)] += 1; w[g] = bool(_watch.watches(it))
         return dict(c), w
 def with_store(src, fn):
@@ -228,7 +230,7 @@ def one_read(g, stored, t=T0):
     """(list word, unstamped reads counted, the shown (phase, kind)) for one read of item g at clock t, the decision from the stored pair (stored) or the fields alone."""
     with frozen(t), reading(stored):
         u0 = counters(); it = _service_store._load(g); w = quietly(server._item_list, it); u1 = counters()
-        m = _model.view(dict(it, gid=g), server._model_of(dict(it, gid=g)), t, lambda i_: server._after_open(i_.get("metadata") or {}), check=True)
+        m = _model.view(dict(it, gid=g), _item_read._model_of(dict(it, gid=g)), t, lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=True)
     return w, u1 - u0, _model.shown_pair(m)
 W = {g: (one_read(g, True), one_read(g, False)) for g in ("g43", "g44", "g45", "g46", "g47", "g48", "g49", "g50")}
 for g, what, stored_word, field_word in (("g43", "a plain doing item stored waiting on a time", "waiting", "agents"), ("g44", "a relay wait stored alive", "agents", "waiting"),
@@ -256,7 +258,7 @@ def anchored_pair(store, t):
         for g, it in sorted(items.items()):
             if it.get("status") != "open" or (it.get("metadata") or {}).get("wait_kind") or (it.get("metadata") or {}).get("state") != "outside": continue
             r = next(r for r in ub.rows if r["gid"] == g)
-            rows.append((g, ub.mod_of(r).wait.kind, server._model_of(dict(it, gid=g)).wait.kind, _model.stored_waits_on(it)))
+            rows.append((g, ub.mod_of(r).wait.kind, _item_read._model_of(dict(it, gid=g)).wait.kind, _model.stored_waits_on(it)))
         return rows
 
 

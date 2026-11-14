@@ -16,32 +16,32 @@ from typing import Any, Callable
 @dataclass(frozen=True)
 class Hooks:
     """What the hand-off passes still reach in server.py, in the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
-    after_open: Callable[..., Any]  # server._after_open
-    front_pair_ok: Callable[..., Any]  # server._front_pair_ok
+    after_open: Callable[..., Any]  # item_read._after_open
+    front_pair_ok: Callable[..., Any]  # holders._front_pair_ok
     item_refs: Callable[..., Any]  # server._item_refs
     ladder_enter: Callable[..., Any]  # service/ladder.ladder_enter
     ladder_first: Callable[..., Any]  # service/ladder.ladder_first
     ladder_on: Callable[..., Any]  # service/ladder.ladder_on
     laddered: Callable[..., Any]  # service/ladder.laddered
-    load_or_none: Callable[..., Any]  # server._load_or_none
-    model_of: Callable[..., Any]  # server._model_of
-    old_wait_off: Callable[..., Any]  # server._old_wait_off
+    load_or_none: Callable[..., Any]  # item_read._load_or_none
+    model_of: Callable[..., Any]  # item_read._model_of
+    old_wait_off: Callable[..., Any]  # item_read._old_wait_off
     page_io: Callable[..., Any]  # server._page_io
     publish: Callable[..., Any]  # web.publish._publish
-    recovery_role: Callable[[], Any]  # server._RECOVERY_ROLE
-    recovery_target: Callable[..., Any]  # server._recovery_target
-    recovery_tell: Callable[..., Any]  # server._recovery_tell
-    role_name: Callable[..., Any]  # server._role_name
-    role_of: Callable[..., Any]  # server._role_of
-    scoped_anchors: Callable[..., Any]  # server._scoped_anchors
+    recovery_role: Callable[[], Any]  # pane_recovery._RECOVERY_ROLE
+    recovery_target: Callable[..., Any]  # pane_recovery._recovery_target
+    recovery_tell: Callable[..., Any]  # pane_recovery._recovery_tell
+    role_name: Callable[..., Any]  # sessions_registry._role_name
+    role_of: Callable[..., Any]  # holders._role_of
+    scoped_anchors: Callable[..., Any]  # item_read._scoped_anchors
     session_id: Callable[..., Any]  # server._session_id
     stall_confirm: Callable[..., Any]  # service/stall.stall_confirm
     stall_load: Callable[..., Any]  # service/stall.stall_load
     stall_lock: Callable[[], Any]  # service/stall.STALL_LOCK
     stall_save: Callable[..., Any]  # service/stall.stall_save
     stall_ver: Callable[..., Any]  # service/stall.stall_ver
-    switchover_on: Callable[..., Any]  # server._switchover_on
-    update: Callable[..., Any]  # server._update
+    switchover_on: Callable[..., Any]  # item_read._switchover_on
+    update: Callable[..., Any]  # update._update
 
 
 _hooks_: Hooks | None = None

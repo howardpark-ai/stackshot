@@ -51,10 +51,10 @@ def reading(server: Any, it: dict[str, Any], gid: str, now: float) -> dict[str, 
     """What the fields give for the item at the clock now (server._retire_reading: phase, kind of wait, mover, watched) and, apart, the list and the old
     state word it reads as."""
     probe = {**it, "gid": gid}
-    ao = lambda i_: server._after_open(i_.get("metadata") or {})      # noqa: E731
+    ao = lambda i_: server._item_read._after_open(i_.get("metadata") or {})      # noqa: E731
     with SP.frozen(now), SP.fields_only(server):
         r = server._retire_reading(gid, it)
-        mod = server._model_of(probe)
+        mod = server._item_read._model_of(probe)
         return {**r, "list": server._item_list(probe), "word": mod.today}
 
 

@@ -132,6 +132,7 @@ STORE = T / "store"
 DESC = "- A thing\n- It lives here\n- Finished when it works"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.service import update as _update_svc
 from stackshot.waits import waiting as _wt
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
@@ -159,7 +160,7 @@ def round_trip(label):
     → (the item's id, its issue number)."""
     out = _wt_create._create(subject=f"[home] {label}", description=DESC, project="projects/alpha", owner="home-here", next="x")
     gid = G.norm(re.search(r"created (\S+)", out).group(1)); n = G.issue_of(gid, STORE)
-    server._update(gid, description=f"- {label}, edited\n- It lives here\n- Finished when it works", sender="home-here")
+    _update_svc._update(gid, description=f"- {label}, edited\n- It lives here\n- Finished when it works", sender="home-here")
     r1 = G.drain(None, STORE, say=lambda s: None); edited = "edited" in F.issues.get(n, {}).get("body", "")
     _wt_complete.stackshot_complete(gid, outcome="done", reason="it worked", description="- Done", sender="home-here")
     r2 = G.drain(None, STORE, say=lambda s: None)
@@ -221,7 +222,7 @@ link = ui_render.issue_url(gid_b, STORE)
 check("the item page's issue link uses the name", link == f"https://github.com/{NAME}/issues/{n_b}" and f'href="{link}"' in ui_render.Board(str(STORE)).item_html(gid_b), link)
 # the repo changes owner with no id set: a write waits, and the log line names issues_repo_id as the fix
 F.moved = True
-server._update(gid_b, description="- edited while the repo moves", sender="home-here")
+_update_svc._update(gid_b, description="- edited while the repo moves", sender="home-here")
 err = io.StringIO()
 with contextlib.redirect_stderr(err):
     r = G.drain(None, STORE, say=lambda s: None)

@@ -45,6 +45,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import work as W; from stackshot.audit import silence as SL; from stackshot.model import ids as _model_ids
+from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
@@ -75,7 +76,7 @@ try:
         for j, txt in enumerate((f"stage {stage}: PR up", f"stage {stage}: review", f"stage {stage}: scan 99", f"stage {stage}: releasing")):
             clk[0] += 30 * MIN
             before = rd(g)
-            server._update(g, work={"text": txt}, sender=ENG); snap(f"s{stage}.{j}")
+            _update_svc._update(g, work={"text": txt}, sender=ENG); snap(f"s{stage}.{j}")
             after = rd(g); writes += 1; n_this += 1
             vers.append((stall_svc.stall_ver(before), stall_svc.stall_ver(after), before, after))
         # close the stage: some by done=[n] with the next stage in next, some by a status done with the next stage given in the same call
@@ -83,9 +84,9 @@ try:
         pos = len(S.view(rd(g)["metadata"]))          # the open step is the last position of the stored checklist
         nxt = f"{ENG}: pick stage {stage + 1}"
         if k % 2 == 0:
-            server._update(g, done=[pos], next=nxt, sender=ENG)
+            _update_svc._update(g, done=[pos], next=nxt, sender=ENG)
         else:
-            server._update(g, work={"state": "done"}, next=nxt, sender=ENG)
+            _update_svc._update(g, work={"state": "done"}, next=nxt, sender=ENG)
         snap(f"close{stage}"); per_stage[stage] = n_this + 1
     m = rd(g)["metadata"]; st = S.view(m)
 
@@ -94,17 +95,17 @@ try:
     check("each done step carries its latest status (done), and the old work field was never written", all((S.tag_of(x) or {}).get("state") == "done" for x in st[:10]) and "work" not in m, m.get("work"))
     check("the open step has no status yet (nothing written since the last close) and `next` is one line", S.tag_of(st[10]) is None and m["next"].count("\n") == 0, (st[10], m["next"]))
     clk[0] += 30 * MIN
-    server._update(g, work={"text": "stage 17: PR up"}, sender=ENG); snap("s17")
+    _update_svc._update(g, work={"text": "stage 17: PR up"}, sender=ENG); snap("s17")
     m = rd(g)["metadata"]; st = S.view(m)
     check("a status write sets the status of the sender's open step in place: still 11 steps", len(st) == 11 and (S.tag_of(st[10]) or {}).get("text") == "stage 17: PR up", st[10])
 
     # ------------------------------------------------------------ 2 in place, unchanged, done, made
     ts1 = S.tag_of(st[10])["ts"]; clk[0] += 5 * MIN
-    out = server._update(g, work={"text": "stage 17: PR up"}, sender=ENG)
+    out = _update_svc._update(g, work={"text": "stage 17: PR up"}, sender=ENG)
     st = S.view(rd(g)["metadata"])
     check("a status sent again unchanged keeps its old time and says so", S.tag_of(st[10])["ts"] == ts1 and "unchanged, already so" in out, (S.tag_of(st[10]), out))
     clk[0] += 5 * MIN
-    server._update(g, work={"text": "stage 17: review", "state": "in progress"}, sender=ENG)
+    _update_svc._update(g, work={"text": "stage 17: review", "state": "in progress"}, sender=ENG)
     st = S.view(rd(g)["metadata"])
     check("a changed status moves the time", S.tag_of(st[10])["text"] == "stage 17: review" and S.tag_of(st[10])["ts"] > ts1, S.tag_of(st[10]))
 
@@ -140,13 +141,13 @@ try:
     check("a status in progress counts as a running build subagent on the mover's step for 90 minutes", SL.subagent_running(it, tag_ts + 80 * MIN, ENG, same), it["metadata"].get("steps"))
     check("…not after that, and not for another session's mover", not SL.subagent_running(it, tag_ts + 95 * MIN, ENG, same) and not SL.subagent_running(it, tag_ts + 10 * MIN, MAIN, same))
     clk[0] += 60 * MIN
-    server._update(g, work={"text": "stage 17: review", "state": "in progress"}, sender=ENG)       # unchanged: its old time stays, so a status left in progress does not hide the item forever
+    _update_svc._update(g, work={"text": "stage 17: review", "state": "in progress"}, sender=ENG)       # unchanged: its old time stays, so a status left in progress does not hide the item forever
     it2 = rd(g); st2 = S.view(it2["metadata"])
     check("a status sent again unchanged does not extend the 90 minutes", S.tag_of(st2[10])["ts"] == tag_ts and not SL.subagent_running(it2, tag_ts + 95 * MIN, ENG, same), S.tag_of(st2[10]))
-    server._update(g, work={"text": "stage 17: scan 99"}, sender=ENG)
+    _update_svc._update(g, work={"text": "stage 17: scan 99"}, sender=ENG)
     it3 = rd(g)
     check("…while a changed one starts them again", SL.subagent_running(it3, time.time() + 80 * MIN, ENG, same), S.tag_of(S.view(it3["metadata"])[10]))
-    server._update(g, work={"state": "done"}, sender=ENG)
+    _update_svc._update(g, work={"state": "done"}, sender=ENG)
     check("the step marked done by a status done is no running subagent", not SL.subagent_running(rd(g), time.time() + MIN, ENG, same))
 
     # ------------------------------------------------------------ 6 a handful of lines
@@ -164,8 +165,8 @@ try:
     # ------------------------------------------------------------ 7 a close that marks the open step itself (dropped), a legacy `id`
     r2 = _wt_create.stackshot_create(subject="[home] a build that is called off", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: build it")
     g2 = _model_ids._norm_id(r2.split()[1]); snap("create2")
-    clk[0] += 30 * MIN; server._update(g2, work={"text": "PR up"}, sender=ENG); snap("w2a")
-    clk[0] += 30 * MIN; server._update(g2, work={"text": "review"}, sender=ENG); snap("w2b")
+    clk[0] += 30 * MIN; _update_svc._update(g2, work={"text": "PR up"}, sender=ENG); snap("w2a")
+    clk[0] += 30 * MIN; _update_svc._update(g2, work={"text": "review"}, sender=ENG); snap("w2b")
     clk[0] += 30 * MIN; _wt_complete.stackshot_complete(g2, outcome="dropped", reason="called off", outcome_text="- called off", sender=ENG); snap("drop2")
     st_d = S.view(rd(g2)["metadata"], closed=True)
     check("the close marked the open step dropped, and it kept its status", [x["status"] for x in st_d] == ["dropped"] and (S.tag_of(st_d[0]) or {}).get("text") == "review", st_d)
@@ -178,17 +179,17 @@ try:
     refused = []
     for spec in ({"id": "x", "state": "done"}, {"id": "migrating-ids", "text": "migrating ids", "state": "done"}, '{"id": "x", "state": "done"}'):
         try:
-            server._update(g3, work=spec, sender=ENG); refused.append("accepted")
+            _update_svc._update(g3, work=spec, sender=ENG); refused.append("accepted")
         except Exception as ex:
             refused.append(str(ex))
     check("a work spec that carries a legacy `id` is refused with the way in, and ticks nothing", all("old Work list" in x and "done=[n]" in x for x in refused) and rd(g3) == before3, refused)
-    check("…while the same spec without the `id` is a status write on the sender's step", (server._update(g3, work={"text": "migrating ids"}, sender=ENG), (S.tag_of(S.view(rd(g3)["metadata"])[0]) or {}).get("text"))[1] == "migrating ids")
+    check("…while the same spec without the `id` is a status write on the sender's step", (_update_svc._update(g3, work={"text": "migrating ids"}, sender=ENG), (S.tag_of(S.view(rd(g3)["metadata"])[0]) or {}).get("text"))[1] == "migrating ids")
     for empty_id in ("", None, "  "):
         W.parse({"id": empty_id, "text": "migrating ids"})
-    out_e = server._update(g3, work={"id": "", "text": "migrating ids, again"}, sender=ENG)
+    out_e = _update_svc._update(g3, work={"id": "", "text": "migrating ids, again"}, sender=ENG)
     check("an empty or null `id` (a cached-schema client may always send one) is ignored: the write is a status write", (S.tag_of(S.view(rd(g3)["metadata"])[0]) or {}).get("text") == "migrating ids, again", out_e)
     check("…and so are a zero and an empty list in `id`", W.parse({"id": 0, "text": "x"})["text"] == "x" and W.parse({"id": [], "text": "x"})["text"] == "x")
-    server._update(g3, work='{"id":"","text":"from a json string"}', sender=ENG)
+    _update_svc._update(g3, work='{"id":"","text":"from a json string"}', sender=ENG)
     check("…and an empty id through the JSON-string form writes a status", (S.tag_of(S.view(rd(g3)["metadata"])[0]) or {}).get("text") == "from a json string", S.view(rd(g3)["metadata"])[0])
     # a drifted step (its line left next without a mark) shows on no row and holds no running subagent
     it4 = rd(g3); m4 = it4["metadata"]; m4["next"] = f"{ENG}: something else"

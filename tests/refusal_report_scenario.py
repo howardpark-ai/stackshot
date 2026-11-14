@@ -48,6 +48,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.service import update as _update_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc
@@ -189,7 +190,7 @@ try: out_ = _wt_update.stackshot_update("5", sender="team-back", priority="p3")
 finally: fx = CL.end(tok)
 check("3 id: …while a note-only update of the same bare number lands, with the fix noted", rd5()["metadata"].get("priority") == "p3" and rd5()["status"] == "open" and "item-id" in [k for k, _ in fx], (rd5()["metadata"], fx))
 tok = CL.begin()
-try: server._update("5", sender="team-back", priority="p2")
+try: _update_svc._update("5", sender="team-back", priority="p2")
 finally: fx = CL.end(tok)
 check("3 id: update reads a bare number, and says so", rd5()["metadata"].get("priority") == "p2" and "item-id" in [k for k, _ in fx], (rd5()["metadata"], fx))
 # the wake

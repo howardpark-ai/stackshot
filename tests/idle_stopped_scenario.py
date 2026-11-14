@@ -63,6 +63,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
@@ -70,15 +71,15 @@ from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # ---- 0. the tail reader on its own
-check("the transcript check: the last turn ended in an error, whatever the CLI wrote after it", server._pane_stuck(U["home-stuck"]) == "Credit balance is too low", server._pane_stuck(U["home-stuck"]))
+check("the transcript check: the last turn ended in an error, whatever the CLI wrote after it", _pane_recovery._pane_stuck(U["home-stuck"]) == "Credit balance is too low", _pane_recovery._pane_stuck(U["home-stuck"]))
 check("…a pane name resolves to its transcript; nothing known for a session with no transcript on this box, or a cloud id",
-      server._pane_stuck("home-stuck") == "Credit balance is too low" and server._pane_stuck(U["home-far"]) == "" and server._pane_stuck("cse_0123456789abcdef") == "")
+      _pane_recovery._pane_stuck("home-stuck") == "Credit balance is too low" and _pane_recovery._pane_stuck(U["home-far"]) == "" and _pane_recovery._pane_stuck("cse_0123456789abcdef") == "")
 transcript("home-far", entry("user", "hi"), entry("assistant", "You've hit your weekly limit · resets Jan 8, 5am (UTC)", err=True), entry("user", "try again"))
-check("…a prompt after the error: the pane is trying again, not stopped", server._pane_stuck(U["home-far"]) == "", server._pane_stuck(U["home-far"]))
+check("…a prompt after the error: the pane is trying again, not stopped", _pane_recovery._pane_stuck(U["home-far"]) == "", _pane_recovery._pane_stuck(U["home-far"]))
 transcript("home-far", entry("user", "hi"), entry("assistant", "API Error: 400 You have reached your specified workspace API usage limits. You will regain access on 2030-01-01 at 00:00 UTC.", err=True))
-check("…the error text is the reason, clipped to one line", server._pane_stuck(U["home-far"]).startswith("API Error: 400 You have reached your specified workspace API usage limits"), server._pane_stuck(U["home-far"]))
+check("…the error text is the reason, clipped to one line", _pane_recovery._pane_stuck(U["home-far"]).startswith("API Error: 400 You have reached your specified workspace API usage limits"), _pane_recovery._pane_stuck(U["home-far"]))
 transcript("home-far", *JUNK)
-check("…a tail with no turn in it: nothing known", server._pane_stuck(U["home-far"]) == "")
+check("…a tail with no turn in it: nothing known", _pane_recovery._pane_stuck(U["home-far"]) == "")
 (TR / f"{U['home-far']}.jsonl").unlink()
 got = []
 for op in ("home-stew", "home-crew", ""):
@@ -89,9 +90,9 @@ _cfg.CFG["fleet"]["operator_session"] = "home-stew"
 
 # ---- 0b. a pane on another machine: no transcript here, so its puller (version 7) reads it there and reports `stopped` on the session's record
 check("a pane with no transcript on this box and a running record that carries `stopped` (its puller's report) reads as stopped, with that reason; a gone record, or none, does not",
-      server._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far", "stopped": "Credit balance is too low"}}) == "Credit balance is too low"
-      and server._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far", "stopped": "x", "gone": "2026-01-01T00:00:00Z"}}) == ""
-      and server._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far"}}) == "" and server._pane_stuck(U["home-far"], None, {}) == "")
+      _pane_recovery._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far", "stopped": "Credit balance is too low"}}) == "Credit balance is too low"
+      and _pane_recovery._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far", "stopped": "x", "gone": "2026-01-01T00:00:00Z"}}) == ""
+      and _pane_recovery._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far"}}) == "" and _pane_recovery._pane_stuck(U["home-far"], None, {}) == "")
 from stackshot.fleet import puller
 puller._transcript_roots = lambda: [str(T / "transcripts")]
 rep = puller.report([{"sessionId": U["home-stuck"], "name": "home-stuck"}, {"sessionId": U["home-owner"], "name": "home-owner"}])

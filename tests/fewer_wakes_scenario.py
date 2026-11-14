@@ -94,6 +94,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.anchors import anchors as _anc_y
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -468,11 +469,11 @@ def hb_pushes(gid, since): return [x for x in to(A, since) if "back with you alo
 _cfg.CFG.setdefault("board", {}).pop("handback_hold_seconds", None)
 check("3a: the hold defaults to 180 seconds and is set by [board] handback_hold_seconds", telling.handback_hold_s() == 180.0, telling.handback_hold_s())
 p0, n0 = len(pushes()), len(pushes()); t0 = time.time()
-out = server._update("a20", needs=["osprey-main"], next="osprey-main: over to you", sender="osprey-front2"); settle()
+out = _update_svc._update("a20", needs=["osprey-main"], next="osprey-main: over to you", sender="osprey-front2"); settle()
 check("3b: another front agent hands the item back to the front agent keeper alone: nothing is pushed yet (not to the keeper, not to the builder), the line is held, and the reply says the builder is told, not the keeper",
       not hb_notes("a20", n0) and not hb_pushes("a20", p0) and len(held()) == 1 and "in 3 minutes unless you close a20 first" in out and "its builder osprey-x is told it is back with them alone, not them" in out, (held(), out))
 p0, n0 = len(pushes()), len(pushes())
-out_b = server._update("a30", needs=["osprey-main"], next="osprey-main: builder's own", sender="osprey-x"); settle()
+out_b = _update_svc._update("a30", needs=["osprey-main"], next="osprey-main: builder's own", sender="osprey-x"); settle()
 check("3b negative: the builder's own hand-back to the front agent keeper tells nobody and holds nothing: the board shows it",
       not hb_notes("a30", n0) and not hb_pushes("a30", p0) and len(held()) == 1 and "nobody is told" in out_b, (held(), out_b))
 p0, n0 = len(pushes()), len(pushes())
@@ -486,58 +487,58 @@ check("3d: the builder closes the item inside the window: the held hand-back is 
 check("…and the tick after the window sends nothing more", telling.handback_tick(now=t0 + 400) == [] and not hb_notes("a20", n0) and len(to(A, p0)) == 1)
 # no close: delivered when the window ends
 p0, n0 = len(pushes()), len(pushes()); t1 = time.time()
-server._update("a21", needs=["osprey-main"], next="osprey-main: review the PR", sender="osprey-front2"); settle()
+_update_svc._update("a21", needs=["osprey-main"], next="osprey-main: review the PR", sender="osprey-front2"); settle()
 check("3e negative: a hand-back with no close in the window is delivered when it ends, to the builder (not the keeper), reworded, once",
       telling.handback_tick(now=t1 + 100) == [] and telling.handback_tick(now=t1 + 181) == ["a21"] and len(hb_notes("a21", n0)) == 1 and held() == {}
       and hb_notes("a21", n0)[0][1].startswith("[stackshot] a21 is back with osprey-main, a front agent, alone (handed back by osprey-front2)") and "told to you, not to osprey-main" in hb_notes("a21", n0)[0][1]
       and not hb_pushes("a21", p0) and telling.handback_tick(now=t1 + 999) == [], (held(), hb_notes("a21", n0), to(A, p0)))
 # a restart loses nothing: the held line is a file
-server._update("a23", needs=["osprey-main"], next="osprey-main: first", sender="osprey-front2"); settle()
+_update_svc._update("a23", needs=["osprey-main"], next="osprey-main: first", sender="osprey-front2"); settle()
 f1 = held(); k = list(f1)[0]
-server._update("a23", needs=["osprey-x"], next="osprey-x: more work", sender="osprey-main"); settle()
-server._update("a23", needs=["osprey-main"], next="osprey-main: second", sender="osprey-front2"); settle()
+_update_svc._update("a23", needs=["osprey-x"], next="osprey-x: more work", sender="osprey-main"); settle()
+_update_svc._update("a23", needs=["osprey-main"], next="osprey-main: second", sender="osprey-front2"); settle()
 f2 = held()
 check("3f: a second hand-back of the same item inside the window is the same held line, with the first due time (one line for the item)",
       list(f2) == [k] and f2[k]["due"] == f1[k]["due"], (f1, f2))
 n0 = len(pushes()); telling.handback_tick(now=f2[k]["due"] + 1)
 check("…and one line is delivered for the two", len(hb_notes("a23", n0)) == 1, hb_notes("a23", n0))
 n0 = len(pushes())
-server._update("a24", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
-server._update("a24", needs=["osprey-main", "osprey-x"], next="osprey-x: more", sender="osprey-main"); settle()
+_update_svc._update("a24", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
+_update_svc._update("a24", needs=["osprey-main", "osprey-x"], next="osprey-x: more", sender="osprey-main"); settle()
 telling.handback_tick(now=time.time() + 999)
 check("3g negative: an item that moved on while the line was held (the builder is named again) is not announced as back with the keeper", not hb_notes("a24", n0) and held() == {}, (hb_notes("a24", n0), held()))
 n0 = len(pushes())
-server._update("a25", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
-server._update("a25", needs=["decision"], ask="Decide: whether to ship · Recommend: yes · Stakes: none · By: no date", sender="osprey-x"); settle()
+_update_svc._update("a25", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
+_update_svc._update("a25", needs=["decision"], ask="Decide: whether to ship · Recommend: yes · Stakes: none · By: no date", sender="osprey-x"); settle()
 telling.handback_tick(now=time.time() + 999)
 check("…nor one that now waits on his decision", not hb_notes("a25", n0) and held() == {}, (hb_notes("a25", n0), held()))
 # 0 = no hold
 _cfg.CFG["board"]["handback_hold_seconds"] = 0; n0 = len(pushes())
-out = server._update("a26", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
+out = _update_svc._update("a26", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 check("3h: handback_hold_seconds = 0 tells the builder at once, as before the hold", len(hb_notes("a26", n0)) == 1 and held() == {} and "is told it is back with them alone, not them: a front agent is not handed an item on stackshot's own motion" in out and "unless you close" not in out, (out, hb_notes("a26", n0)))
 _cfg.CFG["board"].pop("handback_hold_seconds", None)
 # the close of a different item leaves the held line alone
 n0 = len(pushes()); t3 = time.time()
-server._update("a27", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
+_update_svc._update("a27", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 _wt_complete.stackshot_complete("a28", outcome="done", reason="done", description="- done", sender="osprey-x"); settle()
 check("3i negative: closing another item does not drop it", len(held()) == 1 and telling.handback_tick(now=t3 + 181) == ["a27"] and len(hb_notes("a27", n0)) == 1, (held(), hb_notes("a27", n0)))
 # a reopened item is open again: a new hand-back is held again
-server._update("a20", status="open", next="osprey-x: more", needs=["osprey-x"], then="osprey-main", sender="osprey-main"); settle()
-p0 = len(pushes()); server._update("a20", needs=["osprey-main"], next="osprey-main: look again", sender="osprey-front2"); settle()
+_update_svc._update("a20", status="open", next="osprey-x: more", needs=["osprey-x"], then="osprey-main", sender="osprey-main"); settle()
+p0 = len(pushes()); _update_svc._update("a20", needs=["osprey-main"], next="osprey-main: look again", sender="osprey-front2"); settle()
 check("…a reopened item's new hand-back is held like any other", len(held()) == 1, held())
 
 # the held line is never lost: a write that fails sends at once; a tick sends first and removes after (at least once)
 n0 = len(pushes()); k0 = len(held()); _real_w = telling.handback_write
 telling.handback_write = lambda d: False
 try:
-    out = server._update("a29", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
+    out = _update_svc._update("a29", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 finally:
     telling.handback_write = _real_w
 check("3j negative: when the held line cannot be written it is sent at once, never lost (the reply does not promise a window)",
       len(hb_notes("a29", n0)) == 1 and len(held()) == k0 and "unless you close" not in out and "told it is back with them alone" in out, (out, hb_notes("a29", n0), held()))
 def rehold(gid):          # the item goes to the builder and comes back: a fresh held line
-    server._update(gid, needs=["osprey-x"], next="osprey-x: more work", sender="osprey-main"); settle()
-    server._update(gid, needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
+    _update_svc._update(gid, needs=["osprey-x"], next="osprey-x: more work", sender="osprey-main"); settle()
+    _update_svc._update(gid, needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 n0 = len(pushes()); _real_send = telling.handback_send; calls = []
 def _send_fails(rec): calls.append(rec["gid"]); raise OSError("router log full")
 telling.handback_send = _send_fails
