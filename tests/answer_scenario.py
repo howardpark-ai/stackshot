@@ -171,6 +171,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.service import answer_handover as handover_svc
 from stackshot.service import update as _update_svc
 from stackshot.web import answers as _web_answers
 from stackshot.waits import watchers as _watch
@@ -958,7 +959,7 @@ check("D1, Park: a dead then is not stored as post_wake_mover: parked (hold and 
       server._answer("a81", "Park", "", "") == "decision" and hd_(rd("a", 81)["metadata"]) is True and wk_(rd("a", 81)["metadata"]) == "2099-01-01"
       and not any(k in rd("a", 81)["metadata"] for k in ("then", "mover", "wait_kind", "post_wake_mover")) and "home-ghost" not in json.dumps(rd("a", 81)["metadata"]) and not b(81).conflicts, (rd("a", 81)["metadata"], b(81)))
 check("D1, a then that is live is still handed: a50's hand-over unchanged (mover home-agent), so the shared test lets a live session through",
-      rd("a", 50)["metadata"].get("mover") == "home-agent" and server._then_live("home-agent", {"project": "projects/alpha"}) and not server._then_live("home-ghost", {"project": "projects/alpha"}))
+      rd("a", 50)["metadata"].get("mover") == "home-agent" and handover_svc._then_live("home-agent", {"project": "projects/alpha"}) and not handover_svc._then_live("home-ghost", {"project": "projects/alpha"}))
 told.clear()
 check("D2, before the release: Yes on needs [decision, home-agent] + then home-agent + an open after leaves the item waiting, then stored, no conflict",
       server._answer("a82", "Yes", "", "") == "decision" and rd("a", 82)["metadata"].get("then") == "home-agent" and "mover" not in rd("a", 82)["metadata"] and rd("a", 82)["metadata"].get("needs") == ["home-agent"]

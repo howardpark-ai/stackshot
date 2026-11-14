@@ -6,8 +6,7 @@ server.py is being split into one module per area (CONTRIBUTING.md, Layout). The
 modules, the registry readers (`service/gates.py`), the session helpers (`fleet/sessions_registry.py`) and the instance settings and text clipping (`core/instance.py`, `model/bullet_text.py`). server.py imports the names its own code reads from here (`_owed_mark` and the others it calls), and the suites and
 scripts read and set every other name on this module. `_refuse_if_owing` has no caller here and is not a name of server.py: the create and update tables look it up on this module when a write runs
 (`_late_in`), and a suite that stubs it (`page_debts._refuse_if_owing = ...`) stubs it here, which reaches every caller. `_page_ts` is called here by `_owed_settle` and by the client API's page-ts answer in server.py, which reads it on this module too: the suites that put a page's time in place of the real one
-set it here, and that reaches both callers. `_HERE` is the checkout's root, read only in the two messages that name the `pages.py clear` command;
-server.py keeps its own `_HERE` (its git calls read it, and the suites set it), which is the same value."""
+set it here, and that reaches both callers. `_HERE` is the checkout's root, read only in the two messages that name the `pages.py clear` command."""
 from __future__ import annotations
 
 import json

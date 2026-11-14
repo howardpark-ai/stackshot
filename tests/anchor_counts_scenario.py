@@ -90,6 +90,7 @@ check("completion_due: the same anchor on two pages is asked about on each (each
 
 # ---- the readers built on it
 from stackshot.web import server
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import item_read as _item_read
 from stackshot.anchors import anchors as ANC
 from stackshot.web import publish as _web_publish
@@ -186,9 +187,9 @@ check("...and an anchor scoped to nobody held releases nothing (a project-wide a
 
 # _watch_anchor_seen: an anchor any page holds is watched (no "add it" warning), the log of the page that holds it is read; one no page holds is the warning
 (T / "store/anchors.json").write_text(json.dumps({A: [], B: [{"url": URL_B, "items": ["a20"], "added": 5, "by": "t"}], C: []}))
-seen = server._watch_anchor_seen(A, URL_B, 0.0)
+seen = wait_gates_svc._watch_anchor_seen(A, URL_B, 0.0)
 check("wait-set note: an anchor held by another project's page is watched (no warning) and the notices in that page's log are reported", "does not watch" not in seen and "Kim wrote" in seen and "again" in seen, seen)       # the item's own page's log is read as before; beta's, which holds the anchor, is read too
-unheld = server._watch_anchor_seen(A, "https://example.invalid/nobody", 0.0)
+unheld = wait_gates_svc._watch_anchor_seen(A, "https://example.invalid/nobody", 0.0)
 check("...an anchor no page holds is still the warning, saying how to add it", "anchor-hub does not watch https://example.invalid/nobody for projects/alpha" in unheld and 'add=["https://example.invalid/nobody"]' in unheld, unheld)
 
 # _watch_anchor_notice: an item of another project whose stored wait is on an anchor a keeperless page holds is turned by that page's notice, even if the item's own page has a keeper

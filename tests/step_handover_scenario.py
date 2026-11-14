@@ -72,6 +72,7 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import needs as _model_needs
+from stackshot.service import released as released_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
@@ -108,8 +109,8 @@ logging.disable(logging.INFO)
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def raw(i): return (T / f"store/a/{i}.json").read_text()
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._OWN_REPO[:] = [REPO]
-server._HERE = rlive_svc.HERE = T / "repo"
+released_svc._OWN_REPO[:] = [REPO]
+rlive_svc.HERE = T / "repo"
 GH = {key(11): ("merged", "")}
 def fake_pr_merged(ref, now_, gh_st):
     ref = checks_svc.check_ref(ref); st, err = GH.get(ref, ("open", ""))

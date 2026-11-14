@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -474,7 +475,7 @@ finally:
 m65 = json.loads((T / "store/a/65.json").read_text())
 check("a done check's close writes a reason within 120 characters, starting with the check's words", m65["status"] == "completed" and m65["metadata"]["outcome"] == "done"
       and m65["metadata"]["reason"].startswith("done check passed: label") and len(m65["metadata"]["reason"]) <= 120, m65["metadata"].get("reason"))
-it66 = _service_store._load("a66"); server._watch_close(it66, "dropped on his answer on the board: " + "something " * 40, time.time())
+it66 = _service_store._load("a66"); wait_gates_svc._watch_close(it66, "dropped on his answer on the board: " + "something " * 40, time.time())
 check("a watcher's drop writes a reason within 120 characters", it66["status"] == "completed" and 0 < len(it66["metadata"]["reason"]) <= 120, it66["metadata"].get("reason"))
 
 # ---- 7. the tool texts state the limits

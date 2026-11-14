@@ -70,6 +70,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.fleet import liveness as _lv
@@ -168,7 +169,7 @@ for label, ms in (("a machine record that is not a dict", {"host-b": "garbage", 
         bx, ok = f"{e.__class__.__name__}: {e}", False
     check(f"non-dict state ({label}): no machine is known from it, the names table still is, and nothing raises", ok, bx)
 state_with(["host-b"])
-check("non-dict state: ...a wait on a machine of the names table is accepted (offline), not an error", server._evw_box_spec(EW.parse("box_online box-b")).machine == "box-b", None)
+check("non-dict state: ...a wait on a machine of the names table is accepted (offline), not an error", wait_gates_svc._evw_box_spec(EW.parse("box_online box-b")).machine == "box-b", None)
 write_state()
 refused("write: the backstop is still required to be after now", lambda: _update_svc._update("a12", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(0), post_wake_mover=BACK, mover="none"), "is not after now")
 _update_svc._update("a10", sender=BACK, next="team-back: keep going")

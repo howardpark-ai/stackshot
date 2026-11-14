@@ -1,4 +1,4 @@
-"""Scenario test for the anchor-wait refusal (server._anchor_wait_gate) — fixture data, no live store, no network, no server socket.
+"""Scenario test for the anchor-wait refusal (wait_gates_svc._anchor_wait_gate) — fixture data, no live store, no network, no server socket.
 
 A create or an update that sets wait_kind=anchor with a wait_anchor that is not on the project's anchors list is refused, and the refusal names the `anchors` call that adds it. Covered:
 
@@ -70,6 +70,7 @@ def accepted(name, f):
         check(name, False, str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from stackshot.anchors import anchors as _anc

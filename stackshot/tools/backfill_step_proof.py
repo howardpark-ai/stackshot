@@ -113,12 +113,12 @@ def run(a: argparse.Namespace) -> dict:
         os.environ.pop("STACKSHOT_URL", None)
         import logging
         logging.disable(logging.INFO)
-        from stackshot.service import checks as _checks, proofs as _proofs, released_live as _live  # noqa: PLC0415
-        from stackshot.web import server  # noqa: PLC0415
+        from stackshot.service import checks as _checks, proofs as _proofs, released as _released, released_live as _live  # noqa: PLC0415
+        from stackshot.web import server  # noqa: PLC0415, F401  — importing it fills the hook tables the service modules read
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
         _web_publish._publish = lambda: None
-        server._HERE = _live.HERE = Path(a.checkout).expanduser().resolve() if a.checkout else ROOT
-        server._OWN_REPO[:] = []
+        _live.HERE = Path(a.checkout).expanduser().resolve() if a.checkout else ROOT
+        _released._OWN_REPO[:] = []
         unread: set[str] = set()
         if not a.github:
             def _offline(ref: str, now: float, gh_st: dict) -> tuple[bool, str]:

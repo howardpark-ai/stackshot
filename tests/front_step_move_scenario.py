@@ -1,4 +1,4 @@
-"""Scenario test for the front-step rule (front_step.py, audit_run.front_step_pass, server._front_step_mark and _front_step_move): a step held by a front agent (or a retired session) that stays the first open
+"""Scenario test for the front-step rule (front_step.py, audit_run.front_step_pass, wait_gates_svc._front_step_mark and _front_step_move): a step held by a front agent (or a retired session) that stays the first open
 step of an item another session moves is moved to that mover by the ten-minute filing pass, with nobody asking. Fixture items in a temporary store, the server's own item writes, messages replaced by recorders,
 no network, no model call.
 
@@ -42,6 +42,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.model import nextlines as NL
 from stackshot.web import server
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import messaging as _messaging
 _cfg.CFG["audit"]["mode"] = "script"
 H = 3600; now = time.time()
@@ -71,7 +72,7 @@ sent = []
 def deliver(to, text, fyi=False): sent.append((to, text, fyi)); return True, "[200] ok"
 def env(**kw):
     kw.setdefault("pages", lambda run, deadline: {"enabled": False, "mode": "", "counts": {}})
-    kw.setdefault("step_mark", server._front_step_mark); kw.setdefault("step_move", server._front_step_move)
+    kw.setdefault("step_mark", wait_gates_svc._front_step_mark); kw.setdefault("step_move", wait_gates_svc._front_step_move)
     kw.setdefault("clock", lambda: 0.0)         # the pass time is the test's own `now` (a pass reads max(env.clock(), now)): never the real clock, which near a local midnight sits 15 minutes past the shifted `now`
     return AR.Env(roles=kw.pop("roles", ROLES), fallback=lambda p: "alpha-main", builder=lambda p: "alpha-builder", page_of=lambda p: ("", None),
                   deliver=kw.pop("deliver", deliver), sessions=lambda: None, **kw)
@@ -230,19 +231,19 @@ check("5 …and an empty role map in the middle of a clock keeps it", clock_of("
 
 # ---- 5b. the server's writes under their own checks
 load_fixtures()
-check("5b the clock write refuses a step that is not the first open one, no mover or one that is not the item's, a clock already there", server._front_step_mark("a1", "0" * 12, T0, "home-agent") is False and server._front_step_mark("a1", FS.step_hash(first_open("a1")), T0) is False
-      and server._front_step_mark("a1", FS.step_hash(first_open("a1")), T0, "alpha-builder") is False and clock_of("a1") is None
-      and server._front_step_mark("a1", FS.step_hash(first_open("a1")), T0, "home-agent") is True
-      and server._front_step_mark("a1", FS.step_hash(first_open("a1")), T0 + 5, "home-agent") is False and clock_of("a1")["at"] == T0)
-check("5b …the move refuses before its clock is due, for another opener, for a changed step; and moves nothing", server._front_step_move("a1", FS.step_hash(first_open("a1")), "alpha-main", "home-agent", 3, T0 + 3 * H - 1)["moved"] is False
-      and server._front_step_move("a1", FS.step_hash(first_open("a1")), "ops-other", "home-agent", 3, T0 + 3 * H)["moved"] is False and server._front_step_move("a1", "0" * 12, "alpha-main", "home-agent", 3, T0 + 3 * H)["moved"] is False
+check("5b the clock write refuses a step that is not the first open one, no mover or one that is not the item's, a clock already there", wait_gates_svc._front_step_mark("a1", "0" * 12, T0, "home-agent") is False and wait_gates_svc._front_step_mark("a1", FS.step_hash(first_open("a1")), T0) is False
+      and wait_gates_svc._front_step_mark("a1", FS.step_hash(first_open("a1")), T0, "alpha-builder") is False and clock_of("a1") is None
+      and wait_gates_svc._front_step_mark("a1", FS.step_hash(first_open("a1")), T0, "home-agent") is True
+      and wait_gates_svc._front_step_mark("a1", FS.step_hash(first_open("a1")), T0 + 5, "home-agent") is False and clock_of("a1")["at"] == T0)
+check("5b …the move refuses before its clock is due, for another opener, for a changed step; and moves nothing", wait_gates_svc._front_step_move("a1", FS.step_hash(first_open("a1")), "alpha-main", "home-agent", 3, T0 + 3 * H - 1)["moved"] is False
+      and wait_gates_svc._front_step_move("a1", FS.step_hash(first_open("a1")), "ops-other", "home-agent", 3, T0 + 3 * H)["moved"] is False and wait_gates_svc._front_step_move("a1", "0" * 12, "alpha-main", "home-agent", 3, T0 + 3 * H)["moved"] is False
       and opener_of("a1") == "alpha-main")
 dup = get("a8"); dup["metadata"]["next"] = "alpha-main: answer the question\nhome-agent: answer the question"; put("a8", dup)
-server._front_step_mark("a8", FS.step_hash(first_open("a8")), T0, "home-agent")
-check("5b …and refuses a move that would make two open steps read the same", server._front_step_move("a8", FS.step_hash(first_open("a8")), "alpha-main", "home-agent", 3, T0 + 3 * H) == {"moved": False, "why": "another open step already reads the same"} and opener_of("a8") == "alpha-main")
+wait_gates_svc._front_step_mark("a8", FS.step_hash(first_open("a8")), T0, "home-agent")
+check("5b …and refuses a move that would make two open steps read the same", wait_gates_svc._front_step_move("a8", FS.step_hash(first_open("a8")), "alpha-main", "home-agent", 3, T0 + 3 * H) == {"moved": False, "why": "another open step already reads the same"} and opener_of("a8") == "alpha-main")
 withproof = get("a6"); withproof["metadata"]["step_proof"] = {ST.key(first_open("a6")): {"kind": "event", "event": "recycle"}}; put("a6", withproof)
-server._front_step_mark("a6", FS.step_hash(first_open("a6")), T0, "home-agent")
-server._front_step_move("a6", FS.step_hash(first_open("a6")), "alpha-keeper", "home-agent", 3, T0 + 3 * H)
+wait_gates_svc._front_step_mark("a6", FS.step_hash(first_open("a6")), T0, "home-agent")
+wait_gates_svc._front_step_move("a6", FS.step_hash(first_open("a6")), "alpha-keeper", "home-agent", 3, T0 + 3 * H)
 check("5b a step with a proof keeps it: the proof follows the reworded step", list(get("a6")["metadata"]["step_proof"]) == [ST.key("home-agent: write the page entry")], get("a6")["metadata"].get("step_proof"))
 check("5b the reword keeps the first line's marker and bold marks and the lines under it", FS.reopen("- **alpha-main (front):** decide it\n  note under it", "home-agent") == "- **home-agent:** decide it\n  note under it" and FS.reopen("Status: x", "home-agent") != ""
       and FS.reopen("no opener here", "home-agent") == "" and FS.reopen("alpha-main:", "home-agent") == "home-agent:", FS.reopen("- **alpha-main (front):** decide it\n  note under it", "home-agent"))
@@ -254,7 +255,7 @@ def race(change, k="a1", at=T0 + 3 * H):
     log = []
     def racing_move(gid, *a):
         d = get(gid); change(d); put(gid, d)
-        res = server._front_step_move(gid, *a); log.append(res); return res
+        res = wait_gates_svc._front_step_move(gid, *a); log.append(res); return res
     r = run_pass(at, step_move=racing_move)
     return r, log
 def handed(d): d["metadata"]["needs"] = ["alpha-main"]
@@ -270,9 +271,9 @@ check("5b2 an item whose mover changed in the same gap is not moved to the old m
 load_fixtures()
 d = get("a1"); d["metadata"]["needs"] = ["alpha-main"]; put("a1", d)                                          # handed to the opener, the step text unchanged
 d = get("a8"); d["metadata"]["hold"] = True; d["metadata"]["state"] = "parked"; put("a8", d)                   # parked
-check("5b2 the server's clock write refuses an item handed to the opener, or parked, since the pass read it", server._front_step_mark("a1", FS.step_hash(first_open("a1")), T0, "home-agent") is False
-      and server._front_step_mark("a8", FS.step_hash(first_open("a8")), T0, "home-agent") is False and clock_of("a1") is None and clock_of("a8") is None
-      and server._front_step_mark("a6", FS.step_hash(first_open("a6")), T0, "home-agent") is True, (clock_of("a1"), clock_of("a8"), clock_of("a6")))
+check("5b2 the server's clock write refuses an item handed to the opener, or parked, since the pass read it", wait_gates_svc._front_step_mark("a1", FS.step_hash(first_open("a1")), T0, "home-agent") is False
+      and wait_gates_svc._front_step_mark("a8", FS.step_hash(first_open("a8")), T0, "home-agent") is False and clock_of("a1") is None and clock_of("a8") is None
+      and wait_gates_svc._front_step_mark("a6", FS.step_hash(first_open("a6")), T0, "home-agent") is True, (clock_of("a1"), clock_of("a8"), clock_of("a6")))
 
 # ---- 5b3. a new mover is not handed the step minutes after it took the item
 load_fixtures(); run_pass(T0)

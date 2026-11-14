@@ -56,6 +56,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR
+from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -222,11 +223,11 @@ class _Clock:                    # the server's clock stopped at the wake itself
     def time(self): return self.at
     def __getattr__(self, k): return getattr(time, k)
 real_time = server.time
-server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
+server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
 try:
     at_wake = (server._wake_alone_on_agent(m_basis), "alone is a wait until that date" in server._wake_window_note(m_basis))
 finally:
-    server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
+    server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
 check("11 …a wake exactly now is not waiting any more: the basis no longer exempts it, so the note rules apply again (alone, and the window note fires)", at_wake == (True, True), at_wake)
 bw = dict(it_of(1), metadata=dict(mt(1, "g")))
 ep = W.wake_epoch(W1)

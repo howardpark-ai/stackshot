@@ -128,8 +128,8 @@ from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
-server._HERE = rlive_svc.HERE = T / "repo"
+released_svc._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
+rlive_svc.HERE = T / "repo"
 check("the last-good path is release.sh's ($LOGDIR/last-good, LOGDIR = config.py state releases)", _cfg.state("releases", "last-good") == LAST_GOOD)
 # the delivery path is the real one: tell_woken → the front gate → push.py (a fake that logs what it was asked to send)
 PUSHLOG = T / "push.log"
