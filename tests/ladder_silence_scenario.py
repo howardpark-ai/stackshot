@@ -81,7 +81,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import audit_run as AR; from stackshot.audit import audit; from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import agents as _agents
 from stackshot.core import config as _cfg
 from stackshot.service import store as _service_store
@@ -165,9 +165,9 @@ spy = []
 _real_dates = AR.dates_pass
 AR.dates_pass = lambda **kw: spy.append(kw.get("entered")) or {}
 try:
-    server._dates_expected_tick()
+    audit_ticks_svc._dates_expected_tick()
     on_spy = list(spy); spy.clear()
-    ladder_cfg(False); server._dates_expected_tick()
+    ladder_cfg(False); audit_ticks_svc._dates_expected_tick()
     off_spy = list(spy); spy.clear()
 finally:
     AR.dates_pass = _real_dates

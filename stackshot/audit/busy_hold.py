@@ -33,7 +33,7 @@ def _quoted(sub: dict[str, Any]) -> str:
 def live_work(gid: str, mover: str, *, subagents: Callable[[str], list[dict[str, Any]]], items: Callable[[], dict[str, dict[str, Any]]],
               anchored: Callable[[], dict[str, Any]], same: Callable[[Any, Any], bool], shown: Callable[[str], str]) -> str:
     """The words for what is running on item `gid` that `mover` runs ("your subagent "<description>"" ), "" when nothing is or nothing can be told.
-    `subagents(mover)` → the mover's running subagents (server `_mover_subagents`: raises `subagent_tie.Unreadable` or anything else when they cannot be read); `items()` → every stored item by id;
+    `subagents(mover)` → the mover's running subagents (`service/audit_ticks.py` `_mover_subagents`: raises `subagent_tie.Unreadable` or anything else when they cannot be read); `items()` → every stored item by id;
     `anchored()` → {item id: the pull requests ("owner/repo#n") anchored to it}; `same(a, b)` → whether two names are one session; `shown(id)` → the id as the board writes it."""
     try:
         subs = [s for s in (subagents(mover) or []) if isinstance(s, dict) and not s.get("unreadable")]

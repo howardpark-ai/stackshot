@@ -7,7 +7,7 @@ the same sort of claim about the mover, not about an item. The audit therefore a
   <root>/<working-directory folder>/<session uuid>/subagents/agent-<id>.jsonl        its transcript, the first line the brief the mover gave it
 
 `running(session, roots, now)` lists a session's subagents that are running: no `finished` flag and the transcript written within `RUNNING_S`, or a `finished` flag that only says the subagent is PARKED (see `running`). A subagent whose pane was recycled or killed leaves
-neither a flag nor a later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). The caller (server `_mover_subagents`) asks
+neither a flag nor a later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). The caller (`service/audit_ticks.py` `_mover_subagents`) asks
 only for a pane that is busy now, since a subagent keeps its pane in a turn.
 
 `tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request

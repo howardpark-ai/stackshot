@@ -1,4 +1,4 @@
-"""Scenario test for the balancer (audit/hand_idle.py `balance_*`, server._balance_tick, its own minute tick ahead of the hand-off tick, `[audit] balance`): an item that is NOT STARTED (an untaken hand-off to a
+"""Scenario test for the balancer (audit/hand_idle.py `balance_*`, service/audit_ticks._balance_tick, its own minute tick ahead of the hand-off tick, `[audit] balance`): an item that is NOT STARTED (an untaken hand-off to a
 builder) or QUEUED BEHIND its mover's other item and has waited `balance_minutes` (10) goes to the builder with the fewest open items, and the mover it left is told to disregard it. Fixture items in a temporary
 store, a fake clock (the pass is given its `now`), the pane registry replaced by a dict, no live store, no network, no model call, no message really sent.
 
@@ -62,6 +62,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.web.tools import notes as _notes_tool
@@ -104,7 +105,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK
+CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -141,14 +142,14 @@ def mover_of(i): return mt(i).get("mover")      # the stored mover (a waiting it
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     sent.clear(); panes.clear(); dead.clear(); (T / "store/anchors.json").write_text("{}")
-    server._BALANCE_LOGGED.clear(); _cfg.CFG["audit"].pop("balance_minutes", None); off()      # the baseline of every section is the switch off until it says `on()`
+    audit_ticks_svc._BALANCE_LOGGED.clear(); _cfg.CFG["audit"].pop("balance_minutes", None); off()      # the baseline of every section is the switch off until it says `on()`
 def on(): _cfg.CFG["audit"]["balance"] = True
 def off(): _cfg.CFG["audit"]["balance"] = False
 def tick(at=None, **kw):
     """One pass of the balancer at `at` (default now0), the server's clock set to it → the ids moved."""
     at = now0 if at is None else at
     CLK.t = at
-    try: return server._balance_tick(now=at, **kw)
+    try: return audit_ticks_svc._balance_tick(now=at, **kw)
     finally: CLK.t = None
 def to_main(): return [x for x in sent if x[1] == U["home-main"]]
 def to_builder(name): return [x for x in sent if x[1] == U[name]]
@@ -435,23 +436,23 @@ def probe_cap():
     wipe(); on()
     for i in range(1, 6): put(i, act=15, **ho("home-peer", 12))
     for n in ("team-back", "team-aux", "other-back", "lone-back"): panes[n] = "idle"
-    real = server._balance_builders; server._balance_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
+    real = audit_ticks_svc._balance_builders; audit_ticks_svc._balance_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
     try: got = tick()
-    finally: server._balance_builders = real
+    finally: audit_ticks_svc._balance_builders = real
     return len(got) == 3 and len({mover_of(i) for i in range(1, 6)} - {"home-peer"}) == 3
 rule("6 at most three items are moved in one pass", probe_cap, [(HI, "BALANCE_MAX_PER_TICK", 99)])
 def probe_no_front_target():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-back"] = "idle"
-    real = server._balance_builders; server._balance_builders = lambda project: ["home-main", "team-back"]
+    real = audit_ticks_svc._balance_builders; audit_ticks_svc._balance_builders = lambda project: ["home-main", "team-back"]
     try: got = tick()
-    finally: server._balance_builders = real
+    finally: audit_ticks_svc._balance_builders = real
     return got == ["a1"] and mover_of(1) == "team-back"
 rule("6 a front agent is never the target, whatever its load (home-main has none)", probe_no_front_target, [(HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": c[0])])
 def probe_front_mover():
     wipe(); on(); put(1, mover="home-main", act=15, **ho("home-main", 12)); panes["team-aux"] = "idle"
-    real = server._balance_builder_names; server._balance_builder_names = lambda: [*real(), "home-main"]      # so only the front test stands between the item and a move
+    real = audit_ticks_svc._balance_builder_names; audit_ticks_svc._balance_builder_names = lambda: [*real(), "home-main"]      # so only the front test stands between the item and a move
     try: return tick() == [] and mover_of(1) == "home-main" and sent == []
-    finally: server._balance_builder_names = real
+    finally: audit_ticks_svc._balance_builder_names = real
 rule("6 an item a front agent moves is never moved", probe_front_mover, [(telling, "front_keeper", lambda w, p="", strict=False: (False, ""))])
 def probe_dead_target():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"; dead["team-aux"] = "a retired session, its pane gone"
@@ -504,17 +505,17 @@ def old_due(*a, **k):      # the old behaviour: an item with the day's no-builde
 rule("7 the note blocks nothing: builders dead on the first pass (-main told once), idle five minutes later, the item moves at once and the move ends the note", probe_dead_then_back, [(HI, "balance_due", old_due)])
 def probe_single_builder():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12))
-    real = server._balance_builders; server._balance_builders = lambda project: ["home-peer"]
+    real = audit_ticks_svc._balance_builders; audit_ticks_svc._balance_builders = lambda project: ["home-peer"]
     try:
         with _Err() as e: got = tick()
-    finally: server._balance_builders = real
+    finally: audit_ticks_svc._balance_builders = real
     return got == [] and sent == [] and history(1) == [] and "balance" not in mt(1) and "no other builder to move it to" in e.text
 rule("7 a mover that is the only builder speaks to nobody: no History line, no message, a log line only", probe_single_builder, [(HI, "balance_others", lambda *a, **k: ["x"])])
 def probe_only_tried():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12, tried=["team-back", "team-aux"]))
-    real = server._balance_builders; server._balance_builders = lambda project: ["home-peer", "team-back", "team-aux"]
+    real = audit_ticks_svc._balance_builders; audit_ticks_svc._balance_builders = lambda project: ["home-peer", "team-back", "team-aux"]
     try: got = tick()
-    finally: server._balance_builders = real
+    finally: audit_ticks_svc._balance_builders = real
     return got == [] and sent == [] and history(1) == []
 rule("7 …nor when every other builder is one it already had (`tried`): nobody is dead, there is nobody to tell", probe_only_tried, [(HI, "balance_others", lambda *a, **k: ["x"])])
 def probe_batched():
@@ -677,29 +678,29 @@ check("11 a hand-off record with no readable time is no wait: nothing moves and 
 
 # ================================================================ 12. builders only
 def probe_builders_list():
-    return server._balance_builders("projects/alpha") == ["team-back", "team-aux"] and "team-rev" not in server._balance_builders("projects/alpha")
+    return audit_ticks_svc._balance_builders("projects/alpha") == ["team-back", "team-aux"] and "team-rev" not in audit_ticks_svc._balance_builders("projects/alpha")
 rule("12 the candidates are builders only (a mandate that says build, maintain, merge or engineer), the item's own project's; a reviewer is none", probe_builders_list, [(handoff_svc, "handoff_ranked", lambda project: [(2, i, n) for i, n in enumerate(("team-back", "team-aux", "team-rev"))])])
 def probe_reviewer_no_target():
     wipe(); on(); put(1, mover="team-back", act=15, **ho("team-back", 12)); [busy_on(n, 1, first=60 + 10 * k) for k, n in enumerate(("team-aux", "other-back", "home-peer"))]
     for n in ("team-rev", "team-aux", "team-back", "other-back", "home-peer"): panes[n] = "idle"
     return tick() == [] and mover_of(1) == "team-back" and sent == []
-rule("12 a builder's item does not go to a reviewer with no open items: with every builder as loaded as its mover it stays", probe_reviewer_no_target, [(server, "_balance_builders", lambda project: server._hand_idle_builders(project))])
+rule("12 a builder's item does not go to a reviewer with no open items: with every builder as loaded as its mover it stays", probe_reviewer_no_target, [(audit_ticks_svc, "_balance_builders", lambda project: audit_ticks_svc._hand_idle_builders(project))])
 def probe_reviewer_mover():
     wipe(); on(); put(1, mover="team-rev", act=15, **ho("team-rev", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"
     return tick() == [] and mover_of(1) == "team-rev" and sent == []
-rule("12 an item whose mover is a reviewer is never balanced", probe_reviewer_mover, [(server, "_balance_builder_names", lambda: ["team-rev", "team-back", "team-aux", "other-back", "home-peer"])])
+rule("12 an item whose mover is a reviewer is never balanced", probe_reviewer_mover, [(audit_ticks_svc, "_balance_builder_names", lambda: ["team-rev", "team-back", "team-aux", "other-back", "home-peer"])])
 def probe_stranger_mover():
     wipe(); on(); put(1, mover="home-peer2", act=15, **ho("home-peer2", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"
     return tick() == [] and mover_of(1) == "home-peer2" and sent == []
-rule("12 …nor one whose mover is no agent of any project page", probe_stranger_mover, [(server, "_balance_builder_names", lambda: ["home-peer2", "team-back", "team-aux"])])
+rule("12 …nor one whose mover is no agent of any project page", probe_stranger_mover, [(audit_ticks_svc, "_balance_builder_names", lambda: ["home-peer2", "team-back", "team-aux"])])
 def probe_roles_unreadable():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
-    real = server._balance_builder_names
+    real = audit_ticks_svc._balance_builder_names
     def boom(narrow=False): raise OSError("registry gone")
-    server._balance_builder_names = boom
+    audit_ticks_svc._balance_builder_names = boom
     try:
         with _Err() as e: got = tick()
-    finally: server._balance_builder_names = real
+    finally: audit_ticks_svc._balance_builder_names = real
     return got == [] and mover_of(1) == "home-peer" and "builders not read" in e.text
 check("12 with no view of who builds nothing is judged a builder: nothing moves, a stderr line says so", probe_roles_unreadable() is True)
 
@@ -719,11 +720,11 @@ def probe_send_fails_cap():
     wipe(); on()
     for i in range(1, 6): put(i, act=15, **ho("home-peer", 12))
     for n in ("team-back", "team-aux", "other-back", "lone-back"): panes[n] = "idle"
-    real_b = server._balance_builders; server._balance_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
+    real_b = audit_ticks_svc._balance_builders; audit_ticks_svc._balance_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
     real = telling.tell_woken; telling.tell_woken = raising_handoff_tell
     try:
         with _Err(): got = tick()
-    finally: telling.tell_woken = real; server._balance_builders = real_b
+    finally: telling.tell_woken = real; audit_ticks_svc._balance_builders = real_b
     return len(got) == 3
 rule("13 …and the cap of three per pass still holds", probe_send_fails_cap, [(HI, "mark_balanced", lambda meta, now, frm, to: meta.__setitem__("balance", {"at": now + 1, "from": frm, "to": to, "count": 1}))])
 
@@ -772,8 +773,8 @@ check("15 control: a taken hand-off in the history that was to another session, 
 
 # ================================================================ 16. who counts as a builder: the mover's test, apart from the targets
 def probe_cross():
-    return "gamma-maint" in server._balance_builder_names() and "team-rev" not in server._balance_builder_names() and "gamma-maint" not in server._balance_builders("projects/alpha")
-rule("16 a maintainer of another project is a builder (its item may be balanced) but never a target for another project's item", probe_cross, [(server, "_balance_builder_names", lambda: [])])
+    return "gamma-maint" in audit_ticks_svc._balance_builder_names() and "team-rev" not in audit_ticks_svc._balance_builder_names() and "gamma-maint" not in audit_ticks_svc._balance_builders("projects/alpha")
+rule("16 a maintainer of another project is a builder (its item may be balanced) but never a target for another project's item", probe_cross, [(audit_ticks_svc, "_balance_builder_names", lambda: [])])
 
 # ================================================================ 17. only the builders of the item's own project
 def old_builders(project):      # the reverted rule: the project's own builders, then the `build` builders of every other project
@@ -782,22 +783,22 @@ def old_builders(project):      # the reverted rule: the project's own builders,
     return out + [n for n, r in _anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
                   and re.search(r"\bbuild", str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""), re.I)]
 def probe_own_only_list():
-    return (server._balance_builders("projects/alpha") == ["team-back", "team-aux"] and server._balance_builders("projects/beta") == ["other-back"]
-            and server._balance_builders("projects/lone") == ["home-peer"] and server._balance_builders("projects/gamma") == ["gamma-maint"])
-rule("17 the candidates for an item are the builders of its own project, never another project's", probe_own_only_list, [(server, "_balance_builders", old_builders)])
+    return (audit_ticks_svc._balance_builders("projects/alpha") == ["team-back", "team-aux"] and audit_ticks_svc._balance_builders("projects/beta") == ["other-back"]
+            and audit_ticks_svc._balance_builders("projects/lone") == ["home-peer"] and audit_ticks_svc._balance_builders("projects/gamma") == ["gamma-maint"])
+rule("17 the candidates for an item are the builders of its own project, never another project's", probe_own_only_list, [(audit_ticks_svc, "_balance_builders", old_builders)])
 def probe_other_project_never():
     wipe(); on(); put(1, mover="team-back", act=15, **ho("team-back", 12)); busy_on("team-back", 1, first=60)
     for n in ("team-aux", "other-back", "home-peer", "gamma-maint"): panes[n] = "idle"
     dead["team-aux"] = "a retired session, its pane gone"      # the project's only other builder cannot take it; the empty builders of beta, lone and gamma must not
     with _Err() as e: got = tick()
     return got == [] and mover_of(1) == "team-back" and HO.record_of(rd(1))["to"] == "team-back" and not told("balance")
-rule("17 an item of one project is not handed to another project's builder, however idle (its own project's other builder has no pane: the item stays)", probe_other_project_never, [(server, "_balance_builders", old_builders)])
+rule("17 an item of one project is not handed to another project's builder, however idle (its own project's other builder has no pane: the item stays)", probe_other_project_never, [(audit_ticks_svc, "_balance_builders", old_builders)])
 def probe_no_other_builder():
     wipe(); on(); put(1, mover="home-peer", project="projects/lone", act=15, **ho("home-peer", 12))
     for n in ("team-back", "team-aux", "other-back", "gamma-maint"): panes[n] = "idle"
     with _Err() as e: got = tick()
     return got == [] and mover_of(1) == "home-peer" and sent == [] and history(1) == [] and "balance" not in mt(1) and "no other builder to move it to" in e.text
-rule("17 a project whose only builder is the item's mover leaves the item where it is, silently, whoever else is idle", probe_no_other_builder, [(server, "_balance_builders", old_builders)])
+rule("17 a project whose only builder is the item's mover leaves the item where it is, silently, whoever else is idle", probe_no_other_builder, [(audit_ticks_svc, "_balance_builders", old_builders)])
 def probe_own_project_still_moves():
     wipe(); on(); put(1, mover="team-back", act=15, **ho("team-back", 12)); busy_on("team-back", 1, first=60)
     for n in ("team-aux", "other-back"): panes[n] = "idle"
@@ -842,19 +843,19 @@ check("18 …while a session the writer names in `needs=` is still told", probe_
 # ================================================================ 19. a stay that lasts is logged once an hour, not every minute
 def probe_log_throttle():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12))
-    real = server._balance_builders; server._balance_builders = lambda project: ["home-peer"]
+    real = audit_ticks_svc._balance_builders; audit_ticks_svc._balance_builders = lambda project: ["home-peer"]
     try:
         with _Err() as e1: tick(); tick(now0 + 60); tick(now0 + 30 * MIN)
         with _Err() as e2: tick(now0 + 61 * MIN)
-    finally: server._balance_builders = real
+    finally: audit_ticks_svc._balance_builders = real
     return e1.text.count("no other builder to move it to") == 1 and e2.text.count("no other builder to move it to") == 1
-rule("19 'no other builder to move it to' is logged once per item per hour", probe_log_throttle, [(server, "BALANCE_LOG_EVERY", 0.0)])
+rule("19 'no other builder to move it to' is logged once per item per hour", probe_log_throttle, [(audit_ticks_svc, "BALANCE_LOG_EVERY", 0.0)])
 def probe_log_throttle_load():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); [busy_on(n, 1, first=60 + 10 * k) for k, n in enumerate(("team-back", "team-aux"))]
     for n in ("team-back", "team-aux"): panes[n] = "idle"
     with _Err() as e: tick(); tick(now0 + 60); tick(now0 + 5 * MIN)
     return e.text.count("no builder has few enough open items") == 1
-rule("19 'no builder has few enough open items' is logged once per item per hour too", probe_log_throttle_load, [(server, "BALANCE_LOG_EVERY", 0.0)])
+rule("19 'no builder has few enough open items' is logged once per item per hour too", probe_log_throttle_load, [(audit_ticks_svc, "BALANCE_LOG_EVERY", 0.0)])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

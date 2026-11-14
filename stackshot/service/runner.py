@@ -10,8 +10,8 @@ minutes moves before the hand-off tick would remind its mover) and the hand-off 
 catch-up, the silence tick and the archive tick. `board=True` marks a tick that reads items: it is skipped while the migration's pass holds the board.
 
 The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, the hand-off tick from service/handoff.py, the clients' tick and the inbox flag from service/fleet_events.py and the stall pass from service/stall_tick.py,
-and called directly. What stays in server.py is the other tick functions (the phase sweep, the done check, the step proof, the balancer, the answers, the registry sync, the page-debt fallback, the filing, dates, silence and
-archive passes) and the publish. The table calls each of them through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it). A hook is looked
+and called directly. What stays in server.py is the other tick functions (the phase sweep, the done check, the step proof, the answers, the registry sync, the page-debt fallback) and the publish; the balancer and the filing, dates, silence and
+archive passes are service/audit_ticks.py's. The table calls each of them through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it). A hook is looked
 up when its tick runs, so a suite that replaces the function on server.py is the one called; a suite that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here, and
 one that replaces a wake, event-wait, hand-off or stall function sets it on the module that holds it.
 
@@ -46,14 +46,14 @@ from stackshot.waits import watchers as _watch
 class Hooks:
     """What the minute set still reaches in server.py: the tick functions and the publish, in the names they have there without the leading underscore. server.py builds one and gives it to `install`."""
     phase_tick: Callable[[], Any]  # server._phase_tick
-    balance_tick: Callable[[], Any]  # server._balance_tick
+    balance_tick: Callable[[], Any]  # service.audit_ticks._balance_tick
     answer_tick: Callable[[], Any]  # server._answer_tick
     roles_sync_safe: Callable[[], Any]  # server._roles_sync_safe
     pilot_fallback_tick: Callable[[], Any]  # service/page_debt.py _pilot_fallback_tick
-    filing_tick: Callable[[], Any]  # server._filing_tick
-    dates_tick: Callable[[], Any]  # server._dates_tick
-    silence_tick: Callable[[], Any]  # server._silence_tick
-    archive_tick: Callable[[], Any]  # server._archive_tick
+    filing_tick: Callable[[], Any]  # service.audit_ticks._filing_tick
+    dates_tick: Callable[[], Any]  # service.audit_ticks._dates_tick
+    silence_tick: Callable[[], Any]  # service.audit_ticks._silence_tick
+    archive_tick: Callable[[], Any]  # service.audit_ticks._archive_tick
     publish: Callable[[], Any]  # web.publish._publish
     publish_now: Callable[..., Any]  # web.publish._publish_now
     publish_every: Callable[[], float]  # web.publish._publish_every
