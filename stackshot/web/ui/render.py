@@ -2954,9 +2954,10 @@ class Board:
         """The wait line and the chases of a waiting item: what it waits on in full (an anchor's link and event, the items it waits after and whether each is
         open, the party a relay waits on, a time's basis or his words), who watches, until when, who takes it after, and every chase logged on it."""
         e = esc; m = r["metadata"]; w = mod.wait; rows = []
-        if w.kind == "list" and mod.waits:      # a wait on a list: each line with its tick, then the one backstop day (no chases: a list is never chased)
+        if w.kind == "list" and mod.waits:      # a wait on a list: each line with its tick, then the one backstop day, and the chases while a news line is open (a list is chased for its relay lines alone)
             rows = [(_t("wait.waits_on"), self.wait_list_html(r, mod, page=True)), (_t("wait.label.backstop"), e(_t("wait.list.backstop", day=self.wait_day(w.backstop)))), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')]
             rows += [(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else []
+            rows += self.chase_rows_html(r, w, m)
             return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
         if w.kind == "anchor":
             what = self.wait_anchor_html(r, w, full=True)      # the stored anchor in full, else the ones scoped to the item
@@ -2971,16 +2972,25 @@ class Board:
         wwords = _wt.words_of(m)
         if wwords.get("quote"):
             rows.append((_t("wait.his_words"), f'{e(wwords["quote"])}' + (f' <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else "")))
+        rows += self.chase_rows_html(r, w, m)
+        return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
+    def chase_rows_html(self, r, w, m) -> list:
+        """The Chases row of a wait block, as [(label, html)] ([] for none): the chases logged on the wait, each with when and by whom, and (a relay or anchor wait, or a list with a relay line still open) how many bring the
+        question "drop it?"; "none yet" when the wait is chased and has none. One reader for a single wait and a list (watchers.chasing and chases_in_play): a list with no open relay line shows no row."""
+        e = esc
+        chased = w.kind in _wat.CHASE_KINDS or (w.kind == "list" and _wat.chasing(m))
         ch = _ip.chase_rows(m)
         if ch:
             def one(c):
                 try: at = self.when(float(c.get("at") or 0))
                 except (TypeError, ValueError): at = ""
                 return f'<li><span class="dim">{e(at)}</span> · <b>{self.mentions(e(str(c.get("by") or "")), r["gid"])}</b>: {self.mentions(e(str(c.get("note") or "")), r["gid"])}</li>'
-            more = f' <span class="dim">{_t("wait.chase_note", n=_wat.CHASES_MAX, owner=e(_model.owner_display()))}</span>' if w.kind in _wat.CHASE_KINDS else ""
-            rows.append((_t("wait.chases"), f'{len(ch)}{more}<ul class="ichases">{"".join(one(c) for c in ch)}</ul>'))
-        elif w.kind in _wat.CHASE_KINDS: rows.append((_t("wait.chases"), f'<span class="dim">{_t("wait.none_yet")}</span>'))
-        return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
+            more = f' <span class="dim">{_t("wait.chase_note", n=_wat.CHASES_MAX, owner=e(_model.owner_display()))}</span>' if chased else ""
+            return [(_t("wait.chases"), f'{len(ch)}{more}<ul class="ichases">{"".join(one(c) for c in ch)}</ul>')]
+        if chased:
+            more = f' <span class="dim">{_t("wait.chase_note", n=_wat.CHASES_MAX, owner=e(_model.owner_display()))}</span>' if w.kind == "list" else ""
+            return [(_t("wait.chases"), f'<span class="dim">{_t("wait.none_yet")}</span>{more}')]
+        return []
     def more_html(self, r, done) -> str:
         """The sidebar's closed "More details" fold: the fields the page showed before the item model and the sidebar's rows do not cover (agent at work on the item, due, confirmed and
         stale, a leftover old work list, after and observers, a wait's basis and his words). Nothing is dropped, and it is one fold to delete once the owner has seen the page."""
@@ -3773,6 +3783,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         e = esc; gid = r["gid"]; w = mod.wait
         n = sum(1 for ln in mod.waits if ln.arrived)
         head = (_t("wait.list.page_all", n=n) if mod.wait_mode == "all" else _t("wait.list.page_any")) if page else _t("wait.list.row_head", n=n, day=e(self.day_words(w.backstop)))
+        if not page and (n_ch := len(_watch.chases_in_play(r["metadata"]))): head += " " + esc(_t("home.wait.chased", n=n_ch))      # the row says how many times a list with news still open has been chased, as a single wait's row does
         out = [f'<span class="wlh"><span class="wmode">{e(_ip.list_mode_words(mod))}</span><span class="dim">{head}</span></span>']
         for ln in mod.waits:
             k = ln.kind

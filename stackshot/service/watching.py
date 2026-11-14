@@ -178,6 +178,8 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
         else:
             _watch.turn_alive(meta, post, what, now)
             mover = post
+        if kind == _wl.LIST:                            # the list is over (the question above has the count of its chases): nothing is chased any more
+            meta.pop("chases", None)
         _hooks().state_end(meta)                                # a stored state of the old wait is over with it: the item reads from its fields
         if "confirmed" not in it:                       # as the wake pass: `confirmed` stays, so the item reads stale until its mover refreshes it
             it["confirmed"] = _hooks().rmod_confirmed_at(it)
@@ -285,6 +287,8 @@ def _wl_mark_save(gid: str, it: dict[str, Any], meta: dict[str, Any], marks: lis
     floor = watch_floor(it)                      # the oldest notice an anchor line may still count, read before this save moves the item's clock
     for i, what in marks:
         if _wl.mark_arrived(meta, i, what, now):
+            if _wl.lines(meta)[i]["kind"] == "relay":      # the owner relayed news: a reply came, so the chases on the list's relay lines start over
+                meta.pop("chases", None)
             said.append(f"arrived: {_clip_line(what, _wl.LINE_MAX)} ({len(_wl.arrived_lines(meta))} of {len(_wl.lines(meta))})")      # the words are free text (a notice's, an event's): the History keeps a line's worth
     if not said:
         return False

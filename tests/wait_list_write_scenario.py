@@ -15,6 +15,7 @@ stored line (waits/wait_list.py), judges the new ones as their single waits are 
   6  fix round    the loop test follows a list's item lines (list and list, list and single, through a third item; a line outside a loop is accepted); a single wait written over a stored list replaces it; a repeat is judged
                   after an event is canonical, and a stored list sent again is no repeat of itself; a text nested too deep; the text of an empty list is a clear and a list of dates is judged as a date wait; until alone
                   earlier than a stored time line; values of a line (text, 300 characters, its kind's fields); waits=[] with no list says so; blank, CLEAR and None, clear_wait beside a clear, a time line with a space
+  7  chases        the chases logged on a list (read, never written by a call): a write that leaves the wait alone keeps them, one that moves its lines, its mode or its backstop day, or clears it, drops them
 
     tests/run-suite wait_list_write        -> exit 0 / 1"""
 import datetime as dt, json, logging, os, pathlib, re, sys, time
@@ -784,6 +785,28 @@ for n_ in ("create", "update"):
     d_ = tools_[n_].parameters["properties"]["waits"]["description"]
     check(f"7f {n_}: the waits text names every parameter a list does not go with (clear_* for the clears), the stored backstop, and says until is not the only way to give it",
           all(x in d_ or (x.startswith("clear_") and "clear_*" in d_) for x in WLW.SINGLE if x != "until") and "wait_basis" in d_ and "Needs until, the backstop day (an update may omit it)" in d_ and "or the stored one" not in d_, d_)
+
+# ================================================================ 7. chases on a list: a write that moves the wait starts them over, one that does not leaves them
+CHL = [{"at": now0 - 2 * DAY, "by": BACK, "note": "asked once"}, {"at": now0 - DAY, "by": BACK, "note": "asked twice"}]
+def with_chases(i):
+    d = rd(i); d["metadata"]["chases"] = CHL; (T / f"store/a/{i}.json").write_text(json.dumps(d))
+item(500, needs=[BACK]); bupd(500, waits=[Re("the lease"), It("a900")], until=w(6)); with_chases(500)
+bupd(500, next=f"{BACK}: keep waiting for the lease")
+check("7 a write that does not touch the wait (a next line) leaves the chases on a list", mt(500).get("chases") == CHL, mt(500))
+bupd(500, waits=[Re("the lease"), It("a900")], until=w(6))
+check("7 …sending the same list again changes nothing, so the chases stay", mt(500).get("chases") == CHL and len(mt(500)["waits"]) == 2, mt(500))
+bupd(500, until=w(5))
+check("7 …a backstop day moved earlier is a new round: the chases start over (as a moved ask-by day starts a relay wait's)", "chases" not in mt(500) and mt(500)["until"] == w(5) and listed(mt(500)), mt(500))
+item(501, needs=[BACK]); bupd(501, waits=[Re("the lease"), It("a900")], until=w(6)); with_chases(501)
+bupd(501, waits=[Re("the lease"), It("a900"), Tm(w(3))])
+check("7 a line added is a new round too: the chases start over, the news line stays", "chases" not in mt(501) and [ln["kind"] for ln in mt(501)["waits"]] == ["relay", "item", "time"], mt(501))
+item(502, needs=[BACK]); bupd(502, waits=[Re("the lease"), It("a900")], until=w(6)); with_chases(502)
+bupd(502, waits=[Re("the lease"), It("a901")])
+check("7 …and so is a line changed", "chases" not in mt(502) and mt(502)["waits"][1]["after"] == "a901", mt(502))
+item(503, needs=[BACK]); bupd(503, waits=[Re("the lease"), It("a900")], until=w(6)); with_chases(503)
+check("7 a list reads as chased out while it holds a news line and two chases", WK.chased_out(mt(503)) and WK.chasing(mt(503)), mt(503))
+bupd(503, clear_wait=True)
+check("7 …and a cleared wait drops them with the rest of it", "chases" not in mt(503) and not mt(503).get("waits"), mt(503))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": wait list write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

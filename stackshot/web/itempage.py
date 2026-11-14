@@ -281,5 +281,5 @@ def is_comment(kind: str, line: str) -> bool:
 
 
 def chase_rows(meta: dict[str, Any]) -> list[dict[str, Any]]:
-    """The chases logged on a waiting item (watchers.chases_of), oldest first: [{at, by, note}]."""
-    return _wat.chases_of(meta)
+    """The chases that count on a waiting item (watchers.chases_in_play), oldest first: [{at, by, note}]; a list's only while a news line is open."""
+    return _wat.chases_in_play(meta)

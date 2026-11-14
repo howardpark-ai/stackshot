@@ -11,6 +11,8 @@ day at the latest. This part of the feature is storage, the model and the ending
     path); mixed kinds; two lines on one item or anchor; `all` ends on the last arrival and `any` on the first; a repeated delivery changes nothing; an item already turned is not turned again
   * the backstop day, with and without an open relay line (the owner is asked then, and "not yet" puts the list back with what had arrived)
   * the end drops the wait's fields (waits and wait_mode with the rest), and the mover is told what arrived and what did not
+  * chases on a list: only the news (relay) lines are chased, while one is open (the pure readings `chasing`, `chases_in_play` and `chased_out`, the "drop it?" question at the backstop day and its three answers, the
+    end of the group, a relay line that arrives, a write that changes the list, the legacy path with the watchers off, `get`'s chases line)
   * with the watchers off, a legacy path marks no line of a list (the `after` release and the held-anchor release never take one) but the legacy wake pass still ends a list at its backstop day, by the
     watchers' own path and in their words; a single wait is not touched (the existing suites are the proof)
 
@@ -213,7 +215,7 @@ check("watchers: due → the backstop day when it has come; nothing before; a gr
 check("watchers: next_moment → the earliest of the backstop and the open time lines; a turn that failed is looked at again after the back-off",
       wk.next_moment(LI()["metadata"]) == wk.day_epoch(day(3)) and wk.next_moment({**LI()["metadata"], "until": day(2)}) == wk.day_epoch(day(2))
       and wk.next_moment({**LI()["metadata"], "until": day(-2), "watch": {"failed_at": now0}}) == now0 + wk.BACKOFF, wk.next_moment(LI()["metadata"]))
-check("watchers: a list has no chases (a list is not a chased wait)", not wk.chased_out({**LI()["metadata"], "chases": [{"at": 1}, {"at": 2}, {"at": 3}]}) and "list" not in wk.CHASE_KINDS, None)
+check("watchers: a list with no relay line is not chased (only news the owner relays is), whatever is logged on it, and the single wait kinds a chase goes with are still the two", not wk.chased_out({**LI()["metadata"], "chases": [{"at": 1}, {"at": 2}, {"at": 3}]}) and "list" not in wk.CHASE_KINDS and wk.CHASE_KINDS == ("relay", "anchor"), None)
 check("watchers: what a clear of the wait drops names waits and wait_mode (the one list: WAIT_GROUP; the end of a wait, a close, a date alone, what a put-back keeps)",
       all(f in model.WAIT_GROUP and f in model.MODEL_FIELDS and f in model.DROP_ON_CLOSE and f in wk.LIVE_DROP and f in wk.DATE_DROP and f in wk.WAS_FIELDS for f in ("waits", "wait_mode")), None)
 check("seams: the lists of wait fields name waits and wait_mode (the re-park fields, the wait's structure, the write guards' state fields, the wake hint's fields), and the migration's set fields do NOT (nothing migrates a list)",
@@ -727,5 +729,95 @@ check("hostile: a megabyte of whitespace-only text in a field is no text (the li
 check("single: the model's fields, kinds and words for the five single kinds are what they were (an item with one wait stores no list, reads no lines, and the five-kind write check is the same)",
       model.WAIT_KINDS[:5] == ("time", "anchor", "item", "relay", "event") and model.KIND_WORDS["event"] == "a fleet event" and model.derive({**rd(103), "metadata": {**mt(103)}}).waits == (), None)
 check("single: the stored `until` of a single wait that the list reader sees is no list (wait_kind not list)", not WL.valid({"wait_kind": "time", "until": day(3), "waits": [Tm(day(3)), It("a1")], "wait_mode": "all"}) and WL.lines({"waits": [Tm(day(3)), It("a1")]}) == (), None)
+
+
+# ================================================================ chases: a list is chased for its news (relay) lines alone
+reset()
+CH2 = [{"at": now0 - 2 * DAY, "by": BACK, "note": "asked for the ticket"}, {"at": now0 - DAY, "by": BACK, "note": "asked again"}]
+ARR = lambda line, what="relayed": {**line, "arrived": {"at": now0 - 100, "what": what}}
+LC = lambda waits, chases=CH2, **m: {"wait_kind": "list", "wait_mode": "all", "until": day(5), "waits": waits, "chases": chases, **m}
+SINGLE = lambda kind, **m: {"wait_kind": kind, "until": day(5), "chases": CH2, **m}
+check("chases (pure): a list is chased while a relay line has not arrived (whatever else it holds); not with no relay line, and not once its relay lines have all arrived",
+      wk.chasing(LC([Tm(day(3)), Re()])) and wk.chasing(LC([Re("a"), Re("b")])) and wk.chasing(LC([ARR(Re("a")), Re("b")])) and wk.chasing(LC([An(AURL), Re()]))
+      and not wk.chasing(LC([Tm(day(3)), It("a1")])) and not wk.chasing(LC([An(AURL), Ev("recycle")])) and not wk.chasing(LC([ARR(Re()), It("a1")])) and not wk.chasing(LC([ARR(Re("a")), ARR(Re("b"))])), None)
+check("chases (pure): …a single wait is chased as it was: a relay and an anchor wait are, a time, item or event wait is not",
+      wk.chasing(SINGLE("relay")) and wk.chasing(SINGLE("anchor")) and not wk.chasing(SINGLE("time")) and not wk.chasing(SINGLE("item", after=["a1"])) and not wk.chasing(SINGLE("event", wait_event="recycle")) and not wk.chasing({}), None)
+check("chases (pure): …a list that does not hold (one line) is no list: it is read as the single wait it would be, and a relay line in it is not chased", not wk.chasing(LC([Re()])) and not wk.chasing({**LC([Re(), Tm(day(3))]), "until": ""}), None)
+check("chases (pure): chased_out needs a chased wait and two chases: a list with an open news line and two is; one is not; two with no open news line is not",
+      wk.chased_out(LC([Tm(day(3)), Re()])) and wk.chased_out(LC([Re("a"), Re("b")], CH2 + CH2)) and not wk.chased_out(LC([Tm(day(3)), Re()], CH2[:1])) and not wk.chased_out(LC([Tm(day(3)), Re()], []))
+      and not wk.chased_out(LC([Tm(day(3)), It("a1")])) and not wk.chased_out(LC([ARR(Re()), Tm(day(3))])) and wk.CHASES_MAX == 2, None)
+check("chases (pure): …and a single relay or anchor wait is chased out by the same two (differential: nothing about it moved)", wk.chased_out(SINGLE("relay")) and wk.chased_out(SINGLE("anchor")) and not wk.chased_out({**SINGLE("relay"), "chases": CH2[:1]})
+      and not wk.chased_out(SINGLE("time")) and not wk.chased_out(SINGLE("item", after=["a1"])) and not wk.chased_out(SINGLE("event", wait_event="recycle")), None)
+check("chases (pure): chases_in_play is every chase logged on a single wait, those of a list only while it is chased", wk.chases_in_play(LC([Tm(day(3)), Re()])) == CH2 and wk.chases_in_play(LC([Tm(day(3)), It("a1")])) == [] and wk.chases_in_play(LC([ARR(Re()), Tm(day(3))])) == []
+      and wk.chases_in_play(SINGLE("relay")) == CH2 and wk.chases_in_play(SINGLE("time")) == CH2 and wk.chases_in_play({"chases": "x"}) == [], None)
+check("chases (pure): get's chases line follows it: shown for a chased list (the count, the last one's author and note), nothing for a list that is not, the single wait's as it was",
+      wk.chases_line(LC([Tm(day(3)), Re()]), lambda x: x) == "chases: 2 (last by team-back: asked again)" and wk.chases_line(LC([Tm(day(3)), It("a1")])) == "" and wk.chases_line(LC([ARR(Re()), Tm(day(3))])) == ""
+      and wk.chases_line(SINGLE("relay"), lambda x: x) == "chases: 2 (last by team-back: asked again)", wk.chases_line(LC([Tm(day(3)), Re()])))
+check("chases (pure): the question names what did not arrive: one news line, or every one still open joined with \"; \" (an arrived line is not named), clipped; a single relay wait's is its own subject, as before",
+      wk.drop_ask(LC([Tm(day(3)), Re("SK's ticket")])) == "Decide: drop it? SK's ticket did not arrive after 2 chases · Options: drop / keep waiting until <date>"
+      and wk.drop_ask(LC([Re("SK's ticket"), ARR(Re("the order")), Re("the lease")])) == "Decide: drop it? SK's ticket; the lease did not arrive after 2 chases · Options: drop / keep waiting until <date>"
+      and wk.drop_ask(LC([Re("x" * 200), Re("y")])).startswith("Decide: drop it? " + "x" * 80 + "… did not arrive")
+      and wk.drop_ask({**SINGLE("relay"), "wait_event": "the lease", "party": "the landlord"}) == "Decide: drop it? the landlord's the lease did not arrive after 2 chases · Options: drop / keep waiting until <date>", wk.drop_ask(LC([Re("SK's ticket"), ARR(Re("the order")), Re("the lease")])))
+check("chases (pure): the relay question a list asks is the one it always asked (the first open news line); the list's open news lines are what the pure reader gives", wk.relay_ask(LC([Tm(day(3)), Re("a"), Re("b")])) == "Decide: has a arrived? · Options: arrived / not yet, ask again on <date> / drop"
+      and WL.relay_events(LC([Re("a"), ARR(Re("b")), Re("c")])) == ["a", "c"] and WL.relay_events(LC([Tm(day(3)), It("a1")])) == [] and WL.relay_event(LC([Re("a"), Re("b")])) == "a", None)
+
+# the backstop day of a chased list: the owner is asked "drop it?" in place of "has it arrived?"
+reset()
+lst(300, [Re("SK's final ticket"), Re("the signing order"), Tm(day(6))], mode="all", until=day(-1), then="home-other", chases=CH2); woke = wakes_svc.wake_pass(); m = mt(300)
+check("chases (backstop): a list chased twice with a news line open asks the owner \"drop it?\" at its backstop day, naming every news line still open, with the two buttons; the post-wake mover is `then`", "a300" in woke and m.get("needs") == ["decision"]
+      and m.get("ask") == "Decide: drop it? SK's final ticket; the signing order did not arrive after 2 chases · Options: drop / keep waiting until <date>" and [o["label"] for o in m["options"]] == ["drop", "keep waiting until <date>"]
+      and m.get("then") == BACK and "mover" not in m and m["watch"]["asked"] == "dropit", m)
+check("chases (backstop): …the list's end is on the item (arrived and open lines), nobody is messaged, the wait's fields are gone but kept as the record, and the chases (their count is in the question) are not left on it", m["woke"]["to"] == OWN
+      and m["woke"]["what"].startswith(f"backstop day {day(-1)}: nothing had arrived; still open: news of SK's final ticket; ") and not any(g == "a300" for g, *_ in sent("watch")) and all(k not in m for k in GONE) and "chases" not in m and len(m["watch"]["was"]["waits"]) == 3
+      and m["watch"]["was"]["wait_kind"] == "list" and mod_of(300).owner_moves, m)
+out = server._answer("a300", "keep waiting until <date>", f"keep waiting until {day(10)}", "answer"); m = mt(300)
+check("chases (keep waiting): puts the list back as \"not yet\" does (lines, mode, post-wake mover, the backstop moved to the day he gave, nothing of the question left); the chases start over", out == "decision" and m.get("wait_kind") == "list" and m.get("wait_mode") == "all" and m.get("until") == day(10)
+      and WL.valid(m) and m.get("post_wake_mover") == BACK and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and "chases" not in m and mod_of(300).wait.kind == "list" and wk.next_moment(m) == wk.day_epoch(day(6)), (out, m))      # (the next moment is the open date line, before the moved backstop day)
+lst(301, [Re("the quote"), Re("the order")], mode="all", until=day(-1), chases=CH2); wakes_svc.wake_pass()
+server._answer("a301", "drop", "", "answer"); m = mt(301)
+check("chases (drop): closes the item as not planned and the list goes with the rest of the wait", rd(301)["status"] == "completed" and m.get("outcome") == "dropped" and all(k not in m for k in GONE) and "ask" not in m and "chases" not in m, m)
+lst(302, [Re("the quote"), Re("the order")], mode="all", until=day(-1), chases=CH2); wakes_svc.wake_pass()
+d = server._answer("a302", "", "I am not sure yet, ask Dana", "answer"); m = mt(302)
+check("chases (his words): an answer in the box with no button on the \"drop it?\" question is never a drop: the post-wake mover has the item with his words", m.get("mover") == BACK and "ask" not in m and rd(302)["status"] == "open" and "chases" not in m and "I am not sure yet" in m["woke"]["what"], m)
+
+# one chase is not enough; no open news line is no question
+reset()
+lst(303, [Re("the lease"), Tm(day(6))], mode="all", until=day(-1), chases=CH2[:1]); wakes_svc.wake_pass(); m = mt(303)
+check("chases (backstop): one chase on a list with a news line open is the plain question (has it arrived?), as a single relay wait's one chase is; the log does not stay on the item", m.get("ask") == "Decide: has the lease arrived? · Options: arrived / not yet, ask again on <date> / drop"
+      and m["watch"]["asked"] == "relay" and [o["label"] for o in m["options"]] == ["arrived", "not yet, ask again on <date>", "drop"] and "chases" not in m, m)
+lst(304, [ARR(Re("the lease")), Tm(day(6)), It("a305")], mode="all", until=day(-1), chases=CH2); item(305, subject="[home] open"); wakes_svc.wake_pass(); m = mt(304)
+check("chases (backstop): a list whose news line has arrived is not chased: the backstop day gives the item to its post-wake mover with no question, and no chases stay on it", m.get("mover") == BACK and "ask" not in m and "decision" not in (m.get("needs") or []) and "chases" not in m and all(k not in m for k in GONE), m)
+lst(306, [Tm(day(6)), It("a305"), An(AURL, "PR merged"), Ev("recycle")], mode="any", until=day(-1), chases=CH2); wakes_svc.wake_pass(); m = mt(306)
+check("chases (backstop): a list of a date, an item, an anchor and an event is never chased, whatever is logged on it: the backstop day gives it to its post-wake mover", m.get("mover") == BACK and "ask" not in m and "chases" not in m and all(k not in m for k in GONE), m)
+# the group over by its mode: no question, the chases go
+reset()
+lst(307, [Re("the lease"), Tm(day(-1))], mode="any", until=day(9), chases=CH2); woke = wakes_svc.wake_pass(); m = mt(307)
+check("chases (any met): a list whose group is over by what has arrived (any: the date came) turns to its post-wake mover with no question although a news line is open and chased twice; its chases go", "a307" in woke and m.get("mover") == BACK and "ask" not in m
+      and "decision" not in (m.get("needs") or []) and m["woke"]["what"].startswith("any of 2 arrived:") and "chases" not in m and all(k not in m for k in GONE), m)
+lst(308, [Re("the lease"), It("a309")], mode="all", until=day(9), chases=CH2); item(309, subject="[home] blocker of a chased list")
+out_ = {}; watching_svc.watch_mark("a308", "relay", time.time(), out_, lambda m_: WL.lines_by_kind(m_, "relay"), "the owner relayed the lease"); m = mt(308)
+check("chases (relay arrives): a news line arriving starts the chases over (a reply came): the list waits on for its other line, ticked, and nothing is chased any more", arrived_of(308) == [True, False] and m.get("wait_kind") == "list" and "chases" not in m and not wk.chasing(m), m)
+close(309); m = mt(308)
+check("chases (all met): …and the group ending on its last line leaves no chases on the item", m.get("mover") == BACK and m["woke"]["what"].startswith("all 2 arrived:") and "chases" not in m, m)
+# an arrival of another kind, or a relay line while another news line stays open
+lst(310, [Re("a"), Re("b"), It("a311")], mode="all", until=day(9), chases=CH2); item(311, subject="[home] blocker")
+watching_svc.watch_mark("a310", "item", time.time(), {}, lambda m_: WL.lines_by_kind(m_, "item"), "a311 closed"); m = mt(310)
+check("chases (other arrival): an item line arriving is no reply from the owner: the chases stay, and the list is still chased for its open news lines", arrived_of(310) == [False, False, True] and m.get("chases") == CH2 and wk.chased_out(m), m)
+watching_svc.watch_mark("a310", "relay", time.time(), {}, lambda m_: WL.lines_by_kind(m_, "relay")[:1], "he relayed a"); m = mt(310)
+check("chases (relay arrives): …a news line arriving while another stays open starts them over (one log for the list: a reply came); the second line is still chased, from none", arrived_of(310) == [True, False, True] and "chases" not in m and wk.chasing(m) and not wk.chased_out(m), m)
+lst(312, [Re("a"), Re("b"), Tm(day(7))], mode="all", until=day(9), chases=CH2)
+watching_svc.watch_mark("a312", "time", time.time(), {}, lambda m_: [2], "its date came"); m = mt(312)
+check("chases (date line arrives): a date line arriving leaves the chases as they were", arrived_of(312) == [False, False, True] and m.get("chases") == CH2, m)
+# the legacy path with the watchers off asks the same question in the same words
+reset(); cfg(watchers=False)
+lst(313, [Re("the lease"), Tm(day(6))], mode="all", until=day(-1), chases=CH2); wakes_svc.wake_pass(); m = mt(313)
+check("chases (watchers off): the legacy wake pass ends a chased list at its backstop day with the same \"drop it?\" question, the same buttons and no chases left", m.get("ask") == "Decide: drop it? the lease did not arrive after 2 chases · Options: drop / keep waiting until <date>"
+      and m["watch"]["asked"] == "dropit" and [o["label"] for o in m["options"]] == ["drop", "keep waiting until <date>"] and "chases" not in m and not sent("watch"), m)
+cfg(watchers=True)
+# a single wait is chased as it was
+reset()
+item(314, subject="[home] a single relay wait chased twice", wait_kind="relay", hold=True, until=day(-1), wait_event="the lease", party="the landlord", needs=[], post_wake_mover=BACK, chases=CH2, watch={"set_at": now0 - 3600})
+wakes_svc.wake_pass(); m = mt(314)
+check("chases (single): a relay wait chased twice asks \"drop it?\" on its ask-by day as before, and keeps its chases on the item", m.get("ask") == "Decide: drop it? the landlord's the lease did not arrive after 2 chases · Options: drop / keep waiting until <date>" and m["watch"]["asked"] == "dropit" and m.get("chases") == CH2, m)
 
 print(("ok" if not fails else "FAILED") + f": wait list scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

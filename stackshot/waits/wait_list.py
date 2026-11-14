@@ -274,10 +274,15 @@ def lines_for_time(meta: dict[str, Any], now: float) -> list[int]:
     return out
 
 
+def relay_events(meta: dict[str, Any]) -> list[str]:
+    """What the owner relays on each relay (news) line that has not arrived, in the stored order ([] when none is open): the lines a chase is about."""
+    ls = lines(meta)
+    return [ls[i]["event"] for i in lines_by_kind(meta, "relay")]
+
+
 def relay_event(meta: dict[str, Any]) -> str:
     """What the owner relays on the first open relay line ("" when none is open): the subject of the question he is asked at the backstop day."""
-    ls = lines(meta)
-    return next((ls[i]["event"] for i in lines_by_kind(meta, "relay")), "")
+    return next(iter(relay_events(meta)), "")
 
 
 # ---------------------------------------------------------------------------------------------------------------- the scheduler

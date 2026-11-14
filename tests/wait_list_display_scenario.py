@@ -4,8 +4,9 @@ The list itself (waits/wait_list.py) and its ending are tests/wait_list_scenario
 
   * the Waiting row of a list item: one line per wait with its kind and what it waits on, a box ticked (with the time) once the line has arrived, "all of N" / "any of N", how many have arrived, and the one backstop
     day ("back anyway <day>"), the end slot on the right (until <day>), the who line (who picks it up, and who watches: one watcher per kind of line, an arrived line needs none)
-  * the item page's wait block: the same lines with a second line each (what watches it, or in what words and when it arrived, an item line open or closed), the mode in words, the Backstop row, no Watched by row
-    and no Chases row (a list is never chased), the Picks it up row
+  * the item page's wait block: the same lines with a second line each (what watches it, or in what words and when it arrived, an item line open or closed), the mode in words, the Backstop row, no Watched by row,
+    the Picks it up row, and a Chases row while a news (relay) line is open: "none yet" and how many chases bring "drop it?", or the count with each chase logged; no Chases row, and no "chased" on the Waiting row, for a
+    list with no news line or whose news lines have all arrived (a list is chased for its news lines alone)
   * every kind of line: time, anchor, item, relay, event; free text (an event, an anchor, the words of an arrival) is escaped in the row and on the page
   * a single wait reads exactly as it did (a row with no list class, the old words, its Watched by and Chases rows), and a stored list that does not hold reads as the date alone
   * every user-visible string comes from the string table: a locale that marks every key marks every word of a list row and of the page block
@@ -80,6 +81,13 @@ lst(346, [arr(Re("the lease"), GOT, "the lease arrived"), It("a301")], mode="all
 LONG_ID = "a" + "9" * 1_000_000
 lst(347, [Re("one"), It(LONG_ID)], mode="all", subject="[home] a line that names an item with a very long id")
 lst(348, [arr(Re("the lease"), GOT, ""), arr(An(AURL, "PR merged"), GOT + 60, ""), It("a301")], mode="all", subject="[home] arrivals with no words recorded")
+CH = [{"at": GOT - 86400, "by": "team-back", "note": "asked for the ticket"}, {"at": GOT, "by": "team-back", "note": "asked again <b>x</b>"}]      # two chases logged by an older write (no call logs one now)
+lst(350, [Re("SK's final ticket"), Re("the signing order")], mode="all", until=day(4), chases=CH, subject="[home] two news lines, chased twice")
+lst(351, [arr(Re("the lease"), GOT, "he relayed it"), It("a301")], mode="all", until=day(4), chases=CH, subject="[home] the news line has arrived, chases still stored")
+lst(352, [An(AURL, "PR merged"), It("a301")], mode="any", until=day(4), chases=CH, subject="[home] no news line, chases stored")
+lst(353, [Re("the lease"), Tm(day(2))], mode="any", until=day(4), chases=CH[:1], subject="[home] one news line, chased once")
+lst(354, [arr(Re("SK's final ticket"), GOT, "relayed"), Re("the signing order")], mode="all", until=day(4), chases=CH, subject="[home] one news line arrived, one open, chased twice")
+item(355, subject="[home] a single time wait with chases stored", wait_kind="time", hold=True, wake=day(5), needs=[], post_wake_mover=BACK, chases=CH)
 fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)
@@ -108,7 +116,7 @@ check("row (all, nothing arrived): the head says the mode, that nothing has arri
 check("row: …the lines come in the stored order", p310.index("SK's final ticket") < p310.index("the signing order"), p310)
 check("row: …the end slot on the right is the backstop day, as an item or anchor wait's is", end_slot("a310") == f"until {W(day(4))}", end_slot("a310"))
 check("row: …the who line: who picks it up and who watches (relay lines: the scheduler)", who_line("a310") == "team-back picks it up · watched by the scheduler", who_line("a310"))
-check("row: …no `ask by`, no chases (a list has only its backstop day and is never chased)", "ask by" not in p310 and "chased" not in p310, p310)
+check("row: …no `ask by` (a list has only its backstop day), and nothing about chases until it has been chased", "ask by" not in p310 and "chased" not in p310, p310)
 # any of 2, a date with a time, anchors
 c311 = wait_cell("a311"); p311 = plain(c311)
 check("row (any): \"any of 2\", the backstop day with its time, two anchor lines each with the anchor as a link", plain(re.search(r'class="wmode">(.*?)</span>', c311).group(1)) == "any of 2" and f"0 arrived · back anyway {W(day(2) + 'T10:00')}" in p311
@@ -128,9 +136,9 @@ check("row: a list with an anchor that is no address still has its watcher (the 
 pg310, pg311, pg312 = page_wait("a310"), page_wait("a311"), page_wait("a312")
 p_310 = plain(pg310)
 check("page (all, nothing arrived): Waits on holds the list: the mode, how many arrived and how it ends, one line per wait with its kind", "all of 2" in p_310 and "0 arrived · it comes back when the last one does" in p_310 and box_on(pg310) == [False, False] and p_310.count("news only") == 2, p_310)
-check("page: …Backstop is its own row (the day, and that it is back at the latest whatever has arrived); Picks it up follows; there is no Watched by row and no Chases row", re.findall(r"<dt>(.*?)</dt>", pg310) == ["Waits on", "Backstop", "Picks it up"]
+check("page: …Backstop is its own row (the day, and that it is back at the latest whatever has arrived); Picks it up follows, then Chases (two news lines are open); there is no Watched by row", re.findall(r"<dt>(.*?)</dt>", pg310) == ["Waits on", "Backstop", "Picks it up", "Chases"]
       and f"{b.wait_day(day(4))} · back at the latest, whatever has arrived" in p_310, re.findall(r"<dt>(.*?)</dt>", pg310))
-check("page: …each open line says what watches it: news only <owner> relays, watched by the scheduler", p_310.count("news only") == 2 and p_310.count("watched by the scheduler") == 2 and "Chases" not in p_310 and "Watched by" not in p_310, p_310)
+check("page: …each open line says what watches it: news only <owner> relays, watched by the scheduler", p_310.count("news only") == 2 and p_310.count("watched by the scheduler") == 2 and "Watched by" not in p_310, p_310)
 p_311 = plain(pg311)
 check("page (any): \"any of 2\" and \"the first to arrive brings it back\"; each anchor line shows its anchor in full as a link, watched by the anchor module", "any of 2" in p_311 and "the first to arrive brings it back" in p_311 and "arrived ·" not in p_311
       and pg311.count('<a href="https://github.com/o/r/pull/') == 2 and p_311.count("watched by the anchor module") == 2 and "https://github.com/o/r/pull/5" in p_311 and "https://github.com/o/r/pull/6" in p_311, (pg311.count('<a href="https://github.com/o/r/pull/'), p_311.count("watched by the anchor module"), p_311))
@@ -163,6 +171,30 @@ check("single: …the item page keeps its Watched by row, its Until or Ask by ro
       and re.findall(r"<dt>(.*?)</dt>", page_wait("a321")) == ["Waits on", "Watched by", "Ask by", "Picks it up", "Chases"] and "Watched by" in page_wait("a322") and "Chases" in page_wait("a323"), re.findall(r"<dt>(.*?)</dt>", page_wait("a321")))
 c330 = wait_cell("a330")
 check("malformed: a stored list that does not hold (one line) is read as the date alone, everywhere: no list class on the row or the page", 'class="wl"' not in c330 and 'class="wl"' not in page_wait("a330") and "list" not in plain(c330).lower(), plain(c330))
+
+# ================================================================ chases: a list is chased for its news lines alone
+from stackshot.waits import watchers as _wk
+OWN = model.owner_display()
+NOTE = f'· after {_wk.CHASES_MAX} with no reply it comes to {OWN} as "drop it?"'
+def chase_cell(g): h = page_wait(g); i = h.find("<dt>Chases</dt><dd>"); return plain(h[i + len("<dt>Chases</dt><dd>"):h.find("</dd>", i)]) if i >= 0 else None
+def dts(g): return re.findall(r"<dt>(.*?)</dt>", page_wait(g))
+check("chases (page): a list with news lines open and none chased yet has a Chases row, last: \"none yet\" and how many chases bring \"drop it?\" (the count is the single wait's, watchers.CHASES_MAX)",
+      chase_cell("a310") == "none yet " + NOTE and dts("a310")[-1] == "Chases" and _wk.CHASES_MAX == 2, (chase_cell("a310"), NOTE))
+check("chases (page): …a list with one news line among other kinds (six lines, the news open) has it too", chase_cell("a312") == "none yet " + NOTE and dts("a312") == ["Waits on", "Backstop", "Picks it up", "Chases"], (chase_cell("a312"), dts("a312")))
+check("chases (page): …a list of anchors or of dates and items has no Chases row (only news the owner relays is chased)", all("Chases" not in dts(g) for g in ("a311", "a315", "a352")), (dts("a311"), dts("a315"), dts("a352")))
+check("chases (page): …nor a list whose news lines have all arrived, whatever is still logged on it (an arrived line stops the chase)", "Chases" not in dts("a351") and "Chases" not in dts("a346") and "Chases" not in plain(page_wait("a351")), (dts("a351"), dts("a346")))
+c350 = chase_cell("a350"); pg350 = page_wait("a350")
+check("chases (page): a chased list shows the count, the same note, and each chase logged (when, by whom, what), escaped like any free text", c350.startswith(f"2 {NOTE}") and "asked for the ticket" in c350 and "asked again <b>x</b>" in c350 and "&lt;b&gt;x&lt;/b&gt;" in pg350 and "<b>x</b>" not in pg350, c350)
+check("chases (page): …each chase carries its time and its author (the board's own when and name)", pg350.count('<ul class="ichases">') == 1 and pg350.count("<li>") >= 2 and W_(CH[0]["at"]) in c350 and W_(CH[1]["at"]) in c350 and c350.count("team-back") == 2, c350)
+check("chases (page): …with one news line arrived and one open, the chases still count (one log for the list, read while a news line is open)", chase_cell("a354").startswith(f"2 {NOTE}") and dts("a354")[-1] == "Chases", chase_cell("a354"))
+check("chases (page): …chased once, the count is 1 and the note the same", chase_cell("a353").startswith(f"1 {NOTE}"), chase_cell("a353"))
+check("chases (row): a list chased twice says so after its head (as a single relay wait's row does); a list not chased yet says nothing", "· chased 2×" in plain(wait_cell("a350")) and "· chased 1×" in plain(wait_cell("a353")) and f"back anyway {W(day(4))} · chased 2×" in plain(wait_cell("a350")) and "chased" not in plain(wait_cell("a310")), plain(wait_cell("a350")))
+check("chases (row): …no \"chased\" for a list with no open news line, whatever is logged on it", all("chased" not in plain(wait_cell(g)) for g in ("a351", "a352")) and "chased 2×" in plain(wait_cell("a354")), [plain(wait_cell(g)) for g in ("a351", "a352", "a354")])
+check("chases (row): …the row keeps its lines, ticks and who line beside the count", box_on(wait_cell("a354")) == [True, False] and who_line("a354") == "team-back picks it up · watched by the scheduler" and end_slot("a354") == f"until {W(day(4))}", (box_on(wait_cell("a354")), who_line("a354")))
+check("chases (get): `chases: n` shows for a list while a news line is open and not once they have arrived or when the list has none", any(l.startswith("chases: 2 (last by team-back: asked again") for l in server._model_lines({**json.loads((T / "store/a/350.json").read_text()), "gid": "a350"}))
+      and not any(l.startswith("chases:") for g_ in ("351", "352", "310") for l in server._model_lines({**json.loads((T / f"store/a/{g_}.json").read_text()), "gid": f"a{g_}"})), None)
+check("chases (single): a single wait reads as it did: a relay's Chases row is \"none yet\" alone (no note), an anchor's too; chases logged on a time wait are shown as they were (the count, no note)",
+      chase_cell("a321") == "none yet" and chase_cell("a323") == "none yet" and chase_cell("a355").startswith("2 ") and NOTE not in chase_cell("a355") and "chased 2×" in plain(wait_cell("a355")), (chase_cell("a321"), chase_cell("a323"), chase_cell("a355")))
 
 # ================================================================ the string table
 LOC = T / "locales"

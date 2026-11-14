@@ -16,11 +16,13 @@ reading of the owner's answer to those asks, the date he gives. The server (serv
           happened; the backstop passes first → alive, the post-wake mover, "the event did not come". The stall pass does not run for it (a waiting item has no mover to nag)
   relay   the ask-by day comes → alive with the owner as mover, a ready question: has <party>'s <event> arrived? arrived / not yet, ask again on <date> / drop
   list    several waits of any of the kinds above at once (waits/wait_list.py): each line is marked when it arrives, and the item comes back when every line has (`all`) or the first has (`any`) → alive,
-          the post-wake mover, with what arrived and what did not; the backstop day passing first → the same (an open relay line then asks the owner, as a relay's ask-by day does). No chases on a list
+          the post-wake mover, with what arrived and what did not; the backstop day passing first → the same (an open relay line then asks the owner, as a relay's ask-by day does). A list is chased
+          for its relay (news) lines alone, while one is still open (`chasing`)
 
-  Chases (a relay or anchor wait): a follow-up an older item logged is only read (no call logs one now). With two on the item, the wait's next end (the ask-by day or the
+  Chases (a relay or anchor wait, and a list while one of its relay lines is open): a follow-up an older item logged is only read (no call logs one now). With two on the item, the wait's next end (the ask-by day or the
   backstop) brings the item to the owner as "drop it?" (drop / keep waiting until <date>) instead of the usual arrival. Reading taken: "after two chases with no reply"
-  is judged when the wait comes due, since only then has the last chase had its time to be answered.
+  is judged when the wait comes due, since only then has the last chase had its time to be answered. A list keeps the one log of the item, which counts for its relay lines together: a relay line that arrives
+  starts it over (a reply came), the end of the list drops it, and the other kinds of line (a date, an item, an anchor, a fleet event) are never chased.
 
 [model] pause = true holds every transition here (and the wake pass beside them); when it turns false the due ones fire in one pass, one message per recipient."""
 from __future__ import annotations
@@ -213,9 +215,23 @@ def chases_of(meta: dict[str, Any]) -> list[dict[str, Any]]:
     return [c for c in v if isinstance(c, dict)] if isinstance(v, list) else []
 
 
+def chasing(meta: dict[str, Any]) -> bool:
+    """Is a chase part of this wait: a relay or anchor wait always, a wait on a list while one of its relay (news) lines has not arrived. A list with no relay line, or whose relay lines have all
+    arrived, is not chased: only news the owner relays is chased, and an arrived line stops it."""
+    k = stored_kind(meta)
+    if k == _wl.LIST:
+        return bool(_wl.lines_by_kind(meta, "relay"))
+    return k in CHASE_KINDS
+
+
+def chases_in_play(meta: dict[str, Any]) -> list[dict[str, Any]]:
+    """The chases that count on the wait as it stands, oldest first: every one logged on a single wait (as chases_of), those of a list only while it is chased (`chasing`), none once its relay lines have arrived."""
+    return [] if stored_kind(meta) == _wl.LIST and not chasing(meta) else chases_of(meta)
+
+
 def chased_out(meta: dict[str, Any]) -> bool:
-    """A relay or anchor wait with CHASES_MAX chases on it: its next end asks "drop it?"."""
-    return stored_kind(meta) in CHASE_KINDS and len(chases_of(meta)) >= CHASES_MAX
+    """A chased wait (`chasing`) with CHASES_MAX chases on it: its next end asks "drop it?"."""
+    return chasing(meta) and len(chases_of(meta)) >= CHASES_MAX
 
 
 # ---------------------------------------------------------------------------------------------------------------- the asks
@@ -232,9 +248,18 @@ def relay_ask(meta: dict[str, Any]) -> str:
     return f"{_ASK_HEAD}has {subject_of(meta)} arrived?{_OPT_MARK}arrived / not yet, ask again on <date> / drop"
 
 
+def chased_subject(meta: dict[str, Any], clip: int = 80) -> str:
+    """What the "drop it?" question says did not arrive: a single wait's subject; for a list every relay line still open, joined with "; " (the question closes the whole item, so it names all the news it
+    would give up on, not the first alone)."""
+    if stored_kind(meta) != _wl.LIST:
+        return subject_of(meta, clip)
+    text = "; ".join(_model.clean(e) for e in _wl.relay_events(meta)) or "the news"
+    return text if len(text) <= clip else text[:clip].rstrip() + "…"
+
+
 def drop_ask(meta: dict[str, Any]) -> str:
     """The question an item chased twice comes with: "Decide: drop it? … · Options: drop / keep waiting until <date>"."""
-    return (f"{_ASK_HEAD}drop it? {subject_of(meta, 80)} did not arrive after {len(chases_of(meta))} chases{_OPT_MARK}drop / keep waiting until <date>")
+    return (f"{_ASK_HEAD}drop it? {chased_subject(meta)} did not arrive after {len(chases_of(meta))} chases{_OPT_MARK}drop / keep waiting until <date>")
 
 
 def is_watcher_ask(ask: Any) -> bool:
@@ -392,8 +417,8 @@ def woke_line(meta: dict[str, Any], label=str) -> str:
 
 
 def chases_line(meta: dict[str, Any], label=str) -> str:
-    """get's `chases: n` with the last one's note and who logged it ("" when none)."""
-    rows = chases_of(meta)
+    """get's `chases: n` with the last one's note and who logged it ("" when none; a list shows the chases only while it is chased)."""
+    rows = chases_in_play(meta)
     if not rows:
         return ""
     last = rows[-1]
