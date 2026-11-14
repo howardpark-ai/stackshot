@@ -70,6 +70,8 @@ from stackshot.service import watching as watching_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.service import telling
+from stackshot.service import answer_handover as handover_svc
+from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.fleet import liveness as LV
 from stackshot.web import home
 from stackshot.web import publish as _web_publish
@@ -79,8 +81,8 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 SENT = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 telling.front_sender = lambda who: False
-server._own_repo = lambda: "acme/widgets"
-server._evwait_preread = lambda kind, phrase: None
+released_svc._own_repo = lambda: "acme/widgets"
+wait_gates_svc._evwait_preread = lambda kind, phrase: None
 evwaits_svc.evw_boxes = lambda: {}
 LV.puller_online = lambda rec: bool(rec)
 (T / "state").mkdir(parents=True, exist_ok=True); (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
@@ -141,7 +143,7 @@ clear_g()
 
 # ================================================================ 2. a decision's hand-over of a time wait
 def hand(meta, mover_in, then_in, **kw):
-    m_ = dict(meta); server._decision_hand_over(m_, mover_in, then_in, now=now0, **kw); return m_
+    m_ = dict(meta); handover_svc._decision_hand_over(m_, mover_in, then_in, now=now0, **kw); return m_
 BASE = {"project": "projects/zedwork", "needs": [BACK]}
 m_ = hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, waiting=True)
 check("2 a hold with a wake and an agent in then: a time wait, mover = then, the old key never, then cleared, the stamp set", m_.get("wait_kind") == "time" and stores_mover(m_, HELP) and "then" not in m_ and m_["watch"]["set_at"] == now0, m_)
@@ -204,10 +206,10 @@ check("3 restore_wait: a wait on a date alone with external in needs and the old
 # the server reads the snapshot either way
 for n, was in ((6, {LEG: HELP}), (7, {"mover": HELP})):
     item(n, subject=f"[zed] was {n}", needs=["decision"], ask="Did it arrive?", options=[{"label": "Arrived"}], watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), **was}, "at": now0})
-    m_ = dict(mt(n)); r = server._watch_answer(rd(n), m_, {"do": "arrived", "text": "", "date": ""}, now0)
+    m_ = dict(mt(n)); r = wait_gates_svc._watch_answer(rd(n), m_, {"do": "arrived", "text": "", "date": ""}, now0)
     check(f"3 _watch_answer arrived, snapshot {sorted(was)[0]}: the agent it names has the item", m_.get("mover") == HELP and m_.get("needs") == [HELP] and HELP in r, (r, m_))
     item(n + 10, subject=f"[zed] was again {n}", needs=["decision"], ask="Did it arrive?", options=[{"label": "Arrived"}], watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), **was}, "at": now0})
-    m_ = dict(mt(n + 10)); r = server._watch_answer(rd(n + 10), m_, {"do": "wait", "text": "", "date": day(9)}, now0)
+    m_ = dict(mt(n + 10)); r = wait_gates_svc._watch_answer(rd(n + 10), m_, {"do": "wait", "text": "", "date": day(9)}, now0)
     check(f"3 _watch_answer not yet, snapshot {sorted(was)[0]}: the wait is back with the picker as `mover`", stores_mover(m_, HELP) and m_.get("ask_by") == day(9) and "waits again" in r, (r, m_))
 
 # ================================================================ 4. the plan: the cold call's edge and the migration
