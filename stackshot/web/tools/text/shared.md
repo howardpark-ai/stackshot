@@ -18,19 +18,16 @@ observers="none" clears. after: items of any project that must close first (afte
 item counts as waiting without a hold, and when the last one closes it wakes and the sessions in its needs (else its
 mover) are told; a dropped one releases it too, a superseded one is followed to its replacement; a loop is refused;
 after="none" clears. after is for a real dependency (this item needs that one's output), never for the order a builder
-takes its items in. A hold (hold=true) names what it waits for (a wake, after items, a notice from an anchor scoped to
-the item, a recycle, or a wait_basis window the work itself needs); one with none is refused. A wake (or until)
-without hold=true is a wait: the item is listed as waiting until that date (a wake past the cap takes a wait_basis);
-in an update that hands the item to another session it is only the hand-off's backstop and the item stays active
-(unless the item carries hold, wait_kind, wait_basis or an after link, in this call or stored by an earlier one: then
-the date stays a wait). An item waiting on {{OWNER}} is never on hold: it carries needs=decision with its ask, or
-after=<the item that carries the ask>. needs names only who can move now. An item that waits on {{OWNER}} and on a
-session at once: where his answer could change with the session's work, or its work with his answer, the session goes
-first and adds decision when it is done (or the decision is its own item, linked with after=); decision sits beside
-this project's background agents only when the two are independent (beside any other session it is refused), and when
-unsure, in sequence. When decision leaves needs (he has decided), the sessions still named are told at once; a session
-whose work changes the question rewrites the ask. The server never hands an item to a front agent on its own motion:
-when the item is back with its front agent mover alone, the project's builder is told instead.
+takes its items in. A hold (hold=true) names what it waits for (a wake, after items, an anchor notice, a recycle, or a
+wait_basis window); one with none is refused. An item waiting on {{OWNER}} is never on hold: it carries needs=decision
+with its ask, or after=<the item that carries the ask>. needs names only who can move now. An item that waits on
+{{OWNER}} and on a session at once: where his answer could change with the session's work, or its work with his
+answer, the session goes first and adds decision when it is done (or the decision is its own item, linked with
+after=); decision sits beside this project's background agents only when the two are independent (beside any other
+session it is refused), and when unsure, in sequence. When decision leaves needs (he has decided), the sessions still
+named are told at once; a session whose work changes the question rewrites the ask. The server never hands an item to
+a front agent on its own motion: when the item is back with its front agent mover alone, the project's builder is told
+instead.
 
 ## text ANCHOR_SHAPES
 Slack channel/DM, Drive file/folder, Gmail thread, gmail:q:<query> or gmail:q@<mailbox>:<query>, Notion page or
@@ -60,46 +57,47 @@ notes it.
 subject (a create's, or one an update sets): the outcome wanted ("Make X work when Y"), never the symptom ("X fails
 when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is refused: the rest goes in the
 description bullets. An update that leaves subject out, or sets the one it has, is never refused for a stored long
-subject. description: the item's background as short `- ` bullets of live state, one fact each, at most
-{{DESC_MAX_LINES}} lines of {{DESC_LINE_MAX}} characters each (a link counts by its text); the server refuses prose, a
-longer line and more lines; never a paragraph. The first bullet opens `Goal:` (case-sensitive) with the outcome wanted
-in a sentence (the subject names the same outcome); a symptom, cause or trigger goes in a later bullet that opens
-`Problem:`. Then what the item is and where it lives (his words as a bullet such as `- {{OWNER}}: …`; parallel bullets
-go under one parent bullet, indented two spaces); never steps or commands for {{OWNER}} (those go in step, below), no
-working notes, status or history; prune what is no longer live; details go on the project page. A create, or an update
-that replaces the description, whose first bullet does not open `Goal:` is refused; an update that leaves description
-out is never judged. Example: description="- Goal: the export finishes in under a minute\n- Problem: the nightly run
-takes 9 minutes\n- Lives in export.py". Item text renders as markdown (nested `- ` lists, **bold**, `code`, > quotes;
-no raw HTML, headings or tables). next: {{NEXT_WORDS}} {{NEXT_REFUSALS}}A line of next is refused unless it is <=
-{{NEXT_LINE_MAX}} characters after its `<actor>: ` prefix, and <= {{NEXT_LINE_FULL}} in all (a link counts by its
-text); only the text you write in a call is checked. Each line remembers the session whose write put it there, and a
-later update changes only its own sender's lines. A command {{OWNER}} runs goes in a next line that starts
-`{{OWNER}}:`, whole in backticks, never in the description or in the step (step=…: a one-line summary, see step
-below); his item page shows it in Your step as its own block with a copy button. A next line that starts
-`{{OWNER}}:`{{ALIAS_PAREN}} and asks him to run something (an imperative run cue such as run, type, execute, enter, or
-a place phrase such as {{P_EX}}; a line where someone else runs it, "say go and I will run …", is not a cue) gets the
-command check{{P_CHK}} on create and update, refused as `next line: …`, and only for the lines the call sets: the
-command goes in backticks or a fence{{P_RUN}}. A line that only mentions a command, and lines for other sessions, are
-not checked. A `! ` line (a command typed into a pane) in a line that starts `{{OWNER}}:`, bare, in backticks or after
-a colon or a run cue ("type ! cmd"), is refused whether or not the line asks him to run it: {{P_BANG}}; "done!" is not
-a `! ` line. A first line of next that starts `{{OWNER}}:` (or {{OPENERS_TXT}}, "{{OWNER}} to …") on an item that is
-doing, blocked or verifying is refused when the call sets next, needs or the step: set step=<his step in one line>, or
-needs=decision with an ask (a create has no step). A next line that defers on another item in words (once, after,
-when, until or before, then a board#N; the words of [keywords.model_guards] defer_after_id also count) is refused
-unless after=["board#N"] names that item in the same item, since a wait written only in words wakes nobody when the
-item closes; give the wait its end too, ask_by=YYYY-MM-DD, the day it comes back to someone if board#N is still open
-(supplies=<what that item's output gives this one>). Right: next="my-x: ship the export once board#N closes",
-after=["board#N"], ask_by="2099-03-02". Only the lines the call sets are checked; a line that only mentions an item
-("see board#N") is not a deferral; on an item waiting on his call (needs=decision) write "see board#N", not after=;
-wake=YYYY-MM-DD is the way to be reminded on a day. Links sit on the words (`blocked on [#7](url)`), never a naked URL
-or a bare id: a naked http(s) URL in description, next or ask is refused, write `[words](url)` (a code span or fence
-is fine). needs: whose move it is now (the list is described below). due: YYYY-MM-DD {{TIMEZONE}}, set only from a
-real deadline ({{OWNER}}'s word, an outside date, or a date a dependency fixes), otherwise left empty: a made-up date
-reads to {{OWNER}} as their own deadline (to expect something back by a date, use a wake). ask: the line a
-needs=decision item carries, written so {{OWNER}} can decide from it alone and refreshed whenever the question moves,
-one line of at most 240 characters, "Decide: <what to decide> · Recommend: <your recommendation> · Stakes: <what
-happens either way> · By: <a date in words such as Mon Jun 8th 2099, or no date>"; example: ask="Decide: whether to
-approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099",
+subject. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
+lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); split a longer
+fact into two bullets or put it on the project page; prose, a longer line and more lines are refused. The first bullet
+opens `Goal:` (case-sensitive) with the outcome wanted in a sentence (the subject names the same outcome); a symptom,
+cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
+a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
+commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;
+details go on the project page. A create, or an update that replaces the description, whose first bullet does not open
+`Goal:` is refused; an update that leaves description out is never judged. Example: description="- Goal: the export
+finishes in under a minute\n- Problem: the nightly run takes 9 minutes\n- Lives in export.py". Item text renders as
+markdown (nested `- ` lists, **bold**, `code`, > quotes; no raw HTML, headings or tables). next: {{NEXT_WORDS}}
+{{NEXT_REFUSALS}}A line of next is refused unless it is <= {{NEXT_LINE_MAX}} characters after its `<actor>: ` prefix,
+and <= {{NEXT_LINE_FULL}} in all (a link counts by its text); only the text you write in a call is checked. Each line
+remembers the session whose write put it there, and a later update changes only its own sender's lines. A command
+{{OWNER}} runs goes in a next line that starts `{{OWNER}}:`, whole in backticks, never in the description or in the
+step (step=…: a one-line summary, see step below); his item page shows it in Your step as its own block with a copy
+button. A next line that starts `{{OWNER}}:`{{ALIAS_PAREN}} and asks him to run something (an imperative run cue such
+as run, type, execute, enter, or a place phrase such as {{P_EX}}; a line where someone else runs it, "say go and I
+will run …", is not a cue) gets the command check{{P_CHK}} on create and update, refused as `next line: …`, and only
+for the lines the call sets: the command goes in backticks or a fence{{P_RUN}}. A line that only mentions a command,
+and lines for other sessions, are not checked. A `! ` line (a command typed into a pane) in a line that starts
+`{{OWNER}}:`, bare, in backticks or after a colon or a run cue ("type ! cmd"), is refused whether or not the line asks
+him to run it: {{P_BANG}}; "done!" is not a `! ` line. A first line of next that starts `{{OWNER}}:` (or
+{{OPENERS_TXT}}, "{{OWNER}} to …") on an item that is doing, blocked or verifying is refused when the call sets next,
+needs or the step: set step=<his step in one line>, or needs=decision with an ask (a create has no step). A next line
+that defers on another item in words (once, after, when, until or before, then a board#N; the words of
+[keywords.model_guards] defer_after_id also count) is refused unless after=["board#N"] names that item in the same
+item, since a wait written only in words wakes nobody when the item closes; give the wait its end too,
+ask_by=YYYY-MM-DD, the day it comes back to someone if board#N is still open (supplies=<what that item's output gives
+this one>). Right: next="my-x: ship the export once board#N closes", after=["board#N"], ask_by="2099-03-02". Only the
+lines the call sets are checked; a line that only mentions an item ("see board#N") is not a deferral; on an item
+waiting on his call (needs=decision) write "see board#N", not after=; wake=YYYY-MM-DD is the way to be reminded on a
+day. Links sit on the words (`blocked on [#7](url)`), never a naked URL or a bare id: a naked http(s) URL in
+description, next or ask is refused, write `[words](url)` (a code span or fence is fine). needs: whose move it is now
+(the list is described below). due: YYYY-MM-DD {{TIMEZONE}}, set only from a real deadline ({{OWNER}}'s word, an
+outside date, or a date a dependency fixes), otherwise left empty: a made-up date reads to {{OWNER}} as their own
+deadline (to expect something back by a date, use a wake). ask: the line a needs=decision item carries, written so
+{{OWNER}} can decide from it alone and refreshed whenever the question moves, one line of at most 240 characters with
+all four parts in this order, joined by " · ": "Decide: <what to decide> · Recommend: <your recommendation> · Stakes:
+<what happens either way> · By: <a date in words such as Mon Jun 8th 2099, or no date>"; example: ask="Decide: whether
+to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099",
 options=[{"label": "Approve", "line": "Approve the schema", "recommended": true}, {"label": "Decline", "line": "Wait a
 week", "recommended": false}]. An ask that only confirms {{OWNER}}'s own action is refused ("have you done X?", a bare
 "is it done?", or a Decide part that names the action of his own `{{OWNER}}:` next lines, such as "Decide: install the
@@ -113,23 +111,21 @@ options' lines. A needs=decision item whose description or next links a mockup (
 or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup](<that link>) in the
 ask's Decide part too, or the write is refused: the home row and the item page show it as Mockup ↗ beside the
 question. A mockup link goes in the ask only, never in an option: an option label or line holding a markdown link or
-an http(s) URL is refused. A command for {{OWNER}} to run, or a paste, belongs on the item: in next when it is short
-(a code span), otherwise on the project page, with next linking to it. options: when the decision is a pick between
-alternatives, list them, each on one line, {{OPT_FORM}}; the ask's Recommend names the recommended one's label. The
-server refuses a needs=decision item whose ask or description names alternatives while it lists none: words such as
-"which of the two", "pick one", "x, y or z", "x vs y", "Option A", and labeled choices in the Decide part ("A or B",
-"A (…) or B (…)", "A: … or B: …"); put each alternative in as one option, or the page draws only Yes / No for it. A
-needs=decision item with no options whose Decide part opens with what, which, how, who, when, where or why is refused
-(create; an update that sets the ask or options or puts it on his call), since Yes / No cannot answer it: list its
-answers as options or reword it as a yes/no ("Decide: whether to …"). The same goes for a needs=decision item with no
-options whose Recommend part is not a yes or a no (it names a person, a topic, a date, whatever the Decide part's
-wording or language), since the page draws only Yes / No under it: put the choices as options, or make it a yes/no
-question with a Recommend of yes or no. Name who acts in every option label and line ({{OWNER}}, a session's name, a
-role), never "I", "you", "we", "us" or "me"; the ask line likewise never says "I", "you" or "me" (the reply notes one;
-write "Pat unpublishes", not "I unpublish"). A yes/no decision lists two options, "Approve" and "Decline" (the one you
-recommend marked recommended: true), so {{OWNER}} gets one-click buttons. options="none" clears them (refused while
-the ask is an open question). Write the project page first, then the board: a page write up to five minutes before the
-change counts.
+an http(s) URL is refused. options: when the decision is a pick between alternatives, list them, each on one line,
+{{OPT_FORM}}; the ask's Recommend names the recommended one's label. The server refuses a needs=decision item whose
+ask or description names alternatives while it lists none: words such as "which of the two", "pick one", "x, y or z",
+"x vs y", "Option A", and labeled choices in the Decide part ("A or B", "A (…) or B (…)", "A: … or B: …"); put each
+alternative in as one option, or the page draws only Yes / No for it. A needs=decision item with no options whose
+Decide part opens with what, which, how, who, when, where or why is refused (create; an update that sets the ask or
+options or puts it on his call), since Yes / No cannot answer it: list its answers as options or reword it as a yes/no
+("Decide: whether to …"). The same goes for a needs=decision item with no options whose Recommend part is not a yes or
+a no (it names a person, a topic, a date, whatever the Decide part's wording or language), since the page draws only
+Yes / No under it: put the choices as options, or make it a yes/no question with a Recommend of yes or no. Name who
+acts in every option label and line ({{OWNER}}, a session's name, a role), never "I", "you", "we", "us" or "me"; the
+ask line likewise never says "I", "you" or "me" (the reply notes one; write "Pat unpublishes", not "I unpublish"). A
+yes/no decision lists two options, "Approve" and "Decline" (the one you recommend marked recommended: true), so
+{{OWNER}} gets one-click buttons. options="none" clears them (refused while the ask is an open question). Write the
+project page first, then the board: a page write up to five minutes before the change counts.
 
 ## text SAID_PARAM
 A list of entries, two kinds. (1) His own words {tag: Acked-by (his decision) | Suggested-by (his idea or request) |
@@ -228,9 +224,9 @@ done now: if it could, the write is refused with the model's reason, so do the s
 reply, a build or test still running, a window the work itself needs, a resource that is down; a preference for a
 scheduled run is none). The check passes the write when the model is unavailable or slow. It does not apply to a wait
 on another item (after), on a decision or an outside party (needs decision or external), a park (hold with
-wait_basis), a stored wait (wait_kind), a hand-off to another session, or a step you leave as it was. wait_reason is
-not stored on the item. Right: update(item_id="board#N", sender="my-x", until="<tomorrow or later, within {{CAP_DAYS}}
-days, YYYY-MM-DD>T04:00", wait_reason="the nightly run finishes at 03:00").
+wait_basis), a stored wait (wait_kind), a hand-off to another session, or a step you leave as it was. Right:
+update(item_id="board#N", sender="my-x", until="<tomorrow or later, within {{CAP_DAYS}} days, YYYY-MM-DD>T04:00",
+wait_reason="the nightly run finishes at 03:00").
 
 ## param AFTER
 Items this one waits on: after=["board#N"], with ask_by=<YYYY-MM-DD> as the day it comes back if they are still open.
@@ -238,19 +234,19 @@ The wait ends when they close.
 
 ## param OUTCOME
 How a close ended: done | dropped (won't do, no longer needed, or can't) | superseded (replaced by another item:
-reworded, merged or split; send superseded_by=<the replacing item's id>). Passed on update with status=completed, or
-on complete: outcome="done", reason="Export shipped in PR 12", outcome_text="- PR 12 merged"; all three are required.
+reworded, merged or split; send superseded_by=<its id>). With reason and outcome_text, all three required:
+outcome="done", reason="Export shipped in PR 12", outcome_text="- PR 12 merged".
 
 ## param REASON
 One line, at most {{CLOSE_REASON_MAX}} characters (longer is refused): the end state reached and why. Goes with
 outcome on a close.
 
 ## param DESCRIPTION
-The item's background as short `- ` bullets, at most {{DESC_MAX_LINES}} lines of {{DESC_LINE_MAX}} characters, live
-state only (never steps or commands): description="- Goal: the export finishes in under a minute\n- Problem: the
-nightly run takes 9 minutes". The first bullet opens `Goal:` (case-sensitive), a symptom or cause goes in a later
-`Problem:` bullet, {{OWNER}}'s words go in a bullet such as `- {{OWNER}}: …`, and parallel bullets go under one parent
-bullet, indented two spaces.
+The item's background as `- ` bullets, at most {{DESC_MAX_LINES}} lines, every line `- ` included at most
+{{DESC_LINE_MAX}} characters, live state only (never steps or commands): description="- Goal: the export finishes in
+under a minute\n- Problem: the nightly run takes 9 minutes". The first bullet opens `Goal:` (case-sensitive), a
+symptom or cause goes in a later `Problem:` bullet, {{OWNER}}'s words go in a bullet such as `- {{OWNER}}: …`, and
+parallel bullets go under one parent bullet, indented two spaces.
 
 ## param OPTIONS
 The alternatives of a decision, one per line: options=[{"label": "Approve", "line": "Approve the schema",
@@ -393,24 +389,23 @@ done=[n] or dropped=[n]). It tells the mover of every other open item whose next
 own wake, and the closer is not told. {{ASK_RULE}}
 
 ## text CLOSE_FORM
-A close (complete, or update with status=completed) carries outcome: done | dropped (won't do or no longer needed) |
-superseded (replaced by another item; superseded_by = its id), reason (one line, the end state reached and why, at
-most {{CLOSE_REASON_MAX}} characters (longer is refused)) and outcome_text (short `- ` bullets, at most
-{{DESC_MAX_LINES}} lines of {{DESC_LINE_MAX}} characters, shown as the Outcome); it leaves the description as it was
-(one passed with a close is stored as outcome_text) and clears next, ask and needs (and any hold, wake or recycle
-wait); due stays as a record. Reopening (status=open on a completed item) takes a new next, and drops outcome,
-outcome_text, reason and superseded_by. A close ticks only the steps that are still open and are yours (you wrote
-them, or they open with your name), by the closer (done when the outcome is done, dropped otherwise; this settles a
-step of his too). A step that opens with another session's name stays open, so the close is refused, naming that step,
-and nothing changes: ask that session to finish it, or mark it in the closing call with update (status=completed and
-done=[n] or dropped=[n]; complete takes no marks). It tells the mover of every other open item whose next or
-description names the closed item (board#N), one message per mover (the first 8 items, then a count); the items that
-wait on it through after get their own wake, and the closer is not told. {{ASK_RULE}}
+A close (complete, or update with status=completed) carries outcome: done | dropped | superseded (superseded_by = its
+id), reason (one line, at most {{CLOSE_REASON_MAX}} characters (longer is refused)) and outcome_text (`- ` bullets,
+every line `- ` included at most {{DESC_LINE_MAX}} characters); it clears next, ask and needs (and any hold, wake or
+recycle wait), leaves the description as it was (one passed with a close is stored as outcome_text) and keeps due as a
+record. Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text, reason and
+superseded_by. A close ticks only the steps that are still open and are yours (you wrote them, or they open with your
+name), by the closer (done when the outcome is done, dropped otherwise; this settles a step of his too). A step that
+opens with another session's name stays open, so the close is refused, naming that step: ask that session to finish
+it, or mark it in the closing call with update (status=completed and done=[n] or dropped=[n]; complete takes no
+marks). It tells the mover of every other open item that names the closed item (board#N), one message per mover (the
+first 8, then a count); the items that wait on it through after get their own wake; the closer is not told.
+{{ASK_RULE}}
 
 ## param OUTCOME_TEXT
-A close's summary: how the item ended, as short `- ` bullets (at most {{DESC_MAX_LINES}} lines of {{DESC_LINE_MAX}}
-characters), stored in the item's Outcome field. A close does not change the item's description. Goes with a close
-only.
+A close's summary: how the item ended, as `- ` bullets (at most {{DESC_MAX_LINES}} lines, every line `- ` included at
+most {{DESC_LINE_MAX}} characters): outcome_text="- PR 12 merged\n- live on the box". Stored in the item's Outcome
+field; the item's description is not changed. Goes with a close only.
 
 ## text GMAIL_TERMS
 Terms are from:, to:, cc:, subject: and person: (or plain text, a subject term), joined by AND, OR and parentheses
