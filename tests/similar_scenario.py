@@ -40,6 +40,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import ids as _model_ids
+from stackshot.model import similar as _sim
 from stackshot.web.tools import create as _wt_create
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -60,10 +61,10 @@ def created(r, gid):
     return r.startswith("created ") and server._load(gid)["status"] == "open"
 
 # ---- the words and the score
-W = getattr(server, "_subject_words", lambda s: None)   # absent before the feature: the checks below then fail, they do not crash
+W = getattr(_sim, "_subject_words", lambda s: None)   # absent before the feature: the checks below then fail, they do not crash
 check("words: the prefix, case, short and filler words dropped, a plural folded",
       W("[home] Add the Similar items to a Create reply") == frozenset({"similar", "create", "reply"}) and W("[work] Fix it") == frozenset(), W("[home] Add the Similar items to a Create reply"))
-S = getattr(server, "_similar_score", lambda *a: None)
+S = getattr(_sim, "_similar_score", lambda *a: None)
 check("score: one shared word never matches, the same single word does, no overlap is 0",
       S(W("[home] backup"), W("[home] backup"), False, False) == 1.0 and S(W("[home] backup nightly"), W("[home] backup weekly"), True, True) == 0.0
       and S(W("[home] alpha beta"), W("[home] gamma delta"), True, True) == 0.0)

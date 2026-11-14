@@ -7,9 +7,9 @@ sessions the item names, publishes, and builds the reply. The order of those ste
 
 The request map (`requests.json`: a request id and the item it filed) is this module's: a retry with the same request id returns the item the first call made (`_requests`, `_remember_request`).
 
-The write gates a create runs are service/gates.py's (`_gates.gate_*`, in the order they ran in server.py). The field and decision checks and the notices a create runs are still server.py's, because the update tool,
-the close and the telling run the same ones; they are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves
-`Hooks` when its area moves under service/. A hook is looked up on server.py when a create runs, so a suite that replaces one there still reaches the create; a suite that replaces a gate patches it on service/gates.py. Three thread-local flags of server.py are read by a create and also by the gates, the update tool and the telling, so they
+The write gates a create runs are service/gates.py's (`_gates.gate_*`, in the order they ran in server.py), the field and decision rules model/'s (`field_gates.py`, `decision_gates.py`, the similar-items rule `similar.py`), each called on its
+module. The notices a create runs and the helpers of the areas that still sit in server.py are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves
+`Hooks` when its area moves under service/. A hook is looked up on server.py when a create runs, so a suite that replaces one there still reaches the create; a suite that replaces a gate or a rule patches it on its owner. Three thread-local flags of server.py are read by a create and also by the gates, the update tool and the telling, so they
 stay thread-locals there until those areas move and a create reads them through `Hooks`: `session_next` (the create or update tool's own call, set by `session_write`), `question` (a script's
 question: set by the question, terminal-prompt and watcher routes around their create) and `terminal_row` (the terminal prompt's and the job-gap routes' row).
 
@@ -30,10 +30,13 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
-from stackshot.core.store import _next_id
+from stackshot.core.store import _item_files, _next_id
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
+from stackshot.model import decision_gates as _dg
+from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
+from stackshot.model import similar as _sim
 from stackshot.model import nextlines as _nl
 from stackshot.model import next_rules as _nr
 from stackshot.model import steps as _steps
@@ -78,11 +81,36 @@ def _remember_request(rid: str, gid: str) -> None:
             raise
 
 
+def similar_note(gid: str, subject: str, project: str) -> str:
+    """The create reply's similar-items note (`model/similar.py` makes it): the stored items, the anchors registry's parent of a project and the clock are read here. A note only: any failure gives "" and the create stands."""
+    try:
+        if not _sim._subject_words(subject):
+            return ""
+
+        def stored():
+            for g, p in _item_files():
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        it = json.load(f)
+                except Exception:
+                    continue
+                if isinstance(it, dict):
+                    yield g, it
+
+        try:
+            reg = _anc.registry()
+            parent_of = lambda p: _anc.hub_of(p, reg)
+        except Exception:
+            parent_of = lambda p: p
+        return _sim._similar_note(gid, subject, project, stored(), parent_of, time.time())
+    except Exception:
+        return ""
+
+
 @dataclass(frozen=True)
 class Hooks:
-    """What a create still reaches in server.py (the field and decision checks and notices it shares with the update tool, the close and the telling, the three thread-local flags, two constants), in the names
+    """What a create still reaches in server.py (the notices and helpers it shares with the update tool, the close and the telling, the thread-local flags, a constant), in the names
     they have there without the leading underscore; server.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads the thread-local."""
-    actor_note: Callable[..., Any]
     after_open: Callable[..., Any]
     anchor_wait_gate: Callable[..., Any]
     ask_owed: Callable[..., Any]
@@ -91,42 +119,25 @@ class Hooks:
     fallback_wait_date: Callable[..., Any]
     fmt: Callable[..., Any]
     form_notes: Callable[..., Any]
-    gate_alternatives: Callable[..., Any]
     gate_ask: Callable[..., Any]
-    gate_bare_urls: Callable[..., Any]
-    gate_description: Callable[..., Any]
-    gate_goal: Callable[..., Any]
-    gate_metadata: Callable[..., Any]
-    gate_mockup: Callable[..., Any]
-    gate_next: Callable[..., Any]
-    gate_one_decision: Callable[..., Any]
-    gate_open_question: Callable[..., Any]
     gate_options: Callable[..., Any]
-    gate_own_action: Callable[..., Any]
-    gate_recommend_stance: Callable[..., Any]
-    gate_recycle_item: Callable[..., Any]
-    gate_subject: Callable[..., Any]
     lift_ask: Callable[..., Any]
     machine_note: Callable[..., Any]
     model_guards_on: Callable[..., Any]
     nag: Callable[..., Any]
     next_put: Callable[..., Any]
-    options_note: Callable[..., Any]
     owed_mark: Callable[..., Any]
     owner_then_default: Callable[..., Any]
     parse_wake: Callable[..., Any]
-    project_subject_prefix: Callable[..., Any]
     publish: Callable[..., Any]
     record_fixes: Callable[..., Any]
     refuse_if_owing: Callable[..., Any]
     said_note: Callable[..., Any]
     session_id: Callable[..., Any]
-    similar_note: Callable[..., Any]
     wait_alias_gate: Callable[..., Any]
     wake_at: Callable[..., Any]
     writer_owes: Callable[..., Any]
     ask_none: tuple[str, ...]             # the words that mean no ask, no observers, no check (server._ASK_NONE)
-    subject_tagged: Any                   # the compiled pattern of a subject that already carries a tag (field_gates._SUBJECT_TAGGED)
 
 
 _hooks_: Hooks | None = None
@@ -198,21 +209,21 @@ def create_item(
             it = _load(prev); it["gid"] = prev
             return prev, f"already created as {_gh.shown(prev)} (same request_id).\n" + h.fmt(it) + h.nag()
     subject, description, next, ask = (_shown_ids(x) for x in (subject, description, next, ask))   # g7 →
-    if subject.strip() and not by and not any(subject.startswith(pfx) for pfx in _cfg.CFG["subject"]["prefixes"]) and not h.subject_tagged.match(subject):
-        pfx_ = h.project_subject_prefix(project)        # a subject with no scope prefix takes its project's (a pure fact; the reply says so)
+    if subject.strip() and not by and not any(subject.startswith(pfx) for pfx in _cfg.CFG["subject"]["prefixes"]) and not _fg._SUBJECT_TAGGED.match(subject):
+        pfx_ = _gates.project_subject_prefix(project)        # a subject with no scope prefix takes its project's (a pure fact; the reply says so)
         if pfx_:
             subject = pfx_ + subject.lstrip()
             _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it")
-    h.gate_subject(subject)
-    h.gate_recycle_item(subject)
-    h.gate_description(description)
+    _fg._gate_subject(subject)
+    _fg._gate_recycle_item(subject)
+    _fg._gate_description(description)
     if _writes.session_next() and not by:      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
-        h.gate_goal(description)
-    h.gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none)
+        _fg._gate_goal(description)
+    _fg._gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none, session=_writes.session_next())
     ask = "" if ask.strip().lower() in h.ask_none else ask
     if ask:
         ask = h.gate_ask(ask)
-    h.gate_bare_urls({"description": description, "next": next, "ask": ask})
+    _fg._gate_bare_urls({"description": description, "next": next, "ask": ask}, session=_writes.session_next())
     opts = h.gate_options(options)
     needs_l = _gates.gate_needs(needs, project, owner) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in h.ask_none else []
     if agent.strip() and agent.strip().lower() not in h.ask_none:    # the older form writes the session into needs
@@ -280,17 +291,17 @@ def create_item(
         meta["draft"] = draft_txt
     if anchors:
         raise ToolError("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one")
-    h.gate_metadata(meta, creating=True)
+    _gates.gate_metadata(meta, creating=True)
     lifted = "" if ask else h.lift_ask(meta, writer=owner, keeper=owner)   # a client without the ask parameter: the ask's form as next's first line
     asked = lifted + h.ask_owed(meta)       # needs=decision without an ask: a nag line, or refused from [ask] refuse_after
-    h.gate_one_decision(meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written
-    h.gate_alternatives(meta, description)  # alternatives named, none listed
+    _dg._gate_one_decision(meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written
+    _dg._gate_alternatives(meta, description)  # alternatives named, none listed
     if not _writes.question():    # a script's question is never lost on its wording: its Decide is the question as written, and the board may take no options
-        h.gate_open_question(meta)          # an open question with no options: the page would draw Yes / No under it
-        h.gate_recommend_stance(meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
-    h.gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
-    h.gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
-    asked += h.options_note(meta) + h.actor_note(meta)
+        _dg._gate_open_question(meta)          # an open question with no options: the page would draw Yes / No under it
+        _dg._gate_recommend_stance(meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
+    _dg._gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
+    _dg._gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
+    asked += _dg._options_note(meta) + _dg._actor_note(meta)
     desc_note = _gates.gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v))    # the write guards of the item model, every field judged on a create
     h.anchor_wait_gate({}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
     if _writes.session_next() and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
@@ -359,5 +370,5 @@ def create_item(
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
     return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_inst.BOARD_URL}) now.\n" + h.fmt(item) + h.said_note(said_l) + proof_note + asked + h.form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note
-                 + then_note + h.similar_note(gid, subject, str(meta.get("project") or "")) + told + h.nag("" if by else owner))
+                 + then_note + similar_note(gid, subject, str(meta.get("project") or "")) + told + h.nag("" if by else owner))
 

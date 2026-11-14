@@ -14,7 +14,7 @@ from stackshot.service import gates as _gates, writes as _writes
 from stackshot.service.store import _load
 from stackshot.waits import until_write as _uw, wait_list_write as _wlw, waiting as _wt
 from stackshot.web.auth import oauth as _oauth
-from stackshot.web.field_gates import _fleet_tool, _when_idle
+from stackshot.model.field_gates import _fleet_tool, _when_idle
 from stackshot.web.tools.notes import _off_map_note_item, _owner_param, _sender_required
 from stackshot.web.tools.text import _AFTER_PARAM, _ALIASES, _ASK_NONE, _CHECK_PARAM, _CONTACT_PARAM, _DESCRIPTION_PARAM, _MOVER_PARAM, _OPTIONS_PARAM, _OUTCOME_PARAM, _OUTCOME_TEXT_PARAM, _POST_WAKE_PARAM, _P_BARE, _P_EX2, _P_OLD, _P_PLACE_STEP, _REASON_PARAM, _SAID_PARAM, _SELF_WAIT_FORM, _STEP_PROOF_PARAM, _THEN_PARAM, _WAIT_EVENT_PARAM, _WAIT_KIND_PARAM, _WAIT_MODE_PARAM, _WAITS_PARAM, _lead, load_text
 

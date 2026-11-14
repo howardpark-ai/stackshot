@@ -24,6 +24,7 @@ from stackshot.core.instance import OWNER
 from stackshot.fleet.sessions_registry import _sessions_index
 from stackshot.github import ghsync as _gh
 from stackshot.model import cold_call as _cold
+from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.needs import _needs_kinds
@@ -108,7 +109,7 @@ def handoff_cold(gid: str, cold_at: float) -> None:
             kept, ans = ans, None
         if ans is not None:
             ans, note = _cold.validate(ans, {a["name"] for a in agents if a.get("live")}, _handoff.ho_same, exclude,
-                                       desc_limits=_hooks().description_limits() if _hooks().bullets_on() else None, gate=(lambda t: _hooks().gate_description(t, "outcome_text")) if _hooks().bullets_on() else None, stall=stall)
+                                       desc_limits=_fg._description_limits() if _fg._bullets_on() else None, gate=(lambda t: _fg._gate_description(t, "outcome_text")) if _fg._bullets_on() else None, stall=stall)
         with _writes.ITEM_LOCK:               # the check and the write are one step: nothing writes the item between them
             cur = _load(gid)
             r = _ho.record_of(cur)
@@ -145,7 +146,7 @@ def handoff_cold(gid: str, cold_at: float) -> None:
                     _hooks().update(gid, needs=[*kinds] if to_front else [*kinds, ans["to"]], sender=_ho.COLD, **({"mover": ans["to"]} if (cmeta.get("mover") or to_front) else {}),
                             **({"clear_needs": True} if to_front and not kinds else {}))      # a stored doing or verifying state stands on a session in needs, and a front agent is never named there: the write drops the state (_state_apply) and the item reads as derived
                 elif ans["action"] == "close":
-                    _hooks().update(gid, status="completed", outcome=ans["outcome"], reason=_hooks().fit(_shown_ids(ans["reason"]), _hooks().close_reason_max()), outcome_text=ans["outcome_text"], sender=_ho.COLD)     # the model's reason is cut to the limit after its ids are expanded (g7 to board#N, which _update does), never refused
+                    _hooks().update(gid, status="completed", outcome=ans["outcome"], reason=_fg._fit(_shown_ids(ans["reason"]), _fg._close_reason_max()), outcome_text=ans["outcome_text"], sender=_ho.COLD)     # the model's reason is cut to the limit after its ids are expanded (g7 to board#N, which _update does), never refused
                 else:
                     _hooks().update(gid, needs=["decision"], ask=ans["ask"], options=ans["options"], next=f"{OWNER}: answer the ask on the item", clear_next=True, sender=_ho.COLD,    # his item's next is this line alone, as before: the server's own write wipes the others
                             **({"clear_mover": True} if cmeta.get("mover") else {}))      # a stored mover would stay the mover beside decision

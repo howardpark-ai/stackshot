@@ -106,7 +106,7 @@ _ITEM_LINES = [   # the item as get shows it, which create, update and complete 
     ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"),
 ]
 _WRITE_NOTES = [   # the notes a create or an update reply ends with
-    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/decision_gates.py", "_options_note"), ("stackshot/web/tools/notes.py", "_owner_param"),
+    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_said_note"), ("stackshot/model/decision_gates.py", "_options_note"), ("stackshot/web/tools/notes.py", "_owner_param"),
     ("stackshot/web/server.py", "_owner_then_default"),
 ]
 _GET_ONLY = [("stackshot/web/tools/get.py", "stackshot_get"), ("stackshot/web/server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
@@ -114,7 +114,7 @@ HELPERS: dict[str, list[tuple[str, str]]] = {
     "get": _GET_ONLY + _ITEM_LINES,
     "brief": [("stackshot/web/tools/brief.py", "stackshot_brief"), ("stackshot/web/server.py", "_model_report_line"), ("stackshot/web/tools/brief.py", "_world_waits_text"),
               ("stackshot/service/handoff.py", "handoff_brief"), ("stackshot/web/whatschanged.py", "lines"), ("stackshot/model/model_guards.py", "brief_line"), ("stackshot/waits/handoff.py", "brief_lines")] + _ITEM_LINES,
-    "create": [("stackshot/web/tools/create.py", "stackshot_create"), ("stackshot/web/tools/create.py", "_create"), ("stackshot/service/create.py", "create_item"), ("stackshot/web/similar.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
+    "create": [("stackshot/web/tools/create.py", "stackshot_create"), ("stackshot/web/tools/create.py", "_create"), ("stackshot/service/create.py", "create_item"), ("stackshot/model/similar.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
     "update": [("stackshot/web/tools/update.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_report_note"),
                ("stackshot/web/server.py", "_command_note"), ("stackshot/web/server.py", "_watch_on_write"), ("stackshot/service/telling.py", "mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
     "message": [("stackshot/web/tools/message.py", "stackshot_message"), ("stackshot/web/server.py", "_message")],

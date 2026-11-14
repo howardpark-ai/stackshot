@@ -1,4 +1,4 @@
-"""Scenario test for the gate that keeps the owner's own action out of needs=decision (server._gate_own_action) — fixture data, no live
+"""Scenario test for the gate that keeps the owner's own action out of needs=decision (decision_gates._gate_own_action) — fixture data, no live
 store, no network, no server process (the server module is imported and called in-process, on a temporary config).
 
 A decision is a choice the owner makes; a step is something he does (step=<his action>, which stores the your-step state and which the board ticks when
@@ -49,6 +49,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.model import decision_gates as _dg
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.tools import update as _wt_update
@@ -113,28 +114,28 @@ for decide in ("Have you decided between A and B?", "Have you decided whether to
                "have you come up with a name", "is it done and is it fine to send", "is it done, so we can send it?"):
     out, e = create(ask=ask(decide), options=YESNO)
     check(f"create accepted: {decide!r} (Yes/No)", out and not e, e)
-    why = server._own_action_ask({"needs": ["decision"], "ask": ask(decide)})   # no options: another gate asks for them when alternatives are named
+    why = _dg._own_action_ask({"needs": ["decision"], "ask": ask(decide)})   # no options: another gate asks for them when alternatives are named
     check(f"the gate accepts {decide!r} with no options", not why, why)
 
-why = server._own_action_ask({"needs": ["decision"], "ask": ask("have you moved on from option A"), "options": YESNO})   # create has its own gate on a bare option code
+why = _dg._own_action_ask({"needs": ["decision"], "ask": ask("have you moved on from option A"), "options": YESNO})   # create has its own gate on a bare option code
 check("the gate accepts 'have you moved on from option A' with Yes/No", not why, why)
 
 # ---- 1c2. rule 1 is skipped when the options are Approve/Decline (a go-ahead is a decision)
 out, e = create(ask=ask("have you done the two GitHub steps"), options=GO)
 check("create accepted: a have-you ask with Approve/Decline options", out and not e, e)
-why = server._own_action_ask({"needs": ["decision"], "ask": ask("have you done the two GitHub steps"), "options": GO})
+why = _dg._own_action_ask({"needs": ["decision"], "ask": ask("have you done the two GitHub steps"), "options": GO})
 check("the gate skips rule 1 for Approve/Decline", not why, why)
 for decide in ("have you done the two GitHub steps", "did you set a date for the demo", "is it done?", "are they done"):
-    why = server._own_action_ask({"needs": ["decision"], "ask": ask(decide), "options": YESNO})
+    why = _dg._own_action_ask({"needs": ["decision"], "ask": ask(decide), "options": YESNO})
     check(f"the gate still refuses {decide!r} with Yes/No", "only asks whether" in why, why)
 
 # ---- 1d. Approve/Decline, or no options, over his own next line that the Decide part names
 for name, kw in (("Approve/Decline over his own next line", dict(options=GO)), ("no options over his own next line", dict(options=None))):
     before = items(); out, e = create(ask=ask("delete the test repo?"), next=f"{O}: delete the test repo\nhome-kiwi-engineer: tag the release", **kw)
     check(f"create refused: {name}", e.startswith("Refused: this needs=decision item whose Decide part only names") and says_step(e) and items() == before, e or out)
-why = server._own_action_ask({"needs": ["decision"], "ask": "Decide: delete the test repo?", "next": f"{O}: delete the test repo"})
+why = _dg._own_action_ask({"needs": ["decision"], "ask": "Decide: delete the test repo?", "next": f"{O}: delete the test repo"})
 check("the gate refuses a bare Decide: ask with no options over his own next line", "only names" in why, why)
-why = server._own_action_ask({"needs": ["decision"], "ask": "Decide: send the email to the vendor now?", "options": GO, "next": f"{O}: read the vendor draft email"})
+why = _dg._own_action_ask({"needs": ["decision"], "ask": "Decide: send the email to the vendor now?", "options": GO, "next": f"{O}: read the vendor draft email"})
 check("…but not Approve/Decline whose Decide part is not his next line's action", not why, why)
 
 # ---- 1b. create: a Decide part that names his own action, Yes/No over one or more of his next lines that are that action
@@ -145,7 +146,7 @@ for name, kw in (("Decide: <his two actions>? over his two next lines", dict(ask
                                                                      next=f"{O}: delete the test repo\n{O}: water the plants\nhome-kiwi-engineer: tag the release"))):
     before = items(); out, e = create(**kw)
     check(f"create refused: {name}", e.startswith("Refused: this needs=decision item") and says_step(e) and items() == before, e or out)
-why = server._own_action_ask({"needs": ["decision"], "ask": "Decide: install the apps and delete the test repo?", "options": YESNO, "next": TWO_OWN})
+why = _dg._own_action_ask({"needs": ["decision"], "ask": "Decide: install the apps and delete the test repo?", "options": YESNO, "next": TWO_OWN})
 check("the gate reads a bare Decide: ask (no Recommend, Stakes, By) the same way", "only names" in why, why)
 for name, kw in (("a choice between alternatives over his own lines", dict(ask=ask("install the new apps or keep the old ones"), next=TWO_OWN,
                                                                              options=[{"label": "New apps", "line": "Install the two new sorter apps.", "recommended": True},

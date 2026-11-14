@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.model import field_gates as _fg
 from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import complete as _wt_complete
@@ -95,7 +96,7 @@ passes("blank lines between bullets are free (they are not lines)", lambda: crea
 passes("a nested bullet counts as a bullet", lambda: create("- one\n  - nested\n- two"))
 link = "[board#1](https://github.com/example/board/issues/1)"
 long_link = f"- Waits on {link} and {link} and {link} and {link}, then on the vendor"
-check("fixture: the link-heavy bullet is over 120 raw and within 120 as read", len(long_link) > 120 and server._visible_len(long_link) <= 120, (len(long_link), server._visible_len(long_link)))
+check("fixture: the link-heavy bullet is over 120 raw and within 120 as read", len(long_link) > 120 and _fg._visible_len(long_link) <= 120, (len(long_link), _fg._visible_len(long_link)))
 passes("a link-heavy bullet passes: a link counts by its text, not its URL", lambda: create(long_link))
 refused("the words of a link do count", lambda: create("- " + f"[{'w' * 130}](https://example.com/x)"), "description bullet is")
 passes("a long URL on a link is not counted", lambda: create("- Lives at [the doc](https://example.com/" + "a" * 200 + ")"))
@@ -112,16 +113,16 @@ LONGNAME = "falcon-engineer-with-a-very-long-name (builder): "
 passes("the limit counts after the `<actor>: ` prefix: a 200-character action behind a long actor name passes (the whole line is over 250)", lambda: create(next=LONGNAME + "w" * 200))
 refused("…and 201 characters after the prefix are refused, the refusal counting after the prefix", lambda: create(next=LONGNAME + "w" * 201), "a line of next is 201 characters after its `<actor>: ` prefix", "limit is 200", "one short line per next action")
 WORDY = "w" * 100 + " " + "w" * 100 + " " + "w" * 100 + ": "       # a name of three words of any length is a prefix too: the whole line is capped as well
-check("fixture: the three-word name is a prefix of 304 characters, so the action alone is under the limit", server._next_len(WORDY + "act") == 3 and len(WORDY) == 304, (server._next_len(WORDY + "act"), len(WORDY)))
+check("fixture: the three-word name is a prefix of 304 characters, so the action alone is under the limit", _fg._next_len(WORDY + "act") == 3 and len(WORDY) == 304, (_fg._next_len(WORDY + "act"), len(WORDY)))
 refused("a line of 304+ characters behind a three-word prefix is refused by the whole-line cap", lambda: create(next=WORDY + "act"), "a line of next is 307 characters in all", "limit for the whole line is 280", "one short line per next action")
 passes("a line of exactly 280 characters in all passes (80 of prefix, 200 of action)", lambda: create(next="falcon-main-" + "x" * 60 + ": " + "w" * 200))
 refused("…and 281 in all are refused, though the action is within 200", lambda: create(next="falcon-main-" + "x" * 67 + ": " + "w" * 200), "a line of next is 281 characters in all", "limit for the whole line is 280")
 passes("…a bullet marker and bold marks in front of the actor are part of the prefix", lambda: create(next="- **home-other:** " + "w" * 200))
 refused("…and 201 behind them are refused", lambda: create(next="- **home-other:** " + "w" * 201), "a line of next is 201 characters")
 check("_next_len: the characters after the prefix; a line with no prefix, or a label that names no one, counts whole",
-      server._next_len("home-other: abc") == 3 and server._next_len("my-x (builder): abc") == 3 and server._next_len("1. **my-x:** abc") == 3 and server._next_len("abc def ghi") == 11
-      and server._next_len("Status: abc") == 11 and server._next_len("home-other:abc") == 14 and server._next_len(f"home-other: [{'w' * 5}](https://example.com/{'u' * 50}) z") == 7,
-      [server._next_len(x) for x in ("home-other: abc", "my-x (builder): abc", "1. **my-x:** abc", "abc def ghi", "Status: abc", "home-other:abc")])
+      _fg._next_len("home-other: abc") == 3 and _fg._next_len("my-x (builder): abc") == 3 and _fg._next_len("1. **my-x:** abc") == 3 and _fg._next_len("abc def ghi") == 11
+      and _fg._next_len("Status: abc") == 11 and _fg._next_len("home-other:abc") == 14 and _fg._next_len(f"home-other: [{'w' * 5}](https://example.com/{'u' * 50}) z") == 7,
+      [_fg._next_len(x) for x in ("home-other: abc", "my-x (builder): abc", "1. **my-x:** abc", "abc def ghi", "Status: abc", "home-other:abc")])
 refused("a long line among short ones is refused", lambda: create(next="home-other: first\n- " + n_long), "a line of next is")
 passes("a link in next counts by its text", lambda: create(next=f"home-other: read {link} " + "w" * 150))
 passes("a long command line of the owner's is not judged", lambda: create(next=f"{server.OWNER}: `" + "x " * 150 + "`"))
@@ -171,12 +172,12 @@ passes("config: …and 200 for next", lambda: create(next=n_ok))
 # ---- 6. the script question route writes bullets and goes through the full gate (the HTTP-level cases are in question_scenario)
 d, why = server._question_text("The retry failed twice.\nShould it go on?", "box", "q-script")
 check("the question route's text becomes bullets, then the Filed by bullet", why == "" and d == "- The retry failed twice.\n- Should it go on?\n- Filed by q-script (a script on box)", (d, why))
-passes("…and that text passes the gate as it is", lambda: server._gate_description(d))
+passes("…and that text passes the gate as it is", lambda: _fg._gate_description(d))
 d2, _ = server._question_text("x" * 300, "box", "q-script")
 check("a line over the limit is clipped to it, with an ellipsis", d2.splitlines()[0].endswith(" …") and len(d2.splitlines()[0]) <= 120, d2)
-passes("…and the clipped text passes the gate", lambda: server._gate_description(d2))
+passes("…and the clipped text passes the gate", lambda: _fg._gate_description(d2))
 writes.QUESTION.on = True
-refused("the gate has no question-route exemption any more: prose is refused while the flag is set", lambda: server._gate_description("Plain prose."), "not a `- ` bullet")
+refused("the gate has no question-route exemption any more: prose is refused while the flag is set", lambda: _fg._gate_description("Plain prose."), "not a `- ` bullet")
 writes.QUESTION.on = False
 
 # ---- 6b. the bullet marker, and the forms of a link
@@ -189,7 +190,7 @@ for name, md in (("a titled link", f'[board#1]({url} "a title")'), ("a titled li
                  ("one level of balanced parentheses in the url", f"[board#1](https://en.wikipedia.org/wiki/Foo_(bar){'u' * 120})"),
                  ("a plain link", f"[board#1]({url})")):
     line = f"- See {md} now"
-    check(f"fixture: {name} is long raw and short as read", len(line) > 120 and server._visible_len(line) == len("- See board#1 now"), (len(line), server._visible_len(line)))
+    check(f"fixture: {name} is long raw and short as read", len(line) > 120 and _fg._visible_len(line) == len("- See board#1 now"), (len(line), _fg._visible_len(line)))
     passes(f"a link counts by its text only: {name}", lambda line=line: create(line))
 refused("…while text after such a link still counts", lambda: create(f'- See [board#1]({url} "a title") ' + "w" * 120), "description bullet is")
 
@@ -232,7 +233,7 @@ check("bullets: more than max_lines: the last kept line says how many more, with
       BT.bullets("\n".join(f"l{i}" for i in range(1, 11)), 6, 120).splitlines() == [f"- l{i}" for i in range(1, 6)] + ["- …and 5 more"])
 check("bullets: a numbered list, \"e.g.\" and \"Dr.\" are kept as written (no sentence split)",
       BT.bullets("1. First step, e.g. this one.\n2) Dr. Kim signs it.", 8, 120) == "- First step, e.g. this one.\n- Dr. Kim signs it.")
-check("question: the clipped bullets pass the gate", all(_ok for _ok in [not server._gate_description(server._question_text("a " * 200 + "\n- " + LK + " " + "b " * 100, "box", "q")[0])]))
+check("question: the clipped bullets pass the gate", all(_ok for _ok in [not _fg._gate_description(server._question_text("a " * 200 + "\n- " + LK + " " + "b " * 100, "box", "q")[0])]))
 
 # ---- 6e. the question route: empty lines, a long sender
 d3, why3 = server._question_text("- \n...\n---\nReal line\n* \n", "box", "q")
@@ -241,7 +242,7 @@ d3b, why3b = server._question_text("- \n…\n", "box", "q")
 check("question: a text with no line of words is refused", d3b == "" and "no line of words" in why3b, (d3b, why3b))
 d4, why4 = server._question_text("Real line", "box", "s" * 300)
 check("question: a long sender is clipped like any bullet, so the text still passes the gate (never a 400)", why4 == "" and d4.splitlines()[-1].endswith(" …") and all(len(l) <= 120 for l in d4.splitlines()), (d4, why4))
-passes("…and the gate takes it", lambda: server._gate_description(d4))
+passes("…and the gate takes it", lambda: _fg._gate_description(d4))
 d5, why5 = server._question_text("Real line", "m" * 300, "q")
 check("question: a long machine name too", why5 == "" and all(len(l) <= 120 for l in d5.splitlines()), d5)
 d6, why6 = server._question_text("\n".join(f"line {i}" for i in range(1, 9)), "box", "q")
@@ -254,14 +255,14 @@ def timed(name, f, limit=2.0):          # CPU time of this process, so a loaded 
 for name, line in (("brackets", "[" * 40000), ("closing brackets", "]" * 40000), ("open links", "[a](<" * 8000), ("open titles", "[a](x (" * 6000), ("open quotes", '[a](x "' * 6000),
                    ("spaces after a destination", "[a](x" + " " * 40000), ("spaces inside the paren", "[a](" + " " * 40000), ("urls", "http://" * 5700), ("parens", "[a](" + "(" * 40000),
                    ("backticks", "`" * 40000), ("link texts", "[a]" * 13000), ("words", "word " * 8000), ("a command line", server.OWNER + ": `" + "x" * 40000)):
-    timed(f"_visible_len on {name}", lambda line=line: server._visible_len(line))
+    timed(f"_visible_len on {name}", lambda line=line: _fg._visible_len(line))
 for name, line in (("words", "home-other: " + "word " * 8000), ("brackets", "home-other: " + "[" * 40000), ("open links", "home-other: " + "[a](<" * 8000), ("a command", server.OWNER + ": `" + "x" * 40000), ("spaces", server.OWNER + ":" + " " * 40000 + "x")):
     def run_next(line=line):
-        try: server._gate_next(line)
+        try: _fg._gate_next(line)
         except server.ToolError: pass
     timed(f"_gate_next on {name}", run_next)
     def run_desc(line=line):
-        try: server._gate_description("- " + line)
+        try: _fg._gate_description("- " + line)
         except server.ToolError: pass
     timed(f"_gate_description on {name}", run_desc)
 t0 = time.process_time(); BT.clip_bullet("- " + "word " * 8000 + "[a](x) " * 2000, 120); BT.bullets("\n".join("word " * 600 for _ in range(8)), 8, 120)
@@ -272,7 +273,7 @@ timed("judge on 8 lines that open a fence and never close it, 40k times over a l
 timed("judge on a fenced block of 40,000 characters of words", lambda: BT.judge("```\n" + "word " * 8000 + "\n```", 8, 120))
 check("judge: fences pair off one at a time (a second block is a block, an unpaired last fence is none)",
       BT.judge("```\nprose a\n```\n- ok\n```x\nprose b\n```\n```\nprose c", 10, 120) == ("marker", "```", 0), BT.judge("```\nprose a\n```\n- ok\n```x\nprose b\n```\n```\nprose c", 10, 120))
-check("an owner-name line with spaces round the backticks is the whole-command form; prose after it is not", server._owner_command(f"  {server.OWNER}: `ls -l`  ") and not server._owner_command(f"{server.OWNER}: `ls` and more"), None)
+check("an owner-name line with spaces round the backticks is the whole-command form; prose after it is not", _fg._owner_command(f"  {server.OWNER}: `ls -l`  ") and not _fg._owner_command(f"{server.OWNER}: `ls` and more"), None)
 
 # ---- 6g. the way back, and the re-bullet pass held to the same line limit
 from stackshot.model import rebullet as RB
@@ -291,29 +292,29 @@ check("the rubric names the character limit it is given", "about 120 characters"
 import random
 QL = "> " + "He said that we should do it " * 5                  # a quote of about 150 characters
 check("judge: a `>` quote line is exempt from the marker (and a short one passes the gate)", BT.judge("- ok\n> his words", 8, 120) is None)
-passes("gate: a short `>` quote line is taken", lambda: server._gate_description("- ok\n> his words"))
-refused("gate: a `>` quote line still gets the length check", lambda: server._gate_description("- ok\n" + QL), "characters, the limit is 120")
+passes("gate: a short `>` quote line is taken", lambda: _fg._gate_description("- ok\n> his words"))
+refused("gate: a `>` quote line still gets the length check", lambda: _fg._gate_description("- ok\n" + QL), "characters, the limit is 120")
 FENCE = "- ok\n```\n" + "x" * 300 + "\nplain prose in a fence\n```"
 check("judge: a fenced block, fence lines included, is held to nothing but the line count", BT.judge(FENCE, 8, 120) is None)
-passes("gate: a fenced block with a long line and prose is taken", lambda: server._gate_description(FENCE))
-refused("gate: a fenced block counts toward max_lines", lambda: server._gate_description("```\n" + "\n".join("x" for _ in range(8)) + "\n```"), "lines, the limit is 8")
-refused("gate: an unclosed fence is no fence", lambda: server._gate_description("- ok\n```\nprose"), "not a `- ` bullet")
-refused("gate: an indented line that is not a bullet is prose", lambda: server._gate_description("- ok\n    continued text"), "not a `- ` bullet")
-passes("gate: an indented bullet is a bullet", lambda: server._gate_description("- ok\n    - nested"))
+passes("gate: a fenced block with a long line and prose is taken", lambda: _fg._gate_description(FENCE))
+refused("gate: a fenced block counts toward max_lines", lambda: _fg._gate_description("```\n" + "\n".join("x" for _ in range(8)) + "\n```"), "lines, the limit is 8")
+refused("gate: an unclosed fence is no fence", lambda: _fg._gate_description("- ok\n```\nprose"), "not a `- ` bullet")
+refused("gate: an indented line that is not a bullet is prose", lambda: _fg._gate_description("- ok\n    continued text"), "not a `- ` bullet")
+passes("gate: an indented bullet is a bullet", lambda: _fg._gate_description("- ok\n    - nested"))
 # parallel bullets nest under one parent, indented two spaces; a nested line is a line for max_lines and is held to line_max like any other
 NEST = "- Three batches\n  - Batch 1: the gate\n  - Batch 2: the prompt\n  - Batch 3: the tests"
 check("judge: a parent with three `  - ` children passes", BT.judge(NEST, 8, 120) is None, BT.judge(NEST, 8, 120))
-passes("gate: a parent with three `  - ` children is taken", lambda: server._gate_description(NEST))
+passes("gate: a parent with three `  - ` children is taken", lambda: _fg._gate_description(NEST))
 check("judge: a nested line counts as a line for max_lines", BT.judge(NEST, 4, 120) is None and BT.judge(NEST, 3, 120) == ("lines", "", 4), BT.judge(NEST, 3, 120))
 check("judge: a nested line is held to line_max, indent not counted", BT.judge("- Parent\n  " + bullet(120), 8, 120) is None and BT.judge("- Parent\n  " + bullet(121), 8, 120) == ("long", "  " + bullet(121), 121), BT.judge("- Parent\n  " + bullet(121), 8, 120))
-refused("gate: a nested line over the limit is refused", lambda: server._gate_description("- Parent\n  " + bullet(121)), "bullet is 121 characters")
+refused("gate: a nested line over the limit is refused", lambda: _fg._gate_description("- Parent\n  " + bullet(121)), "bullet is 121 characters")
 refused("gate: the refusal hint says parallel bullets nest under a parent, indented two spaces", lambda: create("A thing. It lives here."), "parallel bullets such as batches, steps or parts go under one parent bullet, indented two spaces")
 check("rebullet.verdict: a rewrite that nests its items two spaces under the lead is accepted", RB.verdict("Three batches. Batch 1 the gate. Batch 2 the prompt. Batch 3 the tests.", "- Three batches\n  - Batch 1 the gate\n  - Batch 2 the prompt\n  - Batch 3 the tests", line_max=120) == "", RB.verdict("Three batches. Batch 1 the gate. Batch 2 the prompt. Batch 3 the tests.", "- Three batches\n  - Batch 1 the gate\n  - Batch 2 the prompt\n  - Batch 3 the tests", line_max=120))
 check("rebullet.parse keeps the indent of a nested bullet", RB.parse("- Parent\n  - Child one\n  - Child two") == "- Parent\n  - Child one\n  - Child two", RB.parse("- Parent\n  - Child one\n  - Child two"))
 for name, txt in (("a quote line", "- ok\n> his words"), ("a long quote line", "- ok\n" + QL), ("a fence", FENCE), ("an indented line", "- ok\n  more prose"), ("prose", "Plain prose."),
                   ("a long bullet", "- " + "word " * 40), ("nine lines", "\n".join("- x" for _ in range(9))), ("a clean text", "- a\n- b")):
     try:
-        server._gate_description(txt); gate_says = True
+        _fg._gate_description(txt); gate_says = True
     except server.ToolError:
         gate_says = False
     form = RB.verdict("Zq " + txt, txt, line_max=120)       # the old text is the text with a word before it: nothing lost, the form is all that is judged
@@ -345,7 +346,7 @@ for _ in range(3000):
     if not out:
         continue
     try:
-        server._gate_description(out)
+        _fg._gate_description(out)
     except server.ToolError as e:
         bad.append((text[:200], out[:300], str(e)[:200])); break
 check("fuzz: 3000 random texts through bullet_text.bullets all pass _gate_description", not bad, bad)
@@ -383,23 +384,23 @@ for _ in range(20000):
         bad.append((line[:150], lm, c)); break
 check("fuzz: clip_bullet on a link with a naked URL touching it, words of every kind (20000 lines), reads within its limit (1235 of 60000 failed before)", not bad, bad)
 lone = BT.clip_bullet("- [" + "long words " * 30 + "](https://example.com/page)", 120)
-check("clip: a lone long link keeps its link (words clipped) and passes the gate", "](https://example.com/page)" in lone and not server._gate_description(lone), lone)
+check("clip: a lone long link keeps its link (words clipped) and passes the gate", "](https://example.com/page)" in lone and not _fg._gate_description(lone), lone)
 # the switches: require_bullets = false is the whole way back
 d_cfg["require_bullets"] = False
 LONGN = "home-other: " + "word " * 60
-passes("require_bullets = false: a next line over 200 characters is taken again", lambda: server._gate_next(LONGN))
+passes("require_bullets = false: a next line over 200 characters is taken again", lambda: _fg._gate_next(LONGN))
 check("…and read as the old note", "a line over 200 characters" in server._report_note(LONGN), server._report_note(LONGN))
 dq, whyq = server._question_text("Real line one\n1. numbered\n" + "z " * 100, "box", "q")
 check("require_bullets = false: the question route keeps its old form (lines as written, then a blank line and the plain provenance line)",
       whyq == "" and dq.endswith("\n\nFiled by q (a script on box)") and dq.startswith("Real line one\n1. numbered\n"), (dq[-80:], whyq))
 d_cfg.pop("require_bullets")
-refused("…and back on by default: the next line is refused again", lambda: server._gate_next(LONGN), "a line of next is")
+refused("…and back on by default: the next line is refused again", lambda: _fg._gate_next(LONGN), "a line of next is")
 check("…and the question route bullets again", server._question_text("Real line one", "box", "q")[0].startswith("- Real line one"))
 was_next = n_cfg.get("line_max")
 n_cfg["line_max"] = 0
-passes("[metadata.next] line_max = 0 means off: a long next line is taken", lambda: server._gate_next(LONGN))
+passes("[metadata.next] line_max = 0 means off: a long next line is taken", lambda: _fg._gate_next(LONGN))
 check("…and the old note returns", "a line over 200 characters" in server._report_note(LONGN), server._report_note(LONGN))
-passes("…while the description gate still holds", lambda: server._gate_description("- ok"))
+passes("…while the description gate still holds", lambda: _fg._gate_description("- ok"))
 if was_next is None: del n_cfg["line_max"]
 else: n_cfg["line_max"] = was_next
 
@@ -451,10 +452,10 @@ d64 = json.loads((T / "store/a/64.json").read_text()); d64["status"] = "complete
 passes("a reopen is unaffected by a stored 300-character reason", lambda: server._update("a64", status="open", next=f"{MAIN}: take it up again", sender=MAIN))
 check("…the reason is dropped by the reopen as before", "reason" not in json.loads((T / "store/a/64.json").read_text())["metadata"])
 # the server's own closes keep to the limit by cutting, and never fail
-check("_fit: text within the limit is returned as one line", server._fit("a  b\nc", 10) == "a b c")
-fitted = server._fit("word " * 100, 120)
-check("_fit: text over the limit is cut at a word, with the ellipsis, within the limit", len(fitted) <= 120 and fitted.endswith(" …") and server._fit("x" * 300, 120).endswith(" …") and len(server._fit("x" * 300, 120)) == 120, (len(fitted), fitted))
-check("_fit: 0 means no limit", len(server._fit("word " * 100, 0)) == 499)
+check("_fit: text within the limit is returned as one line", _fg._fit("a  b\nc", 10) == "a b c")
+fitted = _fg._fit("word " * 100, 120)
+check("_fit: text over the limit is cut at a word, with the ellipsis, within the limit", len(fitted) <= 120 and fitted.endswith(" …") and _fg._fit("x" * 300, 120).endswith(" …") and len(_fg._fit("x" * 300, 120)) == 120, (len(fitted), fitted))
+check("_fit: 0 means no limit", len(_fg._fit("word " * 100, 0)) == 499)
 long_subject_item(65, "[home] done check")
 d65 = json.loads((T / "store/a/65.json").read_text()); d65["metadata"]["check"] = "item_closed a67"; (T / "store/a/65.json").write_text(json.dumps(d65))
 was_label = checks_svc.check_label; checks_svc.check_label = lambda c: "label " * 60

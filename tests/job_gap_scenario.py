@@ -57,6 +57,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+from stackshot.model import field_gates as _fg
 from stackshot.web.tools import get as _wt_get
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
@@ -155,7 +156,7 @@ st, c = jg("clear", repo=None)
 check("clear: 200 with the closed item's id, the timer and the code", st == 200 and c["cleared"] == [gid1] and c["timer"] == "sala-foo.timer" and c["code"] == "no-lane", (st, c))
 it = item(gid1)
 check("…the item is completed, outcome done, a one-line reason within the limit that names the code, the end state in outcome_text and the description kept", it["status"] == "completed" and it["metadata"].get("outcome") == "done"
-      and "no-lane is fixed on sala-foo.timer" in it["metadata"].get("reason", "") and len(it["metadata"]["reason"]) <= server._close_reason_max() and it["metadata"]["outcome_text"].splitlines()[0] == "- sala-foo.timer: the gap (no-lane) is fixed"
+      and "no-lane is fixed on sala-foo.timer" in it["metadata"].get("reason", "") and len(it["metadata"]["reason"]) <= _fg._close_reason_max() and it["metadata"]["outcome_text"].splitlines()[0] == "- sala-foo.timer: the gap (no-lane) is fixed"
       and it["metadata"]["outcome_text"].splitlines()[-1].startswith("- Closed by sala-unit-gaps (a script on") and "is fixed" not in it["description"], (it["status"], it["metadata"].get("reason"), it["description"]))
 settle()
 check("…the close tells no session and charges no page; the other gaps stay open", pushed == [] and server._owed_load() == {} and open_for("sala-foo.timer", "not-git") != [] and open_for("sala-foo.timer", "no-lane") == [], (pushed, server._owed_load()))
@@ -241,7 +242,7 @@ sub = item(o["item"])["subject"] if st == 200 else ""
 check("the longest timer and code the call takes: still a subject within the limit", st == 200 and len(sub) <= 80, (st, o, sub)); jg("clear", timer="t" * 120, code="a" * 40, repo=None)
 st, o = jg("open", timer="sala-detail.timer", detail="x" * 600)
 dd = item(o["item"])["description"].splitlines() if st == 200 else []
-max_lines, line_max = server._description_limits()
+max_lines, line_max = _fg._description_limits()
 check("a detail of 600 characters: the bullet is cut to the line limit, the item is made", st == 200 and len(dd) <= max_lines and all(len(x) <= line_max for x in dd) and any("xxx" in x and x.endswith("…") for x in dd), (st, dd))
 jg("clear", timer="sala-detail.timer", repo=None)
 st, e = jg("open", timer="sala-detail.timer", detail="y" * 601)

@@ -42,11 +42,13 @@ UNLAYERED = ("audit", "tools")          # reports and tools that read the packag
 ROOT_OK = ("stackshot", "stackshot.paths")      # the root modules a layer below the surface may import: the package itself and paths.py
 
 # What points the wrong way today (measured Tue Nov 10th 2026): (importing file, module it imports) → (how many imported names, the structure change
-# that removes it). The two in core/config.py and the one in projects/project_restore.py are lazy imports inside a function; model/ask_read's is at module level.
+# that removes it). The two in core/config.py and the one in projects/project_restore.py are lazy imports inside a function; model/ask_read's, model/decision_gates' and model/field_gates' are at module level.
 ALLOWED_TODAY = {
     ("stackshot/core/config.py", "stackshot.github.ghsync"): (1, "the passes move to service/: stall_item_answers, which reads an item through github/ghsync, leaves core/ with the stall pass for service/stall.py"),
     ("stackshot/core/config.py", "stackshot.waits.stall"): (2, "the passes move to service/: stall_auth and stall_notes, which call waits/stall, leave core/ with the stall pass for service/stall.py"),
     ("stackshot/model/ask_read.py", "stackshot.web.render"): (1, "the domain moves: the ask's parser (web/render.parse_ask) moves under model/ with the ask rules"),
+    ("stackshot/model/decision_gates.py", "stackshot.web.render"): (1, "the domain moves: the ask's parser and the option limits (web/render.parse_ask, mockup_hit, OPTIONS_MIN, OPTIONS_MAX, OPTION_LINE_MAX) move under model/ with the ask rules"),
+    ("stackshot/model/field_gates.py", "stackshot.web.render"): (1, "the domain moves: the ask's parser (web/render.parse_ask) moves under model/ with the ask rules"),
     ("stackshot/projects/project_restore.py", "stackshot.web.whatschanged"): (1, "the domain moves: the day wording (web/whatschanged.day_words) moves down to core/ beside the clock"),
 }
 

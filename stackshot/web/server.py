@@ -610,34 +610,16 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
 _gh.on_comment = _github_comment
 
 
-# The write-time field checks and the registry readers they use (field_gates.py), kept on this module as well: the writes, the tools and the suites call `server.<name>`. Private names no caller on this module reads stay in that module:
-# SUBJECT_MAX_DEFAULT, CLOSE_REASON_MAX_DEFAULT, _RECYCLE_ONLY, _GOAL_RETRY, _registry_hit.
-from stackshot.web.field_gates import (  # noqa: E402,F401
+# The write-time field limits the server's own writes read (model/field_gates.py): the subject, close-reason, description and next-line limits, the bullet switch and the idle-recycle wording.
+from stackshot.model.field_gates import (  # noqa: E402
     NEXT_PREFIX_ROOM,
     _bullets_on,
     _close_reason_max,
     _description_limits,
     _fit,
-    _fleet_tool,
-    _gate_bare_urls,
-    _gate_description,
-    _gate_goal,
-    _gate_metadata,
-    _gate_next,
-    _gate_recycle_item,
-    _gate_subject,
-    _marks_given,
     _next_len,
     _next_line_max,
-    _nl_text_without,
-    _owner_command,
-    _project_subject_prefix,
-    _registry_hits,
-    _registry_text,
-    _require_marks,
     _subject_max,
-    _SUBJECT_TAGGED,
-    _visible_len,
     _when_idle,
 )
 
@@ -1568,16 +1550,8 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
 # description that names alternatives while the item lists none is refused (_gate_alternatives), with a matcher kept narrow so a go/no-go ask passes (keywords in either; in the
 # Decide part also a list "x, y or z", "x vs y" and labeled choices, "A or B", "A (…) or B (…)", _lettered_alternatives). An ask whose Recommend part does not name the
 # recommended option's label gets a note in the reply (_options_note), never a refusal: scripts file asks of their own wording.
-# The decision gates live in decision_gates.py (_OPT_FORM and _OPT_RELAUNCH, the matchers' names, _gate_alternatives, _gate_open_question, _gate_mockup, _gate_one_decision, _gate_own_action,
-# _options_note, _actor_note); every name stays on this module as well, which is how the writes below, the tests and the tools reach them.
-from stackshot.web.decision_gates import (  # noqa: E402,F401
-    _OPT_FORM, _OPT_RELAUNCH, _lettered_alternatives, _alternatives, _gate_alternatives, _decide_of, _open_question, _gate_open_question, _gate_recommend_stance, _MOCKUP_ASK,
-    _gate_mockup, _CODE_ID, _CODE_REF_RX, _CODE_BARE_RX, _CODE_BARE_AFTER, _CODE_UNIT_RX, _CODE_PAREN_RX, _MANY_DECISIONS_RX, _URL_ENTITY_RX,
-    _code_defined, _one_decision_kind, _one_decision, _gate_one_decision, _OWN_VERBS, _OWN_DONE, _OWN_JUDGE_RX, _OWN_NOT_DO, _OWN_END, _OPEN_Q_RX,
-    _OWN_ALT_RX, _OWN_STOP, _OWN_MATCH_SHARE, _own_word, _own_words, _YESNO_LABELS, _GOAHEAD_LABELS, _own_action_rx, _labels_in, _yes_no_options,
-    _own_action_lines, _own_line_named, _own_action_ask, _gate_own_action, _recommend_missing, _options_note, _QUOTED_RX, _BARE_PRONOUN_RX,
-    _OPT_PRONOUN_RX, _ACTOR_EXAMPLE, _PRONOUN_HEAD, _PRONOUN_TAIL, _ROMAN_NOUN_RX, _ROMAN_SEP, _ROMAN_AFTER_RX, _ROMAN_BEFORE_RX, _roman_one, _bare_pronoun, _actor_note,
-)
+# The decision gates live in model/decision_gates.py (the option form and the matchers); this module reads the option form and the mockup form for the options gate below.
+from stackshot.model.decision_gates import _MOCKUP_ASK, _OPT_FORM  # noqa: E402
 
 
 # An option is drawn as a clickable card that selects or unselects, so a link inside its label or line would show as raw "[text](url)" text and could
@@ -3566,11 +3540,6 @@ def _holds_report() -> str:
     return "\n".join(out) + "\n"
 
 
-# The create reply's similar-items note (similar.py), kept on this module as well: the create tool calls `_similar_note`, and the similar-items suite reads `_subject_words` and `_similar_score` here. Private constants no caller on this module reads stay in that module:
-# _SIMILAR_DAYS, _SIMILAR_MIN, _SIMILAR_MAX, _SIMILAR_STOP.
-from stackshot.web.similar import _similar_note, _similar_score, _subject_words  # noqa: E402,F401
-
-
 def _model_of(item: dict[str, Any]) -> "_model.Model":
     """The item read by the model (model.py): the state, the effective mover and the effective wait, from the stored fields and today's state."""
     gid, m = str(item.get("gid") or item.get("id") or ""), item.get("metadata") or {}
@@ -4102,12 +4071,7 @@ _wake_hooks.install(_wake_hooks.Hooks(
 # the recovery request, the page store, the publish and the session ids. A hook leaves this table when the area that holds it moves under service/.
 _handoff_hooks.install(_handoff_hooks.Hooks(
     after_open=_late("_after_open"),
-    bullets_on=_late("_bullets_on"),
-    close_reason_max=_late("_close_reason_max"),
-    description_limits=_late("_description_limits"),
-    fit=_late("_fit"),
     front_pair_ok=_late("_front_pair_ok"),
-    gate_description=_late("_gate_description"),
     item_refs=_late("_item_refs"),
     ladder_enter=lambda *a, **k: _laddersvc.ladder_enter(*a, **k),
     ladder_first=lambda *a, **k: _laddersvc.ladder_first(*a, **k),
@@ -4170,9 +4134,7 @@ _stall_hooks.install(_stall_hooks.Hooks(
 # the pull-request key, the hold readers of the item model, the publish, the session ids and rosters, the write gates' field limits, the renderer's answer for whose move it is and the mark of a wait the server set
 # back. A hook leaves this table when the area that holds it moves under service/.
 _checks_hooks.install(_checks_hooks.Hooks(
-    close_reason_max=_late("_close_reason_max"),
     date_parked=_late("_date_parked"),
-    fit=_late("_fit"),
     hold_flag=_late("_hold_flag"),
     is_held=_late("_is_held"),
     own_repo=_late("_own_repo"),
@@ -4231,7 +4193,6 @@ _foryou_hooks.install(_foryou_hooks.Hooks(
 # What a create still reaches on this module (service/create.py runs the create in its order): the gates and notices the update tool, the close and the telling share, the three thread-local flags
 # and two constants. A hook leaves this table when the area that holds it moves under service/.
 _create_svc.install(_create_svc.Hooks(
-    actor_note=_late("_actor_note"),
     after_open=_late("_after_open"),
     anchor_wait_gate=_late("_anchor_wait_gate"),
     ask_owed=_late("_ask_owed"),
@@ -4240,42 +4201,25 @@ _create_svc.install(_create_svc.Hooks(
     fallback_wait_date=_late("_fallback_wait_date"),
     fmt=_late("_fmt"),
     form_notes=_late("_form_notes"),
-    gate_alternatives=_late("_gate_alternatives"),
     gate_ask=_late("_gate_ask"),
-    gate_bare_urls=_late("_gate_bare_urls"),
-    gate_description=_late("_gate_description"),
-    gate_goal=_late("_gate_goal"),
-    gate_metadata=_late("_gate_metadata"),
-    gate_mockup=_late("_gate_mockup"),
-    gate_next=_late("_gate_next"),
-    gate_one_decision=_late("_gate_one_decision"),
-    gate_open_question=_late("_gate_open_question"),
     gate_options=_late("_gate_options"),
-    gate_own_action=_late("_gate_own_action"),
-    gate_recommend_stance=_late("_gate_recommend_stance"),
-    gate_recycle_item=_late("_gate_recycle_item"),
-    gate_subject=_late("_gate_subject"),
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
     model_guards_on=_late("_model_guards_on"),
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     next_put=_late("_next_put"),
-    options_note=_late("_options_note"),
     owed_mark=_late("_owed_mark"),
     owner_then_default=_late("_owner_then_default"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
-    project_subject_prefix=_late("_project_subject_prefix"),
     publish=_late("_publish"),
     record_fixes=_late("_record_fixes"),
     refuse_if_owing=_late("_refuse_if_owing"),
     said_note=_late("_said_note"),
     session_id=_late("_session_id"),
-    similar_note=_late("_similar_note"),
     wait_alias_gate=_late("_wait_alias_gate"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     writer_owes=_late("_writer_owes"),
     ask_none=_ASK_NONE,
-    subject_tagged=_SUBJECT_TAGGED,
 ))
 
 
@@ -4978,7 +4922,6 @@ _gates.install(_gates.Hooks(
     ask_none=_ASK_NONE,
     ask_stands=_late("_ask_stands"),
     basis_words=_BASIS_WORDS,
-    close_reason_max=_late("_close_reason_max"),
     close_refusal=_CLOSE_REFUSAL,
     contact_alive=_late("_contact_alive"),
     contact_fronts=_late("_contact_fronts"),
@@ -4987,7 +4930,6 @@ _gates.install(_gates.Hooks(
     follow_superseded=_late("_follow_superseded"),
     front_held=_late("_front_held"),
     front_pair_ok=_late("_front_pair_ok"),
-    gate_description=_late("_gate_description"),
     handoffs_in=_late("_handoffs_in"),
     handover_kind=lambda *a, **k: _proofs.handover_kind(*a, **k),
     hub_sessions=_late("_hub_sessions"),
@@ -5017,7 +4959,6 @@ _gates.install(_gates.Hooks(
 # What an update still reaches on this module (service/update.py runs the update in its order): the gates and notices the create tool, the close and the telling share, the per-write flags and a few constants.
 # A hook leaves this table when the area that holds it moves under service/.
 _update_svc.install(_update_svc.Hooks(
-    actor_note=_late("_actor_note"),
     after_open=_late("_after_open"),
     anchor_wait_gate=_late("_anchor_wait_gate"),
     ask_none=_ASK_NONE,
@@ -5038,20 +4979,8 @@ _update_svc.install(_update_svc.Hooks(
     finishes_own_line=_late("_finishes_own_line"),
     fmt=_late("_fmt"),
     form_notes=_late("_form_notes"),
-    gate_alternatives=_late("_gate_alternatives"),
     gate_ask=_late("_gate_ask"),
-    gate_bare_urls=_late("_gate_bare_urls"),
-    gate_description=_late("_gate_description"),
-    gate_goal=_late("_gate_goal"),
-    gate_metadata=_late("_gate_metadata"),
-    gate_mockup=_late("_gate_mockup"),
-    gate_next=_late("_gate_next"),
-    gate_one_decision=_late("_gate_one_decision"),
-    gate_open_question=_late("_gate_open_question"),
     gate_options=_late("_gate_options"),
-    gate_own_action=_late("_gate_own_action"),
-    gate_recommend_stance=_late("_gate_recommend_stance"),
-    gate_subject=_late("_gate_subject"),
     handoffs_in=_late("_handoffs_in"),
     hold_held_by=_late("_hold_held_by"),
     hold_set=_late("_hold_set"),
@@ -5059,15 +4988,12 @@ _update_svc.install(_update_svc.Hooks(
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
     main_agent=_late("_main_agent"),
-    marks_given=_late("_marks_given"),
     model_apply=_late("_model_apply"),
     model_guards_on=_late("_model_guards_on"),
     model_of=_late("_model_of"),
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     name_on_write=_late("_name_on_write"),
     next_put=_late("_next_put"),
-    nl_text_without=_late("_nl_text_without"),
-    options_note=_late("_options_note"),
     owed_mark=_late("_owed_mark"),
     owner_quote_on=_late("_owner_quote_on"),
     owner_state_mover=_late("_owner_state_mover"),
@@ -5082,7 +5008,6 @@ _update_svc.install(_update_svc.Hooks(
     render_option_lines=lambda *a, **k: _rmod.option_lines(*a, **k),
     render_same_ref=lambda *a, **k: _rmod.same_ref(*a, **k),
     render_when_words=lambda *a, **k: _rmod.when_words(*a, **k),
-    require_marks=_late("_require_marks"),
     said_note=_late("_said_note"),
     scoped_anchors=_late("_scoped_anchors"),
     session_id=_late("_session_id"),
@@ -5584,7 +5509,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
     """One read of the client API → (status, content type, body)."""
     if what == "registry":
         try:
-            return 200, "application/json", _registry_text()
+            return 200, "application/json", _gates.registry_text()
         except Exception:
             return 503, "text/plain", "no registry yet"
     if what == "roles":                 # roles.json as the server keeps it; written here first if it is not there yet

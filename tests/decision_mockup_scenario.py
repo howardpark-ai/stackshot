@@ -1,4 +1,4 @@
-"""Scenario test for a design decision's mockup link (server._gate_mockup and ui/render.mockup_url) — fixture data, no live
+"""Scenario test for a design decision's mockup link (decision_gates._gate_mockup and ui/render.mockup_url) — fixture data, no live
 store, no network, no server socket.
 
   1  the write gate: create and update refuse a needs=decision write whose description or next links a claude.ai artifact page while the

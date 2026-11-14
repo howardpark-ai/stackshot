@@ -57,6 +57,7 @@ def tool(*args, store=None):
     return r.returncode, r.stdout, r.stderr
 
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.model import ids as _model_ids
+from stackshot.service import gates as _gates
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 p.cmd_registry(quiet=True)
 ids = {k: e["id"] for k, e in reg().items()}
@@ -278,11 +279,11 @@ for label, f in (("registry", prj.registry), ("build", prj.build), ("list_projec
                  ("refs", lambda: prj.refs(NOPAGE)), ("id_to_key", lambda: prj.id_to_key(NOPAGE)), ("to_key", lambda: prj.to_key(NOPAGE)), ("with_made", lambda: prj.with_made(prj.registry())),
                  ("with_pending", lambda: prj.with_pending(prj.registry())), ("sync", lambda: prj.sync(force=True)), ("anchors.registry", anchors.registry), ("session_roles", lambda: anchors.session_roles(anchors.registry(), set())),
                  ("pilot_roots", anchors.pilot_roots), ("pages.load_registry", p.load_registry), ("server registry", lambda: server._registry("projects")), ("client registry", lambda: server._client_get("registry", {})),
-                 ("registry hits", lambda: server._registry_hits("projects", NOPAGE)), ("recent_items", lambda: prj.recent_items(prj.registry()))):
+                 ("registry hits", lambda: _gates.registry_hits("projects", NOPAGE)), ("recent_items", lambda: prj.recent_items(prj.registry()))):
     try: f()
     except Exception as ex: crash.append((label, repr(ex)))
 check("no page: no reader of the registry crashes on it", not crash, crash)
-check("no page: it adds no row to a registry keyed by page (it is reached by resolve), and the others are as they were", set(prj.registry()) == keys0 and prj.ref(NOPAGE) is None and prj.id_to_key(NOPAGE) == "" and server._registry_hits("projects", NOPAGE) == [])
+check("no page: it adds no row to a registry keyed by page (it is reached by resolve), and the others are as they were", set(prj.registry()) == keys0 and prj.ref(NOPAGE) is None and prj.id_to_key(NOPAGE) == "" and _gates.registry_hits("projects", NOPAGE) == [])
 def create(project, owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, owner=owner, **{"next": f"{owner}: carry on", "mover": owner, **kw})
 def refusal(project, owner="home-nopage-main"):
     try: create(project, owner); return ""

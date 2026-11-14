@@ -1,4 +1,4 @@
-"""Scenario test for the gate that keeps the item page's Yes / No fallback from being asked an open question (server._gate_open_question) and the Recommend note beside it — fixture
+"""Scenario test for the gate that keeps the item page's Yes / No fallback from being asked an open question (decision_gates._gate_open_question) and the Recommend note beside it — fixture
 data, no live store, no network, no server socket.
 
   1  the open-question gate on a create: a needs=decision item with no options is refused when the Decide part of its ask opens with what, which, how, who, whom, whose, when, where or why (each of the nine),
@@ -79,6 +79,7 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.model import decision_gates as _dg
 from stackshot.service import watching as watching_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
@@ -185,18 +186,18 @@ check("3 update: …no note", "(note: the ask's Recommend" not in (out or ""), o
 ev = {"wait_event": "countersigned NDA"}
 for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options()), ("the drop question", wk.drop_ask(ev), wk.drop_options())):
     m = {"needs": ["decision"], "ask": ask, "options": opts, "watch": {"asked": "relay" if "relay" in what else "dropit"}}
-    check(f"4 watcher: {what} is no open question and its Recommend part is not judged", server._open_question(m) == "" and server._recommend_missing(m) == "", (ask, server._open_question(m)))
-    passes(f"4 watcher: {what} passes the open-question gate and names its recommended label", lambda m=m: (server._gate_open_question(m), server._recommend_missing(m)))
+    check(f"4 watcher: {what} is no open question and its Recommend part is not judged", _dg._open_question(m) == "" and _dg._recommend_missing(m) == "", (ask, _dg._open_question(m)))
+    passes(f"4 watcher: {what} passes the open-question gate and names its recommended label", lambda m=m: (_dg._gate_open_question(m), _dg._recommend_missing(m)))
     m2 = {**m, "options": None}
-    passes(f"4 watcher: {what} without its options is still the watcher's own and passes the open-question gate", lambda m2=m2: server._gate_open_question(m2))
+    passes(f"4 watcher: {what} without its options is still the watcher's own and passes the open-question gate", lambda m2=m2: _dg._gate_open_question(m2))
 wm = {"needs": ["decision"], "ask": "Decide: what has arrived? · Options: arrived / not yet, ask again on <date> / drop", "watch": {"asked": "relay"}}
-check("4 watcher: a watcher's own ask that happens to open with an interrogative word is read as the watcher's and not refused", server._open_question(wm) != "" and server._watch.asked_of(wm) == "relay", wm)
-passes("4 watcher: …the open-question gate lets it stand with no options", lambda: server._gate_open_question(wm))
-refused("4 watcher: …while the same words with no watcher mark on the item are refused", lambda: server._gate_open_question({k: v for k, v in wm.items() if k != "watch"}), *OQ[:3])
+check("4 watcher: a watcher's own ask that happens to open with an interrogative word is read as the watcher's and not refused", _dg._open_question(wm) != "" and server._watch.asked_of(wm) == "relay", wm)
+passes("4 watcher: …the open-question gate lets it stand with no options", lambda: _dg._gate_open_question(wm))
+refused("4 watcher: …while the same words with no watcher mark on the item are refused", lambda: _dg._gate_open_question({k: v for k, v in wm.items() if k != "watch"}), *OQ[:3])
 ask, opts = watching_svc.watch_ask("a1", {}, "its wait ended")
 m = {"needs": ["decision"], "ask": ask, "options": opts}
-check("4 post-wake: the question the server builds opens with “what” and lists two options, which name the recommended label", server._open_question(m) != "" and len(opts) == 2, (ask, opts))
-passes("4 post-wake: …and passes the open-question gate and names its recommended label", lambda: (server._gate_open_question(m), server._recommend_missing(m)))
+check("4 post-wake: the question the server builds opens with “what” and lists two options, which name the recommended label", _dg._open_question(m) != "" and len(opts) == 2, (ask, opts))
+passes("4 post-wake: …and passes the open-question gate and names its recommended label", lambda: (_dg._gate_open_question(m), _dg._recommend_missing(m)))
 # a cold call's ask_owner answer is written through the update, so the gates read it
 item(20, needs=["team-back"], mover="team-back", next="team-back: look at it")
 cold = server._ho.COLD

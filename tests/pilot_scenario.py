@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.model import decision_gates as _dg
 from stackshot.service import migrations as migsvc
 from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
@@ -1640,7 +1641,7 @@ check("actor: …naming who acts ends the note", "name who acts" not in res and 
 def opt_pair(label, line):
     return [{"label": label, "line": line, "recommended": True}, {"label": "B: Pat decides", "line": "Hold until Pat answers.", "recommended": False}]
 def actor_hits(label, line):
-    return server._actor_note({"options": opt_pair(label, line)}, ask=False)
+    return _dg._actor_note({"options": opt_pair(label, line)}, ask=False)
 res = actor_hits("I unpublish", "you click Unpublish")
 check("actor: the real case (label \"I unpublish\", line \"you click Unpublish\") is noted once for that option, with an example",
       res.count("name who acts") == 1 and "option \u201cI unpublish\u201d says \u201cI\u201d" in res and f"\u201c{server.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d" in res, res)
@@ -1665,11 +1666,11 @@ check("actor: a pronoun inside curly single quotes reads like one inside straigh
 check("actor: curly and straight apostrophes in a contraction are the same hit", "says \u201cI\u2019ll\u201d" in actor_hits("Pat unpublishes", "then I\u2019ll approve") and "says \u201cI'll\u201d" in actor_hits("Pat unpublishes", "then I'll approve"), "")
 check("actor: a quote does not hide a bare word next to it", "says \u201cyou\u201d" in actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'), actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'))
 check("actor: we/our/us are noted in an option only; the ask line keeps its own word list",
-      server._actor_note({"ask": "Decide: do we ship it · Recommend: yes", "options": []}) == "" and "says \u201cwe\u201d" in actor_hits("Pat ships", "we ship it"), "")
-res = server._actor_note({"options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
-check("actor: the module re-exports the word-list names", all(hasattr(server, n) for n in ("_OPT_PRONOUN_RX", "_ACTOR_EXAMPLE", "_PRONOUN_HEAD", "_PRONOUN_TAIL")), "")
+      _dg._actor_note({"ask": "Decide: do we ship it · Recommend: yes", "options": []}) == "" and "says \u201cwe\u201d" in actor_hits("Pat ships", "we ship it"), "")
+res = _dg._actor_note({"options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
+check("actor: the module holds the word-list names", all(hasattr(_dg, n) for n in ("_OPT_PRONOUN_RX", "_ACTOR_EXAMPLE", "_PRONOUN_HEAD", "_PRONOUN_TAIL")), "")
 check("actor: at most three option notes, one per option", res.count("name who acts") == 3, res)
-res = server._actor_note({"ask": "Decide: do you ship it", "options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
+res = _dg._actor_note({"ask": "Decide: do you ship it", "options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
 check("actor: three option notes fill the cap and the ask-line note still comes after them", res.count("name who acts") == 4 and res.rstrip().endswith("name who acts, e.g. " + f"\u201c{server.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d.)") and "the ask line says \u201cyou\u201d" in res.split("\n")[-1], res)
 res = actor_hits("", "you click Unpublish")
 check("actor: an option with an empty label is named by its place, not by empty quotes", "the line of option 1 says \u201cyou\u201d" in res and "\u201c\u201d" not in res, res)
@@ -1741,7 +1742,7 @@ for why, (decide, rec) in {
         "a single decision with `and` in its options": ("A and B together, or C", "A and B together"),
         "a worded single decision": ("whether the tool is plan-A-only or open to all lanes", "plan-A-only, since the cost is per seat")}.items():
     ask_ = mkask(decide, rec)["ask"]
-    check(f"one decision: {why} is accepted (the matcher)", server._one_decision({"ask": ask_}, "") == "", server._one_decision({"ask": ask_}, ""))
+    check(f"one decision: {why} is accepted (the matcher)", _dg._one_decision({"ask": ask_}, "") == "", _dg._one_decision({"ask": ask_}, ""))
 res = mkd(needs="decision", **mkask(f"ship the 2GB build, v3 and 1.2.3 on Fri Mar 13th at 10am with PR #53 and board#{BID_A}", "yes, 16px, 4K, 7B, 5m, 2d, 3d, $5b"))
 check("one decision: dates, versions, ids, sizes and times together pass on create", "created" in res, res)
 res = mkd(needs="decision", **mkask("A and B together, or C", "yes, A and B together; C costs a day more"))
@@ -1754,12 +1755,12 @@ for why, kw in {"2b = … in the description": mkask("ship 2b or 3a", "yes, 2b",
 for why, ask_, desc_ in (("A: … B: … in the description", mkask("take Option A or Option B", "Option A")["ask"], "A: plugins on plan A only. B: plugins on every lane. Done when decided."),
                          ("choice codes defined in the ask itself", mkask("take choice 1: Widget plan-A-only or choice 2: Widget on every lane", "choice 1")["ask"], ""),
                          ("(a) … (b) in the ask", mkask("(a) Widget plan-A-only or (b) Widget on every lane", "(a)")["ask"], "")):
-    r_ = server._one_decision({"ask": ask_}, desc_)
+    r_ = _dg._one_decision({"ask": ask_}, desc_)
     check(f"one decision: codes defined in the item are accepted ({why}; the matcher)", r_ == "", r_)
-check("one decision: defining the codes does not excuse an ask that packs several decisions", "several decisions" in server._one_decision({"ask": PACKED_ASK}, "2: plugins on plan A. 3: runner off plan A."), "")
-e = server._one_decision({"ask": mkask("take Option A or Option B", "Option A")["ask"]}, "A: plugins on plan A only. Done when decided.")
+check("one decision: defining the codes does not excuse an ask that packs several decisions", "several decisions" in _dg._one_decision({"ask": PACKED_ASK}, "2: plugins on plan A. 3: runner off plan A."), "")
+e = _dg._one_decision({"ask": mkask("take Option A or Option B", "Option A")["ask"]}, "A: plugins on plan A only. Done when decided.")
 check("one decision: a code with no definition is refused although another is defined (the matcher)", "Option B" in e or "B" in e, e)
-od = lambda ask_, desc_="", opts_=None: server._one_decision({"ask": ask_, "options": opts_}, desc_)
+od = lambda ask_, desc_="", opts_=None: _dg._one_decision({"ask": ask_, "options": opts_}, desc_)
 # options spelled out in plain prose, in the description, in a list or in bold are defined; a code pointed at by a unit or a place is none
 for why, (ask_, desc_) in {
         "`Option A (words)` in the ask": (mkask("take Option A (Widget plan-A-only) or Option B (all lanes)", "Option A")["ask"], ""),
@@ -1792,11 +1793,11 @@ for why, ask_ in {"`(a) or (b)`": mkask("take (a) or (b)", "(a)")["ask"], "`(a) 
 check("one decision: `(a) or (b)` defined in the description passes", od(mkask("take (a) or (b)", "(a)")["ask"], "(a) plan-A-only. (b) all lanes.") == "")
 check("one decision: a `;` followed by a space in a Decide still splits", "split by" in od(mkask("ship the fix; rename the repo")["ask"]), od(mkask("ship the fix; rename the repo")["ask"]))
 # the refusal's wording follows the rule that fired
-k_ = refusal(lambda: server._gate_one_decision({"ask": mkask("ship 2b or wait")["ask"]}, ""))
+k_ = refusal(lambda: _dg._gate_one_decision({"ask": mkask("ship 2b or wait")["ask"]}, ""))
 check("one decision: only the code rule fired → word the options or define each code, no advice to split", "define each code" in k_ and "A: " in k_ and "split it" not in k_ and "One decision per item" not in k_, k_)
-k_ = refusal(lambda: server._gate_one_decision({"ask": PACKED_ASK}, ""))
+k_ = refusal(lambda: _dg._gate_one_decision({"ask": PACKED_ASK}, ""))
 check("one decision: the several-decisions rule fired → split it into one item per decision", "split it into one item per decision" in k_ and "define each code" not in k_, k_)
-k_ = refusal(lambda: server._gate_one_decision({"ask": mkask("ship 2b or wait")["ask"]}, "", True))
+k_ = refusal(lambda: _dg._gate_one_decision({"ask": mkask("ship 2b or wait")["ask"]}, "", True))
 check("one decision: an ask lifted from next says so", k_.startswith("Refused: this ask (lifted from next's first line) "), k_)
 # an update: refused only when the ask is written or changed; the item keeps its ask
 g9 = gid_of(mk(needs="decision", ask=ASK))

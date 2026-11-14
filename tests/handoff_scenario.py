@@ -85,6 +85,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.model import field_gates as _fg
 from stackshot.service import handoff as handoff_svc, handoff_cold as hcold_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import wakes as wakes_svc
@@ -402,7 +403,7 @@ tick(d_i + 11 * MIN, 72); drain()
 dd = mt(72).get("outcome_text", ""); dl = dd.splitlines()
 check("5 cold: a prose close (numbered lines, \"e.g.\", \"Dr.\", a line over 120 characters; the older `description` key) still closes the item, its outcome text written as bullets within the limits, split on lines only",
       rd(72)["status"] == "completed" and rd(72).get("written_by") == "cold-call" and len(dl) == 4 and dl[0] == "- The thing is done and in use, e.g. the nightly run."
-      and dl[1] == "- Dr. Kim signed it off." and dl[3] == "- Nothing is left to do" + "." and all(l.startswith("- ") and server._visible_len(l) <= 120 for l in dl)
+      and dl[1] == "- Dr. Kim signed it off." and dl[3] == "- Nothing is left to do" + "." and all(l.startswith("- ") and _fg._visible_len(l) <= 120 for l in dl)
       and dl[2].endswith(" …") and "[the vendor" not in dl[2] , dd)
 check("5 cold: …the validator alone: a marker (-, *, a dot, 1. or 1)) is taken off once, a line of digits and punctuation is dropped, and sentences are not split",
       CC.bullets("* A star\n\u2022 A dot\n- A dash\n3) A paren\n 4. A number\n...\n---\n", 8, 120) == "- A star\n- A dot\n- A dash\n- A paren\n- A number"
@@ -414,15 +415,15 @@ check("5 cold: …more lines than max_lines: the last kept line says how many mo
 item(88, project="projects/gamma", owner=U["home-gamma-front"], needs=[])
 hand(88, "home-peer"); drain(); d_j = ho(88)["delivered_at"]
 before_a = rd(88)["description"]
-_gate_was = server._gate_description
+_gate_was = _fg._gate_description
 def _gate_refusing(desc, field="description"):
     if field == "outcome_text" and "Resolved:" in desc:
         raise server.ToolError("Refused: outcome_text is refused (test)")
     return _gate_was(desc, field)
-server._gate_description = _gate_refusing
+_fg._gate_description = _gate_refusing
 cold({"action": "close", "outcome": "done", "reason": "finished", "outcome_text": "Resolved: the thing is done."})
 tick(d_j + 11 * MIN, 88); drain()
-server._gate_description = _gate_was
+_fg._gate_description = _gate_was
 check("5 cold: a close whose outcome text the gate refuses leaves the item open and unchanged, the record says why, the ladder goes on",
       rd(88)["status"] == "open" and rd(88)["description"] == before_a and "outcome" not in mt(88) and (ho(88).get("cold") or {}).get("state") == "failed"
       and "refused" in json.dumps(ho(88)) and ho(88).get("to") == "home-send", (rd(88)["status"], rd(88)["description"], ho(88)))
