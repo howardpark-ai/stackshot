@@ -863,9 +863,9 @@ check("nothing stored (today's behaviour, unchanged): decision out of needs, no 
       answer_svc._answer("a53", "Yes", "", "") == "decision" and not any(k in rd("a", 53)["metadata"] for k in ("mover", "then", "needs")) and b(53).mover == "home-here" and not b(53).conflicts
       and [t[1] for t in told if t[0] == "a53"] == [OWNER], (rd("a", 53)["metadata"], b(53), told))
 told.clear()
-check("F1, a hold with a wake still standing: the stored mover Oliver goes, the item reads waiting with no model conflict, it is a time wait to home-agent (wait_kind time, post_wake_mover home-agent, watch.set_at stamped), then cleared, nobody told it is theirs",
-      answer_svc._answer("a58", "Yes", "", "") == "decision" and "mover" not in rd("a", 58)["metadata"] and "then" not in rd("a", 58)["metadata"] and "needs" not in rd("a", 58)["metadata"]
-      and rd("a", 58)["metadata"].get("wait_kind") == "time" and rd("a", 58)["metadata"].get("post_wake_mover") == "home-agent" and rd("a", 58)["metadata"].get("watch", {}).get("set_at")
+check("F1, a hold with a wake still standing: the stored mover Oliver goes, the item reads waiting with no model conflict, it is a time wait to home-agent (wait_kind time, mover home-agent, watch.set_at stamped), then cleared, nobody told it is theirs",
+      answer_svc._answer("a58", "Yes", "", "") == "decision" and rd("a", 58)["metadata"].get("mover") == "home-agent" and "then" not in rd("a", 58)["metadata"] and "needs" not in rd("a", 58)["metadata"]
+      and rd("a", 58)["metadata"].get("wait_kind") == "time" and "post_wake_mover" not in rd("a", 58)["metadata"] and rd("a", 58)["metadata"].get("watch", {}).get("set_at")
       and b(58).state == "waiting" and not b(58).conflicts and not any("yours now" in t[2] for t in told if t[0] == "a58"), (rd("a", 58)["metadata"], b(58), told))
 _out = {}
 watching_svc.watch_fire("a58", "time", time.time(), _out)
@@ -890,9 +890,9 @@ check("F1, a60 followed to the end of its after: home-agent moves it (mover, fir
       b(60).state == "alive" and b(60).mover == "home-agent" and not b(60).conflicts and rd("a", 60)["metadata"].get("needs") == [AGENT] and "then" not in rd("a", 60)["metadata"]
       and any(t[0] == "a60" and t[1] == AGENT for t in told), (rd("a", 60)["metadata"], b(60), told))
 told.clear()
-check("F2, a pick that carries a wake with a then: it waits on its until, the mover Oliver and the then are gone, the time wait's post-wake mover is the then (stamped), no model conflict",
-      answer_svc._answer("a61", "Park", "", "") == "decision" and hd_(rd("a", 61)["metadata"]) is True and wk_(rd("a", 61)["metadata"]) == "2099-01-01" and "mover" not in rd("a", 61)["metadata"]
-      and "then" not in rd("a", 61)["metadata"] and rd("a", 61)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 61)["metadata"]
+check("F2, a pick that carries a wake with a then: it waits on its until, the mover Oliver and the then are gone, the time wait's picker, stored as mover, is the then (stamped), no model conflict",
+      answer_svc._answer("a61", "Park", "", "") == "decision" and hd_(rd("a", 61)["metadata"]) is True and wk_(rd("a", 61)["metadata"]) == "2099-01-01" and rd("a", 61)["metadata"].get("mover") == "home-agent"
+      and "then" not in rd("a", 61)["metadata"] and "post_wake_mover" not in rd("a", 61)["metadata"] and "wait_kind" not in rd("a", 61)["metadata"]
       and rd("a", 61)["metadata"].get("watch", {}).get("set_at")
       and b(61).state == "waiting" and b(61).wait.post_wake_mover == "home-agent" and not b(61).conflicts, (rd("a", 61)["metadata"], b(61)))
 _out = {}
@@ -913,8 +913,8 @@ told.clear()
 check("a park on an item that also has external in needs: no time wait is stored, then is dropped, the item reads waiting with no conflict",
       answer_svc._answer("a64", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 64)["metadata"] and "post_wake_mover" not in rd("a", 64)["metadata"] and "then" not in rd("a", 64)["metadata"]
       and "external" in rd("a", 64)["metadata"].get("needs", []) and not b(64).conflicts, (rd("a", 64)["metadata"], b(64)))
-check("a park with a then stored its post-wake mover; update clear_hold=true releases it and drops the wait's fields with it (wait_kind, post_wake_mover, watch), no refusal, no conflict",
-      answer_svc._answer("a65", "Park", "", "") == "decision" and rd("a", 65)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 65)["metadata"]
+check("a park with a then stored its picker as mover; update clear_hold=true releases it and drops the wait's fields with it (wait_kind, post_wake_mover, watch), no refusal, no conflict",
+      answer_svc._answer("a65", "Park", "", "") == "decision" and rd("a", 65)["metadata"].get("mover") == "home-agent" and "wait_kind" not in rd("a", 65)["metadata"]
       and (_update_svc._update("a65", clear_hold=True, sender="home-agent") or True) and not any(k in rd("a", 65)["metadata"] for k in ("hold", "wake", "wait_kind", "post_wake_mover", "watch", "then"))
       and b(65).state == "alive" and not b(65).conflicts, (rd("a", 65)["metadata"], b(65)))
 told.clear()

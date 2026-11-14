@@ -1,17 +1,19 @@
 """Scenario test for the server's own writers of a waiting item's picker — fixture data, no live store, no network, no server socket.
 
-Three places store who picks a waiting item up when the wait ends as `mover`, no longer as the old key `post_wake_mover`: the state migration's plan, the cold call's answer and the save rule. Three writers stay on the old key
-on purpose, because storing `mover` there would change what a later clear_hold, clear_wait or clear_wake leaves: the wait-end fix, the answer hand-over and `remember`/`restore_wait`. Every read of the picker is as before (the same
-picker, the same session told, the same arrival). On every save that names the picker, a write that sets a different `mover` on a waiting item drops a stored old key (the old key reads first, so it would outvote the new
-mover), `clear_mover` and `clear_wait` drop both keys, and `clear_wait` also drops a stored `mover` that is he (the pick-up went with the wait) while an agent's `mover` stays as the live mover. Covered:
+Every place that stores who picks a waiting item up when the wait ends stores it as `mover`, no longer as the old key `post_wake_mover`: the state migration's plan, the cold call's answer, the save rule, the wait-end fix,
+the answer hand-over and `remember`/`restore_wait`. Every read of the picker is as before (the same picker, the same session told, the same arrival), and an item that still stores the old key reads and ends as it did. On every
+save that names the picker, a write that sets a different `mover` on a waiting item drops a stored old key (the old key reads first, so it would outvote the new mover), `clear_mover` and `clear_wait` drop both keys, and
+`clear_wait` also drops a stored `mover` that is he (the pick-up went with the wait) while an agent's `mover` stays as the live mover. A wait or a hold never changes who moves the item: `clear_wait` and `clear_hold` leave
+the agent the item was handed to as the mover, whichever key stored it. Covered:
 
-  1  wait-end fix    each op of the filing pass's wait fix (after, event, anchor) stores the picker as it did (the old key): deferred on purpose, see 9
-  2  hand-over       a decision's hand-over of a time wait (a hold with a wake, a wait on a date alone) is exactly as on main (the one writer deferred to the later steps: it still stores the old key, so a later
-                     clear_hold, clear_wait or clear_wake ends as it always did); the shapes that store nothing (external, an open after, a hold with no wake, a dead then, the watchers off) are as they were
-  3  snapshot        a watch.was snapshot and its restore are as on main (deferred on purpose, see 9): each key goes back as it was stored (the old word none included); was_picker reads every form
+  1  wait-end fix    each op of the filing pass's wait fix (after, event, anchor) stores the picker as `mover` and drops an old key it finds
+  2  hand-over       a decision's hand-over of a time wait (a hold with a wake, a wait on a date alone) stores the picker as `mover`; the shapes that store nothing (external, an open after, a hold with no wake, a dead then,
+                     the watchers off) are as they were
+  3  snapshot        a watch.was snapshot holds the picker as `mover`, an old snapshot is put back as `mover`; was_picker reads every form
   4  plan            the cold call's answer key stays post_wake_mover, the validated answer carries `mover`; the state migration's plan sets `mover` and drops a stored old key; its route applies the save rule
   5  save rule       an update that sets mover on a waiting item with an old key stored; clear_mover and clear_wait on each form (old key, mover, both, he, an agent); an alive item; an item with external in needs
   6  differential    an item stored under the old key against the same stored as `mover`: the picker, the session told, the arrival, the item after the wake — equal, but for the word held_by gives
+  9  clears          each writer's wait, ended by clear_wait or clear_hold, leaves the agent it was handed to as the live mover (the picker stored as `mover` and an old item that stores the old key alike)
 
     tests/run-suite mover_writers        → exit 0 / 1"""
 import json, logging, os, pathlib, re, sys, time
@@ -130,7 +132,7 @@ gitem(9204, f"zed-back: wait for {ref(9202)} to close, then write the summary", 
 r = fix_pass()
 for n in (9201, 9203, 9204):
     m_ = mt(n, "g"); mod_ = model.derive(rd(n, "g"), now0)
-    check(f"1 after (g{n}): the item waits on the item's close, with the mover stored as the old key, as on main (deferred, see section 9)", m_.get("wait_kind") == "item" and stores_old(m_, BACK) and mod_.state == "waiting" and mod_.wait.mover == BACK and mod_.wait.mover_explicit, m_)
+    check(f"1 after (g{n}): the item waits on the item's close, with the picker stored as `mover` and no old key", m_.get("wait_kind") == "item" and stores_mover(m_, BACK) and mod_.state == "waiting" and mod_.wait.mover == BACK and mod_.wait.mover_explicit, m_)
     check(f"1 after (g{n}): the session it is told is the mover, worded mover", telling.held_by(rd(n, "g"))[0] == BACK, telling.held_by(rd(n, "g")))
 check("1 after: the pass said it fixed them", len(r.get("wait_end", {}).get("fixed", [])) == 3, r.get("wait_end"))
 clear_g()
@@ -140,7 +142,7 @@ gitem(9214, "zed-back: wait for other/repo#7 to be merged, then write the summar
 r = fix_pass()
 for n, what in ((9211, "event"), (9213, "anchor")):
     m_ = mt(n, "g")
-    check(f"1 {what} wait (g{n}): stored with the old key, as on main", m_.get("wait_kind") == what and stores_old(m_, BACK) and model.derive(rd(n, "g"), now0).state == "waiting" and model.derive(rd(n, "g"), now0).wait.mover == BACK, (m_, r.get("wait_end")))
+    check(f"1 {what} wait (g{n}): the picker is stored as `mover`", m_.get("wait_kind") == what and stores_mover(m_, BACK) and model.derive(rd(n, "g"), now0).state == "waiting" and model.derive(rd(n, "g"), now0).wait.mover == BACK, (m_, r.get("wait_end")))
 check("1 a stored event wait that only lacks its backstop (the fix writes a day): the old key left on it stays", mt(9214, "g").get(LEG) == HELP, mt(9214, "g"))
 clear_g()
 
@@ -149,15 +151,15 @@ def hand(meta, mover_in, then_in, **kw):
     m_ = dict(meta); handover_svc._decision_hand_over(m_, mover_in, then_in, now=now0, **kw); return m_
 BASE = {"project": "projects/zedwork", "needs": [BACK]}
 m_ = hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, waiting=True)
-check("2 a hold with a wake and an agent in then: a time wait, the picker = then under the old key (deferred on purpose: see the end-of-wait matrix below), then cleared, the stamp set", m_.get("wait_kind") == "time" and stores_old(m_, HELP) and "then" not in m_ and m_["watch"]["set_at"] == now0, m_)
+check("2 a hold with a wake and an agent in then: a time wait, the picker = then stored as `mover`, then cleared, the stamp set", m_.get("wait_kind") == "time" and stores_mover(m_, HELP) and "then" not in m_ and m_["watch"]["set_at"] == now0, m_)
 m_ = hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, parked=True)
-check("2 …a parked item is the same", m_.get("wait_kind") == "time" and stores_old(m_, HELP) and "then" not in m_, m_)
+check("2 …a parked item is the same", m_.get("wait_kind") == "time" and stores_mover(m_, HELP) and "then" not in m_, m_)
 m_ = hand({**BASE, "mover": OWN, "then": HELP, "until": FUT}, OWN, HELP, waiting=True)
-check("2 a wait on a date alone: no kind, the picker = then under the old key, then cleared", "wait_kind" not in m_ and stores_old(m_, HELP) and "then" not in m_ and m_["until"] == FUT, m_)
+check("2 a wait on a date alone: no kind, the picker = then stored as `mover`, then cleared", "wait_kind" not in m_ and stores_mover(m_, HELP) and "then" not in m_ and m_["until"] == FUT, m_)
 m_ = hand({**BASE, "then": HELP, LEG: BACK, "hold": True, "wake": FUT}, "", HELP, waiting=True)
-check("2 an old key stored on the item is replaced by the then (the one picker, never two)", stores_old(m_, HELP), m_)
+check("2 an old key stored on the item is replaced by the then (the one picker, never two)", stores_mover(m_, HELP), m_)
 m_ = hand({**BASE, "mover": BACK, "then": HELP, "until": FUT}, BACK, HELP, waiting=True)
-check("2 a stored agent mover: the then takes it, as on main (the old key is the picker and reads first)", m_.get(LEG) == HELP and m_.get("mover") == BACK and D(**m_).wait.mover == HELP, m_)
+check("2 a stored agent mover: the then takes it (the one picker is `mover`, no old key appears)", stores_mover(m_, HELP) and D(**m_).wait.mover == HELP, m_)
 # the shapes that store no picker are as they were
 item(1, subject="[zed] an open item the others wait after")
 for label, meta, kw in (("an open after link", {**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT, "after": ["a1"]}, dict(waiting=True)),
@@ -186,26 +188,26 @@ for label, extra in (("a wait on a date alone", {"until": FUT}), ("a hold with a
 def remembered(meta):
     m_ = dict(meta); wk.remember(m_, "relay", now0); return m_
 RW = {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), "needs": [BACK]}
-for label, meta, want in (("a wait stored as mover", {**RW, "mover": HELP}, {"mover": HELP}), ("a wait stored under the old key", {**RW, LEG: HELP}, {LEG: HELP}),
-                          ("both stored", {**RW, LEG: HELP, "mover": BACK}, {LEG: HELP, "mover": BACK}), ("the old key with the word none", {**RW, LEG: "none"}, {LEG: "none"}),
-                          ("a wait on a date alone under the old key", {"until": FUT, "needs": [BACK], LEG: HELP}, {LEG: HELP})):
+for label, meta, want in (("a wait stored as mover", {**RW, "mover": HELP}, {"mover": HELP}), ("a wait stored under the old key", {**RW, LEG: HELP}, {"mover": HELP}),
+                          ("both stored (the old key reads first)", {**RW, LEG: HELP, "mover": BACK}, {"mover": HELP}), ("the old key with the word none", {**RW, LEG: "none"}, {LEG: "none"}),
+                          ("a wait on a date alone under the old key", {"until": FUT, "needs": [BACK], LEG: HELP}, {"mover": HELP})):
     m_ = remembered(meta)
-    check(f"3 remember, {label}: the snapshot holds the keys as stored (no key is translated)", {k: m_["watch"]["was"].get(k) for k in (LEG, "mover") if k in m_["watch"]["was"]} == want, m_["watch"])
+    check(f"3 remember, {label}: the snapshot holds the picker as `mover` (an old key is folded into it; the word none under the old key stays as stored)", {k: m_["watch"]["was"].get(k) for k in (LEG, "mover") if k in m_["watch"]["was"]} == want, m_["watch"])
 check("3 was_picker reads every form (old snapshot, new snapshot, both)", wk.was_picker({LEG: HELP}) == wk.was_picker({"mover": HELP}) == HELP and wk.was_picker({LEG: BACK, "mover": HELP}) == BACK, None)
 check("3 was_picker: a snapshot's word none under the old key is a session of that name, under `mover` nobody (as on main)", wk.was_picker({LEG: "none"}) == "none" and wk.was_picker({"mover": "none"}) == "", None)
 def restored(was, **now_meta):
     m_ = {"project": "projects/zedwork", "needs": ["decision"], "ask": "x", "watch": {"asked": "relay", "was": was, "at": now0}, **now_meta}
     wk.restore_wait(m_, day(9), True, now0); return m_
-for label, was, ok in (("an old snapshot (the old key)", {"wait_kind": "relay", "wait_event": "the reply", LEG: HELP}, lambda m: stores_old(m, HELP)),
+for label, was, ok in (("an old snapshot (the old key)", {"wait_kind": "relay", "wait_event": "the reply", LEG: HELP}, lambda m: stores_mover(m, HELP)),
                        ("a new snapshot (mover)", {"wait_kind": "relay", "wait_event": "the reply", "mover": HELP}, lambda m: stores_mover(m, HELP)),
-                       ("both keys", {"wait_kind": "relay", "wait_event": "the reply", LEG: HELP, "mover": HELP}, lambda m: m.get(LEG) == HELP and m.get("mover") == HELP),
+                       ("both keys", {"wait_kind": "relay", "wait_event": "the reply", LEG: HELP, "mover": HELP}, lambda m: stores_mover(m, HELP)),
                        ("the old key with the word none", {"wait_kind": "relay", "wait_event": "the reply", LEG: "none"}, lambda m: m.get(LEG) == "none" and "mover" not in m)):
     m_ = restored(was)
-    check(f"3 restore_wait, {label}: the wait is back with its keys as they were stored", ok(m_) and m_.get("wait_kind") == "relay" and m_.get("ask_by") == day(9), m_)
+    check(f"3 restore_wait, {label}: the wait is back with its picker stored as `mover` (the word none under the old key as stored)", ok(m_) and m_.get("wait_kind") == "relay" and m_.get("ask_by") == day(9), m_)
 m_ = restored({"wait_kind": "relay", "wait_event": "the reply", LEG: HELP}, **{LEG: BACK})
-check("3 restore_wait: an old key still on the item is replaced by the snapshot's, as on main", stores_old(m_, HELP), m_)
+check("3 restore_wait: an old key still on the item is replaced by the snapshot's picker, stored as `mover`", stores_mover(m_, HELP), m_)
 m_ = restored({"until": FUT, "needs": [BACK, "external"], LEG: HELP})
-check("3 restore_wait: a wait on a date alone with external in needs and the old key goes back with that key (its end reads it: as on main)", m_.get(LEG) == HELP and "mover" not in m_, m_)
+check("3 restore_wait: a wait on a date alone with external in needs and the old key goes back as `mover`", stores_mover(m_, HELP), m_)
 # the server reads the snapshot either way
 for n, was in ((6, {LEG: HELP}), (7, {"mover": HELP})):
     item(n, subject=f"[zed] was {n}", needs=["decision"], ask="Did it arrive?", options=[{"label": "Arrived"}], watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), **was}, "at": now0})
@@ -213,7 +215,7 @@ for n, was in ((6, {LEG: HELP}), (7, {"mover": HELP})):
     check(f"3 _watch_answer arrived, snapshot {sorted(was)[0]}: the agent it names has the item", m_.get("mover") == HELP and m_.get("needs") == [HELP] and HELP in r, (r, m_))
     item(n + 10, subject=f"[zed] was again {n}", needs=["decision"], ask="Did it arrive?", options=[{"label": "Arrived"}], watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), **was}, "at": now0})
     m_ = dict(mt(n + 10)); r = wait_gates_svc._watch_answer(rd(n + 10), m_, {"do": "wait", "text": "", "date": day(9)}, now0)
-    check(f"3 _watch_answer not yet, snapshot {sorted(was)[0]}: the wait is back with its picker under the key the snapshot held", (stores_old(m_, HELP) if LEG in was else stores_mover(m_, HELP)) and m_.get("ask_by") == day(9) and "waits again" in r, (r, m_))
+    check(f"3 _watch_answer not yet, snapshot {sorted(was)[0]}: the wait is back with its picker stored as `mover`", stores_mover(m_, HELP) and m_.get("ask_by") == day(9) and "waits again" in r, (r, m_))
 
 # ================================================================ 4. the plan: the cold call's edge and the migration
 TODAY = __import__("datetime").date.today()
@@ -261,7 +263,7 @@ for g_ in (False, True):
     m_ = ruled(105, {**WAITING_KEYS, "mover": HELP}, clear_mover=True)
     check(f"5 clear_mover with a mover only: it goes {tag}", "mover" not in m_ and LEG not in m_, m_)
     m_ = ruled(106, {**WAITING_KEYS, LEG: HELP}, clear_wait=True)
-    check(f"5 clear_wait with the old key: the wait and the old key go {tag}", all(k not in m_ for k in ("wait_kind", LEG, "mover")), m_)
+    check(f"5 clear_wait with the old key: the wait and the old key go, the agent it named stays as the live mover {tag}", "wait_kind" not in m_ and LEG not in m_ and m_.get("mover") == HELP and D(**m_).state == "alive" and D(**m_).mover == HELP, m_)
     m_ = ruled(107, {**WAITING_KEYS, "mover": HELP}, clear_wait=True)
     check(f"5 clear_wait with an agent's mover: the wait goes, the agent stays as the live mover {tag}", "wait_kind" not in m_ and m_.get("mover") == HELP and LEG not in m_ and D(**m_).state == "alive" and D(**m_).mover == HELP, m_)
     m_ = ruled(108, {**WAITING_KEYS, "mover": OWN, "then": HELP}, clear_wait=True)
@@ -465,9 +467,9 @@ try:
 finally:
     guards(False)
 
-# ================================================================ 9. a clear ends as on main for every writer of a wait's picker (the design of what a clear leaves is a later step)
-# The wait-end fix, the decision hand-over and a restored wait still store the old key: stored as `mover`, an agent that is not the default mover would stay on as the live mover after a clear_wait, with a
-# hand-off record and a notice; on main the old key went with the wait group and the item ended alive on its default mover. Each clear below ends as it always did.
+# ================================================================ 9. a clear leaves the agent the item was handed to as the live mover, for every writer of a wait's picker
+# A wait or a hold never changes who moves the item: clear_wait and clear_hold end the wait and the agent it was handed to stays the mover, never the default mover (the project's builder), whether the picker was stored
+# as `mover` or an old item still stores it under the old key.
 def cleared(n, meta, **kw):
     item(n, subject=f"[zed] clear {n}", **{k: v for k, v in meta.items() if k not in ("next",)})
     SENT.clear(); upd(n, **kw)
@@ -475,29 +477,33 @@ def cleared(n, meta, **kw):
     return m_, mod_, list(SENT)
 def fixed(n, nxt, **meta):
     clear_g(); gitem(9202, "zed-helper: build the thing"); gitem(n, nxt, **meta); fix_pass(); return mt(n, "g")
-CASES = (("the wait-end fix (after), another session stored as the mover", fixed(9205, f"zed-helper: wait for {ref(9202)} to close, then write the summary", mover=HELP), dict(clear_wait=True), "no picker"),
-         ("the wait-end fix (event), another session stored as the mover", fixed(9215, "zed-helper: wait for other/repo#7 to be merged, then write the summary", mover=HELP), dict(clear_wait=True), "alive"),
-         ("the wait-end fix (anchor)", fixed(9216, "zed-back: wait for the reply in https://github.com/acme/widgets/issues/5"), dict(clear_wait=True), "alive"),
-         ("a hand-over (a hold with a wake)", hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, waiting=True), dict(clear_hold=True), "alive"),
-         ("a hand-over (a parked item)", hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, parked=True), dict(clear_hold=True), "alive"),
-         ("a hand-over (a wait on a date alone)", hand({**BASE, "mover": OWN, "then": HELP, "until": FUT}, OWN, HELP, waiting=True), dict(clear_wait=True), "alive"),
-         ("a restored wait (old snapshot)", restored({"wait_kind": "relay", "wait_event": "the reply", LEG: HELP}, needs=[BACK]), dict(clear_wait=True), "alive"),
-         ("a restored wait (new snapshot: a stored agent mover, which a clear_wait keeps as on main)", restored({"wait_kind": "relay", "wait_event": "the reply", "mover": HELP}, needs=[BACK]), dict(clear_wait=True), "agent stays"))
+CASES = (("the wait-end fix (after), another session stored as the mover", fixed(9205, f"zed-helper: wait for {ref(9202)} to close, then write the summary", mover=HELP), dict(clear_wait=True), HELP, False),
+         ("the wait-end fix (event), another session stored as the mover", fixed(9215, "zed-helper: wait for other/repo#7 to be merged, then write the summary", mover=HELP), dict(clear_wait=True), HELP, True),
+         ("the wait-end fix (anchor), another session stored as the mover", fixed(9216, "zed-back: wait for the reply in https://github.com/acme/widgets/issues/5", mover=HELP), dict(clear_wait=True), HELP, True),
+         ("a hand-over (a hold with a wake)", hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, waiting=True), dict(clear_hold=True), HELP, True),
+         ("a hand-over (a parked item)", hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, parked=True), dict(clear_hold=True), HELP, True),
+         ("a hand-over (a wait on a date alone)", hand({**BASE, "mover": OWN, "then": HELP, "until": FUT}, OWN, HELP, waiting=True), dict(clear_wait=True), HELP, True),
+         ("a hand-over (a wait on a date alone), clear_hold", hand({**BASE, "mover": OWN, "then": HELP, "until": FUT}, OWN, HELP, waiting=True), dict(clear_hold=True), HELP, True),
+         ("a restored wait (old snapshot)", restored({"wait_kind": "relay", "wait_event": "the reply", LEG: HELP}, needs=[BACK]), dict(clear_wait=True), HELP, True),
+         ("a restored wait (new snapshot)", restored({"wait_kind": "relay", "wait_event": "the reply", "mover": HELP}, needs=[BACK]), dict(clear_wait=True), HELP, True),
+         ("an old item that stores the picker under the old key (a relay wait)", {**BASE, "wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT, LEG: HELP}, dict(clear_wait=True), HELP, True),
+         ("an old item that stores the picker under the old key (a time wait)", {**BASE, "wait_kind": "time", "hold": True, "wake": FUT, LEG: HELP}, dict(clear_hold=True), HELP, True),
+         ("an old item that stores the picker under the old key (a wait on a date alone)", {**BASE, "until": FUT, LEG: HELP}, dict(clear_hold=True), HELP, True),
+         ("an old item that stores the picker under the old key (a wait on a date alone), clear_wait", {**BASE, "until": FUT, LEG: HELP}, dict(clear_wait=True), HELP, True))
 n9 = 800
-for label, meta, kw, want in CASES:
+for label, meta, kw, who, alive in CASES:
     n9 += 1
     clear_g()
     m0 = {k: v for k, v in meta.items() if k not in ("watch",)}
-    if label.startswith("the wait-end fix"):
-        check(f"9 {label}: stores the picker under the old key, as on main", m0.get(LEG) in (BACK, HELP) and "mover" not in m0, m0)
+    if label.startswith("the wait-end fix") or label.startswith("a hand-over") or label.startswith("a restored wait"):
+        check(f"9 {label}: the picker is stored as `mover`, no old key", stores_mover(m0, who), m0)
     m_, mod_, sent = cleared(n9, m0, **kw)
     op = sorted(kw)[0]
-    if want == "alive":
-        check(f"9 {label}, {op}: the wait, the picker and the pick-up are gone, the item is alive on the default mover ({BACK}), nobody is told", mod_.state == "alive" and mod_.mover == BACK and not any(k in m_ for k in ("wait_kind", "mover", LEG, "until", "hold", "wake")) and not sent, (m_, mod_.mover, sent))
-    elif want == "no picker":
-        check(f"9 {label}, {op}: no picker is left stored and nobody is told (the item waits on its open after link)", not any(k in m_ for k in ("wait_kind", "mover", LEG)) and not sent, (m_, sent))
+    check(f"9 {label}, {op}: the wait and the old key are gone and {who} stays the mover, not the default mover ({BACK})", m_.get("mover") == who and LEG not in m_ and "wait_kind" not in m_ and not any(k in m_ for k in ("until", "hold", "wake")), m_)
+    if alive:
+        check(f"9 {label}, {op}: the item reads alive, moved by {who}", mod_.state == "alive" and mod_.mover == who, (mod_.state, mod_.mover))
     else:
-        check(f"9 {label}, {op}: the agent stays the live mover (the one clear_wait rule, as on main)", m_.get("mover") == HELP and LEG not in m_ and mod_.state == "alive", (m_, mod_.mover))
+        check(f"9 {label}, {op}: the open after link still holds the item, and {who} is its mover", (mod_.wait.mover if mod_.wait else mod_.mover) == who, (mod_.state, mod_.mover))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": mover writers scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

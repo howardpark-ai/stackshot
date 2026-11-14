@@ -213,7 +213,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
     """The ten-minute filing pass's fix of a wait a next line states in words (audit_run.wait_end_pass; server_fixes.WAIT_END; wait_end.py): the item is read again under the lock and the gap found again
     from its words (a line that changed, a wait the mover sent back, a decision on the owner, a held item: nothing is written), then the plan is set through the gates a write passes: `after`
     (gates.gate_after), an event wait (_evwait_gate), an anchor wait (the link is added to the anchors scoped to the item, _anchor_wait_gate) or a step proof (proofs.step_proof_set), a backstop day (the wake or ask_by it
-    has, else now plus [waiting] cap_days), and a History line (server_fixes.record). A waiting item takes its mover as post_wake_mover. The server's own save: no writer. A gate's refusal leaves the item as
+    has, else now plus [waiting] cap_days), and a History line (server_fixes.record). A waiting item stores its picker as mover. The server's own save: no writer. A gate's refusal leaves the item as
     it was. Never closes an item and writes no ask. -> {"fixed": bool, "what": str, "why": str}."""
     tok, op = str(plan.get("token") or ""), str(plan.get("op") or "")
 
@@ -259,10 +259,9 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 print(f"wait end: {gid} anchor not taken back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
         def waiting_as(kind: str) -> None:
-            # One of three writers that still store the old key, on purpose, for a later step (this one, the hand-over in answer_handover.py and remember/restore_wait in waits/watchers.py): a later `clear_wait`,
-            # `clear_hold` or `clear_wake` drops the old key with the wait group, so the item ends as it does on main; stored as `mover` an agent that is not the default would stay as the live mover, which is a choice for later.
-            meta.pop("mover", None)
-            meta["post_wake_mover"] = mover
+            # The wait's picker is stored as `mover` (who picks the item up when the wait ends), never the old key: a later `clear_wait`, `clear_hold` or `clear_wake` ends the wait and leaves this agent as the live mover.
+            meta.pop("post_wake_mover", None)
+            meta["mover"] = mover
             meta["wait_kind"] = kind
             if not has_back:
                 meta["until"] = back        # the one date the wait ends on (until_write.py); an item that stores its date as wake or ask_by keeps it as it is

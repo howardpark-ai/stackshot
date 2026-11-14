@@ -119,11 +119,11 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
     An item that still reads as waiting after the answer (`waiting`; a park, a pick carrying a wake, is one) has no mover: a stored mover that is he goes, and a stored `then` is kept for
     whoever ends the wait only where the code that ends that wait hands it over. By what the wait is:
       an open `after` link: `then` stays; _wakes.release_after hands the item to it when the last prerequisite closes (_hand_stored_then), with its usual notice;
-      a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and post_wake_mover=`then` (watch.set_at stamped, as an update does), `then` cleared,
+      a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and mover=`then`, the one who picks it up when the wait ends (watch.set_at stamped, as an update does), `then` cleared,
         so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold. With `[model] watchers = false` no time wait is stored: the park stays as it was, `then`
         with it, and the old wake pass hands the item to it when the hold ends (_hand_stored_then);
       `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would sit on the item unread); the wait's own
-        mover (the first session in needs, else the project's builder or -main agent) takes it when it ends. A wait already stored as a watcher's keeps its own post-wake mover.
+        mover (the first session in needs, else the project's builder or -main agent) takes it when it ends. A wait already stored as a watcher's keeps its own picker.
     Without this a stored mover=the owner stayed on an item whose state had become doing: "model conflict: mover=the owner on an item whose state is doing", and needs read as the keeper. → who the item was handed to now ("" when to nobody): it is told it is the mover."""
     then = "" if _model.is_owner(then_in) else then_in
     if then and not _then_live(then, meta):      # a `then` that is no live session (free text, retired, unknown) takes nothing, here or at the end of a wait: it is dropped and the item falls back to needs or the project's default mover
@@ -141,12 +141,12 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
                 pass
             elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
                 if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
-                    # One of three writers that still store the old key, on purpose, for a later step (this one, the wait-end fix in wait_fixes.py and remember/restore_wait in waits/watchers.py): a later
-                    # `clear_hold`, `clear_wait` or `clear_wake` drops the old key with the wait group, so the item ends as it does on main; stored as `mover` an agent that is not the default would stay as the live mover, which is a choice for later.
-                    if _wt.stored_until(meta):
-                        meta["post_wake_mover"] = then       # a wait on the date alone stores no kind (until is the whole of it)
-                    else:
-                        meta["wait_kind"], meta["post_wake_mover"] = "time", then
+                    # The picker of the wait is stored as `mover` (who picks the item up when the wait ends), never the old key; a stored old key is dropped, since `mover` wins it. A later `clear_hold`,
+                    # `clear_wait` or `clear_wake` ends the wait and leaves this agent as the live mover: a wait never changes who moves the item.
+                    meta.pop(_model.LEGACY_PICKER_KEY, None)
+                    meta["mover"] = then
+                    if not _wt.stored_until(meta):
+                        meta["wait_kind"] = "time"       # a wait on the date alone stores no kind (until is the whole of it)
                     meta["watch"] = {**(meta["watch"] if isinstance(meta.get("watch"), dict) else {}), "set_at": now or time.time()}
                     meta.pop("then", None)
                 # [model] watchers = false: no watcher would wake it, so no time wait is stored. The old park stays with `then` on it, and the old wake pass hands the item over when the hold ends (_hand_stored_then)
