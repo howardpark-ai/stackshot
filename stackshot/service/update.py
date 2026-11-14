@@ -269,7 +269,8 @@ def _list_note(plan: "_gates.WaitsPlan", meta: dict[str, Any], open_: bool) -> s
         return "\n(wait list: " + _wl.summary({**meta, "until": _uw.date_of(meta)}, _gh.shown) + ")"
     if plan.kind == "one":
         return f"\n(the list is down to one wait, so it is stored as the single wait it is: {_wl.line_text(plan.lines[0], _gh.shown)})"
-    return "\n(the wait on a list is cleared: the item waits on nothing now)"
+    day = _uw.date_of(meta)      # a clear beside a later `until` leaves the item waiting on that date, as a wait on a time
+    return f"\n(the wait on a list is cleared: the item waits on the date {day} now)" if day else "\n(the wait on a list is cleared: the item waits on nothing now)"
 
 
 def _stale_wait_notes(item_was: dict[str, Any], item: dict[str, Any], keeper: str = "") -> str:

@@ -63,6 +63,7 @@ HOME = os.path.expanduser("~")
 from stackshot import paths as _paths
 HERE = str(_paths.ROOT)      # the checkout: the commands this module prints for a session name this file by its package path (the allow rules match that path)
 from stackshot.core import config as _cfg   # stackshot.toml through the repo checkout: the same paths on every machine (stdlib tomllib)
+from stackshot.core.lines import newline_lines
 from stackshot.projects import project_registry as _pr   # the project record's entries, laid over the registry's page lines (stdlib only)
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id
 from stackshot.projects import brains as _brains   # which brain holds a page: [paths] brain, or a second brain's own copy ([[brains]])
@@ -1166,7 +1167,7 @@ def turn_activity(transcript_path):
         with open(transcript_path, "rb") as f:
             f.seek(0, 2); size = f.tell(); f.seek(max(0, size - 3_000_000)); raw = f.read().decode("utf-8", "ignore")
     except Exception: return out
-    lines = raw.splitlines()
+    lines = newline_lines(raw)      # a transcript record ends at a newline only (see core/lines.py)
     evs = []
     for ln in lines:
         try: evs.append(json.loads(ln))

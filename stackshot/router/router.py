@@ -73,6 +73,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core.lines import newline_lines
 from stackshot.router import routing as _routing
 from stackshot.anchors import anchors as _anc
 
@@ -163,7 +164,7 @@ def _append(path: Path, line: dict[str, Any]) -> None:
 def _read(path: Path) -> list[dict[str, Any]]:
     out = []
     try:
-        for ln in path.read_text(encoding="utf-8").splitlines():
+        for ln in newline_lines(path.read_text(encoding="utf-8")):
             try:
                 d = json.loads(ln)
             except ValueError:

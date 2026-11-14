@@ -19,7 +19,7 @@ panes that are files in a temp folder, messages recorded by a fake push, a fake 
      only the mover's own work line holds the ladder; an empty or unreadable heartbeat is unknown (live); a gone entry reaches the cold call whatever the heartbeat shows
  11  a live background mover that stays silent after the look is told to the project's -main agent: a notice to the project's -main agent `minutes` after the look (marked for the owner, naming the silence, asking for a nudge or a
      different mover and saying how to stop the repeats), the same notice again only every `ladder.MAIN_EVERY`, never one per pass; ONE notice per -main agent per pass, listing every item due for it; a front mover, a fresh work line and
-     a mover whose pane is not live (the cold call, the builder) get none; a project with no -main agent gets the History line alone
+     a mover whose pane is not live (the cold call, the builder) get none; a project with no -main agent gets the History line alone; a mover that is the project's -main agent itself is told nothing (nobody is above it) and its History line and the note of its save say so
 
     tests/run-suite ladder_silence       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -501,6 +501,23 @@ finally:
     server._main_agent = real_main
 check("11f no -main agent: nothing is sent, a History line says so, and the rung is taken once (the next pass does nothing)", "a77" in done and "a77" not in done2 and len(pushes()) == n_push and any("no -main agent to tell" in x["text"] for x in log_of(77)) and entry(77).get("main_at"), (done, done2, log_of(77)))
 close(77)
+# 11g. the live background mover is the project's -main agent itself: nobody is above it, so it is not told about its own silence (a mutant that lets -main tell itself fails the first check), the History line says
+# why in the words for it, and the rung is taken once; the note the save is handed says "the -main agent itself", not "no -main agent to tell" (the third check; the old tick-level test of this went with the hand-up)
+clear_records(); put(9091, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
+enter([9091]); stk(now0 + 31 * MIN); real_main = server._main_agent; server._main_agent = lambda project: "home-docs"
+real_save = ladder_svc._writes.save; save_notes = []
+def noting_save(gid, item, *a, **kw): save_notes.append(kw.get("note", "")); return real_save(gid, item, *a, **kw)      # the save's note reaches no page: read it as it is handed over
+ladder_svc._writes.save = noting_save
+try:
+    n_push = len(pushes()); n_own = len(pushes_to("home-docs", "a9091")); done = stk(now0 + 41 * MIN + 1); done2 = stk(now0 + 41 * MIN + 61)
+    to_ = ladder_svc.ladder_main_to("a9091", "home-docs"); why_ = ladder_svc.ladder_no_main("a9091", "home-docs")
+finally:
+    server._main_agent = real_main; ladder_svc._writes.save = real_save
+check("11g the mover is the -main agent itself: ladder_main_to is empty (nobody above it), and its reason names that mover, not a missing -main agent", to_ == "" and "no one above it to tell" in why_ and "has no -main agent" not in why_, (to_, why_))
+check("11g …nothing is sent to it about its own silence, and the rung is taken once (the next pass does nothing)", "a9091" in done and "a9091" not in done2 and len(pushes()) == n_push and len(pushes_to("home-docs", "a9091")) == n_own and entry(9091).get("main_at"), (done, done2, pushes()[n_push:], entry(9091)))
+check("11g …the History line says the mover is the project's -main agent, with no one above it to tell (not the no -main agent wording)", any("its mover is the project's -main agent, so there is no one above it to tell" in x["text"] for x in log_of(9091)) and not any("no -main agent to tell" in x["text"] for x in log_of(9091)), log_of(9091))
+check("11g …and the note the save is handed says it is the -main agent itself", "ladder: its mover is silent, it is the -main agent itself" in save_notes and not any("no -main agent to tell" in n for n in save_notes), save_notes)
+close(9091)
 # 11h. an untaken hand-off whose mover is a live background session: a write by someone else (the owner's comment, 20 minutes before the notice is due) does not delay the notice to -main:
 # it is due ten minutes after the look, whatever the item's activity (a pin: no "recent activity" wait stands between the look and -main)
 clear_records()

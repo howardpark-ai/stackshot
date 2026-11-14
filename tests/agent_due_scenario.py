@@ -14,7 +14,7 @@ Checked here, against a scratch store and config (no port, no real server, nothi
     tests/run-suite agent_due        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _midnight
 sys.path.insert(0, STACK)
 tmp = _scratch.mkdtemp(prefix="agentduetest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
@@ -31,6 +31,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 NAMES = ("home-owner", "home-stew", "team-back", "home-front", "home-other")
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1)}
+_midnight.wait_out("Asia/Dubai")      # a local midnight inside the run would move the "today" and "tomorrow" the checks read: start on the far side of one that is close
 now0 = time.time()
 DAY, HOUR = 86400.0, 3600.0
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
