@@ -314,6 +314,15 @@ def _anchor_wait_gate(old: dict[str, Any], meta: dict[str, Any], gid: str = "", 
     raise ToolError(f"Refused: wait_anchor {url} is not on {project or 'the project'}'s anchors list, so nothing watches it and the wait would end only at its backstop. Add the anchor first: {fix}")
 
 
+def _old_key_changed(old: dict[str, Any], meta: dict[str, Any], model_set: dict[str, str], model_drop: set[str]) -> bool:
+    """Did the write change the old picker key (`post_wake_mover`) on purpose? The save rule drops a stored old key beside a new `mover` and on `clear_mover` (a clear_wait ends the wait, so it never gets here): that vanishing is the rule's own
+    doing, not a change to the wait (the awaited date, anchor or picker as the writer meant it), so it neither restamps the wait's clock nor starts the chases over, as on main, where the key stayed."""
+    k = _model.LEGACY_PICKER_KEY
+    if meta.get(k) == old.get(k):
+        return False
+    return k in model_set or k in model_drop      # named by the write (set or cleared): on purpose; gone without being named: the save rule dropped it
+
+
 def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], model_set: dict[str, str], model_drop: set[str], writer: str, session_write: bool) -> str:
     """What an update owes the watchers, on the metadata as the write leaves it: a session's write ends the shown arrival (`woke`); a wait newly set, or whose awaited date or anchor moved,
     stamps its time (a notice older than that is not its arrival) and starts the chases over (they were about the old date); a wait cleared drops both. → the reply's lines."""
@@ -331,7 +340,7 @@ def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], mo
             meta["watch"] = w
             if not w:
                 meta.pop("watch")
-    elif any(meta.get(k) != old.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "until", "post_wake_mover", "waits", "wait_mode")):
+    elif any(meta.get(k) != old.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "until", "waits", "wait_mode")) or _old_key_changed(old, meta, model_set, model_drop):
         w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
         w["set_at"] = time.time()
         meta["watch"] = w

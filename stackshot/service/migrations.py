@@ -25,6 +25,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import store as _store
 from stackshot.core.instance import OWNER
@@ -544,6 +545,7 @@ def migrate_one(w: dict[str, Any]) -> dict[str, Any]:
                 for k in drops:
                     meta.pop(k, None)
                 meta.update({k: v for k, v in sets.items() if k not in ("cap_ok", "wait_basis")})
+                _model.settle_picker_keys(meta, sets, drops, _model.waits_stored(json.loads(was)), same=_anc.same_session)      # the one save rule: a mover set on a wait leaves no old key beside it
                 if "next" in sets or "next" in drops:
                     _nl.carry(json.loads(was), meta, str(meta.get("owner") or ""))      # the lines it named keep their writers (by position), else the keeper's
                 if "cap_ok" in sets:        # his words are copied from the item's own stored answers, here: a value the caller sends is never taken as it comes

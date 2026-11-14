@@ -19,7 +19,7 @@ optional and all in the item's metadata:
   ask_by            YYYY-MM-DD, the day a relay wait turns into a question to the owner
   until             YYYY-MM-DD or YYYY-MM-DDTHH:MM, the one date a wait ends on (read as a wake is read): an open item that stores one is waiting, wait_kind or not (no kind = a wait on the date
                     alone, kind time); with a kind it is the date the wait comes back anyway (the backstop), for a relay the day it turns into a question. Read first, the legacy wake and ask_by after
-  post_wake_mover   the old name of a waiting item's `mover`; while it is stored (not yet moved into `mover`) it wins over a stored `mover`
+  post_wake_mover   the old name of a waiting item's `mover`; while it is stored it wins over a stored `mover` when read, and a write that sets a different `mover` on a waiting item drops it
   (the wait's other inputs are fields an item already had: wake for a time, after for an item; for an anchor or an item wait a wake is its backstop)
   phase             alive | waiting, what the board SHOWS the open item as, written by every save of an open item (stamp._phase_stamp, the one place) and kept true as the clock moves by the
                     minute set's phase sweep (stamp._phase_sweep: a dated wait's wake coming within the hour, local midnight (instance timezone), an `after` item closing). The readers (view) take the alive-or-waiting
@@ -93,6 +93,38 @@ def stored_picker(meta: dict[str, Any]) -> str:
     """A waiting item's picker as stored, read in one place: the legacy key first (while it is stored it wins, as it always did), else the stored `mover`, where the literal word none names
     nobody. "" when neither is stored (the default picker is the caller's)."""
     return norm_who((meta or {}).get(LEGACY_PICKER_KEY)) or pick_who((meta or {}).get("mover"))
+
+
+def settle_picker_keys(meta: dict[str, Any], setv: Any, drop: Any, was_waiting: bool = False, waits_now: bool | None = None, same: Callable[[str, str], bool] | None = None) -> None:
+    """The one save rule for the picker's two stored keys, run on `meta` after a write has applied its sets and drops (`setv`: the fields it set, `drop`: the fields it dropped; `was_waiting`: the item
+    waited before the write; `waits_now`: it waits as the write leaves it, read from `meta` when not given; `same`: whether two references name the same session, which a caller with the fleet's names passes so an id and a name count as one, else the same name in any letter case). A write that names the legacy key itself is left as written (the old parameter keeps working as it did).
+      a write that sets `mover` on an item that waits → the stored legacy key goes (the new mover wins, never the old key), unless the new `mover` names the same session as the old key (a restated picker changes nothing)
+      clear_mover (`mover` dropped) → the legacy key goes with it, so it cannot become the picker once the mover is gone
+      clear_wait (every field of WAIT_GROUP dropped) → the legacy key goes with the wait (it is in WAIT_GROUP), and a stored `mover` that is the owner goes with it, when the item waited and the write set no mover
+        (he picked the item up when the wait ended: no wait, no pick-up); an agent's stored `mover` stays as the live mover."""
+    if LEGACY_PICKER_KEY in setv:
+        return
+    if "mover" in drop:
+        meta.pop(LEGACY_PICKER_KEY, None)
+    if "mover" in setv and (waits_stored(meta) if waits_now is None else waits_now) and not _restates_legacy(meta, same):
+        meta.pop(LEGACY_PICKER_KEY, None)
+    if set(WAIT_GROUP) <= set(drop) and was_waiting and "mover" not in setv and is_owner(norm_who(meta.get("mover"))):
+        meta.pop("mover", None)
+
+
+def _restates_legacy(meta: dict[str, Any], same: Callable[[str, str], bool] | None = None) -> bool:
+    """Does the stored `mover` name the very session the stored legacy key names? A write that sets a `mover` equal to the old key restates what the item already says, so it changes nothing (the old key stays).
+    The same name in any letter case is the same session; `same` (the caller's, with the fleet's names) also equates a session's id with its name."""
+    old, new = norm_who(meta.get(LEGACY_PICKER_KEY)), norm_who(meta.get("mover"))
+    return bool(old) and bool(new) and (old.lower() == new.lower() or bool(same and same(old, new)))
+
+
+def waits_stored(meta: dict[str, Any]) -> bool:
+    """Does the item read as waiting on what `meta` stores (a stored kind or a stored until, or a waiting state)? A caller reads it before a write for settle_picker_keys' `was_waiting`."""
+    try:
+        return derive({"status": "open", "metadata": meta}).state == WAITING
+    except Exception:  # noqa: BLE001  — a reading that fails leaves the keys as they are
+        return False
 
 
 @dataclass(frozen=True)
@@ -334,7 +366,7 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     mv_d, _ = _defaults(m, today)
     mover_s, post_s = pick_who(m.get("mover")), norm_who(m.get(LEGACY_PICKER_KEY))
     if mover_s and post_s and mover_s != post_s:
-        conflicts.append(f"mover={mover_s} and post_wake_mover={post_s} are both stored on a waiting item and differ: post_wake_mover picks it up when the wait ends, until it is moved into mover")
+        conflicts.append(f"mover={mover_s} and post_wake_mover={post_s} are both stored on a waiting item and differ: post_wake_mover picks it up when the wait ends, as an item stored under the old key, which is being retired. Setting a different mover (update mover=) drops the old key; clear_mover or clear_wait drops it too")
     picker_s = stored_picker(m)        # a stored post_wake_mover (the old name, not yet moved) wins; a mover alone is the picker
     post_d = owner_display() if kind == "relay" else mv_d       # a relay's ask-by day turns the item to him (section 4); the rest the section 3 chain
     picker = picker_s or post_d
