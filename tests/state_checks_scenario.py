@@ -63,6 +63,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.service import agents as _agents
+from stackshot.service import update as _update_svc
 from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -86,7 +88,7 @@ ZONE_OFFSET = 4 * 3600      # the pinned instance timezone, Asia/Dubai: UTC+4, n
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 hrs = lambda n: time.strftime("%Y-%m-%d %H:%M", time.gmtime(now0 + n * 3600 + ZONE_OFFSET))      # an expected_by n hours after the suite started (a time of day)
 BACK = "team-back"
-def upd(i, sender="home-front", **kw): return server._update(f"a{i}", sender=sender, **kw)
+def upd(i, sender="home-front", **kw): return _update_svc._update(f"a{i}", sender=sender, **kw)
 mt = lambda i: rd(i)["metadata"]
 raw = lambda i: (T / f"store/a/{i}.json").read_text()
 def refused_nw(name, i, f, *want):
@@ -286,11 +288,11 @@ item(53, needs=[BACK], next="team-back: build it")
 upd(53, sender="home-stew", priority="p2", description="- A thing\n- It lives elsewhere\n- Done when done")
 check("5a: a non-owner's write that changes none of needs, state, hold, wake, after marks nothing", "next_stale" not in mt(53), mt(53))
 reads = []
-_roster = server._session_roster
-server._session_roster = lambda: (reads.append(1), _roster())[1]
+_roster = _agents._session_roster
+_agents._session_roster = lambda: (reads.append(1), _roster())[1]
 upd(53, sender="home-stew", priority="p3")
 check("5a: a write that changes nothing it watches reads neither the fleet's names nor the roster", reads == [], reads)
-server._session_roster = _roster
+_agents._session_roster = _roster
 upd(53, sender="home-stew", needs=["decision"], ask=ASK)
 check("5a: …needs is one of them", (mt(53).get("next_stale") or {}).get("fields") == ["needs"], mt(53))
 upd(53, sender="home-stew", next="team-back: build it, then ask Oliver", needs=[BACK])

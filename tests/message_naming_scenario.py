@@ -58,6 +58,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.fleet import client
+from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
@@ -94,7 +95,7 @@ def send(to, text, sender=MAIN): return server._name_on_handover(to, text, sende
 def write_ok(i, sender, **kw):
     """The mover's next write on the item: (True, "") when it lands, (False, the refusal) when it is refused."""
     try:
-        server._update(f"a{i}", sender=sender, **kw); return True, ""
+        _update_svc._update(f"a{i}", sender=sender, **kw); return True, ""
     except Exception as e:  # noqa: BLE001
         return False, str(e)
 REFUSAL = "needs names more than one mover"
@@ -219,7 +220,7 @@ check("73 the message tool where it names: the reply says named, as before", out
 # ---- 9. the way the line points works: the sender hands the item over with update(mover=<agent>)
 item(80, needs=[BBUILD])
 send(GBUILD, "a80 is yours")
-r = server._update("a80", sender=MAIN, mover=GBUILD, needs=[GBUILD], next=f"{GBUILD}: build it", clear_next=True)
+r = _update_svc._update("a80", sender=MAIN, mover=GBUILD, needs=[GBUILD], next=f"{GBUILD}: build it", clear_next=True)
 check("80 …handing the item over by update(mover=…) works, and the item is the new mover's alone", "Refused" not in str(r) and needs(80) == [GBUILD], (r, needs(80)))
 
 # ---- 9b. a stored mover that is the agent being named, or the legacy word `none`, is no second mover

@@ -66,6 +66,7 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -96,7 +97,7 @@ mt = lambda i: rd(i)["metadata"]
 raw = lambda i: (T / f"store/a/{i}.json").read_text()
 def upd(i, sender=BACK, **kw):
     with writes.session_write():
-        return server._update(f"a{i}", sender=sender, **kw)
+        return _update_svc._update(f"a{i}", sender=sender, **kw)
 def refused_nw(name, i, f, *want):
     was = raw(i)
     refused(name, f, *want)
@@ -284,7 +285,7 @@ check("ask_by: the event-wait form itself (a first ask_by) is accepted", ab_(mt(
 
 # ================================================================ what is not judged
 doing(30)
-server._update("a30", sender=BACK, wake=day(4))
+_update_svc._update("a30", sender=BACK, wake=day(4))
 check("not judged: a write of the server's own (not a session's) pushing the wake out", wk_(mt(30)) == day(4), mt(30))
 doing(31)
 CFG["guards"] = False

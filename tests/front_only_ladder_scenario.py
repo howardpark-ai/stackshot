@@ -1,4 +1,4 @@
-"""Scenario test for where the stall ladder ends (server._recovery_target, _recovery_tell, the `recover` step of handoff.next_step): a front-only project (anchors.front_only: its `agents:` map lists no
+"""Scenario test for where the stall ladder ends (service/pane_recovery.py: _recovery_target, _recovery_tell, the `recover` step of handoff.next_step): a front-only project (anchors.front_only: its `agents:` map lists no
 `background:` agent, so there is no builder to try) ends at its -main agent, marked for the owner as every message to a front agent is, instead of the fleet's builder; a project with a builder is
 unchanged. Fixture data (English stand-in names) in a temporary store, the push replaced by a recorder, no network, no model call.
 
@@ -6,7 +6,7 @@ unchanged. Fixture data (English stand-in names) in a temporary store, the push 
      quiet session and asking it to decide; the fleet's builder is told nothing; the History line says who was asked; the item stays with its mover and is not on the owner's list; later passes send nothing
   2  a project with a builder is unchanged: its builder is the first choice, and when the quiet session is that builder itself the last rung still asks the fleet's builder (unmarked, `fleet recovery:`), not the -main agent
   3  a front-only project whose quiet mover is its -main agent itself, and one with no -main agent to name: the fleet's builder is asked, as before
-  4  the choice on its own (server._recovery_target: the recipient, its kind, whether the project is builderless) for each shape, a front-only test that raises keeps the fleet's builder (one line on stderr)
+  4  the choice on its own (service/pane_recovery.py: _recovery_target: the recipient, its kind, whether the project is builderless) for each shape, a front-only test that raises keeps the fleet's builder (one line on stderr)
   5  what the request says: the target is computed once per request; the hand-off record (`recovery_by`), its event, `get`'s line, the journal note and the History line name who was actually asked; "what
      the ladder tried" never claims a builder for a front-only project, whether its -main agent or the fleet's builder is asked, in the stall ladder and the hand-off ladder alike; a project with a builder keeps its old words
 
@@ -69,6 +69,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.core import instance as _core_instance
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
@@ -187,7 +188,7 @@ check("3 a front-only project whose quiet mover is its -main agent: nobody is ab
 close(4)
 
 CALLS = []
-_real_tgt = server._recovery_target
+_real_tgt = _pane_recovery._recovery_target
 def _counting(project, quiet):
     out = _real_tgt(project, quiet); CALLS.append((project, quiet, out)); return out
 def rec(to, frm="home-send", **kw):
@@ -198,9 +199,9 @@ def ev_texts(i): return [e["text"] for e in ho(i).get("events", [])]
 def msgs(gid, who): return [p[1] for p in pushes_to(who, gid)]
 # (a) the -main agent was asked: every line that names the recipient says so, not the fleet's builder
 item(10, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
-CALLS.clear(); server._recovery_target = _counting
+CALLS.clear(); _pane_recovery._recovery_target = _counting
 stk(T1); stk(T2)
-server._recovery_target = _real_tgt
+_pane_recovery._recovery_target = _real_tgt
 check("5 the target is computed once per request (the record, the wording of `tried` and the send follow the one answer)", len([c for c in CALLS if c[0] == "projects/beta" and c[1] == "home-peer3"]) == 1 and len(CALLS) == 1, CALLS)
 check("5 …the hand-off record says who was asked, and its event line names the -main agent, not the fleet's builder", ho(10).get("recovery_by") == "the project's -main agent"
       and any("the project's -main agent was asked" in t for t in ev_texts(10)) and not any("fleet's builder" in t for t in ev_texts(10)), (ho(10), ev_texts(10)))
@@ -244,7 +245,7 @@ check("5 the served stall form says where a recovery message goes: a front-only 
       "the project's -main agent when the project lists no background agent, to the fleet's builder otherwise" in _wt_get._STALL_FORM and "the fleet's builder is sent one message" not in _wt_get._STALL_FORM, _wt_get._STALL_FORM[:200])
 
 # ================================================================ 4. the choice on its own
-tgt = server._recovery_target
+tgt = _pane_recovery._recovery_target
 check("4 a front-only project with a -main agent -> (that agent, main)", tgt("projects/beta", "home-peer3") == ("home-beta-front", "main", True), tgt("projects/beta", "home-peer3"))
 check("4 …the quiet session is that agent (by name or by id) -> the fleet's builder", tgt("projects/beta", "home-beta-front") == ("home-fleet", "fleet", True) and tgt("projects/beta", U["home-beta-front"]) == ("home-fleet", "fleet", True), (tgt("projects/beta", "home-beta-front"), tgt("projects/beta", U["home-beta-front"])))
 check("4 a project with a builder -> the fleet's builder, whoever is quiet", tgt("projects/alpha", "home-peer") == ("home-fleet", "fleet", False) and tgt("projects/alpha", "team-back") == ("home-fleet", "fleet", False), tgt("projects/alpha", "home-peer"))

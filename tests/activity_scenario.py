@@ -55,6 +55,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import create as create_svc
+from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
 from stackshot.github import ghsync as _gh
@@ -140,7 +141,7 @@ check("5 a server nudge on an old item seeds the clock from the old state, not f
 save(1, note="woke: the wait ended")
 check("5 …and a second server save leaves it", abs(act(1) - OLD) < 1)
 # a session's write
-server._update("a1", sender="home-peer", next="home-peer: do the next thing")
+_update_svc._update("a1", sender="home-peer", next="home-peer: do the next thing")
 check("5 a session's update moves it to now", act(1) >= t0, act(1))
 a1 = act(1)
 time.sleep(0.02)
@@ -191,12 +192,12 @@ gid, _r = create_svc.create_item(subject="[home] a new item", description=DESC, 
 new = json.loads((T / f"store/{gid[0]}/{gid[1:]}.json").read_text())
 check("5 a new item made by a session starts with its clock at the creation", abs(new["activity"] - new["updated"]) < 2, (gid, new.get("activity")))
 # a session's filing-only update is a write about the item too
-server._update("a3", sender="home-peer", priority="p1")
+_update_svc._update("a3", sender="home-peer", priority="p1")
 check("5 a session's filing edit (priority) moves it too (a write about the work by a mover)", act(3) is not None and act(3) >= t0, act(3))
 # the audit agent's update through the tool
 before_audit = act(3)
 time.sleep(0.02)
-server._update("a3", sender=AUDIT_AGENT, priority="p2")
+_update_svc._update("a3", sender=AUDIT_AGENT, priority="p2")
 check("5 the audit agent's update through the tool leaves it", act(3) == before_audit, (act(3), before_audit))
 
 # ---- 6. backward compatibility

@@ -56,6 +56,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -79,7 +80,7 @@ NEW = "- The thing works and is in use"
 refused("an old cached schema (complete with the id alone): names what is missing and the portal path, never a relaunch",
         lambda: _wt_complete.stackshot_complete("a1"), "closing a1 needs outcome, reason, outcome_text", "a relaunch does not",
         "portal_codemode_execute with codemode.stackshot_complete({item_id, outcome, reason, outcome_text, superseded_by})")
-refused("update status=completed alone: the same", lambda: server._update("a1", status="completed"), "closing a1 needs outcome, reason, outcome_text", "codemode.stackshot_complete")
+refused("update status=completed alone: the same", lambda: _update_svc._update("a1", status="completed"), "closing a1 needs outcome, reason, outcome_text", "codemode.stackshot_complete")
 refused("no reason", lambda: _wt_complete.stackshot_complete("a1", outcome="done", outcome_text=NEW), "needs reason")
 refused("no outcome_text", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="it works"), "needs outcome_text")
 refused("no outcome", lambda: _wt_complete.stackshot_complete("a1", reason="it works", outcome_text=NEW), "needs outcome")
@@ -90,9 +91,9 @@ refused("superseded without superseded_by", lambda: _wt_complete.stackshot_compl
 refused("superseded_by with outcome done", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="it works", outcome_text=NEW, superseded_by="a2"), "superseded_by goes with outcome=superseded")
 refused("superseded by itself", lambda: _wt_complete.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="A1"), "cannot be superseded by itself")
 refused("superseded by an item that does not exist", lambda: _wt_complete.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="a99"), "a99, which does not exist")
-refused("outcome on an open item without a close", lambda: server._update("a1", outcome="done"), "go with a close")
-refused("outcome_text on an open item without a close", lambda: server._update("a1", outcome_text=NEW), "go with a close")
-refused("reason outside a close", lambda: server._update("a1", next="x", reason="why"), "go with a close")
+refused("outcome on an open item without a close", lambda: _update_svc._update("a1", outcome="done"), "go with a close")
+refused("outcome_text on an open item without a close", lambda: _update_svc._update("a1", outcome_text=NEW), "go with a close")
+refused("reason outside a close", lambda: _update_svc._update("a1", next="x", reason="why"), "go with a close")
 check("nothing above changed the item", rd(1)["status"] == "open" and rd(1)["metadata"]["next"] == "do the thing" and rd(1)["description"] == DESC, rd(1))
 
 # ---- 2. a close: done, through complete
@@ -104,12 +105,12 @@ check("due stays as a record", m.get("due") == "2026-10-20", m)
 check("outcome (lower-cased) and reason are stored, no superseded_by", m.get("outcome") == "done" and m.get("reason") == "PR #11 live at 010bc0d" and "superseded_by" not in m, m)
 check("the reply shows outcome, reason and outcome_text", "outcome: done" in out and "reason: PR #11 live at 010bc0d" in out and f"outcome text:\n{NEW}" in out and "next:" not in out, out)
 check("get shows them", "outcome: done" in _wt_get.stackshot_get("a1"), _wt_get.stackshot_get("a1"))
-refused("outcome on an already completed item", lambda: server._update("a1", status="completed", outcome="dropped"), "already completed",
+refused("outcome on an already completed item", lambda: _update_svc._update("a1", status="completed", outcome="dropped"), "already completed",
         "to correct its close, reopen it (status=open with a next) and close it again")
 snap("a1 done")
 
 # ---- 3. update with status=completed: dropped, and an item on hold
-out = server._update("a8", status="completed", outcome="dropped", reason="no longer needed after the redesign", outcome_text="- Not pursued; the redesign removed the need")
+out = _update_svc._update("a8", status="completed", outcome="dropped", reason="no longer needed after the redesign", outcome_text="- Not pursued; the redesign removed the need")
 m = rd(8)["metadata"]
 check("update status=completed closes a held item: hold and wake go", rd(8)["status"] == "completed" and "hold" not in m and "wake" not in m and m.get("outcome") == "dropped", m)
 
@@ -121,8 +122,8 @@ check("superseded by a completed item is fine", rd(4)["metadata"].get("supersede
 snap("a2 a4 superseded")
 
 # ---- 5. reopening
-refused("reopening without a new next", lambda: server._update("a4", status="open"), "reopening a4 needs a new next")
-out = server._update("a4", status="open", next="Oliver: pick it up again", needs=["decision"], ask="Decide: pick it up again now · Recommend: yes · Stakes: a day of delay · By: no date")
+refused("reopening without a new next", lambda: _update_svc._update("a4", status="open"), "reopening a4 needs a new next")
+out = _update_svc._update("a4", status="open", next="Oliver: pick it up again", needs=["decision"], ask="Decide: pick it up again now · Recommend: yes · Stakes: a day of delay · By: no date")
 m = rd(4)["metadata"]
 check("reopening drops outcome, outcome_text, reason and superseded_by and takes the new next",
       rd(4)["status"] == "open" and not any(k in m for k in ("outcome", "outcome_text", "reason", "superseded_by")) and rd(4)["description"] == DESC and m.get("next", "").split("\n")[0] == "Oliver: pick it up again", m)      # the server's step of his follows it on the list

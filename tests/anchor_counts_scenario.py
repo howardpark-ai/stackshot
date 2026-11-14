@@ -90,6 +90,7 @@ check("completion_due: the same anchor on two pages is asked about on each (each
 
 # ---- the readers built on it
 from stackshot.web import server
+from stackshot.service import item_read as _item_read
 from stackshot.anchors import anchors as ANC
 from stackshot.web import publish as _web_publish
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
@@ -97,10 +98,10 @@ from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
 ANC.save({k: v for k, v in store.items()})
-check("the server reads an anchor held by another project's page (_scoped_anchors)", urls(server._scoped_anchors(A, "a1")) == [SOLO, DM] and urls(server._scoped_anchors(A, "b2")) == [DM, PR]
-      and server._scoped_anchors(A, "z9") == [], (urls(server._scoped_anchors(A, "a1")), urls(server._scoped_anchors(A, "b2"))))
-check("...and from the anchors a pass already loaded", urls(server._scoped_anchors(A, "a1", store)) == [SOLO, DM] and server._scoped_anchors(A, "a1", None) == server._scoped_anchors(A, "a1"))
-check("the note a hold owes sees it: an outside item whose thread is anchored on another page is not told to anchor it", server._scoped_anchor_exists("b2", {"project": A}) and not server._scoped_anchor_exists("z9", {"project": A}))
+check("the server reads an anchor held by another project's page (_scoped_anchors)", urls(_item_read._scoped_anchors(A, "a1")) == [SOLO, DM] and urls(_item_read._scoped_anchors(A, "b2")) == [DM, PR]
+      and _item_read._scoped_anchors(A, "z9") == [], (urls(_item_read._scoped_anchors(A, "a1")), urls(_item_read._scoped_anchors(A, "b2"))))
+check("...and from the anchors a pass already loaded", urls(_item_read._scoped_anchors(A, "a1", store)) == [SOLO, DM] and _item_read._scoped_anchors(A, "a1", None) == _item_read._scoped_anchors(A, "a1"))
+check("the note a hold owes sees it: an outside item whose thread is anchored on another page is not told to anchor it", _item_read._scoped_anchor_exists("b2", {"project": A}) and not _item_read._scoped_anchor_exists("z9", {"project": A}))
 check("a hold that waits on a notice from an anchor on another page is held by it (_hold_held_by)", server._hold_held_by("b2", {"project": A}) == ["anchor"] and server._hold_held_by("z9", {"project": A}) == [])
 
 shown = server._fmt({"gid": "a1", "id": "a1", "subject": "[home] item a1", "description": "- A thing, finished when it works", "status": "open", "metadata": {"project": A, "owner": "Oliver"}})

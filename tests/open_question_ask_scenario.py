@@ -79,6 +79,7 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.service import update as _update_svc
 from stackshot.waits import handoff as _ho
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -91,7 +92,7 @@ from stackshot.web.ui import render as r2
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
-upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
+upd = lambda i, sender="home-front", **kw: _update_svc._update(f"a{i}", sender=sender, **kw)
 mk = lambda **kw: _wt_create._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
                                     "next": "Oliver: answer the ask", "needs": ["decision"], "ask": YN, **kw})
 OQ = ("Refused", "lists no options", "open question", "Yes / No", "Decide: whether to", "options=[", "exactly one recommended", "cached tool list")
@@ -205,8 +206,8 @@ passes("4 post-wake: …and passes the open-question gate and names its recommen
 item(20, needs=["team-back"], mover="team-back", next="team-back: look at it")
 cold = _ho.COLD
 refused_nw("4 cold call: an ask_owner whose question is open and whose options are missing is refused", 20,
-           lambda: server._update("a20", needs=["decision"], ask=OPEN("which layout to ship"), next="Oliver: answer the ask on the item", clear_next=True, sender=cold, clear_mover=True), *OQ)
-passes("4 cold call: …with two to four options naming the recommended label it is written", lambda: server._update("a20", needs=["decision"], ask=OPEN("which layout to ship"), options=OPTS,
+           lambda: _update_svc._update("a20", needs=["decision"], ask=OPEN("which layout to ship"), next="Oliver: answer the ask on the item", clear_next=True, sender=cold, clear_mover=True), *OQ)
+passes("4 cold call: …with two to four options naming the recommended label it is written", lambda: _update_svc._update("a20", needs=["decision"], ask=OPEN("which layout to ship"), options=OPTS,
                                                                                                               next="Oliver: answer the ask on the item", clear_next=True, sender=cold, clear_mover=True))
 check("4 cold call: …and stored", rd(20)["metadata"]["ask"] == OPEN("which layout to ship") and rd(20)["metadata"]["options"] == OPTS, rd(20)["metadata"])
 from stackshot.model import cold_call as cc

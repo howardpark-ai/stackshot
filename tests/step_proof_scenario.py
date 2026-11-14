@@ -109,6 +109,7 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.core import config as _cfg
 from stackshot.model import steps as _steps
@@ -343,7 +344,7 @@ check("…the tick is one of the runner's clocks, in its settle group", [t.group
 fixtures()
 
 # ---- 8. writing the proof: update and create take step_proof
-def upd(i, **kw): return server._update(f"a{i}", sender="home-builder", **kw)
+def upd(i, **kw): return _update_svc._update(f"a{i}", sender="home-builder", **kw)
 def refused(name, fn, *want):
     try: fn(); check(name, False)
     except ToolError as e: check(name, str(e).startswith("Refused:") and all(w in str(e) for w in want), str(e))

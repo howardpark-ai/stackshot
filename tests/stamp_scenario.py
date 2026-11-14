@@ -73,6 +73,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.service import update as _update_svc
 from stackshot.web import search as _search
 from stackshot.github import ghsync as _gh
 from stackshot.core import instance as _core_instance
@@ -361,12 +362,12 @@ rc4, out4 = cli(SP.undo, undo=str(undo_file))
 check("9 …undo twice is a no-op (every answer is same)", rc4 == 0 and snapshot() == snap0 and set(out4["results"]) == {"same"}, (rc4, out4))
 rc5, out5 = cli(SP.apply)
 undo2 = pathlib.Path(out5["undo"])
-server._update("g75", sender="home-front", hold=True, wake=day(30), wait_basis=f"the vendor ships on {day(33)}")         # a session parks it after the stamp: the save restamps it waiting
+_update_svc._update("g75", sender="home-front", hold=True, wake=day(30), wait_basis=f"the vendor ships on {day(33)}")         # a session parks it after the stamp: the save restamps it waiting
 snap_s = snapshot()
 rc6, out6 = cli(SP.undo, undo=str(undo2))
 check("9 …after a session's write the item answers kept and is left as the session saved it; the others are put back", rc6 == 0 and out6["results"].get("kept") == 1 and "board#75" in " ".join(out6["kept_because_a_later_save_restamped_them"]) and bytes_of(75) == snap_s["75.json"]
       and mt(74).get("waits_on") is None and out6["results"].get("set") == out5["written"] - 1, (rc6, out6))
-server._update("g75", sender="home-front", clear_hold=True)
+_update_svc._update("g75", sender="home-front", clear_hold=True)
 
 # ---- 9b. a session saves an already-stamped item between batches; and a run that dies after the server wrote a batch
 def item_file(g): return T / f"store/{g[0]}/{g[1:]}.json"
@@ -446,7 +447,7 @@ stop = threading.Event(); errs = []; done = []
 def worker():
     try:
         for n in range(50):
-            server._update("g82", sender="home-front", next=f"team-back: step {n}")
+            _update_svc._update("g82", sender="home-front", next=f"team-back: step {n}")
         done.append(1)
     except Exception as e:  # noqa: BLE001
         errs.append(repr(e))

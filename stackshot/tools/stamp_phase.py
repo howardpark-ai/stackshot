@@ -196,7 +196,7 @@ def display_of(server: Any, it: dict[str, Any], gid: str, stored: bool = False) 
     `stored` False: as the stamp proof has always read it (the fields alone, the writer's reading). True: as the readers show it now (the stored pair decides alive or waiting and the kind of the wait)."""
     from stackshot.model import model as _model  # noqa: PLC0415
     probe = {**it, "gid": gid}
-    mod = _model.view(probe, server._model_of(probe), after_open=lambda i_: server._after_open(i_.get("metadata") or {}), check=stored)
+    mod = _model.view(probe, server._item_read._model_of(probe), after_open=lambda i_: server._item_read._after_open(i_.get("metadata") or {}), check=stored)
     return {"today": mod.today or "", "state": mod.state, "kind": mod.wait.kind if mod.wait else "", "until": mod.wait.until if mod.wait else "", "backstop": mod.wait.backstop if mod.wait else "",
             "conflicts": list(mod.conflicts), "list": server._item_list(probe), "model": server._model_lines(probe, short=True), "fmt": server._fmt(probe), "brief": server._fmt(probe, brief=True)}
 

@@ -63,6 +63,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as WK_, waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.service import item_read as _item_read
 import stackshot.core.config as _cfg_
 from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
@@ -340,12 +341,12 @@ put(82, needs=[BACK], hold=True, wake=day(3), hold_set={"at": now0 - DAY, "by": 
 put(83, needs=[BACK], hold=True, wake=day(3), after=["g31"])
 put(84, needs=["external"], hold=True, wake=day(3), wait_kind="anchor", wait_anchor="https://example.com/y")
 put(85, needs=["external"], hold=True, wake=day(3))
-real_scoped = server._scoped_anchors
-server._scoped_anchors = lambda project, gid: ["https://example.com/watched"] if gid == "g82" else real_scoped(project, gid)
+real_scoped = _item_read._scoped_anchors
+_item_read._scoped_anchors = lambda project, gid: ["https://example.com/watched"] if gid == "g82" else real_scoped(project, gid)
 try:
     st_, d_ = call(op="until", items=[f"g{i}" for i in (81, 82, 83, 84, 85)])
 finally:
-    server._scoped_anchors = real_scoped
+    _item_read._scoped_anchors = real_scoped
 r10 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
 check("10 a hold on a pane recycle keeps its flag and its stamp, and stores the date as until", r10[81]["action"] == "set" and mt(81).get("hold") is True and mt(81).get("hold_set") and mt(81).get("until") == day(3) and "wake" not in mt(81), (r10[81]["action"], r10[81].get("why"), wk(mt(81))))
 check("10 a hold on an anchor scoped to the item keeps its flag and its stamp too", r10[82]["action"] == "set" and mt(82).get("hold") is True and mt(82).get("hold_set") and mt(82).get("until") == day(3), (r10[82]["action"], r10[82].get("why"), wk(mt(82))))

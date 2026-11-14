@@ -1958,7 +1958,7 @@ def ann_forms(src):
     return +out
 ANNUSE_ALLOW = {
     ("stackshot/web/app.py", "wraps"): (1, "functools.wraps once: the standby wrapper of custom_route, a decorator's wrapper"),
-    ("stackshot/web/server.py", "wraps"): (1, "functools.wraps once: the update tool's own signature kept visible; the function it copies from (update_unlocked, in service/update.py) is used as a value there, so its annotation names stay reads"),
+    ("stackshot/service/update.py", "wraps"): (1, "functools.wraps once: `_update`, the thin wrapper that keeps the signature of update_unlocked visible; update_unlocked is used as a value there, so its annotation names stay reads"),
     ("tests/read_only_scenario.py", "getattr of __annotations__ or __wrapped__"): (2, "hasattr(endpoint, '__wrapped__') twice: whether a route is wrapped, nothing is evaluated"),
 }
 def ann_uses(files):
@@ -1987,8 +1987,8 @@ for what, code, form in (("typing.get_type_hints", "import typing\nh = typing.ge
                          ("vars(f)['__annotations__']", "a = vars(f)['__annotations__']", "subscript of __annotations__")):
     flagged = [x for _f, x, _n, _k in ann_uses({"tests/new_scenario.py": code})]
     check(f"TRIPWIRE fires on a new use of an annotation reader: {what} in a new suite", form in flagged, flagged)
-real_s = "stackshot/web/server.py"
-check("TRIPWIRE a new use in a file that already has an entry for that form fails (one more functools.wraps appended to server.py)",
+real_s = "stackshot/service/update.py"
+check("TRIPWIRE a new use in a file that already has an entry for that form fails (one more functools.wraps appended to service/update.py)",
       ann_uses({real_s: scan[real_s]}) == [] and ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}) == [(real_s, "wraps", 2, 1)],
       ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}))
 check("TRIPWIRE stays quiet on the listed uses and on a bare function def (def f(x: int) -> int)",

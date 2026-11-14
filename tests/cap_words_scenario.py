@@ -74,6 +74,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
@@ -120,7 +121,7 @@ check("A: get shows his words behind the wake, with the quote and its source", f
 bd = ui_render.Board(f"{tmp}/store")
 ph = bd.item_html("a13")
 check("A: the item page shows them in its sidebar", "<dt>His words</dt><dd>park this until Jun 4th" in ph, re.findall(r"<dt>His words</dt>.{0,200}", ph))
-server._update("a13", wake=day(3), sender="home-owner")
+_update_svc._update("a13", wake=day(3), sender="home-owner")
 check("A: a different wake does not keep the old record: his answer on the item (given since it last moved) is recorded again for the new wake, as a time wait's reason",
       rd(13)["metadata"]["cap_ok"]["wake"] == day(3) and rd(13)["metadata"]["cap_ok"]["quote"] == "park this until Jun 4th" and W.words_of(rd(13)["metadata"])["quote"] == "park this until Jun 4th", rd(13)["metadata"])
 item(102, hold=True, wake=day(30), cap_ok={"wake": day(31), "by": "his recorded words", "quote": "park this", "source": "x"}, answers=[park])
@@ -194,7 +195,7 @@ B = lambda n: f"The vendor visits Tue {day(n)} 14:00"
 item(22, hold=True, wake=day(30))                                            # stored with no words (like): a wake past the cap
 check("B: before: no words and no basis behind the wake", not W.words_of(rd(22)["metadata"]) and not W.basis_of(rd(22)["metadata"]), rd(22)["metadata"])
 sc = rd(22)["state_updated"]
-out = server._update("a22", wait_basis=B(33), sender="home-owner")
+out = _update_svc._update("a22", wait_basis=B(33), sender="home-owner")
 m = rd(22)["metadata"]; wb = m.get("wait_basis") or {}
 check("B: on a wake already stored the basis is recorded for that wake: text, wake, who, when", wb.get("text") == B(33) and wk_(wb) == day(30) and wb.get("by") and wb.get("at"), m)
 check("B: it lifts the cap for that wake: the basis is read for it", W.basis_of(rd(22)["metadata"]) == B(33), rd(22)["metadata"])
@@ -208,63 +209,63 @@ d = rd(22); d["metadata"].pop("until", None); d["metadata"]["wake"] = day(31); (
 check("B: the same item with its wake moved by hand to another date has no basis for it any more (the basis is bound to its wake)", not W.basis_of(rd(22)["metadata"]), rd(22)["metadata"])
 d["metadata"].pop("until", None); d["metadata"]["wake"] = day(30); (T / "store/a/22.json").write_text(json.dumps(d))
 refused("B: moving the wake to another date past the cap with no words is refused (the cap), and the basis stays on the old wake",
-        lambda: server._update("a22", wake=day(31), sender="home-owner"), "at most 7 days", "wait_basis=")
+        lambda: _update_svc._update("a22", wake=day(31), sender="home-owner"), "at most 7 days", "wait_basis=")
 check("B: …still recorded for the old wake", wk_(rd(22)["metadata"]) == day(30) and W.basis_of(rd(22)["metadata"]) == B(33), rd(22)["metadata"])
 refused("B: moving the wake to within the cap with no reason is refused (a time wait carries one), and the basis stays on the old wake",
-        lambda: server._update("a22", wake=day(5), sender="home-owner"), "no reason", "wait_basis=")
-server._update("a22", wake=day(5), wait_basis=f"visit on {day(6)}", sender="home-owner")
+        lambda: _update_svc._update("a22", wake=day(5), sender="home-owner"), "no reason", "wait_basis=")
+_update_svc._update("a22", wake=day(5), wait_basis=f"visit on {day(6)}", sender="home-owner")
 check("B: moving the wake to within the cap with a basis of its own binds the new basis to the new wake (a held item takes a basis at any length)", W.basis_of(rd(22)["metadata"]) == f"visit on {day(6)}" and wk_(rd(22)["metadata"]) == day(5), rd(22)["metadata"])
 d_ = rd(22); d_["metadata"].pop("wait_basis", None); (T / "store/a/22.json").write_text(json.dumps(d_))      # the next checks start from a held wake with no basis
-server._update("a22", wake=day(40), wait_basis=f"visit on {day(41)}", hold=True, sender="home-owner")
+_update_svc._update("a22", wake=day(40), wait_basis=f"visit on {day(41)}", hold=True, sender="home-owner")
 check("B: a far wake with a basis in the same call is accepted, and the basis is bound to it", wk_(rd(22)["metadata"]) == day(40) and W.basis_of(rd(22)["metadata"]) == f"visit on {day(41)}", rd(22)["metadata"])
-server._update("a22", wake=day(42), wait_basis=f"visit moved to {day(43)}", sender="home-owner")
+_update_svc._update("a22", wake=day(42), wait_basis=f"visit moved to {day(43)}", sender="home-owner")
 check("B: …and a later far wake with its own basis replaces it", wk_(rd(22)["metadata"]) == day(42) and W.basis_of(rd(22)["metadata"]) == f"visit moved to {day(43)}", rd(22)["metadata"])
-refused("B: clear_wait_basis on a held wake would leave a time wait with no reason: refused", lambda: server._update("a22", clear_wait_basis=True, sender="home-owner"), "no reason")
-refused("B: wait_basis=\"none\" the same", lambda: server._update("a22", wait_basis="none", sender="home-owner"), "no reason")
-server._update("a22", clear_wait_basis=True, clear_hold=True, sender="home-owner")
+refused("B: clear_wait_basis on a held wake would leave a time wait with no reason: refused", lambda: _update_svc._update("a22", clear_wait_basis=True, sender="home-owner"), "no reason")
+refused("B: wait_basis=\"none\" the same", lambda: _update_svc._update("a22", wait_basis="none", sender="home-owner"), "no reason")
+_update_svc._update("a22", clear_wait_basis=True, clear_hold=True, sender="home-owner")
 check("B: clear_wait_basis with the hold released (no wait is left) drops it, and the wake alone is a backstop again", "wait_basis" not in rd(22)["metadata"] and "hold" not in rd(22)["metadata"], rd(22)["metadata"])
 d_ = rd(22); d_["metadata"].update(hold=True, wake=day(42)); (T / "store/a/22.json").write_text(json.dumps(d_))
 check("B: …and a stored hold with that wake and no basis has none", not W.basis_of(rd(22)["metadata"]), rd(22)["metadata"])
 
 # refusals
 item(23, wake=day(3))
-refused("B: a wake under the cap that is no hold (a backstop wake) needs no basis: refused (not needed)", lambda: server._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
-refused("B: …the same when the wake is set in the same call", lambda: server._update("a23", wake=day(6), wait_basis=B(7), sender="home-owner"), "not needed")
+refused("B: a wake under the cap that is no hold (a backstop wake) needs no basis: refused (not needed)", lambda: _update_svc._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
+refused("B: …the same when the wake is set in the same call", lambda: _update_svc._update("a23", wake=day(6), wait_basis=B(7), sender="home-owner"), "not needed")
 item(2020, hold=True, wake=day(3))
-server._update("a2020", wait_basis=B(4), sender="home-owner")
+_update_svc._update("a2020", wait_basis=B(4), sender="home-owner")
 check("B: a held wake under the cap takes a basis (a time wait carries a reason at any length)", W.basis_of(rd(2020)["metadata"]) == B(4), rd(2020)["metadata"])
 item(28, hold=True, recycle=True, recycle_at=now0)                          # a hold with no date of its own
-refused("B: a hold with no date has no wake for a basis to explain: refused", lambda: server._update("a28", wait_basis=B(33), sender="home-owner"), "no wake date")
+refused("B: a hold with no date has no wake for a basis to explain: refused", lambda: _update_svc._update("a28", wait_basis=B(33), sender="home-owner"), "no wake date")
 item(64)
-refused("B: …nor an item with no hold or wake, nor hold=true in the same call without a wake", lambda: server._update("a64", hold=True, wait_basis=B(33), sender="home-owner"), "no wake date")
+refused("B: …nor an item with no hold or wake, nor hold=true in the same call without a wake", lambda: _update_svc._update("a64", hold=True, wait_basis=B(33), sender="home-owner"), "no wake date")
 item(29, hold=True, wake=day(30))
-refused("B: a reason with no date is a way around the rule: refused", lambda: server._update("a29", wait_basis="waiting for the vendor to answer", sender="home-owner"), "YYYY-MM-DD")
-refused("B: a date before the wake day is no basis for waiting until the wake", lambda: server._update("a29", wait_basis=f"vendor answered on {day(10)}", sender="home-owner"), "none of its dates")
-refused("B: a text of the wrong length is refused", lambda: server._update("a29", wait_basis=day(33), sender="home-owner"), "12 to 300")
-refused("B: clear_wait_basis does not go with a new basis", lambda: server._update("a29", wait_basis=B(33), clear_wait_basis=True, sender="home-owner"), "does not go with")
-refused("B: a basis does not go with a call that drops the wake", lambda: server._update("a29", wait_basis=B(33), clear_wake=True, sender="home-owner"), "drops the wake")
+refused("B: a reason with no date is a way around the rule: refused", lambda: _update_svc._update("a29", wait_basis="waiting for the vendor to answer", sender="home-owner"), "YYYY-MM-DD")
+refused("B: a date before the wake day is no basis for waiting until the wake", lambda: _update_svc._update("a29", wait_basis=f"vendor answered on {day(10)}", sender="home-owner"), "none of its dates")
+refused("B: a text of the wrong length is refused", lambda: _update_svc._update("a29", wait_basis=day(33), sender="home-owner"), "12 to 300")
+refused("B: clear_wait_basis does not go with a new basis", lambda: _update_svc._update("a29", wait_basis=B(33), clear_wait_basis=True, sender="home-owner"), "does not go with")
+refused("B: a basis does not go with a call that drops the wake", lambda: _update_svc._update("a29", wait_basis=B(33), clear_wake=True, sender="home-owner"), "drops the wake")
 check("B: …and nothing was recorded by the refusals", "wait_basis" not in rd(29)["metadata"] and "wait_basis" not in rd(23)["metadata"], (rd(29)["metadata"], rd(23)["metadata"]))
 W._cfg.CFG.setdefault("waiting", {})["cap_needs_owner"] = False
-refused("B: with the cap switched off ([waiting] cap_needs_owner = false) there is nothing to lift on a backstop wake: refused", lambda: server._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
-server._update("a29", wait_basis=B(33), sender="home-owner")
+refused("B: with the cap switched off ([waiting] cap_needs_owner = false) there is nothing to lift on a backstop wake: refused", lambda: _update_svc._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
+_update_svc._update("a29", wait_basis=B(33), sender="home-owner")
 check("B: …a held wake still takes it: it is the time wait's reason, whatever the cap", W.basis_of(rd(29)["metadata"]) == B(33), rd(29)["metadata"])
 W._cfg.CFG["waiting"]["cap_needs_owner"] = True
 item(65, hold=True, wake=day(30))
-refused("B: a date 31 days after the wake day is outside the window", lambda: server._update("a65", wait_basis=f"vendor answers on {day(61)}", sender="home-owner"), "none of its dates", "30 days")
+refused("B: a date 31 days after the wake day is outside the window", lambda: _update_svc._update("a65", wait_basis=f"vendor answers on {day(61)}", sender="home-owner"), "none of its dates", "30 days")
 item(68, hold=True, wake=day(30))
-server._update("a68", wait_basis=f"vendor answers on {day(60)}", sender="home-owner")
+_update_svc._update("a68", wait_basis=f"vendor answers on {day(60)}", sender="home-owner")
 check("B: a date 30 days after the wake day (a deliberate early check) is accepted", W.basis_of(rd(68)["metadata"]) == f"vendor answers on {day(60)}", rd(68)["metadata"])
-server._update("a68", clear_wait_basis=True, clear_hold=True, sender="home-owner")
+_update_svc._update("a68", clear_wait_basis=True, clear_hold=True, sender="home-owner")
 check("B: W.basis_problem: day 0 and day 30 pass, day 31 and the day before the wake do not", not W.basis_problem("x on 2026-11-09", datetime.date(2026, 11, 9)) and not W.basis_problem("x on 2026-12-09", datetime.date(2026, 11, 9))
       and W.basis_problem("x on 2026-12-10", datetime.date(2026, 11, 9)) and W.basis_problem("x on 2026-11-08", datetime.date(2026, 11, 9)), None)
-refused("B: a date that is not on the calendar is refused", lambda: server._update("a65", wait_basis="vendor reply due 2026-02-30", sender="home-owner"), "not a real calendar date")
-refused("B: ...even beside a real date in the window", lambda: server._update("a65", wait_basis=f"visit {day(31)} or 2026-02-30", sender="home-owner"), "not a real calendar date")
-refused("B: a far date that merely sounds distant is no basis for a wake a month out", lambda: server._update("a65", wait_basis="check later 2030-01-01", sender="home-owner"), "none of its dates")
-refused("B: a wake more than a year out is refused whatever the basis", lambda: server._update("a65", wake="2099-12-31", hold=True, wait_basis="vendor reply 2099-12-31", sender="home-owner"), "at most 365 days")
-refused("B: ...the same for a wake a year and a month out", lambda: server._update("a65", wake=day(396), hold=True, wait_basis=f"vendor reply {day(397)}", sender="home-owner"), "at most 365 days")
-refused("B: a far basis on a wake set in the same call is refused too", lambda: server._update("a65", wake=day(40), hold=True, wait_basis="check later 2030-01-01", sender="home-owner"), "none of its dates")
+refused("B: a date that is not on the calendar is refused", lambda: _update_svc._update("a65", wait_basis="vendor reply due 2026-02-30", sender="home-owner"), "not a real calendar date")
+refused("B: ...even beside a real date in the window", lambda: _update_svc._update("a65", wait_basis=f"visit {day(31)} or 2026-02-30", sender="home-owner"), "not a real calendar date")
+refused("B: a far date that merely sounds distant is no basis for a wake a month out", lambda: _update_svc._update("a65", wait_basis="check later 2030-01-01", sender="home-owner"), "none of its dates")
+refused("B: a wake more than a year out is refused whatever the basis", lambda: _update_svc._update("a65", wake="2099-12-31", hold=True, wait_basis="vendor reply 2099-12-31", sender="home-owner"), "at most 365 days")
+refused("B: ...the same for a wake a year and a month out", lambda: _update_svc._update("a65", wake=day(396), hold=True, wait_basis=f"vendor reply {day(397)}", sender="home-owner"), "at most 365 days")
+refused("B: a far basis on a wake set in the same call is refused too", lambda: _update_svc._update("a65", wake=day(40), hold=True, wait_basis="check later 2030-01-01", sender="home-owner"), "none of its dates")
 check("B: ...and nothing was recorded by those refusals", "wait_basis" not in rd(65)["metadata"] and wk_(rd(65)["metadata"]) == day(30), rd(65)["metadata"])
-server._update("a65", wake=day(300), hold=True, wait_basis=f"the sample license expires {day(302)}", sender="home-owner")
+_update_svc._update("a65", wake=day(300), hold=True, wait_basis=f"the sample license expires {day(302)}", sender="home-owner")
 check("B: a wake 300 days out with its date inside the window is accepted (the limit is a year)", W.basis_of(rd(65)["metadata"]) == f"the sample license expires {day(302)}", rd(65)["metadata"])
 # the server fires the wake: the basis goes with it
 d = rd(65); d["metadata"].pop("until", None); d["metadata"]["hold"] = True; d["metadata"]["wake"] = day(-1); d["metadata"]["wait_basis"]["wake"] = day(-1); (T / "store/a/65.json").write_text(json.dumps(d))
@@ -276,7 +277,7 @@ check("B: _wake_pass firing the wake drops the basis with the hold and the wake"
 for how, kw in (("clear_wake", {"clear_wake": True}), ("clear_hold", {"clear_hold": True}), ("a close", {"status": "completed", "outcome": "done", "reason": "ok", "description": "- Done"})):
     item(32, wake=day(30), wait_basis={"text": B(33), "wake": day(30), "by": "home-owner", "at": now0}, **({"hold": True} if how != "clear_wake" else {}))   # (a hold cannot lose its wake and stay a hold)
     try:
-        server._update("a32", sender="home-owner", **kw)
+        _update_svc._update("a32", sender="home-owner", **kw)
     except Exception as e:
         check(f"B: {how} runs", False, str(e))
     check(f"B: {how} drops the basis with the wake", "wait_basis" not in rd(32)["metadata"], rd(32)["metadata"])
@@ -327,7 +328,7 @@ check("web: ...each row has the item link, the subject, the basis text, the wake
 check("web: ...the oldest wake first and the newest last", sm.index('id="task-a-66"') < sm.index('id="task-a-67"'), sm)
 check("web: ...it is the Waiting block, in the live set, and there is no block of its own", ' waiting-list=' in ht and ' outside-event=' not in ht and 'id="outside-event"' not in ht, None)
 # no row once the wake changes (the basis is read only for the wake it was given for), and no section at all when none is left
-server._update("a67", clear_hold=True, sender="home-owner")      # the hold and its wake go (a new wake would need a reason of its own:), and the basis with them
+_update_svc._update("a67", clear_hold=True, sender="home-owner")      # the hold and its wake go (a new wake would need a reason of its own:), and the basis with them
 sm = sect(ui_render.Board(f"{tmp}/store", now=mon).html())
 check("web: once an item's wake goes its basis goes (the basis was for the old wake): one basis left on the Waiting list, and its heading counts the rows", f"vendor answers on {day(43)}" not in sm and B(33) in sm and sm.count("set by") == 1
       and re.search(r'Waiting <span class="count">(\d+)</span>', sm).group(1) == str(sm.count('<li class="irow hrow')), sm)
@@ -367,15 +368,15 @@ check("API: an agent's entry is a 400", st == 400 and "own words" in d["error"],
 import inspect
 from stackshot.service import update as _upd_svc
 from stackshot.web.tools import complete as _wt_complete, create as _wt_create, update as _wt_update
-_OWNER = {"stackshot_create": _wt_create, "stackshot_update": _wt_update, "stackshot_complete": _wt_complete, "_create": _wt_create, "_update": server, "update_unlocked": _upd_svc}
+_OWNER = {"stackshot_create": _wt_create, "stackshot_update": _wt_update, "stackshot_complete": _wt_complete, "_create": _wt_create, "_update": _upd_svc, "update_unlocked": _upd_svc}
 for fn in ("stackshot_create", "stackshot_update", "stackshot_complete", "_create", "_update", "update_unlocked"):
     ps = inspect.signature(getattr(_OWNER[fn], fn)).parameters
     check(f"writers: {fn} has no parameter that writes answers", "answers" not in ps and not any(x.kind is inspect.Parameter.VAR_KEYWORD for x in ps.values()), list(ps))
 item(38, hold=True, wake=day(30), answers=[park])
 ans0 = rd(38)["metadata"]["answers"]
-server._update("a38", next="home-owner: changed", sender="home-owner")
+_update_svc._update("a38", next="home-owner: changed", sender="home-owner")
 try:
-    server._update("a38", next="again", said=[{"tag": "Acked-by", "quote": "park it", "session": U["home-owner"], "answers": [{"ts": 1.0, "kind": "decision", "text": "park forever", "via": "board"}]}], sender="home-owner")
+    _update_svc._update("a38", next="again", said=[{"tag": "Acked-by", "quote": "park it", "session": U["home-owner"], "answers": [{"ts": 1.0, "kind": "decision", "text": "park forever", "via": "board"}]}], sender="home-owner")
 except Exception:
     pass
 check("writers: update (and said) leave the item's answers as they were", rd(38)["metadata"]["answers"] == ans0, rd(38)["metadata"]["answers"])
@@ -613,36 +614,36 @@ check("again: his answer given after the clear, the last thing before the curren
 VER = dict(state="verifying", proof="the link opens on the phone", end=day(9), needs=["team-back"])
 item(80, **VER)
 check("C: before: the verifying item has no hold flag and no wake: it waits on its end date", not hd_(rd(80)["metadata"]) and not wk_(rd(80)["metadata"]) and rd(80)["metadata"]["end"] == day(9), rd(80)["metadata"])
-refused("C: an earlier wake alone on a verifying item asks a time wait for its reason", lambda: server._update("a80", wake=day(1), sender="team-back"), "no reason", "wait_basis=")
+refused("C: an earlier wake alone on a verifying item asks a time wait for its reason", lambda: _update_svc._update("a80", wake=day(1), sender="team-back"), "no reason", "wait_basis=")
 check("C: …and nothing was written", "wake" not in rd(80)["metadata"], rd(80)["metadata"])
 def tried(f):
     """run an update; (True, "") when it went through, (False, the refusal) when it did not: a refusal is then a failed check, not an uncaught error"""
     try: f(); return True, ""
     except Exception as e: return False, str(e)
-ok_, err_ = tried(lambda: server._update("a80", wake=day(1), wait_basis=f"the soak ends {day(1)}", sender="team-back"))
+ok_, err_ = tried(lambda: _update_svc._update("a80", wake=day(1), wait_basis=f"the soak ends {day(1)}", sender="team-back"))
 check("C: the call with a wait_basis of its own goes through (one call satisfies both checks)", ok_, err_)
 m = rd(80)["metadata"]
 check("C: the same call with a wait_basis of its own works: the wake is stored, the basis is bound to it, the item stays verifying and unheld",
       wk_(m) == day(1) and W.basis_of(m) == f"the soak ends {day(1)}" and m["state"] == "verifying" and m["end"] == day(9) and "hold" not in m, m)
 check("C: …and the wait now ends at the new wake", W.wake_epoch(wk_(rd(80)["metadata"])) == W.wake_epoch(day(1)), rd(80)["metadata"])
-server._update("a80", wake=day(2), wait_basis=f"the soak ends {day(2)} after all", sender="team-back")
+_update_svc._update("a80", wake=day(2), wait_basis=f"the soak ends {day(2)} after all", sender="team-back")
 check("C: a later wake with its own basis replaces both", wk_(rd(80)["metadata"]) == day(2) and W.basis_of(rd(80)["metadata"]) == f"the soak ends {day(2)} after all", rd(80)["metadata"])
 item(81, **VER)
-refused("C: a wait_basis on a verifying item with a wake past its 365-day reach is still refused", lambda: server._update("a81", wake="2099-12-31", wait_basis="vendor reply 2099-12-31", sender="team-back"), "at most 365 days")
+refused("C: a wait_basis on a verifying item with a wake past its 365-day reach is still refused", lambda: _update_svc._update("a81", wake="2099-12-31", wait_basis="vendor reply 2099-12-31", sender="team-back"), "at most 365 days")
 # the hold and the wake in one call, on an item still on agent (a stored doing): the stored item is no time wait yet, the call makes it one
 item(83, needs=["team-back"], state="doing")
 refused("C: hold=true with the wake and no basis, on a doing item, is refused with the reason guard (nothing is stored)",
-        lambda: server._update("a83", hold=True, wake=day(1), sender="team-back"), "no reason", "wait_basis=")
+        lambda: _update_svc._update("a83", hold=True, wake=day(1), sender="team-back"), "no reason", "wait_basis=")
 check("C: …and the item is as it was", rd(83)["metadata"].get("state") == "doing" and "wake" not in rd(83)["metadata"] and not hd_(rd(83)["metadata"]), rd(83)["metadata"])
-ok_, err_ = tried(lambda: server._update("a83", hold=True, wake=day(1), wait_basis=f"the soak ends {day(1)}", sender="team-back"))
+ok_, err_ = tried(lambda: _update_svc._update("a83", hold=True, wake=day(1), wait_basis=f"the soak ends {day(1)}", sender="team-back"))
 check("C: the same call with a wait_basis goes through", ok_, err_)
 m = rd(83)["metadata"]
 check("C: …the item is held, with the wake and the basis bound to it", hd_(m) is True and wk_(m) == day(1) and W.basis_of(m) == f"the soak ends {day(1)}", m)
 # the other side stays as it was: a wake alone on an alive item is a backstop that needs no basis, and a basis for it is not needed
 item(82, needs=["team-back"], state="doing")
-server._update("a82", wake=day(2), sender="team-back")
+_update_svc._update("a82", wake=day(2), sender="team-back")
 check("C: a wake alone on a doing item is a date to wait on (stored as until, no hold): accepted with no basis", wk_(rd(82)["metadata"]) == day(2) and "hold" not in rd(82)["metadata"] and _WT.stored_until(rd(82)["metadata"]) == day(2), rd(82)["metadata"])
-refused("C: …and a wait_basis for it is not needed", lambda: server._update("a82", wake=day(3), wait_basis=f"visit on {day(4)}", sender="team-back"), "not needed")
+refused("C: …and a wait_basis for it is not needed", lambda: _update_svc._update("a82", wake=day(3), wait_basis=f"visit on {day(4)}", sender="team-back"), "not needed")
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": cap words scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

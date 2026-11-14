@@ -121,7 +121,6 @@ from stackshot.model import nextlines as _nl  # noqa: E402  — whose lines are 
 from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on the checklist: the server makes `<owner>: <what to decide>` for an ask or a your-step, ticks it with his answer, and a session cannot (owner_steps.py)
 from stackshot.model import step_proof as _sp  # noqa: E402  — a step that names the event which completes it: the patterns for its words and the explicit form (step_proof.py)
 from stackshot.waits import builderless as _bl  # noqa: E402  — a project with no builder: whom an answered step goes to, and a front agent handing an item to another front agent of its project (builderless.py)
-from stackshot.model import contact as _contact  # noqa: E402  — an item's contact: the front agent the person talks to about it (contact.py)
 from stackshot.model import next_rules as _nr  # noqa: E402  — the write checks of Next: a line names who takes it (N1), a reworded step is no rewrite (N3), an open item keeps an open step (N6) (next_rules.py)
 from stackshot.model import bullet_text as _bt  # noqa: E402  — how a line reads and how a text becomes `- ` bullets, for the gates, the cold call's close and the question route (bullet_text.py)
 from stackshot.model import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
@@ -192,19 +191,17 @@ from stackshot.service.store import _legacy_hold, _legacy_needs, _path  # noqa: 
 from stackshot.service import create as _create_svc  # noqa: E402  — creating an item: every gate and write of the create tool in their order, and the request map (service/create.py)
 from stackshot.service import gates as _gates  # noqa: E402  — the write gates of the create, update and complete tools and the checks before the item lock (service/gates.py)
 from stackshot.service import update as _update_svc  # noqa: E402  — updating, completing and confirming an item: every gate and write of the update tool in their order (service/update.py)
+from stackshot.model import holders as _holders  # noqa: E402  — who holds an item and who may be named to move it: the stored hold flag, the role a page gives a session, the front-agent pair rule (model/holders.py)
+from stackshot.service import item_read as _item_read  # noqa: E402  — reading items: the open `after` items, the item as the model reads it, the scoped anchors, what is parked, the model's switches (service/item_read.py)
+from stackshot.service import agents as _agents  # noqa: E402  — a project's -main agent and builder, the names a hand-off could name, the reader of many items' movers (service/agents.py)
+from stackshot.service import contacts as _contacts  # noqa: E402  — an item's contact: the readers, the write, what follows a retired or renamed agent, the backfill (service/contacts.py)
+from stackshot.service import pane_recovery as _pane_recovery  # noqa: E402  — pane liveness, a session or a machine down, the recovery request of a quiet mover and the park fallback (service/pane_recovery.py)
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
 else:
     (_store.STORE / _store.LETTER).mkdir(parents=True, exist_ok=True)
     _create_svc.REQUESTS.parent.mkdir(parents=True, exist_ok=True)
-
-
-# ----------------------------------------------------------------------------- store (the one store, every letter)
-# STORE, _item_files, _next_id and the file write are core/store.py's; _path, _load and _shown_ids are service/store.py's (imported where STORE was defined, above).
-
-
-# _norm_id, _bare_id_ok and _GID (an id as a session writes it → the store's) are model/ids.py's.
 
 
 # ----------------------------------------------------------------------------- needs, observers and after
@@ -217,27 +214,10 @@ else:
 # metadata.after: items of any project that must close first; while one is open the item is parked without a hold,
 # and the last close wakes it. The stored list is canonical: decision, external, then the sessions as given.
 # _NEEDS_KINDS, _needs_list, _needs_of, _needs_kinds, _canon_needs, _needs_store, _needs_sessions, _waits_decision, _after_of and _observers_of are model/needs.py's (imported near the top of this module).
-# _after_open stays here: it reads each `after` item from the store.
-
-
-def _after_open(meta: dict[str, Any]) -> list[str]:
-    """The items in an item's `after` that are still open (a missing file counts as closed: it blocks nothing)."""
-    out = []
-    for g in _after_of(meta):
-        try:
-            p = _path(g)
-            if p.exists() and json.load(open(p, encoding="utf-8")).get("status") == "open":
-                out.append(g)
-        except Exception:
-            continue
-    return out
+# _after_open, which reads each `after` item from the store, is service/item_read.py's.
 
 
 # _legacy_needs and _legacy_hold, the two forms _load reads an old file through, are store.py's.
-
-
-
-
 
 
 def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
@@ -345,7 +325,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
                 m = it.get("metadata") or {}
                 if it.get("status") != "open" or _model.norm_who(m.get("mover")) or _needs_sessions(m):
                     continue
-                mod = _model_of({**it, "gid": gid})
+                mod = _item_read._model_of({**it, "gid": gid})
                 if mod.state != _model.ALIVE or _model.is_owner(mod.mover) or mod.wait is not None:
                     continue
                 project = str(m.get("project") or "")
@@ -439,37 +419,6 @@ def _session_ids_pass() -> str:
         return line
 
 
-def _hold_flag(item: dict[str, Any]) -> bool:
-    """The stored hold flag: an open item with metadata.hold, whatever its needs. The wake pass reads it (a held item's wake
-    releases the flag, a backstop's leaves it alone); everything that shows or counts the hold reads _is_held."""
-    return item.get("status") == "open" and bool((item.get("metadata") or {}).get("hold"))
-
-
-def _is_held(item: dict[str, Any]) -> bool:
-    """On hold (its lane stays 'on agent' and a secondary property renders it as 'on hold'):
-    an open item with metadata.hold, optionally metadata.wake. needs, due and next stay as they are.
-    An item whose needs hold decision is never on hold, whatever its
-    stored flag says (render.is_held, the same rule for the flag): it waits on the owner's call, and the update tool drops such a flag on
-    the item's next write. The flag only: a wait on a date alone is parked too, as _is_parked reads it."""
-    return _hold_flag(item) and not _waits_decision(item.get("metadata") or {})
-
-
-def _is_parked(item: dict[str, Any]) -> bool:
-    """What the board draws as parked: the renderers' own rule (render.is_held), so a session reads what the board shows: an open item on hold (the flag), or waiting on one date alone (an `until`
-    with no kind or the kind time), never one whose needs hold decision. `_is_held` above is the hold flag alone, for the logic that releases and sets holds."""
-    return _rmod.is_held(item)
-
-
-def _date_parked(item: dict[str, Any], unfolded: bool = False) -> bool:
-    """A wait stored as one date (`until`, no kind or the kind time) is what the old hold with a wake was: the write's notes and
-    relays read it as put on hold / released from hold. `unfolded`: the write began by unfolding a stored until into the old
-    working fields (so the until is not in the item yet): True for that read of the item as it was."""
-    m = item.get("metadata") or {}
-    return bool((unfolded or _wt.stored_until(m)) and _uw.kind_of(m) in ("", "time") and item.get("status") == "open" and _rmod.needs_kind(item) != "call")      # one rule with the board's (_is_parked): an item whose needs hold his decision is never parked
-
-
-
-
 def _close_description_repair(apply: bool = False, days: float = 14.0, now: float | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """The one-off repair of the closes that replaced a description (tools/restore_close_descriptions.py runs it): every item closed in the last `days` days whose description is the
     one its close wrote has the description of the revision before the close (found in the store's git, close_repair.py) put back, and the text the close wrote moved into
@@ -507,7 +456,7 @@ def _stamp_values(gid: str, item: dict[str, Any]) -> tuple[str, str]:
     """(phase, waits_on) of an item as the board shows it now: the one reading (model.view of model.derive, so a held or dated or wait_basis doing item is waiting) worked out by model.stamp_values,
     "" = the key is absent. Both the save's stamp (_phase_stamp) and the stamp pass (_stamp_one) take it from here."""
     probe = {**item, "gid": gid}
-    shown = _model.view(probe, _model_of(probe), after_open=lambda i_: _after_open(i_.get("metadata") or {}), check=False)
+    shown = _model.view(probe, _item_read._model_of(probe), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=False)
     return _model.stamp_values(probe, shown)
 
 
@@ -635,51 +584,16 @@ from stackshot.web.page_debts import (  # noqa: E402,F401
     _owed_readable,
     _owed_save,
     _owed_settle,
-    _role_name,
-    _same_sess,
     _session_id,
     _shown_needs,
     _shown_ref,
-    _store_ref,
 )
-
-
-# ----------------------------------------------------------------------------- publish (in-process)
-import threading
 
 
 # ----------------------------------------------------------------------------- how an item relates to sessions (the linked agent before it)
 
 
 _wt.FALLBACK_MOVER = _telling.fallback_mover        # model.derive and waiting.mover_of read the default mover through this (the server alone can read the project registry)
-
-
-def _hub_sessions(project: str) -> tuple[str, str, list[str], list[str], str]:
-    """→ (hub key, the name-line session (always "": it is retired), background agents, user-facing agents, the page's own `agent:` keeper) for an item's project: the
-    background agents of the page, of its pilot root and of its hub, together."""
-    reg = _anc.registry()
-    hub = _anc.hub_of(project, reg)
-    keys = [k for k in dict.fromkeys([str(project).strip("/"), _anc.pilot_root(project), hub]) if k]
-    back, front = [], []
-    for k in keys:
-        e = reg.get(k) or {}
-        b = [str(x) for x in (e.get("back_agents") or {})]
-        back += [x for x in b if x not in back]
-        front += [str(x) for x in (e.get("agents") or {}) if str(x) not in b and str(x) not in front]
-    e = reg.get(str(project).strip("/")) or {}
-    keeper = str(e.get("session") or "") if e.get("role") == "agent" else ""
-    stew = ""      # the retired name-line session is not offered as a session to name
-    return hub, stew, back, [x for x in front if x not in back], keeper
-
-
-def _role_of(name: str, nm: dict[str, str] | None = None) -> tuple[dict[str, Any], str]:
-    """→ (anchors.session_roles(), the name a project page lists `name` under: as given, by its fleet label, its name now or an old name; "" when no page lists it).
-    roles[key]["role"] is "front" for a user-facing agent and "back" for a background agent. The needs gate and the front-mover gate read a name through this."""
-    name = str(name or "").strip()
-    nm = _anc.names() if nm is None else nm
-    roles = _anc.session_roles()
-    label = nm.get(_anc.canonical(name, nm), "") or name
-    return roles, _role_name(roles, name, label)
 
 
 def _builderless_answer_to(meta: dict[str, Any], project: str) -> str:
@@ -690,25 +604,12 @@ def _builderless_answer_to(meta: dict[str, Any], project: str) -> str:
             return ""
         nm = _anc.names()
         def usable(who: str) -> bool:      # a front agent of this item's project, as mover= may name one (a step line does no more)
-            roles, key = _role_of(who, nm)
+            roles, key = _holders._role_of(who, nm)
             return bool(key) and _bl.front_of(roles[key], project)
         return _bl.answer_target(meta, usable)
     except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the old fallback
         print(f"answer: next session of {project} not read ({e.__class__.__name__}: {e}); the keeper takes it", file=sys.stderr, flush=True)
         return ""
-
-
-def _front_pair_ok(sender: str, key: str, project: str) -> bool:
-    """May `sender` hand an item of `project` to the front agent `key` (builderless.pair_allowed): both are live front agents of the project the item is filed under (one page), and the project is front-only (anchors.front_only). A project with no agents map has no front agent to name."""
-    try:
-        s = str(sender or "").strip()
-        if not s:
-            return False
-        nm = _anc.names()
-        roles, skey = _role_of(s, nm)
-        return _bl.pair_allowed(roles.get(skey) if skey else None, roles.get(key), _anc.front_only(project), project)
-    except Exception:  # noqa: BLE001  — the relaxation is an extra: a failed read keeps the refusal
-        return False
 
 
 def _finishes_own_line(work: Any, meta: dict[str, Any], writer: str, open_item: bool = True) -> bool:
@@ -761,14 +662,6 @@ def _after_reaches(start: list[str], target: str, seen: set[str] | None = None) 
         if it.get("status") == "open" and _after_reaches(_after_of(it.get("metadata") or {}) + _wl.item_ids(it.get("metadata") or {}), target, seen):
             return True
     return False
-
-
-def _state_end(meta: dict[str, Any], *states: str) -> None:
-    """The server's own act (a wake that fired, an after link released, an anchor's notice) ends the wait a stored state stood
-    on: the state and its carry fields go when the state is one of `states` (none given: whatever it is), and the item reads as derived from its fields."""
-    if meta.get("state") in (states or (*_states.STATES, *_states.LEGACY_STATES)):
-        for k in _states.DROP_ON_CLOSE:
-            meta.pop(k, None)
 
 
 _STATE_STANDS_ON = {"your-call": "needs decision and the ask", "blocked": "after, and supplies",
@@ -825,20 +718,6 @@ def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, st
     return ""
 
 
-def _model_guards_on() -> bool:
-    """[model] guards (default true): the write guards of the item model. false turns them off without a deploy of code; the report on existing items still reads."""
-    return bool(_cfg.get("model", "guards", default=True))
-
-
-def _open_item_named(ref: str) -> str:
-    """`board#N` as a session wrote it in a next line → the store id of that item when it exists and is open, else "" (a closed or unknown item is nothing to wait for). Read only."""
-    try:
-        g = _norm_id(ref)
-        return g if _svcstore._load(g).get("status") == "open" else ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
 def _model_apply(meta: dict[str, Any], status: str, setv: dict[str, str], drop: set[str]) -> None:
     """Store or drop the model fields on `meta` (the metadata as this write leaves it). A completed item has no mover and waits on nothing: only its goal can be set."""
     if status == "completed":
@@ -850,25 +729,14 @@ def _model_apply(meta: dict[str, Any], status: str, setv: dict[str, str], drop: 
     meta.update(setv)
 
 
-def _is_background(who: str, project: str) -> bool:
-    """Is `who` a background agent of the project's hub? False for a front agent, the owner, a session no page lists and "" (the test the hand-off gate uses, model_guards.Ctx)."""
-    w = _model.norm_who(who)
-    if not w or _model.is_owner(w):
-        return False
-    try:
-        return bool(_mg.Ctx().background_of(w, project))
-    except Exception:  # noqa: BLE001  — a registry that cannot be read names nobody
-        return False
-
-
 def _owner_then(project: str, mover_before: str, sender: str, next_text: str, needs: list[str]) -> str:
     """Who takes an item after the owner's answer when nobody named it, as an item goes to him. Not the front agent that relayed the
     ask: the agent that does the work. In order: (1) the mover before his step when it is a background agent; (2) the project's builder when it moves the item (a session in needs) or when
     next names it as the one building (a line `<builder>: …`); (3) the sender when it is a background agent (a builder that files or edits its own decision item is its own then). "" when
     none (the model's own default then stands: the first session in needs, else nobody, and his answer hands the item to the project's builder, else its -main agent)."""
-    if _is_background(mover_before, project):
+    if _holders._is_background(mover_before, project):
         return mover_before
-    b = _builder_for(project)
+    b = _agents._builder_for(project)
     if b:
         bid = _session_id(b)
         named = any(_session_id(x) == bid for x in needs)
@@ -876,7 +744,7 @@ def _owner_then(project: str, mover_before: str, sender: str, next_text: str, ne
             named = bool(re.search(r"(?mi)^\s*(?:[-*]\s+|\d+[.)]\s+)?" + re.escape(b) + r"\s*:", next_text))
         if named:
             return b
-    if _is_background(sender, project):
+    if _holders._is_background(sender, project):
         return sender
     return ""
 
@@ -888,17 +756,17 @@ def _owner_then_default(item_was: dict[str, Any] | None, meta: dict[str, Any], s
         return ""
     try:
         now_item = {"status": "open", "metadata": meta}
-        mod = _model_of(now_item)
+        mod = _item_read._model_of(now_item)
         if mod.state != _model.ALIVE or not _model.is_owner(mod.mover):
             return ""
-        after = lambda i_: _after_open(i_.get("metadata") or {})
+        after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
         if item_was and _model.stood_his(item_was, after):
             return ""
         before = ""
         if mover_arg and not _model.is_owner(mover_arg):
             before = mover_arg
         elif item_was and item_was.get("status") == "open":
-            wm = _model_of({**item_was, "gid": ""})
+            wm = _item_read._model_of({**item_was, "gid": ""})
             before = wm.mover if wm.state == _model.ALIVE else ""
         project = str(meta.get("project") or "")
         who = _owner_then(project, before, sender, str(meta.get("next") or ""), _needs_sessions(meta))
@@ -928,9 +796,9 @@ def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bo
     The way back: when the item stood in his state before this write (`item_was`) and no longer does (his decision out of needs, the state moved on), the mover he held goes back to `then` (the
     agent that had it), or to the model's default when none is stored; a wait that replaces his state drops it. → the note for the reply ("" when nothing moved).
     [model] guards = false, a filing write and a close are left alone."""
-    if named or not _model_guards_on() or item_now.get("status") != "open":
+    if named or not _item_read._model_guards_on() or item_now.get("status") != "open":
         return ""
-    after = lambda i_: _after_open(i_.get("metadata") or {})
+    after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
     try:
         ch = _model.settle(item_now, _model.stood_his(item_was, after), after)
     except Exception as e:  # noqa: BLE001  — a reading that fails changes nothing
@@ -939,7 +807,7 @@ def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bo
     if not ch:
         return ""
     mover_s, h = _model.norm_who(meta.get("mover")), _model.owner_display()
-    if ch.get("mover") == h and not _model.norm_who(meta.get("then")) and ch.get("then") == mover_s and not _is_background(mover_s, str(meta.get("project") or "")):
+    if ch.get("mover") == h and not _model.norm_who(meta.get("then")) and ch.get("then") == mover_s and not _holders._is_background(mover_s, str(meta.get("project") or "")):
         better = _owner_then(str(meta.get("project") or ""), mover_s, "", str(meta.get("next") or ""), _needs_sessions(meta))      # D9: a front agent that relayed the ask is not its then when a builder does the work
         if better:
             ch = {**ch, "then": better}
@@ -958,10 +826,10 @@ def _settle_mover_on_save(item: dict[str, Any], before: dict[str, Any] | None) -
     whose stored mover disagrees with the side of his state it stands on is settled in place (model.settle): an agent mover on an item that waits on him becomes he, the agent in `then`; the mover he
     held goes back to `then` when the item leaves his state. Runs before the hand-off record, so a move to him is a hand-off to him and the way back needs none. A filing write and
     [model] guards = false leave it. Never fails a save. → True when it changed the item."""
-    if not _model_guards_on() or item.get("status") != "open":
+    if not _item_read._model_guards_on() or item.get("status") != "open":
         return False
     try:
-        after = lambda i_: _after_open(i_.get("metadata") or {})
+        after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
         ch = _model.settle(item, _model.stood_his(before, after), after)
         if not ch:
             return False
@@ -994,13 +862,13 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
         went on to wait for something else: the server's step is dropped, by the writer (owner_steps.drop_open); his own
         answer ticks the step itself (_answer), and a note on a step leaves it open for the session that judges it
     A closed item (its checklist is the record), a filing write and [model] guards = false leave it. Never fails a save. → True when it changed the checklist."""
-    if not _model_guards_on() or item.get("status") != "open":
+    if not _item_read._model_guards_on() or item.get("status") != "open":
         return False
     try:
         meta = item.get("metadata")
         if not isinstance(meta, dict):
             return False
-        after = lambda i_: _after_open(i_.get("metadata") or {})
+        after = lambda i_: _item_read._after_open(i_.get("metadata") or {})
         keeper, now, was = str(meta.get("owner") or ""), time.time(), (meta.get("steps"), meta.get("next"), _hs.recorded(meta))
         if _model.stood_his(item, after):
             _hs.ensure(meta, _owner_want(meta), keeper, NAME, now, NAME)
@@ -1016,7 +884,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
 
 def _eff_state(item: dict[str, Any]) -> str:
     """The item's state, stored else derived, as the brief shows it."""
-    return _states.of(item, lambda i_: _after_open(i_.get("metadata") or {}))[0]
+    return _states.of(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))[0]
 
 
 def _state_check_notes(item: dict[str, Any]) -> list[str]:
@@ -1030,7 +898,7 @@ def _state_check_notes(item: dict[str, Any]) -> list[str]:
         s = _eff_state(item)
         if s in _states.AGENT_STATES:
             out.append(f"note: next names {who} but the state is {s}: pass step=… (or needs=decision with an ask)")
-    _hits, broad = _ac.wait_words(item, lambda i_: _after_open(i_.get("metadata") or {}))
+    _hits, broad = _ac.wait_words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))
     if broad:
         out.append(f"(flag: next uses {', '.join(broad)}, words that can hide a wait: if it waits, set the wait; the auditor reads this)")
     ns = m.get("next_stale")
@@ -1105,7 +973,7 @@ def _back_agent(who: str, idx: dict[str, dict[str, Any]] | None = None) -> str:
     except Exception:
         return ""
     idx = _sr._sessions_index() if idx is None else idx
-    name = _role_name(roles, who, str((idx.get(who) or {}).get("name") or ""))
+    name = _sr._role_name(roles, who, str((idx.get(who) or {}).get("name") or ""))
     return name if name and roles[name]["role"] == "back" else ""
 
 
@@ -1125,14 +993,14 @@ def _one_mover_clash(item: dict[str, Any], agent: str) -> str:
     item stores (metadata.mover) when needs does not name it. A background agent of the item's project is never counted by the guards, so it is always named, whatever the item holds.
     Off with [model] one_mover = false or guards = false."""
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    if not bool(_cfg.get("model", "one_mover", default=True)) or not _model_guards_on():
+    if not bool(_cfg.get("model", "one_mover", default=True)) or not _item_read._model_guards_on():
         return ""
     try:
         project, ctx = str(meta.get("project") or ""), _mg.Ctx(label=_sr._session_label, shown=_gh.shown)
         if ctx.background_of(agent, project):
             return ""
         needs_now = _needs_of(meta)
-        if _mg.second_mover_in([*needs_now, _store_ref(agent)], project, ctx):
+        if _mg.second_mover_in([*needs_now, _sr._store_ref(agent)], project, ctx):
             others = _mg.counted_movers(needs_now, project, ctx)
             return f"{', '.join(_sr._session_label(x) for x in others)} already moves it" if others else f"it waits on {_model.owner_display()}'s call (needs decision)"
         stored = _model.pick_who(meta.get("mover"))      # the legacy literal `none` names nobody
@@ -1170,7 +1038,7 @@ def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str
             return f"\n(did not name {agent} in {_gh.shown(gid)}'s needs: {clash}, and an item has one mover. To hand it to {agent}, write the item: update(mover={agent}))"
     prev = _telling.holder(item)       # the session that held the item before the agent is named hears of it
     already = list(_needs_sessions(meta))
-    _needs_store(meta, _canon_needs([*_needs_of(meta), _store_ref(agent)], nm))
+    _needs_store(meta, _canon_needs([*_needs_of(meta), _sr._store_ref(agent)], nm))
     _writes.save(gid, item, note=f"named {agent}: {why}")
     was = ", ".join(_sr._session_label(s) for s in already)
     told = ""
@@ -1222,7 +1090,7 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
         return nothing
     why = f"{'close' if closing else 'update'} by {_sr._session_label(sender)}"
     if not closing:
-        _needs_store(meta, _canon_needs([*_needs_of(meta), _store_ref(agent)], nm))
+        _needs_store(meta, _canon_needs([*_needs_of(meta), _sr._store_ref(agent)], nm))
     return lambda: _auto_name(gid, _svcstore._load(gid), agent, sender, why, "" if closing else "after its update", nm)
 
 
@@ -1461,13 +1329,13 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
         back = next((a for a in ([sender.strip()] if sender.strip() else []) + authors if a and not _model.is_owner(a)), "")
         shown_opts = _rmod.options_of(item)
         meta.pop("ask", None); meta.pop("options", None); meta.pop("idle", None)
-        _state_end(meta, "your-call")
+        _holders._state_end(meta, "your-call")
         _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
         if back and _then_live(back, meta):
             meta["then"] = back      # the author takes the item back; read below, so the hand-over sees the `then` set here and not the one stored before
         mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # after the line above: _decision_hand_over reads the then that stands now
         meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {})}
-        _decision_hand_over(meta, mover_in, then_in, parked=False, waiting=_model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
+        _decision_hand_over(meta, mover_in, then_in, parked=False, waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
         _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\"")
         item["metadata"] = meta
         item["updated"] = item["state_updated"] = item["confirmed"] = now
@@ -2193,7 +2061,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 to = mover
             else:
                 if row["project"] not in mains:
-                    mains[row["project"]] = _main_agent(row["project"])
+                    mains[row["project"]] = _agents._main_agent(row["project"])
                 to = mains[row["project"]]
                 if to and _handoff.ho_same(to, mover):
                     kind = _bt.KIND_FRONT      # the mover is the project's -main agent itself: the front wording, to the same session
@@ -2269,7 +2137,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         try:
             if row["project"] not in builders:
                 builders[row["project"]] = _hand_idle_builders(row["project"])
-                mains[row["project"]] = _main_agent(row["project"])
+                mains[row["project"]] = _agents._main_agent(row["project"])
             to = _hi.pick_free(builders[row["project"]], busy, status, dead, _handoff.ho_same, row["mover"])
             main = mains[row["project"]]
             if main and _model.is_owner(main):
@@ -2371,7 +2239,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         try:
             if "anchors" not in cells:
                 cells["anchors"] = _anc.load()
-            return bool(_scoped_anchors(str((item.get("metadata") or {}).get("project") or ""), gid, cells["anchors"]))
+            return bool(_item_read._scoped_anchors(str((item.get("metadata") or {}).get("project") or ""), gid, cells["anchors"]))
         except Exception:  # noqa: BLE001
             return True
     anchored = anchored or anchors_of
@@ -2402,7 +2270,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             project = row["project"]
             if project not in builders:
                 builders[project] = _balance_builders(project)
-                mains[project] = _main_agent(project)
+                mains[project] = _agents._main_agent(project)
             main = mains[project]
             if main and _model.is_owner(main):
                 main = ""      # the owner is told nothing by this pass
@@ -2487,172 +2355,6 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
 # The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are service/foryou_events.py's; the dates pass above runs the due-date look on that module.
 
 
-# ----------------------------------------------------------------------------- pane liveness and the park fallback
-# A pane stopped on an error is not a pane that can move an item: the one record of it is the pane's own transcript on this box,
-# where Claude Code writes the failed turn as an assistant entry with isApiErrorMessage (the usage limits, the workspace limit, the
-# credit balance; said.py reads the same files). A raise to the owner's call stored before the last rung existed can still carry a
-# "Park until" button, which _answer still applies (the hold and its wake), since the hold is his.
-_IDLE_PARK_DAYS = 3         # [idle] park_days when unset: only for a raise stored with a "Park until" button (no new raise offers one)
-_STUCK_TAIL = 512 * 1024    # bytes read from the end of a transcript to find its last turn
-_STUCK_CACHE: dict[str, tuple[tuple[str, int, int], str]] = {}   # transcript uuid → (the file's signature, why it looks stopped)
-
-
-def _idle_park_days() -> int:
-    """[idle] park_days: how many days out the raise's recommended park wakes (3 when unset; at least 1)."""
-    try:
-        v = _cfg.get("idle", "park_days")
-        return max(1, int(_IDLE_PARK_DAYS if v is None or v == "" else v))
-    except (TypeError, ValueError):
-        return _IDLE_PARK_DAYS
-
-
-def _transcript_error(path: Path) -> str:
-    """The error the last turn in this transcript ended in ("" when it ended well): said.transcript_error, which the puller
-    reads the same way on its own machine."""
-    return _said.transcript_error(path, _STUCK_TAIL, 160)
-
-
-def _pane_stuck(who: str, nm: dict[str, str] | None = None, idx: dict[str, dict[str, Any]] | None = None) -> str:
-    """Why this pane looks stopped: the last turn in its transcript on this box ended in an API error (_transcript_error), the
-    one record of a pane stopped on a usage or credit limit while its puller still reports it. "" when it did not, or when the
-    box has no transcript for it (a cloud session, a name no live pane carries): then nothing is known and the clock runs as
-    before. A transcript is read again only when the file changed. A pane on another machine has no transcript here: its
-    puller (version 7) reads it there and reports `stopped` on the session's record, which `idx` (the sessions index) carries;
-    an older puller reports none, so nothing is known of those."""
-    sid = _anc.canonical(who, nm)
-    try:
-        roots = _said.roots_of(_cfg.get("said", "transcripts"))
-        # a permanent id has no transcript of its own: the session's latest transcript on this box (step B), else the id as given
-        path = next((x for x in (_said.find_transcript(t, roots) for t in [*reversed(_sr.transcripts(sid)), sid]) if x is not None), None)
-        if path is None:
-            rec = (idx or {}).get(sid.lower()) or (idx or {}).get(sid) or {}
-            return str(rec.get("stopped") or "") if _lv.running(rec) else ""
-        st = path.stat()
-    except OSError:
-        return ""
-    sig = (str(path), st.st_size, st.st_mtime_ns)
-    hit = _STUCK_CACHE.get(sid)
-    if hit is None or hit[0] != sig:
-        hit = (sig, _transcript_error(path)); _STUCK_CACHE[sid] = hit
-    return hit[1]
-
-
-
-
-_RECOVERY_ROLE = {"main": "the project's -main agent", "fleet": "the fleet's builder"}      # who a recovery request was asked of, in words, by `_recovery_target`'s kind
-
-
-def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
-    """(who is asked to recover a quiet mover's item, which kind of recipient it is: "main" | "fleet", whether the project has no builder: it is front-only, so the ladder had none to try). The caller computes
-    it ONCE per request, on the raw session (a name or an id, never its label), and hands it to `_recovery_tell` and to the wording of what was tried, so the text and the real recipient cannot disagree.
-    A front-only project (anchors.front_only: its `agents:` map lists no background agent, so there is no
-    builder for the ladder to try) ends at its -main agent (`_main_agent`), the session its owner talks to. Every other project ends at the fleet's builder (`fleet_builder` in service/fleet_events.py), as before, and so does a front-only
-    project with no -main agent to name, and one whose quiet mover is its -main agent itself (nobody is above it in the project): those are still builderless, so the third value is True for them. A front-only test
-    that fails keeps the fleet's builder and says the project has one (False: nothing is claimed about a builder that was not read)."""
-    builderless = False
-    try:
-        proj = str(project or "").strip()
-        if proj and _anc.front_only(proj):
-            builderless = True
-            main = _main_agent(proj)
-            if main and not (_handoff.ho_same(main, quiet) or _session_id(main) == (_session_id(quiet) or quiet)):
-                return main, "main", True
-    except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the fleet's builder
-        print(f"recovery: front-only test of {project} failed ({e.__class__.__name__}: {e}); the fleet's builder is asked", file=sys.stderr, flush=True)
-        builderless = False
-    return _fleetev.fleet_builder(), "fleet", builderless
-
-
-def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried: str, outcome: str, to: str = "") -> str:
-    """The History line of a recovery request (metadata.stall.log, shown on the item as a line said by the server): which session is quiet, what happened to the request
-    (`outcome`, as _recovery_tell reports it: asked, held, self, nobody, failed) and what the ladder tried. The line names the session asked by its own name, so it
-    says the same whether that is the fleet's builder or a front-only project's -main agent. Written onto `item` in place; the caller saves it. → the text."""
-    label = _sr._session_label(to) or to
-    said = {"asked": f"{label} was asked to recover it",
-            "held": f"not sent: the message to {label} was held back, not delivered",
-            "self": f"not sent: {label} is the fleet's builder itself, so nobody else could be asked",      # only a fleet request can be its own quiet session: the -main agent is never chosen for itself (_recovery_target)
-            "failed": f"not sent: the send to {label} failed",
-            "nobody": "not sent: no fleet builder resolves (operator_session unset, retired or without a keeper)"}.get(outcome, outcome)
-    text = f"{quiet} is quiet and nobody could take the item: {said} (why: {_clip_line(why, 90)}; tried: {tried})"
-    _stall.note(item.setdefault("metadata", {}), now, text)
-    return text
-
-
-def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: str, now: float | None = None, kind: str = "fleet") -> None:
-    """Write the History line of a recovery request once its outcome is known: on a fresh read of the item under the lock (the send's thread may have recorded a failure on it meanwhile). Never raises."""
-    try:
-        with _writes.ITEM_LOCK:
-            item = _svcstore._load(gid)
-            if item.get("status") != "open":
-                return
-            _recovery_note(item, time.time() if now is None else now, quiet, why, tried, outcome, to)
-            role = _RECOVERY_ROLE.get(kind, _RECOVERY_ROLE["fleet"])
-            _writes.save(gid, item, note="nobody could take it: " + (f"{role} was asked" if outcome == "asked" else f"{role} could not be asked"))      # the server's own act: the state clock stays, and no page is owed
-    except Exception as e:  # noqa: BLE001
-        print(f"recovery: {gid} History line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: str, tag: str = "stall", now: float | None = None, target: "tuple[str, str, bool] | None" = None) -> str:
-    """The last rung of the ladders: ONE message to the fleet's builder naming the item and the quiet session and asking it to take the fix through its usual path (the callers send it once
-    per episode: a hand-off record, a stall record; they mark the episode BEFORE this send, on purpose: a failed send is not retried every pass, `metadata.undelivered`
-    records it and the audit's unmoved digest is the backstop). The item stays with its mover; the message is not for the owner and owes no reply. The History line is written here, after the
-    outcome is known, so it says what happened. A front-only project's request goes to its -main agent instead (`_recovery_target`), marked for the owner as every message to a front agent is, and asks it to decide
-    (bring the session back, message it, or hand the item on); the others go to the fleet's builder. → the outcome: "asked" (the send was started; a delivery that fails later lands in metadata.undelivered), "held" (the front gate held it), "self" (the quiet
-    session is the builder itself), "nobody" (no builder resolves), "failed" (the send raised). `target` is the caller's `_recovery_target` (computed once on the raw session, as the caller's wording of `tried` used it);
-    without it the target is read here on `quiet`. Never raises."""
-    to, outcome, kind = "", "failed", "fleet"
-    try:
-        to, kind, _bl_less = target if target is not None else _recovery_target(str((item.get("metadata") or {}).get("project") or ""), quiet)
-        to_id = (_session_id(to) or to) if to else ""
-        if not to:
-            outcome = "nobody"
-            print(f"recovery: {gid} {quiet} is quiet and nobody could take it; no fleet builder resolves (operator_session unset, retired or without a keeper)", file=sys.stderr, flush=True)
-        elif to_id == (_session_id(quiet) or quiet):
-            outcome = "self"
-            print(f"recovery: {gid} {quiet} is quiet and is the fleet's builder itself; nobody else to ask", file=sys.stderr, flush=True)
-        else:
-            meta = item.get("metadata") or {}
-            if kind == "main":
-                text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
-                        f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please decide what it needs: bring the session back, message {quiet}, or hand the item on (update mover=<session>). "
-                        f"The item stays with {quiet} meanwhile, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
-            else:
-                text = (f"[stackshot] fleet recovery: {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it. "
-                        f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please take the fix through your usual path: bring the session back, or hand the item to a session that runs. "
-                        f"The item stays with {quiet} meanwhile; nothing here is for {OWNER}, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
-            th = _telling.tell_woken(gid, to_id, text, tag=tag)
-            outcome = "asked" if th is not None else "held"
-            print(f"recovery: {gid} {quiet} is quiet; " + (f"{to} asked to recover it" if th is not None else f"the message to {to} was held back"), file=sys.stderr, flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"recovery: {gid} not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    _recovery_log(gid, quiet, why, tried, outcome, to, now, kind)
-    return outcome
-
-
-def _idle_park_at(day: str, text: str) -> str:
-    """The wake a "Park until …" answer sets, for a raise stored before the park option was dropped and still
-    on an item's page: the first future date written in his note (YYYY-MM-DD, or with THH:MM), else `day`, the one the option
-    named, else [idle] park_days from now (that day has passed). No new raise carries such an option."""
-    now = _pages.zone_now()
-    for cand in [*re.findall(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?", str(text or "")), str(day or "")]:
-        if not cand:
-            continue
-        try:
-            stored = _wakes.parse_wake(cand)
-            if _wakes.wake_at(stored) > now:
-                return stored
-        except ToolError:
-            continue
-    return (now + dt.timedelta(days=_idle_park_days())).strftime("%Y-%m-%d")
-
-
-def _idle_live(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]]) -> bool:
-    """Is that session running now (its puller or hooks report it, not marked gone)? A cse_ session's state is unknown to the
-    server and does not count: its time is never live time."""
-    sid = _anc.canonical(who, nm)
-    return _lv.idle_live(idx.get(sid.lower()) or idx.get(sid))
-
-
 # ----------------------------------------------------------------------------- whose move it is
 # Every open item has a MOVER (the one party whose move it is now: waiting.mover_for). No date is derived for it: an item has no "expected by" time
 # and is not marked late for one. A parked item (on hold, or after an open item) is held until its wake or its blocker closes; a wait that went wrong
@@ -2661,278 +2363,7 @@ def _idle_live(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]]) -> 
 # is told at once; an `after` item that closes releases the item, whatever way it closed, and the wake notice says so.
 
 
-_STARTED = time.time()      # when this server started: a machine is not called unreachable for downtime that was the server's own
-
-
-def _machine_unreachable(letter: Any, now: float | None = None) -> str:
-    """Why a machine cannot be reached now: its puller has not checked in (machine.json online.ok false) for [client] online_minutes,
-    counted from its last check-in or this server's start, whichever is later (after the server's own downtime every puller reads
-    as late until it has had its chance to check in), else ""."""
-    return _lv.machine_unreachable(letter, now, _STARTED)       # _STARTED is read here, at the call: the tests move it
-
-
-def _session_down(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]], stuck: Any = None, now: float | None = None) -> str:
-    """Why this session cannot move an item now, "" when it can or when nothing is known (a cloud session, a name the fleet does not
-    know: never down). A running pane is down when its last turn ended in an API error (`stuck`, else _pane_stuck: its transcript on
-    this box, or the `stopped` its puller reports from another machine) or its machine's puller is not checking in; a pane that is
-    not running is down once it has been gone past the grace (a relaunch under way is not)."""
-    sid = _anc.canonical(who, nm)
-    rec = idx.get(sid.lower()) or idx.get(sid)
-    return _lv.session_down(rec, lambda: stuck(sid) if stuck is not None else _pane_stuck(sid, nm, idx), _STARTED, now)
-
-
-class _WaitCtx:
-    """What one reader needs to work out the mover of many items: a cache of the items read (an `after` blocker is read once)."""
-    def __init__(self, now: float) -> None:
-        self.now = now
-        self._items: dict[str, dict[str, Any] | None] = {}
-
-    def load(self, gid: str) -> dict[str, Any] | None:
-        if gid not in self._items:
-            try:
-                self._items[gid] = _svcstore._load(gid)
-            except Exception:  # noqa: BLE001
-                self._items[gid] = None
-        return self._items[gid]
-
-    def mover(self, gid: str, item: dict[str, Any]) -> dict[str, str]:
-        """The item's mover (waiting.mover_for)."""
-        return _wt.mover_for({**item, "gid": gid}, self.load)
-
-
-def _session_roster() -> set[str]:
-    """Every session name a hand-off could name: the sessions a page names (anchors.session_roles: keepers, user-facing and
-    background agents) and the names the fleet knows (anchors.names)."""
-    names: set[str] = set()
-    try:
-        names |= set(_anc.session_roles())
-    except Exception:
-        pass
-    try:
-        names |= {str(n) for n in _anc.names().values() if n}
-    except Exception:
-        pass
-    return names
-
-
-_HANDOFF_LINE = re.compile(r"^[ \t]*(?:[-*+•]|\d+[.)])?[ \t]*([A-Za-z0-9][\w.-]*)[ \t]*:", re.M)   # "<session>: <action>", a list marker before it at most
-
-
-def _handoffs_in(text: str, roster: set[str]) -> list[str]:
-    """The sessions `text` hands work to: a roster name at the start of a line of `text` (after a list marker, "- " or "1. ",
-    and whitespace at most) followed by a colon, the `<session>: <action>` form a next line takes. A name anywhere else (inside a
-    page slug, a `#s=<name>` link, a sentence that mentions the session, code or quotes) is not a hand-off. → the names, sorted."""
-    plain = _plain_text(text)
-    if not plain.strip():
-        return []
-    return sorted({m.group(1) for m in _HANDOFF_LINE.finditer(plain)} & roster)
-
-
-def _main_agent(project: str) -> str:
-    """The project's -main agent: the page's front `agents:` entry whose name ends in -main, else its first front agent; for a page with none, its
-    hub's, else the general -main agent of its scope (anchors.fallback_main); "" when none. Front-only: a background agent is never the
-    escalation target (the -main agent is the one the owner talks to)."""
-    try:
-        return _anc.fallback_main(project)
-    except Exception:
-        return ""
-
-
-def _builder_agent(project: str) -> str:
-    """The project's builder while the router is live for it (router_live.builder: a background agent whose mandate builds, maintains,
-    merges or engineers), else "" — page work and build work go to it, never to a retired name-line session."""
-    return _router_live.builder(project)
-
-
-def _builder_by_page() -> dict[str, str]:
-    """[handoff.builder_by_page]: project page key -> the background agent that builds that area. A table of another type reads as empty (every item keeps the project's first
-    builder, today's behaviour); an entry that is not text is skipped. Keys lose their surrounding slashes. Read where it is used, so a reload applies."""
-    sec = _cfg.get("handoff")
-    tab = sec.get("builder_by_page") if isinstance(sec, dict) else None
-    if not isinstance(tab, dict):
-        return {}
-    return {k.strip().strip("/"): v.strip() for k, v in tab.items() if isinstance(k, str) and isinstance(v, str) and k.strip().strip("/") and v.strip()}
-
-
-def _builder_for(project: str) -> str:
-    """The builder a new item of `project` (the page it is filed on) goes to by default: the agent [handoff.builder_by_page] maps the page to, by prefix (the key itself or a page under it,
-    the longest key first), when that agent is a background agent of the item's project; else the project's first builder (_builder_agent). Never an error: an unmapped page, an empty map and a
-    mapped agent the project does not list all give the first builder. An explicit mover on a create never comes through here."""
-    key = str(project or "").strip().strip("/")
-    tab = _builder_by_page() if key else {}
-    for page in sorted((p for p in tab if key == p or key.startswith(p + "/")), key=len, reverse=True):
-        if _is_background(tab[page], project):
-            return tab[page]
-    return _builder_agent(project)
-
-
 # ---- an item's contact (contact.py): the front agent the person the board is for talks to about the item; stored in metadata.contact, a filing field
-def _contact_fronts(project: str) -> dict[str, str]:
-    """The project's front agents with their mandate lines ({} when it lists none, or the registry cannot be read)."""
-    try:
-        return _contact.fronts(project)
-    except Exception as e:  # noqa: BLE001  — a registry that cannot be read names nobody
-        print(f"contact: front agents of {project} not read ({e.__class__.__name__}: {e})", file=sys.stderr, flush=True)
-        return {}
-
-
-def _contact_same(a: str, b: str) -> bool:
-    """Do two references name one session: as permanent ids when both resolve, else as the names stand (case-folded), or as the fleet's canonical ids."""
-    a, b = str(a or "").strip(), str(b or "").strip()
-    if not a or not b:
-        return False
-    if a.casefold() == b.casefold() or _same_sess(a, b):
-        return True
-    try:
-        nm = _anc.names()
-        return _anc.canonical(a, nm) == _anc.canonical(b, nm)
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _contact_alive(contact: str) -> bool:
-    """Is a stored contact still a front agent (of any project: a front agent that created an item of another project stays its contact)?"""
-    return _telling.front_sender(contact)
-
-
-def _contact_default(creator: str, project: str) -> str:
-    """The contact of an item nobody named one for: its creator when that is a front agent, else the project's -main agent; "" when the project names neither."""
-    if creator and _telling.front_sender(creator):
-        return _store_ref(creator)
-    main = _main_agent(project)
-    return _store_ref(main) if main else ""
-
-
-def _contact_of(meta: dict[str, Any]) -> str:
-    """The item's contact as it stands now: the stored one while it is still a front agent, else the project's -main agent ("" when none)."""
-    c = str(meta.get("contact") or "").strip()
-    if c and _contact_alive(c):
-        return c
-    return _main_agent(str(meta.get("project") or ""))
-
-
-def _contact_label(item: dict[str, Any]) -> str:
-    """The contact as people read it (the session's current name): an open item's live contact, a closed item's stored one; "" when none."""
-    m = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    c = _contact_of(m) if item.get("status") == "open" else str(m.get("contact") or "").strip()
-    return _sr._session_label(c) if c else ""
-
-
-def _main_agent_without(project: str, name: str) -> str:
-    """The project's -main agent as the pages will list it once `name` is off the agents map (the registry follows a retire minutes late)."""
-    try:
-        reg = _anc.registry()
-        gone = name.casefold()
-        out = {}
-        for k, e in reg.items():
-            if isinstance(e, dict) and gone in {str(n).casefold() for n in (e.get("agents") or {})}:
-                e = {**e, "agents": {n: m for n, m in (e.get("agents") or {}).items() if str(n).casefold() != gone},
-                     "back_agents": {n: m for n, m in (e.get("back_agents") or {}).items() if str(n).casefold() != gone}}
-            out[k] = e
-        return _anc.fallback_main(project, out)
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _contact_set(gid: str, new: str, was: str, why: str) -> bool:
-    """Store a contact on an open item as a filing write by the server (the migration author): no state, clock, hand-off or page moves. → True when written."""
-    with _writes.ITEM_LOCK:
-        it = _svcstore._load(gid)
-        meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
-        if it.get("status") != "open" or str(meta.get("contact") or "") != was:
-            return False                                        # the item moved on since it was read
-        if new:
-            meta["contact"] = new
-        else:
-            meta.pop("contact", None)
-        it["metadata"] = meta
-        _writes.save(gid, it, note=why, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=False)
-    return True
-
-
-def _contact_fall_retired(name: str) -> list[str]:
-    """`name` left its project (retired): every open item whose stored contact is that session falls to its project's -main agent (the one the pages will list without it).
-    → the ids of the items changed. Never raises: a retire is not failed over it."""
-    moved: list[str] = []
-    try:
-        for gid, _p in _item_files():
-            try:
-                it = _svcstore._load(gid)
-            except Exception:  # noqa: BLE001
-                continue
-            meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
-            c = str(meta.get("contact") or "").strip()
-            if it.get("status") != "open" or not c or not _contact_same(c, name):
-                continue
-            main = _main_agent_without(str(meta.get("project") or ""), name)
-            new = _store_ref(main) if main and not _contact_same(main, name) else ""
-            if _contact_set(gid, new, str(meta.get("contact") or ""), f"contact {_sr._session_label(c)} retired: now {_sr._session_label(new) if new else 'none'}"):
-                moved.append(_gh.shown(gid))
-    except Exception as e:  # noqa: BLE001
-        print(f"contact: retire pass for {name} stopped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return moved
-
-
-def _contact_follow_rename(old: str, new: str) -> list[str]:
-    """An agent's page entry was renamed `old` → `new`: a contact stored as the plain name `old` (the registry resolved no permanent id for it) becomes `new` on the open items; one
-    stored as a permanent id needs no change (the name shown follows the session). → the ids of the items changed. Never raises."""
-    moved: list[str] = []
-    try:
-        for gid, _p in _item_files():
-            try:
-                it = _svcstore._load(gid)
-            except Exception:  # noqa: BLE001
-                continue
-            c = str((it.get("metadata") if isinstance(it.get("metadata"), dict) else {}).get("contact") or "").strip()
-            if it.get("status") == "open" and c and c.casefold() == old.casefold() and _contact_set(gid, _store_ref(new), c, f"contact {old} is now {new}"):
-                moved.append(_gh.shown(gid))
-    except Exception as e:  # noqa: BLE001
-        print(f"contact: rename pass for {old} stopped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return moved
-
-
-def _contact_after_agent(out: tuple[int, dict[str, Any]], kind: str, *names: str) -> tuple[int, dict[str, Any]]:
-    """The contacts follow a page's agent entry that was retired (`kind` "retire", names = (the agent,)) or renamed ("rename", names = (old, new)): run after the page write answered 200,
-    and name the items changed in the answer as `contact_moved` (left out when none). Any other answer passes through untouched."""
-    status, body = out
-    if status != 200 or not isinstance(body, dict):
-        return out
-    moved = _contact_fall_retired(names[0]) if kind == "retire" else _contact_follow_rename(names[0], names[1])
-    return (status, {**body, "contact_moved": moved}) if moved else out
-
-
-def _contact_backfill(dry: bool = True) -> dict[str, Any]:
-    """The backfill and its dry run (`client.py backfill-contact [--dry-run]`, tools/backfill_contact.py on a copy of the store): every open item without a live contact gets one,
-    the creator when that was a front agent, else the project's -main agent (contact.plan has the rules). Closed items are left. → {"counts": {rule: n}, "items": [{item, project, rule,
-    was, to}], "written": n, "dry_run": bool}. A dry run writes nothing; a second run writes nothing (the items have a contact then)."""
-    mains: dict[str, str] = {}
-    fronts: dict[str, bool] = {}
-    rows: list[dict[str, Any]] = []
-    counts = {r: 0 for r in _contact.RULES}
-    written = 0
-    for gid, _p in _item_files():
-        try:
-            it = _svcstore._load(gid)
-        except Exception:  # noqa: BLE001
-            continue
-        meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
-        project = str(meta.get("project") or "")
-        creator = str(meta.get("owner") or "").strip()
-        if project not in mains:
-            mains[project] = _main_agent(project) if project else ""
-        if creator not in fronts:
-            fronts[creator] = bool(creator) and _telling.front_sender(creator)
-        new, rule = _contact.plan(it, creator_front=fronts[creator], main=(_store_ref(mains[project]) if mains[project] else ""), alive=_contact_alive)
-        counts[rule] += 1
-        if rule in (_contact.RULE_CLOSED, _contact.RULE_HAS):
-            continue
-        row = {"item": _gh.shown(gid), "project": project, "rule": rule, "was": _sr._session_label(str(meta.get("contact") or "")), "to": _sr._session_label(new)}
-        if new and not dry:
-            ok = _contact_set(gid, _store_ref(new), str(meta.get("contact") or ""), f"contact filled in: {_sr._session_label(new)} ({rule})")
-            row["written"] = ok
-            written += int(ok)
-        rows.append(row)
-    return {"dry_run": bool(dry), "counts": counts, "items": rows, "written": written}
 
 
 # ----------------------------------------------------------------------------- automatic rulings
@@ -3019,14 +2450,14 @@ from stackshot.web import app as _app  # noqa: E402  — the MCP application (we
 mcp = _app.build(
     fmt=lambda *a, **k: _fmt(*a, **k),
     handoff_brief=lambda *a, **k: _handoff.handoff_brief(*a, **k),
-    is_parked=lambda *a, **k: _is_parked(*a, **k),
+    is_parked=lambda *a, **k: _item_read._is_parked(*a, **k),
     model_report_line=lambda *a, **k: _model_report_line(*a, **k),
     notice_asked=lambda *a, **k: _notice_asked(*a, **k),
     notice_report=lambda *a, **k: _notice_report(*a, **k),
     evwait_preread=lambda *a, **k: _evwait_preread(*a, **k),
     sender_not_owner=lambda *a, **k: _sender_not_owner(*a, **k),
     ask_after_write=lambda *a, **k: _ask_after_write(*a, **k),
-    update=lambda *a, **k: _update(*a, **k),
+    update=lambda *a, **k: _update_svc._update(*a, **k),
     wait_alias_gate=lambda *a, **k: _wait_alias_gate(*a, **k),
     fleet_names=lambda *a, **k: _fleetev.fleet_names(*a, **k),
     inbox_flag_minutes=lambda *a, **k: _fleetev.inbox_flag_minutes(*a, **k),
@@ -3036,12 +2467,12 @@ mcp = _app.build(
     evw_boxes=lambda *a, **k: _evwaits.evw_boxes(*a, **k),
     machine_state=lambda *a, **k: _evwaits.machine_state(*a, **k),
     rules_text=lambda *a, **k: _rules_text(*a, **k),
-    main_agent=lambda *a, **k: _main_agent(*a, **k),
+    main_agent=lambda *a, **k: _agents._main_agent(*a, **k),
     client_get=lambda *a, **k: _client_get(*a, **k),
     client_post=lambda *a, **k: _client_post(*a, **k),
     recycle_wanted_tokens=lambda *a, **k: _recycle_wanted_tokens(*a, **k),
     answer=lambda *a, **k: _answer(*a, **k),
-    contact_label=lambda *a, **k: _contact_label(*a, **k),
+    contact_label=lambda *a, **k: _contacts._contact_label(*a, **k),
     runner_status=lambda *a, **k: _runner.status(*a, **k),
     phase_sweep_status=lambda *a, **k: _phase_sweep_status(*a, **k),
 )
@@ -3121,7 +2552,7 @@ def _form_notes(description: str = "", next_: str = "", parked: bool = False, me
         if "external" in _needs_kinds(meta) and (why := _anchored_wait(gid, meta)):
             out.append(why)
             ext = False                        # the hold note already says to anchor it: once
-    if ext and meta is not None and not _scoped_anchor_exists(gid, meta):
+    if ext and meta is not None and not _item_read._scoped_anchor_exists(gid, meta):
         # an item waiting on an outside reply with no anchor
         out.append("this item now waits on someone outside, and no thread is anchored to it: anchor the thread it waits on in this same turn "
                    f"(anchors(project, add=[url], items=[{gid or 'its id'}])), so its reply wakes you and the item links it")
@@ -3139,7 +2570,7 @@ def _wake_alone_on_agent(meta: dict[str, Any]) -> bool:
     """A wake with no hold on an item that is on agent: what the two wake notes (_wake_window_note, _wake_step_note) share. False for an item on hold or with no wake, one waiting on his decision
     or on an open `after`, one with needs=external, one whose wake carries a wait_basis and is still ahead (the board lists it as waiting until the wake: model.view), and one stored as outside, verifying or blocked
     (none of those is on agent)."""
-    if meta.get("hold") or _wt.stored_until(meta) or not _wt.wake_value(meta) or _waits_decision(meta) or _after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
+    if meta.get("hold") or _wt.stored_until(meta) or not _wt.wake_value(meta) or _waits_decision(meta) or _item_read._after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
         return False
     return not ("external" in [str(x).lower() for x in _wt.needs_of(meta)] or str(meta.get("state") or "").lower() in ("outside", "verifying", "blocked"))
 
@@ -3167,7 +2598,7 @@ def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only:
         meta = dict(meta); _uw.unfold(meta); item = {**item, "metadata": meta}
     if not _wake_alone_on_agent(meta) or not any(str(x or "").strip() for x in senders):
         return []
-    mod = _model_of(item)
+    mod = _item_read._model_of(item)
     if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not any(_handoff.ho_same(mod.mover, x) for x in senders):
         return []
     return _dw.timed_wait_lines(meta.get("next"), _wt.wake_value(meta), _pages.zone_now().date(),
@@ -3222,7 +2653,7 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open" or not _wt.wake_value(meta) or meta.get("hold"):
             return {"parked": False, "why": "not an open item with a wake and no hold"}
-        mod = _model_of(item)
+        mod = _item_read._model_of(item)
         if not mod.mover or _model.is_owner(mod.mover) or _waits_decision(meta):
             return {"parked": False, "why": f"{OWNER} moves it"}
         wake = str(_wt.wake_value(meta))
@@ -3240,7 +2671,7 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
         _hold_set(meta, NAME, now)
         _cap_ok_drop(meta, "wake")
         if meta.get("state") in _states.STATES and meta["state"] != "parked":      # a hold makes the item read parked: the stored state of another kind goes, as in the write's own park
-            _state_end(meta)
+            _holders._state_end(meta)
         _state_apply(meta, "open", "", {}, frozenset({"wake", "hold", "wait_basis"}))
         _basis_put(meta, basis_ok, wake, NAME)
         _sf.record(meta, _sf.WAKE_PARK, wake, _wake_park_line(wake, basis_ok), now)
@@ -3259,7 +2690,7 @@ def _wait_end_facts() -> "_we.Facts":
             project = str((_svcstore._load(gid).get("metadata") or {}).get("project") or "")
         except Exception:  # noqa: BLE001
             return []
-        return [str(e["url"]) for e in _scoped_anchors(project, gid, store)]
+        return [str(e["url"]) for e in _item_read._scoped_anchors(project, gid, store)]
 
     def prs(gid: str) -> list[str]:
         out = []
@@ -3308,14 +2739,14 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open" or meta.get("hold") or _waits_decision(meta):
             return no("not an open item the mover moves")
-        mod = _model_of(item)
+        mod = _item_read._model_of(item)
         alive = mod.state == _model.ALIVE
         mover = mod.mover if alive else (mod.wait.mover if mod.wait else "")
         if not mover or _model.is_owner(mover):
             return no(f"{OWNER} moves it")
         if _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok):
             return no("this line was fixed or sent back already")
-        gap = next((g for g in _we.item_gaps(gid, meta, mover, "alive" if alive else "waiting", facts, _open_item_named, _handoff.ho_same, now,
+        gap = next((g for g in _we.item_gaps(gid, meta, mover, "alive" if alive else "waiting", facts, _item_read._open_item_named, _handoff.ho_same, now,
                                              pending=lambda t: _sf.declined(meta, _sf.WAIT_END, t)) if g.token == tok and g.plan.get("op") == op), None)
         if gap is None:
             return no("the line or the wait changed")
@@ -3343,7 +2774,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
             meta["wait_kind"] = kind
             if not has_back:
                 meta["until"] = back        # the one date the wait ends on (until_write.py); an item that stores its date as wake or ask_by keeps it as it is
-            _state_end(meta)
+            _holders._state_end(meta)
 
         try:
             if op == "after":
@@ -3437,20 +2868,12 @@ def _waits_on_owner(text: str) -> bool:
     return bool(_WAITS_ON_OWNER_RX.search(_sf.settled_out(text, _sf.owner_names())))
 
 
-def _scoped_anchor_exists(gid: str, meta: dict[str, Any]) -> bool:
-    """True when an anchor is scoped to this item, held by any project's page (a project-wide one does not count); a failed lookup says true, so no note."""
-    try:
-        return bool(_scoped_anchors(str(meta.get("project") or ""), gid))
-    except Exception:
-        return True
-
-
 def _anchored_wait(gid: str, meta: dict[str, Any]) -> str:
     """An item that waits on someone outside may be parked when the thread it waits on is
     anchored to it and named in its next, since the anchor's notice wakes the mover; its wake is then a backstop at most
     [waiting] cap_days out (the same cap as any wait; a longer one needs the owner's words). → the note a hold on an item that waits on someone outside owes, "" when it owes none."""
     try:
-        scoped = _scoped_anchors(str(meta.get("project") or ""), gid)
+        scoped = _item_read._scoped_anchors(str(meta.get("project") or ""), gid)
     except Exception:
         scoped = []
     if not any(e["url"] in str(meta.get("next") or "") for e in scoped):
@@ -3472,13 +2895,13 @@ def _hold_held_by(gid: str, meta: dict[str, Any]) -> list[str]:
     """What holds an item on hold now, as render.HOLD_WHY keys: `after` an open item it waits on, `recycle` a pane recycle,
     `external` needs external, `anchor` an anchor scoped to the item. [] when none does."""
     out = []
-    if _after_open(meta):
+    if _item_read._after_open(meta):
         out.append("after")
     if meta.get("recycle"):
         out.append("recycle")
     if "external" in _needs_kinds(meta):
         out.append("external")
-    if _scoped_anchors(str(meta.get("project") or ""), gid):
+    if _item_read._scoped_anchors(str(meta.get("project") or ""), gid):
         out.append("anchor")
     return out
 
@@ -3502,7 +2925,7 @@ def _holds_unexplained() -> list[dict[str, Any]]:
         if not isinstance(it, dict):
             continue
         _legacy_hold(it); _legacy_needs(it); _ip.read_through(it)
-        if not _is_held(it):
+        if not _holders._is_held(it):
             continue
         meta = it.get("metadata") or {}
         if _hold_held_by(gid, meta):
@@ -3524,13 +2947,6 @@ def _holds_report() -> str:
         when = _rmod.when_words(dt.datetime.fromtimestamp(r["at"], _wttext.ZONE)) if r["at"] else "before the record"
         out.append(f"{_gh.shown(r['gid'])} · mover {r['owner'] or 'none'} · wake {r['wake'] or 'none'} · set by {r['by'] or 'unknown'} ({when}) · {r['subject']}")
     return "\n".join(out) + "\n"
-
-
-def _model_of(item: dict[str, Any]) -> "_model.Model":
-    """The item read by the model (model.py): the state, the effective mover and the effective wait, from the stored fields and today's state."""
-    gid, m = str(item.get("gid") or item.get("id") or ""), item.get("metadata") or {}
-    return _model.derive(item, after_open=lambda i_: _after_open(i_.get("metadata") or {}),
-                         anchored=lambda i_: bool(_GID.match(gid) and _scoped_anchors(str(m.get("project") or ""), gid)))
 
 
 _GUARD_REPORT: dict[str, Any] = {"at": 0.0, "rep": None}
@@ -3562,14 +2978,14 @@ def _model_report_line() -> str:
     except Exception as e:  # noqa: BLE001
         print(f"model guards: report not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
-    return line + ("" if _model_guards_on() else " (the guards are off: [model] guards = false)") if line else ""
+    return line + ("" if _item_read._model_guards_on() else " (the guards are off: [model] guards = false)") if line else ""
 
 
 def _mover_lines(item: dict[str, Any]) -> list[str]:
     """What get and a write's reply lead with: `mover:` (who moves an alive item now, as the model reads it: the stored mover, else the default) and `then:` (who takes it after
     the answer or step; it stands only beside the owner). A waiting item shows who picks it up when the wait ends as its mover, and `then:` only when he is that one; a closed one has none at all. [] when the reading fails: a get never fails over it."""
     try:
-        mod = _model_of(item)
+        mod = _item_read._model_of(item)
         who = lambda w: _sr._session_label(w) if w and not _model.is_owner(w) else (w or "no one")
         if mod.state == _model.ALIVE:
             return [f"mover: {who(mod.mover)}" + ("" if mod.mover_explicit else " (derived)")] + ([f"then: {who(mod.then)}" + ("" if mod.then_explicit else " (derived)")] if mod.then else [])
@@ -3583,7 +2999,7 @@ def _mover_lines(item: dict[str, Any]) -> list[str]:
 def _shown_waiting_note(item: dict[str, Any], mod: "_model.Model") -> str:
     """The tail of the `model:` line for a stored doing item the board lists as waiting (model.view: a wake with every open step dated for that day or later, a wake on a held doing item, or a still-future wake that carries a wait_basis):
     ` · the board lists it as waiting until <time> (<why>)`, "" for every other item. The stored state stays doing, and `model: alive` is what the guards and the router read."""
-    vw = _model.view(item, mod, after_open=lambda i_: _after_open(i_.get("metadata") or {}))
+    vw = _model.view(item, mod, after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}))
     if vw is mod or vw.state != _model.WAITING or mod.state != _model.ALIVE or not vw.wait:
         return ""
     return f" · the board lists it as waiting until {vw.wait.until}" + (f" ({vw.wait.basis})" if vw.wait.basis else "")
@@ -3603,7 +3019,7 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
     """The `model:` line of get (and its conflicts, one line each); the brief's (short) is one line for an open item, with no `derived:` tail, no conflicts and none for a closed item.
     [] when the reading fails: a get never fails over it."""
     try:
-        mod = _model_of(item)
+        mod = _item_read._model_of(item)
         shown_as = _shown_waiting_note(item, mod)
         if short:
             return [_model.words(mod, _sr._session_label, _gh.shown, derived=False, when=_arrival_when) + shown_as] if mod.state != _model.DEAD else []
@@ -3618,27 +3034,6 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
 # The hand-off record, its delivery, the minute pass, the cold call and the display are service/handoff.py's and service/handoff_cold.py's. What stays here is the item model's switch
 # and the reader of one item the hooks of those modules and of the wake passes share.
 _ho.SERVER = NAME
-
-
-def _switchover_on() -> bool:
-    """[model] switchover (default false): the item model is the board's only rule. On: the guards judge every write, existing items included (the report-only exemption of
-    a write that touches only model fields goes), the hand-off rules and the watchers cover every item, and the old machinery stands down: the wake pass and the `after` release for an item
-    and a watcher watches. Off: the model runs beside the old machinery, as before the migration. Needs [model] guards and one that has run the migration
-    (tools/migrate_model.py): an item the migration left with residue has no watcher yet, and keeps the old machinery's wake until it is set by hand (`switchover_fallback`, default true)."""
-    return bool(_cfg.get("model", "switchover", default=False)) and _model_guards_on()
-
-
-def _old_wait_off() -> bool:
-    """The old wake pass and `after` release stand down for the items no watcher watches: [model] switchover on and [model] switchover_fallback (default true) false. With the fallback
-    (default) they keep serving only an item the migration left with residue (a wait with no input or end: no watcher owns it yet), until it is set by hand; a watched wait was never theirs."""
-    return _switchover_on() and not bool(_cfg.get("model", "switchover_fallback", default=True))
-
-
-def _load_or_none(gid: str) -> dict[str, Any] | None:
-    try:
-        return _svcstore._load(gid)
-    except Exception:  # noqa: BLE001
-        return None
 
 
 _NEXT_NAMES_MAX = 8      # how many items next names get a line in get (the first ones, in the order next names them)
@@ -3676,10 +3071,10 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
                          + f" ({_rmod.outcome_word(cm.get('outcome') or 'done')}{' by ' + _gh.shown(sup) if sup else ''})")
             continue
         try:
-            mod = _model.view(it, _model_of(it), after_open=lambda i_: _after_open(i_.get("metadata") or {}))      # the same view as the home page, so a long-doing item reads as waiting here too
+            mod = _model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}))      # the same view as the home page, so a long-doing item reads as waiting here too
             who = lambda w: _sr._session_label(w) if w and not _model.is_owner(w) else (w or "no one")
             if mod.state == _model.WAITING:
-                left = _after_open(cm)
+                left = _item_read._after_open(cm)
                 lines.append(f"- {_gh.shown(g)}: open, waiting" + (f" after {', '.join(_gh.shown(x) for x in left)}" if left else ""))
             else:
                 lines.append(f"- {_gh.shown(g)}: open, mover {who(mod.mover)}")
@@ -3692,7 +3087,7 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
 
 def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     m = item.get("metadata") or {}
-    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _is_parked(item) else ''}] {item.get('subject')}"]
+    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _item_read._is_parked(item) else ''}] {item.get('subject')}"]
     if not brief:                            # step 4b: get leads with the mover (and then); the brief's item lines carry the `model:` line, which names it
         out.extend(_mover_lines(item))
     if item.get("description"):
@@ -3706,7 +3101,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         if m.get("outcome_text") and not brief:    # how it ended, in bullets: the description above stays what the item was about (the brief leaves it out, like the description's length)
             out.append(f"outcome text:\n{m['outcome_text']}")
     if item.get("status") == "open":         # where it stands: the stored state with the fields it carries; an item that stores none shows no state line (the model line below says alive or waiting)
-        out.extend(w for w in [_states.words(item, lambda i_: _after_open(i_.get("metadata") or {}))] if w)
+        out.extend(w for w in [_states.words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))] if w)
         out.extend(f"{k}: {v}" for k, v in _states.carry_of(item).items())
         if _draft.of(item):                          # the verbatim text the owner pastes elsewhere, as stored (many lines); the brief, which loads into every session, only says it is there
             d_ = _draft.of(item)
@@ -3731,9 +3126,9 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
             out.append(f"{k}: {m[k]}")
         if k == "ask" and _rmod.open_options(item):   # under the ask, one line each; only while it waits on his decision
             out.append("options:\n" + "\n".join("- " + ln for ln in _rmod.option_lines(item)))
-    if not brief and _contact_label(item):   # the front agent the person talks to about the item (the brief, which loads into every session, leaves it out)
-        out.append(f"contact: {_contact_label(item)}")
-    if _is_parked(item) and _rmod.hold_set_of(item):   # who set the hold, and when
+    if not brief and _contacts._contact_label(item):   # the front agent the person talks to about the item (the brief, which loads into every session, leaves it out)
+        out.append(f"contact: {_contacts._contact_label(item)}")
+    if _item_read._is_parked(item) and _rmod.hold_set_of(item):   # who set the hold, and when
         hs = _rmod.hold_set_of(item)
         out.append(f"hold: set by {_rmod.hold_by(item) or 'unknown'}"
                    + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), _wttext.ZONE))}" if _rmod.hold_at(item) else ""))
@@ -3751,7 +3146,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
                 states.append(f"{g} ({_svcstore._load(g).get('status')})")
             except ToolError:
                 states.append(f"{g} (missing)")
-        out.append("after: " + ", ".join(states) + ("" if _after_open(m) else " — all closed" if item.get("status") == "open" else ""))
+        out.append("after: " + ", ".join(states) + ("" if _item_read._after_open(m) else " — all closed" if item.get("status") == "open" else ""))
     if _observers_of(m):
         out.append("observers: " + ", ".join(_shown_ref(x) for x in _observers_of(m)))
     if item.get("status") != "completed" and _work.lines_of(m):   # what is in motion on it, one line (the item page shows each on its step)
@@ -3983,12 +3378,19 @@ def _late_in(module: Any, name: str) -> Callable[..., Any]:
     return lambda *a, **k: getattr(module, name)(*a, **k)
 
 
+# What the item readers still reach (service/item_read.py): the board renderer's two rules, which a service module cannot import. A hook leaves this table when the renderer's rule moves under model/.
+_item_read.install(_item_read.Hooks(
+    is_held=_late_in(_rmod, "is_held"),
+    needs_kind=_late_in(_rmod, "needs_kind"),
+))
+
+
 # What the telling still reaches (service/telling.py tells the sessions a write concerns): the hand-off record's own functions (service/handoff.py imports the telling, so the telling cannot import it back: each
 # is looked up on that module when it runs), the page keepers of a project's agents, the page debt's marks and the time zone. A hook leaves this table when the area that holds it
 # moves under service/ and does not import the telling.
 _telling.install(_telling.Hooks(
     back_agent=_late("_back_agent"),
-    builder_for=_late("_builder_for"),
+    builder_for=_late_in(_agents, "_builder_for"),
     check_changed=lambda *a, **k: _checks.check_changed(*a, **k),
     check_lane_shown=lambda *a, **k: _checks.check_lane_shown(*a, **k),
     debt_mover=_late("_debt_mover"),
@@ -4001,12 +3403,12 @@ _telling.install(_telling.Hooks(
     handoff_text=lambda *a, **k: _handoff.handoff_text(*a, **k),
     handoff_told_text=lambda *a, **k: _handoff.handoff_told_text(*a, **k),
     ho_same=lambda *a, **k: _handoff.ho_same(*a, **k),
-    main_agent=_late("_main_agent"),
-    model_of=_late("_model_of"),
+    main_agent=_late_in(_agents, "_main_agent"),
+    model_of=_late_in(_item_read, "_model_of"),
     owed_mark=_late("_owed_mark"),
     rmod_outcome_word=lambda *a, **k: _rmod.outcome_word(*a, **k),
-    role_name=_late("_role_name"),
-    same_sess=_late("_same_sess"),
+    role_name=_late_in(_sr, "_role_name"),
+    same_sess=_late_in(_sr, "_same_sess"),
     session_id=_late("_session_id"),
     shown_needs=_late("_shown_needs"),
     zone=lambda: _wttext.ZONE,
@@ -4034,17 +3436,17 @@ _runner.install(_runner.Hooks(
 # What the wake passes, the watchers and the event waits still reach on this module (service/wakes.py, service/watching.py and service/event_waits.py): the item model's readers that other areas share, the
 # proof and release readers, the renderer's answers, the publish and the time zone. A hook leaves this table when the area that holds it moves under service/.
 _wake_hooks.install(_wake_hooks.Hooks(
-    after_open=_late("_after_open"),
+    after_open=_late_in(_item_read, "_after_open"),
     event_activity_tick=_late("_event_activity_tick"),
     follow_superseded=_late("_follow_superseded"),
     hand_stored_then=_late("_hand_stored_then"),
-    hold_flag=_late("_hold_flag"),
-    is_held=_late("_is_held"),
+    hold_flag=_late_in(_holders, "_hold_flag"),
+    is_held=_late_in(_holders, "_is_held"),
     item_mover_model=_late("_item_mover_model"),
-    load_or_none=_late("_load_or_none"),
+    load_or_none=_late_in(_item_read, "_load_or_none"),
     merge_progress_tick=_late("_merge_progress_tick"),
-    model_of=_late("_model_of"),
-    old_wait_off=_late("_old_wait_off"),
+    model_of=_late_in(_item_read, "_model_of"),
+    old_wait_off=_late_in(_item_read, "_old_wait_off"),
     own_repo=_late("_own_repo"),
     publish=_late_in(_pubmod, "_publish"),
     rmod_confirmed_at=lambda *a, **k: _rmod.confirmed_at(*a, **k),
@@ -4053,7 +3455,7 @@ _wake_hooks.install(_wake_hooks.Hooks(
     rmod_parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
     rmod_whose=lambda: _rmod.WHOSE,
     session_id=_late("_session_id"),
-    state_end=_late("_state_end"),
+    state_end=_late_in(_holders, "_state_end"),
     zone=lambda: _wttext.ZONE,
 ))
 
@@ -4061,32 +3463,32 @@ _wake_hooks.install(_wake_hooks.Hooks(
 # What the hand-off passes still reach on this module (service/handoff.py and service/handoff_cold.py): the write gates and limits, the item model's reader and its switch, the stall pass and the one ladder,
 # the recovery request, the page store, the publish and the session ids. A hook leaves this table when the area that holds it moves under service/.
 _handoff_hooks.install(_handoff_hooks.Hooks(
-    after_open=_late("_after_open"),
-    front_pair_ok=_late("_front_pair_ok"),
+    after_open=_late_in(_item_read, "_after_open"),
+    front_pair_ok=_late_in(_holders, "_front_pair_ok"),
     item_refs=_late("_item_refs"),
     ladder_enter=lambda *a, **k: _laddersvc.ladder_enter(*a, **k),
     ladder_first=lambda *a, **k: _laddersvc.ladder_first(*a, **k),
     ladder_on=lambda *a, **k: _laddersvc.ladder_on(*a, **k),
     laddered=lambda *a, **k: _laddersvc.laddered(*a, **k),
-    load_or_none=_late("_load_or_none"),
-    model_of=_late("_model_of"),
-    old_wait_off=_late("_old_wait_off"),
+    load_or_none=_late_in(_item_read, "_load_or_none"),
+    model_of=_late_in(_item_read, "_model_of"),
+    old_wait_off=_late_in(_item_read, "_old_wait_off"),
     page_io=_late("_page_io"),
     publish=_late_in(_pubmod, "_publish"),
-    recovery_role=lambda: _RECOVERY_ROLE,
-    recovery_target=_late("_recovery_target"),
-    recovery_tell=_late("_recovery_tell"),
-    role_name=_late("_role_name"),
-    role_of=_late("_role_of"),
-    scoped_anchors=_late("_scoped_anchors"),
+    recovery_role=lambda: _pane_recovery._RECOVERY_ROLE,
+    recovery_target=_late_in(_pane_recovery, "_recovery_target"),
+    recovery_tell=_late_in(_pane_recovery, "_recovery_tell"),
+    role_name=_late_in(_sr, "_role_name"),
+    role_of=_late_in(_holders, "_role_of"),
+    scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
     session_id=_late("_session_id"),
     stall_confirm=lambda *a, **k: _stallsvc.stall_confirm(*a, **k),
     stall_load=lambda *a, **k: _stallsvc.stall_load(*a, **k),
     stall_lock=lambda: _stallsvc.STALL_LOCK,
     stall_save=lambda *a, **k: _stallsvc.stall_save(*a, **k),
     stall_ver=lambda *a, **k: _stallsvc.stall_ver(*a, **k),
-    switchover_on=_late("_switchover_on"),
-    update=_late("_update"),
+    switchover_on=_late_in(_item_read, "_switchover_on"),
+    update=_late_in(_update_svc, "_update"),
 ))
 
 
@@ -4106,12 +3508,12 @@ def _next_report_mod() -> Any:
 # the session ids and names, the time zone and the words for a time, and the activity clock and the step status of the audit (audit/ and tools/ are imported when a hook runs). A hook leaves this table when the area that
 # holds it moves under service/.
 _stall_hooks.install(_stall_hooks.Hooks(
-    after_open=_late("_after_open"),
-    main_agent=_late("_main_agent"),
+    after_open=_late_in(_item_read, "_after_open"),
+    main_agent=_late_in(_agents, "_main_agent"),
     next_report_all=lambda *a, **k: _next_report_mod().load_all(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
     queue_map=_late("_queue_map"),
-    role_name=_late("_role_name"),
+    role_name=_late_in(_sr, "_role_name"),
     session_id=_late("_session_id"),
     silence_clock=lambda *a, **k: _silence_mod().clock(*a, **k),
     silence_minutes=lambda *a, **k: _silence_mod().minutes(*a, **k),
@@ -4125,31 +3527,31 @@ _stall_hooks.install(_stall_hooks.Hooks(
 # the pull-request key, the hold readers of the item model, the publish, the session ids and rosters, the write gates' field limits, the renderer's answer for whose move it is and the mark of a wait the server set
 # back. A hook leaves this table when the area that holds it moves under service/.
 _checks_hooks.install(_checks_hooks.Hooks(
-    date_parked=_late("_date_parked"),
-    hold_flag=_late("_hold_flag"),
-    is_held=_late("_is_held"),
+    date_parked=_late_in(_item_read, "_date_parked"),
+    hold_flag=_late_in(_holders, "_hold_flag"),
+    is_held=_late_in(_holders, "_is_held"),
     own_repo=_late("_own_repo"),
     pr_key=_late("_pr_key"),
     pr_url=lambda: _PR_URL,
     publish=_late_in(_pubmod, "_publish"),
     rmod_needs_kind=lambda *a, **k: _rmod.needs_kind(*a, **k),
-    role_name=_late("_role_name"),
-    same_sess=_late("_same_sess"),
-    session_down=_late("_session_down"),
+    role_name=_late_in(_sr, "_role_name"),
+    same_sess=_late_in(_sr, "_same_sess"),
+    session_down=_late_in(_pane_recovery, "_session_down"),
     session_id=_late("_session_id"),
-    session_roster=_late("_session_roster"),
+    session_roster=_late_in(_agents, "_session_roster"),
     wait_end_sent_back=_late("_wait_end_sent_back"),
 ))
 
 # What the page-debt call, the migrations and the fleet events still reach on this module (service/page_debt.py, service/migrations.py, service/fleet_events.py): the ledger of the page debts, the grace minutes,
 # the session ids, the project's agents and the item model's readers. A hook leaves this table when the area that holds it moves under service/.
 _passes_hooks.install(_passes_hooks.Hooks(
-    after_open=_late("_after_open"),
-    builder_agent=_late("_builder_agent"),
+    after_open=_late_in(_item_read, "_after_open"),
+    builder_agent=_late_in(_agents, "_builder_agent"),
     grace_min=_late("_grace_min"),
-    main_agent=_late("_main_agent"),
-    model_guards_on=_late("_model_guards_on"),
-    model_of=_late("_model_of"),
+    main_agent=_late_in(_agents, "_main_agent"),
+    model_guards_on=_late_in(_item_read, "_model_guards_on"),
+    model_of=_late_in(_item_read, "_model_of"),
     outcomes=lambda: OUTCOMES,
     owed_lock=lambda: _OWED_LOCK,
     owed_load=_late("_owed_load"),
@@ -4159,7 +3561,7 @@ _passes_hooks.install(_passes_hooks.Hooks(
     pid_write_op=_late("_pid_write_op"),
     publish=_late_in(_pubmod, "_publish"),
     retire_write_op=_late("_retire_write_op"),
-    scoped_anchors=_late("_scoped_anchors"),
+    scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
     script_sender=_late("_script_sender"),
     sender_not_owner=_late("_sender_not_owner"),
     server_module=lambda: sys.modules[__name__],
@@ -4167,7 +3569,7 @@ _passes_hooks.install(_passes_hooks.Hooks(
     settle_apply=_late("_settle_apply"),
     shown_needs=_late("_shown_needs"),
     stamp_write_op=_late("_stamp_write_op"),
-    switchover_on=_late("_switchover_on"),
+    switchover_on=_late_in(_item_read, "_switchover_on"),
     watch_on_write=_late("_watch_on_write"),
     zone=lambda: _wttext.ZONE,
 ))
@@ -4184,10 +3586,10 @@ _foryou_hooks.install(_foryou_hooks.Hooks(
 # What a create still reaches on this module (service/create.py runs the create in its order): the gates and notices the update tool, the close and the telling share, the three thread-local flags
 # and two constants. A hook leaves this table when the area that holds it moves under service/.
 _create_svc.install(_create_svc.Hooks(
-    after_open=_late("_after_open"),
+    after_open=_late_in(_item_read, "_after_open"),
     anchor_wait_gate=_late("_anchor_wait_gate"),
     ask_owed=_late("_ask_owed"),
-    contact_default=_late("_contact_default"),
+    contact_default=_late_in(_contacts, "_contact_default"),
     evwait_gate=_late("_evwait_gate"),
     fallback_wait_date=_late("_fallback_wait_date"),
     fmt=_late("_fmt"),
@@ -4196,7 +3598,7 @@ _create_svc.install(_create_svc.Hooks(
     gate_options=_late("_gate_options"),
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
-    model_guards_on=_late("_model_guards_on"),
+    model_guards_on=_late_in(_item_read, "_model_guards_on"),
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     next_put=_late("_next_put"),
     owed_mark=_late("_owed_mark"),
@@ -4456,7 +3858,7 @@ def _rebullet_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
             raise ToolError(f"Refused: {why}")
         _writes.REFORMAT.on = True
         try:
-            out = _update(gid, description=new, sender=by)
+            out = _update_svc._update(gid, description=new, sender=by)
         finally:
             _writes.REFORMAT.on = False
     return {"item": _gh.shown(gid), "action": "set", "result": out.splitlines()[0] if out else ""}
@@ -4467,8 +3869,6 @@ def _state_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     fields to pass through update, and writes nothing; its caller's token is checked first as for any client route. A refusal raises ToolError (the route answers 400)."""
     _script_sender(spec, machine)
     raise ToolError(_retired.client_refusal(OWNER))
-
-
 
 
 # ---------------------------------------------------------------------------------------------------------------- the stamp pass: phase and waits_on on the open items
@@ -4765,7 +4165,7 @@ def _retire_reading(gid: str, item: dict[str, Any]) -> dict[str, Any]:
     probe = {**json.loads(json.dumps(item)), "gid": gid}
     _legacy_hold(probe)
     _legacy_needs(probe)
-    shown = _model.view(probe, _model_of(probe), after_open=lambda i_: _after_open(i_.get("metadata") or {}), check=False)
+    shown = _model.view(probe, _item_read._model_of(probe), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=False)
     return {"pair": list(_model.shown_pair(shown)), "mover": shown.mover if shown.state == _model.ALIVE else "", "watched": bool(_watch.watches(probe))}
 
 
@@ -4894,10 +4294,6 @@ def _retire_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
     return {"op": op, "results": results}
 
 
-
-
-import functools as _functools  # noqa: E402
-
 def _front_held(*a: Any, **k: Any) -> Any:
     """audit/front_step.held, imported when it is called: the gates are service/ and import no audit/."""
     from stackshot.audit import front_step as _fs  # noqa: PLC0415
@@ -4907,40 +4303,40 @@ def _front_held(*a: Any, **k: Any) -> Any:
 # What the write gates still reach on this module (service/gates.py holds them): the helpers of the areas still here (the hand-off machinery, the roster and the contact lookups, the effective state, the wake parser,
 # the anchors scoped to an item), the checks that sit in web/ and the per-write flags. A hook leaves this table when the area that holds it moves under service/.
 _gates.install(_gates.Hooks(
-    after_open=_late("_after_open"),
+    after_open=_late_in(_item_read, "_after_open"),
     after_reaches=_late("_after_reaches"),
     answers_of=lambda *a, **k: _rmod.answers_of(*a, **k),
     ask_none=_ASK_NONE,
     ask_stands=_late("_ask_stands"),
     basis_words=_BASIS_WORDS,
     close_refusal=_CLOSE_REFUSAL,
-    contact_alive=_late("_contact_alive"),
-    contact_fronts=_late("_contact_fronts"),
-    contact_same=_late("_contact_same"),
+    contact_alive=_late_in(_contacts, "_contact_alive"),
+    contact_fronts=_late_in(_contacts, "_contact_fronts"),
+    contact_same=_late_in(_contacts, "_contact_same"),
     eff_state=_late("_eff_state"),
     follow_superseded=_late("_follow_superseded"),
     front_held=_late("_front_held"),
-    front_pair_ok=_late("_front_pair_ok"),
-    handoffs_in=_late("_handoffs_in"),
+    front_pair_ok=_late_in(_holders, "_front_pair_ok"),
+    handoffs_in=_late_in(_agents, "_handoffs_in"),
     handover_kind=lambda *a, **k: _proofs.handover_kind(*a, **k),
-    hub_sessions=_late("_hub_sessions"),
+    hub_sessions=_late_in(_item_read, "_hub_sessions"),
     item_mover=_late("_item_mover"),
-    main_agent=_late("_main_agent"),
-    model_guards_on=_late("_model_guards_on"),
+    main_agent=_late_in(_agents, "_main_agent"),
+    model_guards_on=_late_in(_item_read, "_model_guards_on"),
     model_page=_MODEL_PAGE,
-    open_item_named=_late("_open_item_named"),
+    open_item_named=_late_in(_item_read, "_open_item_named"),
     outcomes=OUTCOMES,
     own_repo=_late("_own_repo"),
     owner_words_on=_late("_owner_words_on"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     relaunch=_RELAUNCH,
-    role_of=_late("_role_of"),
-    same_sess=_late("_same_sess"),
-    scoped_anchors=_late("_scoped_anchors"),
+    role_of=_late_in(_holders, "_role_of"),
+    same_sess=_late_in(_sr, "_same_sess"),
+    scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
     session_id=_late("_session_id"),
-    session_roster=_late("_session_roster"),
+    session_roster=_late_in(_agents, "_session_roster"),
     shown_ref=_late("_shown_ref"),
-    store_ref=_late("_store_ref"),
+    store_ref=_late_in(_sr, "_store_ref"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
     zone=lambda: _wttext.ZONE,
@@ -4950,7 +4346,7 @@ _gates.install(_gates.Hooks(
 # What an update still reaches on this module (service/update.py runs the update in its order): the gates and notices the create tool, the close and the telling share, the per-write flags and a few constants.
 # A hook leaves this table when the area that holds it moves under service/.
 _update_svc.install(_update_svc.Hooks(
-    after_open=_late("_after_open"),
+    after_open=_late_in(_item_read, "_after_open"),
     anchor_wait_gate=_late("_anchor_wait_gate"),
     ask_none=_ASK_NONE,
     ask_owed=_late("_ask_owed"),
@@ -4958,11 +4354,11 @@ _update_svc.install(_update_svc.Hooks(
     basis_words=_BASIS_WORDS,
     cap_ok_drop=_late("_cap_ok_drop"),
     cap_ok_put=_late("_cap_ok_put"),
-    contact_alive=_late("_contact_alive"),
-    contact_fronts=_late("_contact_fronts"),
-    contact_same=_late("_contact_same"),
+    contact_alive=_late_in(_contacts, "_contact_alive"),
+    contact_fronts=_late_in(_contacts, "_contact_fronts"),
+    contact_same=_late_in(_contacts, "_contact_same"),
     date_only_wait=_late("_date_only_wait"),
-    date_parked=_late("_date_parked"),
+    date_parked=_late_in(_item_read, "_date_parked"),
     eff_state=_late("_eff_state"),
     evwait_gate=_late("_evwait_gate"),
     evwait_preread=_late("_evwait_preread"),
@@ -4972,16 +4368,16 @@ _update_svc.install(_update_svc.Hooks(
     form_notes=_late("_form_notes"),
     gate_ask=_late("_gate_ask"),
     gate_options=_late("_gate_options"),
-    handoffs_in=_late("_handoffs_in"),
+    handoffs_in=_late_in(_agents, "_handoffs_in"),
     hold_held_by=_late("_hold_held_by"),
     hold_set=_late("_hold_set"),
-    is_held=_late("_is_held"),
+    is_held=_late_in(_holders, "_is_held"),
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
-    main_agent=_late("_main_agent"),
+    main_agent=_late_in(_agents, "_main_agent"),
     model_apply=_late("_model_apply"),
-    model_guards_on=_late("_model_guards_on"),
-    model_of=_late("_model_of"),
+    model_guards_on=_late_in(_item_read, "_model_guards_on"),
+    model_of=_late_in(_item_read, "_model_of"),
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     name_on_write=_late("_name_on_write"),
     next_put=_late("_next_put"),
@@ -5000,14 +4396,14 @@ _update_svc.install(_update_svc.Hooks(
     render_same_ref=lambda *a, **k: _rmod.same_ref(*a, **k),
     render_when_words=lambda *a, **k: _rmod.when_words(*a, **k),
     said_note=_late("_said_note"),
-    scoped_anchors=_late("_scoped_anchors"),
+    scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
     session_id=_late("_session_id"),
-    session_roster=_late("_session_roster"),
+    session_roster=_late_in(_agents, "_session_roster"),
     state_apply=_late("_state_apply"),
-    state_end=_late("_state_end"),
-    store_ref=_late("_store_ref"),
-    switchover_on=_late("_switchover_on"),
-    update=_late("_update"),
+    state_end=_late_in(_holders, "_state_end"),
+    store_ref=_late_in(_sr, "_store_ref"),
+    switchover_on=_late_in(_item_read, "_switchover_on"),
+    update=_late_in(_update_svc, "_update"),
     wait_end_sent_back=_late("_wait_end_sent_back"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     wake_event_set=lambda: _runner.WAKE_EVENT.set(),
@@ -5020,21 +4416,6 @@ _update_svc.install(_update_svc.Hooks(
 ))
 
 
-@_functools.wraps(_update_svc.update_unlocked)      # the tool's own signature stays visible to anything that reads it
-def _update(*args: Any, **kwargs: Any) -> str:
-    """The update write (service/update.py's `update_item`) under the item lock; the update and complete tools and every write the server makes itself come through here."""
-    return _update_svc.update_item(*args, **kwargs)
-
-
-def _scoped_anchors(project: str, gid: str, anchors: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """The anchors scoped to this item, from every project's page and not only the item's own (anchor_scope.anchor_scope; the project-wide ones do not count): each once, with the
-    page that holds it in `page`. `project`: the item's project, whose page is read first. `anchors`: the anchors already loaded (a pass that asks about many items loads them once)."""
-    try:
-        return _ascope.anchor_scope(_anc.load() if anchors is None else anchors, gid, project)
-    except Exception:
-        return []
-
-
 # ----------------------------------------------------------------------------- messaging between sessions
 # The one hop Claude's own cross-session messaging cannot make is cloud/Cowork → a local pane (and Cowork → Cowork). The
 # server is the one thing every session reaches, so it relays: push.py delivers into a pane's inbox on this box
@@ -5042,8 +4423,6 @@ def _scoped_anchors(project: str, gid: str, anchors: dict[str, Any] | None = Non
 # the target is not live; a pane on another machine gets its line through the server's inbox, which that machine's puller
 # fetches (inbox.py). Every message is logged to <state>/messages.jsonl. The sender self-identifies (the server cannot see which session calls).
 MSG_LOG = _cfg.state("messages.jsonl")
-
-
 
 
 def _msg_label(ident: str, idx: dict[str, dict[str, Any]]) -> str:
@@ -5090,7 +4469,7 @@ def _project_of_name(name: str, roles: dict[str, Any], idx: dict[str, Any]) -> s
     reg = _anc.registry()
     def reaches(k: str) -> bool:
         return bool(_telling.stand_in_keeper(k, reg))
-    k = str((roles.get(_role_name(roles, name)) or {}).get("project") or "")
+    k = str((roles.get(_sr._role_name(roles, name)) or {}).get("project") or "")
     if k in reg and reaches(k):
         return k
     fold = name.casefold(); best: list[tuple[int, int, int, int, int, str]] = []
@@ -5124,7 +4503,7 @@ def _dead_recipient(to: str, cands: list[dict[str, Any]], idx: dict[str, dict[st
         roles = _anc.session_roles()
     except Exception:  # noqa: BLE001
         roles = {}
-    held = _role_name(roles, to, name)
+    held = _sr._role_name(roles, to, name)
     if held and roles[held].get("retired") and not any(_lv.running(r) for r in cands):
         why = "a retired name-line session, its pane gone"
     else:
@@ -5157,7 +4536,7 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
     agent, and any failure here (where the code cannot tell, nothing is lost). → the reply line, or "" (deliver it).
     `via` = the page key it was addressed to, when it was a `For <agent>` message to a project."""
     try:
-        sname = _role_name(roles, sender, str((idx.get(sender) or {}).get("name") or ""))
+        sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or ""))
         if not sname or roles[sname]["role"] != "back" or sname.casefold() == str(target).casefold():
             return ""
         body = re.sub(r"\A\s*\[for [^\]\n]{1,40}\]\s*", "", raw)
@@ -5199,7 +4578,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     project (the router rules it) and never reaches this gate. a background agent's marked message that only reports on a board
     item is written onto the item instead of delivered (_builder_report) → the sender's reply then, else None (the message is delivered)."""
     roles = _anc.session_roles()
-    name = _role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
+    name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
     if not name or roles[name]["role"] != "front":
         return None
     project = roles[name]["project"]
@@ -5252,7 +4631,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         m_for = _router._FOR_AGENT.match(next((ln.strip() for ln in raw.splitlines() if ln.strip()), ""))      # "For <front agent>, …" to a project is the same message (the router's for-agent rule would pass it to that pane)
         if m_for:
             roles_ = _anc.session_roles()
-            tname = _role_name(roles_, m_for.group(1))
+            tname = _sr._role_name(roles_, m_for.group(1))
             if tname and roles_[tname]["role"] == "front":
                 reported = _builder_report(tname, raw, sender, idx, roles_, via=to.rstrip("/"))
                 if reported:
@@ -5558,7 +4937,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
     return 404, "text/plain", "no such read: registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles"
 
 
-def _wait_fields(gid: str, it: dict[str, Any], ctx: "_WaitCtx") -> dict[str, Any]:
+def _wait_fields(gid: str, it: dict[str, Any], ctx: "_agents._WaitCtx") -> dict[str, Any]:
     """The wait fields on an item as the items API carries them (the web board and the fleet tool read them): mover {kind, who, via?}. The fields that
     carried a computed expected-by time stay in the answer so that a reader written against them does not break, always empty (expected_by null, wait "",
     overdue null): they go in a later release."""
@@ -5593,7 +4972,7 @@ def _client_items(key: str) -> tuple[int, str, str]:
     me.discard("")
     out = []
     now = time.time()
-    ctx = _WaitCtx(now)                # every open item has a mover, listed whatever wait it is in
+    ctx = _agents._WaitCtx(now)                # every open item has a mover, listed whatever wait it is in
     for gid, p in _item_files():
         try:
             with open(p, encoding="utf-8") as f:
@@ -5622,15 +5001,15 @@ def _client_items(key: str) -> tuple[int, str, str]:
             up = float(it.get("updated") or 0) or None    # any write, a filing edit too (an ask-only update moves only this)
         except (TypeError, ValueError):
             up = None
-        st_, st_derived = _states.of(it, lambda i_: _after_open(i_.get("metadata") or {}))     # the item's stored state, or the one derived from its fields (not sent)
+        st_, st_derived = _states.of(it, lambda i_: _item_read._after_open(i_.get("metadata") or {}))     # the item's stored state, or the one derived from its fields (not sent)
         # the asking session's live roles on the item, as the server holds them now (the end-of-turn text shows them): "mover" (it moves the alive item: by its needs, its
         # stored mover or the project's default), "then" (it takes the item after the owner's answer) and "needs" (named in its needs).
         roles = ([_ROLE_MOVER] if is_mover else []) + ([_ROLE_THEN] if is_then else []) + ([_ROLE_NEEDS] if linked else [])
         out.append({"gid": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "needs": _shown_needs(_needs_of(m)),
                     **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
-                    "contact": _contact_label(dict(it, gid=gid)),
+                    "contact": _contacts._contact_label(dict(it, gid=gid)),
                     "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _rmod.confirmed_at(it, p),
-                    "updated": up, "held": _is_parked(it) or bool(_after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
+                    "updated": up, "held": _item_read._is_parked(it) or bool(_item_read._after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
                     "roles": roles, **({"role": "agent"} if linked else {})})      # "agent": named in the item's needs (the session named in needs is its mover too, so the key no longer excludes it)
     return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
 
@@ -5638,7 +5017,7 @@ def _client_items(key: str) -> tuple[int, str, str]:
 def _then_label_raw(item: dict[str, Any]) -> str:
     """The session id or name an alive item's `then` (stored, else the model's) or a waiting item's post-wake mover names; "" for none or the owner."""
     try:
-        mod = _model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
+        mod = _item_read._model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
         who = mod.then if mod.state == _model.ALIVE else ((mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else "")      # a waiting item's picker takes the role `then` (or, when he picks it up, the `then` beside him)
     except Exception:  # noqa: BLE001
         who = ""
@@ -5648,7 +5027,7 @@ def _then_label_raw(item: dict[str, Any]) -> str:
 def _item_mover_model(item: dict[str, Any]) -> tuple[str, bool]:
     """(who moves the item now as _item_mover reads it, whether the item is alive): "" and False when the reading fails or the item is closed."""
     try:
-        mod = _model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
+        mod = _item_read._model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
         alive = mod.state == _model.ALIVE
         return (mod.mover if alive else (mod.wait.mover if mod.wait else "")), alive
     except Exception:  # noqa: BLE001
@@ -5658,7 +5037,7 @@ def _item_mover_model(item: dict[str, Any]) -> tuple[str, bool]:
 def _basis_wait_of(item: dict[str, Any]) -> bool:
     """Is the open item a doing item the board lists as waiting for a wake that states its reason (dated_wait.basis_wait)? The end-of-turn board question skips it like a held one."""
     try:
-        return _dw.basis_wait(item, time.time(), lambda i_: _after_open(i_.get("metadata") or {})) is not None
+        return _dw.basis_wait(item, time.time(), lambda i_: _item_read._after_open(i_.get("metadata") or {})) is not None
     except Exception:  # noqa: BLE001
         return False
 
@@ -5668,7 +5047,7 @@ def _item_list(item: dict[str, Any]) -> str:
     rule for an item it cannot place (a failed reading, or a dead one) is Agents at work (home.classify), so the field is never empty: the items sheet groups as the page does."""
     try:
         it = dict(item, gid=str(item.get("gid") or item.get("id") or ""))
-        vw = _model.view(it, _model_of(it), after_open=lambda i_: _after_open(i_.get("metadata") or {}))
+        vw = _model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}))
         which = _home.list_of(_queued.overlay(vw, _queue_map().get(it["gid"], "")))     # a doing item with a far wake and every step dated is listed as waiting, and one queued behind its mover's other item
     except Exception:  # noqa: BLE001
         which = ""
@@ -5725,7 +5104,7 @@ def _client_item_facts(key: str, ids: str) -> tuple[int, str, str]:
         row = {"status": str(it.get("status") or ""), "shown": _gh.shown(g),
                "mover": _item_mover_label(it, nm, mover), "mover_me": bool(mover and ({mover, _anc.canonical(mover, nm)} & me)),
                "mine": bool(th_ and ({th_, _anc.canonical(th_, nm)} & me)), "agent": any({ag, _anc.canonical(ag, nm)} & me for ag in _needs_sessions(m)),
-               "project": str(m.get("project") or ""), "contact": _contact_label(it)}
+               "project": str(m.get("project") or ""), "contact": _contacts._contact_label(it)}
         if row["status"] != "open":
             try:
                 ts = float(it.get("state_updated") or it.get("updated") or 0)
@@ -5780,7 +5159,7 @@ def _held_only_for_recycle(item: dict[str, Any]) -> bool:
     """On hold, and the pane recycle is all the hold waits for: no wake and no open after (render.held_only_for_recycle,
     the one definition, which the board's status line uses too; the open afters read from the files here). _recycled releases
     such a hold with the recycle; _recycle_wanted counts such an item, since only a recycle will ever move it."""
-    return _rmod.held_only_for_recycle(item, _after_open(item.get("metadata") or {}))
+    return _rmod.held_only_for_recycle(item, _item_read._after_open(item.get("metadata") or {}))
 
 
 def _recycle_wanted_rows(machine: str) -> list[tuple[str, dict[str, Any]]]:
@@ -5797,7 +5176,7 @@ def _recycle_wanted_rows(machine: str) -> list[tuple[str, dict[str, Any]]]:
             it = _svcstore._load(gid)
         except Exception:
             continue
-        if not _rmod.waits_recycle(it) or not _rmod.recycle_due(it, _after_open(it.get("metadata") or {})):   # the board's status line uses the same test
+        if not _rmod.waits_recycle(it) or not _rmod.recycle_due(it, _item_read._after_open(it.get("metadata") or {})):   # the board's status line uses the same test
             continue
         at = (it.get("metadata") or {}).get("recycle_at")      # (an event wait for a recycle sets no recycle flag, so it never gets here; one that also carries the flag asks for the recycle like any other item)
         at = float(at) if isinstance(at, (int, float)) else 0.0
@@ -5820,7 +5199,7 @@ def _recycle_wait_pr(project: str, gid: str, anchors: dict[str, Any] | None = No
     The repository is named as the URL has it (through [github.moved]); sala holds the recycle only for a name it maps
     (itself, or one in its SALA_RECYCLE_REF_REPOS) and counts any other as live."""
     best, best_at = "", -1.0
-    for e in _scoped_anchors(project, gid, anchors):
+    for e in _item_read._scoped_anchors(project, gid, anchors):
         key = _pr_key(str(e.get("url") or ""))
         if not key:
             continue
@@ -5913,10 +5292,10 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
             it["updated"] = time.time()      # a filing edit: the state clock and the confirm stay as they were
         it["metadata"] = meta
         _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
-              + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _is_held(it) or _date_parked(it) else ""))
+              + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
         for sid, _why in _telling.notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
             to = (sid, "") if sid == owner else (sid, _sr._session_label(owner) or owner)
-            cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _is_held(it) or _date_parked(it) else ""))
+            cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
         print(f"recycle: {gid} no longer waits ({kind} on {machine})", file=sys.stderr, flush=True)
     for (to, front), rows in cleared.items():
         ids = [_gh.shown(g) for g, _ in rows]      # the notice names each item as it is shown (board#N); the stderr tag keeps the raw ids
@@ -6003,9 +5382,9 @@ def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
             it = _svcstore._load(g)
             action = "already" if _rmod.waits_recycle(it) else "set"
             if action == "set":
-                _update(g, recycle=True, sender=f"a script on {machine}")   # the script's write, not the owner's (the History names it)
+                _update_svc._update(g, recycle=True, sender=f"a script on {machine}")   # the script's write, not the owner's (the History names it)
                 it = _svcstore._load(g)
-            done.append({"item": g, "action": action, "held": _is_held(it) or _date_parked(it), "owner": _sr._session_label(_telling.holder(it)),
+            done.append({"item": g, "action": action, "held": _holders._is_held(it) or _item_read._date_parked(it), "owner": _sr._session_label(_telling.holder(it)),
                          "needs": [_shown_ref(x) for x in _needs_sessions(it.get("metadata") or {})]})
     return {"items": done, "pr": pr}
 
@@ -6083,7 +5462,7 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
                 continue
             meta = it.get("metadata") or {}
             cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))
-            if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or _is_held(it):
+            if _stall.not_due(it, now, lambda i_: _item_read._after_open(i_.get("metadata") or {})) or _holders._is_held(it):
                 continue      # the board shows it waiting, held or in the owner's lane: not on the stall ladder, and a stray mention must not reset its silence clock
             # the item's own words: its description, its steps, the status tag of each open step (a tag is where a session writes "PR 136 released; PR 137 in review", often before the step's text says it) and the lines of `next`
             tags = [t["text"] for t in (_steps.tag_of(c) for c in cl if c.get("status") == _steps.OPEN) if t]      # an open step's tag only: a done or dropped step keeps its tag, and a stale "PR 137 released" must not tie a later merge
@@ -6189,7 +5568,7 @@ def _event_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
 
 def _event_item_live(it: dict[str, Any], now: float) -> bool:
     """Is the item still on the stall ladder: not waiting, not held, not in the owner's lane (the test `_merge_tied` makes when it ties)?"""
-    return not (_stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or _is_held(it))
+    return not (_stall.not_due(it, now, lambda i_: _item_read._after_open(i_.get("metadata") or {})) or _holders._is_held(it))
 
 
 def _event_activity_tick(now: float | None = None) -> list[str]:
@@ -6251,7 +5630,7 @@ def _project_agent_rename(machine: str, body: dict[str, Any]) -> tuple[int, dict
             return 409, {"error": f"a rename of {busy} is in progress; try again"}
         _RENAMING.add(busy)
     try:
-        return _contact_after_agent(_project_agent_rename_write(*pre), "rename", pre[1], pre[2])
+        return _contacts._contact_after_agent(_project_agent_rename_write(*pre), "rename", pre[1], pre[2])
     finally:
         with _PROJECT_LOCK:
             _RENAMING.discard(busy)
@@ -6281,7 +5660,7 @@ def _project_agent_retire(machine: str, body: dict[str, Any]) -> tuple[int, dict
             return 409, {"error": f"a rename or retire of {busy} is in progress; try again"}
         _RENAMING.add(busy)
     try:
-        return _contact_after_agent(_project_agent_retire_write(*pre), "retire", pre[1])
+        return _contacts._contact_after_agent(_project_agent_retire_write(*pre), "retire", pre[1])
     finally:
         with _PROJECT_LOCK:
             _RENAMING.discard(busy)
@@ -6357,7 +5736,7 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     if len(recs) > 1:
         return 400, {"error": f"{project!r} is ambiguous: it names {' and '.join(r['key'] for r in recs)}; write the full key or the id"}
     key = recs[0]["key"]
-    front = sorted(_hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
+    front = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to take the question after {OWNER} answers; "
                               "a front agent lists itself first (client.py post project-agent)"}
@@ -6436,7 +5815,7 @@ def _terminal_projects(session: str) -> list[dict[str, Any]]:
             recs = _prj.refs(ref, _registry("projects"))
         except ValueError as e:
             raise ToolError(f"the project record cannot be read right now, nothing was filed: {e}")
-        if len(recs) == 1 and recs[0]["key"] not in [r["key"] for r in out] and _hub_sessions(recs[0]["key"])[3]:
+        if len(recs) == 1 and recs[0]["key"] not in [r["key"] for r in out] and _item_read._hub_sessions(recs[0]["key"])[3]:
             out.append(recs[0])
     return out
 
@@ -6522,14 +5901,14 @@ def _terminal_clear(found: list[str], name: str, sender: str, machine: str, by: 
     done = []
     for gid in found:
         desc = _terminal_bullets(f"{name} stopped waiting in its terminal", f"Closed by {sender} (a script on {machine}): {_TERMINAL_REASON}")
-        _update(gid, outcome_text=desc, status="completed", outcome="done", reason=_TERMINAL_REASON, sender=by)
+        _update_svc._update(gid, outcome_text=desc, status="completed", outcome="done", reason=_TERMINAL_REASON, sender=by)
         done.append(_gh.shown(gid))
     return {"session": name, "cleared": done}
 
 
 def _terminal_state(gid: str, name: str, by: str) -> None:
     """The item's state: your-step with the one-line step (a create sets none)."""
-    _update(gid, step=f"Answer {name}'s question in its terminal", sender=by)
+    _update_svc._update(gid, step=f"Answer {name}'s question in its terminal", sender=by)
 
 
 def _terminal_question_line(text: str) -> bool:
@@ -6546,7 +5925,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
         gid = found[0]
         meta = _svcstore._load(gid).get("metadata") or {}
         if str(meta.get("next") or "").strip() != nxt.strip():
-            _update(gid, next=nxt, sender=f"a script on {machine}", dropped=[i + 1 for i, x in enumerate(_steps.view(meta)) if x["status"] == _steps.OPEN and _terminal_question_line(x["text"])])       # a script's line is the creator's (the item's first writer), which this write replaces (next_writer in _update); the old question is a dropped step
+            _update_svc._update(gid, next=nxt, sender=f"a script on {machine}", dropped=[i + 1 for i, x in enumerate(_steps.view(meta)) if x["status"] == _steps.OPEN and _terminal_question_line(x["text"])])       # a script's line is the creator's (the item's first writer), which this write replaces (next_writer in _update); the old question is a dropped step
         if meta.get("state") != "your-step" or not _states.clean(meta.get("step")):
             _terminal_state(gid, name, by)                                # an item a crash left between its create and its state write is made whole here
         return 200, {"item": _gh.shown(gid), "session": name, "project": str(meta.get("project") or ""), "repeat": True}
@@ -6556,7 +5935,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
         return 409, {"error": "no project to file under: the session's project" + (f" and {fb}" if fb else "") + " list no front agent (a user-facing agent under `agents:` on the page)"}
     rec = cands[0]
     key = rec["key"]
-    owner = sorted(_hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))[0]
+    owner = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))[0]
     desc = _terminal_bullets(f"{name} is waiting in its terminal for {OWNER}'s answer", f"Opened by {sender} (a script on {machine}); it closes when the pane stops waiting")
     pfx_, tail_ = _terminal_subject_prefix(str(rec.get('scope') or '')), " is waiting for your answer in its terminal"
     name_ = _svcstore._shown_ids(name)
@@ -6567,7 +5946,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
         _terminal_state(gid, name, by)
     except Exception:  # noqa: BLE001  — re-raised below; a crash between the two writes is repaired by the next open (the repeat path)
         try:
-            _update(gid, outcome_text=_terminal_bullets(f"{name}: the row could not be made", f"Closed by {sender} (a script on {machine})"), status="completed",
+            _update_svc._update(gid, outcome_text=_terminal_bullets(f"{name}: the row could not be made", f"Closed by {sender} (a script on {machine})"), status="completed",
                     outcome="dropped", reason="the item could not be made whole", sender=by)
         except Exception as e2:  # noqa: BLE001
             print(f"terminal prompt: {_gh.shown(gid)} left open half made, not closed: {e2}", file=sys.stderr, flush=True)
@@ -6702,7 +6081,7 @@ def _jobgap_clear(found: list[str], timer: str, code: str, sender: str, machine:
     done = []
     for gid in found:
         desc = _terminal_bullets(f"{timer}: the gap ({code}) is fixed", f"Closed by {sender} (a script on {machine}): the job-gap watcher no longer finds it")
-        _update(gid, outcome_text=desc, status="completed", outcome="done", reason=_fit(f"{code} is fixed on {timer}: sala's job-gap watcher no longer finds it", _close_reason_max()), sender=by)
+        _update_svc._update(gid, outcome_text=desc, status="completed", outcome="done", reason=_fit(f"{code} is fixed on {timer}: sala's job-gap watcher no longer finds it", _close_reason_max()), sender=by)
         done.append(_gh.shown(gid))
     return {"timer": timer, "code": code, "cleared": done, "note": "" if done else f"no open item for {timer}: {code}; nothing was closed"}
 
@@ -6713,11 +6092,11 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
         return 200, {"item": _gh.shown(found[0]), "timer": timer, "code": code, "project": str(meta.get("project") or ""), "mover": _sr._session_label(str(meta.get("mover") or "")),
                      "owner": _sr._session_label(str(meta.get("owner") or "")), "repeat": True, "fallback": bool(meta.get("job_gap_fallback"))}
     key = rec["key"]
-    front = sorted(_hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
+    front = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to keep the item; a front agent lists itself first (client.py post project-agent)"}
     owner = front[0]
-    builder = _builder_agent(key)
+    builder = _agents._builder_agent(key)
     mover = builder or owner
     gap, what = _JOBGAP_WORDS.get(code, (f"has the gap {code}", f"has the gap {code}"))
     fix = _JOBGAP_FIX.get(code, _JOBGAP_FIX_OTHER).format(unit=timer, repo=repo)
@@ -6849,7 +6228,7 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
         return 400, {"error": f"mover {mover!r} is not a background agent listed on {key}'s page (its agents map): " + (", ".join(back) or "the page lists none")}
     if not step.startswith(mover + ": ") or not step[len(mover) + 2:].strip():
         return 400, {"error": f"step is one line that starts with the mover's name: '{mover}: <what it does>'"}
-    front = sorted(_hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
+    front = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to keep the item; a front agent lists itself first (client.py post project-agent)"}
     owner = front[0]
@@ -6991,7 +6370,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             return 400, {"error": str(e)}
     if what == "backfill-contact":   # every open item without a live contact gets one (client.py backfill-contact [--dry-run]); a dry run unless the body says apply
         try:
-            return 200, _contact_backfill(dry=body.get("apply") is not True)
+            return 200, _contacts._contact_backfill(dry=body.get("apply") is not True)
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "message":       # a script sends a message the way a session's `message` tool does
@@ -7055,7 +6434,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             if "basis" in body:
                 by = _script_sender(body, machine)
                 gid = _norm_id(str(body.get("item") or ""))
-                out = _update(gid, wait_basis=str(body.get("basis") or ""), sender=by)
+                out = _update_svc._update(gid, wait_basis=str(body.get("basis") or ""), sender=by)
                 return 200, {"item": _gh.shown(gid), "action": "set", "result": out.splitlines()[0] if out else ""}
             return 200, _record_cap_words(body, machine)
         except ToolError as e:
@@ -7248,7 +6627,7 @@ def _hand_stored_then(gid: str, item: dict[str, Any], meta: dict[str, Any]) -> b
             meta.pop("then", None)      # the `then` already is the mover or is named in needs: it follows nobody
         return False
     probe = {k: v for k, v in meta.items() if k != "mover"}
-    mod = _model_of({**item, "gid": gid, "metadata": probe})
+    mod = _item_read._model_of({**item, "gid": gid, "metadata": probe})
     if mod.state != _model.ALIVE or _model.is_owner(mod.mover):
         return False
     meta.pop("mover", None)
@@ -7282,7 +6661,7 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
         elif then and not _uw.kind_of(meta):               # no wait stored as a kind (an until alone is a wait on the date, with no kind)
             if "external" in _needs_kinds(meta):
                 meta.pop("then", None)
-            elif _after_open(meta):
+            elif _item_read._after_open(meta):
                 pass
             elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
                 if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
@@ -7424,7 +6803,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 rec["letter"] = letter      # the letter the box drew beside it (three or more options): a note that names a letter still reads right later
         parked = ""                     # an option that carries a wake (a stored raise's "Park until …"): the server applies his choice itself
         if kind == "decision" and picked.get("wake"):
-            parked = rec["parked"] = _idle_park_at(str(picked["wake"]), text)
+            parked = rec["parked"] = _pane_recovery._idle_park_at(str(picked["wake"]), text)
         prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
         meta["answers"] = [*prior, rec]
         if stepped:                     # the step is done: the state and its step go, and the item moves to its then-mover with his words (the answer) on it, recorded as his
@@ -7447,7 +6826,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
                         _check_his_step(meta, rec["step"], now)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
-            _state_end(meta, "your-step")
+            _holders._state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
             meta.pop("mover", None); meta.pop("then", None)
             _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; the owner's words for the wake go with it)
@@ -7468,12 +6847,12 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 rec["ask"] = str(meta["ask"])   # the ask he answered stays with his answer: the item drops it, and a decision asked again within an hour with that same ask is refused (gates.gate_decision_again)
             meta.pop("ask", None)
             meta.pop(_askl.LEFT, None)      # an answered ask leaves no "taken off" record: a late pick on an older ask reads stale
-            _state_end(meta, "your-call")   # the call is made: a stored your-call no longer stands (a park picked below reads as derived)
+            _holders._state_end(meta, "your-call")   # the call is made: a stored your-call no longer stands (a park picked below reads as derived)
             if matched:                 # a pick among the options settles the question: ask and options go, his answer keeps the label and line
                 meta.pop("options", None)
             meta.pop("idle", None)
             if parked:                  # on hold until that day, as update(hold=true, until=…) would leave it; "Owner acts now" leaves it on agent
-                _state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
+                _holders._state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
                 meta["until"] = parked          # the one date the wait ends on (until_write.py); no hold and no wake are stored
                 _cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
                             source=f"{OWNER}'s answer on the board, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")   # "Park until <date>" is his own word for that date
@@ -7481,7 +6860,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             effect = _watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop
             if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
                 handed = _decision_hand_over(meta, mover_in, then_in, parked=bool(parked),
-                                    waiting=_model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
+                                    waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
         if askback:                     # the question put back: three days to pick from (watchers.ask_back); the item stays his, needs still names his decision
             meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())
         item["metadata"] = meta

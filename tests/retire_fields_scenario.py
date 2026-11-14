@@ -64,6 +64,9 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.model import retire_fields as RF; from stackshot.tools import retire_fields_report as RR; from stackshot.tools import stamp_phase as SP
+from stackshot.service import agents as _agents
+from stackshot.service import item_read as _item_read
+from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from stackshot.waits import watchers as _watch
 from stackshot.web import publish as _web_publish
@@ -98,8 +101,8 @@ def reading(i):
     """phase, kind, list and mover from the fields alone, at the clock now (the old state word apart)."""
     it = dict(raw(i), gid=f"g{i}")
     with SP.fields_only(server):
-        mod = server._model_of(it)
-        shown = _model.view(it, mod, None, lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
+        mod = _item_read._model_of(it)
+        shown = _model.view(it, mod, None, lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=False)
         return [list(_model.shown_pair(shown)), server._item_list(it), shown.mover if shown.state == _model.ALIVE else ""]
 
 BASIS_DAY = day(12)
@@ -160,7 +163,7 @@ check("1 queued (the rank queue's word) stays", P[16]["edits"] == {}, P[16])
 before_r = {i: reading(i) for i in OPEN}
 def wc(i):
     """waiting.mover_for for an item as the server reads it (its `after` blockers loaded from the store): whose move it is."""
-    ctx = server._WaitCtx(time.time())
+    ctx = _agents._WaitCtx(time.time())
     return W.mover_for({**raw(i), "gid": f"g{i}"}, ctx.load)
 WAIT_IDS = (1, 5, 7, 8, 12, 14, 31)
 wait_before = {i: wc(i) for i in WAIT_IDS}
@@ -190,7 +193,7 @@ check("3 …no side effect: the state folder is the same and the phase and waits
 check("4 a party beside a wait_event keeps the wait_event; a supplies the description said adds no line", mt(4)["wait_event"] == "Acme legal replies" and mt(4)["ask_by"] == day(6) and raw(14)["description"] == orig[14]["description"], (mt(4), raw(14)["description"]))
 check("4 the supplies line is the last bullet of the description", raw(5)["description"] == DESC + "\n- Needs: its output feeds the build", raw(5)["description"])
 it7 = dict(raw(7), gid="g7")
-m7 = _model.view(it7, server._model_of(it7), None, lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
+m7 = _model.view(it7, _item_read._model_of(it7), None, lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=False)
 check("5 the verifying item reads waiting on its end day, with the proof as the text of the wait", m7.state == _model.WAITING and W.basis_of(mt(7)) == "the nightly run is green" and mt(7)["wake"] == END_WAKE, (m7.state, mt(7)))
 check("5 …and it waits to the end of that day, as the verifying state read it (its end is now its wake, and whose move it is stays the same)",
       W.wake_epoch(mt(7)["wake"]) is not None and wc(7) == wait_before[7], (wait_before[7], wc(7), mt(7)))
@@ -234,7 +237,7 @@ check("8 undo puts every file back value for value (a restored key goes last in 
 st_, d_ = call(op="unretire", items=undo_entries)
 check("8 …undo twice is a no-op (every answer is same)", {r["action"] for r in d_["results"]} == {"same"}, d_)
 call(op="retire", items=["g3", "g5"])
-server._update("g3", sender="home-front", ask_by=day(9))                  # a session changes a key the pass wrote
+_update_svc._update("g3", sender="home-front", ask_by=day(9))                  # a session changes a key the pass wrote
 st_, d_ = call(op="unretire", items=[e for e in undo_entries if e["item"] in ("board#3", "board#5")])
 acts = {r["item"]: r["action"] for r in d_["results"]}
 check("8 a key a later save changed makes the entry `kept` (left as the session saved it); the others are put back", acts.get("board#3") == "kept" and acts.get("board#5") == "set" and mt(3).get("until") == day(9) and mt(5).get("supplies") == "its output feeds the build" and raw(5)["description"] == DESC, (acts, mt(3), raw(5)["description"]))

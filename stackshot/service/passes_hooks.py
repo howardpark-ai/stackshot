@@ -16,12 +16,12 @@ from typing import Any, Callable
 @dataclass(frozen=True)
 class Hooks:
     """What the page-debt call, the migrations and the fleet events still reach outside service/, by the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
-    after_open: Callable[..., Any]  # server._after_open
-    builder_agent: Callable[..., Any]  # server._builder_agent
+    after_open: Callable[..., Any]  # item_read._after_open
+    builder_agent: Callable[..., Any]  # agents._builder_agent
     grace_min: Callable[..., Any]  # server._grace_min
-    main_agent: Callable[..., Any]  # server._main_agent
-    model_guards_on: Callable[..., Any]  # server._model_guards_on
-    model_of: Callable[..., Any]  # server._model_of
+    main_agent: Callable[..., Any]  # agents._main_agent
+    model_guards_on: Callable[..., Any]  # item_read._model_guards_on
+    model_of: Callable[..., Any]  # item_read._model_of
     outcomes: Callable[[], Any]  # server.OUTCOMES
     owed_lock: Callable[[], Any]  # server._OWED_LOCK
     owed_load: Callable[..., Any]  # server._owed_load
@@ -31,7 +31,7 @@ class Hooks:
     pid_write_op: Callable[..., Any]  # server._pid_write_op
     publish: Callable[..., Any]  # web.publish._publish
     retire_write_op: Callable[..., Any]  # server._retire_write_op
-    scoped_anchors: Callable[..., Any]  # server._scoped_anchors
+    scoped_anchors: Callable[..., Any]  # item_read._scoped_anchors
     script_sender: Callable[..., Any]  # server._script_sender
     sender_not_owner: Callable[..., Any]  # server._sender_not_owner
     server_module: Callable[[], Any]  # the server module itself
@@ -39,7 +39,7 @@ class Hooks:
     settle_apply: Callable[..., Any]  # server._settle_apply
     shown_needs: Callable[..., Any]  # server._shown_needs
     stamp_write_op: Callable[..., Any]  # server._stamp_write_op
-    switchover_on: Callable[..., Any]  # server._switchover_on
+    switchover_on: Callable[..., Any]  # item_read._switchover_on
     watch_on_write: Callable[..., Any]  # server._watch_on_write
     zone: Callable[[], Any]  # server.ZONE
 
