@@ -10,7 +10,7 @@ for ONE item, the done steps his saved decisions would have left, exactly as `se
     nothing is rewritten). So the fill-in is idempotent: a second run adds nothing.
   - The steps are appended after the checklist as it reads now (view), in the order he answered: no existing position moves, and the item page draws finished steps by their time anyway.
 
-Pure functions on an item's metadata dict, no server import and no store access: the server writes (server._migrate_one, the `backfill` write), recomputing from the item's own saved answers."""
+Pure functions on an item's metadata dict, no server import and no store access: the server writes (service/migrations.py `migrate_one`, the `backfill` write), recomputing from the item's own saved answers."""
 from __future__ import annotations
 
 from typing import Any

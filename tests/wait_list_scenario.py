@@ -63,6 +63,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
+from stackshot.service import migrations as migsvc
 from stackshot.service import wakes as wakes_svc, watching as watching_svc, event_waits as evwaits_svc
 from stackshot.service import telling
 server._publish = lambda: None
@@ -217,7 +218,7 @@ check("watchers: a list has no chases (a list is not a chased wait)", not wk.cha
 check("watchers: what a clear of the wait drops names waits and wait_mode (the one list: WAIT_GROUP; the end of a wait, a close, a date alone, what a put-back keeps)",
       all(f in model.WAIT_GROUP and f in model.MODEL_FIELDS and f in model.DROP_ON_CLOSE and f in wk.LIVE_DROP and f in wk.DATE_DROP and f in wk.WAS_FIELDS for f in ("waits", "wait_mode")), None)
 check("seams: the lists of wait fields name waits and wait_mode (the re-park fields, the wait's structure, the write guards' state fields, the wake hint's fields), and the migration's set fields do NOT (nothing migrates a list)",
-      all(f in gates._REPARK_FIELDS and f in gates._WAIT_STRUCTURE and f in model_guards.STATE_FIELDS and f in server._WAKE_FIELD_KEYS for f in ("waits", "wait_mode"))
+      all(f in gates._REPARK_FIELDS and f in gates._WAIT_STRUCTURE and f in model_guards.STATE_FIELDS and f in migsvc.WAKE_FIELD_KEYS for f in ("waits", "wait_mode"))
       and not any(f in migration.OPEN_SET_FIELDS or f in migration.SET_FIELDS for f in ("waits", "wait_mode")), None)
 sig = lambda **m: gates._struct_sig({"wait_kind": "list", **m})
 base_ = {"wait_mode": "all", "waits": [Tm(day(3)), It("a1")]}

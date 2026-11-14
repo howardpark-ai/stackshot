@@ -9,8 +9,8 @@ The order of the table is the order of the work: (1) the events that end a wait,
 minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass, the dates pass, the wake
 catch-up, the silence tick and the archive tick. `board=True` marks a tick that reads items: it is skipped while the migration's pass holds the board.
 
-The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, the hand-off tick from service/handoff.py and the stall pass from service/stall_tick.py,
-and called directly. What stays in server.py is the other tick functions (the phase sweep, the done check, the step proof, the balancer, the answers, the registry sync, the clients, the page-debt fallback, the filing, dates, silence and
+The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, the hand-off tick from service/handoff.py, the clients' tick and the inbox flag from service/fleet_events.py and the stall pass from service/stall_tick.py,
+and called directly. What stays in server.py is the other tick functions (the phase sweep, the done check, the step proof, the balancer, the answers, the registry sync, the page-debt fallback, the filing, dates, silence and
 archive passes) and the publish. The table calls each of them through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it). A hook is looked
 up when its tick runs, so a suite that replaces the function on server.py is the one called; a suite that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here, and
 one that replaces a wake, event-wait, hand-off or stall function sets it on the module that holds it.
@@ -33,6 +33,7 @@ from stackshot.projects import pages as _pages
 from stackshot.router import routing as _routing
 from stackshot.service import checks as _checks
 from stackshot.service import event_waits as _evwaits
+from stackshot.service import fleet_events as _fleetev
 from stackshot.service import handoff as _handoff
 from stackshot.service import proofs as _proofs
 from stackshot.service import stall_tick as _stalltick
@@ -48,7 +49,6 @@ class Hooks:
     balance_tick: Callable[[], Any]  # server._balance_tick
     answer_tick: Callable[[], Any]  # server._answer_tick
     roles_sync_safe: Callable[[], Any]  # server._roles_sync_safe
-    clients_tick: Callable[[], Any]  # server._clients_tick
     pilot_fallback_tick: Callable[[], Any]  # server._pilot_fallback_tick
     filing_tick: Callable[[], Any]  # server._filing_tick
     dates_tick: Callable[[], Any]  # server._dates_tick
@@ -57,7 +57,6 @@ class Hooks:
     publish: Callable[[], Any]  # server._publish
     publish_now: Callable[..., Any]  # server._publish_now
     publish_every: Callable[[], float]  # server._publish_every
-    inbox_flag_send: Callable[..., Any]  # server._inbox_flag_send
 
 
 _hooks_: Hooks | None = None
@@ -112,7 +111,7 @@ def ticks() -> "list[_minute.Tick]":
         T("handoff_tick", lambda: _handoff.handoff_tick(), "handoff", board=True),
         T("answer_tick", lambda: _hooks().answer_tick(), "answers", board=True),
         T("roles_sync_safe", lambda: _hooks().roles_sync_safe(), "fleet"),
-        T("clients_tick", lambda: _hooks().clients_tick(), "fleet"),
+        T("clients_tick", lambda: _fleetev.clients_tick(), "fleet"),
         T("pilot_fallback_tick", lambda: _hooks().pilot_fallback_tick(), "fleet", board=True),
         T("stall_tick", lambda: _stalltick.stall_tick(), "fleet", board=True),
         T("handback_tick", lambda: _telling.handback_tick(), "fleet", board=True),
@@ -165,7 +164,7 @@ def watchdog(now: float | None = None) -> str:
     to = _cfg.audit_builder()
     if not to:
         return "nobody"
-    _hooks().inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min (its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}): "
+    _fleetev.inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min (its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}): "
                                  f"{('it is stuck in the tick ' + cur) if cur else 'no tick is running, so the loop itself is stuck'}, and no wake, anchor, event wait or hand-off runs meanwhile (GET /audit/status has each tick's last_run). "
                                  f"Sent once for this stall; nothing here is for {OWNER} and no reply is owed.")
     return "told"

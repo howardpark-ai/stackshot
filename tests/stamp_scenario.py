@@ -73,6 +73,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.service import migrations as migsvc
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import telling
 from stackshot.core import store as _core_store
@@ -557,7 +558,7 @@ if src.is_dir() and any(q.is_dir() and len(q.name) == 1 for q in src.iterdir()):
             d0 = {g: SP.display_of(server, items0[g], g) for g in opens}; w0 = {g: bool(wk.watches(items0[g])) for g in opens}
         applied = []
         for k in range(0, len(opens), 40):
-            applied += server._migrate_write({"op": "stamp", "items": opens[k:k + 40], "sender": SENDER}, "box-a")["results"]
+            applied += migsvc.migrate_write({"op": "stamp", "items": opens[k:k + 40], "sender": SENDER}, "box-a")["results"]
         items1 = SP.load_dir(R / "store")
         with SP.frozen(t_):
             d1 = {g: SP.display_of(server, items1[g], g) for g in opens}; w1 = {g: bool(wk.watches(items1[g])) for g in opens}

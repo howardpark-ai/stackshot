@@ -1,4 +1,4 @@
-"""Scenario test for the one-off fill-in of his past decisions (next_backfill.py, server.py `_migrate_backfill`) — fixture data, no live store,
+"""Scenario test for the one-off fill-in of his past decisions (next_backfill.py, service/migrations.py `migrate_backfill`) — fixture data, no live store,
 no network, no server socket.
 
 Covers: the plan for an open item (a saved `decision` answer becomes `Oliver: <the Decide part of its ask> → <the option>`, done by him at the answer's time; an answer with no ask reads `answer the ask
@@ -64,6 +64,7 @@ def mt(i): return rd(i)["metadata"]
 def digest(): return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((T / "store").glob("*/*.json"))}
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_backfill as NB; from stackshot.model import owner_steps as HS; from stackshot.model import migration as M
+from stackshot.service import migrations as migsvc
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 
@@ -106,7 +107,7 @@ item(8, answers=[ANS(T1, choice="Ship", ask=ASK)])
 CFGM = server._cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, migration=True, migration_senders=["falcon-engineer"], migration_machines=["testbox"])
 def call(op, **kw):
-    try: return server._migrate_write({"op": op, "sender": "falcon-engineer", **kw}, "testbox")
+    try: return migsvc.migrate_write({"op": op, "sender": "falcon-engineer", **kw}, "testbox")
     except Exception as e: return {"error": str(e)}
 def body(i, **kw):
     it = rd(i)

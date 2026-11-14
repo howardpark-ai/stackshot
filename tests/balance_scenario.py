@@ -62,6 +62,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import migrations as migsvc
+from stackshot.service import page_debt as pdebt_svc
+from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
@@ -83,14 +86,14 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
+CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
 def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
 telling.tell_woken = fake_tell
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
-server._inbox_flag_send = lambda *a, **k: sent.append(("flag", "", "", "flag"))
+fleetev.inbox_flag_send = lambda *a, **k: sent.append(("flag", "", "", "flag"))
 panes = {}; dead = {}                                              # a name -> its pane's registry status; a name -> why it has no pane
 def fake_status(who, idx=None):
     st = panes.get(who, "")
@@ -98,7 +101,7 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
+server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", last=None, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. `last` = minutes ago (or (minutes, kind)) of its `last_activity` record, which the queue rule reads."""

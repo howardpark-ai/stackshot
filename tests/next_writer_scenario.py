@@ -43,6 +43,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
+from stackshot.service import migrations as migsvc
 from stackshot.service import handoff as handoff_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
@@ -317,7 +318,7 @@ telling.tell_woken = _tw
 gm = _model_ids._norm_id(_wt_create._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN, next="nameless line").split()[1])     # a line stored before N1: only the server's own write can make one now
 upd(gm, GEN, next=f"{GEN}: second")
 it = server._load(gm)
-res = server._migrate_one({"item": gm, "set": {"next": f"{MAIN}: nameless line\n{GEN}: second"}, "drop": [], "expect": it["updated"], "expect_sig": server._migrate_sig(gm, it), "kind": "named"})
+res = migsvc.migrate_one({"item": gm, "set": {"next": f"{MAIN}: nameless line\n{GEN}: second"}, "drop": [], "expect": it["updated"], "expect_sig": migsvc.migrate_sig(gm, it), "kind": "named"})
 check("migration: the apply goes through", res.get("action") == "set", res)
 check("migration: the lines it named keep their writers", lines(gm) == [f"{MAIN}: nameless line", f"{GEN}: second"] and who(gm) == [MAIN, GEN], (nx(gm), who(gm)))
 

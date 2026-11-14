@@ -51,6 +51,7 @@ def reload_with(text):
     return out, err.getvalue()
 
 from stackshot.core import config; from stackshot.projects import pages; from stackshot.fleet import clients; from stackshot.fleet import fleet; from stackshot.web import server
+from stackshot.service import fleet_events as fleetev
 from stackshot.web.auth import signin as _signin
 from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
@@ -83,7 +84,7 @@ check("valid, unchanged: an empty list, nothing logged", out == [] and log == ""
 # a live file that still carries the retired [idle] stuck_to key is read as it is: the key is ignored, with no warning and no refusal
 OLDKEY = edit(LIVE, (r"(?m)^park_days = 3", 'stuck_to = "home-old"\npark_days = 3'))
 out, log = reload_with(OLDKEY)
-check("retired key: a file that still has [idle] stuck_to loads, the key is only listed as changed, nothing reads it and nothing is logged", out == ["idle.stuck_to"] and log == "" and not hasattr(server, "_stuck_to") and server._fleet_builder() == (config.get("fleet", "operator_session") or ""), (out, log))
+check("retired key: a file that still has [idle] stuck_to loads, the key is only listed as changed, nothing reads it and nothing is logged", out == ["idle.stuck_to"] and log == "" and not hasattr(server, "_stuck_to") and fleetev.fleet_builder() == (config.get("fleet", "operator_session") or ""), (out, log))
 check("retired key: config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
 out, log = reload_with(LIVE)
 

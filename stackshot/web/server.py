@@ -118,10 +118,9 @@ from stackshot.waits import wait_list as _wl  # noqa: E402  — a wait on a list
 from stackshot.waits import handoff as _ho  # noqa: E402  — the hand-off machinery of the item model: the record, the clock, section 5 (handoff.py)
 from stackshot.waits import successor as _succ  # noqa: E402  — the closest live agent for an open item whose mover is gone: the audit's hand-over (successor.py)
 from stackshot.model import rebullet as _rebullet  # noqa: E402  — the re-bullet pass's checks: a rewrite that lost a link, a number or a quote is refused (rebullet.py)
-from stackshot.model import migration as _mig  # noqa: E402  — the migration onto the item model: the planner; the server applies its writes (_migrate_write)
+from stackshot.model import migration as _mig  # noqa: E402  — the migration onto the item model: the planner; the server applies its writes (_migrations.migrate_write)
 from stackshot.model import nextlines as _nl  # noqa: E402  — whose lines are in an item's next: update replaces only the sender's, clear_next wipes all (nextlines.py)
 from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on the checklist: the server makes `<owner>: <what to decide>` for an ask or a your-step, ticks it with his answer, and a session cannot (owner_steps.py)
-from stackshot.model import next_backfill as _nbf  # noqa: E402  — the one-off fill-in of his past decisions as done steps, worked out from the item's own saved answers (next_backfill.py)
 from stackshot.model import step_proof as _sp  # noqa: E402  — a step that names the event which completes it: the patterns for its words and the explicit form (step_proof.py)
 from stackshot.waits import builderless as _bl  # noqa: E402  — a project with no builder: whom an answered step goes to, and a front agent handing an item to another front agent of its project (builderless.py)
 from stackshot.model import contact as _contact  # noqa: E402  — an item's contact: the front agent the person talks to about it (contact.py)
@@ -130,8 +129,6 @@ from stackshot.model import bullet_text as _bt  # noqa: E402  — how a line rea
 from stackshot.model import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
 from stackshot.waits import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
 from stackshot.waits import server_fixes as _sf  # noqa: E402  — the server's facts-only fixes of a write and what records them: a wake that is the whole of a wait, a front agent as mover, a loose wait reason, a settled pick (server_fixes.py)
-from stackshot.model import last_activity_pass as _lact_pass  # noqa: E402  — the data change that fills metadata.last_activity for the open items that have none, from their History, and puts it back (last_activity_pass.py; the ops lastact and unlastact)
-from stackshot.waits import until_pass as _until_pass  # noqa: E402  — the data change that rewrites the waits stored as wake, ask_by and hold as until: the plan, the ops of the migration route and the undo (until_pass.py)
 from stackshot.waits import wait_end as _we  # noqa: E402  — a next line that waits in words for something nothing tells the item has happened, and the fix the filing pass makes of it (wait_end.py)
 from stackshot.waits import until_write as _uw  # noqa: E402  — the write side of the one `until` date of a wait: the old fields folded into it, a kind with no date (until_write.py)
 from stackshot.model import ask_leaves as _askl  # noqa: E402  — a wrong or moot ask leaves the owner's move on its own: the pure half (ask_leaves.py)
@@ -154,6 +151,10 @@ from stackshot.service import released_live as _rlive  # noqa: E402  — what is
 from stackshot.service import proofs as _proofs  # noqa: E402  — a step's proof, the settle of one item for one event and the hand-over after it (service/proofs.py)
 from stackshot.service import released as _relsvc  # noqa: E402  — a live pull request settles the items built for it (service/released.py)
 from stackshot.service import checks_hooks as _checks_hooks  # noqa: E402  — what those four still reach on this module (service/checks_hooks.py)
+from stackshot.service import fleet_events as _fleetev  # noqa: E402  — the fleet's own minute clocks (the clients' tick, the inbox flag) and the fleet helpers (service/fleet_events.py)
+from stackshot.service import migrations as _migrations  # noqa: E402  — the start-up migrations and the passes of the migration route (service/migrations.py)
+from stackshot.service import page_debt as _pdsvc  # noqa: E402  — the page-debt call: its pass, its calls per page and the fallback to the page's keeper (service/page_debt.py)
+from stackshot.service import passes_hooks as _passes_hooks  # noqa: E402  — what the page-debt call, the migrations and the fleet events still reach on this module (service/passes_hooks.py)
 from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line a front agent's notice always leaves on the item (quiet.py)
 from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
@@ -238,75 +239,8 @@ def _after_open(meta: dict[str, Any]) -> list[str]:
 # _legacy_needs and _legacy_hold, the two forms _load reads an old file through, are store.py's.
 
 
-def _migrate_needs() -> list[str]:
-    """Once, at server start: every open item stored with needs as a word, or with a linked agent (metadata.agent), is
-    rewritten: needs a list, the agent in it. Idempotent (an item already in the new form is left alone); `updated` and
-    `state_updated` stay as they were, as _migrate_holds leaves them. One stderr line per item. → the gids rewritten."""
-    out = []
-    for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if it.get("status") != "open" or not _legacy_needs(it):
-            continue
-        _writes.save(gid, it)
-        out.append(gid)
-        print(f"migrate: {gid} needs → {it['metadata'].get('needs') or []} (the linked agent, if any, moved into it), clocks unchanged — {it.get('subject')}",
-              file=sys.stderr, flush=True)
-    return out
 
 
-def _migrate_owner_mover() -> list[str]:
-    """Once per start (idempotent, so every start runs it): the rules of _settle_mover_on_save and _handoff.handoff_his_over applied to the items stored before them. An open item that waits on
-    him with a session stored as its mover gets him as mover and the session in `then`; one that stores him as mover while no longer in his state, with an answer of his newer than the change of mover to him
-    (his hand-off record's time; else the item's last write) as the proof he let it go, gets its `then` agent back as mover (an older answer followed by a deliberate mover=the owner is left); a hand-off record to him that nobody took is ended when an answer of his is on the item after it (a board answer, a comment, a Done) or when the
-    item is no longer his to move (some kept a stale hand-over marker after he answered). `updated` and the clocks stay as they were.
-    One stderr line per item; nothing is posted to GitHub (mirror off). [model] guards = false skips the mover part, [model] handoff = false the record part. → the gids rewritten."""
-    out = []
-    after = lambda i_: _after_open(i_.get("metadata") or {})
-    for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if it.get("status") != "open" or not isinstance(it.get("metadata"), dict):
-            continue
-        did: list[str] = []
-        try:
-            if _model_guards_on():
-                rec_ = _ho.record_of(it)
-                # the proof that he held it and has let go: an answer of his NEWER than the change of mover to him (his hand-off record's time; with no record, the item's last write, a second before it).
-                # An old answer followed by a mover=the owner a writer set later is a deliberate hand-over, not a hand-back to make.
-                since = float(rec_.get("at") or 0) if rec_ and _model.is_owner(rec_.get("to")) else float(it.get("updated") or 0) - 1
-                his = any(isinstance(a, dict) and float(a.get("ts") or 0) >= since for a in (it["metadata"].get("answers") or []))
-                ch = _model.settle(it, his, after)
-                if ch:
-                    was_mover = _model.norm_who(it["metadata"].get("mover"))
-                    _settle_apply(it["metadata"], ch)
-                    did.append(f"mover {was_mover} → {ch['mover'] or 'default'}" + (f", then {ch['then']}" if ch.get("then") else ""))
-            r = _ho.pending_his(it) if _handoff.handoff_on() else None
-            if r is not None:
-                answers = [float(a.get("ts") or 0) for a in (it["metadata"].get("answers") or []) if isinstance(a, dict) and float(a.get("ts") or 0) >= float(r.get("at") or 0)]
-                if answers:
-                    _ho.answered(it, time.time(), f"{OWNER}'s answer was already on the item", at=min(answers))
-                    did.append("his hand-off ended (answered)")
-                else:
-                    mod = _model_of({**it, "gid": gid})
-                    if not (mod.state == _model.ALIVE and _model.is_owner(mod.mover)):
-                        _ho.answered(it, time.time(), f"it is no longer {OWNER}'s to move")
-                        did.append("his hand-off ended (not his to move)")
-        except Exception as e:  # noqa: BLE001  — one unreadable item never stops the start
-            print(f"migrate: {gid} his mover not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-            continue
-        if not did:
-            continue
-        _writes.save(gid, it, mirror=False)         # a start-up pass posts nothing to GitHub (no comment per migrated item)
-        out.append(gid)
-        print(f"migrate: {gid} {'; '.join(did)}, clocks unchanged — {it.get('subject')}", file=sys.stderr, flush=True)
-    return out
 
 
 def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
@@ -537,24 +471,6 @@ def _date_parked(item: dict[str, Any], unfolded: bool = False) -> bool:
     return bool((unfolded or _wt.stored_until(m)) and _uw.kind_of(m) in ("", "time") and item.get("status") == "open" and _rmod.needs_kind(item) != "call")      # one rule with the board's (_is_parked): an item whose needs hold his decision is never parked
 
 
-def _migrate_holds() -> list[str]:
-    """Once, at server start: every stored item with the retired status "on_hold" becomes status open + metadata.hold (its
-    wake kept). `updated` and `state_updated` stay as they were: a migration is not a state change, and the renderer orders
-    by the item clock. One stderr line per item. → the gids rewritten."""
-    out = []
-    for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if not _legacy_hold(it):
-            continue
-        _writes.save(gid, it)
-        out.append(gid)
-        print(f"migrate: {gid} status on_hold → open + metadata.hold (wake {it['metadata'].get('wake') or 'none'}), clocks unchanged — {it.get('subject')}",
-              file=sys.stderr, flush=True)
-    return out
 
 
 def _close_description_repair(apply: bool = False, days: float = 14.0, now: float | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -1372,12 +1288,12 @@ def _pilot_fallback_tick(now: float | None = None) -> int:
             stew = str(e["moves"]); prev = d.get(key, {}).get(stew) or {}
             settle = "ct" if "ct" in (e.get("settle"), prev.get("settle")) else str(e.get("settle") or "")
             # `moved` and `debts` (step 3b): the debts that moved here, each with its item, what changed and who left it undone, which the
-            # page-debt call (_page_debt_pass) reads; the keeper's own later debt (_owed_mark) overwrites the entry and so ends the mark
+            # page-debt call (page_debt.page_debt_pass) reads; the keeper's own later debt (_owed_mark) overwrites the entry and so ends the mark
             debts = [*(prev.get("debts") or []), {"item": e.get("item") or "", "what": str(e.get("what") or "changed"), "writer": o}] if prev.get("moved") else \
                     [{"item": e.get("item") or "", "what": str(e.get("what") or "changed"), "writer": o}]
             d.setdefault(key, {})[stew] = {"ts": now, "item": e.get("item") or "", **({"settle": settle} if settle else {}), "moved": True, "debts": debts}
         _owed_save(d)
-    if _page_debt.live():     # step 3b, live: the 30-minute relay to the keeper is the page-debt call's now (_page_debt_pass)
+    if _page_debt.live():     # step 3b, live: the 30-minute relay to the keeper is the page-debt call's now (page_debt.page_debt_pass)
         return len(due)
     out: dict[str, list[tuple[str, str, dict[str, Any], str, str]]] = {}     # keeper → [(project, gid, item, what, writer)], in the order due
     for key, o, e in due:
@@ -1397,219 +1313,6 @@ def _pilot_fallback_tick(now: float | None = None) -> int:
     return len(due)
 
 
-# ----------------------------------------------------------------------------- the page-debt call (router step 3b)
-# The 30-minute move of a page debt to the keeper (_pilot_fallback_tick) becomes one thin call per page per audit run ([router] page_debt,
-# page_debt.py): it is given the items of the debts that moved and the page's Current state and proposes the smallest edit. Shadow
-# (the default): the proposal is only logged, <state>/router/page_debt.jsonl, and the old relay (held for the router while it is live,
-# else the keeper's) stays as it is. Live ([router] page_debt_shadow = false): the edit is applied with a revision-checked put and the
-# debts settled; what cannot be applied (the call said "cannot", an answer that does not parse, a failed or slow call, an old_text
-# that does not match, a refused put, a put that timed out and whose read back shows no edit) goes to the agent that keeps the page
-# (its own `agent:`), else the project's builder, else its -main agent, as a page-update notice in the words of today's relay, and the
-# debt is theirs from then on. A put that timed out is read back first: a page that shows the edit counts as written.
-_PAGE_DEBT_LOCK = threading.Lock()
-
-
-def _clean_line(s: Any, n: int = 200) -> str:
-    return " ".join(str(s or "").split())[:n]
-
-
-def _page_debt_item(gid: str, what: str) -> dict[str, Any]:
-    """An item as the call is shown it: subject, state, description, next, needs, ask, outcome and the last few `said` lines."""
-    try:
-        it = _load(gid)
-    except Exception:
-        return {"id": _gh.shown(gid), "change": what, "subject": "(the item could not be read)"}
-    meta = it.get("metadata") or {}
-    said = [f"{e['tag']}: {' '.join(e['quote'].split())[:240]}" for e in _said.entries_of(meta)[-5:] if e.get("quote")]
-    row = {"id": _gh.shown(gid), "subject": str(it.get("subject") or "")[:200], "status": str(it.get("status") or ""), "change": what,
-           "description": str(it.get("description") or "")[:800], "next": str(meta.get("next") or "")[:600], "needs": _shown_needs(_needs_of(meta)),
-           "ask": str(meta.get("ask") or "")[:300], "outcome": str(meta.get("outcome") or ""), "reason": str(meta.get("reason") or "")[:300], "said": said}
-    return {k: v for k, v in row.items() if v not in ("", [], None)}
-
-
-def _page_debt_forget(key: str, moved: dict[str, dict[str, Any]], keeper: str = "", now: float = 0.0) -> None:
-    """Drop the moved debts the call took (each only while it is still the entry it read); `keeper` set = the debt becomes that agent's."""
-    with _OWED_LOCK:
-        d = _owed_load(); last = ""; settle = ""
-        for o, e in moved.items():
-            cur = d.get(key, {}).get(o)
-            if cur and cur.get("ts") == e.get("ts"):
-                del d[key][o]
-            last = str(e.get("item") or last)
-            settle = "ct" if "ct" in (e.get("settle"), settle) else str(e.get("settle") or settle)
-        if key in d and not d[key]:
-            del d[key]
-        if keeper:
-            d.setdefault(key, {})[keeper] = {"ts": now or time.time(), "item": last, **({"settle": settle} if settle else {})}
-        _owed_save(d)
-
-
-def _page_agent(key: str) -> str:
-    """The agent that keeps the page `key` as its own working document: the registry's entry for the page, when its frontmatter names an
-    `agent:` (pages.keeper_of: role "agent", the entry's `session`; anchors.registry), and that session is live (a heartbeat in the fleet's
-    sessions index, by name or id, not marked gone; project_keeper reads the same entry for the item notices). A hub page names a `display-name:` and
-    a sub-page that names nobody belongs to its keeper, so neither has one → "" ."""
-    try:
-        e = _anc.registry().get(str(key or "").strip().strip("/")) or {}
-        name = str(e.get("session") or "").strip()
-        if e.get("role") != "agent" or not name:
-            return ""
-        sid = _session_id(name)
-        idx = _sessions_index()
-        return name if any(_lv.running(r) and (k == sid or str(r.get("name") or "") == name) for k, r in idx.items()) else ""
-    except Exception:
-        return ""
-
-
-def _page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[tuple[str, str, str]], why: str, now: float) -> str:
-    """The debts the call did not settle go, in one message with the rows as today's relay writes them, to the agent that keeps the page
-    (_page_agent: the page's own `agent:`, when live), else the project's builder (a background agent whose mandate builds), else its -main
-    agent (anchors.fallback_main: its hub's, else the scope's general -main agent); with none of them the debts stay moved, for the next audit run's call.
-    The [for <owner>] mark is on the message only when that agent is a front one (a -main or other top-level `agents:` entry,
-    whose pane takes a peer's message only with it); a background agent gets the plain text. → who was told."""
-    own = _page_agent(key)
-    main = _main_agent(key)
-    builder = _builder_agent(key)
-    keeper = own or builder or main
-    if not keeper:
-        return ""         # nobody can take them: they stay moved, and the next audit run's call tries again
-    front = _telling.front_keeper(own, key)[0] if own else (not builder and bool(main))      # the -main agent is front by construction; a builder and the keeper fallback are not
-    rows = []
-    for gid, what, writer in debts:
-        try:
-            item = _load(gid)
-        except Exception:
-            item = {}
-        rows.append((key, gid, item, what, writer))
-    n = len(rows); s, are, them = ("s", "are", "them") if n != 1 else ("", "is", "it")
-    head = ((_FOR_OWNER + " ") if front else "") + (
-            f"[board] {n} page update{s} on {key} {are} yours to write: the writer{s} left {them} undone past {_grace_min()} min and the "
-            f"audit's page call could not write {them} ({_clean_line(why, 200)}). "
-            + ("Write the Current state: you keep this page." if own else "Write the Current state, or hand it to the agent that keeps the page."))
-    if keeper and rows:
-        for nid in _telling.pilot_relay_many(keeper, rows, head=head):
-            if own or builder or main:      # the notices went to the page's agent, the builder or the -main agent, which has no `route`: ruled passed at once, so nothing is left unruled
-                try:
-                    _routing.rule(nid, "passed", to=keeper, by=AUTO_RULER,
-                                  reason="the audit's page call could not write the page update: passed to " + ("the agent that keeps the page" if own else "the builder" if builder else "the -main agent"))
-                except Exception:
-                    pass
-    _page_debt_forget(key, moved, keeper, now)
-    return keeper
-
-
-_PAGE_DEBT_READ_WHAT = "the audit's page call skips its pages this run"
-
-
-def _page_debt_project(key: str, moved: dict[str, dict[str, Any]], now: float, mode: str, runner: Any = None, io: Any = None) -> str:
-    """One page's debts, one call. → the result: proposed · would_fall_back (shadow) · applied · fallback (live)."""
-    live = mode == "live"
-    debts: list[tuple[str, str, str]] = []
-    for o, e in moved.items():
-        for x in (e.get("debts") or [{"item": e.get("item") or "", "what": "changed", "writer": o}]):
-            t = (str(x.get("item") or ""), str(x.get("what") or "changed"), str(x.get("writer") or o))
-            if t not in debts:
-                debts.append(t)
-    items = [_page_debt_item(g, w) for g, w, _ in debts]
-    line: dict[str, Any] = {"ts": now, "project": key, "mode": mode, "call": "", "items": [_gh.shown(g) for g, _w, _o in debts], "status": "none",
-                            "proposal": None, "applies": None, "result": "", "why": "", "to": "", "usage": {}, "cost_usd": None, "duration_s": 0.0}
-    gb = io if io is not None else (_page_debt.page_io() if live else None)
-    content, rev = (gb.get(key) if live else (_page_debt.read_mirror(key), None))
-    why, res, edits, new = "", None, None, None
-    kb = _brains.for_key(key)
-    if (content is None or (live and not rev)) and not kb.default:
-        # a second brain's copy or gbrain CLI did not give the page: skipped for this run, said once, never a fallback to an agent
-        first = _brains.warn_once(kb, "the page " + key + " could not be read" + (" through its gbrain CLI" if live else " from its local copy"),
-                                  _PAGE_DEBT_READ_WHAT, channel=_PAGE_DEBT_READ_WHAT + " " + key)   # a channel per page: another page reading fine is no recovery of this one
-        if first:       # the call retries at each audit run while the outage lasts: one log line per outage, not one per run
-            line.update(result="skipped", why=f"second brain {kb.name}: the page could not be read")
-            _page_debt.log(line)
-        return "skipped"
-    if content is None or (live and not rev):
-        why = "the page could not be read"
-    else:
-        if not kb.default:
-            _brains.clear(kb, _PAGE_DEBT_READ_WHAT + " " + key)     # this page reads again: with no read of the brain failing, one line says it is back
-        res = _page_debt.call(key, items, content, runner)
-        line.update(call=res["call"], status=res["status"], proposal=res["proposal"], usage=res["usage"], cost_usd=res["cost_usd"], duration_s=res["duration_s"])
-        why = res["why"]
-        if res["kind"] == "edits":
-            new, bad = _page_debt.apply_edits(content, res["proposal"]["edits"])
-            if new is None:
-                why = bad
-            else:
-                edits = res["proposal"]["edits"]
-    line["applies"] = edits is not None
-    if not live:
-        line.update(result="proposed" if edits is not None else "would_fall_back", why="" if edits is not None else why)
-        _page_debt.log(line)
-        return line["result"]
-    if edits is not None:
-        state, msg = _page_debt.put_state(gb.put(key, new, rev))
-        if state == "refused":      # an explicit refusal (a stale revision, an error from gbrain): the page was not written, nothing to read back
-            line["applies"], why = False, "the page write was refused: " + msg
-        else:
-            # "ok" = gbrain said so; "unknown" = the put timed out or failed in a way that leaves it open whether it landed: either way the page
-            # is read back, and only a page that shows the edit counts as written
-            back, _rev2 = gb.get(key)
-            if back is not None and _page_debt.verify(back, edits):
-                _page_debt_forget(key, moved)
-                line.update(result="applied", why="the page write got no answer (" + msg + "), but a read back shows the edit: taken as written" if state == "unknown" else "")
-                _page_debt.log(line)
-                return "applied"
-            line["applies"] = False
-            why = ("the page write got no answer (" + msg + ") and a read back does not show the edit: check the page" if state == "unknown"
-                   else "the page was written, but a read back does not show the edit: check the page")
-    line.update(result="fallback", why=why, to=_page_debt_fallback(key, moved, debts, why, now))
-    _page_debt.log(line)
-    return "fallback"
-
-
-def _page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None, run: str = "", deadline: float | None = None) -> dict[str, int]:
-    """The pass the audit run's pages stage asks for (POST /client/page-debt): every page with debts that moved to its keeper and are still
-    unsettled gets one call. `run` names the audit run (its start stamp): a mark per page, run and mode, in <state>/router/page_debt_day.json,
-    is written before the call, so a page is called once per run, a crash never repeats it within the run, and switching shadow to live calls
-    again; a pass with no `run` marks by the local day. `deadline` (an epoch) is the end of the run's time budget: no page is begun after it, and
-    the pages left get no mark, so the next run calls them. A page whose call raises is counted as `error` and the pass goes on to the next.
-    → {pages, left, <result>: n}; {} when [router] page_debt is off (nothing runs)."""
-    if not _page_debt.enabled():
-        _brains.clear_unvisited(_PAGE_DEBT_READ_WHAT + " ", set())     # nothing reads any more: no page holds a brain in an outage
-        return {}
-    now = time.time() if now is None else now
-    local = dt.datetime.fromtimestamp(now, _cfg.tz())
-    out: dict[str, int] = {"pages": 0}
-    with _PAGE_DEBT_LOCK:
-        mode = _page_debt.mode(); mark = f"{run or f'{local:%Y-%m-%d}'}:{mode}"
-        days = _page_debt.read_days()
-        d = _owed_readable(_owed_settle())
-        # a page whose debts are settled, renamed or gone is not visited again, so it can never report that it reads: drop its failing read
-        _brains.clear_unvisited(_PAGE_DEBT_READ_WHAT + " ", {k for k, v in d.items() if any(e.get("moved") for e in v.values())})
-        for key in sorted(d):
-            moved = {o: e for o, e in d[key].items() if e.get("moved")}
-            if not moved or days.get(key) == mark:
-                continue
-            if deadline is not None and time.time() >= deadline:      # the run's time is spent: this page waits for the next run
-                out["left"] = out.get("left", 0) + 1
-                continue
-            prev = days.get(key)
-            days[key] = mark
-            _page_debt.write_days(days)
-            out["pages"] += 1
-            try:
-                r = _page_debt_project(key, moved, now, mode, runner, io)
-            except Exception as e:  # noqa: BLE001 — one page's failure is that page's: the mark stays (no repeat in this run), the pass goes on
-                print(f"page-debt call for {key} failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-                r = "error"
-            out[r] = out.get(r, 0) + 1
-            if r == "skipped":      # a second brain's page could not be read (its CLI failed): no mark for this run, so the next run tries again
-                if prev is None:
-                    days.pop(key, None)
-                else:
-                    days[key] = prev
-                _page_debt.write_days(days)
-    return out
-
-
 from stackshot.anchors import anchors as _anc  # noqa: E402
 from stackshot.anchors import machine_anchor as _ma  # noqa: E402  — a machine of the fleet as an anchor: its items' movers are told at each check-in (machine_anchor.py)
 from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the merge pass (`_merge_progress_tick`)
@@ -1617,7 +1320,6 @@ from stackshot.model import merge_tie as _mtie  # noqa: E402  — which open ite
 from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's record of the other activity on pull requests (CI results, comments, reviews, merges): read by the last-activity pass (event_log.py)
 from stackshot.model import last_activity as _lastact  # noqa: E402  — the item's one "last activity" record, `metadata.last_activity` (last_activity.py)
 from stackshot.anchors import anchor_scope as _ascope  # noqa: E402  — which anchors count for an item: the one reader, from every project's page (anchor_scope.py)
-from stackshot.fleet import fleet as _fleet  # noqa: E402
 from stackshot.web import render as _rmod  # noqa: E402
 from stackshot.model import option_labels as _option_labels  # noqa: E402,F401  — the letter an option label repeats from its badge: dropped on read, the pick that names it still lands (option_labels.py)
 from stackshot.model import ask_read as _ar  # noqa: E402  — how an ask and its options are read (open question, alternatives, Yes/No pair, Recommend), shared with the audit (ask_read.py)
@@ -2825,92 +2527,6 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     return moved
 
 
-def _clients_tick() -> None:
-    """The server's own clients, as time passes: a puller that stopped checking in makes its machine offline (clients.py)."""
-    from stackshot.fleet import clients as _c
-    _c.tick()
-    try:
-        _inbox_flag_tick()     # its own clock, below; it reads no item, so it goes on while a migration holds the board
-    except Exception as e:  # noqa: BLE001  — the flag is an extra: the clients' tick above has run
-        print(f"inbox: flag pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-# ----------------------------------------------------------------------------- a line that waits too long in the inbox
-# A message can wait in a session's inbox while the pane runs and
-# takes other lines; the sender was told "waits in the server's inbox: the session is away" and nothing said otherwise later. A line that waits for a session that shows
-# a sign of life (not marked gone, on a machine whose puller checks in: inbox.alive) for [client] inbox_flag_minutes (default 5; 0 turns it off) is reported once: to the session that
-# sent it (a running pane), and to the fleet's builder (_fleet_builder: the fleet operator, else the keeper of its project when it is retired), with the likeliest reason (inbox.why). The journal gets the line too.
-_INBOX_FLAG_EVERY = 60.0     # seconds between passes; the runner calls it every 60 s
-_INBOX_FLAG_LAST = [0.0]
-_INBOX_FLAG_START = [time.time()]     # the server's start: the first pass waits one poll period (clients.POLL_MAX) and a margin
-_INBOX_FLAG_LINES = 5                 # at most this many lines in one sender's flag, then "+N more"
-
-
-def _inbox_flag_minutes() -> float:
-    try:
-        return float(_cfg.get("client", "inbox_flag_minutes", default=5))
-    except (TypeError, ValueError):
-        return 5.0
-
-
-def _inbox_flag_send(to: str, text: str) -> "threading.Thread":
-    """One flag line to a session through push.py in the background (as the wake pass sends); a failure is a stderr line. → the thread (a test joins it)."""
-    def run() -> None:
-        try:
-            r = subprocess.run([*_interp.resilient(_telling.PUSH), "--from", NAME, to, text], capture_output=True, text=True, timeout=110,
-                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
-            out = (r.stdout.strip().splitlines() or [""])[-1]
-            if not out.startswith(("delivered", "queued", "inbox")):
-                print(f"inbox: flag to {to} not delivered: {out or 'no result'}{(' — ' + r.stderr.strip().splitlines()[-1]) if r.stderr.strip() else ''}", file=sys.stderr, flush=True)
-        except Exception as e:  # noqa: BLE001
-            print(f"inbox: flag to {to} failed: {e}", file=sys.stderr, flush=True)
-    th = threading.Thread(target=run, daemon=True)
-    th.start()
-    return th
-
-
-def _inbox_flag_tick(now: float | None = None) -> list[str]:
-    """One pass of the flag (see above). → the sessions told. `now` is for tests."""
-    mins = _inbox_flag_minutes()
-    now = time.time() if now is None else now
-    if mins <= 0 or now - _INBOX_FLAG_LAST[0] < _INBOX_FLAG_EVERY or now - _INBOX_FLAG_START[0] < _clients.POLL_MAX + 15:
-        return []        # not before every puller has polled again since the server started: the machines' rows come back at their next check-in
-    _INBOX_FLAG_LAST[0] = now
-    late = _inbox.new_overdue(mins * 60.0, now, skip_from=(NAME,))     # the flag's own lines are sent from NAME: never flagged in their turn
-    if not late:
-        return []
-    idx = _sessions_index()
-    running = {str(r.get("name")) for r in idx.values() if r.get("name") and _lv.running(r)}
-    keeper = _fleet_builder()
-    at = lambda ts: dt.datetime.fromtimestamp(ts, ZONE).strftime("%H:%M")
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for it in late:
-        groups.setdefault(str(it.get("name") or it.get("to")), []).append(it)
-        print(f"inbox: line {it['id']} for {it.get('name') or it.get('to')} (from {it.get('from') or '?'}, put {at(float(it['ts']))} {_cfg.tz_abbr()}) has waited {int(it['age'] // 60)} min though the session runs: {it['why']}",
-              file=sys.stderr, flush=True)
-    told: list[str] = []
-    senders: dict[str, list[str]] = {}
-    for target, its in groups.items():
-        for it in its:
-            m = re.match(r"[A-Za-z0-9][\w.-]*", str(it.get("from") or ""))
-            if m and m.group(0) in running and m.group(0) != target:
-                senders.setdefault(m.group(0), []).append(f"to {target} ({at(float(it['ts']))} {_cfg.tz_abbr()}): {it['why']}")
-    for who, lines in senders.items():
-        shown = lines[:_INBOX_FLAG_LINES] + ([f"+{len(lines) - _INBOX_FLAG_LINES} more"] if len(lines) > _INBOX_FLAG_LINES else [])
-        _inbox_flag_send(who, f"[stackshot] {len(lines)} of your message(s) {'is' if len(lines) == 1 else 'are'} still in the server's inbox after {mins:g} min, though the session {'runs' if len(lines) == 1 else 'run'}: "
-                              + "; ".join(shown) + (f". {keeper} has been told." if keeper and keeper != who else "."))
-        told.append(who)
-    if keeper:
-        parts = [f"{len(its)} line(s) for {target}, from " + ", ".join(sorted({str(i.get('from') or '?') for i in its})) + f" (the oldest put {at(min(float(i['ts']) for i in its))} {_cfg.tz_abbr()}): {its[0]['why']}" for target, its in groups.items()]
-        parts = parts[:_INBOX_FLAG_LINES] + ([f"+{len(parts) - _INBOX_FLAG_LINES} more session(s)"] if len(parts) > _INBOX_FLAG_LINES else [])
-        _inbox_flag_send(keeper, f"[stackshot] Lines are waiting in the server's inbox for running sessions (more than {mins:g} min): " + "; ".join(parts)
-                                 + ". Usual causes: two sessions carrying one name, a puller that is not taking them (a line held on purpose, by a relaunch hold or a pause, is not reported). They are in the inbox until a puller takes them; nothing is lost.")
-        told.append(keeper)
-    else:
-        print("inbox: nobody to tell about the waiting lines ([fleet] operator_session is unset or retired with no keeper)", file=sys.stderr, flush=True)
-    return told
-
-
 # The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are foryou_events.py's; its names are imported from the owners above.
 
 
@@ -2964,19 +2580,6 @@ def _pane_stuck(who: str, nm: dict[str, str] | None = None, idx: dict[str, dict[
     return hit[1]
 
 
-def _fleet_builder() -> str:
-    """The session a fleet recovery is asked of: the fleet operator ([fleet] operator_session, the session that runs the fleet: the builder of the fleet's tool), or, when that session
-    is retired, the keeper of its project. "" when none resolves (then the History line and the journal say nobody was asked). A retired operator with no project is never sent to."""
-    op = str(_cfg.get("fleet", "operator_session") or "").strip()
-    if not op:
-        return ""
-    try:
-        r = _anc.session_roles().get(op) or {}
-    except Exception:  # noqa: BLE001
-        r = {}
-    if r.get("retired"):
-        return _telling.page_keeper(str(r.get("project") or "")) if r.get("project") else ""
-    return op
 
 
 _RECOVERY_ROLE = {"main": "the project's -main agent", "fleet": "the fleet's builder"}      # who a recovery request was asked of, in words, by `_recovery_target`'s kind
@@ -2986,7 +2589,7 @@ def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
     """(who is asked to recover a quiet mover's item, which kind of recipient it is: "main" | "fleet", whether the project has no builder: it is front-only, so the ladder had none to try). The caller computes
     it ONCE per request, on the raw session (a name or an id, never its label), and hands it to `_recovery_tell` and to the wording of what was tried, so the text and the real recipient cannot disagree.
     A front-only project (anchors.front_only: its `agents:` map lists no background agent, so there is no
-    builder for the ladder to try) ends at its -main agent (`_main_agent`), the session its owner talks to. Every other project ends at the fleet's builder (`_fleet_builder`), as before, and so does a front-only
+    builder for the ladder to try) ends at its -main agent (`_main_agent`), the session its owner talks to. Every other project ends at the fleet's builder (`fleet_builder` in service/fleet_events.py), as before, and so does a front-only
     project with no -main agent to name, and one whose quiet mover is its -main agent itself (nobody is above it in the project): those are still builderless, so the third value is True for them. A front-only test
     that fails keeps the fleet's builder and says the project has one (False: nothing is claimed about a builder that was not read)."""
     builderless = False
@@ -3000,7 +2603,7 @@ def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
     except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the fleet's builder
         print(f"recovery: front-only test of {project} failed ({e.__class__.__name__}: {e}); the fleet's builder is asked", file=sys.stderr, flush=True)
         builderless = False
-    return _fleet_builder(), "fleet", builderless
+    return _fleetev.fleet_builder(), "fleet", builderless
 
 
 def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried: str, outcome: str, to: str = "") -> str:
@@ -3468,8 +3071,8 @@ mcp = _app.build(
     ask_after_write=lambda *a, **k: _ask_after_write(*a, **k),
     update=lambda *a, **k: _update(*a, **k),
     wait_alias_gate=lambda *a, **k: _wait_alias_gate(*a, **k),
-    fleet_names=lambda *a, **k: _fleet_names(*a, **k),
-    inbox_flag_minutes=lambda *a, **k: _inbox_flag_minutes(*a, **k),
+    fleet_names=lambda *a, **k: _fleetev.fleet_names(*a, **k),
+    inbox_flag_minutes=lambda *a, **k: _fleetev.inbox_flag_minutes(*a, **k),
     message=lambda *a, **k: _message(*a, **k),
     anchor_release=lambda *a, **k: _wakes.anchor_release(*a, **k),
     watch_label=lambda *a, **k: _watching.watch_label(*a, **k),
@@ -4464,7 +4067,6 @@ _runner.install(_runner.Hooks(
     balance_tick=_late("_balance_tick"),
     answer_tick=_late("_answer_tick"),
     roles_sync_safe=_late("_roles_sync_safe"),
-    clients_tick=_late("_clients_tick"),
     pilot_fallback_tick=_late("_pilot_fallback_tick"),
     filing_tick=_late("_filing_tick"),
     dates_tick=_late("_dates_tick"),
@@ -4473,7 +4075,6 @@ _runner.install(_runner.Hooks(
     publish=_late("_publish"),
     publish_now=_late("_publish_now"),
     publish_every=_late("_publish_every"),
-    inbox_flag_send=_late("_inbox_flag_send"),
 ))
 
 
@@ -4592,6 +4193,37 @@ _checks_hooks.install(_checks_hooks.Hooks(
     session_id=_late("_session_id"),
     session_roster=_late("_session_roster"),
     wait_end_sent_back=_late("_wait_end_sent_back"),
+))
+
+# What the page-debt call, the migrations and the fleet events still reach on this module (service/page_debt.py, service/migrations.py, service/fleet_events.py): the ledger of the page debts, the grace minutes,
+# the session ids, the project's agents and the item model's readers. A hook leaves this table when the area that holds it moves under service/.
+_passes_hooks.install(_passes_hooks.Hooks(
+    after_open=_late("_after_open"),
+    builder_agent=_late("_builder_agent"),
+    grace_min=_late("_grace_min"),
+    main_agent=_late("_main_agent"),
+    model_guards_on=_late("_model_guards_on"),
+    model_of=_late("_model_of"),
+    outcomes=lambda: OUTCOMES,
+    owed_lock=lambda: _OWED_LOCK,
+    owed_load=_late("_owed_load"),
+    owed_readable=_late("_owed_readable"),
+    owed_save=_late("_owed_save"),
+    owed_settle=_late("_owed_settle"),
+    pid_write_op=_late("_pid_write_op"),
+    publish=_late("_publish"),
+    retire_write_op=_late("_retire_write_op"),
+    scoped_anchors=_late("_scoped_anchors"),
+    script_sender=_late("_script_sender"),
+    sender_not_owner=_late("_sender_not_owner"),
+    server_module=lambda: sys.modules[__name__],
+    session_id=_late("_session_id"),
+    settle_apply=_late("_settle_apply"),
+    shown_needs=_late("_shown_needs"),
+    stamp_write_op=_late("_stamp_write_op"),
+    switchover_on=_late("_switchover_on"),
+    watch_on_write=_late("_watch_on_write"),
+    zone=lambda: ZONE,
 ))
 
 
@@ -4901,400 +4533,6 @@ def _state_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     raise ToolError(_retired.client_refusal(OWNER))
 
 
-# ----------------------------------------------------------------------------- the migration onto the item model (migration.py, tools/migrate_model.py)
-# tools/migrate_model.py PLANS (the items, the guards' residue, the cold call's reads); this is where the plan is APPLIED, so the server stays the one writer: POST /client/migrate, the
-# machine token's route like /client/state. Each planned write is a filing edit made under the item lock through `writes.save`, author `migration`, so the History,
-# the search and the For you list update as for any write, and no clock moves. It is not `_update`: it records no hand-off (the author is a script's), tells nobody (no needs notice, no
-# page debt) and sends nothing. While the pass runs the server holds the board-wide pause itself (watchers.hold: in this process, renewed by every batch, gone after a few minutes if the
-# script dies), so no wake fires, no wait ends, no hand-off clock runs and the checks and the For you ticks stand still; `end` lifts it and runs one wake pass, so
-# what came due fires in one batch, one message per recipient. A write the guards refuse is reported as refused and not forced; an item that moved since it was planned is reported as moved.
-MIGRATION_OUTCOMES = (*OUTCOMES, "unrecorded")      # what a back-filled close may carry: `unrecorded` is written by this pass only (gates.gate_close refuses it on every new close)
-_MIGRATE_HOLD_S = 600.0       # each begin / apply renews the pass's hold for this long, and never past watchers.HOLD_CEILING_S (an hour) from its begin
-_MIGRATE_BATCH = 60           # writes in one apply
-_MIGRATE_SENDERS: list[str] = []     # the default of [model] migration_senders: no session runs the pass until the instance names them
-_MIGRATE_MACHINES: list[str] = []                                                        # ... and of migration_machines (none until the instance names them): the machines whose token may
-
-
-def _migration_on() -> bool:
-    """[model] migration (default false): the route of the migration pass answers only while this is true. The operator turns it on for the run and off after."""
-    return bool(_cfg.get("model", "migration", default=False))
-
-
-def _model_names(key: str, default: list[str]) -> list[str]:
-    v = _cfg.get("model", key, default=default)
-    if isinstance(v, str):
-        v = [v]
-    return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
-
-
-_MIGRATE_OFF = ("refused: the migration route is off ([model] migration = false). It is turned on for the run and off after, by the operator; the script cannot")
-_MIGRATE_NOT_YOU = ("refused: only the sessions in [model] migration_senders may run the migration pass, from a machine in migration_machines: `sender` must be one of them "
-                    "and the token must be that machine's")
-
-
-def _migration_gate(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]] | None:
-    """The gate of POST /client/migrate, before anything is read: 403 while [model] migration is off, 403 for a sender not in [model] migration_senders or a token whose machine is not in
-    migration_machines (a label alone proves nothing: any token holder can type it; the For you form's rule). None when the call may go on."""
-    if not _migration_on():
-        return 403, {"error": _MIGRATE_OFF}
-    sender = " ".join(str(body.get("sender") or "").split())
-    if not sender or sender not in _model_names("migration_senders", _MIGRATE_SENDERS) or not machine or machine not in _model_names("migration_machines", _MIGRATE_MACHINES):
-        return 403, {"error": _MIGRATE_NOT_YOU}
-    return None
-
-
-def _migrate_refuse(shown: str, why: str) -> dict[str, Any]:
-    return {"item": shown, "action": "refused", "why": why}
-
-
-def _migrate_sig(gid: str, item: dict[str, Any]) -> list[int]:
-    """What an answer or a comment changes without moving `updated`: [the item's answers, 0] (migration.activity_sig). The owner's comment on GitHub is an answer on the item (via github), so the second place is kept at 0 since the mirror stopped copying the issue's comments. A write is planned on it and checked against it again under the item lock."""
-    return _mig.activity_sig(item, 0)
-
-
-def _migrate_backfill(gid: str, shown: str, w: dict[str, Any]) -> dict[str, Any]:
-    """The write `{item, backfill: "owner_steps", expect, expect_sig}`: the done steps of his past decisions, worked out HERE from the item's own saved answers (next_backfill.apply); the caller
-    sends no text, so nothing typed is ever stored. An open item only; the same `expect` and `expect_sig` checks as any migration write, so an item written or answered since it was planned is `moved`. Nothing
-    to add → `already`, so a second run changes nothing. A filing edit as the others: `updated`, the state clock and the confirm stay, and the author is `migration`."""
-    if w.get("backfill") != "owner_steps":
-        return _migrate_refuse(shown, "backfill = owner_steps is the only fill-in there is")
-    try:
-        exp = float(w["expect"])
-        if isinstance(w["expect"], bool) or not math.isfinite(exp):
-            raise ValueError("not finite")
-    except (KeyError, TypeError, ValueError):
-        return _migrate_refuse(shown, "expect is required: the item's `updated` when it was planned (a finite number), so a write over a change made since is never made")
-    sig = w.get("expect_sig")
-    if not (isinstance(sig, list) and len(sig) == 2 and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in sig)):
-        return _migrate_refuse(shown, "expect_sig is required: [how many answers the item held, 0] when it was planned, so an answer made since is never overwritten")
-    try:
-        with _writes.ITEM_LOCK:
-            item = _load(gid)
-            if item.get("status") != "open":
-                return _migrate_refuse(shown, f"the item is {item.get('status')}: a closed item is left as it is")
-            if abs(float(item.get("updated") or 0) - exp) > 1e-6:
-                return {"item": shown, "action": "moved", "why": "the item was written since it was planned: planned again, never overwritten"}
-            if _migrate_sig(gid, item) != sig:
-                return {"item": shown, "action": "moved", "why": "an answer or a comment arrived on the item since it was planned (neither moves `updated`): planned again, never overwritten"}
-            meta = json.loads(json.dumps(item.get("metadata") or {}, default=str))
-            added = _nbf.apply(meta, _nbf.plan(meta, "open", str(meta.get("owner") or "")), str(meta.get("owner") or ""))
-            if not added:
-                return {"item": shown, "action": "already", "why": ""}
-            item["metadata"] = meta
-            note = f"his past decisions filled in as done steps ({added})"
-            _writes.save(gid, item, note=note, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=bool(_gh.issue_of(gid)))
-        return {"item": shown, "action": "set", "why": note, "added": added}
-    except ToolError as e:
-        return _migrate_refuse(shown, str(e))
-    except Exception as e:  # noqa: BLE001  — one write that fails never stops the batch
-        print(f"migrate: {gid} backfill not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return _migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
-
-
-def _migrate_one(w: dict[str, Any]) -> dict[str, Any]:
-    """One planned write → {"item", "action": set | already | moved | refused, "why"}. `w` = {item, set, drop, expect, kind, note}; `expect` (the item's `updated` when it was planned, 0 for an item that has none) is required: a write
-    with none is refused, and one that no longer matches is `moved`. An open item takes the fields of migration.OPEN_SET_FIELDS, a closed one only its outcome (OUTCOME_FIELDS)."""
-    if not isinstance(w, dict):
-        return _migrate_refuse("?", "a write is an object")
-    try:
-        gid = _norm_id(str(w.get("item") or ""))
-    except ToolError as e:
-        return _migrate_refuse(str(w.get("item") or "?"), str(e))
-    shown = _gh.shown(gid)
-    if w.get("backfill"):
-        return _migrate_backfill(gid, shown, w)
-    sets, drops = w.get("set") or {}, w.get("drop") or []
-    if not isinstance(sets, dict) or not isinstance(drops, list):
-        return _migrate_refuse(shown, "set is an object and drop a list")
-    bad = [k for k in sets if k not in _mig.SET_FIELDS] + [k for k in drops if k not in _mig.DROP_FIELDS]
-    if bad:
-        return _migrate_refuse(shown, f"the migration may not set or drop {', '.join(sorted(set(map(str, bad))))}")
-    try:
-        exp = float(w["expect"])           # 0 is what an item with no `updated` is planned with; absent, not a number, NaN or infinite is no expectation at all (NaN compares as equal to nothing, so it would skip the check)
-        if isinstance(w["expect"], bool) or not math.isfinite(exp):
-            raise ValueError("not finite")
-    except (KeyError, TypeError, ValueError):
-        return _migrate_refuse(shown, "expect is required: the item's `updated` when it was planned (a finite number), so a write over a change made since is never made")
-    sig = w.get("expect_sig")
-    if not (isinstance(sig, list) and len(sig) == 2 and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in sig)):
-        return _migrate_refuse(shown, "expect_sig is required: [how many answers the item held, 0] when it was planned, so an answer made since is never overwritten")
-    note = _clip_line(str(w.get("note") or w.get("kind") or "migrated onto the item model"), 300)
-    sets = dict(sets)
-    try:
-        with _writes.ITEM_LOCK:
-            item = _load(gid)
-            if abs(float(item.get("updated") or 0) - exp) > 1e-6:
-                return {"item": shown, "action": "moved", "why": "the item was written since it was planned: planned again, never overwritten"}
-            if _migrate_sig(gid, item) != sig:
-                return {"item": shown, "action": "moved", "why": "an answer or a comment arrived on the item since it was planned (neither moves `updated`): planned again, never overwritten"}
-            was = json.dumps(item.get("metadata") or {}, sort_keys=True, default=str)
-            meta = json.loads(was)
-            if item.get("status") == "completed":
-                extra = [k for k in (*sets, *drops) if k not in _mig.OUTCOME_FIELDS]
-                if extra or meta.get("outcome") or str(sets.get("outcome") or "") not in MIGRATION_OUTCOMES:
-                    return {"item": shown, "action": "already" if meta.get("outcome") and not extra else "refused",
-                            "why": "it already has an outcome" if meta.get("outcome") and not extra else "a closed item takes an outcome (done | dropped | superseded | unrecorded), its reason and superseded_by only"}
-                sup = str(sets.get("superseded_by") or "")
-                if (sets["outcome"] == "superseded") != bool(sup):
-                    return _migrate_refuse(shown, "superseded_by goes with outcome superseded, and only with it")
-                if sup:
-                    try:
-                        sets["superseded_by"] = sup = _norm_id(sup)
-                    except ToolError as e:
-                        return _migrate_refuse(shown, str(e))
-                    if sup == gid or not _path(sup).exists():
-                        return _migrate_refuse(shown, "an item is not its own duplicate, and the item it duplicates must exist")
-                if "reason" in sets:
-                    sets["reason"] = _clip_line(" ".join(str(sets["reason"]).split()), 300)         # one line
-                for k in drops:
-                    meta.pop(k, None)
-                meta.update(sets)
-            else:
-                if item.get("status") != "open":
-                    return _migrate_refuse(shown, f"the item is {item.get('status')}")
-                late = [k for k in (*sets, *drops) if k in _mig.OUTCOME_FIELDS]
-                if late:
-                    return _migrate_refuse(shown, f"an open item takes no {', '.join(sorted(set(late)))}: an outcome is a closed item's")
-                probs = _model.check_fields({k: v for k, v in sets.items() if k in _model.MODEL_FIELDS})
-                if "needs" in sets and not (isinstance(sets["needs"], list) and len(sets["needs"]) == 1 and isinstance(sets["needs"][0], str) and sets["needs"][0].strip()):
-                    probs.append("needs is the one session that moves the item now")
-                if probs:
-                    return _migrate_refuse(shown, "; ".join(probs))
-                for k in drops:
-                    meta.pop(k, None)
-                meta.update({k: v for k, v in sets.items() if k not in ("cap_ok", "wait_basis")})
-                if "next" in sets or "next" in drops:
-                    _nl.carry(json.loads(was), meta, str(meta.get("owner") or ""))      # the lines it named keep their writers (by position), else the keeper's
-                if "cap_ok" in sets:        # his words are copied from the item's own stored answers, here: a value the caller sends is never taken as it comes
-                    cand = {**item, "metadata": meta}
-                    entry = _mig.park_quote(cand, time.time())
-                    if not entry:
-                        return _migrate_refuse(shown, "no stored words of his stand behind this item's wake: cap_ok is copied from his answer on the item, never typed")
-                    meta["cap_ok"] = _mig.cap_ok_from(cand, entry)
-                if "wait_basis" in sets:
-                    wb = sets["wait_basis"]
-                    wake_now = str(meta.get("wake") or "")
-                    prob = ""
-                    if not (isinstance(wb, dict) and set(wb) <= {"text", "wake", "by", "at"} and _model.clean(wb.get("text")) and wb.get("by") == _mig.AUTHOR and str(wb.get("wake") or "") == wake_now):
-                        prob = "wait_basis is {text, wake, by: migration, at} and its wake is the item's wake"
-                    else:
-                        try:
-                            prob = _wt.basis_problem(str(wb["text"]), dt.date.fromisoformat(wake_now[:10]))
-                        except ValueError:
-                            prob = "its wake is no date"
-                    if prob:
-                        return _migrate_refuse(shown, f"wait_basis refused: {prob}")
-                    meta["wait_basis"] = {"text": _clip_line(" ".join(str(wb["text"]).split()), 300), "wake": wake_now, "by": _mig.AUTHOR, "at": wb.get("at")}
-                if json.dumps(meta, sort_keys=True, default=str) != was:
-                    item_was = {**item, "metadata": json.loads(was)}
-                    _watch_on_write(gid, item_was, meta, {}, set(), "", False)       # a wait newly stored stamps its time (an older notice is not its arrival)
-                    w_new = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
-                    w_old = (item_was["metadata"].get("watch") or {}) if isinstance(item_was["metadata"].get("watch"), dict) else {}
-                    if _watch.stored_kind(meta) == "anchor" and w_new.get("set_at") and w_new.get("set_at") != w_old.get("set_at"):
-                        # a migrated anchor wait counts what anchor-hub logged since the item's last move: the notices from before the pass are its arrivals, not lost to a stamp of now
-                        w_new["set_at"] = float(item.get("state_updated") or item.get("updated") or 0) or w_new["set_at"]
-                    touched = set(sets) | set(drops)
-                    if touched & (set(_model.MODEL_FIELDS) | {"wake", "hold", "after"}):
-                        touched |= _mg.STATE_FIELDS                                          # what defines the state: its invariants are judged whole, as an update that sets them would
-                    item_now = {**item, "metadata": meta}
-                    _gates.gate_model(item_now, touched, gid, needs=_needs_of(meta), hold=bool(meta.get("hold")), strict=True, windows_text="", defers_text="")
-            if json.dumps(meta, sort_keys=True, default=str) == was:
-                return {"item": shown, "action": "already", "why": ""}
-            item["metadata"] = meta                    # a filing edit: `updated`, the state clock and the confirm stay where they were
-            _writes.save(gid, item, note=note, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=bool(_gh.issue_of(gid)))     # an item with no issue is never mirrored: a job for it would create one
-        return {"item": shown, "action": "set", "why": note}
-    except ToolError as e:
-        return _migrate_refuse(shown, str(e))
-    except Exception as e:  # noqa: BLE001  — one write that fails never stops the batch
-        print(f"migrate: {gid} not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return _migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
-
-
-_WAKE_HEAD = "[stackshot] The item model migration pass finished."
-_WAKE_FIELD_KEYS = ("wait_anchor", "wait_event", "after", "wake", "ask_by", "post_wake_mover", "waits", "wait_mode")
-
-
-_WAKE_KINDS = frozenset({"wait_input", "no_end", "post_wake", "default_end", "anchor_seen"})
-_DATE_RX = re.compile(r"\d{4}-\d{2}-\d{2}")
-
-
-def _date_only(v: Any) -> str:
-    """The day (YYYY-MM-DD) a value starts with, else "": a date is the only thing a row's `default` may carry into a text."""
-    v = str(v or "").strip()[:10]
-    return v if _DATE_RX.fullmatch(v) else ""
-
-
-def _migrate_wake_row(gid: str, item: dict[str, Any], hint: dict[str, Any]) -> "_mig.Residue | None":
-    """The residue row for one item, derived HERE from the item as it is stored. The row a caller hands in (the plan's, or rows.json's after a crash) is only a hint of which item to look at and what
-    kind of row to build: nothing it says goes into a text. The kind must be one of _WAKE_KINDS; the fields are those the hint names that are in _WAKE_FIELD_KEYS and are still unset on the item;
-    a default_end row is built from the stored ask_by (a date) and stands only when the hint's default is that same day; an anchor_seen row from the stored anchor wait and a notice count (a number);
-    a wait_anchor row's note of the anchors scoped to the item from the anchors file. → None when the row no longer stands."""
-    meta = item.get("metadata") or {}
-    kind = str(hint.get("kind") or "")
-    if kind not in _WAKE_KINDS:
-        return None
-    if kind == "default_end":
-        stored = _date_only(meta.get("ask_by"))
-        return _mig.Residue(gid, kind, "", False, ("ask_by",), stored) if stored and _date_only(hint.get("default")) == stored else None
-    if kind == "anchor_seen":
-        url = " ".join(str(meta.get("wait_anchor") or "").split())[:300]
-        try:
-            n = max(1, min(int(str(hint.get("default") or "1")), 999))
-        except ValueError:
-            n = 1
-        if str(meta.get("wait_kind") or "").lower() != "anchor" or not url or url not in str(hint.get("why") or ""):       # the hint's own words are only compared (is it about the anchor the item stores?), never copied
-            return None
-        return _mig.Residue(gid, kind, _mig.anchor_seen_why(url, n), False, (), str(n))
-    hint_fields = hint.get("fields") if isinstance(hint.get("fields"), list) else []
-    fields = tuple(f for f in dict.fromkeys(str(x) for x in hint_fields) if f in _WAKE_FIELD_KEYS and not meta.get(f))
-    if not fields:
-        return None
-    default = _date_only(hint.get("default")) if "ask_by" in fields else ""
-    why = ""
-    if fields == ("wait_anchor",):
-        urls = [" ".join(str(e.get("url") or "").split())[:200] for e in _scoped_anchors(str(meta.get("project") or ""), gid) if e.get("url")]
-        if len(urls) > 1:
-            why = f"{len(urls)} anchors are scoped to it ({', '.join(urls)}) and none could be picked from its text"
-    return _mig.Residue(gid, kind, why, True, fields, default)
-
-
-def _migrate_wake(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """The wake at the end of the pass: the residue that needs a person's field, per mover, one message each with the exact field. `rows` = migration.Residue.as_dict() of the items with a field to
-    set (or a default ask_by to replace, or notices already on an anchor): each is only a hint of an item and a kind, and every row of the text is derived here from the item as stored
-    (_migrate_wake_row), so a row handed in carries no text of its own into a message. The mover is who the item's own notices go
-    to first (its mover, or the keeper of a front agent's page; _wakes.reminder_to). Nothing is sent here: the pass writes the texts down for a person to read, and `send_wake` sends them.
-    → {mover's label: {"sid", "gids", "text"}}; an item with nobody to tell is listed under "nobody" (with no sid)."""
-    by_owner: dict[str, dict[str, Any]] = {}
-    for r in rows:
-        try:
-            gid = _norm_id(str(r.get("item") or ""))
-            item = _load(gid)
-        except ToolError:
-            continue
-        if item.get("status") != "open":
-            continue
-        meta = item.get("metadata") or {}
-        res = _migrate_wake_row(gid, item, r)
-        if res is None:
-            continue
-        who = _wakes.reminder_to(meta)
-        sid, label = (who[0][0], _session_label(who[0][0])) if who else ("", "nobody")
-        e = by_owner.setdefault(label, {"sid": sid, "hand": {}, "lines": [], "gids": [], "subject": {}})
-        e["subject"][gid] = str(item.get("subject") or "")
-        if gid not in e["gids"]:
-            e["gids"].append(gid)
-        if res.kind in ("default_end", "anchor_seen"):
-            e["lines"].append(res)                      # a default to replace and the notices already on an anchor are each their own line
-        elif gid in e["hand"]:                          # an item's missing fields (its input and its end) are one line, not two
-            cur = e["hand"][gid]
-            cur.fields = tuple(dict.fromkeys([*cur.fields, *res.fields]))
-            cur.default = cur.default or res.default
-            cur.why = cur.why if cur.kind == "wait_input" else res.why
-            cur.kind = "wait_input" if "wait_input" in (cur.kind, res.kind) else cur.kind
-        else:
-            e["hand"][gid] = res
-    out: dict[str, dict[str, Any]] = {}
-    for label, e in by_owner.items():
-        lines = [_mig.wake_row(_gh.shown(r.gid), e["subject"][r.gid], r) for r in [*e["hand"].values(), *e["lines"]]]
-        out[label] = {"sid": e["sid"], "gids": list(e["gids"]), "text": _mig.wake_text(label, lines, len(e["gids"]))}
-    return out
-
-
-_MIG_PASS = {"id": "", "by": ""}         # the pass the board-wide hold belongs to (begin sets it; a restart loses it with the hold)
-_MIG_PASS_LOCK = threading.Lock()
-_PASS_ID_RX = re.compile(r"\d{8}-\d{6}-[0-9a-f]{6}")
-
-
-def _pass_path(pass_id: str) -> Path:
-    """<state>/migration/<pass id>.json: what a pass stored on the server, out of the item store: {pass_id, by, begun, ended, owners: {label: {sid, gids, text, sent}}}."""
-    if not _PASS_ID_RX.fullmatch(str(pass_id or "")):
-        raise ToolError("Refused: pass_id is the id `begin` returned")
-    return _cfg.state("migration", f"{pass_id}.json")
-
-
-def _pass_load(pass_id: str) -> dict[str, Any]:
-    try:
-        d = json.loads(_pass_path(pass_id).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        d = None
-    if not isinstance(d, dict):
-        raise ToolError(f"Refused: no pass {pass_id} is stored on this server")
-    return d
-
-
-def _pass_save(rec: dict[str, Any]) -> None:
-    p = _pass_path(str(rec.get("pass_id") or ""))
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(f".{p.name}.tmp")
-    tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, p)
-
-
-def _owners_view(rec: dict[str, Any]) -> dict[str, Any]:
-    return {k: {"sid": v.get("sid", ""), "gids": v.get("gids", []), "text": v.get("text", ""), "sent": v.get("sent")} for k, v in (rec.get("owners") or {}).items()}
-
-
-def _migrate_wake_text(spec: dict[str, Any]) -> dict[str, Any]:
-    """op wake_text {pass_id, rows?}: the per-owner texts a pass stored at its `end` (with whether each was sent), for a person to read. A pass whose `end` never came back (the script died, the answer was lost)
-    has none yet: with the `rows` the script wrote down before it called `end`, the texts are built now, from the items as stored, and kept; that waits until the pass no longer holds the board."""
-    pid = str(spec.get("pass_id") or "")
-    with _MIG_PASS_LOCK:
-        rec = _pass_load(pid)
-        if rec.get("owners") is None:
-            rows = spec.get("rows")
-            if not isinstance(rows, list):
-                raise ToolError(f"Refused: pass {pid} has no stored texts: its `end` did not complete; send the rows the script wrote down before it (rows) to build them")
-            if _MIG_PASS["id"] == pid and _watch.holding():
-                raise ToolError(f"Refused: pass {pid} still holds the board; end it first (or wait for its hold to lapse)")
-            rows = [r for r in rows if isinstance(r, dict) and (r.get("fields") or r.get("kind") == "anchor_seen")]
-            rec["owners"] = {k: {**v, "sent": None} for k, v in (_migrate_wake(rows) if rows else {}).items()}
-            rec["ended"] = rec.get("ended") or time.time()
-            rec["rebuilt"] = True
-            _pass_save(rec)
-        return {"op": "wake_text", "pass_id": pid, "owners": _owners_view(rec)}
-
-
-def _migrate_send_wake(spec: dict[str, Any], by: str) -> dict[str, Any]:
-    """op send_wake {pass_id, owner, note?}: one owner's stored text, after a person has read it: the text the server generated and stored at the pass's `end` plus an optional note of one line (at most
-    200 characters), sent to the session the items' own notices go to (each item must still be open with that session among them, _wakes.reminder_to). The send is marked on the server before it goes, and an
-    owner already marked is refused: a pass tells an owner once. Free text is never sent."""
-    pid, label = str(spec.get("pass_id") or ""), str(spec.get("owner") or "")
-    note = spec.get("note")
-    if note not in (None, ""):
-        if not isinstance(note, str) or "\n" in note or "\r" in note or len(note) > 200:
-            raise ToolError("Refused: note is one line of at most 200 characters")
-        note = note.strip()
-    with _MIG_PASS_LOCK:
-        rec = _pass_load(pid)
-        ent = (rec.get("owners") or {}).get(label)
-        if not isinstance(ent, dict):
-            raise ToolError(f"Refused: pass {pid} stored no text for {label!r}")
-        if ent.get("sent"):
-            raise ToolError(f"Refused: the text for {label} of pass {pid} was already sent ({ent['sent'].get('at') if isinstance(ent['sent'], dict) else ent['sent']})")
-        sid, gids = str(ent.get("sid") or ""), [str(g) for g in ent.get("gids") or []]
-        if not sid or not gids:
-            raise ToolError(f"Refused: {label} has nobody to send to")
-        for gid in gids:
-            item = _load(_norm_id(gid))
-            if item.get("status") != "open":
-                raise ToolError(f"Refused: {_gh.shown(gid)} is not open")
-            if sid not in [x for x, _w in _wakes.reminder_to(item.get("metadata") or {})]:
-                raise ToolError(f"Refused: {_gh.shown(gid)}'s own notices do not go to that session")
-        text = str(ent.get("text") or "") + (f"\n\nNote from {by.split(' via ')[0]}: {note}" if note else "")
-        ent["sent"] = {"at": dt.datetime.now(ZONE).isoformat(timespec="seconds"), "by": by, "note": note or ""}
-        _pass_save(rec)            # marked before it goes: a second caller meanwhile is refused; a failure below clears the mark
-        outcome: dict[str, Any] = {}
-        th = _telling.tell_woken(",".join(_norm_id(g) for g in gids), sid, text, tag="migration", result=outcome)
-        if th is not None:
-            th.join(timeout=120)
-        if not outcome.get("ok"):
-            why = str(outcome.get("why") or ("no answer from the push within 120 s: it may still arrive, so look before sending again" if th is not None else "nobody to send to"))
-            ent["sent"] = None
-            _pass_save(rec)
-            print(f"migrate: the residue wake for {label} (pass {pid}) NOT delivered: {why}", file=sys.stderr, flush=True)
-            return {"op": "send_wake", "pass_id": pid, "owner": label, "sent": False, "why": why, "items": len(gids)}
-    print(f"migrate: the residue wake for {label} (pass {pid}) delivered ({len(gids)} item(s))", file=sys.stderr, flush=True)
-    return {"op": "send_wake", "pass_id": pid, "owner": label, "sent": True, "items": len(gids), "at": ent["sent"]["at"]}
 
 
 # ---------------------------------------------------------------------------------------------------------------- the stamp pass: phase and waits_on on the open items
@@ -5351,16 +4589,16 @@ def _stamp_open(gid: str, shown: str, closed_ok: bool = False) -> tuple[Path, by
     project-id pass writes every item). Read under the item lock by the caller."""
     p = _path(gid)
     if not p.exists():
-        return p, b"", {}, _migrate_refuse(shown, "no such item")
+        return p, b"", {}, _mig.refuse(shown, "no such item")
     data = p.read_bytes()
     try:
         raw = json.loads(data)
     except ValueError:
-        return p, data, {}, _migrate_refuse(shown, "the item file does not read")
+        return p, data, {}, _mig.refuse(shown, "the item file does not read")
     if not isinstance(raw, dict) or not isinstance(raw.get("metadata"), dict):
-        return p, data, {}, _migrate_refuse(shown, "the item has no metadata")
+        return p, data, {}, _mig.refuse(shown, "the item has no metadata")
     if raw.get("status") != "open" and not closed_ok:
-        return p, data, raw, _migrate_refuse(shown, f"closed: the item is {raw.get('status')}, and a closed item is left as it is")
+        return p, data, raw, _mig.refuse(shown, f"closed: the item is {raw.get('status')}, and a closed item is left as it is")
     return p, data, raw, None
 
 
@@ -5392,7 +4630,7 @@ def _stamp_one(gid: str, dry: bool = False) -> dict[str, Any]:
         return {**out, "action": "set", "why": "phase and waits_on stamped"}
     except Exception as e:  # noqa: BLE001  — one item that fails never stops the batch
         print(f"stamp: {gid} not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return _migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 _PHASE_SWEEP: dict[str, Any] = {"runs": 0, "swept": 0, "stamped": 0, "moved": 0, "refused": 0, "disagreements": 0, "last_run": None, "last_stamped": None, "last_ms": None}
@@ -5471,22 +4709,22 @@ def _unstamp_one(w: Any) -> dict[str, Any]:
     """Put one item's two stamped keys back: `w` = {item, before, after} (the keys as they were, and as the stamp left them; None = absent). Under the item lock, if the item holds `after` it gets `before` (a key
     that was absent is dropped) → `set`; if it already holds `before` → `same`; if it holds anything else (a later save restamped it) → `kept`, untouched. A closed item → `refused`. Running it again is a no-op."""
     if not isinstance(w, dict):
-        return _migrate_refuse("?", "an entry is an object {item, before, after}")
+        return _mig.refuse("?", "an entry is an object {item, before, after}")
     try:
         gid = _norm_id(str(w.get("item") or ""))
     except ToolError as e:
-        return _migrate_refuse(str(w.get("item") or "?"), str(e))
+        return _mig.refuse(str(w.get("item") or "?"), str(e))
     shown = _gh.shown(gid)
     extra = [k for k in w if k not in _STAMP_ENTRY]
     if extra:
-        return _migrate_refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before and after only")
+        return _mig.refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before and after only")
     sides: dict[str, dict[str, Any]] = {}
     for side in ("before", "after"):
         d = w.get(side)
         if not isinstance(d, dict) or set(d) != set(_STAMP_KEYS):
-            return _migrate_refuse(shown, f"{side} is {{phase, waits_on}}, and names no other key")
+            return _mig.refuse(shown, f"{side} is {{phase, waits_on}}, and names no other key")
         if not all(_stamp_state(d[k], k) for k in _STAMP_KEYS):
-            return _migrate_refuse(shown, f"{side} holds a value no stamp writes")
+            return _mig.refuse(shown, f"{side} holds a value no stamp writes")
         sides[side] = d
     try:
         with _writes.ITEM_LOCK:
@@ -5505,35 +4743,35 @@ def _unstamp_one(w: Any) -> dict[str, Any]:
         return {**out, "action": "set", "why": "the keys put back"}
     except Exception as e:  # noqa: BLE001
         print(f"stamp: {gid} not put back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return _migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def _stamp_pass_keep(pass_id: str, by: str, op: str, results: list[dict[str, Any]]) -> None:
     """The results of a stamp or an undo batch, kept in the pass record (<state>/migration/<pass id>.json) beside the script's own undo file. A record that cannot be kept is logged, never fatal."""
     try:
-        with _MIG_PASS_LOCK:
+        with _migrations.MIG_PASS_LOCK:
             try:
-                rec = _pass_load(pass_id)
+                rec = _migrations.pass_load(pass_id)
             except ToolError:
                 rec = {"pass_id": pass_id, "by": by, "kind": "stamp", "begun": time.time(), "ended": None, "owners": {}, "items": [], "undone": []}
             rec.setdefault("items" if op in ("stamp", "retire", "project_id", "until", "lastact") else "undone", []).extend(results)
-            _pass_save(rec)
+            _migrations.pass_save(rec)
     except Exception as e:  # noqa: BLE001
         print(f"stamp: the results of pass {pass_id} not kept: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
 def _stamp_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
-    """op stamp {items: [id, …], pass_id?, dry?} | unstamp {items: [{item, before, after}, …], pass_id?} (at most _MIGRATE_BATCH): the stamp pass. No begin and no hold: each item is worked out and written under its own lock
+    """op stamp {items: [id, …], pass_id?, dry?} | unstamp {items: [{item, before, after}, …], pass_id?} (at most _mig.BATCH): the stamp pass. No begin and no hold: each item is worked out and written under its own lock
     (_stamp_one), so a session's update takes its turn and nothing is planned that could go stale. `dry` (stamp only) writes nothing and answers what each item would get. One publish at the end when anything was written.
     → {"op", "results": [...]}."""
     extra = [k for k in spec if k not in _STAMP_BODY]
     if extra:
         raise ToolError(f"Refused: {op} takes op, sender, items and pass_id only (got {', '.join(sorted(map(str, extra)))}): it writes the two keys phase and waits_on and nothing else")
     items = spec.get("items")
-    if not isinstance(items, list) or not items or len(items) > _MIGRATE_BATCH:
-        raise ToolError(f"Refused: items is a list of 1 to {_MIGRATE_BATCH} " + ("item ids" if op == "stamp" else "entries {item, before, after}"))
+    if not isinstance(items, list) or not items or len(items) > _mig.BATCH:
+        raise ToolError(f"Refused: items is a list of 1 to {_mig.BATCH} " + ("item ids" if op == "stamp" else "entries {item, before, after}"))
     pid = str(spec.get("pass_id") or "")
-    if pid and not _PASS_ID_RX.fullmatch(pid):
+    if pid and not _mig.PASS_ID_RX.fullmatch(pid):
         raise ToolError("Refused: pass_id is <YYYYMMDD-HHMMSS>-<6 hex>")
     dry = bool(spec.get("dry"))
     if dry and op != "stamp":
@@ -5546,7 +4784,7 @@ def _stamp_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         try:
             gid = _norm_id(str(it or ""))
         except ToolError as e:
-            results.append(_migrate_refuse(str(it or "?"), str(e)))
+            results.append(_mig.refuse(str(it or "?"), str(e)))
             continue
         results.append(_stamp_one(gid, dry=dry))
     if any(r["action"] == "set" for r in results):
@@ -5636,29 +4874,29 @@ def _retire_one(gid: str, dry: bool = False) -> dict[str, Any]:
         return {**out, "action": "set", "why": "retired"}
     except Exception as e:  # noqa: BLE001  — one item that fails never stops the batch
         print(f"retire: {gid} not retired: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return _migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def _unretire_one(w: Any) -> dict[str, Any]:
     """Put one item's retired keys back: `w` = {item, before, after} (retire_fields.entry_for). Under the item lock, if the item holds `after` for every key it names it gets `before` (None drops the key) → `set`; if it
     already holds `before` → `same`; anything else (a later save changed a key) → `kept`, untouched. A closed item → `refused`. Running it again is a no-op."""
     if not isinstance(w, dict):
-        return _migrate_refuse("?", "an entry is an object {item, before, after}")
+        return _mig.refuse("?", "an entry is an object {item, before, after}")
     try:
         gid = _norm_id(str(w.get("item") or ""))
     except ToolError as e:
-        return _migrate_refuse(str(w.get("item") or "?"), str(e))
+        return _mig.refuse(str(w.get("item") or "?"), str(e))
     shown = _gh.shown(gid)
     extra = [k for k in w if k not in _STAMP_ENTRY]
     if extra:
-        return _migrate_refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before and after only")
+        return _mig.refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before and after only")
     before, after = w.get("before"), w.get("after")
     for side in (before, after):
         why = _retire.entry_problem(side)
         if why:
-            return _migrate_refuse(shown, why)
+            return _mig.refuse(shown, why)
     if set(before) != set(after):
-        return _migrate_refuse(shown, "before and after name the same keys")
+        return _mig.refuse(shown, "before and after name the same keys")
     keys = list(before)
     try:
         with _writes.ITEM_LOCK:
@@ -5684,20 +4922,20 @@ def _unretire_one(w: Any) -> dict[str, Any]:
         return {**out, "action": "set", "why": "the keys put back"}
     except Exception as e:  # noqa: BLE001
         print(f"retire: {gid} not put back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return _migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def _retire_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
-    """op retire {items: [id, …], pass_id?, dry?} | unretire {items: [{item, before, after}, …], pass_id?} (at most _MIGRATE_BATCH): the retire pass. No begin and no hold: each item is worked out and written under its
+    """op retire {items: [id, …], pass_id?, dry?} | unretire {items: [{item, before, after}, …], pass_id?} (at most _mig.BATCH): the retire pass. No begin and no hold: each item is worked out and written under its
     own lock (_retire_one). `dry` (retire only) writes nothing and answers what each item would get. One publish at the end when anything was written. → {"op", "results": [...]}."""
     extra = [k for k in spec if k not in _RETIRE_BODY]
     if extra:
         raise ToolError(f"Refused: {op} takes op, sender, items, pass_id and dry only (got {', '.join(sorted(map(str, extra)))})")
     items = spec.get("items")
-    if not isinstance(items, list) or not items or len(items) > _MIGRATE_BATCH:
-        raise ToolError(f"Refused: items is a list of 1 to {_MIGRATE_BATCH} " + ("item ids" if op == "retire" else "entries {item, before, after}"))
+    if not isinstance(items, list) or not items or len(items) > _mig.BATCH:
+        raise ToolError(f"Refused: items is a list of 1 to {_mig.BATCH} " + ("item ids" if op == "retire" else "entries {item, before, after}"))
     pid = str(spec.get("pass_id") or "")
-    if pid and not _PASS_ID_RX.fullmatch(pid):
+    if pid and not _mig.PASS_ID_RX.fullmatch(pid):
         raise ToolError("Refused: pass_id is <YYYYMMDD-HHMMSS>-<6 hex>")
     dry = bool(spec.get("dry"))
     if dry and op != "retire":
@@ -5710,7 +4948,7 @@ def _retire_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         try:
             gid = _norm_id(str(it or ""))
         except ToolError as e:
-            results.append(_migrate_refuse(str(it or "?"), str(e)))
+            results.append(_mig.refuse(str(it or "?"), str(e)))
             continue
         results.append(_retire_one(gid, dry=dry))
     if any(r["action"] == "set" for r in results):
@@ -5720,91 +4958,6 @@ def _retire_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
     return {"op": op, "results": results}
 
 
-def _migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
-    """POST /client/migrate (the machine token's, behind _migration_gate): `op` = begin | apply | end, and `sender` = the session that runs the pass.
-      stamp / unstamp   the stamp pass (tools/stamp_phase.py): metadata.phase and metadata.waits_on written on the open items, and put back; no begin, no hold, nothing else written (_stamp_write_op)
-      retire / unretire the retire pass (tools/retire_fields_report.py --apply / --undo): the stored state words and carry fields taken out of the open items, each moved to its home, and put back (_retire_write_op)
-      until / ununtil   the until pass (tools/until_migrate.py --apply / --undo): the waits stored as wake, ask_by and hold rewritten as `until` (until_pass.py), one History line each, and put back (until_pass.write_op)
-      lastact / unlastact the last-activity pass (tools/last_activity_backfill.py --apply / --undo): metadata.last_activity filled from the History for the open items that have none, nothing else written, and put back (last_activity_pass.write_op)
-      project_id / unproject_id the project-id pass (tools/project_id_report.py --apply / --undo): the permanent id of the item's project stored on every item, open or closed, and put back (_pid_write_op)
-      begin   holds the board-wide pause for the pass (for at most an hour, whatever renews it) and says what the server's switches are ({guards, pause, switchover, handoff, held}); the pass stops
-              when the guards are off, since it must be judged by them; a second caller's begin while another's pass holds the board is refused
-      apply   `writes` (at most _MIGRATE_BATCH): each applied through the normal save path, author `migration`, judged by the guards; only the caller that began the pass; the hold is renewed → {"results": [...]}
-      end     only the caller that began the pass: lifts the hold (never the config's own `[model] pause`) and runs one wake pass, so what came due fires in one batch; `residue` (the plan's rows with a
-              field to set) is turned into one text per owner, the exact field per item, kept on the server under the pass's id (<state>/migration/<id>.json), and NOT sent
-              → {"pass_id", "fired": [...], "wake": {owner: text}, "wake_detail": {owner: {sid, gids, text}}, "held": bool}
-      wake_text  {pass_id, rows?}: the stored texts and which were sent; with `rows` it builds them for a pass whose `end` never completed (the route's gate applies, no pass need be held)
-      send_wake  {pass_id, owner, note?}: that owner's stored text plus the note (one line, 200 characters), sent once, marked on the server; no other text goes out
-    Refusals raise ToolError (the route answers 400)."""
-    by = _script_sender(spec, machine)
-    _sender_not_owner(str(spec.get("sender") or ""))
-    op = str(spec.get("op") or "apply")
-    state = lambda: {"guards": _model_guards_on(), "pause": bool(_cfg.get("model", "pause", default=False)), "switchover": _switchover_on(), "handoff": _handoff.handoff_on(),
-                     "watchers": _watch.enabled(), "held": _watch.holding(), "by": by}
-    if op not in ("begin", "apply", "end", "wake_text", "send_wake", "stamp", "unstamp", "retire", "unretire", "project_id", "unproject_id", "until", "ununtil", "lastact", "unlastact"):
-        raise ToolError("Refused: op = begin | apply | end | wake_text | send_wake | stamp | unstamp | retire | unretire | project_id | unproject_id | until | ununtil | lastact | unlastact")
-    if op in ("stamp", "unstamp"):
-        return _stamp_write_op(spec, op, by)
-    if op in ("retire", "unretire"):
-        return _retire_write_op(spec, op, by)
-    if op in ("project_id", "unproject_id"):
-        return _pid_write_op(spec, op, by)
-    if op in ("until", "ununtil"):
-        return _until_pass.write_op(sys.modules[__name__], spec, op, by)
-    if op in ("lastact", "unlastact"):
-        return _lact_pass.write_op(sys.modules[__name__], spec, op, by)
-    if op == "wake_text":
-        return _migrate_wake_text(spec)
-    if op == "send_wake":
-        return _migrate_send_wake(spec, by)
-    holder = _watch.holder()
-    if op == "begin":
-        if not _model_guards_on():
-            raise ToolError("Refused: [model] guards is false; the migration is judged by the guards and does not run without them")
-        if holder and holder != by:
-            raise ToolError(f"Refused: a pass begun by {holder} holds the board; it ends with its `end`, or lapses within an hour of its begin")
-        _watch.hold(by, _MIGRATE_HOLD_S, begin=True)
-        pass_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{os.urandom(3).hex()}"
-        _MIG_PASS.update(id=pass_id, by=by)
-        _pass_save({"pass_id": pass_id, "by": by, "begun": time.time(), "ended": None, "owners": None})
-        print(f"migrate: pass {pass_id} begun by {by}; the board-wide pause is held (an hour at most)", file=sys.stderr, flush=True)
-        return {"op": op, "pass_id": pass_id, **state()}
-    if not holder:
-        raise ToolError("Refused: begin the pass first (op=begin): the writes go in with the board-wide pause held, and a hold lapses an hour after its begin")
-    if holder != by:
-        raise ToolError(f"Refused: the pass was begun by {holder}; only that caller applies its writes or ends it")
-    if op == "end":
-        pass_id = _MIG_PASS["id"] if _MIG_PASS["by"] == by else ""
-        _watch.release()
-        fired: list[str] = []
-        try:
-            fired = list(_wakes.wake_pass())
-        except Exception as e:  # noqa: BLE001
-            print(f"migrate: the wake pass after the pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        _runner.WAKE_EVENT.set()
-        rows = [r for r in (spec.get("residue") or []) if isinstance(r, dict) and (r.get("fields") or r.get("kind") == "anchor_seen")]
-        detail = _migrate_wake(rows) if rows else {}
-        if pass_id:
-            with _MIG_PASS_LOCK:
-                try:
-                    rec = _pass_load(pass_id)
-                    rec["owners"] = {k: {**v, "sent": None} for k, v in detail.items()}
-                    rec["ended"] = time.time()
-                    _pass_save(rec)
-                except ToolError as e:
-                    print(f"migrate: the texts of pass {pass_id} could not be kept: {e}", file=sys.stderr, flush=True)
-        print(f"migrate: pass {pass_id} ended by {by}; the pause lifted, {len(fired)} item(s) fired in one pass, {len(detail)} owner text(s) kept for a person to read (none sent)", file=sys.stderr, flush=True)
-        return {"op": op, "pass_id": pass_id, "fired": [_gh.shown(g) for g in fired], "wake": {k: v["text"] for k, v in detail.items()}, "wake_detail": detail, **state()}
-    if not _model_guards_on():
-        raise ToolError("Refused: [model] guards is false; the migration is judged by the guards and does not run without them")
-    ws = spec.get("writes")
-    if not isinstance(ws, list) or not ws or len(ws) > _MIGRATE_BATCH:
-        raise ToolError(f"Refused: writes is a list of 1 to {_MIGRATE_BATCH} planned writes")
-    _watch.hold(by, _MIGRATE_HOLD_S)
-    results = [_migrate_one(w) for w in ws]
-    if any(r["action"] == "set" for r in results):
-        _publish()
-    return {"op": op, "results": results, "held": _watch.holding()}
 
 
 import functools as _functools  # noqa: E402
@@ -5974,9 +5127,6 @@ def _scoped_anchors(project: str, gid: str, anchors: dict[str, Any] | None = Non
 MSG_LOG = _cfg.state("messages.jsonl")
 
 
-def _fleet_names() -> dict[str, str]:
-    """letter → fleet name, from each machine's live state (a letter with no state stays a letter)."""
-    return {L: _fleet.read(L, "machine").get("fleet") or L for L in _fleet.letters()}
 
 
 def _msg_label(ident: str, idx: dict[str, dict[str, Any]]) -> str:
@@ -6215,7 +5365,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         named = [r for r in idx.values() if r.get("name") == to]
         rec = idx.get(to) or max(named, key=lambda r: str(r.get("seen", "")), default=None)
         if not rec and not re.fullmatch(r"[0-9a-f-]{36}", to):
-            names = _fleet_names()
+            names = _fleetev.fleet_names()
             alive = [r for r in idx.values() if r.get("name") and _lv.present(r)]        # a retired session's row is no pane to name
             live = sorted(f"{r.get('name')} ({names.get(str(r.get('machine')), r.get('machine'))})" for r in alive)
             near = difflib.get_close_matches(to, sorted({str(r['name']) for r in alive}), n=3, cutoff=0.6)
@@ -6237,7 +5387,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
             # an id no machine reports and no pane here ever had is refused: a queue "until the session comes back" would never end
             # for a claude.ai chat id
             raise ToolError(f"Refused: {to!r} is not a session stackshot can deliver to — no pane with this transcript id is in any machine's heartbeat, and none "
-                            f"ever ran on {_fleet_names().get(_pub_letter(), 'the server box')}. If it is the id in a claude.ai/chat/… link: a Cowork or cloud session is addressed by its cse_… id, "
+                            f"ever ran on {_fleetev.fleet_names().get(_pub_letter(), 'the server box')}. If it is the id in a claude.ai/chat/… link: a Cowork or cloud session is addressed by its cse_… id, "
                             "which it shows as the sender of its own messages and as the creator of its board items (the sessions tool lists those); until it has done either, "
                             "stackshot cannot reach it. A pane started in the last few minutes on another machine appears at that machine's next heartbeat: address it by name then.")
     if fyi and not held and _back_agent(to, idx):         # an fyi to a background agent starts no turn; it is handed over with the next one (it names the agent in no item's needs: it asked nothing)
@@ -6300,9 +5450,9 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     if outcome.startswith("delivered"):
         return f"{outcome} — arrives as a labelled [stackshot message] turn" + ("" if origin else f"; the reply, if any, comes back through the message tool to {sender!r}") + named
     if outcome.startswith("queued (paused"):
-        return f"{outcome} — {_fleet_names().get(_pub_letter(), 'the server box')} is holding deliveries (a reboot or a fleet change is in progress); the queue is delivered, oldest first, when the hold is lifted" + named
+        return f"{outcome} — {_fleetev.fleet_names().get(_pub_letter(), 'the server box')} is holding deliveries (a reboot or a fleet change is in progress); the queue is delivered, oldest first, when the hold is lifted" + named
     if outcome.startswith("inbox"):
-        m = _inbox_flag_minutes()
+        m = _fleetev.inbox_flag_minutes()
         return (f"{outcome} — it waits in the server's inbox until the session's machine fetches it: its puller asks about once a minute while the session runs (a session that is not running, or a machine that is asleep, takes longer)"
                 + (f". If the session is running and the line is still there after {m:g} minutes, the fleet's keeper is told why, and so are you when you are a running pane (a cloud or Cowork sender is not)" if m > 0 else "") + named)
     if outcome.startswith("queued"):
@@ -6679,7 +5829,7 @@ from stackshot.fleet import inbox as _inbox      # noqa: E402  — the server-si
 def _on_machine(machine: str):
     """→ (names, on): the fleet's names (for _anc.canonical) and a test of whether a session id runs on `machine`, by the
     fleet's live heartbeat or by the sessions the client API holds for that machine."""
-    nm, idx, fleet = _anc.names(), _sessions_index(), _fleet_names()
+    nm, idx, fleet = _anc.names(), _sessions_index(), _fleetev.fleet_names()
     here = set(_clients.sessions_on(machine))
     def on(owner: str) -> bool:
         rec = idx.get(owner.lower()) or idx.get(owner)
@@ -7916,7 +7066,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         except (TypeError, ValueError):
             return 400, {"error": "deadline = an epoch in seconds (the end of the run's time budget), or left out"}
         enabled = _page_debt.enabled()
-        return 200, {"enabled": enabled, "mode": _page_debt.mode() if enabled else "", "counts": _page_debt_pass(run=run, deadline=deadline)}
+        return 200, {"enabled": enabled, "mode": _page_debt.mode() if enabled else "", "counts": _pdsvc.page_debt_pass(run=run, deadline=deadline)}
     if what == "orphan-handover":   # the audit run's hand-over of open items whose mover is gone (audit_run.py); a dry run unless the body says apply
         try:
             return 200, _handoff.orphan_handover(apply=body.get("apply") is True)
@@ -8004,11 +7154,11 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "migrate":       # tools/migrate_model.py: the migration onto the item model, planned by the script, applied here through the normal save path (begin | apply | end)
-        gate = _migration_gate(machine, body)       # off by default ([model] migration), and only the named sessions on the named machines
+        gate = _migrations.migration_gate(machine, body)       # off by default ([model] migration), and only the named sessions on the named machines
         if gate is not None:
             return gate
         try:
-            return 200, _migrate_write(body, machine)
+            return 200, _migrations.migrate_write(body, machine)
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "register":      # a session says it exists (its SessionStart hook)
@@ -8567,12 +7717,12 @@ def _start_background() -> list[str]:
         print(f"config: {_n}", file=sys.stderr, flush=True)
     _wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
     try:
-        if _migrate_holds():                # status on_hold → open + metadata.hold, before the first publish and the runner
+        if _migrations.migrate_holds():                # status on_hold → open + metadata.hold, before the first publish and the runner
             _publish()
     except Exception as e:
         print(f"hold migration failed: {e}", file=sys.stderr, flush=True)
     try:
-        if _migrate_needs():                # needs a list, the linked agent (metadata.agent) in it; idempotent, so every start runs it
+        if _migrations.migrate_needs():                # needs a list, the linked agent (metadata.agent) in it; idempotent, so every start runs it
             _publish()
     except Exception as e:
         print(f"needs migration failed: {e}", file=sys.stderr, flush=True)
@@ -8582,7 +7732,7 @@ def _start_background() -> list[str]:
     except Exception as e:
         print(f"session ids pass failed: {e}", file=sys.stderr, flush=True)
     try:
-        if _migrate_owner_mover():         # an item that waits on him has him as mover, his answered hand-offs are ended; idempotent, so every start runs it
+        if _migrations.migrate_owner_mover():         # an item that waits on him has him as mover, his answered hand-offs are ended; idempotent, so every start runs it
             _publish()
     except Exception as e:
         print(f"mover migration failed: {e}", file=sys.stderr, flush=True)

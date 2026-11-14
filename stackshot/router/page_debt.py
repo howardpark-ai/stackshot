@@ -6,7 +6,7 @@ retired; the 30-minute move becomes ONE thin call per project per audit run (the
 tools, safe mode, the API variables unset, a timeout, usage recorded) that is given the moved debts' items and the page's Current
 state and proposes the smallest edit to the Current state, or says it cannot. This module holds the parts that need no server
 state: the settings, the prompt, the reading of the answer, the checked application of an edit to a page, and the page reads and
-writes. server.py (_page_debt_pass) joins them to the ledger, the board and the routing log.
+writes. service/page_debt.py (page_debt_pass) joins them to the ledger, the board and the routing log.
 
 Settings, [router] in stackshot.toml (read at each use: a reload applies them):
   page_debt          false (default) = nothing runs; true = the pass runs with each audit run, in the mode below

@@ -220,6 +220,7 @@ os.remove(T / "state/anchor-hub/held-msg.txt"); clear()
 
 # ================================================================= 4. the client API's poll, and push.py / the message tool
 from stackshot.fleet import client; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+from stackshot.service import fleet_events as fleetev
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 tok = open(client.mint("box-far")).read().strip()
 from starlette.testclient import TestClient
@@ -296,12 +297,12 @@ with TestClient(app) as c:
     # the server's pass: names the session by its current name, groups by it
     cl.checkin("box-far", [S(NEW, "ops-builder"), S(SENDER, "site-main"), S(MAIN, "ops-keeper")], {}, now=T0 + 10 * 3600 + 30)
     sent = []
-    server._inbox_flag_send = lambda to, text: sent.append((to, text))
-    server._fleet_builder = lambda: "ops-keeper"
+    fleetev.inbox_flag_send = lambda to, text: sent.append((to, text))
+    fleetev.fleet_builder = lambda: "ops-keeper"
     inbox.put(NAME, "pass line one", "msg", now=TN + 1700, sender="site-main (00000004…)")
     inbox.put(ENG, "pass line two", "msg", now=TN + 1705, sender="site-main (00000004…)")
-    server._INBOX_FLAG_LAST[0] = 0.0; server._INBOX_FLAG_START[0] = 0.0
-    told = server._inbox_flag_tick(now=TN + 2010)
+    fleetev.INBOX_FLAG_LAST[0] = 0.0; fleetev.INBOX_FLAG_START[0] = 0.0
+    told = fleetev.inbox_flag_tick(now=TN + 2010)
     txt = dict(sent)
     check("flag pass: the sender and the keeper are told once, and both name the session as it is called now",
           sorted(told) == ["ops-keeper", "site-main"] and "to ops-builder" in txt["site-main"] and "2 line(s) for ops-builder" in txt["ops-keeper"], (told, txt))
