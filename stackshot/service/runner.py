@@ -54,9 +54,9 @@ class Hooks:
     dates_tick: Callable[[], Any]  # server._dates_tick
     silence_tick: Callable[[], Any]  # server._silence_tick
     archive_tick: Callable[[], Any]  # server._archive_tick
-    publish: Callable[[], Any]  # server._publish
-    publish_now: Callable[..., Any]  # server._publish_now
-    publish_every: Callable[[], float]  # server._publish_every
+    publish: Callable[[], Any]  # web.publish._publish
+    publish_now: Callable[..., Any]  # web.publish._publish_now
+    publish_every: Callable[[], float]  # web.publish._publish_every
 
 
 _hooks_: Hooks | None = None

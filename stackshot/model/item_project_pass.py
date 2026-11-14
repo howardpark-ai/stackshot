@@ -143,7 +143,7 @@ def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
             continue
         results.append(one(S, gid, dry=dry))
     if any(r["action"] == "set" for r in results):
-        S._publish()
+        S._pubmod._publish()
     if pid and not dry:
         S._stamp_pass_keep(pid, by, op, results)
     return {"op": op, "results": results}

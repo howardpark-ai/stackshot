@@ -51,6 +51,7 @@ def reload_with(text):
     return out, err.getvalue()
 
 from stackshot.core import config; from stackshot.projects import pages; from stackshot.fleet import clients; from stackshot.fleet import fleet; from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 from stackshot.web.auth import signin as _signin
 from stackshot.core import store as _core_store
@@ -58,7 +59,7 @@ from stackshot.web.ui import render as ui_render
 from stackshot.anchors.anchorhub import core as hubcore
 
 # ---- 1. a valid change: every reader sees it at its next read, nothing restarted
-before = (server._page_slack(), clients._online(), fleet._grace(), server._publish_every(), ui_render._stale_s(), hubcore._quiet_max())
+before = (server._page_slack(), clients._online(), fleet._grace(), _web_publish._publish_every(), ui_render._stale_s(), hubcore._quiet_max())
 check("before: the example's values", before == (300, 600.0, 600.0, 600.0, 900, 10800), before)
 check("before: plain flavor, the default page dirs", config.page_flavor() == "plain" and pages.norm("x") == "projects/x" and "edit " in server._page_how(), server._page_how())
 LIVE = edit(BASE, (r"(?m)^slack_seconds = 300", "slack_seconds = 120"), (r"(?m)^online_minutes = 10", "online_minutes = 3"),
@@ -71,7 +72,7 @@ check("valid: reload returns the live keys that changed", out == sorted(["page_r
                                                                          "pages.dirs", "anchor_hub.quiet_max_hold", "auth.ui_open", "pilot.waiting_minutes"]), out)
 check("valid: CFG is a new dict, swapped whole", config.CFG is not cfg_was and config.get("page_rule", "slack_seconds") == 120)
 check("valid: nothing logged for a clean reload", log == "", log)
-after = (server._page_slack(), clients._online(), fleet._grace(), server._publish_every(), hubcore._quiet_max())
+after = (server._page_slack(), clients._online(), fleet._grace(), _web_publish._publish_every(), hubcore._quiet_max())
 check("valid: the server, clients, fleet and anchor-hub read the new values at once", after == (120, 180.0, 180.0, 240.0, 600), after)
 check("valid: [auth] ui_open is read at each request", _signin._ui_open() is False)
 check("derived: the board page's stale threshold follows [publish] every_minutes", ui_render._stale_s() == 360 and ui_render._every_m() == 4.0, ui_render._stale_s())

@@ -62,9 +62,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import update as _wt_update
-server._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
 BACK = "team-back"
 def bupd(i, **kw):

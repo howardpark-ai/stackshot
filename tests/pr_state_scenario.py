@@ -200,13 +200,15 @@ check("…and the tag is gone after the call", GB.current() == "", GB.current())
 
 # ---- 5. the server's three callers on one pull request, through their own paths
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released_live as rlive_svc
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False
-server._refuse_if_owing = lambda debtor: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 server._OWN_REPO[:] = ["example-owner/stackshot"]
 server._HERE = rlive_svc.HERE = T / "repo"
 def gid(i): return f"a{i}"

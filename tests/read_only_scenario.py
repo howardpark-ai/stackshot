@@ -107,6 +107,7 @@ threads_before = {t.name for t in threading.enumerate()}
 from stackshot.core import readonly
 from stackshot.core import store as _core_store
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.auth import signin as _signin
 from stackshot.service import writes
 atexit.register(lambda: readonly._reload_for_test(False))        # runs before _scratch's clean-up: the backstop must be off when the folders are removed
@@ -186,7 +187,7 @@ try:
     check("a file outside the instance's directories is not the backstop's business", True)
 except Exception as e:  # noqa: BLE001
     check("a file outside the instance's directories is not the backstop's business", False, e)
-check("the server's _publish and _publish_now do nothing", server._publish() is None and "read-only" in server._publish_now() and not (T / "state").exists())
+check("the publish module's _publish and _publish_now do nothing", _web_publish._publish() is None and "read-only" in _web_publish._publish_now() and not (T / "state").exists())
 
 # ---- 4. start-up: nothing starts
 started = server._start_background()

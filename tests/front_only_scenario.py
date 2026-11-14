@@ -130,6 +130,7 @@ check("5 a damaged page registry file reads as no pages: front-only", A.front_on
 
 # ---------------------------------------------------------------- 6. agreement with the older tests, and the two server rules
 from stackshot.web import server  # noqa: E402
+from stackshot.web import publish as _web_publish
 from stackshot.service import handoff as handoff_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -151,7 +152,7 @@ rows = {p: (A.front_only(p), old_no_builder(p)) for p in SHAPES}
 check("6 on every fixture project front_only agrees with the older hand-off builder / first background agent test", all(a == b for a, b in rows.values()), rows)
 check("6 the fixture holds both kinds of project", {a for a, _ in rows.values()} == {True, False}, rows)
 
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 nm = server._anc.names()
 roles = server._anc.session_roles()
 fp = lambda sender, key, project: server._front_pair_ok(sender, key, project)

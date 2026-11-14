@@ -88,12 +88,13 @@ for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
 from stackshot.web import server; from stackshot.service import projects as _psvc; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.projects import project_registry as _projects_registry
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 check("start-time backfill: stamps every page with its existing id (none minted afresh), once", server._prj.stamp_registry() is True
       and {k: e["id"] for k, e in reg().items()} == ids0 and server._prj.stamp_registry() is False, {k: e.get("id") for k, e in reg().items()})
 check("the server's start runs the backfill before the first roles/projects write", "_prj.stamp_registry()" in open(f"{STACK}/stackshot/web/server.py").read().split('def _start_background')[-1]

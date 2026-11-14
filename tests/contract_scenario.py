@@ -233,6 +233,7 @@ check("…a line addressed by that name records the live session's id", line["uu
 iid = inbox.put(U(1), "for the retired pane", "hub"); d = inbox.take({U(31): "work-y2"})
 check("a line addressed by id to a session gone past the grace follows its name to the live namesake (a retired id strands nothing)", len(d) == 1 and d[0]["session"] == U(31) and d[0]["ids"] == [iid], d); inbox.ack([iid])
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import sessions as _wt_sessions
@@ -400,7 +401,7 @@ push.send, push.resolve, push.SRC, push.Q = _send, _resolve, _src, _q
 
 # ================================================================= 5. the client API's writes, over HTTP
 from stackshot.fleet import client; from stackshot.web import server
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 tok_b = open(client.mint("box-far")).read().strip(); tok_me = open(client.mint(ME)).read().strip()
 from starlette.testclient import TestClient
 app = server.mcp.http_app()

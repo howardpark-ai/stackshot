@@ -65,9 +65,10 @@ REG = str(T / "reg")
 
 from stackshot.fleet import client; from stackshot.fleet import clients as cl; from stackshot.fleet import puller; from stackshot.fleet import versions as ver
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 puller.CHECKOUT = str(BOX)
 REAL_CP = puller._claude_process
 puller._claude_process = lambda: ""             # this host may well run claude processes; the fake box is idle unless a check says otherwise

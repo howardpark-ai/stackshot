@@ -94,6 +94,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -102,8 +104,8 @@ from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.anchors.anchorhub import core
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+_web_page_debts._refuse_if_owing = lambda debtor: None
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends its close line (the held case is in front_quiet_scenario)
 _real_verdict = telling.front_verdict
 telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)

@@ -87,7 +87,8 @@ def check(name, cond, got=None):
 logging.disable(logging.INFO)
 from stackshot.core import config as _cfg
 from stackshot.web.ui import render; from stackshot.web import server, i18n; from stackshot.model import model
-server._publish = lambda: None
+from stackshot.web import publish as _web_publish
+_web_publish._publish = lambda: None
 b = render.Board(str(T / "store"), now=NOW)
 plain = lambda h: re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", h))).strip()
 def row(g): r = next(x for x in b.rows if x["gid"] == g); return r, b.mod_of(r)

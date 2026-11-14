@@ -164,12 +164,14 @@ check("2 a healthy second brain reports no problem", brains.problem(brains.for_k
 
 # ---- 3. the second copy is missing: fail open everywhere
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import gates as _gates
 from stackshot.service import page_debt as pdebt_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.routes import client_api as _rt_client
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 shutil.move(str(T / "second"), str(T / "second-away"))
 with stderr() as err:
     fms, _rels, skipped_ = _pg.read_pages_ex()
@@ -210,7 +212,7 @@ _cfg.CFG["page_rule"]["mode"] = "refuse"
 brains._WARNED.clear()      # the server is a process of its own: it says so once for its own run
 with stderr() as err:
     d = server._owed_settle(); nag = server._nag(OWNER)
-    try: server._refuse_if_owing(OWNER); refused = ""
+    try: _web_page_debts._refuse_if_owing(OWNER); refused = ""
     except Exception as e: refused = str(e)
 check("3 pages owed keep the debt (not settled, not dropped)", "projects/beta-one" in d and "projects/beta-one" in server._owed_load(), d)
 check("3 pages owed neither nag nor refuse for the unreadable brain", "beta-one" not in nag and not refused, (nag, refused))

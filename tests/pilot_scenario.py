@@ -101,6 +101,8 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.model import decision_gates as _dg
 from stackshot.service import migrations as migsvc
 from stackshot.service import checks as checks_svc
@@ -125,7 +127,7 @@ def setwk_(m, w):
     if "until" in m: m["until"] = w
     else: m["wake"] = w
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends; the held case has its own check (front_quiet_scenario)
 _real_verdict = telling.front_verdict
 telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
@@ -2150,11 +2152,11 @@ server._update(g4, priority="p3", sender="home-beta"); check("confirmed: a filin
 server._update(g4, ask=ASK, sender="home-beta"); check("confirmed: an ask edit is filing: no confirm, no state clock", rd(g4)["confirmed"] == 1000.0 and rd(g4)["state_updated"] == 1000.0, rd(g4))
 t0 = time.time(); server._update(g4, next="pick one", sender="home-beta"); check("confirmed: a state change sets it with the state clock", rd(g4)["confirmed"] == rd(g4)["state_updated"] >= t0, rd(g4))
 # the confirm tool: confirmed only; no page, no relay; published
-pubs = []; _pub_ = server._publish; server._publish = _wt_anchors._publish = _wt_route._publish = lambda: pubs.append(1)
+pubs = []; _pub_ = _web_publish._publish; _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: pubs.append(1)
 setf("a1", confirmed=1000.0, updated=2000.0, state_updated=2000.0); before = rd("a1")
 led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
 res = _wt_complete.stackshot_confirm("a1", sender="work-osprey-main"); after_ = rd("a1"); time.sleep(0.5)
-server._publish = _wt_anchors._publish = _wt_route._publish = _pub_
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = _pub_
 check("confirm: sets confirmed only (updated, state_updated, metadata, status as they were); the writer stamp beside it (written_at: when the session last wrote the item) is the one other field that moves",
       after_["confirmed"] >= t0 and after_.get("written_at", 0) >= t0 and {k: v for k, v in after_.items() if k not in ("confirmed", "written_at")} == {k: v for k, v in before.items() if k not in ("confirmed", "written_at")}, (before, after_))
 check("confirm: replies 'confirmed <gid> at <time>.' and the item", re.match(r"confirmed a1 at \w{3} \w{3} \d{1,2}(st|nd|rd|th) \d\d:\d\d\.\na1 \[open\] ", res) is not None
@@ -2720,7 +2722,7 @@ check("a later next-only write never loosens it", server._owed_load()["projects/
 res = server._update("a1", next="a step by someone else", sender="work-osprey-x")
 check("each writer owes its own", sorted(server._owed_load()["projects/alpha"]) == sorted([A, X]) and server._owed_load()["projects/alpha"][X]["settle"] == "any")
 d = server._owed_load(); d["projects/alpha"][A]["ts"] -= 3600; server._owed_save(d)
-try: server._refuse_if_owing(A); ok = True
+try: _web_page_debts._refuse_if_owing(A); ok = True
 except ToolError: ok = False
 check("the writer is never refused for a pilot debt", ok)
 check("the nag says it moves instead", "Still missing after 30 min, it moves to the router" in server._nag(A) and "refuses your next board write" not in server._nag(A), server._nag(A))
@@ -3769,7 +3771,7 @@ finally:
 # session's item, or a non-owner's close, is told to the owner at once). The switch is off for every check above.
 server._cfg.CFG["board"]["tell_owner"] = True
 server._cfg.CFG["pilot"]["writer_owes_page"] = True     # every page is the router's, so a write would also relay a page-owed notice to the keeper at once; the writer owes it here, and the pushes counted below are the owner notices only
-server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 Xn = "work-osprey-x"
 def told_owner(to, g):
     """The [board] lines this section's notices put to one session for one item (the pilot relay's own lines start `[board] a1 changed`)."""

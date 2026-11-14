@@ -58,8 +58,9 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.fleet import client
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import message as _wt_message
-server._publish = lambda: None
+_web_publish._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
 _orig_run = server.subprocess.run
 def _fake_run(cmd, *a, **kw):

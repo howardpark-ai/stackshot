@@ -53,6 +53,8 @@ def put(i, status="open", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server; from stackshot.service import projects as _psvc
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import create as _wt_create
@@ -60,8 +62,8 @@ from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 sh = server._gh.shown
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 told = []                                              # every notice the server would send: recorded, never sent
 telling.tell_woken = lambda *a, **k: told.append((a, k))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"

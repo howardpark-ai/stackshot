@@ -332,7 +332,7 @@ from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 fresh(); setfiles(mode="on\n", hold="", gate="")
@@ -811,11 +811,11 @@ published = []; real_pub, real_timer = _web_publish._publish, _web_publish._PUB_
 _web_publish._publish = lambda: published.append(1)
 live = threading.Timer(60, lambda: None); live.daemon = True; live.start()
 try:
-    _web_publish._PUB_TIMER = live; a = server._publish_if_idle()
-    check("server._publish_if_idle: False and no publish asked while the debounce timer's publish is alive", a is False and published == [], (a, published))
-    live.cancel(); live.join(5); _web_publish._PUB_TIMER = live; b = server._publish_if_idle()
+    _web_publish._PUB_TIMER = live; a = _web_publish._publish_if_idle()
+    check("_web_publish._publish_if_idle: False and no publish asked while the debounce timer's publish is alive", a is False and published == [], (a, published))
+    live.cancel(); live.join(5); _web_publish._PUB_TIMER = live; b = _web_publish._publish_if_idle()
     check("…True and one publish asked once that timer is dead", b is True and published == [1], (b, published))
-    _web_publish._PUB_TIMER = None; c2 = server._publish_if_idle()
+    _web_publish._PUB_TIMER = None; c2 = _web_publish._publish_if_idle()
     check("…and True with no timer at all", c2 is True and published == [1, 1], published)
 finally:
     live.cancel(); _web_publish._publish, _web_publish._PUB_TIMER = real_pub, real_timer

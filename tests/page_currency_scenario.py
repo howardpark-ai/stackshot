@@ -240,11 +240,12 @@ d.pop(N); fs.write_text(json.dumps(d))
 
 # ---- 5. the server's ledger
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.routes import client_api as _rt_client
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 check("server: a keeper's debt is strict, an agent's is not", server._strict(S) and server._strict(B) and not server._strict(A))
 server._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() - 30, "item": "s2"}}})
 time.sleep(1.1); b = T / "brain/projects/beta.md"

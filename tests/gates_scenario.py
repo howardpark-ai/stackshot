@@ -50,6 +50,7 @@ from stackshot.core import config as _cfg
 from stackshot.model import draft as _draft, model_guards as _mg, step_commands as _sc
 from stackshot.waits import self_wait as _selfwait
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import handoff as handoff_svc
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.tools import update as _wt_update
@@ -343,7 +344,7 @@ UPDATES = (("an update that asks the owner while the item waits", dict(sender=BA
            ("an update that closes the item", dict(sender=BACK, status="completed", outcome="done", reason="the end state", outcome_text="- the result"), "6"))
 def update_order(kw, n):
     put(int(n), mover=BACK)
-    with srv(_publish=lambda *a, **k: None), tel(tell_woken=lambda *a, **k: None):
+    with patched(_web_publish, _publish=lambda *a, **k: None), tel(tell_woken=lambda *a, **k: None):
         return recording(lambda: _wt_update.stackshot_update(f"a{n}", **kw))
 # the label -> the gates in the order main ran them (GATES_MAIN=1 prints each ORDER line)
 ORDER_WANT = {

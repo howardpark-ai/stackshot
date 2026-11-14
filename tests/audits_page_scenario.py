@@ -44,12 +44,13 @@ def text_of(html):
 NAMES = ["Silence", "Filing", "Wording", "Dates", "Proof and patterns", "Pages and agents", "Fleet and services", "Text and rules"]
 
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.audit import audit as _audit_mod
 from stackshot.web.auth import signin as _signin
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from starlette.testclient import TestClient
 posts = []
 _audit_mod.cue = lambda reason: (posts.append(reason), (202, "audit cued to falcon-audit"))[1]

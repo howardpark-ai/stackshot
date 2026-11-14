@@ -29,7 +29,7 @@ class Hooks:
     model_of: Callable[..., Any]  # server._model_of
     old_wait_off: Callable[..., Any]  # server._old_wait_off
     own_repo: Callable[..., Any]  # server._own_repo
-    publish: Callable[..., Any]  # server._publish
+    publish: Callable[..., Any]  # web.publish._publish
     rmod_confirmed_at: Callable[..., Any]  # server._rmod.confirmed_at
     rmod_needs_kind: Callable[..., Any]  # server._rmod.needs_kind
     rmod_options_of: Callable[..., Any]  # server._rmod.options_of

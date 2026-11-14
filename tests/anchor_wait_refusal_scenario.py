@@ -70,12 +70,14 @@ def accepted(name, f):
         check(name, False, str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 CFG = server._cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, watchers=True, pause=False)       # the write guards have their own suite

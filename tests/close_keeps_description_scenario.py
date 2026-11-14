@@ -80,13 +80,15 @@ try:
     def mt(i): return rd(i)["metadata"]
 
     from stackshot.web import server
+    from stackshot.web import publish as _web_publish
+    from stackshot.web import page_debts as _web_page_debts
     from stackshot.web.tools import anchors as _wt_anchors
     from stackshot.web.tools import route as _wt_route
     from stackshot.web.tools import complete as _wt_complete
     from stackshot.web.tools import get as _wt_get
     from stackshot.web.ui import render as r2
-    server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+    _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+    _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
     def refused(name, f, *want):
         try:
             out = f(); check(name, False, out)

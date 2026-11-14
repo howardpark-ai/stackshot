@@ -187,10 +187,11 @@ class DryApplier:
         import logging
         from stackshot.service import migrations
         from stackshot.web import server
+        from stackshot.web import publish as _web_publish  # noqa: PLC0415
         logging.disable(logging.INFO)
         self.server = server
         self.migrations = migrations
-        server._publish = lambda: None
+        _web_publish._publish = lambda: None
         self.sender = sender
         if server._gh.enabled():
             raise SystemExit("the copy's config has the GitHub mirror on; refusing")

@@ -40,10 +40,11 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import ids as _model_ids
+from stackshot.web import publish as _web_publish
 from stackshot.model import similar as _sim
 from stackshot.web.tools import create as _wt_create
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 MAIN, OTHER = "falcon-main", "home-other"
 STK, ATT, OTH = "projects/example", "projects/example/queue-notes", "projects/other"
 def create(subject, project=STK, owner=MAIN):

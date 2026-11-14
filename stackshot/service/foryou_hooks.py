@@ -15,7 +15,7 @@ from typing import Any, Callable
 class Hooks:
     """What the For you rows still reach outside service/, by the names they have there without the leading underscore. server.py builds one and gives it to `install`."""
     parse_ask: Callable[..., Any]  # web/render.parse_ask
-    publish: Callable[..., Any]  # server._publish
+    publish: Callable[..., Any]  # web.publish._publish
     when_words: Callable[..., Any]  # web/render.when_words
 
 

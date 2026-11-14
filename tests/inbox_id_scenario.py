@@ -220,8 +220,9 @@ os.remove(T / "state/anchor-hub/held-msg.txt"); clear()
 
 # ================================================================= 4. the client API's poll, and push.py / the message tool
 from stackshot.fleet import client; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 tok = open(client.mint("box-far")).read().strip()
 from starlette.testclient import TestClient
 app = server.mcp.http_app()

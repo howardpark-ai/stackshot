@@ -4,8 +4,8 @@ helpers they read: how a page is written (`_page_how`), a session's stored refer
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the page and project
 modules, the registry readers (`service/gates.py`), the session helpers (`fleet/sessions_registry.py`) and the instance settings and text clipping (`core/instance.py`, `model/bullet_text.py`). server.py imports each name its writes, its tools and the suites read back from here, so
-`server._owed_mark`, `server._refuse_if_owing`, `server._nag` and the others stay the names they use. `_refuse_if_owing` has no caller here: the writes in server.py call it, and a suite that stubs it
-(`server._refuse_if_owing = ...`) stubs it where they look it up. `_page_ts` is called here by `_owed_settle` and by the client API's page-ts answer in server.py: the suites that put a page's time in place of the real one for
+`server._owed_mark`, `server._nag` and the others stay the names they use. `_refuse_if_owing` has no caller here and is not a name of server.py: the create and update tables look it up on this module when a write runs
+(`_late_in`), and a suite that stubs it (`page_debts._refuse_if_owing = ...`) stubs it here, which reaches every caller. `_page_ts` is called here by `_owed_settle` and by the client API's page-ts answer in server.py: the suites that put a page's time in place of the real one for
 the debts set it on this module (`server._pdebts._page_ts`), and the one that stubs the client API's answer sets it on `server`. `_HERE` is the checkout's root, read only in the two messages that name the `pages.py clear` command;
 server.py keeps its own `_HERE` (its git calls read it, and the suites set it), which is the same value."""
 from __future__ import annotations

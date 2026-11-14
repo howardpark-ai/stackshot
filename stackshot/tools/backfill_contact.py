@@ -65,7 +65,8 @@ def run(a: argparse.Namespace) -> dict:
         import logging
         logging.disable(logging.INFO)
         from stackshot.web import server  # noqa: PLC0415
-        server._publish = lambda: None
+        from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        _web_publish._publish = lambda: None
         return server._contact_backfill(dry=True)
 
 

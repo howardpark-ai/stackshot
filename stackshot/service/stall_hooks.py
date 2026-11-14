@@ -19,7 +19,7 @@ class Hooks:
     after_open: Callable[..., Any]  # server._after_open
     main_agent: Callable[..., Any]  # server._main_agent
     next_report_all: Callable[..., Any]  # tools/next_report.load_all
-    publish: Callable[..., Any]  # server._publish
+    publish: Callable[..., Any]  # web.publish._publish
     queue_map: Callable[..., Any]  # server._queue_map
     role_name: Callable[..., Any]  # server._role_name
     session_id: Callable[..., Any]  # server._session_id

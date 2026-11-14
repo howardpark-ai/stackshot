@@ -602,7 +602,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         _writes.save(gid, item, activity=_activity.ANSWER, activity_at=float(c.get("ts") or 0) or None)      # the owner's comment is an answer: real activity though the save is the server's, stamped at the comment's own time (a backlog read after a restart is not activity now)
-    _publish()
+    _pubmod._publish()
     _telling.tell_comment(gid, item, str(c.get("text") or ""))
     return True
 
@@ -643,7 +643,6 @@ from stackshot.web.page_debts import (  # noqa: E402,F401
     _page_how,
     _page_slack,
     _page_ts,
-    _refuse_if_owing,
     _role_name,
     _same_sess,
     _session_id,
@@ -1204,7 +1203,7 @@ def _name_on_handover(to: str, text: str, sender: str, idx: dict[str, dict[str, 
             continue
         out += _auto_name(g, it, agent, sender, f"handover message from {_session_label(sender)}" + (f" ({via})" if via else ""), "handed over", nm, one_mover=True)
     if out:
-        _publish()
+        _pubmod._publish()
     return out
 
 
@@ -1315,7 +1314,8 @@ from stackshot.fleet.sessions_registry import _session_label, _sessions_index  #
 from stackshot.model.ids import _item_url  # noqa: E402  — an item's page on the board (model/ids.py)
 from stackshot.model.said import _owner_words  # noqa: E402  — what shows the owner's own words are on an item (model/said.py)
 from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe  # noqa: E402  — a registry file of the store, and roles.json with projects.json beside it (projects/project_registry.py)
-from stackshot.web.publish import _publish, _publish_every, _publish_if_idle, _publish_now  # noqa: E402  — the debounced publish, its pace and its idle test; the timer is `stackshot.web.publish._PUB_TIMER` (web/publish.py)
+from stackshot.web import publish as _pubmod  # noqa: E402  — the debounced publish: the writes here call `_pubmod._publish()` and the hook tables look its functions up on that module, so a suite that replaces one sets it on `stackshot.web.publish` (the timer is `_PUB_TIMER` there)
+from stackshot.web.publish import _publish_if_idle  # noqa: E402  — the idle test the board's runner rebuild asks (`_runners.ON_CHANGE` in __main__)
 from stackshot.service import foryou_events as _fyev  # noqa: E402  — the rows the For you list makes from a change of an item and its due-date pass: the dates pass opens the pass's gate and runs it (service/foryou_events.py)
 from stackshot.service import foryou_hooks as _foryou_hooks  # noqa: E402  — what those rows still reach on this module (service/foryou_hooks.py)
 from stackshot.service.projects import _PROJECT_LOCK, _RENAMING, _new_project, _page_io, _project_agent, _project_agent_mandate, _project_agent_rename_checks, _project_agent_rename_write, _project_agent_retire_checks, _project_agent_retire_write, _project_list, _projects_list  # noqa: E402,F401  — the client API's routes, the archive sweep and the hand-off read them, and the two wrappers that stay here take the lock and call the checks and the writes (service/projects.py)
@@ -1485,7 +1485,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
         item["metadata"] = meta
         item["updated"] = item["state_updated"] = item["confirmed"] = now
         _writes.save(gid, item, note="ask taken off his move")
-    _publish()
+    _pubmod._publish()
     item["gid"] = gid
     to = _telling.holder(item)
     line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said it is wrong: {_clip_line(why, 140)}). "
@@ -1616,7 +1616,7 @@ def _router_live_after(project: str, n: dict[str, Any]) -> None:
     republished."""
     if n.get("ruling") in ("passed", "merged"):
         _wakes.anchor_release(project, n, by=_router_live.BY)
-    _publish()
+    _pubmod._publish()
 
 
 # the router's live mode reaches the server only through these three (router_live.configure): which agents are front ones, the push,
@@ -2171,7 +2171,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
         except Exception as e:  # noqa: BLE001  — one item never stops the others
             print(f"audit: {gid} hourly line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if written:
-        _publish()
+        _pubmod._publish()
     return written
 
 
@@ -3021,7 +3021,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
                                 "outcome": "log-only", "error": "", "text": gist}, ensure_ascii=False) + "\n")
     except Exception:
         pass
-    _publish()
+    _pubmod._publish()
     return (f"logged, not delivered (a green release is log-only): notice {nid} on {key}, ruled merged by {AUTO_RULER}; it stays on the routing page"
             + (f"; commented on {', '.join(_gh.shown(g) for g in commented)}" if commented else ""))
 
@@ -3408,7 +3408,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
         finally:
             if not saved:
                 undo_anchor()       # a refusal leaves the item as it was, the anchors list too
-    _publish()
+    _pubmod._publish()
     return {"fixed": True, "what": what, "why": ""}
 
 
@@ -3991,6 +3991,11 @@ def _late(name: str) -> Callable[..., Any]:
     return lambda *a, **k: globals()[name](*a, **k)
 
 
+def _late_in(module: Any, name: str) -> Callable[..., Any]:
+    """A function of its owner module looked up when it is called (not when the table below is built), so a suite that replaces it on the owner reaches the create."""
+    return lambda *a, **k: getattr(module, name)(*a, **k)
+
+
 # What the telling still reaches (service/telling.py tells the sessions a write concerns): the hand-off record's own functions (service/handoff.py imports the telling, so the telling cannot import it back: each
 # is looked up on that module when it runs), the page keepers of a project's agents, the page debt's marks and the time zone. A hook leaves this table when the area that holds it
 # moves under service/ and does not import the telling.
@@ -4033,9 +4038,9 @@ _runner.install(_runner.Hooks(
     dates_tick=_late("_dates_tick"),
     silence_tick=_late("_silence_tick"),
     archive_tick=_late("_archive_tick"),
-    publish=_late("_publish"),
-    publish_now=_late("_publish_now"),
-    publish_every=_late("_publish_every"),
+    publish=_late_in(_pubmod, "_publish"),
+    publish_now=_late_in(_pubmod, "_publish_now"),
+    publish_every=_late_in(_pubmod, "_publish_every"),
 ))
 
 
@@ -4054,7 +4059,7 @@ _wake_hooks.install(_wake_hooks.Hooks(
     model_of=_late("_model_of"),
     old_wait_off=_late("_old_wait_off"),
     own_repo=_late("_own_repo"),
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     rmod_confirmed_at=lambda *a, **k: _rmod.confirmed_at(*a, **k),
     rmod_needs_kind=lambda *a, **k: _rmod.needs_kind(*a, **k),
     rmod_options_of=lambda *a, **k: _rmod.options_of(*a, **k),
@@ -4080,7 +4085,7 @@ _handoff_hooks.install(_handoff_hooks.Hooks(
     model_of=_late("_model_of"),
     old_wait_off=_late("_old_wait_off"),
     page_io=_late("_page_io"),
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     recovery_role=lambda: _RECOVERY_ROLE,
     recovery_target=_late("_recovery_target"),
     recovery_tell=_late("_recovery_tell"),
@@ -4117,7 +4122,7 @@ _stall_hooks.install(_stall_hooks.Hooks(
     after_open=_late("_after_open"),
     main_agent=_late("_main_agent"),
     next_report_all=lambda *a, **k: _next_report_mod().load_all(*a, **k),
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     queue_map=_late("_queue_map"),
     role_name=_late("_role_name"),
     session_id=_late("_session_id"),
@@ -4139,7 +4144,7 @@ _checks_hooks.install(_checks_hooks.Hooks(
     own_repo=_late("_own_repo"),
     pr_key=_late("_pr_key"),
     pr_url=lambda: _PR_URL,
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     rmod_needs_kind=lambda *a, **k: _rmod.needs_kind(*a, **k),
     role_name=_late("_role_name"),
     same_sess=_late("_same_sess"),
@@ -4165,7 +4170,7 @@ _passes_hooks.install(_passes_hooks.Hooks(
     owed_save=_late("_owed_save"),
     owed_settle=_late("_owed_settle"),
     pid_write_op=_late("_pid_write_op"),
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     retire_write_op=_late("_retire_write_op"),
     scoped_anchors=_late("_scoped_anchors"),
     script_sender=_late("_script_sender"),
@@ -4184,7 +4189,7 @@ _passes_hooks.install(_passes_hooks.Hooks(
 # area that holds it moves under service/.
 _foryou_hooks.install(_foryou_hooks.Hooks(
     parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
 ))
 
@@ -4210,9 +4215,9 @@ _create_svc.install(_create_svc.Hooks(
     owed_mark=_late("_owed_mark"),
     owner_then_default=_late("_owner_then_default"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     record_fixes=_late("_record_fixes"),
-    refuse_if_owing=_late("_refuse_if_owing"),
+    refuse_if_owing=_late_in(_pdebts, "_refuse_if_owing"),
     said_note=_late("_said_note"),
     session_id=_late("_session_id"),
     wait_alias_gate=_late("_wait_alias_gate"),
@@ -4427,7 +4432,7 @@ def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
         # Bookkeeping, not activity (no kind, no writer): this copies words the store already holds from his entry in metadata.answers, which moved the clock when it arrived; a script's filing edit that
         # moved no clock, so counting it would make an old answer read as new work whenever the job runs.
         _writes.save(gid, item, note=f"his words recorded for the wake {wake}: {_no_ping(_clip_line(text, 200))} ({_no_ping(src)}), by {_no_ping(by)}")
-        _publish()
+        _pubmod._publish()
     return {"item": _gh.shown(gid), "wake": wake, "quote": text, "source": src, "action": "set"}
 
 
@@ -4633,7 +4638,7 @@ def _phase_tick() -> list[str]:
     refresh of what it holds."""
     done = _phase_sweep()
     if done:
-        _publish()
+        _pubmod._publish()
     return done
 
 
@@ -4732,7 +4737,7 @@ def _stamp_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
             continue
         results.append(_stamp_one(gid, dry=dry))
     if any(r["action"] == "set" for r in results):
-        _publish()
+        _pubmod._publish()
     if pid and not dry:
         _stamp_pass_keep(pid, by, op, results)
     return {"op": op, "results": results}
@@ -4896,7 +4901,7 @@ def _retire_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
             continue
         results.append(_retire_one(gid, dry=dry))
     if any(r["action"] == "set" for r in results):
-        _publish()
+        _pubmod._publish()
     if pid and not dry:
         _stamp_pass_keep(pid, by, op, results)
     return {"op": op, "results": results}
@@ -4999,9 +5004,9 @@ _update_svc.install(_update_svc.Hooks(
     owner_then_default=_late("_owner_then_default"),
     owner_want=_late("_owner_want"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
-    publish=_late("_publish"),
+    publish=_late_in(_pubmod, "_publish"),
     record_fixes=_late("_record_fixes"),
-    refuse_if_owing=_late("_refuse_if_owing"),
+    refuse_if_owing=_late_in(_pdebts, "_refuse_if_owing"),
     release_after=lambda *a, **k: _wakes.release_after(*a, **k),
     render_hold_at=lambda *a, **k: _rmod.hold_at(*a, **k),
     render_option_lines=lambda *a, **k: _rmod.option_lines(*a, **k),
@@ -5942,7 +5947,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
         raw = [g for g, _ in rows]
         _telling.tell_woken(raw[0] if len(raw) == 1 else ", ".join(raw[:-1]) + " and " + raw[-1], to, note, tag="recycle")
     if cleared:
-        _publish()
+        _pubmod._publish()
     try:                           # an event wait on a recycle (or on a fleet op of this verb) is over: its mover hears it live. The count of sessions is sala's to report (client.py event), so `many` is not matched here
         _evwaits.evwait_report(_ew.event(_ew.RECYCLE, machine=machine, result=result, what=f"a {what} finished on {machine} ({when}" + (", partly" if result == "partial" else "") + ")"))
         _evwaits.evwait_report(_ew.event(_ew.FLEET_OP, machine=machine, verb=kind if re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", str(kind or "").lower()) else "recycle", result=result,
@@ -7357,7 +7362,7 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
     item["gid"] = gid
     told = [t for t in _answer_deliver(gid, item, rec) if t]
     print(f"answer: {gid} {code}: his note kept as a comment, told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
-    _publish()
+    _pubmod._publish()
     return code
 
 
@@ -7514,7 +7519,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _answers_save(st)
     kind = ("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
     print(f"answer: {gid} {kind} from the board" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
-    _publish()
+    _pubmod._publish()
     return "askedback" if askback else kind
 
 
@@ -7605,7 +7610,7 @@ def _on_hup() -> None:
             _phase_sweep()                  # the publish below is this reload's own
     except Exception as e:  # noqa: BLE001
         print(f"config reload: phase sweep failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    _publish()
+    _pubmod._publish()
 
 
 async def _serve() -> None:
@@ -7643,47 +7648,47 @@ def _start_background() -> list[str]:
     _wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
     try:
         if _migrations.migrate_holds():                # status on_hold → open + metadata.hold, before the first publish and the runner
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"hold migration failed: {e}", file=sys.stderr, flush=True)
     try:
         if _migrations.migrate_needs():                # needs a list, the linked agent (metadata.agent) in it; idempotent, so every start runs it
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"needs migration failed: {e}", file=sys.stderr, flush=True)
     try:
         if _session_ids_pass():             # step B: a requested move to permanent session ids (or its rollback), under the item lock, before the first publish
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"session ids pass failed: {e}", file=sys.stderr, flush=True)
     try:
         if _migrations.migrate_owner_mover():         # an item that waits on him has him as mover, his answered hand-offs are ended; idempotent, so every start runs it
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"mover migration failed: {e}", file=sys.stderr, flush=True)
     try:
         if _retire_rank_pass():             # ranks are retired: an open item's rank and a rank-only queued state are cleared, clocks unchanged; idempotent, so every start runs it
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"rank retirement pass failed: {e}", file=sys.stderr, flush=True)
     try:
         if [r for r in _mover_backfill_pass() if r["mover"]]:     # D1: a live item with no mover gets the project's builder, else its -main agent, never its creator; idempotent
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"mover backfill pass failed: {e}", file=sys.stderr, flush=True)
     try:
         if _handoff.handoff_repair_pass():          # an open hand-off record that names someone but the item's mover is ended into its history; idempotent, and before the wake pass and any thread
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"hand-off record repair failed: {e}", file=sys.stderr, flush=True)
     try:
         if _close_marks_pass():             # the closed items still showing an open step get them marked (done / dropped by outcome); idempotent, so every start runs it
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"close marks pass failed: {e}", file=sys.stderr, flush=True)
     try:
         if _wakes.wake_pass():                    # items whose wake passed while the server was down are open before the first publish
-            _publish()
+            _pubmod._publish()
     except Exception as e:
         print(f"wake pass failed: {e}", file=sys.stderr, flush=True)
     try:

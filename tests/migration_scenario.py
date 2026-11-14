@@ -134,6 +134,8 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
@@ -141,8 +143,8 @@ from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 from stackshot.tools import migrate_model as MM
 OLIVER = model.owner_display()
-server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._refuse_if_owing = lambda debtor: None
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 FAIL_PUSH = [False]
 def _tell(gid, owner, note, tag="wake", result=None):
