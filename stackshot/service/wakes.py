@@ -7,7 +7,7 @@ a routine line releases a hold scoped to the anchor, and the notice is replayed 
 `minute_wake_wait`) are what the table in service/runner.py calls.
 
 The pass writes through service/writes.py and tells through service/telling.py: the domain decides, the service writes. What the passes still reach in server.py (the item model's shared readers, the proof readers, the
-renderer's answers, the publish and the time zone) comes through `Hooks` in service/wake_hooks.py, looked up when it runs, so a suite that replaces one on server.py is the one called. A suite that replaces a
+renderer's answers, the publish and the time zone) comes through `Hooks` in service/wake_hooks.py, looked up when it runs, so a suite that replaces one on its owner module is the one called. A suite that replaces a
 function of the passes sets it on this module, or on service/watching.py and service/event_waits.py, which hold the watchers and the event waits.
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

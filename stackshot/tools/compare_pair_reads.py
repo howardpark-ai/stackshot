@@ -85,19 +85,20 @@ def rows_at(server: Any, store: Path, now: float, label: str) -> list[dict[str, 
     """One row per open item of the store at the clock `now`: the pair it stores, the reading from the fields, the reading from the stored pair, the list each puts it in."""
     from stackshot.github import ghsync as _gh  # noqa: PLC0415
     from stackshot.model import model  # noqa: PLC0415
+    from stackshot.service import client_reads as _client_reads, item_read as _item_read  # noqa: PLC0415
     items = SP.load_dir(store)
     out: list[dict[str, Any]] = []
     for g in sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num):
         it = items[g]
         probe = {**it, "gid": g}
-        ao = lambda i_: server._item_read._after_open(i_.get("metadata") or {})      # noqa: E731
+        ao = lambda i_: _item_read._after_open(i_.get("metadata") or {})      # noqa: E731
         with SP.frozen(now):
-            mod = server._item_read._model_of(probe)
+            mod = _item_read._model_of(probe)
             fields = model.view(probe, mod, now, ao, check=False)
             stored = model.view(probe, mod, now, ao)
             with SP.fields_only(server):
-                list_fields = server._client_reads._item_list(probe)
-            list_stored = server._client_reads._item_list(probe)
+                list_fields = _client_reads._item_list(probe)
+            list_stored = _client_reads._item_list(probe)
         meta = it.get("metadata") or {}
         out.append({"item": _gh.shown(g), "gid": g, "at": label, "stored": {"phase": meta.get("phase"), "waits_on": meta.get("waits_on")},
                     "fields": list(model.shown_pair(fields)), "shown": list(model.shown_pair(stored)), "list_fields": list_fields, "list_shown": list_stored,

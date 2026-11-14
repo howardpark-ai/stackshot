@@ -302,6 +302,7 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
+from stackshot.projects import project_registry as _project_registry
 from stackshot.web import server; from stackshot.service import foryou_events as fyev; from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.web import runners as _runners
 from stackshot.waits import watchers as _watch
@@ -348,7 +349,7 @@ check("3 board: the clocks that read items are marked to stand still while the m
 TICK_FUNCS = {"wake_pass": "wake_pass", "anchor_pass": "anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "evwait_tick", "check_tick": "check_tick", "proof_tick": "proof_tick", "balance_tick": "_balance_tick", "handoff_tick": "handoff_tick",
               "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "clients_tick", "pilot_fallback_tick": "_pilot_fallback_tick",
               "stall_tick": "stall_tick", "handback_tick": "handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return {"_answer_tick": answer_svc, "clients_tick": fleetev, "handoff_tick": handoff_svc, "handback_tick": telling, "fleet_stamp": runner_svc, "wake_pass": wakes_svc, "anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc, "_pilot_fallback_tick": pdebt_svc, "_balance_tick": audit_ticks_svc, "_filing_tick": audit_ticks_svc, "_dates_tick": audit_ticks_svc, "_silence_tick": audit_ticks_svc, "_archive_tick": audit_ticks_svc, "_phase_tick": stamp_svc}.get(fn, server)       # the owner of a function the spies set: the pilot fallback is the page-debt call's, the phase tick is the stamp pass's (service/stamp.py), the hand-back tick is the telling's, the fleet stamp is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the answer tick is service/answer.py's, the rest are the server's
+def own(fn): return {"_answer_tick": answer_svc, "clients_tick": fleetev, "handoff_tick": handoff_svc, "handback_tick": telling, "fleet_stamp": runner_svc, "wake_pass": wakes_svc, "anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc, "_pilot_fallback_tick": pdebt_svc, "_balance_tick": audit_ticks_svc, "_filing_tick": audit_ticks_svc, "_dates_tick": audit_ticks_svc, "_silence_tick": audit_ticks_svc, "_archive_tick": audit_ticks_svc, "_phase_tick": stamp_svc, "_roles_sync_safe": _project_registry}[fn]       # the owner of a function the spies set: the pilot fallback is the page-debt call's, the phase tick is the stamp pass's (service/stamp.py), the hand-back tick is the telling's, the fleet stamp is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the answer tick is service/answer.py's, the roles sync is the project registry's
 counts: dict[str, int] = {}
 order_seen: list[str] = []
 saved = {}

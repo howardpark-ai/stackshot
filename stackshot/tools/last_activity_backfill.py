@@ -125,6 +125,7 @@ def dry_run(a: argparse.Namespace) -> int:
         from stackshot.service import retire_passes as _retire_passes  # noqa: PLC0415
         from stackshot.service import merge_progress as _merge_progress  # noqa: PLC0415
         from stackshot.service import stamp as _stamp  # noqa: PLC0415
+        from stackshot.web import wiring as _wiring  # noqa: PLC0415
         if not Path(_service_store._path("g1")).resolve().is_relative_to(root.resolve()):
             raise SystemExit("last_activity_backfill: the server does not resolve items inside the scratch copy; refusing to run the pass")
         _web_publish._publish = lambda: None
@@ -132,7 +133,7 @@ def dry_run(a: argparse.Namespace) -> int:
         items = SP.load_dir(d)
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
         now = time.time()
-        host = _stamp.PassHost(server, _stamp, _retire_passes, _merge_progress)
+        host = _stamp.PassHost(server, _stamp, _retire_passes, _merge_progress, _wiring.PASS_NAMES)
         tied, tie_problem = LP.ties(host, now)
         planned = {g: LP.one(host, g, dry=True, tied=tied, now=now, git_store=store) for g in opens}
         wrote = {g: LP.one(host, g, tied=tied, now=now, git_store=store) for g in opens}

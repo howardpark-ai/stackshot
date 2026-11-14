@@ -11,8 +11,8 @@ catch-up, the silence tick and the archive tick. `board=True` marks a tick that 
 
 The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, the hand-off tick from service/handoff.py, the clients' tick and the inbox flag from service/fleet_events.py and the stall pass from service/stall_tick.py,
 and called directly. What stays in server.py is the other tick functions (the phase sweep, the done check, the step proof, the answers, the registry sync, the page-debt fallback) and the publish; the balancer and the filing, dates, silence and
-archive passes are service/audit_ticks.py's. The table calls each of them through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it). A hook is looked
-up when its tick runs, so a suite that replaces the function on server.py is the one called; a suite that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here, and
+archive passes are service/audit_ticks.py's. The table calls each of them through `Hooks`, which web/wiring.py fills once with `install` (web/server.py calls it at its import) (this module cannot import server.py: the surface sits above it). A hook is looked
+up when its tick runs, so a suite that replaces the function on its owner module is the one called; a suite that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here, and
 one that replaces a wake, event-wait, hand-off or stall function sets it on the module that holds it.
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
@@ -44,7 +44,7 @@ from stackshot.waits import watchers as _watch
 
 @dataclass(frozen=True)
 class Hooks:
-    """What the minute set still reaches in server.py: the tick functions and the publish, in the names they have there without the leading underscore. server.py builds one and gives it to `install`."""
+    """What the minute set still reaches in server.py: the tick functions and the publish, in the names they have there without the leading underscore. web/wiring.py builds one and gives it to `install`."""
     phase_tick: Callable[[], Any]  # stamp._phase_tick
     balance_tick: Callable[[], Any]  # service.audit_ticks._balance_tick
     answer_tick: Callable[[], Any]  # service.answer._answer_tick
@@ -70,7 +70,7 @@ def install(hooks: Hooks) -> None:
 
 def _hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the minute set has no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the minute set has no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
 
 

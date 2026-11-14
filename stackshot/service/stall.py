@@ -5,7 +5,7 @@ due are waits/stall.py and, with the one ladder on, waits/ladder.py). This modul
 when it first ran), the pause switch and its record, <state>/stall_pause.json, the readers of a mover and of an item's version, and the steps themselves: the notice sent once more (`stall_resend`), the cold call
 (`stall_cold`, through service/handoff_cold.py) and the project's builder (`stall_builder`, through the hand-off pass's `handoff_exec`). The one ladder is service/ladder.py.
 
-What it still reaches in server.py comes through `Hooks` in service/stall_hooks.py, looked up when it runs, so a suite that replaces one on server.py is the one called. A suite that replaces a function or a clock
+What it still reaches in server.py comes through `Hooks` in service/stall_hooks.py, looked up when it runs, so a suite that replaces one on its owner module is the one called. A suite that replaces a function or a clock
 of this module sets it here (and `time` here, since this module reads its own).
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

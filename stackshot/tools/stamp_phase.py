@@ -193,12 +193,14 @@ def fields_only(server: Any) -> Any:
 
 def display_of(server: Any, it: dict[str, Any], gid: str, stored: bool = False) -> dict[str, Any]:
     """Everything the board shows of an item that the stamp must leave alone, and whether the watchers own it: the 7-state word and wait the model shows, the list word, the model line, get's text and the brief's block.
-    `stored` False: as the stamp proof has always read it (the fields alone, the writer's reading). True: as the readers show it now (the stored pair decides alive or waiting and the kind of the wait)."""
+    `stored` False: as the stamp proof has always read it (the fields alone, the writer's reading). True: as the readers show it now (the stored pair decides alive or waiting and the kind of the wait). `server` is the server module the callers hand over; each reader is looked up on its owner module."""
     from stackshot.model import model as _model  # noqa: PLC0415
+    from stackshot.service import client_reads as _client_reads, item_read as _item_read  # noqa: PLC0415
+    from stackshot.web.tools import get as _tool_get, notes as _tool_notes  # noqa: PLC0415
     probe = {**it, "gid": gid}
-    mod = _model.view(probe, server._item_read._model_of(probe), after_open=lambda i_: server._item_read._after_open(i_.get("metadata") or {}), check=stored)
+    mod = _model.view(probe, _item_read._model_of(probe), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}), check=stored)
     return {"today": mod.today or "", "state": mod.state, "kind": mod.wait.kind if mod.wait else "", "until": mod.wait.until if mod.wait else "", "backstop": mod.wait.backstop if mod.wait else "",
-            "conflicts": list(mod.conflicts), "list": server._client_reads._item_list(probe), "model": server._tool_notes._model_lines(probe, short=True), "fmt": server._tool_get._fmt(probe), "brief": server._tool_get._fmt(probe, brief=True)}
+            "conflicts": list(mod.conflicts), "list": _client_reads._item_list(probe), "model": _tool_notes._model_lines(probe, short=True), "fmt": _tool_get._fmt(probe), "brief": _tool_get._fmt(probe, brief=True)}
 
 
 def ends_within(mod_until: str, backstop: str, tz: Any, now: float) -> bool:

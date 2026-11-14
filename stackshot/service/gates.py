@@ -4,9 +4,9 @@ Every gate raises `ToolError` itself, with the sentence the writer reads, and re
 write leaves, or the arguments it passes, against a rule of the model (model/, waits/, anchors/) and never writes. `service/create.py` and `service/update.py` call them in the order those modules keep; the order is part
 of what a write means. The checks that come before the lock (`fix_front_mover`, `until_in`, `ask_pre`, `gate_self_wait`) are called by the tool wrappers on the surface, which are in web/tools/ and only parse input.
 
-What stays on server.py, and is reached through `Hooks` (which server.py fills once with `install`; this module cannot import server.py, the surface sits above it): the per-write thread-local flags (`question`,
+What stays on server.py, and is reached through `Hooks` (which web/wiring.py fills once with `install` (web/server.py calls it at its import); this module cannot import server.py, the surface sits above it): the per-write thread-local flags (`question`,
 `terminal_row`, `reformat`, `session_next`, read through accessors until the telling and the routes that set them move), the helpers of the areas that still sit there (the hand-off machinery, the roster and the contact
-lookups, the effective state, the wake parser, the anchors scoped to an item) and what the renderer answers (the answers and times). A function hook is looked up on server.py when a gate
+lookups, the effective state, the wake parser, the anchors scoped to an item) and what the renderer answers (the answers and times). A function hook is looked up on its owner module (by web/wiring.py) when a gate
 runs, so a suite that replaces one there still reaches the gate; a suite that replaces a gate patches it here, on its owner.
 
 The rules of an item's fields and of an ask's options are model/'s (`field_gates.py`, `decision_gates.py`), called on those modules. The metadata gate looks a project's page up in the registry and may rebuild it, so it
@@ -121,7 +121,7 @@ def install(hooks: Hooks) -> None:
 
 def _hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the gates have no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the gates have no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
 
 

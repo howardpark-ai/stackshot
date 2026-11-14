@@ -7,12 +7,13 @@ a function on its owner reaches the passes. Three steps, called once each by web
   build()               the MCP application (web/app.py): FastMCP, the middleware, the tools and the routes, which take their callables from here, late-bound
   install_late()        the hand-off clock's name and the thirteen other hook tables
 
-`server.py` runs as `__main__`, so this module cannot import it: `install_early` is handed the server module, and `_late(name)` looks a name up on it when the hook runs (a suite that replaces `_session_id`, `_owed_mark`,
-`_roles_sync_safe` and the like on `server` is the one the tables call). A name that has an owner module is looked up on that module (`_late_in`).
+`server.py` runs as `__main__`, so this module cannot import it: `install_early` is handed the server module, which is the first owner of the `S` the passes written against it read (`pass_host` in the runner's table). Every hook of a table is looked up on the module that owns it
+(`_late_in(module, "name")`, a `getattr` when the hook runs), never on the server module: a suite that replaces `_session_id`, `_owed_mark` and the like sets them on `stackshot.web.page_debts`, `_roles_sync_safe` on `stackshot.projects.project_registry`.
 The comments above each table are the server's own, from where the tables were written: "this module" in them is the server module."""
 from __future__ import annotations
 import importlib
-import time
+import time             # the clock `_busy_live` reads (`time.time`): a suite that pins the clock sets `time` on this module too
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
@@ -81,18 +82,22 @@ from stackshot.web.page_debts import _OWED_LOCK
 from stackshot.web import render as _rmod
 from stackshot.router import router_live as _router_live
 from stackshot.projects import pages as _pages
+from stackshot.anchors import event_log as _elog
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.web import publish as _pubmod
+from stackshot.web import middleware as _middleware
+from stackshot.projects import project_registry as _project_registry
+from stackshot.service import projects as _projects_svc
 from stackshot.service import foryou_hooks as _foryou_hooks
 from stackshot.service import event_activity as _event_activity
 from stackshot.audit import audit_checks as _ac
 
-_HOST: Any = None       # the server module, set by `install_early`: what `_late` looks a name up on
+_HOST: Any = None       # the server module, set by `install_early`: the first owner of the passes' `S` (`pass_host` below)
 
-
-def _late(name: str) -> Callable[..., Any]:
-    """A function of the server module looked up when it is called (not when the table below is built), so a suite that replaces it there reaches the create."""
-    return lambda *a, **k: getattr(_HOST, name)(*a, **k)
+# The names the passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py) read off their `S` that neither the server module nor service/stamp.py,
+# service/retire_passes.py or service/merge_progress.py carries: the owners of the renderer, the pull-request event log and the merge pass. A suite or a tool that builds its own `stamp.PassHost` names this
+# namespace as its last owner.
+PASS_NAMES = SimpleNamespace(_rmod=_rmod, _elog=_elog, _merge_progress=_merge_progress)
 
 
 def _late_in(module: Any, name: str) -> Callable[..., Any]:
@@ -140,7 +145,7 @@ def _front_held(*a: Any, **k: Any) -> Any:
 
 
 def install_early(host: Any) -> None:
-    """The first step: the write path's steps, the GitHub mirror's hooks, the default mover, the page gate's switch and the router's and queue's switches. `host` is the server module (what `_late` looks up)."""
+    """The first step: the write path's steps, the GitHub mirror's hooks, the default mover, the page gate's switch and the router's and queue's switches. `host` is the server module, the first owner of the passes' `S` (`pass_host`)."""
     global _HOST
     _HOST = host
 
@@ -225,9 +230,9 @@ def install_late() -> None:
         builder_for=_late_in(_agents, "_builder_for"),
         check_changed=lambda *a, **k: _checks.check_changed(*a, **k),
         check_lane_shown=lambda *a, **k: _checks.check_lane_shown(*a, **k),
-        debt_mover=_late("_debt_mover"),
+        debt_mover=_late_in(_pdebts, "_debt_mover"),
         front_handed_by_peer=lambda *a, **k: _handoff.front_handed_by_peer(*a, **k),
-        grace_min=_late("_grace_min"),
+        grace_min=_late_in(_pdebts, "_grace_min"),
         handoff_builder=lambda *a, **k: _handoff.handoff_builder(*a, **k),
         handoff_on=lambda *a, **k: _handoff.handoff_on(*a, **k),
         handoff_pane_row=lambda *a, **k: _handoff.handoff_pane_row(*a, **k),
@@ -237,12 +242,12 @@ def install_late() -> None:
         ho_same=lambda *a, **k: _handoff.ho_same(*a, **k),
         main_agent=_late_in(_agents, "_main_agent"),
         model_of=_late_in(_item_read, "_model_of"),
-        owed_mark=_late("_owed_mark"),
+        owed_mark=_late_in(_pdebts, "_owed_mark"),
         rmod_outcome_word=lambda *a, **k: _rmod.outcome_word(*a, **k),
         role_name=_late_in(_sr, "_role_name"),
         same_sess=_late_in(_sr, "_same_sess"),
-        session_id=_late("_session_id"),
-        shown_needs=_late("_shown_needs"),
+        session_id=_late_in(_pdebts, "_session_id"),
+        shown_needs=_late_in(_pdebts, "_shown_needs"),
         zone=lambda: _wttext.ZONE,
     ))
 
@@ -252,7 +257,7 @@ def install_late() -> None:
         phase_tick=_late_in(_stamp_svc, "_phase_tick"),
         balance_tick=_late_in(_audit_ticks, "_balance_tick"),
         answer_tick=_late_in(_answer_svc, "_answer_tick"),
-        roles_sync_safe=_late("_roles_sync_safe"),
+        roles_sync_safe=_late_in(_project_registry, "_roles_sync_safe"),
         pilot_fallback_tick=_late_in(_pdsvc, "_pilot_fallback_tick"),
         filing_tick=_late_in(_audit_ticks, "_filing_tick"),
         dates_tick=_late_in(_audit_ticks, "_dates_tick"),
@@ -285,7 +290,7 @@ def install_late() -> None:
         rmod_options_of=lambda *a, **k: _rmod.options_of(*a, **k),
         rmod_parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
         rmod_whose=lambda: _rmod.WHOSE,
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         state_end=_late_in(_holders, "_state_end"),
         zone=lambda: _wttext.ZONE,
     ))
@@ -303,7 +308,7 @@ def install_late() -> None:
         load_or_none=_late_in(_item_read, "_load_or_none"),
         model_of=_late_in(_item_read, "_model_of"),
         old_wait_off=_late_in(_item_read, "_old_wait_off"),
-        page_io=_late("_page_io"),
+        page_io=_late_in(_projects_svc, "_page_io"),
         publish=_late_in(_pubmod, "_publish"),
         recovery_role=lambda: _pane_recovery._RECOVERY_ROLE,
         recovery_target=_late_in(_pane_recovery, "_recovery_target"),
@@ -311,7 +316,7 @@ def install_late() -> None:
         role_name=_late_in(_sr, "_role_name"),
         role_of=_late_in(_holders, "_role_of"),
         scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         stall_confirm=lambda *a, **k: _stallsvc.stall_confirm(*a, **k),
         stall_load=lambda *a, **k: _stallsvc.stall_load(*a, **k),
         stall_lock=lambda: _stallsvc.STALL_LOCK,
@@ -331,7 +336,7 @@ def install_late() -> None:
         publish=_late_in(_pubmod, "_publish"),
         queue_map=_late_in(_audit_ticks, "_queue_map"),
         role_name=_late_in(_sr, "_role_name"),
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         silence_clock=lambda *a, **k: _silence_mod().clock(*a, **k),
         silence_minutes=lambda *a, **k: _silence_mod().minutes(*a, **k),
         silence_subagent_running=lambda *a, **k: _silence_mod().subagent_running(*a, **k),
@@ -354,7 +359,7 @@ def install_late() -> None:
         role_name=_late_in(_sr, "_role_name"),
         same_sess=_late_in(_sr, "_same_sess"),
         session_down=_late_in(_pane_recovery, "_session_down"),
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         session_roster=_late_in(_agents, "_session_roster"),
         wait_end_sent_back=_late_in(_wait_fixes, "_wait_end_sent_back"),
     ))
@@ -365,7 +370,7 @@ def install_late() -> None:
     _passes_hooks.install(_passes_hooks.Hooks(
         after_open=_late_in(_item_read, "_after_open"),
         builder_agent=_late_in(_agents, "_builder_agent"),
-        grace_min=_late("_grace_min"),
+        grace_min=_late_in(_pdebts, "_grace_min"),
         holds_report=lambda *a, **k: _tool_notes._holds_report(*a, **k),
         home_agents=lambda: _home.AGENTS,
         home_list_of=lambda *a, **k: _home.list_of(*a, **k),
@@ -375,14 +380,14 @@ def install_late() -> None:
         notice_asked=lambda *a, **k: _tool_get._notice_asked(*a, **k),
         notice_report=lambda *a, **k: _tool_get._notice_report(*a, **k),
         outcomes=lambda: OUTCOMES,
-        owed_brain_skip=_late("_owed_brain_skip"),
+        owed_brain_skip=_late_in(_pdebts, "_owed_brain_skip"),
         owed_lock=lambda: _OWED_LOCK,
-        owed_load=_late("_owed_load"),
-        owed_readable=_late("_owed_readable"),
-        owed_save=_late("_owed_save"),
-        owed_settle=_late("_owed_settle"),
+        owed_load=_late_in(_pdebts, "_owed_load"),
+        owed_readable=_late_in(_pdebts, "_owed_readable"),
+        owed_save=_late_in(_pdebts, "_owed_save"),
+        owed_settle=_late_in(_pdebts, "_owed_settle"),
         page_ts=lambda *a, **k: _pdebts._page_ts(*a, **k),      # the owner module's own function, looked up at each call: a suite that puts a page's time in place of the real one sets it on page_debts
-        pass_host=lambda: _stamp_svc.PassHost(_HOST, _stamp_svc, _retire_passes, _merge_progress),
+        pass_host=lambda: _stamp_svc.PassHost(_HOST, _stamp_svc, _retire_passes, _merge_progress, PASS_NAMES),
         pid_write_op=_late_in(_stamp_svc, "_pid_write_op"),
         publish=_late_in(_pubmod, "_publish"),
         queue_map=_late_in(_audit_ticks, "_queue_map"),
@@ -397,7 +402,7 @@ def install_late() -> None:
         scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
         script_sender=_late_in(_owner_words, "_script_sender"),
         sender_not_owner=_late_in(_owner_words, "_sender_not_owner"),
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         settle_apply=_late_in(_holders, "_settle_apply"),
         shown_needs=lambda *a, **k: _pdebts._shown_needs(*a, **k),
         shown_ref=lambda *a, **k: _pdebts._shown_ref(*a, **k),
@@ -437,8 +442,8 @@ def install_late() -> None:
         options_of=lambda *a, **k: _rmod.options_of(*a, **k),
         parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
         publish=_late_in(_pubmod, "_publish"),
-        session_id=_late("_session_id"),
-        unlink_ids=_late("_unlink_ids"),
+        session_id=_late_in(_pdebts, "_session_id"),
+        unlink_ids=_late_in(_middleware, "_unlink_ids"),
         wait_words=lambda *a, **k: _ac.wait_words(*a, **k),
         when_words=lambda *a, **k: _rmod.when_words(*a, **k),
         yesno_options=lambda *a, **k: _rmod.yesno_options(*a, **k),
@@ -463,14 +468,14 @@ def install_late() -> None:
         model_guards_on=_late_in(_item_read, "_model_guards_on"),
         nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
         next_put=_late_in(_asks, "_next_put"),
-        owed_mark=_late("_owed_mark"),
+        owed_mark=_late_in(_pdebts, "_owed_mark"),
         owner_then_default=_late_in(_mover_steps, "_owner_then_default"),
         parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
         publish=_late_in(_pubmod, "_publish"),
         record_fixes=_late_in(_wait_fixes, "_record_fixes"),
         refuse_if_owing=_late_in(_pdebts, "_refuse_if_owing"),
         said_note=_late_in(_owner_words, "_said_note"),
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         wait_alias_gate=_late_in(_wait_fixes, "_wait_alias_gate"),
         wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
         writer_owes=_late_in(_pdebts, "_writer_owes"),
@@ -492,7 +497,7 @@ def install_late() -> None:
         contact_same=_late_in(_contacts, "_contact_same"),
         eff_state=_late_in(_mover_steps, "_eff_state"),
         follow_superseded=_late_in(_mover_steps, "_follow_superseded"),
-        front_held=lambda *a, **k: _front_held(*a, **k),      # this module's own function, looked up at each call (it was the server's, reached with `_late`)
+        front_held=lambda *a, **k: _front_held(*a, **k),      # this module's own function, looked up at each call (it was the server's, looked up on it at each call)
         front_pair_ok=_late_in(_holders, "_front_pair_ok"),
         handoffs_in=_late_in(_agents, "_handoffs_in"),
         handover_kind=lambda *a, **k: _proofs.handover_kind(*a, **k),
@@ -510,9 +515,9 @@ def install_late() -> None:
         role_of=_late_in(_holders, "_role_of"),
         same_sess=_late_in(_sr, "_same_sess"),
         scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         session_roster=_late_in(_agents, "_session_roster"),
-        shown_ref=_late("_shown_ref"),
+        shown_ref=_late_in(_pdebts, "_shown_ref"),
         store_ref=_late_in(_sr, "_store_ref"),
         wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
         when_words=lambda *a, **k: _rmod.when_words(*a, **k),
@@ -557,7 +562,7 @@ def install_late() -> None:
         nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
         name_on_write=_late_in(_agent_names, "_name_on_write"),
         next_put=_late_in(_asks, "_next_put"),
-        owed_mark=_late("_owed_mark"),
+        owed_mark=_late_in(_pdebts, "_owed_mark"),
         owner_quote_on=_late_in(_owner_words, "_owner_quote_on"),
         owner_state_mover=_late_in(_mover_steps, "_owner_state_mover"),
         owner_then_default=_late_in(_mover_steps, "_owner_then_default"),
@@ -573,7 +578,7 @@ def install_late() -> None:
         render_when_words=lambda *a, **k: _rmod.when_words(*a, **k),
         said_note=_late_in(_owner_words, "_said_note"),
         scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
-        session_id=_late("_session_id"),
+        session_id=_late_in(_pdebts, "_session_id"),
         session_roster=_late_in(_agents, "_session_roster"),
         state_apply=_late_in(_mover_steps, "_state_apply"),
         state_end=_late_in(_holders, "_state_end"),

@@ -12,8 +12,8 @@ with `.on` around a write (`session_write` is the create and update tools' own);
 `MENTIONED`, `HO_STATE`) are on service/telling.py.
 
 The steps that still read server.py's own code (the mover's settling, his step, the ask record, the three hand-off steps, the phase, the search index, the
-hand-back line, the pending answer) are reached through `Steps`, which server.py fills once with `install`: this module cannot import server.py (the surface sits above it), and each of those
-functions leaves `Steps` when its area moves under service/. Steps are looked up when a save runs, so a suite that replaces one on server.py still reaches the save.
+hand-back line, the pending answer) are reached through `Steps`, which web/wiring.py fills once with `install` (web/server.py calls it at its import): this module cannot import server.py (the surface sits above it), and each of those
+functions leaves `Steps` when its area moves under service/. Steps are looked up when a save runs, so a suite that replaces one on its owner module still reaches the save.
 
 Imports point down only: this module imports the domain and core, and the store's readers beside it (service/store.py), never web/."""
 from __future__ import annotations
@@ -123,7 +123,7 @@ QUIET = WriteContext(settle=SETTLE_QUIET)       # a write that only files, re-bu
 
 @dataclass(frozen=True)
 class Steps:
-    """The steps of a save whose code is still server.py's, in the order `save` calls them; server.py builds one and gives it to `install`. A step that fails inside is its own to catch (each one
+    """The steps of a save whose code is still server.py's, in the order `save` calls them; web/wiring.py builds one and gives it to `install`. A step that fails inside is its own to catch (each one
     prints its failure and never fails the write), as before. `quiet` is True for a QUIET write."""
     settle_mover: Callable[[dict[str, Any], "dict[str, Any] | None"], Any]
     owner_steps: Callable[[dict[str, Any], "dict[str, Any] | None", str, "tuple[str, str] | None"], Any]
@@ -245,7 +245,7 @@ def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", autho
     activity happened, for one the server reads later (the owner's GitHub comment): the clock takes that time, never later than now and never earlier than it already read (activity.stamp)."""
     steps = _steps
     if steps is None:
-        raise RuntimeError("the write path has no steps installed (server.py installs them at its import)")
+        raise RuntimeError("the write path has no steps installed (web/wiring.py installs them, called from web/server.py at its import)")
     _ro.guard("item write")                   # the lowest store-write layer; a warm standby copy never writes an item
     writer = str(writer or "").strip()        # a blank writer is the server's own act, never an author-less `[author: unknown · -]`
     p = _path(gid)

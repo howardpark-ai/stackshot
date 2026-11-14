@@ -53,6 +53,7 @@ from stackshot.audit import busy_hold, subagent_tie
 from stackshot.core import config as _cfg
 from stackshot.web import server
 from stackshot.web import wiring    # `_busy_live` is web/wiring.py's
+from stackshot.service import released_live as _rlive, store as _svcstore, handoff as _handoff_svc
 from stackshot.web import publish as _web_publish
 from stackshot.service import audit_ticks as audit_ticks_svc, gates, telling, update as update_svc
 from stackshot.tools import next_report as _nr
@@ -109,7 +110,7 @@ def live_for(subs=None, raises=None, anch=None, items=None):
     """The gate's `live` callable as the server builds it (audit/busy_hold.py), over the scratch store and a fake `subagents`."""
     def live(gid, mover):
         return busy_hold.live_work(gid, mover, subagents=(lambda who: (_ for _ in ()).throw(raises)) if raises is not None else (lambda who: subs if who == BACK else []),
-                                   items=items or (lambda: _nr.load_all(None)), anchored=lambda: anch or {}, same=server._handoff.ho_same, shown=_nr.shown)
+                                   items=items or (lambda: _nr.load_all(None)), anchored=lambda: anch or {}, same=_handoff_svc.ho_same, shown=_nr.shown)
     return live
 def gate(live, sender=BACK, gid="a1", **kw):
     kw.setdefault("hold", True)
@@ -225,11 +226,11 @@ with patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
     check("3 a hold written together with done= is not refused", not refused(got), got)
     put(1, mover=BACK)
     SUBS[:] = [sub("Build the export fix, PR 77")]
-    with patched(server._rlive, released_anchors=lambda: {"a1": {"acme/stack#77"}}):
+    with patched(_rlive, released_anchors=lambda: {"a1": {"acme/stack#77"}}):
         got = update(1, **HOLD)
     check("3 the anchors the server reads (released_anchors) are the ones that tie a subagent that names a pull request", refused(got) and "PR 77" in got[1], got)
     put(1, mover=BACK)
-    with patched(server._rlive, released_anchors=lambda: 1 / 0):
+    with patched(_rlive, released_anchors=lambda: 1 / 0):
         got = update(1, **HOLD)
     check("3 anchors that cannot be read are unknown: the write passes", got[0] == "ok", got)
     put(1, mover=BACK)
@@ -260,7 +261,7 @@ check("3b …no note while a running subagent of the mover is tied to the item (
 got = note_of(8, [sub("Build the overnight run, PR 90")])
 check("3b …a subagent that names a pull request nothing anchors is not tied: the note stays", got[0] == "ok" and got[1].count(NOTE) == 1, got)
 doing(8)
-with patched(server._rlive, released_anchors=lambda: {"a8": {"acme/stack#90"}}):
+with patched(_rlive, released_anchors=lambda: {"a8": {"acme/stack#90"}}):
     got = note_of(8, [sub("Build the overnight run, PR 90")])
 check("3b …tied by an anchored pull request (PR 90 anchored to the item): no note", got[0] == "ok" and NOTE not in got[1], got)
 got = note_of(8, [sub("Build @2: the other fix")])

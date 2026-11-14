@@ -12,8 +12,8 @@ The per-write state the telling keeps on a thread (`CLOSE_WAS`, the item as it s
 `SESSION_NEXT`) live in service/writes.py.
 
 What stays in server.py is what needs the web layer or the live pane list: the hand-off record's own functions (the pane a hand-off went to, what it said), the page keeper lookups of a project's agents, the
-page debt's marks, and the time zone. They are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it);
-a hook is looked up on server.py when a notice is told, so a suite that replaces one there still reaches the telling. A suite that replaces a function of the telling patches it on this module.
+page debt's marks, and the time zone. They are reached through `Hooks`, which web/wiring.py fills once with `install` (web/server.py calls it at its import) (this module cannot import server.py: the surface sits above it);
+a hook is looked up on its owner module (by web/wiring.py) when a notice is told, so a suite that replaces one there still reaches the telling. A suite that replaces a function of the telling patches it on this module.
 
 Imports point down only: this module imports the domain, core and the write path (service/writes.py, service/store.py), never web/ or audit/."""
 from __future__ import annotations
@@ -54,7 +54,7 @@ from stackshot.waits import handoff as _ho, held as _held, quiet as _frontq
 @dataclass(frozen=True)
 class Hooks:
     """What the telling still reaches in server.py (the hand-off record's functions, the page keepers of a project's agents, the page debt's marks and the time zone), in the names they have
-    there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
+    there without the leading underscore. web/wiring.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     back_agent: Callable[..., Any]  # service/agent_names.py _back_agent
     builder_for: Callable[..., Any]  # agents._builder_for
     check_changed: Callable[..., Any]  # server lambda to checks.check_changed
@@ -91,7 +91,7 @@ def install(hooks: Hooks) -> None:
 
 def _hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the telling has no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the telling has no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
 
 

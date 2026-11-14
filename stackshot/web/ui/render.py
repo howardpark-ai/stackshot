@@ -1411,12 +1411,12 @@ document.addEventListener('stackshot:swapped',all);window.addEventListener('page
 def _card_order(opts):
     """The options in the order the answer box draws them. Three or more are drawn, and lettered, in the order the owner stored them, because a session writes its ask ("Recommend: B, …")
     in that order and the letter on a card has to agree with it; the recommended card keeps its badge wherever it sits. Two (Approve and Decline, Yes and No) carry no letters and keep the
-    page's rule of the recommended one first. server._split_letter derives the letter from the same stored order."""
+    page's rule of the recommended one first. web/answers.py `_split_letter` derives the letter from the same stored order."""
     return list(opts) if len(opts) >= 3 else sorted(opts, key=lambda o: not o["recommended"])
 def _cards_html(opts) -> str:
     """The option cards of the answer box: opts = [{"label", "line", "recommended"}] in the order drawn (_card_order). One label-wrapped radio (name=choice) per option,
     showing the label, the "recommended" badge on the recommended one and the whole text of the option; three or more options are lettered A, B, C by their place in the list and the radio's value is
-    "B · <label>" (the server splits it again, server._split_letter), two carry no letters and post the bare label. Nothing here is a button: the page script's Send is the only way to send."""
+    "B · <label>" (the server splits it again, web/answers.py `_split_letter`), two carry no letters and post the bare label. Nothing here is a button: the page script's Send is the only way to send."""
     lettered = len(opts) >= 3
     cards = []
     for i, o in enumerate(opts):

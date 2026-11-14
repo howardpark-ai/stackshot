@@ -8,8 +8,8 @@ sessions the item names, publishes, and builds the reply. The order of those ste
 The request map (`requests.json`: a request id and the item it filed) is this module's: a retry with the same request id returns the item the first call made (`_requests`, `_remember_request`).
 
 The write gates a create runs are service/gates.py's (`_gates.gate_*`, in the order they ran in server.py), the field and decision rules model/'s (`field_gates.py`, `decision_gates.py`, the similar-items rule `similar.py`), each called on its
-module. The notices a create runs and the helpers of the areas that still sit in server.py are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves
-`Hooks` when its area moves under service/. A hook is looked up on server.py when a create runs, so a suite that replaces one there still reaches the create; a suite that replaces a gate or a rule patches it on its owner. Three thread-local flags of server.py are read by a create and also by the gates, the update tool and the telling, so they
+module. The notices a create runs and the helpers of the areas that still sit in server.py are reached through `Hooks`, which web/wiring.py fills once with `install` (web/server.py calls it at its import) (this module cannot import server.py: the surface sits above it), and each of them leaves
+`Hooks` when its area moves under service/. A hook is looked up on its owner module (by web/wiring.py) when a create runs, so a suite that replaces one there still reaches the create; a suite that replaces a gate or a rule patches it on its owner. Three thread-local flags of server.py are read by a create and also by the gates, the update tool and the telling, so they
 stay thread-locals there until those areas move and a create reads them through `Hooks`: `session_next` (the create or update tool's own call, set by `session_write`), `question` (a script's
 question: set by the question, terminal-prompt and watcher routes around their create) and `terminal_row` (the terminal prompt's and the job-gap routes' row).
 
@@ -110,7 +110,7 @@ def similar_note(gid: str, subject: str, project: str) -> str:
 @dataclass(frozen=True)
 class Hooks:
     """What a create still reaches in server.py (the notices and helpers it shares with the update tool, the close and the telling, the thread-local flags, a constant), in the names
-    they have there without the leading underscore; server.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads the thread-local."""
+    they have there without the leading underscore; web/wiring.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads the thread-local."""
     after_open: Callable[..., Any]
     anchor_wait_gate: Callable[..., Any]
     ask_owed: Callable[..., Any]
@@ -151,7 +151,7 @@ def install(hooks: Hooks) -> None:
 
 def _hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the create has no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the create has no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
 
 

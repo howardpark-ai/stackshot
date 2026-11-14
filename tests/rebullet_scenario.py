@@ -475,7 +475,7 @@ item(9017, letter="g", desc=THICK, su=now0 - 9 * DAY); item(9009, letter="g", su
 item(9024, letter="g", desc=THICK.replace("shelf-2", "home-bob"), su=now0 - 9 * DAY); item(9023, letter="g", desc=PLAIN, su=now0 - 9 * DAY)
 before = {n: raw(n, "g") for n in (9017, 9009, 9031, 9024, 9023)}
 told = []
-for mod, fn in ((telling, "pilot_relay"), (server, "_owed_mark"), (telling, "tell_owner")):
+for mod, fn in ((telling, "pilot_relay"), (_web_page_debts, "_owed_mark"), (telling, "tell_owner")):
     orig = getattr(mod, fn)
     setattr(mod, fn, (lambda o, f: (lambda *a, **k: (told.append(f), o(*a, **k))[1]))(orig, fn))
 post = lambda what, body, timeout: _rt_client._client_post(SERVER_BOX, what, body)

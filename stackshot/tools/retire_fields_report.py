@@ -50,13 +50,13 @@ say = MM.say
 def reading(server: Any, it: dict[str, Any], gid: str, now: float) -> dict[str, Any]:
     """What the fields give for the item at the clock now (retire_passes._retire_reading: phase, kind of wait, mover, watched) and, apart, the list and the old
     state word it reads as."""
-    from stackshot.service import retire_passes as _retire_passes  # noqa: PLC0415
+    from stackshot.service import client_reads as _client_reads, item_read as _item_read, retire_passes as _retire_passes  # noqa: PLC0415
     probe = {**it, "gid": gid}
-    ao = lambda i_: server._item_read._after_open(i_.get("metadata") or {})      # noqa: E731
+    ao = lambda i_: _item_read._after_open(i_.get("metadata") or {})      # noqa: E731
     with SP.frozen(now), SP.fields_only(server):
         r = _retire_passes._retire_reading(gid, it)
-        mod = server._item_read._model_of(probe)
-        return {**r, "list": server._client_reads._item_list(probe), "word": mod.today}
+        mod = _item_read._model_of(probe)
+        return {**r, "list": _client_reads._item_list(probe), "word": mod.today}
 
 
 def dry_run(a: argparse.Namespace) -> int:

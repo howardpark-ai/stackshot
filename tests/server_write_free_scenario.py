@@ -7,8 +7,8 @@ to reach the notices through hooks. This suite holds what is true now:
                  are on service/telling.py, and no other service module makes one
   2  tables      the fourteen hook tables the server installs (the item readers', the For you rows', the save steps' and the owner's words', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, once each, by the two install steps of web/wiring.py (`install_early`, `install_late`), which web/server.py calls once each at the top of its module (never inside a function)
   3  values      what a table takes as a plain value (not a function, not a late lookup) is a constant of the module that cannot change after the install, so a copy taken at the install cannot go stale; a late
-                 lookup (`_late("name")`, a call in web/wiring.py) is a lookup by name made on the server module when the hook runs, so it captures nothing, and each one must name a function or value the server module defines; a late lookup on an
-                 owner module (`_late_in(module, "name")`) is the same lookup on that module, and must name a function or value that module defines
+                 lookup (`_late_in(module, "name")`, a call in web/wiring.py) is a lookup by name made on the owner module when the hook runs, so it captures nothing, and each one must name a function or value that module defines; no table looks
+                 a name up on the server module (web/server.py defines no name a table reads)
   4  telling     no table of a service module holds a field that the telling answers: create, gates and update call service/telling.py on the module
 
     tests/run-suite server_write_free    -> exit 0 / 1"""
@@ -89,7 +89,7 @@ for node, tab in installs:
         lc = late_call(kw.value)
         if lc and lc[0] is None: late_names.setdefault(lc[1], []).append(f"{tab}.{kw.arg}")
         elif lc: late_owned.setdefault(lc, []).append(f"{tab}.{kw.arg}")
-check("3 every late lookup of every table names something the server module defines", bool(late_names) and not [n for n in late_names if n not in server_defs], sorted(n for n in late_names if n not in server_defs))
+check("3 no table looks a name up on the server module: every late lookup of every table names its owner module (`_late_in`)", bool(late_owned) and not late_names, sorted(late_names))
 def owner_defs(alias):
     rel = owner_files.get(alias)
     if rel is None or not (PKG / rel).exists(): return None
@@ -97,8 +97,8 @@ def owner_defs(alias):
     return {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | {t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)}
 owner_missing = sorted(f"{a}.{n}" for (a, n) in late_owned if (owner_defs(a) is None or n not in owner_defs(a)))
 check("3 every late lookup on an owner module (`_late_in`) names a module the wiring imports and something that module defines", bool(late_owned) and not owner_missing, owner_missing)
-check("3 the publish functions, the page rule's refusal and its owed-writer test are looked up on their owner modules (a suite that replaces one there reaches every table), never on the server",
-      {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_refuse_if_owing", "_writer_owes"}
+check("3 the publish functions and the page rule's names (its refusal, its owed-writer test, the page debt's marks and readers, the session ids) are looked up on their owner modules (a suite that replaces one there reaches every table), never on the server",
+      {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_refuse_if_owing", "_writer_owes", "_debt_mover", "_grace_min", "_owed_brain_skip", "_owed_load", "_owed_mark", "_owed_readable", "_owed_save", "_owed_settle", "_session_id", "_shown_needs", "_shown_ref"}
       and not {"_publish", "_publish_now", "_publish_every", "_refuse_if_owing", "_writer_owes"} & set(late_names), (sorted(late_owned), sorted(late_names)))
 runner_tab = next((n.value.args[0] for n, t in installs if t == "_runner"), None)
 is_late = lambda v: late_call(v) is not None

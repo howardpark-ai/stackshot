@@ -4,7 +4,7 @@ its build plan, Step 4).
 The migration moves every item onto the model: an open item gets stored what model.derive only infers (its mover, `then`, the wait's kind, input and post-wake mover), the guards'
 residue is filled where the item states what is missing, and a closed item without an outcome gets one. This module is the PLAN, pure of the server: it reads items, the session
 registry, the fleet and the anchors (through model_guards.Ctx) and returns writes and residue lists; it changes nothing. tools/migrate_model.py runs it (and the cold call it needs),
-and the server applies the writes (server.py `_migrate_apply`, behind POST /client/migrate): the script plans, the server is the only writer.
+and the server applies the writes (service/migrations.py `migrate_write`, op `apply`, behind POST /client/migrate): the script plans, the server is the only writer.
 
 A write is `{item, set, drop, expect, kind, note}`: the metadata fields to set and to drop, the item's `updated` it was planned on (an item that moved since is planned again, never
 overwritten), the transition it stands for and a one-line note for the History (no issue comment since an earlier change). The migration records no hand-off, sends no notice and wakes nobody (the server holds the

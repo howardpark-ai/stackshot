@@ -5,7 +5,7 @@ item, when it can no longer pass (a pull request closed unmerged) it records the
 of each kind (`pr_merged`, `unit_active`, `lane_on`), the pass's own state in <state>/checks.json (`checks_load`) and the pass itself (`check_tick`, with `check_close`, `check_fail` and `check_wait`). The readers of
 a pull request's merged state are shared with the step proofs (service/proofs.py) and the event waits (service/event_waits.py): one record per pull request, one GitHub read.
 
-What it still reaches in server.py comes through `Hooks` in service/checks_hooks.py, looked up when it runs, so a suite that replaces one on server.py is the one called. A suite that replaces a function or a
+What it still reaches in server.py comes through `Hooks` in service/checks_hooks.py, looked up when it runs, so a suite that replaces one on its owner module is the one called. A suite that replaces a function or a
 clock of this module sets it here (and `time` here, since this module reads its own).
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

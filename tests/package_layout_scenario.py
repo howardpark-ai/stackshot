@@ -236,5 +236,42 @@ check("pyproject.toml: the entry point stackshot is stackshot.cli:main, and the 
 check("... the suites' dependencies are the `tests` group, the rest are extras", "tests" in pp["dependency-groups"] and {"server", "anchor-hub", "icons"} <= set(pp["project"]["optional-dependencies"]), pp.get("dependency-groups"))
 check("uv.lock is at the root and there is no lock under tests/", (ROOT / "uv.lock").is_file() and not list((ROOT / "tests").glob("*.lock")) and not (ROOT / "tests/uv.lock").exists() and not (ROOT / "tests/pyproject.toml").exists())
 
+# ---- web/server.py is the entry only
+def _server_names(tree):
+    """The names a module binds to stackshot.web.server (`from stackshot.web import server [as x]`, `x = server`)."""
+    al = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module == "stackshot.web":
+            al |= {a.asname or a.name for a in n.names if a.name == "server"}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Name) and n.value.id in al:
+            al |= {t.id for t in n.targets if isinstance(t, ast.Name)}
+    return al
+def _server_writes(path):
+    """Every form that sets, deletes or patches a name on the server module: `server.x = ...`, `setattr(server, ...)`, `patch.object(server, ...)`, `monkeypatch.setattr(server, ...)`, a `(server, "name", value)` row of a patch list, `owners.get(name, server)` as the owner a patch falls back to."""
+    tree = ast.parse(path.read_text(encoding="utf-8")); al = _server_names(tree); hits = []
+    if not al:
+        return hits
+    isal = lambda e: isinstance(e, ast.Name) and e.id in al
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+            for t in (n.targets if isinstance(n, (ast.Assign, ast.Delete)) else [n.target]):
+                for u in ast.walk(t):
+                    if isinstance(u, ast.Attribute) and isal(u.value) and isinstance(u.ctx, (ast.Store, ast.Del)):
+                        hits.append(n.lineno)
+        elif isinstance(n, ast.Call) and n.args and isal(n.args[0]) and (getattr(n.func, "attr", getattr(n.func, "id", "")) in ("setattr", "delattr", "object", "setitem")):
+            hits.append(n.lineno)
+        elif isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "get" and any(isal(x) for x in n.args[1:]):
+            hits.append(n.lineno)       # `owners.get(name, server)`: the server module as the owner a patch falls back to
+        elif isinstance(n, ast.Tuple) and len(n.elts) >= 3 and isal(n.elts[0]) and isinstance(n.elts[1], ast.Constant) and isinstance(n.elts[1].value, str):
+            hits.append(n.lineno)
+    return hits
+_srv = ROOT / "stackshot/web/server.py"
+_srv_lines = len(_srv.read_text(encoding="utf-8").splitlines())
+_srv_f401 = [i for i, l in enumerate(_srv.read_text(encoding="utf-8").splitlines(), 1) if "noqa: F401" in l]
+_srv_writers = {str(f.relative_to(ROOT)): h for d in ("tests", "tools", "stackshot") for f in sorted((ROOT / d).rglob("*.py")) for h in [_server_writes(f)] if h}
+check("web/server.py is the entry only: under 400 lines, no `noqa: F401` re-export in it, and no test, tool or script sets, deletes or patches a name on the server module (the clock chains set `wiring.time`)",
+      _srv_lines < 400 and not _srv_f401 and not _srv_writers, (_srv_lines, _srv_f401, _srv_writers))
+
 print(("ok" if not fails else "FAILED") + f": package layout scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush()
 sys.exit(1 if fails else 0)
