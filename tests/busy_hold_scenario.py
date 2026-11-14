@@ -10,7 +10,7 @@ items as the hourly audit reads it). Unknown is never a refusal.
   2  passes      a subagent tied to ANOTHER item of the mover, none running, a read that is Unreadable or raises, a subagent whose files cannot be read, a running subagent that names no item, a sender that
                  is not the mover, the owner, the guard off, a closing write, done=, a clear_* of the park, a named blocker (wait_kind, after, needs, ask_by), a hand-off to another session, an item that is
                  not open, an item with no mover, no live callable at all
-  3  tool        through the real update tool and the server's own wiring (`server._busy_live`, `server._mover_subagents` replaced by a fake): the refused hold stores nothing; the same write passes once the
+  3  tool        through the real update tool and the server's own wiring (`server._busy_live`, `audit_ticks._mover_subagents` replaced by a fake): the refused hold stores nothing; the same write passes once the
                  subagent has ended, and a status with work= passes while it runs; the anchors the server reads are the ones that tie
   4  shape       the gate is called from the update tool before the item lock and after gate_self_wait, takes its proof as a callable, gates.py imports no audit/ module, the config switch reads live
   5  text        the update tool's text no longer calls the mover's own release or run a wait to park
@@ -53,7 +53,7 @@ from stackshot.audit import busy_hold, subagent_tie
 from stackshot.core import config as _cfg
 from stackshot.web import server
 from stackshot.web import publish as _web_publish
-from stackshot.service import gates, telling, update as update_svc
+from stackshot.service import audit_ticks as audit_ticks_svc, gates, telling, update as update_svc
 from stackshot.tools import next_report as _nr
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.ui import releasing as _rel
@@ -191,7 +191,7 @@ def update(i, **kw):
         return outcome(lambda: _wt_update.stackshot_update(f"a{i}", **kw))
 HOLD = dict(next=f"{BACK}: do it", wake=FUT, hold=True, wait_basis=f"the soak window ends {FUT}")
 check("3 the server hands the update tool its proof (server._busy_live): the tool holds it, and it answers a string", callable(_wt_update._busy_live) and isinstance(_wt_update._busy_live("a1", BACK), str))
-with patched(server, _mover_subagents=fake_server_subs):
+with patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
     SUBS[:] = [sub("Build @1: the export fix")]
     before = json.dumps(read(1), sort_keys=True)
     got = update(1, **HOLD)
@@ -232,7 +232,7 @@ with patched(server, _mover_subagents=fake_server_subs):
         got = update(1, **HOLD)
     check("3 anchors that cannot be read are unknown: the write passes", got[0] == "ok", got)
     put(1, mover=BACK)
-with patched(server, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))):
+with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))):
     got = update(1, **HOLD)
     check("3 a mover whose subagents cannot be read (Unreadable) passes through the tool", got[0] == "ok", got)
 put(1, mover=BACK)
@@ -249,7 +249,7 @@ def note_of(i, subs=None, raises=None, **kw):
     def fake(who, idx=None, now=None):
         if raises is not None: raise raises
         return subs if (subs is not None and who == BACK) else []
-    with patched(server, _mover_subagents=fake):
+    with patched(audit_ticks_svc, _mover_subagents=fake):
         got = update(i, next=WAITING_NEXT, **kw)
     return got
 doing(8); base = update(8, next=WAITING_NEXT)
@@ -291,32 +291,32 @@ def counting(who, idx=None, now=None):
     ASKED.append((who, _lock_held()))
     return [sub("Build @8: the overnight run")] if who == BACK else []
 doing(8)
-with patched(server, _mover_subagents=counting):
+with patched(audit_ticks_svc, _mover_subagents=counting):
     got = update(8, next=WAITING_NEXT)
 check("3b the proof for the note is asked once, with the item lock free (before the write takes it), for the item's holder", got[0] == "ok" and NOTE not in got[1] and ASKED == [(BACK, False)], (got, ASKED))
 ASKED.clear(); doing(8)
-with patched(server, _mover_subagents=counting):
+with patched(audit_ticks_svc, _mover_subagents=counting):
     update(8, next=f"{BACK}: write the parser", work={"text": "x", "state": "in progress"})
     update(8, sender=BACK, hold=True, wake=FUT, wait_basis=f"the soak window ends {FUT}", next=WAITING_NEXT)
 check("3b …never asked for a next that reads as work, and not for a write that holds (the gate asks for a hold, the note cannot be made)", [a for a in ASKED if a[1]] == [] and len(ASKED) <= 1, ASKED)
 ASKED.clear(); put(10, mover=BACK, needs=[BACK])
-with patched(server, _mover_subagents=counting):
+with patched(audit_ticks_svc, _mover_subagents=counting):
     update(10, next=WAITING_NEXT)
 check("3b …nor for an item whose stored state is not doing (no note can follow)", ASKED == [], ASKED)
 ASKED.clear(); doing(8)
-with patched(server, _mover_subagents=lambda who, idx=None, now=None: ASKED.append((who, _lock_held())) or [sub("Build @2: the other fix")]):
+with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: ASKED.append((who, _lock_held())) or [sub("Build @2: the other fix")]):
     got = update(8, hold=True, wake=FUT, wait_basis=f"the soak window ends {FUT}", next=WAITING_NEXT)
 check("3b …a write that holds is asked once, by the hold's gate: the note cannot follow a hold, so the note's proof is not asked again", got[0] == "ok" and len(ASKED) == 1, (got, ASKED))
 ASKED.clear(); put(18, status="completed", mover=BACK, needs=[BACK], state="doing", outcome="done")
-with patched(server, _mover_subagents=counting):
+with patched(audit_ticks_svc, _mover_subagents=counting):
     update(18, next=WAITING_NEXT)
 check("3b …nor for a closed item", ASKED == [], ASKED)
 ASKED.clear(); doing(8)
-with patched(server, _mover_subagents=counting):
+with patched(audit_ticks_svc, _mover_subagents=counting):
     update(8, mover=OTHER, next=f"{OTHER}: " + WAITING_NEXT.split(": ", 1)[1])
 check("3b a write that hands the item to another session asks for the new holder (the one the note would speak to)", ASKED in ([(OTHER, False)], []), ASKED)
 ASKED.clear(); doing(8)
-with patched(server, _mover_subagents=counting):
+with patched(audit_ticks_svc, _mover_subagents=counting):
     got = update(8, sender=OTHER, next=WAITING_NEXT)
 check("3b the note asks the item's holder (its mover), not the sender: another session's write to the item is told nothing of its own runs", [a[0] for a in ASKED] == [BACK] and NOTE not in got[1], (got, ASKED))
 
@@ -347,7 +347,7 @@ finally:
     if _had != "<absent>": _m["busy_hold_guard"] = _had
 check("3c `[model] busy_hold_guard` absent from the config means on: refused", refused(absent) and _had != "<absent>" or refused(absent), absent)
 # through the tool: each parameter the gate reads reaches it
-with patched(server, _mover_subagents=fake_server_subs):
+with patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
     SUBS[:] = [sub("Build @1: the export fix")]
     put(1, mover=BACK)
     got = update(1, **HOLD, clear_hold=True)

@@ -95,7 +95,7 @@ def check(name, cond, got=None):
 ID = re.compile(r"^prj_[0-9a-f]{8}$")
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.service import projects as _psvc
+from stackshot.web import server; from stackshot.service import projects as _psvc; from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.core import config as _cfg
 from stackshot.anchors import anchors as _anc
@@ -1381,17 +1381,17 @@ check("archive: the last agent retired with 2 open items → 200 'line removed',
 check("archive: …the page's status stays active (only the retire's own put), the project is on the wait list", status_of("projects/arc-two") == "active" and len(rio.puts) == 1 and wait_keys() == {"projects/arc-two"}
       and json.loads(AWAIT.read_text())["projects/arc-two"]["by"] == "sala-retire", (rio.puts, wait_keys()))
 rio.puts.clear(); gets0 = len(rio.gets)
-res = server._archive_tick()
+res = audit_ticks_svc._archive_tick()
 check("archive sweep: both items still open → the project waits, nothing is written", res == [("projects/arc-two", res[0][1])] and res[0][1].startswith("waits: 2 open item(s)") and not rio.puts and wait_keys() == {"projects/arc-two"}, res)
 d1 = json.loads(item_file(i1).read_text()); d1["status"] = "completed"; item_file(i1).write_text(json.dumps(d1))
-res = server._archive_tick()
+res = audit_ticks_svc._archive_tick()
 check("archive sweep: one item completed, one left → still waiting", res[0][1].startswith("waits: 1 open item(s)") and not rio.puts and status_of("projects/arc-two") == "active", res)
 d2 = json.loads(item_file(i2).read_text()); d2["metadata"]["project"] = "projects/alpha"; item_file(i2).write_text(json.dumps(d2))
-res = server._archive_tick()
+res = audit_ticks_svc._archive_tick()
 check("archive sweep: the other item handed to another project → the next sweep archives the project (status archived, a timeline line, off the wait list)", res == [("projects/arc-two", "archived")] and status_of("projects/arc-two") == "archived"
       and wait_keys() == set() and tl_texts("projects/arc-two")[-1] == "archived; its last agent was retired and its open items are gone", (res, tl_texts("projects/arc-two")))
 rio.puts.clear(); gets1 = len(rio.gets); n_tl = len(rio.timeline)
-check("archive sweep: a sweep over the same state again does nothing: no read, no write, no timeline line", server._archive_tick() == [] and not rio.puts and len(rio.gets) == gets1 and len(rio.timeline) == n_tl)
+check("archive sweep: a sweep over the same state again does nothing: no read, no write, no timeline line", audit_ticks_svc._archive_tick() == [] and not rio.puts and len(rio.gets) == gets1 and len(rio.timeline) == n_tl)
 
 # (4) a sub-page's open item counts for its project; a pending agent keeps it staffed; an agent back on the page takes it off the list
 i3 = open_item("projects/arc-hub/notes")
@@ -1407,7 +1407,7 @@ i4 = open_item("projects/arc-back")
 rt("projects/arc-back", "home-arc-back-main")
 pverbs.agent_add("projects/arc-back", "home-arc-back-new", True, "back again", by="fleet-web", io=rio)
 d4 = json.loads(item_file(i4).read_text()); d4["status"] = "completed"; item_file(i4).write_text(json.dumps(d4)); rio.puts.clear()
-res = server._archive_tick()
+res = audit_ticks_svc._archive_tick()
 check("archive sweep: a project that has an agent again leaves the list without a write, whatever its items", ("projects/arc-back", "left the list: 1 agent(s) on the project") in res and not rio.puts and "projects/arc-back" not in wait_keys()
       and status_of("projects/arc-back") == "active", res)
 
@@ -1474,7 +1474,7 @@ try:
     check("tool: --apply archives the first (one put, status archived) and puts the second on the wait list", rc == 0 and status_of("projects/arc-late") == "archived" and len(rio.puts) == 1 and status_of("projects/arc-late-items") == "active"
           and "projects/arc-late-items" in wait_keys(), (rc, buf.getvalue(), rio.puts, wait_keys()))
     d5 = json.loads(item_file(i5).read_text()); d5["status"] = "completed"; item_file(i5).write_text(json.dumps(d5))
-    res = dict(server._archive_tick())
+    res = dict(audit_ticks_svc._archive_tick())
     check("tool: …and the sweep then archives the waiting one once its item is completed", res.get("projects/arc-late-items") == "archived" and status_of("projects/arc-late-items") == "archived", res)
 finally:
     AEP._page_debt.page_io = real_pio

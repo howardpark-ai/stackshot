@@ -1,4 +1,4 @@
-"""Scenario test for the ten-minute dates pass (audit_checks.dates_findings, audit_run.dates_pass, server._dates_tick): has an item's own expected time passed with nobody acting? Fixture items, messages
+"""Scenario test for the ten-minute dates pass (audit_checks.dates_findings, audit_run.dates_pass, service/audit_ticks._dates_tick): has an item's own expected time passed with nobody acting? Fixture items, messages
 replaced by recorders, no live store, no network, no model call.
 
   1  the rule: an item whose wake passed with no write since is a `stale` finding with the evidence the daily run gives; a doing item with no date of its own is never found (its quiet is the hourly audit line's), nor is a wake still ahead, a write since the wake, a closed item, an item on the owner, behind an open item or in a state that is itself a wait; a held item follows the stale rule (its wake
@@ -225,42 +225,42 @@ check("2 …and it is sent then", len(sent) == 1 and dsent().count("board#") >= 
 
 # ---- 3. the server's tick
 clear_state()
-from stackshot.web import server; from stackshot.service import foryou_events as fyev
+from stackshot.web import server; from stackshot.service import foryou_events as fyev; from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import messaging as _messaging
 for k, v in pass_items.items(): (T / f"store/a/{k[1:]}.json").write_text(json.dumps(v))
 msgs = []
 real_msg = _messaging._message
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
 _cfg.CFG["audit"]["enabled"] = False
-check("3 the expected-time look stands still while the audit is off", server._dates_expected_tick() is None and msgs == [])
+check("3 the expected-time look stands still while the audit is off", audit_ticks_svc._dates_expected_tick() is None and msgs == [])
 _cfg.CFG["audit"]["enabled"] = True; _cfg.CFG["audit"]["mode"] = "agent"
-check("3 …and in agent mode (the rollback)", server._dates_expected_tick() is None and msgs == [])
+check("3 …and in agent mode (the rollback)", audit_ticks_svc._dates_expected_tick() is None and msgs == [])
 _cfg.CFG["audit"]["mode"] = "script"
 fyev._FORYOU_LAST[0] = time.time() + 1e6              # the For-you look's own gate is shut …
-res = server._dates_tick()
+res = audit_ticks_svc._dates_tick()
 check("3 the dates pass still opens the For-you look's gate, so the look runs every ten minutes", fyev._FORYOU_LAST[0] < time.time() + 1000 and res == [], fyev._FORYOU_LAST[0])
 check("3 …and its expected-time look sends through the server's own message function, as the audit's sender, from a script (not as a session)",
       msgs and all(m[2] == "stackshot audit" and m[3] == "server" and m[4] == os.uname().nodename and m[5] is False for m in msgs) and any("board#1 · stale" in m[1] for m in msgs), msgs[:1])
 check("3 …the findings it sent are on the record", fp.exists() and {f["id"] for f in json.loads(fp.read_text())["findings"]} >= {"board#1", "board#9013"})
 msgs.clear()
-server._dates_tick()
+audit_ticks_svc._dates_tick()
 check("3 the next tick sends nothing new", msgs == [])
-real_fy, real_ex = fyev._foryou_tick, server._dates_expected_tick
+real_fy, real_ex = fyev._foryou_tick, audit_ticks_svc._dates_expected_tick
 ran_log = []
 fyev._foryou_tick = lambda *a, **k: (ran_log.append("foryou"), ["a1"])[1]
-server._dates_expected_tick = lambda: ran_log.append("expected")
-check("3 the tick returns the For-you look's gids and runs both looks", server._dates_tick() == ["a1"] and ran_log == ["foryou", "expected"], ran_log)
+audit_ticks_svc._dates_expected_tick = lambda: ran_log.append("expected")
+check("3 the tick returns the For-you look's gids and runs both looks", audit_ticks_svc._dates_tick() == ["a1"] and ran_log == ["foryou", "expected"], ran_log)
 def boom(*a, **k): ran_log.append("foryou"); raise RuntimeError("for-you broke")
 fyev._foryou_tick = boom; ran_log.clear()
-try: server._dates_tick(); err = None
+try: audit_ticks_svc._dates_tick(); err = None
 except RuntimeError as e: err = str(e)
 check("3 an error in the For-you look does not stop the expected-time look, and is raised after it (the runner records it)", ran_log == ["foryou", "expected"] and err == "for-you broke", (ran_log, err))
 def boom2(): ran_log.append("expected"); raise RuntimeError("dates broke")
-fyev._foryou_tick = lambda *a, **k: (ran_log.append("foryou"), [])[1]; server._dates_expected_tick = boom2; ran_log.clear()
-try: server._dates_tick(); err = None
+fyev._foryou_tick = lambda *a, **k: (ran_log.append("foryou"), [])[1]; audit_ticks_svc._dates_expected_tick = boom2; ran_log.clear()
+try: audit_ticks_svc._dates_tick(); err = None
 except RuntimeError as e: err = str(e)
 check("3 …and an error in the expected-time look is raised too, after the For-you look has run", ran_log == ["foryou", "expected"] and err == "dates broke", (ran_log, err))
-fyev._foryou_tick, server._dates_expected_tick = real_fy, real_ex
+fyev._foryou_tick, audit_ticks_svc._dates_expected_tick = real_fy, real_ex
 _messaging._message = real_msg
 
 if fails:

@@ -364,7 +364,7 @@ AUDIT_BALANCE_MINUTES = 10.0
 
 def audit_balance() -> bool:
     """[audit] balance: an item not started, or queued behind its mover's other item, that has waited `balance_minutes` goes to the builder of its own project with the fewest open items (never another project's), and the mover it left is told to disregard it
-    (audit/hand_idle.py, server._balance_tick). Default true; a TOML false, or any value that is not a TOML true, switches it off, read at use."""
+    (audit/hand_idle.py, audit_ticks._balance_tick). Default true; a TOML false, or any value that is not a TOML true, switches it off, read at use."""
     return get("audit", "balance", default=True) is True
 
 

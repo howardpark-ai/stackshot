@@ -52,7 +52,7 @@ from stackshot.audit import busy_hold, subagent_tie
 from stackshot.core import config as _cfg
 from stackshot.web import server
 from stackshot.web import publish as _web_publish
-from stackshot.service import gates, telling, update as update_svc
+from stackshot.service import audit_ticks as audit_ticks_svc, gates, telling, update as update_svc
 from stackshot.tools import next_report as _nr
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.ui import releasing as _rel
@@ -363,7 +363,7 @@ def update(i, **kw):
         return outcome(lambda: _wt_update.stackshot_update(f"a{i}", **kw))
 HOLD = dict(next=f"{BACK}: do it", wake=FUT, hold=True, wait_basis=f"the soak window ends {FUT}")
 check("5 the real unit list is parsed from systemctl's own line shape: release_units reads the numbers of active release units", (UNITS_OUT.update(v=units_text(77, 225)), _rel.release_units())[1] == {77, 225} and (UNITS_OUT.update(v=""), _rel.release_units())[1] == set())
-with patched(server, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
+with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
     SUBS[:] = []
     UNITS_OUT["v"] = units_text(77); logfile(77, QUEUED, age=120.0)
     before = json.dumps(read(1), sort_keys=True)
@@ -409,12 +409,12 @@ with patched(server, _mover_subagents=fake_server_subs), patched(server._rlive, 
         got = update(1, **HOLD)
     check("5 a box where the unit list cannot be had (no systemctl) passes the hold", got[0] == "ok", got)
     reset()
-with patched(server, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))), patched(server._rlive, released_anchors=lambda: dict(A77)):
+with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))), patched(server._rlive, released_anchors=lambda: dict(A77)):
     UNITS_OUT["v"] = units_text(77); logfile(77, QUEUED, age=60.0)
     got = update(1, **HOLD)
     check("5 a mover whose subagents cannot be read (unknown) does not hide a live release through the tool", RELWORDS(got), got)
     reset()
-with patched(server._rlive, released_anchors=lambda: 1 / 0), patched(server, _mover_subagents=fake_server_subs):
+with patched(server._rlive, released_anchors=lambda: 1 / 0), patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
     got = update(1, **HOLD)
     check("5 anchors the server cannot read are unknown: the write passes", got[0] == "ok", got)
     reset()
@@ -424,7 +424,7 @@ logfile(77, QUEUED, age=30.0)
 check("5 a stale log with no unit (the failover box's stale copies) is never read as a release", server._busy_live("a1", BACK) == "")
 # the real proof, nothing but the unit list replaced
 UNITS_OUT["v"] = units_text(77)
-with patched(server, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
+with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
     check("5 server._busy_live answers the words of the release for an item whose anchored pull request is released now", server._busy_live("a1", BACK).startswith("your release of PR #77 is running on it (unit stackshot-release-77.service"), server._busy_live("a1", BACK))
     check("5 …and \"\" for another item of the mover", server._busy_live("a2", BACK) == "")
 UNITS_OUT["v"] = ""
@@ -435,7 +435,7 @@ WAITING_NEXT = f"{BACK}: the first nightly run ends overnight; record its counts
 def doing(i): put(i, mover=BACK, needs=[BACK], state="doing")
 def note_of(i, **kw):
     doing(i)
-    with patched(server, _mover_subagents=fake_server_subs):
+    with patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
         return update(i, next=WAITING_NEXT, **kw)
 A90 = {"a8": {f"{OWN}#90"}}
 logfile(90, tail("deploying b1"), age=60.0)

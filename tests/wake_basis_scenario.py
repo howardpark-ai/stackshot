@@ -55,7 +55,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR; from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
@@ -226,7 +226,7 @@ class _Clock:                    # the server's clock stopped at the wake itself
     def time(self): return self.at
     def __getattr__(self, k): return getattr(time, k)
 real_time = server.time
-server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
+server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
 try:
     at_wake = (_wait_fixes_svc._wake_alone_on_agent(m_basis), "alone is a wait until that date" in _wait_fixes_svc._wake_window_note(m_basis))
 finally:
