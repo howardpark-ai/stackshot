@@ -1,4 +1,4 @@
-"""Scenario test for the ten-minute filing pass (audit_checks.filing_findings, audit_run.filing_pass, server._filing_tick): is each open item filed in the right state? Fixture items, messages replaced by
+"""Scenario test for the ten-minute filing pass (audit_checks.filing_findings, audit_run.filing_pass, service/audit_ticks._filing_tick): is each open item filed in the right state? Fixture items, messages replaced by
 recorders, no live store, no network, no model call.
 
   1  one item per filing rule: stuck-elsewhere (the first open step is someone else's), arbitrary-hold (a hold nothing explains), mislabeled-state (a stored state its fields contradict), reads-as-wait (an alive
@@ -122,6 +122,7 @@ check("2 a negation passes", ww(alive("home-agent: no waiting for a slot, run it
 check("2 a waiting item has none (its next is the record of its wait)", ww(item(21, wrote=now - H, state="blocked", needs=["home-agent"], after=["a6"], next="home-agent: waiting for the build when it closes")[1]) == ([], []))
 check("2 a closed item has none", ww(item(22, status="completed", wrote=now - H, state="doing", next="home-agent: wait for it", outcome="done")[1]) == ([], []))
 from stackshot.web import server
+from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import messaging as _messaging
@@ -205,23 +206,23 @@ msgs = []
 real_msg = _messaging._message
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
 _cfg.CFG["audit"]["enabled"] = False
-check("4 the tick stands still while the audit is off", server._filing_tick() is None and msgs == [])
+check("4 the tick stands still while the audit is off", audit_ticks_svc._filing_tick() is None and msgs == [])
 _cfg.CFG["audit"]["enabled"] = True; _cfg.CFG["audit"]["mode"] = "agent"
-check("4 …and in agent mode (the rollback)", server._filing_tick() is None and msgs == [])
+check("4 …and in agent mode (the rollback)", audit_ticks_svc._filing_tick() is None and msgs == [])
 _cfg.CFG["audit"]["mode"] = "script"
-res = server._filing_tick()
+res = audit_ticks_svc._filing_tick()
 check("4 with the audit on it runs the pass over the store and sends through the server's own message function, as the audit's sender, from a script (not as a session)",
       res is not None and res["findings"] >= 3 and msgs and all(m[2] == "stackshot audit" and m[3] == "server" and m[4] == os.uname().nodename and m[5] is False for m in msgs), (res, msgs[:1]))
 check("4 …the findings it sent are on the record", fp.exists() and len(json.loads(fp.read_text())["findings"]) == res["findings"] and res["sent"], res)
 msgs.clear()
-server._filing_tick()
+audit_ticks_svc._filing_tick()
 check("4 the next tick sends nothing new", msgs == [])
 seen_env = []
 from stackshot.audit import audit_run as _AR4
 real_filing_pass = _AR4.filing_pass
 _AR4.filing_pass = lambda **kw: (seen_env.append(kw.get("env")), {"findings": 0})[1]
 try:
-    server._filing_tick()
+    audit_ticks_svc._filing_tick()
 finally:
     _AR4.filing_pass = real_filing_pass
 check("4 the tick hands the pass the server's wait-end fix and facts (wait_end.py), as it hands the front-step and park functions",

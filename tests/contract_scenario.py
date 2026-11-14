@@ -233,6 +233,7 @@ check("…a line addressed by that name records the live session's id", line["uu
 iid = inbox.put(U(1), "for the retired pane", "hub"); d = inbox.take({U(31): "work-y2"})
 check("a line addressed by id to a session gone past the grace follows its name to the live namesake (a retired id strands nothing)", len(d) == 1 and d[0]["session"] == U(31) and d[0]["ids"] == [iid], d); inbox.ack([iid])
 from stackshot.web import server
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.web import page_debts as _pdebts
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
@@ -654,7 +655,7 @@ with TestClient(app) as c:
     t_ = pg.load_state(sid).get("touches", {})
     check("no project: a trimmed portal reply is resolved by the server lookup (item-facts by the call's item_id)",
           list(t_) == ["projects/alpha"] and t_["projects/alpha"]["task"] == "a1", t_)
-    st_, _, body_ = server._client_get("item-facts", {"key": sid, "ids": "a1"})
+    st_, _, body_ = client_reads_svc._client_get("item-facts", {"key": sid, "ids": "a1"})
     check("no project: item-facts carries the item's project", st_ == 200 and json.loads(body_)["items"]["a1"]["project"] == "projects/alpha", body_)
     sid = U(79); pg.save_state(sid, {"touches": {}})
     pg._touch_mcp_record({"session_id": sid, "tool_response": TRIM}, {"item_id": "a9", "next": "x"}, "update")

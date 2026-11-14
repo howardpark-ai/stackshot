@@ -2,7 +2,7 @@
 this rule tells someone, once per stretch, and never the owner.
 
 Part of the same rule as the hourly line and the idle hand-over (audit/hand_idle.py): that one is for an item the audit could verify NOTHING about; this one is for an item whose only verification, hour after hour, is that a pane is busy. It decides and
-the server writes and sends (`server._busy_tell_tick`, run from the ten-minute audit tick after the idle hand-over). On by default (`[audit] busy_tell`), after 4 hours (`[audit] busy_tell_hours`).
+the server writes and sends (`audit_ticks._busy_tell_tick`, run from the ten-minute audit tick after the idle hand-over). On by default (`[audit] busy_tell`), after 4 hours (`[audit] busy_tell_hours`).
 
   enabled() / hours()                      `[audit] busy_tell` (on unless a TOML false) and `[audit] busy_tell_hours` (default 4, never under 1), both read at use
   stretch_start(meta, clock, now)           (where the busy stretch of a background mover's item counts from, the pane-only lines in it), None when it has none (or fewer than MIN_LINES)

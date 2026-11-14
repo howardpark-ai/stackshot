@@ -57,6 +57,7 @@ def tool(*args, store=None):
     return r.returncode, r.stdout, r.stderr
 
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.model import ids as _model_ids
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import store as _service_store
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -73,7 +74,7 @@ FIELDS = ("title", "type", "session", "role", "status", "hub", "agents", "back_a
 def snap():
     R = prj.registry(); AR = anchors.registry()
     lay = lambda reg_: {k: ({f: e.get(f) for f in FIELDS}, list(e.get("agents") or {}), list(e.get("back_agents") or {})) for k, e in reg_.items()}
-    client = json.loads(server._client_get("registry", {})[2])["pages"]
+    client = json.loads(client_reads_svc._client_get("registry", {})[2])["pages"]
     return {"projects": lay(R), "anchors": lay(AR), "pages": lay(p.load_registry()), "server": lay(pr._registry("projects")), "client": lay(client),
             "name_lines": {k: (anchors.name_line(k, AR), anchors.hub_of(k, AR), anchors.main_of(e), anchors.front_agents(e)) for k, e in AR.items()},
             "roles": anchors.session_roles(AR, set()), "file_roles": anchors.file_roles(AR, set()), "with_pending": lay(prj.with_pending(prj.registry())),
@@ -222,7 +223,7 @@ rec = prj.ref(A)
 check("record first: the project record (ref) — keeper, title, scope, hub, agents with their roles cut from the entry's name", rec["keeper"] == "home-renamed" and rec["title"] == "Alpha, from the record" and rec["scope"] == SCOPE2
       and rec["hub"] == "projects/zeta" and rec["agents"]["home-sparrow-docs"]["front"] is False and rec["agents"]["home-sparrow-main"]["mandate_line"] == "main, from the record", rec)
 check("record first: every module's reader sees it — anchors, pages, the server's registry, the client API", anchors.registry()["projects/alpha"]["session"] == "home-renamed" and p.load_registry()["projects/alpha"]["title"] == "Alpha, from the record"
-      and pr._registry("projects")["projects/alpha"]["hub"] == "projects/zeta" and json.loads(server._client_get("registry", {})[2])["pages"]["projects/alpha"]["back_agents"] == {"home-sparrow-docs": "docs, now background"}
+      and pr._registry("projects")["projects/alpha"]["hub"] == "projects/zeta" and json.loads(client_reads_svc._client_get("registry", {})[2])["pages"]["projects/alpha"]["back_agents"] == {"home-sparrow-docs": "docs, now background"}
       and anchors.hub_of("projects/alpha") == "projects/zeta" and anchors.front_agents(anchors.registry()["projects/alpha"]) == ["home-sparrow-main"])
 check("record first: a field the entry does not hold is the page's — the status and type of alpha", a["status"] == "active" and a["type"] == "project" and a["org"] == "" and a["updated"] == reg()["projects/alpha"]["updated"])
 upd(lambda e: e[A].pop("title")); upd(lambda e: e[A].pop("agents"))
@@ -281,7 +282,7 @@ crash = []
 for label, f in (("registry", prj.registry), ("build", prj.build), ("list_projects", prj.list_projects), ("list with a query", lambda: prj.list_projects(q="nopage")), ("ref by id", lambda: prj.ref(NOPAGE)),
                  ("refs", lambda: prj.refs(NOPAGE)), ("id_to_key", lambda: prj.id_to_key(NOPAGE)), ("to_key", lambda: prj.to_key(NOPAGE)), ("with_made", lambda: prj.with_made(prj.registry())),
                  ("with_pending", lambda: prj.with_pending(prj.registry())), ("sync", lambda: prj.sync(force=True)), ("anchors.registry", anchors.registry), ("session_roles", lambda: anchors.session_roles(anchors.registry(), set())),
-                 ("pilot_roots", anchors.pilot_roots), ("pages.load_registry", p.load_registry), ("server registry", lambda: pr._registry("projects")), ("client registry", lambda: server._client_get("registry", {})),
+                 ("pilot_roots", anchors.pilot_roots), ("pages.load_registry", p.load_registry), ("server registry", lambda: pr._registry("projects")), ("client registry", lambda: client_reads_svc._client_get("registry", {})),
                  ("registry hits", lambda: _gates.registry_hits("projects", NOPAGE)), ("recent_items", lambda: prj.recent_items(prj.registry()))):
     try: f()
     except Exception as ex: crash.append((label, repr(ex)))
@@ -340,9 +341,9 @@ check("…the section and its version are kept as they were by a rewrite for ano
 REC.write_bytes(good); pr.entries()
 REGF = T / "store/projects.json"; reg_good = REGF.read_bytes()
 REGF.write_text("{ not json", encoding="utf-8")
-code, ctype, body = server._client_get("registry", {})
+code, ctype, body = client_reads_svc._client_get("registry", {})
 check("client API: a registry file that does not parse is served as it always was (200, the file's text); only a missing file is 'no registry yet'", code == 200 and body == "{ not json", (code, body))
-REGF.rename(T / "store/projects.gone"); code, ctype, body = server._client_get("registry", {}); (T / "store/projects.gone").rename(REGF)
+REGF.rename(T / "store/projects.gone"); code, ctype, body = client_reads_svc._client_get("registry", {}); (T / "store/projects.gone").rename(REGF)
 check("client API: no registry file gives 503 as before", code == 503 and "no registry" in body, (code, body))
 REGF.write_bytes(reg_good)
 check("…a repaired file reads again", pr.entries() != {} and prj.registry()["projects/alpha"]["session"] == "home-sparrow")

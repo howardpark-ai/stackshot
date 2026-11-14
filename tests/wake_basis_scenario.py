@@ -55,10 +55,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR; from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
@@ -90,7 +91,7 @@ def AO(i):                      # the items an item waits after that are still o
     return [x for x in W.after_of(i["metadata"]) if (T / f"store/g/{x[1:]}.json").exists() and rd(int(x[1:]), "g")["status"] == "open"]
 def derive_of(n): return _model.derive(it_of(n), now_, after_open=AO, anchored=lambda i: False)
 def view_of(n): return _model.view(it_of(n), derive_of(n), now_, AO)
-lst = lambda n: server._item_list(it_of(n))
+lst = lambda n: client_reads_svc._item_list(it_of(n))
 brief = lambda n: _get_tool._fmt(it_of(n), brief=True)
 NEXT = "team-back: check the build later and report back to the owner"     # no date a step could be read for
 BASIS = "the subscription renews on 2099-01-20"
@@ -197,7 +198,7 @@ for cls in (render, ui_render):
           any(l.startswith(f"  {nb_} of the doing items have a wake that states its reason (wait_basis): the board lists them as waiting until the wake") for l in st_.splitlines()), [l for l in st_.splitlines() if "states its reason" in l])
 
 # ---- 9. the end-of-turn board question skips a basis wait, as it skips a held item
-rows = {x["shown"]: x for x in json.loads(server._client_items(U["team-back"])[2])["items"]}
+rows = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["team-back"])[2])["items"]}
 sh = lambda n: _gh.shown(f"g{n}")
 check("9 the items the client reads carry held: true for a basis wait (the hook skips held rows), and false for a plain doing item, a spent wake and a reminder",
       all(rows[sh(n)]["held"] for n in (1, 2, 6, 17, 22)) and not any(rows[sh(n)]["held"] for n in (3, 4, 5, 18)) and rows[sh(1)]["list"] == "waiting", {n: rows.get(sh(n), {}).get("held") for n in (1, 2, 3, 4, 5, 6, 17, 18, 22)})
@@ -226,11 +227,11 @@ class _Clock:                    # the server's clock stopped at the wake itself
     def time(self): return self.at
     def __getattr__(self, k): return getattr(time, k)
 real_time = server.time
-server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
+server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
 try:
     at_wake = (_wait_fixes_svc._wake_alone_on_agent(m_basis), "alone is a wait until that date" in _wait_fixes_svc._wake_window_note(m_basis))
 finally:
-    server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
+    server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
 check("11 …a wake exactly now is not waiting any more: the basis no longer exempts it, so the note rules apply again (alone, and the window note fires)", at_wake == (True, True), at_wake)
 bw = dict(it_of(1), metadata=dict(mt(1, "g")))
 ep = W.wake_epoch(W1)

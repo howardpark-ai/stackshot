@@ -64,6 +64,7 @@ def refused(name, f, *want):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import agents as _agents
 from stackshot.service import update as _update_svc
 from stackshot.github import ghsync as _gh
@@ -391,9 +392,9 @@ item(80, mover="home-front")                                          # no store
 item(81, needs=["decision"], ask=ASK, then="home-front")              # needs a decision; home-front takes it after his answer
 item(82, mover="home-front", state="doing", expected_by=hrs(2))       # stored
 item(83, owner=U["home-other"], needs=["home-front"])                   # owned by someone else, home-front only named in needs
-rows = {x["shown"]: x for x in json.loads(server._client_items(U["home-front"])[2])["items"]}      # the mover's items, not the creator's
+rows = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["home-front"])[2])["items"]}      # the mover's items, not the creator's
 check("7: the client items read carries no state_hint and no state_derived, and no state for an item that stores none; the stored one keeps its state", all("state_hint" not in r and "state_derived" not in r for r in rows.values()) and "state" not in rows["a80"] and rows["a82"]["state"] == "doing", {k: (rows[k].get("state"), rows[k].get("state_hint")) for k in ("a80", "a81", "a82")})
-rows_f = {x["shown"]: x for x in json.loads(server._client_items(U["home-front"])[2])["items"]}
+rows_f = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["home-front"])[2])["items"]}
 check("7: …a session named in needs is the item's mover and its row still has the role, with no hint", rows_f["a83"].get("role") == "agent" and "state_hint" not in rows_f["a83"], rows_f["a83"])
 b = _wt_brief.stackshot_brief()
 check("7: the brief and get carry no hint to store a state, and no derived state word", "state hint:" not in b and "no stored state:" not in b and "state hint:" not in get(80) and "(derived)" not in get(80), None)

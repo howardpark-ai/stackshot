@@ -89,8 +89,9 @@ try:
     page1 = bd.item_html("a1", answer=BOX)
     check("the fixture store renders real item pages: the ask, the owner as mover (Your move) and the buttons", "Your move · since" in re.sub(r"<[^>]+>", "", page1) and "Ship it now" in page1 and ASK.split(" · ")[0].replace("Decide: ", "") in page1, page1[:300])
     from stackshot.web import server
+    from stackshot.service import client_reads as client_reads_svc
     from stackshot.service import agents as _agents
-    mv_of =lambda i: server._wait_fields(f"a{i}", json.loads((T / f"store/a/{i}.json").read_text(encoding="utf-8")), _agents._WaitCtx(time.time())).get("mover", {})
+    mv_of =lambda i: client_reads_svc._wait_fields(f"a{i}", json.loads((T / f"store/a/{i}.json").read_text(encoding="utf-8")), _agents._WaitCtx(time.time())).get("mover", {})
 
 
     # ---- 8. mover.kind in the items API

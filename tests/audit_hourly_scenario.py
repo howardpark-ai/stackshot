@@ -1,4 +1,4 @@
-"""Scenario test for the hourly audit line (audit/hourly.py, server._hourly_tick, called from the ten-minute audit tick, `[audit] hourly_line`, on by default): an item on an agent with no activity for 45 minutes gets ONE
+"""Scenario test for the hourly audit line (audit/hourly.py, service/audit_ticks._hourly_tick, called from the ten-minute audit tick, `[audit] hourly_line`, on by default): an item on an agent with no activity for 45 minutes gets ONE
 History line saying what the audit verified, or that it is idle. Fixture items in a temporary store, a fake clock (the pass is given its `now`), the pane registry replaced by a dict, no live store, no
 network, no model call, no message sent.
 
@@ -78,9 +78,11 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import notes as _notes_tool
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import messaging as _messaging
 from stackshot.fleet import sessions_registry as SR24
@@ -118,7 +120,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
+CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
@@ -157,7 +159,7 @@ def tick(at=None, **kw):
     at = now0 if at is None else at
     CLK.t = at
     kw.setdefault("subagents", lambda who: SUBS.get(who, [])); kw.setdefault("anchored", ANCH)
-    try: return server._hourly_tick(now=at, **kw)
+    try: return audit_ticks_svc._hourly_tick(now=at, **kw)
     finally: CLK.t = None
 def on(): _cfg.CFG["audit"]["hourly_line"] = True
 def off(): _cfg.CFG["audit"]["hourly_line"] = False
@@ -285,7 +287,7 @@ with _Err():
     real_pass = HR.pass_
     put(8, act=90, status="completed", outcome="done")
     HR.pass_ = lambda items, now, env=None, pane=None, same=None, *a, **k: [("a4", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"}), ("a8", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"})]      # the list a slower pass made before the line was written, and an item that closed since
-    try: stale = server._hourly_tick(now=now0 + 5 * MIN, items=stale_items)
+    try: stale = audit_ticks_svc._hourly_tick(now=now0 + 5 * MIN, items=stale_items)
     finally: HR.pass_ = real_pass
 check("4 an item read again under the lock that is no longer due (a line written since, or closed since) is left alone", stale == [] and len(lines(4)) == 1 and lines(8) == [], (stale, lines(4), lines(8)))
 
@@ -325,16 +327,16 @@ clean_pane(); panes["home-peer"] = "busy"
 for p in (T / "store/a").glob("*.json"): p.unlink()
 put(1, act=90); put(2, act=90)
 _cfg.CFG["audit"]["enabled"] = False
-check("8 `_silence_tick` stands still while the audit is off: no line", server._silence_tick() is None and lines(1) == [])
+check("8 `_silence_tick` stands still while the audit is off: no line", audit_ticks_svc._silence_tick() is None and lines(1) == [])
 _cfg.CFG["audit"]["enabled"] = True; _cfg.CFG["audit"]["mode"] = "agent"
-check("8 …and in agent mode (the rollback)", server._silence_tick() is None and lines(1) == [])
+check("8 …and in agent mode (the rollback)", audit_ticks_svc._silence_tick() is None and lines(1) == [])
 _cfg.CFG["audit"]["mode"] = "script"
 real_now = time.time
-res = server._silence_tick()
+res = audit_ticks_svc._silence_tick()
 check("8 with the audit on in script mode the audit tick writes the hourly line: one on each item", len(lines(1)) == 1 and len(lines(2)) == 1, (res, lines(1), lines(2)))
 off()
 for i in (1, 2): put(i, act=90)
-server._silence_tick()
+audit_ticks_svc._silence_tick()
 check("8 …and with `hourly_line` off the same tick writes none", lines(1) == [] and lines(2) == [])
 on()
 real_save = WR24.save
@@ -346,11 +348,11 @@ for i in (1, 2): put(i, act=90)
 with _Err() as e8: got8 = tick()
 WR24.save = real_save
 check("8 one item that cannot be saved stops no other, and the failure is logged", got8 == ["a2"] and "a1 hourly line not written: OSError" in e8.text and lines(2) != [], (got8, e8.text))
-real_hourly = server._hourly_tick
+real_hourly = audit_ticks_svc._hourly_tick
 def boom(**kw): raise RuntimeError("pass failed")
-server._hourly_tick = boom
-with _Err() as e8b: r8 = server._silence_tick()
-server._hourly_tick = real_hourly
+audit_ticks_svc._hourly_tick = boom
+with _Err() as e8b: r8 = audit_ticks_svc._silence_tick()
+audit_ticks_svc._hourly_tick = real_hourly
 check("8 a hourly pass that raises never stops the audit tick that called it", e8b.text.count("hourly line not run: RuntimeError") == 1, e8b.text)
 
 # ================================================================ 13. the audit tick with the audit off stands still as a whole
@@ -358,7 +360,7 @@ clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, act=90); put(2, act=90)
 _cfg.CFG["audit"]["enabled"] = False
-server._silence_tick()
+audit_ticks_svc._silence_tick()
 _cfg.CFG["audit"]["enabled"] = True
 check("13 with the audit off the tick stands still as a whole: no line", lines(1) == [] and lines(2) == [])
 
@@ -465,8 +467,8 @@ m9b = {}
 for k in range(10): HL.note(m9b, float(k), f"line {k}", "audit")
 check("9 the log keeps eight entries", len(HL.log_of(m9b)) == 8 and HL.log_of(m9b)[0]["text"] == "line 2" and "stall" not in m9b)
 check("9 the line's words: verified a, b / idle, nothing verified, hh:mm in the instance zone", HR.text(now0, ["a", "b"], ["b"]) == f"Audit {hm(now0)}: verified a, b" and HR.text(now0, ["a"], []) == f"Audit {hm(now0)}: verified a" + HR.LIVE_ONLY and HR.text(now0, []) == f"Audit {hm(now0)}: idle, nothing verified")
-check("9 the pass reads only: pass_ over the items writes nothing and gives the same list twice", (lambda items: HR.pass_(items, now0, server._silence_env(), lambda w: "busy", handoff_svc.ho_same) == HR.pass_(items, now0, server._silence_env(), lambda w: "busy", handoff_svc.ho_same))({"a1": rd(1), "a2": rd(2)}))
-check("9 an item the pass cannot read is left out, and a pane callable that raises verifies nothing", HR.pass_({"a1": {"status": "open", "metadata": "torn"}, "a2": rd(2)}, now0, server._silence_env(), lambda w: (_ for _ in ()).throw(OSError("x")), handoff_svc.ho_same)[0][1]["kind"] == "audit_idle")
+check("9 the pass reads only: pass_ over the items writes nothing and gives the same list twice", (lambda items: HR.pass_(items, now0, audit_ticks_svc._silence_env(), lambda w: "busy", handoff_svc.ho_same) == HR.pass_(items, now0, audit_ticks_svc._silence_env(), lambda w: "busy", handoff_svc.ho_same))({"a1": rd(1), "a2": rd(2)}))
+check("9 an item the pass cannot read is left out, and a pane callable that raises verifies nothing", HR.pass_({"a1": {"status": "open", "metadata": "torn"}, "a2": rd(2)}, now0, audit_ticks_svc._silence_env(), lambda w: (_ for _ in ()).throw(OSError("x")), handoff_svc.ho_same)[0][1]["kind"] == "audit_idle")
 check("9 a pane callable of None verifies nothing", HR.verified(rd(2), rd(2)["metadata"], "home-peer", now0, None, handoff_svc.ho_same) == ([], []))
 
 # a log entry dated far ahead hides no later line
@@ -491,7 +493,7 @@ check("9 a recorded commit under an hour old verifies (recorded, so the line is 
       and lines(6)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(6)[0]["kind"] == "audit_idle" and HR.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit"}), [lines(6), lines(7)])
 # an item with no timestamp at all
 nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "updated", "state_updated", "created", "confirmed", "written_at")]
-try: wt = HR.due({"a1": nots}, "a1", now0, server._silence_env(), lambda w: "busy", handoff_svc.ho_same)
+try: wt = HR.due({"a1": nots}, "a1", now0, audit_ticks_svc._silence_env(), lambda w: "busy", handoff_svc.ho_same)
 except Exception as e_: wt = e_
 check("9 an item with no timestamp at all is read without an error, and a line for it is written or not at all (never a crash)", wt is None or isinstance(wt, dict), wt)
 # new_entries: a later revision does not re-emit an older line
@@ -684,22 +686,22 @@ OTHER_ROW = {"sess-z9": {"machine": "b", "name": "home-stew", "seen": "2026-01-0
 def registry(status="busy", sid=SID, kind="interactive", name="home-peer"): row_path.write_text(json.dumps({"pid": os.getpid(), "sessionId": sid, "kind": kind, "name": name, "status": status, "statusUpdatedAt": int(now0 * 1000), "updatedAt": int(now0 * 1000)}))
 try:
     registry()
-    check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in server._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1", "stale1"], server._mover_subagents("home-peer", {}, now0))
-    registry("idle"); a_ = server._mover_subagents("home-peer", {}, now0)
-    registry("shell"); b_ = server._mover_subagents("home-peer", {}, now0)
-    check("17 …and none when the pane is idle or showing a shell, or the mover has no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built)", a_ == [] and b_ == [] and server._mover_subagents("home-front", OTHER_ROW, now0) == [], (a_, b_))
+    check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in audit_ticks_svc._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1", "stale1"], audit_ticks_svc._mover_subagents("home-peer", {}, now0))
+    registry("idle"); a_ = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
+    registry("shell"); b_ = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
+    check("17 …and none when the pane is idle or showing a shell, or the mover has no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built)", a_ == [] and b_ == [] and audit_ticks_svc._mover_subagents("home-front", OTHER_ROW, now0) == [], (a_, b_))
     import subprocess as _sp
     dead_ = _sp.Popen(["true"]); dead_.wait()
     row_path.write_text(json.dumps({"pid": dead_.pid, "sessionId": SID, "kind": "interactive", "name": "home-peer", "status": "busy"}))
-    check("17 …a row whose process is gone is no row: nothing is claimed, as for a mover with no row", server._mover_subagents("home-peer", OTHER_ROW, now0) == [], server._mover_subagents("home-peer", OTHER_ROW, now0))
+    check("17 …a row whose process is gone is no row: nothing is claimed, as for a mover with no row", audit_ticks_svc._mover_subagents("home-peer", OTHER_ROW, now0) == [], audit_ticks_svc._mover_subagents("home-peer", OTHER_ROW, now0))
     odd_ = {}
-    registry("busy", kind="headless"); odd_["headless"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
-    registry("busy", kind="sdk-cli"); odd_["sdk"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
-    registry("working"); odd_["unknown status"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
-    registry(""); odd_["no status"] = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry("busy", kind="headless"); odd_["headless"] = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry("busy", kind="sdk-cli"); odd_["sdk"] = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry("working"); odd_["unknown status"] = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry(""); odd_["no status"] = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
     check("17 …a PRESENT row that is no interactive pane (headless, another kind) or whose status the server does not know (a new word, none) is UNKNOWN (Unreadable), never nothing running: the session is there and cannot be looked into", all(odd_.values()), odd_)
     registry("busy", sid=str(_uuid.uuid4())); d_ = "a pane in a turn with no transcript here"
-    check("17 …and Unreadable (unknown) for a pane in a turn whose transcript this box does not hold, or whose registry row names no session", raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable) and (registry("busy", sid=""), raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable))[1], d_)
+    check("17 …and Unreadable (unknown) for a pane in a turn whose transcript this box does not hold, or whose registry row names no session", raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable) and (registry("busy", sid=""), raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable))[1], d_)
     registry("busy")
     clean_pane(); panes["home-peer"] = "busy"
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
@@ -865,13 +867,13 @@ try:
         finally: SR24._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx
         return out_
     live_hb = hb(u1=("home-peer", {})); gone_hb = hb(u1=("home-peer", {"gone": "2026-01-01T00:00:00Z"})); other_hb = hb(u1=("home-stew", {}))
-    r_live = raises(lambda: server._mover_subagents("home-peer", live_hb, now0), TIE.Unreadable)
-    r_gone = server._mover_subagents("home-peer", gone_hb, now0) == []
-    r_none = server._mover_subagents("home-peer", OTHER_ROW, now0) == [] and server._mover_subagents("home-peer", other_hb, now0) == []
+    r_live = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", live_hb, now0), TIE.Unreadable)
+    r_gone = audit_ticks_svc._mover_subagents("home-peer", gone_hb, now0) == []
+    r_none = audit_ticks_svc._mover_subagents("home-peer", OTHER_ROW, now0) == [] and audit_ticks_svc._mover_subagents("home-peer", other_hb, now0) == []
     def no_index():      # the index the server's own reads cannot get: the registry's other readers (the session label inside the module) keep the real one
         if sys._getframe(1).f_globals is vars(server): raise OSError("heartbeat unreadable")
         return REAL_SR_INDEX()
-    server_idx_none = raises(lambda: (setattr(SR24, "_sessions_index", no_index), server._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
+    server_idx_none = raises(lambda: (setattr(SR24, "_sessions_index", no_index), audit_ticks_svc._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
     SR24._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx
     check("20 no registry row on this box: the fleet heartbeat holds the session running (on another machine) → Unreadable (unknown); marked gone → none; no row anywhere (or only another session's) → none; the index cannot be read → Unreadable", r_live and r_gone and r_none and server_idx_none, (r_live, r_gone, r_none, server_idx_none))
     k_live = tick_with_index(live_hb); k_gone = tick_with_index(gone_hb); k_none = tick_with_index(OTHER_ROW); k_bad = tick_with_index(no_index)
@@ -884,9 +886,9 @@ try:
     row_path.unlink(missing_ok=True)
     whole = SR._Index(); whole.update(OTHER_ROW)
     part = SR._Index(); part.update(OTHER_ROW); part.unreadable = ["b"]
-    r_empty = raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable) and raises(lambda: server._mover_subagents("home-peer", SR._Index(), now0), TIE.Unreadable)
-    r_part = raises(lambda: server._mover_subagents("home-peer", part, now0), TIE.Unreadable)
-    r_whole = server._mover_subagents("home-peer", whole, now0) == [] and server._mover_subagents("home-peer", gone_hb, now0) == []
+    r_empty = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable) and raises(lambda: audit_ticks_svc._mover_subagents("home-peer", SR._Index(), now0), TIE.Unreadable)
+    r_part = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", part, now0), TIE.Unreadable)
+    r_whole = audit_ticks_svc._mover_subagents("home-peer", whole, now0) == [] and audit_ticks_svc._mover_subagents("home-peer", gone_hb, now0) == []
     check("21 an empty fleet index, and one with a machine whose sessions.json could not be read, give a mover with no row UNKNOWN (Unreadable); a whole index that holds no row of it, or marks it gone, still gives none (the session is gone)", r_empty and r_part and r_whole, (r_empty, r_part, r_whole))
     k_empty = tick_with_index({}); k_part = tick_with_index(part); k_whole = tick_with_index(whole)
     check("21 …through the audit: an empty index and a partial one read the mover's items UNKNOWN (kind audit_unknown, nothing stamped, not idle-marked); a whole index without a row of it reads idle as built",
@@ -906,39 +908,39 @@ try:
     # 3 lookup by a session ID beside the name lookups: the mover is named by an id (a transcript id, a heartbeat id), not by its name
     registry("busy", name="home-other"); by_tid = handoff_svc.handoff_pane_row(SID, OTHER_ROW)
     by_name_miss = handoff_svc.handoff_pane_row("home-peer", OTHER_ROW)
-    got_id = [x["id"] for x in server._mover_subagents(SID, OTHER_ROW, now0)]
+    got_id = [x["id"] for x in audit_ticks_svc._mover_subagents(SID, OTHER_ROW, now0)]
     check("21 a pane's registry row is found by its session id when the mover is named by it (the row's own name is another), and not by a name that is none of its names", by_tid is not None and by_tid[1]["sessionId"] == SID and by_name_miss is None and len(got_id) > 0, (by_tid, by_name_miss, got_id))
     registry("busy", sid="sess-a1", name="home-other")
     by_fixture_id = handoff_svc.handoff_pane_row("sess-a1", OTHER_ROW); other_id = handoff_svc.handoff_pane_row("sess-a2", OTHER_ROW)
     check("21 …a neutral id (sess-a1) matches the row that carries it as its session id, another id (sess-a2) matches nothing", by_fixture_id is not None and by_fixture_id[1]["sessionId"] == "sess-a1" and other_id is None and handoff_svc.handoff_registered("sess-a1", OTHER_ROW) and not handoff_svc.handoff_registered("sess-a2", OTHER_ROW), (by_fixture_id, other_id))
     row_path.unlink(missing_ok=True)
     hb_by_id = lambda **extra: {"sess-a1": {"machine": "b", "name": "home-other", "seen": "2026-01-01T00:00:00Z", **extra}, **OTHER_ROW}
-    r_id_live = raises(lambda: server._mover_subagents("sess-a1", hb_by_id(), now0), TIE.Unreadable)
-    r_id_gone = server._mover_subagents("sess-a1", hb_by_id(gone="2026-01-01T00:00:00Z"), now0) == []
-    r_id_none = server._mover_subagents("sess-a2", hb_by_id(), now0) == []
+    r_id_live = raises(lambda: audit_ticks_svc._mover_subagents("sess-a1", hb_by_id(), now0), TIE.Unreadable)
+    r_id_gone = audit_ticks_svc._mover_subagents("sess-a1", hb_by_id(gone="2026-01-01T00:00:00Z"), now0) == []
+    r_id_none = audit_ticks_svc._mover_subagents("sess-a2", hb_by_id(), now0) == []
     check("21 no row on this box, the mover named by a heartbeat id: a live row under that id is on another machine (Unreadable), one marked gone reads none, another id with no row reads none", r_id_live and r_id_gone and r_id_none, (r_id_live, r_id_gone, r_id_none))
     registry("busy")
     registry("busy")
     # a read error is kept for the pass: one read of a mover's transcripts for all its items, again under the lock for none
     registry("busy")
-    real_ms, calls20 = server._mover_subagents, []
+    real_ms, calls20 = audit_ticks_svc._mover_subagents, []
     def failing(who, idx=None, now=None): calls20.append(who); raise OSError("transcript folder unreadable")
-    server._mover_subagents = failing
+    audit_ticks_svc._mover_subagents = failing
     try:
         clean_pane(); panes["home-peer"] = "busy"
         for p_ in (T / "store/a").glob("*.json"): p_.unlink()
         for i in (1, 2, 3): put(i, act=90)
         with _Err(): got20e = tick(subagents=None)
-    finally: server._mover_subagents = real_ms
+    finally: audit_ticks_svc._mover_subagents = real_ms
     check("20 an unreadable transcript folder is read ONCE for the pass (the exception is cached like a result), however many items the mover has, and every item reads unknown", len(calls20) == 1 and got20e == ["a1", "a2", "a3"] and all(lines(i)[0]["kind"] == "audit_unknown" for i in (1, 2, 3)), (calls20, got20e))
     calls20.clear()
     def counting(who, idx=None, now=None): calls20.append(who); return []
-    server._mover_subagents = counting
+    audit_ticks_svc._mover_subagents = counting
     try:
         for p_ in (T / "store/a").glob("*.json"): p_.unlink()
         for i in (1, 2, 3): put(i, act=90)
         tick(subagents=None)
-    finally: server._mover_subagents = real_ms
+    finally: audit_ticks_svc._mover_subagents = real_ms
     check("20 …and a result that read fine is read once for the pass as well", len(calls20) == 1, calls20)
 finally:
     row_path.unlink(missing_ok=True)
@@ -948,7 +950,7 @@ finally:
 clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 for i in (1, 2, 3): put(i, act=90)
-env20 = server._silence_env()
+env20 = audit_ticks_svc._silence_env()
 class RaisingFront:
     def __getattr__(self, n): return getattr(env20, n)
     def is_front(self, who, project): raise RuntimeError("keeper lookup failed")
@@ -969,7 +971,7 @@ try:
     two_items_busy(); tick(); k_read = [lines(i)[0]["kind"] for i in (1, 2)]
     reg_path.write_text("{torn", encoding="utf-8")
     torn = (telling.front_keeper("team-back", "projects/alpha"), telling.front_keeper("team-back", "projects/alpha", unread_front=True))
-    env_t = server._silence_env()
+    env_t = audit_ticks_svc._silence_env()
     torn_env = (env_t.is_front("team-back", "projects/alpha"), env_t.is_front_or_unread("team-back", "projects/alpha"), AR.Env(roles={}).is_front_or_unread("team-back", "projects/alpha"))
     two_items_busy(); tick(); k_torn = [lines(i)[0]["kind"] for i in (1, 2)]; ids_torn = [HR.idle_marked(mt(i)) for i in (1, 2)]
 finally:

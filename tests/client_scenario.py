@@ -46,6 +46,7 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
 from stackshot.web.tools import notes as _notes_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
 from stackshot.model import holders as _holders
 from stackshot.service import item_read as _item_read
@@ -79,12 +80,12 @@ client.revoke("box-far"); check("a revoked machine is refused", _rt_client._clie
 tok = open(client.mint("box-far")).read().strip()
 
 # ---- 3. the reads
-st, ct, body = server._client_get("registry", {}); check("registry: the page registry as stored", st == 200 and "projects/alpha" in json.loads(body)["pages"], body[:120])
-st, ct, body = server._client_get("brief", {}); check("brief: what a session start prints", st == 200 and body.startswith("Board: 1 open"), body[:120])
-st, ct, body = server._client_get("rules", {}); check("rules: the rulebook", st == 200 and len(body) > 500 and ct.startswith("text/markdown"), (st, len(body)))
-st, ct, body = server._client_get("page-ts", {"key": "projects/alpha"}); check("page-ts: a page's last change", st == 200 and json.loads(body)["ts"] and json.loads(body)["key"] == "projects/alpha", body)
-st, ct, body = server._client_get("page-ts", {"key": "projects/alpha.md"}); check("page-ts: a trailing .md is fine", st == 200 and json.loads(body)["key"] == "projects/alpha", body)
-st, ct, body = server._client_get("page-ts", {"key": "projects/none"}); check("page-ts: a page that does not exist has no time", st == 200 and json.loads(body)["ts"] is None, body)
+st, ct, body = client_reads_svc._client_get("registry", {}); check("registry: the page registry as stored", st == 200 and "projects/alpha" in json.loads(body)["pages"], body[:120])
+st, ct, body = client_reads_svc._client_get("brief", {}); check("brief: what a session start prints", st == 200 and body.startswith("Board: 1 open"), body[:120])
+st, ct, body = client_reads_svc._client_get("rules", {}); check("rules: the rulebook", st == 200 and len(body) > 500 and ct.startswith("text/markdown"), (st, len(body)))
+st, ct, body = client_reads_svc._client_get("page-ts", {"key": "projects/alpha"}); check("page-ts: a page's last change", st == 200 and json.loads(body)["ts"] and json.loads(body)["key"] == "projects/alpha", body)
+st, ct, body = client_reads_svc._client_get("page-ts", {"key": "projects/alpha.md"}); check("page-ts: a trailing .md is fine", st == 200 and json.loads(body)["key"] == "projects/alpha", body)
+st, ct, body = client_reads_svc._client_get("page-ts", {"key": "projects/none"}); check("page-ts: a page that does not exist has no time", st == 200 and json.loads(body)["ts"] is None, body)
 # 2026-10-16: page-ts for a page that is not in the mirror used to ask the server's own client API from inside the server (pages._api →
 # client.get over the loopback): the event loop could not answer that request until its 6 s timeout ran out, so every request waited.
 # The server never makes that call; a spy on client.get stands in for the loopback (the real one stalls the loop until its timeout).
@@ -92,13 +93,13 @@ from stackshot.projects import pages as _pg_self
 _calls = []; _real_get = client.get; client.get = lambda *a, **k: (_calls.append(a), (0, ""))[1]
 _unreach = len(_pg_self.UNREACHABLE)
 try:
-    st, ct, body = server._client_get("page-ts", {"key": "projects/none"})
+    st, ct, body = client_reads_svc._client_get("page-ts", {"key": "projects/none"})
     check("page-ts for a missing page makes no call to the server itself", _calls == [] and len(_pg_self.UNREACHABLE) == _unreach and _pg_self.LOCAL_ONLY, (_calls, _pg_self.LOCAL_ONLY))
     check("pages._api answers nothing in the server process", _pg_self._api("page-ts", "projects/none") is None and _calls == [], _calls)
 finally: client.get = _real_get
 for bad in ("", "../etc/passwd", "projects/../../x", "inbox/thing"):
-    st, ct, body = server._client_get("page-ts", {"key": bad}); check(f"page-ts refuses {bad!r}", st == 400, (st, body))
-st, ct, body = server._client_get("secrets", {}); check("an unknown read is 404", st == 404, (st, body))
+    st, ct, body = client_reads_svc._client_get("page-ts", {"key": bad}); check(f"page-ts refuses {bad!r}", st == 400, (st, body))
+st, ct, body = client_reads_svc._client_get("secrets", {}); check("an unknown read is 404", st == 404, (st, body))
 
 # ---- 3b. the hold record, the unexplained-holds report and the new holds in the briefings (the part that shipped):
 # hold=true behaves as before (no gate); a hold records who set it and when; the report lists a hold when nothing holds it NOW, whatever was stored as its reason;
@@ -158,8 +159,8 @@ check("each row has the owner, the wake, who set it and when; a hold from before
 check("the printed report: one line per item with mover, wake, setter and time", "a14 · mover sparrow · wake 2026-11-20 · set by sparrow (" in rep and "a13 · mover sparrow · wake 2026-11-19 · set by unknown (before the record)" in rep
       and "a16 ·" not in rep and "update clear_hold=true" in rep, rep)
 check("the report writes nothing: every item file is as it was", before == {f.name: f.read_text() for f in (T / "store/a").glob("*.json")})
-st, ct, body = server._client_get("holds", {}); check("the client API serves it as holds", st == 200 and "a14 · mover sparrow · wake 2026-11-20" in body and "a16 ·" not in body and ct.startswith("text/plain"), (st, body[:120]))
-_cg = client.get; client.get = lambda what, *a, **k: (200, server._client_get(what, {})[2]); _o = sys.stdout; sys.stdout = __import__("io").StringIO()
+st, ct, body = client_reads_svc._client_get("holds", {}); check("the client API serves it as holds", st == 200 and "a14 · mover sparrow · wake 2026-11-20" in body and "a16 ·" not in body and ct.startswith("text/plain"), (st, body[:120]))
+_cg = client.get; client.get = lambda what, *a, **k: (200, client_reads_svc._client_get(what, {})[2]); _o = sys.stdout; sys.stdout = __import__("io").StringIO()
 try: rc = client.main(["client.py", "holds"]); printed = sys.stdout.getvalue()
 finally: sys.stdout = _o; client.get = _cg
 check("client.py holds prints the report and exits 0", rc == 0 and "a14 · mover sparrow" in printed and printed.endswith("\n"), (rc, printed[:200]))
@@ -385,12 +386,12 @@ item(3, U, "on_hold")                                       # the retired status
 item(4, U, meta={"hold": True, "mover": U})
 item(5, U, "completed"); item(6, V); item(7, "cse_0123456789abcdef", meta={"owner_name": "sparrow", "mover": "sparrow"})
 gids = lambda body: [x["gid"] for x in json.loads(body)["items"]]
-st, ct, body = server._client_get("items", {"key": U})
+st, ct, body = client_reads_svc._client_get("items", {"key": U})
 check("items: by the transcript uuid, the session's open items only (an owner stored by name, a held one, one by owner_name)",
       st == 200 and ct == "application/json" and gids(body) == ["a1", "a2", "a3", "a4", "a7"], (st, body[:400]))
-st, ct, body2 = server._client_get("items", {"key": "sparrow"}); check("items: by the pane name, the same", st == 200 and gids(body2) == gids(body), body2[:300])
-st, ct, body3 = server._client_get("items", {"key": V}); check("items: another session sees only its own", st == 200 and gids(body3) == ["a6"], body3[:300])
-st, ct, body4 = server._client_get("items", {"key": "nobody-at-all"}); check("items: a session that owns nothing: an empty list", st == 200 and json.loads(body4) == {"items": []}, body4)
+st, ct, body2 = client_reads_svc._client_get("items", {"key": "sparrow"}); check("items: by the pane name, the same", st == 200 and gids(body2) == gids(body), body2[:300])
+st, ct, body3 = client_reads_svc._client_get("items", {"key": V}); check("items: another session sees only its own", st == 200 and gids(body3) == ["a6"], body3[:300])
+st, ct, body4 = client_reads_svc._client_get("items", {"key": "nobody-at-all"}); check("items: a session that owns nothing: an empty list", st == 200 and json.loads(body4) == {"items": []}, body4)
 x = {i["gid"]: i for i in json.loads(body)["items"]}
 eb2, od2 = x["a2"].pop("expected_by"), x["a2"].pop("overdue")      # kept as keys, always empty (they go in a later release)
 check("items: the fields", x["a2"] == {"gid": "a2", "shown": "a2", "subject": "[home] item 2", "needs": ["decision"], "contact": "", "next": "first\nsecond", "state_updated": 100.0, "confirmed": 200.0, "updated": 300.0, "held": False, "list": "your-move",
@@ -399,7 +400,7 @@ check("items: expected_by and overdue stay as keys and are always empty (no expe
 check("items: held, from metadata.hold and from the retired status", x["a3"]["held"] and x["a4"]["held"] and not x["a1"]["held"], (x["a3"], x["a4"]))
 check("items: an older file without the clocks: state_updated and updated null, confirmed from its fallback", x["a1"]["state_updated"] is None and x["a1"]["updated"] is None and x["a1"]["confirmed"] > 0, x["a1"])
 for bad in ("", "a\nb", "x" * 201):
-    st, ct, b = server._client_get("items", {"key": bad}); check(f"items refuses the key {bad[:6]!r}", st == 400, (st, b))
+    st, ct, b = client_reads_svc._client_get("items", {"key": bad}); check(f"items refuses the key {bad[:6]!r}", st == 400, (st, b))
 with TestClient(app) as c:
     r = c.get("/client/items", params={"key": U}); check("http: items without a token → 401", r.status_code == 401, r.status_code)
     r = c.get("/client/items", params={"key": U}, headers={"Authorization": "Bearer " + "y" * 43}); check("http: items with a wrong token → 401", r.status_code == 401, r.status_code)
@@ -413,7 +414,7 @@ X = "dddddddd-4444-4444-8444-444444444444"
 item(21, X, meta={"needs": "decision", "then": X, "next": "home-lister: carry on"})                    # Oliver moves it: Your move
 item(22, X)                                                                                           # an agent (X) moves it: Agents at work
 item(23, X, meta={"wait_kind": "time", "wake": "2030-01-01", "then": X, "post_wake_mover": X})       # waiting on a time, X takes it after: Waiting
-rows = {i["gid"]: i for i in json.loads(server._client_get("items", {"key": X})[2])["items"]}
+rows = {i["gid"]: i for i in json.loads(client_reads_svc._client_get("items", {"key": X})[2])["items"]}
 check("items: list is your-move for an item Oliver moves, agents for one an agent moves, waiting for a wait",
       (rows.get("a21") or {}).get("list") == "your-move" and (rows.get("a22") or {}).get("list") == "agents" and (rows.get("a23") or {}).get("list") == "waiting",
       {g: r.get("list") for g, r in rows.items()})
@@ -430,9 +431,9 @@ md = lambda n: json.loads((T / f"store/a/{n}.json").read_text())["metadata"]
 item(8, V, meta={"owner_name": "home-other"}); item(9, V, meta={"owner_name": "home-other"})
 _update_svc._update("a8", owner=U, sender="home-other"); m = md(8)
 check("owner change: to a known session's uuid without owner_name, owner_name becomes the name the fleet knows", m["owner"] == U and m["owner_name"] == "sparrow", m)
-st, ct, b = server._client_get("items", {"key": V}); st2, ct2, b2 = server._client_get("items", {"key": "home-other"})
+st, ct, b = client_reads_svc._client_get("items", {"key": V}); st2, ct2, b2 = client_reads_svc._client_get("items", {"key": "home-other"})
 check("owner change: the board check follows the mover, not the creator: the session that moves the item still lists it, by uuid or by name", "a8" in gids(b) and "a8" in gids(b2), (b[:300], b2[:300]))
-st, ct, b = server._client_get("items", {"key": U}); check("owner change: …and the session named as creator now lists nothing for it", "a8" not in gids(b), b[:300])
+st, ct, b = client_reads_svc._client_get("items", {"key": U}); check("owner change: …and the session named as creator now lists nothing for it", "a8" not in gids(b), b[:300])
 _update_svc._update("a8", owner="home-other", sender="sparrow"); m = md(8)
 check("owner change: to a pane name, stored as its uuid and the name as owner_name", m["owner"] == V and m["owner_name"] == "home-other", m)
 _ho_was = dict(_cfgm.CFG.get("model") or {}); _cfgm.CFG["model"] = {**_ho_was, "handoff": False}      # this one check needs a session no pane of which exists: the hand-off's send-time guard (handoff suite) would refuse it

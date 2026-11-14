@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import recycle as recycle_svc
 from stackshot.service import update as _update_svc
 from stackshot.waits import waiting as _wt
 from stackshot.core import config as _cfg
@@ -104,7 +105,7 @@ _update_svc._update("a5", recycle=True); _update_svc._update("a5", hold=True)
 started = time.time(); time.sleep(0.01)
 _update_svc._update("a2", recycle=True)            # flagged again after the sweep began: the recycle does not cover it
 told.clear()
-r = server._recycled("testbox", "recycle", started, "partial", ["home-skipped"])
+r = recycle_svc._recycled("testbox", "recycle", started, "partial", ["home-skipped"])
 check("cleared: the item flagged before, owned here", "a1" in r["cleared"] and "recycle" not in rd(1)["metadata"], r)
 check("cleared: the held item, whose hold waited only for the recycle, is released with it", "a5" in r["cleared"] and "recycle" not in rd(5)["metadata"] and "hold" not in rd(5)["metadata"], rd(5)["metadata"])
 kept = {k["item"]: k["why"] for k in r["kept"]}
@@ -116,12 +117,12 @@ here = next(n for _, o, n in told if o == U["home-here"] and "a1" in n); held = 
 check("the owner's line names its item and says resume", "recycle you waited for has run (testbox" in here and "re-read a1 and resume" in here and ", partly" in here, here)
 check("the mover's line for the held item says the hold went with the recycle", "re-read a5 and resume" in held and "a5 waited only for the recycle and is released from hold." in held, held)
 check("the recycle clears without a state change", rd(1)["state_updated"] == now - 3600, rd(1))
-check("wanted: only the item flagged after the last recycle began (the skipped owner's item is not)", server._recycle_wanted("testbox") == ["a2"], server._recycle_wanted("testbox"))
+check("wanted: only the item flagged after the last recycle began (the skipped owner's item is not)", recycle_svc._recycle_wanted("testbox") == ["a2"], recycle_svc._recycle_wanted("testbox"))
 say(5); _update_svc._update("a5", hold=True, wake="2099-01-02"); _update_svc._update("a5", recycle=True)            # held again (with a wake), and flagged again
-check("wanted: a held item is not counted", server._recycle_wanted("testbox") == ["a2"], server._recycle_wanted("testbox"))
-check("wanted: a machine with no recycle on record counts its owners' items", server._recycle_wanted("otherbox") == ["a4"], server._recycle_wanted("otherbox"))
+check("wanted: a held item is not counted", recycle_svc._recycle_wanted("testbox") == ["a2"], recycle_svc._recycle_wanted("testbox"))
+check("wanted: a machine with no recycle on record counts its owners' items", recycle_svc._recycle_wanted("otherbox") == ["a4"], recycle_svc._recycle_wanted("otherbox"))
 told.clear()
-r = server._recycled("otherbox", "reboot", 0, "ok", [])
+r = recycle_svc._recycled("otherbox", "reboot", 0, "ok", [])
 check("a reboot on the other machine clears its owner's item (started 0 = now); the line goes to the page's keeper, naming the owner", r["cleared"] == ["a4"]
       and told[0][1] == U["home-away"] and "the reboot you waited for has run (otherbox" in told[0][2] and "re-read a4 and resume" in told[0][2], (r, told))
 
@@ -138,7 +139,7 @@ with TestClient(app) as c:
     check("an unknown kind is refused", res.status_code == 400, res.text)
     res = c.get("/client/recycle-wanted", headers=h)
     check("GET /client/recycle-wanted answers \"<count> <ids>\"", res.status_code == 200 and res.text == "0", res.text)
-    server._last_recycle = lambda m: 0.0; _update_svc._update("a1", recycle=True)
+    recycle_svc._last_recycle = lambda m: 0.0; _update_svc._update("a1", recycle=True)
     res = c.get("/client/recycle-wanted", headers=h)
     check("and lists the ids after the count, each with the second its recycle was asked for", res.status_code == 200
           and res.text == f"2 a1@{int(rd(1)['metadata']['recycle_at'])} a3@{int(rd(3)['metadata']['recycle_at'])}", res.text)
@@ -317,17 +318,17 @@ _update_svc._update("a20", recycle=True); _update_svc._update("a20", hold=True) 
 _update_svc._update("a21", recycle=True); say(21); _update_svc._update("a21", hold=True, wake="2099-01-02")                 # and a wake
 _update_svc._update("a22", recycle=True); _update_svc._update("a22", after=["a25"], ask_by="2099-01-02"); _update_svc._update("a22", hold=True)   # and an open after
 _update_svc._update("a23", recycle=True)                                                                     # not held
-check("6b setup: a20 is held for the recycle alone, a21 has a wake, a22 an open after", server._held_only_for_recycle(rd(20)) and not server._held_only_for_recycle(rd(21))
-      and not server._held_only_for_recycle(rd(22)) and rd(21)["metadata"].get("until") and rd(22)["metadata"].get("after") == ["a25"] and rd(22)["metadata"].get("until"),
+check("6b setup: a20 is held for the recycle alone, a21 has a wake, a22 an open after", recycle_svc._held_only_for_recycle(rd(20)) and not recycle_svc._held_only_for_recycle(rd(21))
+      and not recycle_svc._held_only_for_recycle(rd(22)) and rd(21)["metadata"].get("until") and rd(22)["metadata"].get("after") == ["a25"] and rd(22)["metadata"].get("until"),
       [rd(i)["metadata"] for i in (20, 21, 22)])
-w = server._recycle_wanted("testbox")
+w = recycle_svc._recycle_wanted("testbox")
 check("wanted: an item held only for the recycle is listed", "a20" in w, w)
 check("wanted: an item held for a wake as well is not listed", "a21" not in w, w)
 check("wanted: an item held for an open after as well is not listed", "a22" not in w, w)
 check("wanted: an unheld flagged item is listed, as before", "a23" in w, w)
 it25 = rd(25); it25["status"] = "completed"; (T / "store/a/25.json").write_text(json.dumps(it25))
 it22 = rd(22); [it22["metadata"].pop(k, None) for k in ("until", "wait_kind", "after")]; (T / "store/a/22.json").write_text(json.dumps(it22))      # what the release does when its after closes: the wait ends, the date and kind go
-check("wanted: once its after closes and the wait ends, a22 waits for the recycle alone and is listed", "a22" in server._recycle_wanted("testbox"), server._recycle_wanted("testbox"))
+check("wanted: once its after closes and the wait ends, a22 waits for the recycle alone and is listed", "a22" in recycle_svc._recycle_wanted("testbox"), recycle_svc._recycle_wanted("testbox"))
 with TestClient(app) as c:
     h = {"Authorization": "Bearer " + tok}
     res = c.get("/client/recycle-wanted", headers=h)
@@ -351,7 +352,7 @@ with TestClient(app) as c:
     check("retry: it clears the items the first one kept", {"a26", "a27"} <= set(res2.json().get("cleared", [])) and "recycle" not in rd(26)["metadata"]
           and "recycle" not in rd(27)["metadata"], (res2.text, rd(26)["metadata"], rd(27)["metadata"]))
     check("retry: the item held only for the recycle is released from hold", "hold" not in rd(27)["metadata"] and any("a27" in n and "released from hold" in n for _, _, n in told), (rd(27)["metadata"], told))
-    check("retry: the recorded start of the machine's last recycle stays the original", json.load(open(server._recycles_path())).get("testbox") == S, open(server._recycles_path()).read())
+    check("retry: the recorded start of the machine's last recycle stays the original", json.load(open(recycle_svc._recycles_path())).get("testbox") == S, open(recycle_svc._recycles_path()).read())
     res3 = c.post("/client/recycled", json={"kind": "recycle", "started": S, "result": "ok", "skipped": []}, headers=h)
     check("retry: a third report changes nothing and still answers", res3.status_code == 200 and not ({"a26", "a27"} & set(res3.json().get("cleared", []))), res3.text)
 
@@ -361,7 +362,7 @@ F = time.time() + 100          # the flag's time; later than every report above,
 for i, o, at in ((30, "home-here", F - 10), (31, "home-here", F), (32, "home-here", F + 1), (33, "home-skipped", F - 5), (34, "home-away", F - 5)):
     item(i, o, recycle=True, recycle_at=at)
 told.clear()
-r = server._recycled("testbox", "recycle", F, "partial", ["home-skipped"], flag_at=F)
+r = recycle_svc._recycled("testbox", "recycle", F, "partial", ["home-skipped"], flag_at=F)
 kept = {k["item"]: k["why"] for k in r["kept"]}
 check("flag_at: an item flagged before the flag is cleared", "a30" in r["cleared"] and "recycle" not in rd(30)["metadata"] and "recycle_at" not in rd(30)["metadata"], r)
 check("flag_at: an item flagged exactly at the flag's time is covered by it, and cleared", "a31" in r["cleared"] and "recycle" not in rd(31)["metadata"], r)
@@ -370,17 +371,17 @@ check("flag_at: an item flagged after the flag is kept, flag in place", kept.get
 check("flag_at, partial: the skipped keeper's item is kept", kept.get("a33") == "its mover was not relaunched" and rd(33)["metadata"].get("recycle") is True, r)
 check("flag_at: an item whose keeper is on another machine is kept", kept.get("a34", "").startswith("its mover is not on") and rd(34)["metadata"].get("recycle") is True, r)
 check("flag_at: the owner's line names the cleared items, partly", any(o == U["home-here"] and "a30" in n and "a31" in n and "a32" not in n and ", partly" in n for _, o, n in told), told)
-check("flag_at: it is the time recorded as the machine's last recycle", json.load(open(server._recycles_path())).get("testbox") == F, open(server._recycles_path()).read())
-server._last_recycle = lambda m: json.load(open(server._recycles_path())).get(m, 0.0)     # the real one back (6b patched it to 0), to see _recycle_wanted with the recorded flag time
-w = server._recycle_wanted("testbox")
+check("flag_at: it is the time recorded as the machine's last recycle", json.load(open(recycle_svc._recycles_path())).get("testbox") == F, open(recycle_svc._recycles_path()).read())
+recycle_svc._last_recycle = lambda m: json.load(open(recycle_svc._recycles_path())).get(m, 0.0)     # the real one back (6b patched it to 0), to see _recycle_wanted with the recorded flag time
+w = recycle_svc._recycle_wanted("testbox")
 check("wanted under flag_at: the item flagged after the recorded flag time is listed; the ones at or before it are not", "a32" in w and "a30" not in w and "a31" not in w and "a33" not in w, w)
 told.clear()
-r = server._recycled("testbox", "recycle", F, "ok", [], flag_at=F)
+r = recycle_svc._recycled("testbox", "recycle", F, "ok", [], flag_at=F)
 check("flag_at: the retry with the skipped pane back clears its keeper's item, and still keeps the one flagged after", "a33" in r["cleared"] and "recycle" not in rd(33)["metadata"]
       and {k["item"] for k in r["kept"]} >= {"a32"} and "a32" not in r["cleared"], r)
-r = server._recycled("testbox", "recycle", F + 1, "ok", [], flag_at=F + 1)
+r = recycle_svc._recycled("testbox", "recycle", F + 1, "ok", [], flag_at=F + 1)
 check("flag_at: the next flag's call clears the item flagged at that later time", "a32" in r["cleared"] and "recycle" not in rd(32)["metadata"], r)
-check("flag_at: a call for an earlier flag does not move the recorded time back", (server._note_recycle("testbox", F - 50), json.load(open(server._recycles_path())).get("testbox"))[1] == F + 1)
+check("flag_at: a call for an earlier flag does not move the recorded time back", (recycle_svc._note_recycle("testbox", F - 50), json.load(open(recycle_svc._recycles_path())).get("testbox"))[1] == F + 1)
 # over HTTP: flag_at in the body, and refused when it is no number; started absent, flag_at stands for it
 for i, o, at in ((35, "home-here", F + 20), (36, "home-here", F + 21)):
     item(i, o, recycle=True, recycle_at=at)
@@ -395,12 +396,12 @@ with TestClient(app) as c:
 S2 = F + 200
 for i, o, at in ((37, "home-here", S2 - 1), (38, "home-here", S2), (39, "home-here", S2 + 1)):
     item(i, o, recycle=True, recycle_at=at)
-r = server._recycled("testbox", "recycle", S2, "ok", [])
+r = recycle_svc._recycled("testbox", "recycle", S2, "ok", [])
 kept = {k["item"]: k["why"] for k in r["kept"]}
 check("started only (an older sala): flagged before started is cleared", "a37" in r["cleared"] and "recycle" not in rd(37)["metadata"], r)
 check("started only: flagged at started or after is kept, 'flagged after the recycle began' as before", kept.get("a38") == kept.get("a39") == "flagged after the recycle began"
       and rd(38)["metadata"].get("recycle") is True and rd(39)["metadata"].get("recycle") is True, r)
-check("started only: started is the time recorded", json.load(open(server._recycles_path())).get("testbox") == S2, open(server._recycles_path()).read())
+check("started only: started is the time recorded", json.load(open(recycle_svc._recycles_path())).get("testbox") == S2, open(recycle_svc._recycles_path()).read())
 
 # ---- 6d. recycle-wanted prints each id as <id>[@<epoch>][~<repo>:pr<N>]: the second the recycle was asked for, and the pull request anchored to the item
 # (the latest of its pull request anchors; an issue, a project-wide anchor and a bare id add nothing). The count token and the order stay what they were.
@@ -420,16 +421,16 @@ _store.setdefault("projects/alpha", []).extend([
     {"url": _pr.format("stackshot", 13), "items": None, "added": 30, "by": "t"},                                     # a project-wide anchor is the project's, not the item's
 ])
 _anc_path.write_text(json.dumps(_store))
-_rows = server._recycle_wanted("testbox"); _toks = server._recycle_wanted_tokens("testbox")
+_rows = recycle_svc._recycle_wanted("testbox"); _toks = recycle_svc._recycle_wanted_tokens("testbox")
 _mine = {t.split("@")[0].split("~")[0]: t for t in _toks if t.split("@")[0].split("~")[0] in {"a40", "a41", "a42", "a43"}}
 check("tokens: a recycle time and a pull request anchor print as <id>@<epoch>~<repo>:pr<N>, the epoch whole seconds", _mine.get("a40") == f"a40@{_B}~salamander:pr4", _mine)
 check("tokens: no pull request anchor prints the @ suffix alone", _mine.get("a41") == f"a41@{_B + 1}", _mine)
 check("tokens: of several pull request anchors the latest added counts, an issue or a project-wide anchor does not", _mine.get("a42") == f"a42@{_B + 2}~stackshot:pr9", _mine)
-_last0, server._last_recycle = server._last_recycle, (lambda m: 0.0)            # a machine with no recycle on record counts an item whose flag stored no time
+_last0, recycle_svc._last_recycle = recycle_svc._last_recycle, (lambda m: 0.0)            # a machine with no recycle on record counts an item whose flag stored no time
 try:
-    _bare = [t for t in server._recycle_wanted_tokens("testbox") if t.startswith("a43")]
+    _bare = [t for t in recycle_svc._recycle_wanted_tokens("testbox") if t.startswith("a43")]
 finally:
-    server._last_recycle = _last0
+    recycle_svc._last_recycle = _last0
 check("tokens: an item with no recycle time stored and no anchor stays a bare id", _bare == ["a43"], _bare)
 check("tokens: the same items in the same order as _recycle_wanted, and nothing dropped", [re.split(r"[@~]", t)[0] for t in _toks] == _rows, (_toks, _rows))
 with TestClient(app) as c:

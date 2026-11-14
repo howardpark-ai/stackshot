@@ -11,9 +11,9 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
   5  it ends by itself: the mover moves a queued item (it has the newest activity: it is in hand and the other returns to agent once its own hour has passed), the item it waits behind closes, or its activity
      goes idle, or the mover is left with one item
   6  the shared reading (silence.reading, which the hourly line, the idle hand-over and the stall pass use) leaves a queued item off the agents as it does a waiting one and still reads the item in hand on agent; the gate off reads both
-  7  the hourly audit line (hourly.due, hourly.pass_, server._hourly_tick) writes no line on a queued item and one on the item in hand
+  7  the hourly audit line (hourly.due, hourly.pass_, service/audit_ticks._hourly_tick) writes no line on a queued item and one on the item in hand
   8  the stall pass (stalltick_svc.stall_tick) takes no step on a queued item and still takes it on the item in hand
-  9  the items sheet's list word (server._item_list) says waiting for a queued item
+  9  the items sheet's list word (client_reads_svc._item_list) says waiting for a queued item
   4b the words: board.md and the brief (the head's waiting lines and the cards) say `queued behind <item>` for a queued item, never `waiting on another item's close`; the item page and the home row say it too;
      the wait a session stored as an item wait keeps its words
   4c the front test the board and the passes use: the one the server installed is the one used; a front test that cannot answer counts as front (nothing is queued on a guess), in the queue path only; the
@@ -61,9 +61,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server, home
+from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.web.tools import notes as _notes_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import messaging as _messaging
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
@@ -99,7 +101,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
+CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"; _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
@@ -294,20 +296,20 @@ off()
 far = {"metadata": {"last_activity": {"at": now0 + 10 * H, "kind": "step_done", "what": "x"}}}; near = {"metadata": {"last_activity": {"at": now0 + 10 * MIN, "kind": "step_done", "what": "x"}}}
 check("4d candidate: a record dated more than the skew ahead is no record (0); one a little ahead reads as now", Q.candidate("a1", far, "m", now0)[3] == 0.0 and Q.candidate("a1", near, "m", now0)[3] == now0, (Q.candidate("a1", far, "m", now0), Q.candidate("a1", near, "m", now0)))
 check("4d …so a far-future record never holds an item in hand over a real one", q(("a1", "m", "p", Q.candidate("a1", far, "m", now0)[3]), c("a2", ago=5), c("a3", ago=200)) == {"a1": "a2", "a3": "a2"})
-base(); on(); server._QUEUE_CACHE.update(at=0.0, map={})
-m1 = server._queue_map(now0); put(3, act=180, last=1); put(2, act=180, last=300)
-m2 = server._queue_map(now0 + 20); m3 = server._queue_map(now0 + 40)
+base(); on(); audit_ticks_svc._QUEUE_CACHE.update(at=0.0, map={})
+m1 = audit_ticks_svc._queue_map(now0); put(3, act=180, last=1); put(2, act=180, last=300)
+m2 = audit_ticks_svc._queue_map(now0 + 20); m3 = audit_ticks_svc._queue_map(now0 + 40)
 check("4d _queue_map: the answer is kept for 30 seconds (the same map within it, the store read again after it)", m1 == {"a2": "a1"} and m2 is m1 and m3 != m1, (m1, m2, m3))
 real_queued = SL.queued
 def failing(*a, **k): raise OSError("store unreadable")
 err = io.StringIO()
 with mutate(SL, "queued", failing):
-    server._QUEUE_CACHE.update(at=0.0, map={"a9": "a8"})
+    audit_ticks_svc._QUEUE_CACHE.update(at=0.0, map={"a9": "a8"})
     old_err, sys.stderr = sys.stderr, err
-    try: swallowed = server._queue_map(now0 + 100)
+    try: swallowed = audit_ticks_svc._queue_map(now0 + 100)
     finally: sys.stderr = old_err
-check("4d a read that fails is swallowed: {} and a line on stderr, never an error to the caller; and it is not kept (the next call reads again)", swallowed == {} and "queued: not read" in err.getvalue() and server._QUEUE_CACHE["map"] == {"a9": "a8"}, (swallowed, err.getvalue()))
-off(); check("4d …and with the gate off the map is {} without reading anything", server._queue_map(now0 + 200) == {})
+check("4d a read that fails is swallowed: {} and a line on stderr, never an error to the caller; and it is not kept (the next call reads again)", swallowed == {} and "queued: not read" in err.getvalue() and audit_ticks_svc._QUEUE_CACHE["map"] == {"a9": "a8"}, (swallowed, err.getvalue()))
+off(); check("4d …and with the gate off the map is {} without reading anything", audit_ticks_svc._queue_map(now0 + 200) == {})
 
 # ================================================================ 5. it ends by itself
 wipe(); put(1, act=180, last=10); put(2, act=180, last=120)
@@ -352,9 +354,9 @@ on(); got1 = [g for g, _l in HR.pass_(items(), now0, env(), None, None)]
 check("7 the gate off: a line is owed on every silent on-agent item, a2 included", got0 == ["a1", "a2", "a3", "a4", "a5", "a6"], got0)
 check("7 the gate on: none on the queued item", got1 == ["a1", "a3", "a4", "a5", "a6"], got1)
 check("7 due() on its own reads the queue too (a queued item is owed none; the item in hand is)", HR.due(items(), "a2", now0, env()) is None and HR.due(items(), "a1", now0, env()) is not None)
-written = server._hourly_tick(now=now0, items=None, env=env(), pane=lambda who: "")
+written = audit_ticks_svc._hourly_tick(now=now0, items=None, env=env(), pane=lambda who: "")
 check("7 the tick writes the line on the item in hand and none on the queued one", "a1" in written and "a2" not in written and len(lines(1)) == 1 and lines(2) == [], (written, lines(1), lines(2)))
-off(); wrote_off = server._hourly_tick(now=now0 + 70 * MIN, items=None, env=env(), pane=lambda who: "")
+off(); wrote_off = audit_ticks_svc._hourly_tick(now=now0 + 70 * MIN, items=None, env=env(), pane=lambda who: "")
 check("7 the gate off again: the line is owed on a2", "a2" in wrote_off and len(lines(2)) == 1, wrote_off)
 check("7 nothing was sent to anyone", sent == [], sent)
 
@@ -374,7 +376,7 @@ for (_m, _n), _f in REAL.items(): setattr(_m, _n, _f)
 _cfg.CFG["model"] = {}; _cfg.CFG["stall"] = {}
 def cli_row(who, status, at): (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def stk(at, gate):
-    stall_svc.STALL_LAST[0] = 0.0; server._QUEUE_CACHE.update(at=0.0, map={})
+    stall_svc.STALL_LAST[0] = 0.0; audit_ticks_svc._QUEUE_CACHE.update(at=0.0, map={})
     (on if gate else off)()
     CLK.t = at
     try: return stalltick_svc.stall_tick(at)
@@ -395,15 +397,15 @@ for gate in (False, True):
 # ================================================================ 9. the items sheet's list word and the server's map
 @contextlib.contextmanager
 def at_now0():
-    """The server's clock stand-in (CLK) reads now0 while the block runs. The data above is built at now0, which the midnight guard may have moved two hours back, and `server._queue_map()` with no argument asks the server's clock for the time (CLK.t None reads the real one)."""
+    """The server's clock stand-in (CLK) reads now0 while the block runs. The data above is built at now0, which the midnight guard may have moved two hours back, and `audit_ticks_svc._queue_map()` with no argument asks the server's clock for the time (CLK.t None reads the real one)."""
     was = CLK.t; CLK.t = now0
     try: yield
     finally: CLK.t = was
-base(); on(); server._QUEUE_CACHE.update(at=0.0, map={})
+base(); on(); audit_ticks_svc._QUEUE_CACHE.update(at=0.0, map={})
 with at_now0():
-    check("9 _item_list: waiting for a queued item, agents for the item in hand and for a mover's only item", server._item_list(dict(rd(2), gid="a2")) == home.WAITING and server._item_list(dict(rd(1), gid="a1")) == home.AGENTS and server._item_list(dict(rd(4), gid="a4")) == home.AGENTS)
-    check("9 _queue_map: {a2: a1} and nothing for the others", server._queue_map(now0, items()) == {"a2": "a1"}, server._queue_map(now0, items()))
-    off(); check("9 …and {} with the gate off", server._queue_map(now0, items()) == {} and server._item_list(dict(rd(2), gid="a2")) == home.AGENTS)
+    check("9 _item_list: waiting for a queued item, agents for the item in hand and for a mover's only item", client_reads_svc._item_list(dict(rd(2), gid="a2")) == home.WAITING and client_reads_svc._item_list(dict(rd(1), gid="a1")) == home.AGENTS and client_reads_svc._item_list(dict(rd(4), gid="a4")) == home.AGENTS)
+    check("9 _queue_map: {a2: a1} and nothing for the others", audit_ticks_svc._queue_map(now0, items()) == {"a2": "a1"}, audit_ticks_svc._queue_map(now0, items()))
+    off(); check("9 …and {} with the gate off", audit_ticks_svc._queue_map(now0, items()) == {} and client_reads_svc._item_list(dict(rd(2), gid="a2")) == home.AGENTS)
 
 # ================================================================ 10. revert-proof: each rule mutated, the guard must fail
 def observe():
@@ -452,7 +454,7 @@ with mutate(Q, "overlay", lambda mod, behind: mod):
     on(); b = board(); L = {w: ids for w, ids in lists_of(b).items() if w in (AG, WT)}; off()
 check("10 mutation `the board no longer applies the reading` is caught: a2 stays on agent", "a2" in L[AG], L)
 
-with mutate(server, "_queue_map", lambda *a, **k: {}):
+with mutate(audit_ticks_svc, "_queue_map", lambda *a, **k: {}):
     B = stall_rows(); stall_svc.stall_since(B)
     for p in (T / "state").glob("stall*.json"): p.unlink()
     B = stall_rows(); stall_svc.stall_since(B); cli_row("home-peer", "idle", B + 60)

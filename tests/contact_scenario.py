@@ -54,6 +54,7 @@ def put(i, status="open", **meta):
 
 from stackshot.web import server; from stackshot.service import projects as _psvc
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import contacts as _contacts
 from stackshot.core import instance as _core_instance
 from stackshot.github import ghsync as _gh
@@ -235,7 +236,7 @@ check("get: an item with no stored contact shows the project's -main agent", f"c
 put(17, status="completed", contact=SIDE, outcome="done", reason="done")
 check("get: a closed item shows the contact it had", f"contact: {SIDE}" in _wt_get.stackshot_get(item_id="a17"))
 check("brief: the line is left out (the brief loads into every session)", "contact:" not in _get_tool._fmt(_service_store._load("a15"), brief=True))
-st, _t, body = server._client_item_facts("some-session", "a15,a17")
+st, _t, body = client_reads_svc._client_item_facts("some-session", "a15,a17")
 facts = json.loads(body)["items"]
 check("client JSON: item-facts carries the contact", st == 200 and facts["a15"]["contact"] == MAIN and facts["a17"]["contact"] == SIDE, facts)
 

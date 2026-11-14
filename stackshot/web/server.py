@@ -95,15 +95,12 @@ if __name__ == "__main__":
 
 from stackshot.github import ghsync as _gh  # noqa: E402  — the GitHub mirror and the id switch, both off unless [github] says so
 from stackshot.web import whatschanged as _wc  # noqa: E402  — the brief's what-changed lines for 7 days after a release that changes a tool
-from stackshot.model import said as _said  # noqa: E402  — the owner's words on an item, checked against his message's transcript (the trailers)
 from stackshot.model import states as _states  # noqa: E402  — an open item's stored state, what each state carries, and the derived one (states.py)
-from stackshot.model import item_project as _ip  # noqa: E402  — an item's project by its permanent id: the id an item stores and the page key every reader reads through it (item_project.py)
 from stackshot.model import item_project_pass as _ipp  # noqa: E402  — the project-id pass: the ids stored on the items already there, and put back (item_project_pass.py)
 from stackshot.model import retire_fields as _retire  # noqa: E402  — the data change that takes the stored state words and carry fields out of storage: the plan and the undo entry (retire_fields.py)
 from stackshot.waits import waiting as _wt  # noqa: E402  — what an item waits on and whose move it is (waiting.py)
 from stackshot.model import model as _model  # noqa: E402  — the item model of the redesign: dead | alive | waiting, the mover and the wait, derived from the fields (model.py)
 from stackshot.model import queued as _queued  # noqa: E402  — a mover busy on another item: the rule that reads its other on-agent items as waiting, queued behind it (queued.py; `[model] queued_behind`)
-from stackshot.waits import dated_wait as _dw  # noqa: E402  — a doing item the board lists as waiting for its wake (dated_wait.py; the end-of-turn question skips a basis wait)
 from stackshot.web import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
 from stackshot.model import steps as _steps  # noqa: E402  — the checklist behind next: done, dropped and open steps, next derived from it (steps.py)
 from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fleet event (wait_kind=event): the phrase, what matches it (event_waits.py)
@@ -116,9 +113,7 @@ from stackshot.model import close_repair as _cr  # noqa: E402  — the descripti
 from stackshot.waits import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
 from stackshot.model import ask_leaves as _askl  # noqa: E402  — a wrong or moot ask leaves the owner's move on its own: the pure half (ask_leaves.py)
 from stackshot.model import note_read as _noteread  # noqa: E402  — what the owner's note on his step says: done, or a later time (note_read.py)
-from stackshot.fleet import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
 from stackshot.model import activity as _activity  # noqa: E402  — the item's `activity` clock: when something real last happened on the work, and which saves count (activity.py)
-from stackshot.model import progress as _progress  # noqa: E402  — what counts as the item having moved (a step marked, a state change, a merge), read by the last-activity record and the merge pass (progress.py)
 from stackshot.service import runner as _runner  # noqa: E402  — the minute tick table, the wake event and the background threads (service/runner.py)
 from stackshot.service import wakes as _wakes  # noqa: E402  — the wake pass, the anchor pass, the item and anchor release and the minute tick bodies of the wake passes (service/wakes.py)
 from stackshot.service import watching as _watching  # noqa: E402  — the waits' watchers: a wait that ends turns its item; anchor ids and the routine-line test (service/watching.py)
@@ -137,9 +132,11 @@ from stackshot.service import checks_hooks as _checks_hooks  # noqa: E402  — w
 from stackshot.service import fleet_events as _fleetev  # noqa: E402  — the fleet's own minute clocks (the clients' tick, the inbox flag) and the fleet helpers (service/fleet_events.py)
 from stackshot.service import migrations as _migrations  # noqa: E402  — the start-up migrations and the passes of the migration route (service/migrations.py)
 from stackshot.service import page_debt as _pdsvc  # noqa: E402  — the page-debt call: its pass, its calls per page and the fallback to the page's keeper (service/page_debt.py)
-from stackshot.service import passes_hooks as _passes_hooks  # noqa: E402  — what the page-debt call, the migrations and the fleet events still reach on this module (service/passes_hooks.py)
+from stackshot.service import passes_hooks as _passes_hooks  # noqa: E402  — what the page-debt call, the migrations, the fleet events, the client reads and the recycle bookkeeping still reach on this module (service/passes_hooks.py)
+from stackshot.service import client_reads as _client_reads  # noqa: E402  — the reads of the client API and the item facts they carry: an item's mover, its then, its wait and its list (service/client_reads.py)
+from stackshot.service import recycle as _recycle_svc  # noqa: E402  — the recycle bookkeeping: what waits for one, what one cleared and the script's request for one (service/recycle.py)
+from stackshot.service import merge_progress as _merge_progress  # noqa: E402  — a merged pull request is progress for the item it is tied to: the pass and the tie (service/merge_progress.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
-from stackshot.service import foryou as _fy  # noqa: E402  — the For you list's file: the board's route that serves it to the fleet tool reads its payload (service/foryou.py)
 from stackshot.web import runners as _runners  # noqa: E402  — the Runners page: each CI runner by machine and repo, idle, running or offline with the CI switch's reason (runners.py)
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
@@ -147,7 +144,7 @@ from stackshot.web import search as _search  # noqa: E402  — the board's searc
 from stackshot.core import instance as _inst  # noqa: E402  — the owner's name, the instance's name and the board's URL, read from [instance] once, at this import (core/instance.py); `_inst.BOARD_URL` is read and set on that module, never here
 from stackshot.core.instance import NAME, OWNER  # noqa: E402  — NAME and OWNER: the one read of [instance] (core/instance.py)
 from stackshot.model.bullet_text import _clip_line  # noqa: E402  — free text as one line of a notice (model/bullet_text.py)
-from stackshot.model.ids import _GID, _norm_id  # noqa: E402  — item ids and where they are read (model/ids.py)
+from stackshot.model.ids import _norm_id  # noqa: E402  — item ids and where they are read (model/ids.py)
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store  # noqa: E402  — needs, after and observers (model/needs.py)
 from stackshot.web.tools import get as _tool_get  # noqa: E402  — the item as `get` and the brief show it, the notice's ruling (web/tools/get.py)
 from stackshot.web.tools import notes as _tool_notes  # noqa: E402  — the notes a reply carries: form notes, the model lines, the guard report, the holds report (web/tools/notes.py)
@@ -177,6 +174,7 @@ from stackshot.service import messaging as _messaging  # noqa: E402  — the mes
 from stackshot.service import asks as _asks  # noqa: E402  — the ask line: its shape gate, its form in next, the nag, and the leaves of a wrong or moot ask (service/asks.py)
 from stackshot.service import wait_fixes as _wait_fixes  # noqa: E402  — the wait and hold fixes with I/O and the old wait parameters' window (service/wait_fixes.py)
 from stackshot.service import wait_gates as _wait_gates  # noqa: E402  — the write guards of event, anchor and front-step waits, the decision options' gate, and what an update owes the watchers (service/wait_gates.py)
+from stackshot.service import audit_ticks as _audit_ticks  # noqa: E402  — the ten-minute audit ticks (the filing, dates, archive and audit-line passes), the balancer and the queue map they read (service/audit_ticks.py)
 from stackshot.service import answer_handover as _handover  # noqa: E402  — where an item goes after the owner's answer, a Done or the end of a wait: the hand-over helpers and the answer line (service/answer_handover.py)
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
@@ -548,7 +546,6 @@ from stackshot.model.field_gates import (  # noqa: E402
     _fit,
     _next_line_max,
     _subject_max,
-    _when_idle,
 )
 
 
@@ -578,25 +575,21 @@ _wt.FALLBACK_MOVER = _telling.fallback_mover        # model.derive and waiting.m
 
 
 from stackshot.anchors import anchors as _anc  # noqa: E402
-from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the merge pass (`_merge_progress_tick`)
-from stackshot.model import merge_tie as _mtie  # noqa: E402  — which open items a merged pull request is tied to (merge_tie.py)
+from stackshot.anchors import merge_log as _mlog  # noqa: E402,F401  — the hub's record of the pull requests it saw merge (merge_log.py): the merge pass (service/merge_progress.py) reads it itself; the last-activity pass reads it here (`S._mlog`)
 from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's record of the other activity on pull requests (CI results, comments, reviews, merges): read by the last-activity pass (event_log.py)
 from stackshot.model import last_activity as _lastact  # noqa: E402  — the item's one "last activity" record, `metadata.last_activity` (last_activity.py)
 from stackshot.web import render as _rmod  # noqa: E402
 from stackshot.model import ask_read as _ar  # noqa: E402  — how an ask and its options are read (open question, alternatives, Yes/No pair, Recommend), shared with the audit (ask_read.py)
-from stackshot.router import router as _router  # noqa: E402  — the router's judging half: the rules in code and the thin call (router_live.py acts on them)
 from stackshot.router import page_debt as _page_debt  # noqa: E402  — the page-debt call (router step 3b): settings, prompt, checked edit, page read and write ([router] page_debt)
 from stackshot.router import router_live as _router_live  # noqa: E402  — the router: holds every project's notices for itself, rules them and delivers the passes
 from stackshot.projects import pages as _pages  # noqa: E402  — the pane gate's module: page freshness, the item settle test, the registry (one copy since an earlier change)
 from stackshot.projects import projects as _prj  # noqa: E402  — the project record: a permanent id per page, the lookup by id or key, projects.json
-from stackshot.projects import project_archive as _archive  # noqa: E402  — a project whose last agent is retired, with no open item, is archived (project_archive.py)
 from stackshot.fleet import session_ids as _sid  # noqa: E402  — the migration to permanent session ids: applied from here at start, under the item lock
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
 from stackshot.model.ids import _item_url  # noqa: E402  — an item's page on the board (model/ids.py)
-from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe  # noqa: E402  — a registry file of the store, and roles.json with projects.json beside it (projects/project_registry.py)
+from stackshot.projects.project_registry import _registry, _roles_sync_safe  # noqa: E402  — a registry file of the store, and roles.json with projects.json beside it (projects/project_registry.py)
 from stackshot.web import publish as _pubmod  # noqa: E402  — the debounced publish: the writes here call `_pubmod._publish()` and the hook tables look its functions up on that module, so a suite that replaces one sets it on `stackshot.web.publish` (the timer is `_PUB_TIMER` there)
 from stackshot.web.publish import _publish_if_idle  # noqa: E402  — the idle test the board's runner rebuild asks (`_runners.ON_CHANGE` in __main__)
-from stackshot.service import foryou_events as _fyev  # noqa: E402  — the rows the For you list makes from a change of an item and its due-date pass: the dates pass opens the pass's gate and runs it (service/foryou_events.py)
 from stackshot.service import foryou_hooks as _foryou_hooks  # noqa: E402  — what those rows still reach on this module (service/foryou_hooks.py)
 from stackshot.service.projects import _PROJECT_LOCK, _RENAMING, _new_project, _page_io, _project_agent, _project_agent_mandate, _project_agent_rename_checks, _project_agent_rename_write, _project_agent_retire_checks, _project_agent_retire_write, _project_list, _projects_list  # noqa: E402,F401  — the client API's routes, the archive sweep and the hand-off read them, and the two wrappers that stay here take the lock and call the checks and the writes (service/projects.py)
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
@@ -619,143 +612,7 @@ _router_live.configure(is_front=lambda who, project: _telling.front_keeper(who, 
                        after_rule=_router_live_after)
 
 
-def _filing_tick() -> "dict[str, Any] | None":
-    """The ten-minute filing pass (audit_run.filing_pass over audit_checks.filing_findings): is each open item filed in the right state? A finding goes to its mover once, as the daily
-    audit sends one. Stands still when the audit is off or runs in agent mode (the rollback), like the daily run. The pass also carries the front-step rule (front_step.py): a stuck-elsewhere step held by a front
-    agent moves to the item's mover after `[audit] front_step_move_hours`, through `_front_step_mark` (the clock) and `_front_step_move` (the reword)."""
-    if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
-        return None
-    from stackshot.audit import audit_run as _ar
-    return _ar.filing_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver, step_mark=_wait_gates._front_step_mark, step_move=_wait_gates._front_step_move, wake_park=_wait_fixes._wake_park, wait_end=_wait_fixes._wait_end_fix, wait_facts=_wait_fixes._wait_end_facts))
-
-
-def _dates_expected_tick() -> "dict[str, Any] | None":
-    """The wake half of the dates pass (audit_run.dates_pass over audit_checks.dates_findings): an item whose own wake has passed with no write since goes to
-    its mover once, as the daily audit sends a stale one. Stands still when the audit is off or runs in agent mode (the rollback), like the filing pass."""
-    if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
-        return None
-    from stackshot.audit import audit_run as _ar
-    return _ar.dates_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver), entered=_laddersvc.ladder_enter_quiet if _laddersvc.ladder_on() else None)
-
-
-def _dates_tick() -> "list[str]":
-    """The ten-minute dates pass: the For you list's due-date look (_foryou_tick), whose own gate it opens, since the set's pace is the gate here; then the expected-time look
-    (_dates_expected_tick). One that raises never stops the other; the first error is raised after both have run, so the runner records it."""
-    made: list[str] = []
-    failed: Exception | None = None
-    try:
-        _fyev._FORYOU_LAST[0] = 0.0
-        made = _fyev._foryou_tick()
-    except Exception as e:  # noqa: BLE001  — the expected-time look still runs; the runner records this error after it
-        failed = e
-    try:
-        _dates_expected_tick()
-    except Exception as e:  # noqa: BLE001
-        failed = failed or e
-    if failed is not None:
-        raise failed
-    return made
-
-
-def _archive_tick() -> "list[tuple[str, str]]":
-    """The ten-minute archive sweep (project_archive.sweep): a project whose last agent was retired while it still had open items waits on a list; this archives the
-    ones whose items are gone since (completed, or handed to another project). Nothing is read when the list is empty."""
-    if not _archive.waiting():
-        return []
-    today = dt.datetime.now(_cfg.tz()).strftime("%Y-%m-%d")
-    return _archive.sweep(_page_io(), today, _prj.with_made(_registry("projects")), _prj._pending_all())
-
-
-def _silence_env() -> Any:
-    """The audit passes' environment, built in one place for the hourly line, the idle hand-over, the balancer and the queue reading: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`front_keeper` of `stackshot/service/telling.py`), which is stricter than the
-    role map (a project's keeper is not front for its own project; a transcript id resolves). Every pass judges a hand-off by the very answer the others do."""
-    from stackshot.audit import audit_run as _ar
-    return _ar.Env(deliver=_wait_gates._filing_deliver, front=lambda who, project: _telling.front_keeper(who, project)[0], front_strict=lambda who, project: _telling.front_keeper(who, project, True)[0],
-                    front_or_unread=lambda who, project: _telling.front_keeper(who, project, unread_front=True)[0])
-
-
 _queued.configure(is_front=lambda who, project: _telling.front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
-_QUEUE_CACHE: "dict[str, Any]" = {"at": 0.0, "map": {}}
-_QUEUE_TTL = 30.0
-
-
-def _queue_map(now: "float | None" = None, items: "dict[str, dict[str, Any]] | None" = None) -> "dict[str, str]":
-    """{item: the item it is queued behind} for a mover busy on another item (silence.queued, model/queued.py), {} while `[model] queued_behind` is off or when the store cannot be read. Without `items` the
-    answer is kept for `_QUEUE_TTL` seconds, so a page or a pass that asks about many items reads the store once. Derived, never stored."""
-    if not _queued.enabled():
-        return {}
-    from stackshot.audit import silence as _silence
-    from stackshot.tools import next_report as _nrep
-    now = time.time() if now is None else now
-    if items is None and 0 <= now - _QUEUE_CACHE["at"] < _QUEUE_TTL:
-        return _QUEUE_CACHE["map"]
-    try:
-        out = _silence.queued(items if items is not None else _nrep.load_all(None), now, _silence_env())
-    except Exception as e:  # noqa: BLE001  — an extra reading: a failure leaves every item as it was
-        print(f"queued: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return {}
-    if items is None:
-        _QUEUE_CACHE.update(at=now, map=out)
-    return out
-
-
-def _silence_tick() -> "dict[str, Any] | None":
-    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`), then the one message about an item whose lines have only said "busy" for hours (`_busy_tell_tick`). Each is switched by
-    its own `[audit]` key and stands still when off. Stands still when the audit is off or runs in agent mode. One that raises never stops the other; the first error is printed."""
-    if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
-        return None
-    try:
-        _hourly_tick()
-    except Exception as e:  # noqa: BLE001  — the idle hand-over below still runs
-        print(f"audit: hourly line not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        _hand_idle_tick()
-    except Exception as e:  # noqa: BLE001  — handing an idle item on is its own pass: the line above has run
-        print(f"audit: idle items not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        _busy_tell_tick()
-    except Exception as e:  # noqa: BLE001  — the lines above have run
-        print(f"audit: long busy stretches not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return None
-
-
-def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
-    """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
-    the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
-    run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless session), a registry status this server does not know, a pane in a turn whose transcript this box does not hold, or one
-    whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover
-    there must not read idle and be handed on), a sessions index that cannot be read, one that is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
-    from stackshot.audit import subagent_tie as _tie
-    try:
-        idx = _sr._sessions_index() if idx is None else idx
-    except Exception as e:  # noqa: BLE001
-        raise _tie.Unreadable(f"the fleet's sessions index cannot be read ({e.__class__.__name__})") from e
-    row = _handoff.handoff_pane_row(who, idx)
-    if row is None:
-        if _handoff.handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
-            raise _tie.Unreadable("the session is registered here but is no interactive pane this server can look into")
-        w = str(who or "").strip()
-        names = {x for x in (w, _sr._session_label(w)) if x}
-        rows = [r for r in dict.values(idx) if isinstance(r, dict) and r.get("name") in names]
-        byid = idx.get(w) if w else None
-        if isinstance(byid, dict) and not any(byid is r for r in rows):
-            rows.append(byid)
-        if any(_lv.running(r) for r in rows):      # no row on this box, but the fleet's heartbeat holds the session running: it is on another machine (or its row here is not yet written), and its subagents cannot be read from here
-            raise _tie.Unreadable("the session runs on another machine, whose subagents this server cannot read")
-        if not len(idx):      # an empty index says nothing about this session (the heartbeat was not read, or holds nothing yet): "no row" is not "gone" then
-            raise _tie.Unreadable("the fleet's sessions index is empty")
-        if getattr(idx, "unreadable", None):      # a machine's sessions.json that could not be read leaves its sessions out: this one may be on it
-            raise _tie.Unreadable(f"the fleet's sessions index is partial (machine {', '.join(str(x) for x in idx.unreadable)} not read)")
-        return []      # no row of a live process anywhere in a whole index (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
-    st = str(row[1].get("status") or "")
-    if st in ("idle", "shell"):
-        return []      # a pane that is not in a turn has no subagent running (a subagent keeps its pane busy)
-    if st != "busy":
-        raise _tie.Unreadable(f"the pane's registry status is {st or 'missing'}, not one this server knows")
-    sid = str(row[1].get("sessionId") or "")
-    if not sid:
-        raise _tie.Unreadable("the pane's registry row names no session")
-    return _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
 
 
 def _busy_live(gid: str, mover: str) -> str:
@@ -763,395 +620,10 @@ def _busy_live(gid: str, mover: str) -> str:
     ties one (`_mover_subagents`, the anchors `_rlive.released_anchors`). "" when none is, or when it cannot be told (a mover whose subagents cannot be read is unknown, never a refusal)."""
     from stackshot.audit import busy_hold as _bh
     from stackshot.tools import next_report as _nr
-    return _bh.live_work(gid, mover, subagents=lambda who: _mover_subagents(who), items=lambda: _nr.load_all(None), anchored=_rlive.released_anchors, same=_handoff.ho_same, shown=_nr.shown)
+    return _bh.live_work(gid, mover, subagents=lambda who: _audit_ticks._mover_subagents(who), items=lambda: _nr.load_all(None), anchored=_rlive.released_anchors, same=_handoff.ho_same, shown=_nr.shown)
 
 
-def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,
-                 subagents: "Callable[[str], list[dict[str, Any]]] | None" = None, anchored: "dict[str, Any] | None" = None) -> list[str]:
-    """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, on by default), run from the ten-minute audit tick: an open item on an agent with no activity for 45 minutes (`hourly.EVERY`, so the line lands inside the hour), and no audit line in the last
-    45 minutes, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
-    `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
-    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff.handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
-    request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
-    newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
-    the server's own bookkeeping (no writer): it does not move the activity clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
-    passes within 45 minutes write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
-    from stackshot.audit import hourly as _hourly
-    from stackshot.audit import hourly_log as _hlog
-    from stackshot.tools import next_report as _nr
-    if not _hourly.enabled() or _ro.is_read_only():
-        return []
-    now = time.time() if now is None else now
-    items = items if items is not None else _nr.load_all(None)
-    env = env if env is not None else _silence_env()
-    try:
-        idx = _sr._sessions_index() if (pane is None or subagents is None) else {}
-        idx_ok = True
-    except Exception as e:  # noqa: BLE001  — the pane reads then see this box's registry alone; the subagents read tries the index again and is unknown when it still fails
-        idx, idx_ok = {}, False
-        print(f"audit: sessions index not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if pane is None:
-        pane = lambda who: _handoff.handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
-    if subagents is None:
-        seen: dict[str, Any] = {}      # a mover's subagents are read once a pass, not once an item: a read that failed is kept too (as the exception), so the transcript lookup is not repeated for every item and again under the item lock
-        def subagents(who: str) -> "list[dict[str, Any]]":
-            if who not in seen:
-                try:
-                    seen[who] = _mover_subagents(who, idx if idx_ok else None, now)
-                except Exception as e:  # noqa: BLE001
-                    seen[who] = e
-            if isinstance(seen[who], Exception):
-                raise seen[who]
-            return seen[who]
-    if anchored is None:
-        try:
-            anchored = _rlive.released_anchors()      # {item id: the pull requests anchored to it}: a subagent whose brief names one of them is tied to the item
-        except Exception as e:  # noqa: BLE001  — without the anchors a subagent is tied by the item's own id alone
-            anchored = {}
-            print(f"audit: anchors not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    written: list[str] = []
-    for gid, _line in _hourly.pass_(items, now, env, pane, _handoff.ho_same, subagents, anchored):
-        try:
-            with _writes.ITEM_LOCK:
-                item = _svcstore._load(gid)
-                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _handoff.ho_same, subagents, anchored)      # read again under the lock: the item may have been written, held or closed since
-                if line is None:
-                    continue
-                _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"], pane_only=_hourly.pane_only(line))
-                _hourly.stamp(item, line, now)      # a line that verified something is the hourly update: it is the item's last activity too, newest wins and never backwards (an idle line stamps nothing)
-                _writes.save(gid, item, note="audit: hourly line")
-            written.append(gid)
-            print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
-        except Exception as e:  # noqa: BLE001  — one item never stops the others
-            print(f"audit: {gid} hourly line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if written:
-        _pubmod._publish()
-    return written
-
-
-def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None) -> list[str]:
-    """A long busy stretch tells the right agent once (audit/busy_tell.py, `[audit] busy_tell`, on by default; `[audit] busy_tell_hours`, 4), run from the ten-minute audit tick after the idle hand-over. An open item on an agent whose hourly audit lines since its last
-    real activity have verified only that the mover's pane is in a turn, for that long, gets ONE message to its project's -main agent (the mover has looked busy for about that long with no other sign of progress on the item; please look). An item a FRONT agent
-    holds that has had no write but the hourly lines for that long tells that front agent ITSELF, never its -main agent. The message is the same as the idle hand-over's to -main: `[for <owner>]` on its first line (a message to a front agent), through `tell_woken`
-    (tag `stall`, the kind that asks the agent to act), one message per agent per pass. The owner is never told, and no step is made for him. `metadata.busy_tell` is written in the save, before anything is sent (at most once: a crash between the save and the send loses
-    the message), one History line says who was told; a stretch is told of once, and a new one (real activity, or a line that verified something else) can be told again. A project with no -main agent logs it (once an hour per item) and tells nobody, and is looked at again at the next tick.
-    Stands still while the hourly line is off, in a read-only copy and while the board is paused. `now`, `items`, `env` are for tests and the tick. → the ids told."""
-    from stackshot.audit import busy_tell as _bt
-    from stackshot.audit import hourly as _hourly
-    from stackshot.audit import silence as _silence
-    from stackshot.tools import next_report as _nr
-    if not _bt.enabled() or not _hourly.enabled() or _ro.is_read_only() or _handoff.handoff_paused():
-        return []
-    now = time.time() if now is None else now
-    items = items if items is not None else _nr.load_all(None)
-    env = env if env is not None else _silence_env()
-    front = getattr(env, "is_front_or_unread", None) or getattr(env, "is_front", None)      # as the hourly line: a registry that cannot be read says front, so the agent holding the item is told, never a guess at its -main agent
-    hrs = _bt.hours()
-    rows = _bt.due_all(items, now, front, _silence.queued(items, now, env), hrs)
-    if not rows:
-        return []
-    done: list[str] = []
-    told: dict[str, list[tuple[str, str, str]]] = {}      # recipient -> (item, kind, line) of its message
-    mains: dict[str, str] = {}
-    for gid, row in rows:
-        try:
-            mover, kind = row["mover"], row["kind"]
-            if kind == _bt.KIND_FRONT:
-                to = mover
-            else:
-                if row["project"] not in mains:
-                    mains[row["project"]] = _agents._main_agent(row["project"])
-                to = mains[row["project"]]
-                if to and _handoff.ho_same(to, mover):
-                    kind = _bt.KIND_FRONT      # the mover is the project's -main agent itself: the front wording, to the same session
-            if not to or _model.is_owner(to):
-                _balance_log_once(gid, "busy-tell-no-main", now, f"audit: {gid} busy stretch not told: no -main agent to tell")
-                continue
-            with _writes.ITEM_LOCK:
-                item = _svcstore._load(gid)
-                cur = _bt.due({**items, gid: item}, gid, now, front, None, hrs)      # read again under the lock: the item may have been written, held, closed or told of since
-                if cur is None or not _handoff.ho_same(cur["mover"], mover):
-                    continue
-                meta = item.setdefault("metadata", {})
-                span = _bt.span(cur["shown"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back; a background mover's stretch is measured only as far back as its audit lines show (`shown`)
-                _bt.mark(meta, now, to, kind, cur["since"])
-                _stall.note(meta, now, f"{_sr._session_label(mover)}'s item has had {'no write but the hourly audit lines' if kind == _bt.KIND_FRONT else 'only a busy pane for its hourly audit lines'} for about {span}: {_sr._session_label(to)} was told")
-                _writes.save(gid, item, note="audit: busy stretch told")
-            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
-            line = (f"{lead}: no write on it but the hourly audit lines for about {span}. If you are at work on it, write a line on it; if you are not, say what blocks it or hand it on" if kind == _bt.KIND_FRONT else
-                    f"{lead}: {_sr._session_label(mover)} has looked busy for about {span} (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing")
-            told.setdefault(to, []).append((gid, kind, line))
-            done.append(gid)
-            print(f"audit: {gid} busy stretch told to {to} ({kind})", file=sys.stderr, flush=True)
-        except Exception as e:  # noqa: BLE001  — one item never stops the others
-            print(f"audit: {gid} busy stretch not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for to, rows_ in told.items():
-        try:
-            gids, lines = [g for g, _k, _l in rows_], [l for _g, _k, l in rows_]
-            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had only the audit's lines for hours:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_woken(",".join(gids), _session_id(to) or to, f"{_FOR_OWNER}\n[stackshot] {body}\nNo reply is owed to the audit; nothing here is for {OWNER}. → "
-                                + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
-        except Exception as e:  # noqa: BLE001
-            print(f"audit: {to} not told of the busy stretches: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return done
-
-
-def _hand_idle_builders(project: str) -> list[str]:
-    """The sessions an idle item of `project` may be handed to, best first: the project's own background agents (`_handoff.handoff_background`) and no other project's. A project's work is built, reviewed and released by its
-    own builder, so a builder of an unrelated project is never a candidate, however idle. A project with no free background agent of its own keeps the item, and `_hand_idle_tick` says so to its -main agent."""
-    return list(_handoff.handoff_background(project))
-
-
-def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
-                    dead: "Callable[[str], str] | None" = None) -> list[str]:
-    """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, on by default), run from the ten-minute audit tick right after the hourly line: an open item on an agent whose newest audit line is
-    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its own project, never another project's; one whose pane is in no turn on this box and
-    that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
-    from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
-    line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
-    `now`, `items`, `env`, `status`, `dead` are for tests and the tick. → the ids handed on."""
-    from stackshot.audit import hand_idle as _hi
-    from stackshot.tools import next_report as _nr
-    if not _hi.enabled() or _ro.is_read_only() or _handoff.handoff_paused():
-        return []
-    now = time.time() if now is None else now
-    items = items if items is not None else _nr.load_all(None)
-    env = env if env is not None else _silence_env()
-    front = env.is_front if hasattr(env, "is_front") else None
-    rows = _hi.due_all(items, now, front)
-    if not rows:
-        return []
-    if status is None or dead is None:
-        idx = _sr._sessions_index()
-        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
-        dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
-    busy = _hi.busy_movers(items, now)
-    handed: list[str] = []
-    told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
-    builders: dict[str, list[str]] = {}      # per project, read once a pass (the role map is not read again for every item)
-    mains: dict[str, str] = {}
-    for gid, row in rows:
-        if len(handed) >= _hi.MAX_PER_TICK:
-            break
-        try:
-            if row["project"] not in builders:
-                builders[row["project"]] = _hand_idle_builders(row["project"])
-                mains[row["project"]] = _agents._main_agent(row["project"])
-            to = _hi.pick_free(builders[row["project"]], busy, status, dead, _handoff.ho_same, row["mover"])
-            main = mains[row["project"]]
-            if main and _model.is_owner(main):
-                main = ""      # the owner is told nothing by this pass, whatever the page names as -main
-            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
-            if to:
-                def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due, and still with the mover it was found with; the stamp goes on the metadata the move saves
-                    cur = _hi.due({**items, st.gid: item}, st.gid, now, front)
-                    if cur is None or not _handoff.ho_same(cur["mover"], st.frm):
-                        return False
-                    _hi.mark_handed(item.setdefault("metadata", {}), now, st.frm, st.to)
-                    return True
-                st = _ho.Step("move", gid, f"{_hi.WHY} (it was with {_sr._session_label(row['mover'])})", row["mover"], to, via="orphan")
-                if not _handoff.handoff_exec([st], now, verify=False, recheck=still):
-                    continue
-                handed.append(gid)
-                busy.append(to)
-                if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, so it went from {_sr._session_label(row['mover'])} to {_sr._session_label(to)}"))
-                print(f"audit: {gid} idle, handed from {row['mover']} to {to}", file=sys.stderr, flush=True)
-            elif not row["told_none"]:
-                with _writes.ITEM_LOCK:
-                    item = _svcstore._load(gid)
-                    cur = _hi.due({**items, gid: item}, gid, now, front)
-                    if cur is None or cur["told_none"] or not _handoff.ho_same(cur["mover"], row["mover"]):
-                        continue
-                    meta = item.setdefault("metadata", {})
-                    _hi.mark_none(meta, now)
-                    _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
-                    _writes.save(gid, item, note="audit: idle, no builder free")
-                if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with {_sr._session_label(row['mover'])}"))
-                print(f"audit: {gid} idle, no builder free", file=sys.stderr, flush=True)
-        except Exception as e:  # noqa: BLE001  — one item never stops the others
-            print(f"audit: {gid} idle item not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for main, pairs in told.items():
-        try:
-            gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
-            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
-        except Exception as e:  # noqa: BLE001
-            print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return handed
-
-
-_BALANCE_LOGGED: dict[tuple[str, str], float] = {}   # (item, reason) -> when the balancer last logged it: a stay that lasts is one stderr line an hour, not one a minute
-BALANCE_LOG_EVERY = 3600.0
-
-
-def _balance_log_once(gid: str, key: str, now: float, line: str) -> None:
-    """One stderr line for an item the balancer leaves where it is, at most once per `BALANCE_LOG_EVERY` per item and reason (the pass looks at the item every minute for as long as it waits)."""
-    last = _BALANCE_LOGGED.get((gid, key))
-    if last is not None and 0 <= now - last < BALANCE_LOG_EVERY:
-        return
-    if len(_BALANCE_LOGGED) > 2000:
-        _BALANCE_LOGGED.clear()
-    _BALANCE_LOGGED[(gid, key)] = now
-    print(line, file=sys.stderr, flush=True)
-
-
-def _balance_builders(project: str) -> list[str]:
-    """The sessions the balancer may move an item of `project` to, best first: the project's own BUILDERS only (the mandate says build, maintain, merge or engineer: `_handoff.handoff_ranked` classes them 0 and 1). Never another
-    project's builder: a project's code is built, reviewed and released by its own builder, and a builder of an unrelated project has a different mandate. With no other builder here the item stays where it is. A reviewer or any
-    other background agent is no candidate."""
-    return [n for c, _o, n in _handoff.handoff_ranked(project) if c < 2]
-
-
-def _balance_builder_names() -> list[str]:
-    """Every background agent, of any project, whose mandate says build, maintain, merge or engineer and that is not retired (raises when the registry cannot be read): who counts as a builder whose item may be balanced.
-    Only the item's mover is judged by this; where an item may go is `_balance_builders` (its own project's builders)."""
-    reg = _anc.registry()
-    return [n for n, r in _anc.session_roles(reg).items()
-            if r.get("role") == "back" and not r.get("retired") and _router._BUILDER.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
-
-
-def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
-                  dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
-    """The balancer (audit/hand_idle.py, `[audit] balance`, on by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
-    untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder of its own project with the fewest open
-    items, by the same write as the idle hand-over (`_handoff.handoff_exec` → `_handoff.handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
-    why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
-    subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
-    in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it (another builder than its mover is in the role map and none is usable) the item stays, one History line says so and -main is told once per item per 24 hours, and the pass looks again every minute; with no other builder, or a builder that is no improvement, it is a log line only.
-    Only an item whose mover is itself a builder is balanced, and only to builders. The notice to the mover it left is at-most-once (a crash between the save and the send loses it) and is not sent to a pane that is gone. An item the idle
-    hand-over moved in the last 24 hours is left alone. Stands still while the audit is off (`[audit] enabled`) or runs in agent mode, while the board is paused, with `[model] handoff` off, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
-    from stackshot.audit import hand_idle as _hi
-    from stackshot.tools import next_report as _nr
-    if not _hi.balance_enabled() or not _cfg.audit_enabled() or _cfg.audit_mode() != "script" or _ro.is_read_only() or _handoff.handoff_paused() or not _handoff.handoff_on():
-        return []
-    now = time.time() if now is None else now
-    items = items if items is not None else _nr.load_all(None)
-    env = env if env is not None else _silence_env()
-    front = getattr(env, "is_front_safe", None) or env.is_front      # a front test that cannot answer counts as front: nothing moves on a guess
-    minutes = _hi.balance_minutes()
-    cells: dict[str, Any] = {}
-
-    def anchors_of(gid: str, item: dict[str, Any]) -> bool:      # an anchor scoped to the item says a build is in flight; an anchor store that cannot be read counts as one
-        try:
-            if "anchors" not in cells:
-                cells["anchors"] = _anc.load()
-            return bool(_item_read._scoped_anchors(str((item.get("metadata") or {}).get("project") or ""), gid, cells["anchors"]))
-        except Exception:  # noqa: BLE001
-            return True
-    anchored = anchored or anchors_of
-    try:
-        names = _balance_builder_names()
-    except Exception as e:  # noqa: BLE001  — with no view of who builds, nothing is judged a builder: nothing moves on a guess
-        print(f"balance: builders not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return []
-    is_builder = lambda who: any(_handoff.ho_same(who, n) for n in names)      # noqa: E731
-    behind = _hi.balance_queue(items, now, minutes * 60.0, front)
-    rows = _hi.balance_all(items, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
-    if not rows:
-        return []
-    if status is None or dead is None:
-        idx = _sr._sessions_index()
-        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
-        dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
-    load = _hi.load_counts(_hi.busy_movers(items, now), _handoff.ho_same)
-    moved: list[str] = []
-    gone: list[tuple[str, str, str]] = []      # (the mover it left, the item, who has it now): the former mover's notice
-    told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
-    builders: dict[str, list[str]] = {}      # per project, read once a pass
-    mains: dict[str, str] = {}
-    for gid, row in rows:
-        if len(moved) >= _hi.BALANCE_MAX_PER_TICK:
-            break
-        try:
-            project = row["project"]
-            if project not in builders:
-                builders[project] = _balance_builders(project)
-                mains[project] = _agents._main_agent(project)
-            main = mains[project]
-            if main and _model.is_owner(main):
-                main = ""      # the owner is told nothing by this pass
-            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({project})"
-            if row["capped"]:
-                with _writes.ITEM_LOCK:
-                    item = _svcstore._load(gid)
-                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
-                    if cur is None or not cur["capped"] or not _handoff.ho_same(cur["mover"], row["mover"]):
-                        continue
-                    meta = item.setdefault("metadata", {})
-                    _hi.mark_balance_capped(meta, now)
-                    _stall.note(meta, now, f"already moved {_hi.BALANCE_LIFETIME} times by the balancer, so it stays with {_sr._session_label(row['mover'])} and the ladders have it: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
-                    _writes.save(gid, item, note="balance: at its lifetime cap")
-                if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_sr._session_label(row['mover'])} to the ladders"))
-                print(f"balance: {gid} at its lifetime cap", file=sys.stderr, flush=True)
-                continue
-            to = _hi.pick_least(builders[project], load, status, dead, _handoff.ho_same, row["mover"], row["tried"], front, project)
-            if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _handoff.ho_same), _hi.load_of(load, row["mover"], _handoff.ho_same)):
-                _balance_log_once(gid, "load", now, f"balance: {gid} stays with {row['mover']}: no builder has few enough open items")      # silent otherwise: a spread that is as good as it can be is no news
-            elif to:
-                def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
-                    cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
-                    if cur is None or cur["capped"] or not _handoff.ho_same(cur["mover"], st.frm):
-                        return False
-                    _hi.mark_balanced(item.setdefault("metadata", {}), now, st.frm, st.to)
-                    return True
-                st = _ho.Step("move", gid, _hi.balance_why(row["kind"], minutes) + f" (it was with {_sr._session_label(row['mover'])})", row["mover"], to, via="orphan")
-                try:
-                    ok = bool(_handoff.handoff_exec([st], now, verify=False, recheck=still))
-                except Exception as e:  # noqa: BLE001  — a send after the save failed: the move itself was made when the item carries this pass's record
-                    print(f"balance: {gid} sending after the move failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-                    ok = (((_svcstore._load(gid).get("metadata") or {}).get(_hi.BALANCE_KEY) or {}).get("at") == now)
-                if not ok:
-                    continue
-                moved.append(gid)
-                _hi.shift(load, row["mover"], to, _handoff.ho_same)
-                gone.append((row["mover"], gid, to))
-                print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
-            elif not _hi.balance_others(builders[project], row["mover"], row["tried"], _handoff.ho_same, front, project):
-                _balance_log_once(gid, "alone", now, f"balance: {gid} stays with {row['mover']}: no other builder to move it to")      # a mover that is the only builder has nobody to lose: no note, no message
-            else:
-                with _writes.ITEM_LOCK:
-                    item = _svcstore._load(gid)
-                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
-                    if cur is None or cur["capped"] or cur["told_none"] or not _handoff.ho_same(cur["mover"], row["mover"]):
-                        continue
-                    meta = item.setdefault("metadata", {})
-                    _hi.mark_balance_none(meta, now)
-                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no live builder could take it, so it stays with {_sr._session_label(row['mover'])}: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
-                    _writes.save(gid, item, note="balance: no live builder")
-                if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no live builder could take it, so it stays with {_sr._session_label(row['mover'])}"))
-                print(f"balance: {gid} no live builder", file=sys.stderr, flush=True)
-        except Exception as e:  # noqa: BLE001  — one item never stops the others
-            print(f"balance: {gid} not balanced: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for frm in dict.fromkeys(f for f, _g, _t in gone):      # the former mover is told once per item it left, in one message however many: only for an item this pass moved
-        try:
-            if _telling.front_keeper(frm, "")[0] or _model.is_owner(frm) or not _ho.is_session_name(frm) or dead(frm):
-                continue      # a front agent is never sent it unmarked; a pane that is gone cannot take it (and a failed send would leave an `undelivered` note on the item that just moved)
-            mine = [(g, t) for f, g, t in gone if f == frm]
-            if len(mine) == 1:
-                text = f"Disregard: {_gh.shown(mine[0][0])} is now with {_sr._session_label(mine[0][1])}. Drop it, stop any work or subagent on it, and write nothing to it. No reply is owed."
-            else:
-                text = (f"Disregard: {len(mine)} items are now with other sessions:\n" + "\n".join(f"- {_gh.shown(g)} is now with {_sr._session_label(t)}" for g, t in mine)
-                        + "\nDrop them, stop any work or subagent on them, and write nothing to them. No reply is owed.")
-            _telling.tell_woken(",".join(g for g, _t in mine), _session_id(frm) or frm, text, tag="balance")
-        except Exception as e:  # noqa: BLE001
-            print(f"balance: {frm} not told to disregard: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for main, pairs in told.items():
-        try:
-            gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
-            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items stay where they are:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
-        except Exception as e:  # noqa: BLE001
-            print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return moved
-
-
-# The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are service/foryou_events.py's; the dates pass above runs the due-date look on that module.
+# The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are service/foryou_events.py's; the dates pass (service/audit_ticks.py) runs the due-date look on that module.
 
 
 # ----------------------------------------------------------------------------- whose move it is
@@ -1185,9 +657,9 @@ mcp = _app.build(
     machine_state=lambda *a, **k: _evwaits.machine_state(*a, **k),
     rules_text=lambda *a, **k: _rules_text(*a, **k),
     main_agent=lambda *a, **k: _agents._main_agent(*a, **k),
-    client_get=lambda *a, **k: _client_get(*a, **k),
+    client_get=lambda *a, **k: _client_reads._client_get(*a, **k),
     client_post=lambda *a, **k: _client_post(*a, **k),
-    recycle_wanted_tokens=lambda *a, **k: _recycle_wanted_tokens(*a, **k),
+    recycle_wanted_tokens=lambda *a, **k: _recycle_svc._recycle_wanted_tokens(*a, **k),
     answer=lambda *a, **k: _answer(*a, **k),
     contact_label=lambda *a, **k: _contacts._contact_label(*a, **k),
     runner_status=lambda *a, **k: _runner.status(*a, **k),
@@ -1252,14 +724,14 @@ _telling.install(_telling.Hooks(
 # that holds it moves under service/ (the wake, anchor and event wait ticks are service/wakes.py's and service/event_waits.py's, imported by the table).
 _runner.install(_runner.Hooks(
     phase_tick=_late("_phase_tick"),
-    balance_tick=_late("_balance_tick"),
+    balance_tick=_late_in(_audit_ticks, "_balance_tick"),
     answer_tick=_late("_answer_tick"),
     roles_sync_safe=_late("_roles_sync_safe"),
     pilot_fallback_tick=_late_in(_pdsvc, "_pilot_fallback_tick"),
-    filing_tick=_late("_filing_tick"),
-    dates_tick=_late("_dates_tick"),
-    silence_tick=_late("_silence_tick"),
-    archive_tick=_late("_archive_tick"),
+    filing_tick=_late_in(_audit_ticks, "_filing_tick"),
+    dates_tick=_late_in(_audit_ticks, "_dates_tick"),
+    silence_tick=_late_in(_audit_ticks, "_silence_tick"),
+    archive_tick=_late_in(_audit_ticks, "_archive_tick"),
     publish=_late_in(_pubmod, "_publish"),
     publish_now=_late_in(_pubmod, "_publish_now"),
     publish_every=_late_in(_pubmod, "_publish_every"),
@@ -1275,9 +747,9 @@ _wake_hooks.install(_wake_hooks.Hooks(
     hand_stored_then=_late_in(_handover, "_hand_stored_then"),
     hold_flag=_late_in(_holders, "_hold_flag"),
     is_held=_late_in(_holders, "_is_held"),
-    item_mover_model=_late("_item_mover_model"),
+    item_mover_model=_late_in(_client_reads, "_item_mover_model"),
     load_or_none=_late_in(_item_read, "_load_or_none"),
-    merge_progress_tick=_late("_merge_progress_tick"),
+    merge_progress_tick=_late_in(_merge_progress, "_merge_progress_tick"),
     model_of=_late_in(_item_read, "_model_of"),
     old_wait_off=_late_in(_item_read, "_old_wait_off"),
     own_repo=_late_in(_relsvc, "_own_repo"),
@@ -1345,7 +817,7 @@ _stall_hooks.install(_stall_hooks.Hooks(
     main_agent=_late_in(_agents, "_main_agent"),
     next_report_all=lambda *a, **k: _next_report_mod().load_all(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
-    queue_map=_late("_queue_map"),
+    queue_map=_late_in(_audit_ticks, "_queue_map"),
     role_name=_late_in(_sr, "_role_name"),
     session_id=_late("_session_id"),
     silence_clock=lambda *a, **k: _silence_mod().clock(*a, **k),
@@ -1376,15 +848,21 @@ _checks_hooks.install(_checks_hooks.Hooks(
     wait_end_sent_back=_late_in(_wait_fixes, "_wait_end_sent_back"),
 ))
 
-# What the page-debt call, the migrations and the fleet events still reach on this module (service/page_debt.py, service/migrations.py, service/fleet_events.py): the ledger of the page debts, the grace minutes,
-# the session ids, the project's agents and the item model's readers. A hook leaves this table when the area that holds it moves under service/.
+# What the page-debt call, the migrations, the fleet events, the client reads and the recycle bookkeeping still reach on this module (service/page_debt.py, service/migrations.py, service/fleet_events.py,
+# service/client_reads.py, service/recycle.py): the ledger of the page debts, the grace minutes, the session ids, the project's agents, the item model's readers, and for the client reads and the recycle the
+# renderer's words and tests, the home page's list rule, the rulebook text, the notice's ruling and the holds report, the page's time and the queue map. A hook leaves this table when the area that holds it moves under service/.
 _passes_hooks.install(_passes_hooks.Hooks(
     after_open=_late_in(_item_read, "_after_open"),
     builder_agent=_late_in(_agents, "_builder_agent"),
     grace_min=_late("_grace_min"),
+    holds_report=lambda *a, **k: _tool_notes._holds_report(*a, **k),
+    home_agents=lambda: _home.AGENTS,
+    home_list_of=lambda *a, **k: _home.list_of(*a, **k),
     main_agent=_late_in(_agents, "_main_agent"),
     model_guards_on=_late_in(_item_read, "_model_guards_on"),
     model_of=_late_in(_item_read, "_model_of"),
+    notice_asked=lambda *a, **k: _tool_get._notice_asked(*a, **k),
+    notice_report=lambda *a, **k: _tool_get._notice_report(*a, **k),
     outcomes=lambda: OUTCOMES,
     owed_brain_skip=_late("_owed_brain_skip"),
     owed_lock=lambda: _OWED_LOCK,
@@ -1392,16 +870,26 @@ _passes_hooks.install(_passes_hooks.Hooks(
     owed_readable=_late("_owed_readable"),
     owed_save=_late("_owed_save"),
     owed_settle=_late("_owed_settle"),
+    page_ts=lambda *a, **k: _pdebts._page_ts(*a, **k),      # the owner module's own function, looked up at each call: a suite that puts a page's time in place of the real one sets it on page_debts
     pid_write_op=_late("_pid_write_op"),
     publish=_late_in(_pubmod, "_publish"),
+    queue_map=_late_in(_audit_ticks, "_queue_map"),
     retire_write_op=_late("_retire_write_op"),
+    rmod_confirmed_at=lambda *a, **k: _rmod.confirmed_at(*a, **k),
+    rmod_held_only_for_recycle=lambda *a, **k: _rmod.held_only_for_recycle(*a, **k),
+    rmod_recycle_due=lambda *a, **k: _rmod.recycle_due(*a, **k),
+    rmod_render=lambda *a, **k: _rmod.render(*a, **k),
+    rmod_waits_recycle=lambda *a, **k: _rmod.waits_recycle(*a, **k),
+    rmod_when_words=lambda *a, **k: _rmod.when_words(*a, **k),
+    rules_text=_late("_rules_text"),
     scoped_anchors=_late_in(_item_read, "_scoped_anchors"),
     script_sender=_late_in(_owner_words, "_script_sender"),
     sender_not_owner=_late_in(_owner_words, "_sender_not_owner"),
     server_module=lambda: sys.modules[__name__],
     session_id=_late("_session_id"),
     settle_apply=_late_in(_holders, "_settle_apply"),
-    shown_needs=_late("_shown_needs"),
+    shown_needs=lambda *a, **k: _pdebts._shown_needs(*a, **k),
+    shown_ref=lambda *a, **k: _pdebts._shown_ref(*a, **k),
     stamp_write_op=_late("_stamp_write_op"),
     switchover_on=_late_in(_item_read, "_switchover_on"),
     watch_on_write=_late_in(_wait_gates, "_watch_on_write"),
@@ -1429,6 +917,7 @@ _save_hooks.install(_save_hooks.Hooks(
     audit_mod=lambda name: importlib.import_module(f"stackshot.audit.{name}"),
     gmail_terms=lambda: _GMAIL_TERMS,
     msg_max=lambda: _wttext.MSG_MAX,
+    next_report_all=lambda *a, **k: _next_report_mod().load_all(*a, **k),
     option_label_max=lambda: _rmod.OPTION_LABEL_MAX,
     option_line_max=lambda: _rmod.OPTION_LINE_MAX,
     options_max=lambda: _rmod.OPTIONS_MAX,
@@ -1926,7 +1415,7 @@ _gates.install(_gates.Hooks(
     handoffs_in=_late_in(_agents, "_handoffs_in"),
     handover_kind=lambda *a, **k: _proofs.handover_kind(*a, **k),
     hub_sessions=_late_in(_item_read, "_hub_sessions"),
-    item_mover=_late("_item_mover"),
+    item_mover=_late_in(_client_reads, "_item_mover"),
     main_agent=_late_in(_agents, "_main_agent"),
     model_guards_on=_late_in(_item_read, "_model_guards_on"),
     model_page=_MODEL_PAGE,
@@ -2135,646 +1624,8 @@ def _rules_text(profile: str = "cowork") -> str:
     return _cowork_preamble() + "\n" + body.strip() + "\n" + _rules_parts("cowork")
 
 
-# ----------------------------------------------------------------------------- the client API (the design doc)
-# Step (a): what a machine's hooks read — the page registry, the brief, the rulebook, a page's freshness — served
-# to a machine that proves itself with its own token, so a client needs no checkout of this repo. Nothing reads these yet;
-# the checkout stays the path in use until each consumer is switched and proven.
-
-
-def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
-    """One read of the client API → (status, content type, body)."""
-    if what == "registry":
-        try:
-            return 200, "application/json", _gates.registry_text()
-        except Exception:
-            return 503, "text/plain", "no registry yet"
-    if what == "roles":                 # roles.json as the server keeps it; written here first if it is not there yet
-        if not ROLES.exists():
-            _roles_sync_safe()
-        try:
-            return 200, "application/json", ROLES.read_text(encoding="utf-8")
-        except Exception:
-            return 503, "text/plain", "no roles yet"
-    if what == "rules":
-        return 200, "text/markdown; charset=utf-8", _rules_text("full")
-    if what == "brief":
-        return 200, "text/plain; charset=utf-8", _rmod.render(str(_store.STORE), "brief")
-    if what == "project":               # phase A: one project's record by id, full key or bare slug: {id, key, keeper, agents}
-        key = str(params.get("key") or "").strip()
-        if not key or len(key) > 200:
-            return 400, "text/plain", "key = a project: its id (prj_<8 hex>), its page key or its bare slug"
-        try:
-            recs = _prj.refs(key, _registry("projects"))
-        except ValueError as e:         # the id file is damaged and the registry has no id for the page: nothing is minted, the reader tries again
-            return 503, "text/plain", f"the project record cannot be read right now: {e}"
-        if not recs:
-            return 404, "text/plain", f"no project {key!r}: an id (prj_<8 hex>), a page key (projects/<slug>, infra/<slug>) or a bare slug of a page in the registry"
-        if len(recs) > 1:
-            return 400, "text/plain", f"{key!r} is ambiguous: it names {' and '.join(r['key'] for r in recs)}; write the full key or the id"
-        return 200, "application/json", json.dumps(recs[0], ensure_ascii=False)
-    if what == "projects":              # the fleet tool's New session form: the listed projects of a scope, hidden ones too when q matches (projects?scope=<s>&q=<text>)
-        return _projects_list(params)
-    if what == "page-ts":
-        key = _prj.to_key(str(params.get("key") or "").strip("/"))
-        if key.endswith(".md"):
-            key = key[:-3]
-        if not re.fullmatch(_cfg.page_dirs_re() + r"/[\w./-]+", key) or ".." in key:
-            return 400, "text/plain", "key = a page key, " + " or ".join(f"{d}/<slug>" for d in _cfg.page_dirs())
-        ts = int(_pdebts._page_ts(key))
-        return 200, "application/json", json.dumps({"key": key, "ts": ts or None})
-    if what == "items":
-        return _client_items(str(params.get("key") or ""))
-    if what == "item-facts":
-        return _client_item_facts(str(params.get("key") or ""), str(params.get("ids") or ""))
-    if what == "answer":                # a script reads the owner's latest board answer on an item (client.py get answer board#N)
-        return _handover._client_answer(str(params.get("key") or ""))
-    if what == "notice":                # a script reads what the router did with a notice (client.py get notice <id>): the text get(item_id=<id>) shows
-        nid = _tool_get._notice_asked("notice " + str(params.get("key") or "").strip())
-        if not nid:
-            return 400, "text/plain", "key = a notice id: the six hex characters a message to a project returns (\"notice a1b2c3\")"
-        try:
-            return 200, "text/plain; charset=utf-8", _tool_get._notice_report(nid)
-        except ToolError as e:
-            return 404, "text/plain", str(e)
-    if what == "holds":                 # the open items on hold whose hold names no reason: read only, each mover releases its own
-        return 200, "text/plain; charset=utf-8", _tool_notes._holds_report()
-    if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
-        return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", "no such read: registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles"
-
-
-def _wait_fields(gid: str, it: dict[str, Any], ctx: "_agents._WaitCtx") -> dict[str, Any]:
-    """The wait fields on an item as the items API carries them (the web board and the fleet tool read them): mover {kind, who, via?}. The fields that
-    carried a computed expected-by time stay in the answer so that a reader written against them does not break, always empty (expected_by null, wait "",
-    overdue null): they go in a later release."""
-    try:
-        mv = dict(ctx.mover(gid, it))
-    except Exception:  # noqa: BLE001  — a reading that fails never fails the list
-        return {}
-    if mv.get("kind") == _wt.OWNER_KIND:
-        mv["kind"] = _cfg.owner_mover_kind()      # [items_api] owner_mover_kind: the word a reader of the API matches for the owner's move ("legacy" by default, or "owner")
-    elif mv.get("kind") == "session":
-        mv["who"] = _sr._session_label(str(mv.get("who") or "")) or str(mv.get("who") or "")
-    if mv.get("via"):
-        mv["via"] = _gh.shown(str(mv["via"]))
-    return {"mover": mv, "expected_by": None, "wait": "", "overdue": None}
-
-
-_ROLE_MOVER, _ROLE_THEN, _ROLE_NEEDS = "mover", "then", "needs"     # the values of a client items row's `roles` (pages.py words them)
-
-
-def _client_items(key: str) -> tuple[int, str, str]:
-    """`items?key=<session>`: the open items a session moves, for the end-of-turn board check in
-    pages.py. key = the asking session as its hook knows it: a transcript uuid, a cse_ id or a pane name. An item is its own when
-    it moves (its needs, its stored mover, or the project's builder, else its -main agent when nothing names one) or takes after the owner's answer (`then`: the creator is no
-    one's), or when it names the session in its needs, with role "agent" (the key the hooks have read since an earlier change). Every row carries `roles`: the asking session's live roles on the item, from "mover", "then" and "needs" (named in it); the alive item a session moves without keeping or being named is listed too. One pass over the store, one read of
-    the fleet's names. Held items, items that wait on an open item (after) and doing items the board lists as waiting for a wake that states its reason (wait_basis) are listed with held: true (the hook skips them). Every row carries `list`: the home page's list the item is in, "your-move", "agents" or "waiting" (home.list_of), the key the fleet tool's items sheet groups by, so it shows the page's three groups; never empty (an item the page cannot place is in "agents", as there)."""
-    k = str(key or "").strip()
-    if not k or len(k) > 200 or any(c in k for c in "\r\n\t"):
-        return 400, "text/plain", "key = the asking session: its transcript uuid, cse_ id or pane name"
-    nm = _anc.names()
-    me = {k, _anc.canonical(k, nm)}
-    me |= {nm.get(x, "") for x in list(me)}
-    me.discard("")
-    out = []
-    now = time.time()
-    ctx = _agents._WaitCtx(now)                # every open item has a mover, listed whatever wait it is in
-    for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if not isinstance(it, dict):
-            continue
-        _legacy_hold(it); _legacy_needs(it); _ip.read_through(it)
-        if it.get("status") != "open":
-            continue
-        m = it.get("metadata") or {}
-        linked = any({ag, _anc.canonical(ag, nm)} & me for ag in _needs_sessions(m))   # named in its needs
-        mv_, alive_ = _item_mover_model(dict(it, gid=gid))
-        is_mover = bool(alive_ and mv_ and not _model.is_owner(mv_) and ({mv_, _anc.canonical(mv_, nm)} & me))      # the item's mover, by its needs, its stored mover or the project's default (builder, else -main agent)
-        th_ = _then_label_raw(dict(it, gid=gid))
-        is_then = bool(th_ and ({th_, _anc.canonical(th_, nm)} & me))
-        theirs = me if (is_mover or is_then) else set()        # the rows' `mine`: this session moves the item or takes it after the owner
-        if not (is_mover or is_then or linked):
-            continue
-        try:
-            su = float(it.get("state_updated") or 0) or None
-        except (TypeError, ValueError):
-            su = None
-        try:
-            up = float(it.get("updated") or 0) or None    # any write, a filing edit too (an ask-only update moves only this)
-        except (TypeError, ValueError):
-            up = None
-        st_, st_derived = _states.of(it, lambda i_: _item_read._after_open(i_.get("metadata") or {}))     # the item's stored state, or the one derived from its fields (not sent)
-        # the asking session's live roles on the item, as the server holds them now (the end-of-turn text shows them): "mover" (it moves the alive item: by its needs, its
-        # stored mover or the project's default), "then" (it takes the item after the owner's answer) and "needs" (named in its needs).
-        roles = ([_ROLE_MOVER] if is_mover else []) + ([_ROLE_THEN] if is_then else []) + ([_ROLE_NEEDS] if linked else [])
-        out.append({"gid": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "needs": _shown_needs(_needs_of(m)),
-                    **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
-                    "contact": _contacts._contact_label(dict(it, gid=gid)),
-                    "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _rmod.confirmed_at(it, p),
-                    "updated": up, "held": _item_read._is_parked(it) or bool(_item_read._after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
-                    "roles": roles, **({"role": "agent"} if linked else {})})      # "agent": named in the item's needs (the session named in needs is its mover too, so the key no longer excludes it)
-    return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
-
-
-def _then_label_raw(item: dict[str, Any]) -> str:
-    """The session id or name an alive item's `then` (stored, else the model's) or a waiting item's post-wake mover names; "" for none or the owner."""
-    try:
-        mod = _item_read._model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
-        who = mod.then if mod.state == _model.ALIVE else ((mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else "")      # a waiting item's picker takes the role `then` (or, when he picks it up, the `then` beside him)
-    except Exception:  # noqa: BLE001
-        who = ""
-    return "" if (not who or _model.is_owner(who)) else who
-
-
-def _item_mover_model(item: dict[str, Any]) -> tuple[str, bool]:
-    """(who moves the item now as _item_mover reads it, whether the item is alive): "" and False when the reading fails or the item is closed."""
-    try:
-        mod = _item_read._model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
-        alive = mod.state == _model.ALIVE
-        return (mod.mover if alive else (mod.wait.mover if mod.wait else "")), alive
-    except Exception:  # noqa: BLE001
-        return "", False
-
-
-def _basis_wait_of(item: dict[str, Any]) -> bool:
-    """Is the open item a doing item the board lists as waiting for a wake that states its reason (dated_wait.basis_wait)? The end-of-turn board question skips it like a held one."""
-    try:
-        return _dw.basis_wait(item, time.time(), lambda i_: _item_read._after_open(i_.get("metadata") or {})) is not None
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _item_list(item: dict[str, Any]) -> str:
-    """Which of the home page's three lists an open item is in, as the wire word: "your-move", "agents" or "waiting" (home.list_of on the model's reading). The home page's own
-    rule for an item it cannot place (a failed reading, or a dead one) is Agents at work (home.classify), so the field is never empty: the items sheet groups as the page does."""
-    try:
-        it = dict(item, gid=str(item.get("gid") or item.get("id") or ""))
-        vw = _model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}))
-        which = _home.list_of(_queued.overlay(vw, _queue_map().get(it["gid"], "")))     # a doing item with a far wake and every step dated is listed as waiting, and one queued behind its mover's other item
-    except Exception:  # noqa: BLE001
-        which = ""
-    return which or _home.AGENTS
-
-
-def _item_mover(item: dict[str, Any]) -> str:
-    """Who moves the item now, as stored or derived (the model's mover, else for a waiting item who takes it when the wait ends); "" for a closed item or when the reading fails."""
-    return _item_mover_model(item)[0]
-
-
-def _item_mover_label(item: dict[str, Any], names: dict[str, str], who: str | None = None) -> str:
-    """The mover as a person reads it; "" for a closed item or when the reading fails. `who` = the mover when the caller has read it already (_item_mover)."""
-    try:
-        who = _item_mover(item) if who is None else who
-        if not who or _model.is_owner(who):
-            return who
-        return names.get(_anc.canonical(who, names), "") or _sr._session_label(who)
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _client_item_facts(key: str, ids: str) -> tuple[int, str, str]:
-    """`item-facts?key=<session>&ids=g7,g8`: what the end-of-turn check needs about the items a reply's Board lines
-    name, so it can note a line about an item the session is neither the mover nor the `then` of nor the linked agent of, or one already closed (a
-    session that kept reporting on a closed item). Per known id: status, mover (the mover's name), mover_me (the asking session
-    is the mover), mine (the session is its `then`), agent (the item names the session in its needs), project (its metadata.project, for the pane's
-    page gate when a portal write's reply did not say it), and for a closed item its close time in words and outcome. An
-    unknown id is left out."""
-    k = str(key or "").strip()
-    if not k or len(k) > 200 or any(c in k for c in "\r\n\t"):
-        return 400, "text/plain", "key = the asking session: its transcript uuid, cse_ id or pane name"
-    want = [g.strip().lower().replace("#", "") for g in str(ids or "").split(",") if g.strip()][:20]
-    if not want or not all(_GID.match(g) for g in want):
-        return 400, "text/plain", "ids = item ids, comma-separated (at most 20)"
-    nm = _anc.names()
-    me = {k, _anc.canonical(k, nm)}
-    me |= {nm.get(x, "") for x in list(me)}
-    me.discard("")
-    out = {}
-    for g in dict.fromkeys(want):
-        p = _path(g)
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if not isinstance(it, dict):
-            continue
-        _legacy_needs(it)
-        m = it.get("metadata") or {}
-        mover = _item_mover(it)
-        th_ = _then_label_raw(dict(it, gid=g))
-        row = {"status": str(it.get("status") or ""), "shown": _gh.shown(g),
-               "mover": _item_mover_label(it, nm, mover), "mover_me": bool(mover and ({mover, _anc.canonical(mover, nm)} & me)),
-               "mine": bool(th_ and ({th_, _anc.canonical(th_, nm)} & me)), "agent": any({ag, _anc.canonical(ag, nm)} & me for ag in _needs_sessions(m)),
-               "project": str(m.get("project") or ""), "contact": _contacts._contact_label(it)}
-        if row["status"] != "open":
-            try:
-                ts = float(it.get("state_updated") or it.get("updated") or 0)
-            except (TypeError, ValueError):
-                ts = 0.0
-            if ts:
-                row["closed"], row["closed_words"] = ts, _rmod.when_words(dt.datetime.fromtimestamp(ts, _wttext.ZONE))
-            if m.get("outcome"):
-                row["outcome"] = str(m["outcome"])
-        out[g] = row
-    return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
-
-
 from stackshot.fleet import clients as _clients  # noqa: E402  — the server's own state of machines and sessions (steps b and d)
 from stackshot.fleet import inbox as _inbox      # noqa: E402  — the server-side inbox a machine's puller fetches from (step c)
-
-
-def _on_machine(machine: str):
-    """→ (names, on): the fleet's names (for _anc.canonical) and a test of whether a session id runs on `machine`, by the
-    fleet's live heartbeat or by the sessions the client API holds for that machine."""
-    nm, idx, fleet = _anc.names(), _sr._sessions_index(), _fleetev.fleet_names()
-    here = set(_clients.sessions_on(machine))
-    def on(owner: str) -> bool:
-        rec = idx.get(owner.lower()) or idx.get(owner)
-        return (rec is not None and fleet.get(rec.get("machine"), rec.get("machine")) == machine) or owner.lower() in here
-    return nm, on
-
-
-def _recycles_path() -> Path:
-    return _cfg.state("recycles.json")      # {machine: epoch when its last reported recycle's sweep began}
-
-
-def _last_recycle(machine: str) -> float:
-    try:
-        return float(json.load(open(_recycles_path(), encoding="utf-8")).get(machine) or 0)
-    except Exception:
-        return 0.0
-
-
-def _note_recycle(machine: str, started: float) -> None:
-    p = _recycles_path()
-    try:
-        d = json.load(open(p, encoding="utf-8"))
-    except Exception:
-        d = {}
-    d[machine] = max(float(d.get(machine) or 0), started)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8"); os.replace(tmp, p)
-
-
-def _held_only_for_recycle(item: dict[str, Any]) -> bool:
-    """On hold, and the pane recycle is all the hold waits for: no wake and no open after (render.held_only_for_recycle,
-    the one definition, which the board's status line uses too; the open afters read from the files here). _recycled releases
-    such a hold with the recycle; _recycle_wanted counts such an item, since only a recycle will ever move it."""
-    return _rmod.held_only_for_recycle(item, _item_read._after_open(item.get("metadata") or {}))
-
-
-def _recycle_wanted_rows(machine: str) -> list[tuple[str, dict[str, Any]]]:
-    """What a recycle of `machine` would serve now, as (id, item) pairs, oldest id first: the open items that wait for a recycle, moved
-    by a session on that machine, flagged after its last reported recycle began, and not on hold, or on hold for the recycle
-    alone (_held_only_for_recycle: before, such an item was never counted, so no recycle ran for it and
-    it sat there). Not counted: items held for something else too (a wake, an open after; the next recycle clears their flag
-    anyway), movers on another machine or not live, and items the last recycle kept because it skipped their mover, so a
-    session that will not relaunch cannot start a recycle loop."""
-    nm, on_machine = _on_machine(machine)
-    last, out = _last_recycle(machine), []
-    for gid, p in _item_files():
-        try:
-            it = _svcstore._load(gid)
-        except Exception:
-            continue
-        if not _rmod.waits_recycle(it) or not _rmod.recycle_due(it, _item_read._after_open(it.get("metadata") or {})):   # the board's status line uses the same test
-            continue
-        at = (it.get("metadata") or {}).get("recycle_at")      # (an event wait for a recycle sets no recycle flag, so it never gets here; one that also carries the flag asks for the recycle like any other item)
-        at = float(at) if isinstance(at, (int, float)) else 0.0
-        if (at > last or not last) and any(on_machine(_anc.canonical(w, nm)) for w in _recycle_sessions(it) if w):
-            out.append((gid, it))
-    return sorted(out, key=lambda r: (r[0][0], int(r[0][1:]) if r[0][1:].isdigit() else 0))
-
-
-def _recycle_wanted(machine: str) -> list[str]:
-    """The ids of what a recycle of `machine` would serve now (_recycle_wanted_rows has the rule), oldest first."""
-    return [gid for gid, _ in _recycle_wanted_rows(machine)]
-
-
-def _recycle_wait_pr(project: str, gid: str, anchors: dict[str, Any] | None = None) -> str:
-    """The pull request a recycle flag on item `gid` waits for, as sala writes a change reference: "<repo>:pr<N>" (the repository's
-    short name, then the number), or "" when the item has no pull request anchor. The change the flag waits for is the item's
-    pull request anchor: of the project's anchors scoped to the item, those that are GitHub pull request URLs, the one added last
-    (an anchor record keeps no merged or closed state, so recency stands for "the open one": a pull request is anchored when its work
-    starts, and a later anchor replaces an earlier one; sala treats a merged and deployed pull request as live, so a stale pick costs nothing).
-    The repository is named as the URL has it (through [github.moved]); sala holds the recycle only for a name it maps
-    (itself, or one in its SALA_RECYCLE_REF_REPOS) and counts any other as live."""
-    best, best_at = "", -1.0
-    for e in _item_read._scoped_anchors(project, gid, anchors):
-        key = _relsvc._pr_key(str(e.get("url") or ""))
-        if not key:
-            continue
-        try:
-            at = float(e.get("added") or 0)
-        except (TypeError, ValueError):
-            at = 0.0
-        if at >= best_at:                        # a tie goes to the later entry in the store
-            best, best_at = key, at
-    if not best:
-        return ""
-    repo, _, num = best.partition("#")
-    return f"{repo.rsplit('/', 1)[-1]}:pr{num}"
-
-
-def _recycle_wanted_tokens(machine: str) -> list[str]:
-    """What `client.py recycle-wanted` prints after its count: one token per _recycle_wanted id, `<id>[@<epoch>][~<ref>]` (the fleet tool's
-    contract, 5): `@<epoch>` is the whole second the recycle flag was raised (metadata.recycle_at; left out when the item stores none) and
-    `~<repo>:pr<N>` the pull request the flag waits for (_recycle_wait_pr; left out when the item has none). The order is _recycle_wanted's."""
-    rows = _recycle_wanted_rows(machine)
-    try:
-        anchors = _anc.load()
-    except Exception:
-        anchors = {}
-    out = []
-    for gid, it in rows:
-        meta = it.get("metadata") or {}
-        at = meta.get("recycle_at")
-        tok = gid + (f"@{int(at)}" if isinstance(at, (int, float)) and not isinstance(at, bool) and at >= 1 else "")
-        ref = _recycle_wait_pr(str(meta.get("project") or ""), gid, anchors)
-        out.append(tok + (f"~{ref}" if ref else ""))
-    return out
-
-
-def _recycle_sessions(it: dict[str, Any]) -> list[str]:
-    """The sessions a recycle of an item's flag waits for (D6): its mover (by its needs, its stored mover or the project's default), the sessions named in its needs and its `then`; never the creator."""
-    meta = it.get("metadata") or {}
-    out = [_telling.holder(it), *_needs_sessions(meta), _then_label_raw(it)]
-    return [w for i, w in enumerate(out) if w and w not in out[:i]]
-
-
-def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result: str = "ok", skipped: list[str] | None = None,
-              flag_at: float = 0.0) -> dict[str, Any]:
-    """The fleet tool's end-of-recycle hook (client.py recycled): the panes on `machine` (the token's)
-    were relaunched by a recycle or a reboot. sala calls it once per cleared recycle flag (contract version 19, interface 4): `flag_at` is that flag's time (epoch), and the call covers every open item flagged at or before it (its
-    recycle_at <= flag_at; an item flagged exactly then is covered), while an item flagged after it waits for the next flag.
-    A flag clears once every live pane in its scope has relaunched since the flag's time; a pane that never goes idle is given up
-    after 3 h and the flag clears partly (result = partial), that pane in `skipped`. `flag_at` is also the time recorded as the
-    machine's last recycle. Without `flag_at` (an older sala) the call is what it was: the sweep began at `started` (epoch; 0 =
-    now) and every item flagged before then is covered, one flagged at or after it is kept. Every open item covered, moved by a
-    session on that machine, loses metadata.recycle, and its mover gets one line naming its items. Kept: items whose mover the
-    recycle skipped (by name in `skipped`), items flagged after the flag (or after the sweep began), and
-    items whose mover is on another machine or not live anywhere. A held item whose hold waited only for the recycle (no wake,
-    no open after) is released with it (a hold names what it waits for, and that has happened); one that also waits on a
-    wake or an after stays on hold. The line goes to the sessions the item's notices go to (notice_to: the sessions in
-    its needs, else the page's keeper, which for a front agent mover is its keeper); a session other than the mover gets a
-    line naming the mover. → {"cleared", "kept", "told"}."""
-    flag_at = float(flag_at or 0)
-    started = float(started or 0) or flag_at or time.time()
-    nm, on_machine = _on_machine(machine)
-    skip = {_anc.canonical(s, nm) for s in (skipped or []) if str(s).strip()}
-    _note_recycle(machine, flag_at or started)
-    when = _rmod.when_words(dt.datetime.fromtimestamp(started, _wttext.ZONE))
-    what = "reboot" if kind == "reboot" else "recycle"
-    cleared: dict[tuple[str, str], list[tuple[str, bool]]] = {}   # (to, the front mover it is told for, else "") → its rows
-    kept: list[dict[str, str]] = []
-    for gid, p in _item_files():
-        try:
-            it = _svcstore._load(gid)
-        except Exception:
-            continue
-        meta = dict(it.get("metadata") or {})
-        if it.get("status") != "open" or not _rmod.waits_recycle(it):
-            continue
-        owner = _anc.canonical(_telling.holder(it), nm)
-        on = on_machine(owner)
-        at = meta.get("recycle_at")
-        later = isinstance(at, (int, float)) and (at > flag_at if flag_at else at >= started)   # a flag's call covers its own time; started-only: flagged after the sweep began
-        why = ("flagged after the recycle flag it clears" if later and flag_at else "flagged after the recycle began" if later
-               else "its mover was not relaunched" if owner in skip
-               else "its mover is not on " + machine if not on else "")
-        if why:
-            kept.append({"item": gid, "why": why}); continue
-        freed = _held_only_for_recycle(it)   # the recycle was all the hold waited for
-        meta.pop("recycle", None); meta.pop("recycle_at", None)
-        if freed:
-            meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("idle", None)
-            it["updated"] = it["state_updated"] = time.time()   # released like a wake: both clocks move, no page owed
-        else:
-            it["updated"] = time.time()      # a filing edit: the state clock and the confirm stay as they were
-        it["metadata"] = meta
-        _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
-              + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
-        for sid, _why in _telling.notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
-            to = (sid, "") if sid == owner else (sid, _sr._session_label(owner) or owner)
-            cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
-        print(f"recycle: {gid} no longer waits ({kind} on {machine})", file=sys.stderr, flush=True)
-    for (to, front), rows in cleared.items():
-        ids = [_gh.shown(g) for g, _ in rows]      # the notice names each item as it is shown (board#N); the stderr tag keeps the raw ids
-        names = ids[0] if len(ids) == 1 else ", ".join(ids[:-1]) + " and " + ids[-1]
-        held = [_gh.shown(g) for g, h in rows if h == "held"]; freed = [_gh.shown(g) for g, h in rows if h == "freed"]
-        ran = f"has run ({machine}, {when}" + (", partly" if result == "partial" else "") + ")"
-        if front:       # another session than the mover: it comes to it as named in needs or as the page's keeper
-            its = "its" if len(ids) == 1 else "their"
-            note = (f"[stackshot] the {what} {names} waited for {ran}: re-read {names}; {its} mover is {front}, and resuming is yours as the session "
-                    f"named in {its} needs: resume {its} work.")
-        else:
-            note = f"[stackshot] the {what} you waited for {ran}: re-read {names} and resume."
-        note += (f" {' and '.join(freed)} waited only for the recycle and {'is' if len(freed) == 1 else 'are'} released from hold." if freed else "")
-        note += (f" {' and '.join(held)} {'stays' if len(held) == 1 else 'stay'} on hold, waiting on {'its' if len(held) == 1 else 'their'} wake or after too: clear_hold=true if it should come back now." if held else "")
-        raw = [g for g, _ in rows]
-        _telling.tell_woken(raw[0] if len(raw) == 1 else ", ".join(raw[:-1]) + " and " + raw[-1], to, note, tag="recycle")
-    if cleared:
-        _pubmod._publish()
-    try:                           # an event wait on a recycle (or on a fleet op of this verb) is over: its mover hears it live. The count of sessions is sala's to report (client.py event), so `many` is not matched here
-        _evwaits.evwait_report(_ew.event(_ew.RECYCLE, machine=machine, result=result, what=f"a {what} finished on {machine} ({when}" + (", partly" if result == "partial" else "") + ")"))
-        _evwaits.evwait_report(_ew.event(_ew.FLEET_OP, machine=machine, verb=kind if re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", str(kind or "").lower()) else "recycle", result=result,
-                                 what=f"the sala {what} finished on {machine} ({when}" + (", partly" if result == "partial" else "") + ")"))
-    except Exception as e:  # noqa: BLE001  — the recycle's own record is written; a wait that is not woken here is woken by its backstop
-        print(f"recycle: event waits not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return {"cleared": sorted(g for rows in cleared.values() for g, _ in rows), "kept": kept, "told": sorted({to for to, _ in cleared})}
-
-
-_RECYCLE_DUE_LOCK = threading.Lock()
-def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
-    """`client.py recycle-due`: a script
-    marks a recycle as due on an existing item, as a session would with update(recycle=true): the item named by id (`item`),
-    or the open items whose anchors include the pull request `pr`. It never files an item: "do
-    recycle" is not an item, the field is how a recycle is asked for. When no item
-    covers the change, the caller asks the fleet tool for a recycle once the box is idle ([fleet] recycle_when_idle). Running it again changes nothing.
-    → {"items": [{"item", "action": set | already, "held", "owner"}], "pr"}; refusals raise ToolError."""
-    item, pr = item.strip(), pr.strip()
-    if bool(item) == bool(pr):
-        raise ToolError(f"Refused: name the item that waits for the recycle (--item <id>) or the pull request whose anchored items do (--pr <url>), "
-                        f"one of them. recycle-due never files an item; when no item covers the change, {_when_idle()}")
-    if pr:
-        if not _relsvc._pr_key(pr):
-            raise ToolError(f"Refused: --pr takes a GitHub pull request URL (https://github.com/<owner>/<repo>/pull/<n>) — got {pr!r}")
-        gids = [g for gs in _relsvc._pr_items([pr]).values() for g in gs]
-        if not gids:
-            raise ToolError(f"Refused: no open item is anchored to {pr}. If an item serves it, anchor the PR to that item "
-                            f"(anchors(project, add=[url], items=[id])) and run this again; if none does, {_when_idle()}")
-    else:
-        gids = [_norm_id(item)]
-        if _svcstore._load(gids[0]).get("status") != "open":
-            raise ToolError(f"Refused: {gids[0]} is completed; a recycle waits on an open item. If no open item covers the change, {_when_idle()}")
-    done = []
-    with _RECYCLE_DUE_LOCK:
-        for g in gids:
-            it = _svcstore._load(g)
-            action = "already" if _rmod.waits_recycle(it) else "set"
-            if action == "set":
-                _update_svc._update(g, recycle=True, sender=f"a script on {machine}")   # the script's write, not the owner's (the History names it)
-                it = _svcstore._load(g)
-            done.append({"item": g, "action": action, "held": _holders._is_held(it) or _item_read._date_parked(it), "owner": _sr._session_label(_telling.holder(it)),
-                         "needs": [_shown_ref(x) for x in _needs_sessions(it.get("metadata") or {})]})
-    return {"items": done, "pr": pr}
-
-
-# ----------------------------------------------------------------------------- a merged pull request is progress for the item it is tied to
-# An item whose pull request merged has moved, whether or not the merge settles a step: a pull request that is one of several steps never wrote the "merged <ref>" entry of `released_told`
-# (that is the settle path's, `proofs.proof_item`, and it also tells the mover), so the last-activity record (model/last_activity.py) saw no merge for it. The earliest
-# reliable signal is the hub's merge log (anchors/merge_log.py): `Hub.emit` appends one line for every merge it sees, from the read it makes anyway, with the board ids the pull request's
-# body names; nothing here reads GitHub. A merge is tied to an item (model/merge_tie.py) by an anchor scoped to it (never a project-wide one), by its body naming the item, or by the item's own words
-# naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.merges` sees a merge newly recorded and the last-activity record takes it.
-_MERGE_PROG_KEEP = 20       # keys kept in an item's merged_seen (as released_told keeps its last 20)
-_MERGE_BACKLOG_S = 6 * 3600.0      # a merge older than this is not recorded: the backlog of a day of downtime, or a shorter file read again from its start
-
-
-def _merge_progress_state_path() -> Path:
-    return _cfg.state("merge-progress.json")
-
-
-def _merge_progress_offset() -> int | None:
-    """Where in the hub's merge log the pass stopped (a byte offset), None for a pass that has never run on this state directory."""
-    try:
-        v = json.load(open(_merge_progress_state_path(), encoding="utf-8")).get("offset")
-        return int(v) if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _merge_progress_save(offset: int) -> None:
-    try:
-        p = _merge_progress_state_path(); p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps({"offset": int(offset)}) + "\n", encoding="utf-8"); os.replace(tmp, p)
-    except Exception as e:  # noqa: BLE001
-        print(f"merge progress: offset not saved: {e}", file=sys.stderr, flush=True)
-
-
-def _anchor_repo(url: str) -> str:
-    """The GitHub repository ("owner/repo", through [github.moved]) an anchor URL is in (a pull request, a repository's releases or notifications), "" for any other anchor."""
-    a = str(_anc.anchor_id(url) or "")
-    return _cfg.canon_repo(a[7:].split("#", 1)[0].split("@", 1)[0]) if a.startswith("github:") else ""
-
-
-def _merge_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
-    """The lines worth acting on: each parsed on its own (merge_log.normal), so a line of the wrong shape (a hand edit, a torn write that still parsed) is logged and skipped and the offset moves on
-    past it; and only those younger than `_MERGE_BACKLOG_S` (six hours), on every pass. A merge from the backlog of a day of downtime would be recorded at the time of the save, which would move
-    the item's clocks for work that happened long ago: it is no news now, so it is not recorded."""
-    out: list[dict[str, Any]] = []
-    floor = now - _MERGE_BACKLOG_S
-    for row in rows:
-        try:
-            r = _mlog.normal(row)
-        except Exception as e:  # noqa: BLE001
-            print(f"merge progress: line skipped ({e.__class__.__name__}: {str(e)[:80]}): {_mlog.shown(row)}", file=sys.stderr, flush=True)      # the class, the first of the message and a bounded look, never str(row): a line can nest deeper than str() can follow
-            continue
-        if r["ts"] >= floor:
-            out.append(r)
-    return out
-
-
-class _TiedRows(list):
-    """`_merge_tied`'s answer: the list of (line, key, tied), plus `problem`, why the anchors could not be read ("" = they were). The live passes log it and carry on with the other ties; the last-activity backfill
-    (`last_activity_pass.ties`) reports it as a ties problem, so its apply refuses instead of filling an item without the ties its anchors would give."""
-    problem: str = ""
-
-
-def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, Any], str, dict[str, str]]]:
-    """For each merge line the open items on the stall ladder it is tied to: [(line, "owner/repo#n", {item id: why})]. The items are read once for all lines; one that cannot be read is logged and left out.
-    The anchors that cannot be read are logged and the other ties (the pull request's body, the item's own words) are still made; the answer's `problem` says so (`_TiedRows`)."""
-    scoped = _rlive.released_anchors()
-    texts: dict[str, str] = {}
-    projects: dict[str, str] = {}
-    for gid, _p in _item_files():
-        try:
-            it = _svcstore._load(gid)
-            if it.get("status") != "open":
-                continue
-            meta = it.get("metadata") or {}
-            cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))
-            if _stall.not_due(it, now, lambda i_: _item_read._after_open(i_.get("metadata") or {})) or _holders._is_held(it):
-                continue      # the board shows it waiting, held or in the owner's lane: not on the stall ladder, and a stray mention must not reset its silence clock
-            # the item's own words: its description, its steps, the status tag of each open step (a tag is where a session writes "PR 136 released; PR 137 in review", often before the step's text says it) and the lines of `next`
-            tags = [t["text"] for t in (_steps.tag_of(c) for c in cl if c.get("status") == _steps.OPEN) if t]      # an open step's tag only: a done or dropped step keeps its tag, and a stale "PR 137 released" must not tie a later merge
-            texts[gid] = "\n".join([str(it.get("description") or ""), *(c["text"] for c in cl), *tags, str(meta.get("next") or "")])
-            projects[gid] = str(meta.get("project") or "")
-        except Exception as e:  # noqa: BLE001
-            print(f"merge progress: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    problem = ""
-    try:
-        pages = _mtie.repo_pages(_anc.load(), _anchor_repo)
-    except Exception as e:  # noqa: BLE001
-        pages = {}
-        problem = f"the anchors could not be read ({e.__class__.__name__}: {str(e)[:120]})"
-        print(f"merge progress: anchors not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    out = _TiedRows()
-    out.problem = problem
-    for row in rows:
-        key = f"{_cfg.canon_repo(str(row['repo']))}#{int(row['n'])}"
-        body: list[str] = []
-        for ref in row.get("refs") or []:
-            try:
-                g = _norm_id(str(ref))
-            except Exception:      # an id that names no item (another machine's temporary id, a word that only looks like an id)
-                continue
-            if g in texts and g not in body:
-                body.append(g)
-        tied = _mtie.tied(key, body, {g: ks for g, ks in scoped.items() if g in texts}, texts, projects, pages, _cfg.canon_repo)
-        out.append((row, key, tied))
-    return out
-
-
-def _merge_progress_tick(now: float | None = None) -> list[str]:
-    """The pass: read the hub's merge log from where it stopped, and for each open item a merged pull request is tied to (merge_tie.tied) add the pull request to the item's `merged_seen` and save it,
-    which the last-activity record takes (progress.merges). On every pass a line that is malformed is logged and skipped, and one older than six hours is skipped (`_merge_rows`: the
-    backlog of a day of downtime, or a shorter file read again from its start, would record merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
-    or held is left alone. An item that cannot be read or saved is logged and skipped: the others are saved and the offset is stored, so one bad item does not abort the pass every minute. → the ids saved."""
-    if _watch.holding():
-        return []
-    now = time.time() if now is None else now
-    off = _merge_progress_offset()
-    rows, new = _mlog.read(off or 0)      # an offset past the end of the file (replaced or shrunk) reads from its start
-    rows = _merge_rows(rows, now)
-    if not rows:
-        if new != off:
-            _merge_progress_save(new)
-        return []
-    saved: list[str] = []
-    try:
-        ties = _merge_tied(rows, now)
-    except Exception as e:  # noqa: BLE001  — a read that failed as a whole: the offset stays where it was, and the next pass reads the lines again
-        print(f"merge progress: items not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return []
-    for row, key, tied in ties:
-        for gid, how in tied.items():
-            try:
-                with _writes.ITEM_LOCK:
-                    it = _svcstore._load(gid)
-                    meta = it.get("metadata")
-                    if it.get("status") != "open" or not isinstance(meta, dict):
-                        continue
-                    seen = [str(x) for x in (meta.get(_progress.SEEN) or []) if str(x)]
-                    if key in seen:
-                        continue
-                    meta[_progress.SEEN] = [*seen, key][-_MERGE_PROG_KEEP:]
-                    what = f"{_rlive.pr_shown(key)} merged, and {_mtie.HOW[how]}: that is progress on the item"
-                    _stall.note(meta, now, what)      # the History line
-                    it["metadata"] = meta
-                    it["updated"] = now      # as the event save of the settle path does (proofs.proof_item)
-                    _writes.save(gid, it, note=f"{NAME}: {what}", activity=_activity.EVENT)
-                    if gid not in saved:
-                        saved.append(gid)
-                    print(f"merge progress: {gid} moved by {key} ({how})", file=sys.stderr, flush=True)
-            except Exception as e:  # noqa: BLE001  — one item that cannot be read or saved never stops the others
-                print(f"merge progress: {gid} not saved for {key}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    _merge_progress_save(new)
-    return saved
 
 
 # ----------------------------------------------------------------------------- the last-activity record: events on a tied pull request
@@ -2821,7 +1672,7 @@ def _event_activity_tick(now: float | None = None) -> list[str]:
         saved: list[str] = []
         if rows:
             try:
-                ties = _merge_tied(rows, now)
+                ties = _merge_progress._merge_tied(rows, now)
             except Exception as e:  # noqa: BLE001
                 print(f"last activity: items not read: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
                 return []
@@ -3526,10 +2377,10 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             flag_at = float(body.get("flag_at") or 0)
         except (TypeError, ValueError):
             return 400, {"error": "flag_at is an epoch in seconds"}
-        return 200, _recycled(machine, kind, started, str(body.get("result") or "ok"), [str(x) for x in sk], flag_at)
+        return 200, _recycle_svc._recycled(machine, kind, started, str(body.get("result") or "ok"), [str(x) for x in sk], flag_at)
     if what == "recycle-due":   # a script marks a recycle as due on an item (client.py recycle-due)
         try:
-            return 200, _recycle_due(machine, str(body.get("item") or ""), str(body.get("pr") or ""))
+            return 200, _recycle_svc._recycle_due(machine, str(body.get("item") or ""), str(body.get("pr") or ""))
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "released":      # release.sh: main's tests passed on a released merge, so the items built for that PR are settled (client.py released)

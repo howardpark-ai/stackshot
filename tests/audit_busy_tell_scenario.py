@@ -1,4 +1,4 @@
-"""Scenario test for a long busy stretch telling the right agent once (audit/busy_tell.py, server._busy_tell_tick, run from the ten-minute audit tick after the idle hand-over, `[audit] busy_tell` and `busy_tell_hours`):
+"""Scenario test for a long busy stretch telling the right agent once (audit/busy_tell.py, service/audit_ticks._busy_tell_tick, run from the ten-minute audit tick after the idle hand-over, `[audit] busy_tell` and `busy_tell_hours`):
 an item on an agent whose hourly audit lines have said only "the mover's pane is in a turn" for about 4 hours, with no other write between them, tells the project's -main agent ONCE; an item a front agent holds with only
 hourly lines for that long tells that front agent itself, once; the owner is never told. Fixture items in a temporary store, a fake clock (the passes are given their `now`), the pane registry replaced by a dict, no live
 store, no network, no model call, no message really sent. The timelines run the real hourly tick and the real busy tick every ten minutes, so the lines the rule reads are the ones the audit writes.
@@ -65,9 +65,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.web.tools import notes as _notes_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import agents as _agents
@@ -100,7 +102,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK
+CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -144,16 +146,16 @@ def mt(i): return rd(i)["metadata"]
 def lines(i): return HL.log_of(mt(i))
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
-    sent.clear(); sent_at.clear(); panes.clear(); dead.clear(); server._BALANCE_LOGGED.clear(); (T / "store/anchors.json").write_text("{}")
+    sent.clear(); sent_at.clear(); panes.clear(); dead.clear(); audit_ticks_svc._BALANCE_LOGGED.clear(); (T / "store/anchors.json").write_text("{}")
     for k in ("busy_tell", "busy_tell_hours", "hourly_line", "hand_idle"): _cfg.CFG["audit"].pop(k, None)
 def at(m): return now0 + m * MIN                                    # `m` minutes after the item's last activity in the timelines (act=0)
 def hourly(t):
     CLK.t = t
-    try: return server._hourly_tick(now=t, subagents=lambda who: [], anchored={})
+    try: return audit_ticks_svc._hourly_tick(now=t, subagents=lambda who: [], anchored={})
     finally: CLK.t = None
 def tick(t, **kw):
     CLK.t = t
-    try: return server._busy_tell_tick(now=t, **kw)
+    try: return audit_ticks_svc._busy_tell_tick(now=t, **kw)
     finally: CLK.t = None
 def run(frm, to, step=10, line=True, each=None):
     """The audit ticks of minutes frm..to after the activity: the hourly line, then the busy tell; `each(m)` runs first (an event of the fixture). → the ids told."""
@@ -207,7 +209,7 @@ for label, tgt, name, val in (("a read-only standby copy", _ro, "is_read_only", 
 wipe(); put(1, act=400, log=SEVEN); _cfg.CFG["audit"]["hourly_line"] = False
 check("1 with the hourly line off the busy tell stands still (the lines it reads are not being written)", tick(now0) == [] and sent == [])
 wipe(); put(1, act=400, log=SEVEN); _cfg.CFG["audit"]["mode"] = "agent"
-server._silence_tick()
+audit_ticks_svc._silence_tick()
 check("1 …and so does the tick in agent mode", sent == [])
 _cfg.CFG["audit"]["mode"] = "script"
 
@@ -257,7 +259,7 @@ told = run(10, 400)
 check("4 an item whose lines are all idle is not told of, whatever the hours", told == [] and sent == [] and lines(1) and all(l["kind"] == "audit_idle" for l in lines(1)), (told, sent))
 wipe(); put(1, act=300, log=seed([("pane", 50), ("pane", 100), ("pane", 150), ("pane", 200), ("pane", 250), ("idle", 295)]))
 check("4 an item with an idle line as its newest is not told of even when its pane lines are old enough…", tick(now0) == [] and sent == [])
-check("4 …and the idle hand-over finds it (it is that pass's case)", [g for g, _r in HI.due_all(NR.load_all(None), now0, server._silence_env().is_front)] == ["a1"])
+check("4 …and the idle hand-over finds it (it is that pass's case)", [g for g, _r in HI.due_all(NR.load_all(None), now0, audit_ticks_svc._silence_env().is_front)] == ["a1"])
 wipe(); put(1, act=370, log=seed([("pane", 50), ("pane", 100), ("idle", 150), ("pane", 200), ("pane", 250), ("pane", 300)]))
 check("4 an idle line in the middle of the lines moves the start to it: 250 minutes after it is not yet 4 h, so nobody is told", tick(now0) == [] and sent == [])
 wipe(); put(1, act=450, log=seed([("pane", 50), ("pane", 100), ("idle", 150), ("pane", 200), ("pane", 250), ("pane", 300), ("pane", 350), ("pane", 400)]))
@@ -317,7 +319,7 @@ check("6 several items for one -main agent are one message, one line each, namin
 wipe(); put(1, act=0); pane_busy("team-back"); run(10, 245)
 check("7 told once, the record on the item itself (its own metadata key, apart from hand_idle and balance)", len(sent) == 1 and set(mt(1).get("busy_tell", {})) == {"at", "to", "kind", "since"} and "hand_idle" not in mt(1) and "balance" not in mt(1))
 import importlib
-importlib.reload(BT); server._BALANCE_LOGGED.clear()
+importlib.reload(BT); audit_ticks_svc._BALANCE_LOGGED.clear()
 told = run(250, 400)
 check("7 a restart (the module reloaded, nothing held in memory) does not tell again: the record is in the store", told == [] and len(sent) == 1, (told, len(sent)))
 d = rd(1); d["metadata"]["busy_tell"] = {"at": "yesterday", "to": 1}; wr(1, d)
@@ -372,23 +374,23 @@ check("9 the switch off: nothing is told and nothing written over 6 h", run(10, 
 _cfg.CFG["audit"]["busy_tell"] = True
 check("9 …and switched on again, the stretch that ran meanwhile is told of at the next tick", tick(at(370)) == ["a1"] and len(sent) == 1)
 order = []
-real = (server._hourly_tick, server._hand_idle_tick, server._busy_tell_tick)
-server._hourly_tick = lambda *a, **k: order.append("hourly"); server._hand_idle_tick = lambda *a, **k: order.append("hand"); server._busy_tell_tick = lambda *a, **k: order.append("busy")
-try: server._silence_tick()
-finally: server._hourly_tick, server._hand_idle_tick, server._busy_tell_tick = real
+real = (audit_ticks_svc._hourly_tick, audit_ticks_svc._hand_idle_tick, audit_ticks_svc._busy_tell_tick)
+audit_ticks_svc._hourly_tick = lambda *a, **k: order.append("hourly"); audit_ticks_svc._hand_idle_tick = lambda *a, **k: order.append("hand"); audit_ticks_svc._busy_tell_tick = lambda *a, **k: order.append("busy")
+try: audit_ticks_svc._silence_tick()
+finally: audit_ticks_svc._hourly_tick, audit_ticks_svc._hand_idle_tick, audit_ticks_svc._busy_tell_tick = real
 check("9 `_silence_tick` runs the busy tell last, after the hourly line and the idle hand-over", order == ["hourly", "hand", "busy"], order)
 def boom(*a, **k): raise OSError("store gone")
 order.clear()
-server._hourly_tick = lambda *a, **k: order.append("hourly"); server._hand_idle_tick = lambda *a, **k: order.append("hand"); server._busy_tell_tick = boom
+audit_ticks_svc._hourly_tick = lambda *a, **k: order.append("hourly"); audit_ticks_svc._hand_idle_tick = lambda *a, **k: order.append("hand"); audit_ticks_svc._busy_tell_tick = boom
 try:
-    with _Err() as err5: server._silence_tick()
-finally: server._hourly_tick, server._hand_idle_tick, server._busy_tell_tick = real
+    with _Err() as err5: audit_ticks_svc._silence_tick()
+finally: audit_ticks_svc._hourly_tick, audit_ticks_svc._hand_idle_tick, audit_ticks_svc._busy_tell_tick = real
 check("9 a failure in the busy tell is a stderr line and stops nothing (the lines before it have run)", order == ["hourly", "hand"] and "long busy stretches not told: OSError" in err5.text, (order, err5.text))
 order.clear()
-server._hourly_tick = boom; server._hand_idle_tick = lambda *a, **k: order.append("hand"); server._busy_tell_tick = lambda *a, **k: order.append("busy")
+audit_ticks_svc._hourly_tick = boom; audit_ticks_svc._hand_idle_tick = lambda *a, **k: order.append("hand"); audit_ticks_svc._busy_tell_tick = lambda *a, **k: order.append("busy")
 try:
-    with _Err(): server._silence_tick()
-finally: server._hourly_tick, server._hand_idle_tick, server._busy_tell_tick = real
+    with _Err(): audit_ticks_svc._silence_tick()
+finally: audit_ticks_svc._hourly_tick, audit_ticks_svc._hand_idle_tick, audit_ticks_svc._busy_tell_tick = real
 check("9 …and a failure in the hourly line stops neither of the others", order == ["hand", "busy"], order)
 check("9 the hourly log marks a pane-only line and no other (an idle, a subagent and a recorded-event line carry no mark)",
       HR.pane_only({"kind": "audit", "verified": [HR.PANE], "recorded": []}) and not HR.pane_only({"kind": "audit", "verified": [HR.PANE, "a subagent is running on it"], "recorded": []})
@@ -565,7 +567,7 @@ check("11 BT.due_all: an item whose reading raises is left out and the others ar
 _cfg.CFG.setdefault("model", {})["queued_behind"] = True
 try:
     wipe(); put(1, act=400, log=SEVEN); put(2, act=400, log=SEVEN, last_activity={"at": now0 - 10 * MIN, "kind": "audit", "what": "audit verified the mover's pane is in a turn"})      # a2 is the item in hand (activity within the hour: an audit stamp, which holds no tell back), a1 waits behind it
-    qm = SL.queued(NR.load_all(None), now0, server._silence_env())
+    qm = SL.queued(NR.load_all(None), now0, audit_ticks_svc._silence_env())
     told_ = tick(now0)
     check("11 a queued item is not told: of two items of one mover, the one the board queues behind the item in hand is left out, and the item in hand is told", qm == {"a1": "a2"} and told_ == ["a2"] and len(to_main()) == 1 and "busy_tell" not in mt(1) and "busy_tell" in mt(2), (qm, told_, sent))
 finally: _cfg.CFG["model"].pop("queued_behind", None)

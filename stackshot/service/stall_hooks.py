@@ -20,7 +20,7 @@ class Hooks:
     main_agent: Callable[..., Any]  # agents._main_agent
     next_report_all: Callable[..., Any]  # tools/next_report.load_all
     publish: Callable[..., Any]  # web.publish._publish
-    queue_map: Callable[..., Any]  # server._queue_map
+    queue_map: Callable[..., Any]  # service.audit_ticks._queue_map
     role_name: Callable[..., Any]  # sessions_registry._role_name
     session_id: Callable[..., Any]  # server._session_id
     silence_clock: Callable[..., Any]  # audit/silence.clock

@@ -66,6 +66,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
 from stackshot.service import pane_recovery as _pane_recovery
@@ -362,7 +363,7 @@ check("a due date at the end of time is no date, not an exception: 9999-12-31 an
 item(89, due="9999-12-31", su=now0 - 10 * DAY)
 check("an item with such a due date reads as any item: get shows it, the items API lists it and the board builds", "item 89" in _wt_get.stackshot_get("a89"), _wt_get.stackshot_get("a89")[:200])
 bad = {"id": "9", "subject": "[home] bad", "status": "open", "metadata": 5, "state_updated": "garbage"}
-check("a stored value that makes the mover reading raise gives that row no mover fields and fails no list: the reading is guarded", server._wait_fields("a9", bad, _agents._WaitCtx(now0)) == {}, server._wait_fields("a9", bad, _agents._WaitCtx(now0)))
+check("a stored value that makes the mover reading raise gives that row no mover fields and fails no list: the reading is guarded", client_reads_svc._wait_fields("a9", bad, _agents._WaitCtx(now0)) == {}, client_reads_svc._wait_fields("a9", bad, _agents._WaitCtx(now0)))
 check("the board builds with the item of such a due date on it, and shows it", "a89" in ui_render.Board(f"{tmp}/store").markdown(), None)
 
 # ---- 7f. a change to what the item waits on drops a failed wait and an old ladder record (one an earlier version wrote), a filing edit does not
@@ -406,7 +407,7 @@ br = bd.brief()
 check("the brief carries an undelivered count and no stuck count, no stuck line and no line of undated waits", "1 with an undelivered notice" in br and not re.search(r"\d+ stuck|^  stuck: |more stuck|no date of their own|undated", br, re.M), br)
 ph = bd.item_html("a82")
 check("the item page has no Expected by row in its sidebar and prints no computed date or 'past due by' (a held item past its wake, and one inside its date)", "Expected by" not in ph and "past due by" not in ph and "Expected by" not in bd.item_html("a26"), re.findall(r"Expected by.{0,300}", ph))
-st_, ct_, body_ = server._client_get("items", {"key": U["home-owner"]})
+st_, ct_, body_ = client_reads_svc._client_get("items", {"key": U["home-owner"]})
 x = {i["gid"]: i for i in json.loads(body_)["items"]}
 check("the items API (the web board and sala read it) carries the mover of a held item and no ladder step; expected_by, wait and overdue stay as keys and are always empty",
       x["a82"]["held"] and "step" not in x["a82"] and x["a82"]["mover"]["kind"] == "session" and all(v["expected_by"] is None and v["wait"] == "" and v["overdue"] is None for v in x.values()) and len(x) >= 3, x.get("a82"))
@@ -456,7 +457,7 @@ check("board.md has no stuck word at all: no Stuck section, no ladder line, what
 check("the brief has no stuck count and no stuck line", not re.search("stuck", br9, re.I), [m for m in br9.split("\n") if re.search("stuck", m, re.I)][:5])
 g_a = _wt_get.stackshot_get("a45")
 check("an item carrying an old ladder record at step 3 reads as any late hold: no step line, no stuck mark in get, no waiting line and no past-due mark", not re.search(r"step \d of \d|stuck", g_a) and "waiting: " not in g_a and "past due" not in g_a, g_a)
-st_9, ct_9, body_9 = server._client_get("items", {"key": U["home-owner"]})
+st_9, ct_9, body_9 = client_reads_svc._client_get("items", {"key": U["home-owner"]})
 items9 = {i["gid"]: i for i in json.loads(body_9)["items"]}
 check("the items API carries no step on any item, the one with the old record included, and no expected time on any", items9 and not any("step" in i for i in items9.values()) and all(i["expected_by"] is None and i["overdue"] is None and i["wait"] == "" for i in items9.values()) and "a45" in items9, list(items9.get("a45", {})))
 check("the old waiting.json was neither read nor rewritten by any of that (the get, the board, the brief, the items API): it still holds what it held", ST.read_text() == raw_old, ST.read_text()[:300])

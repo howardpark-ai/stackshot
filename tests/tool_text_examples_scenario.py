@@ -178,8 +178,9 @@ out = runs("create: work for the builder (mover left out)", "create",
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- update
 item(40, next=TWO, owner=AGENT)       # the steps are the agent's own: only the writer of a step rewords it
-upd(1, 'done=[1]', 'next="my-x: open the PR"')
-check("update: done and the next one added", "open the PR" in str(mt(1).get("next")), mt(1))
+item(1, next="home-agent: build it\nhome-agent: test it", owner=AGENT)     # the text's example: steps 1 and 2 open, step 1 finished, step 2 written again as it stands
+upd(1, 'done=[1]', r'next="my-x: test it\nmy-x: open the PR"')
+check("update: done and the next one added", "open the PR" in str(mt(1).get("next")) and "test it" in str(mt(1).get("next")) and "build it" not in str(mt(1).get("next")), mt(1))
 upd(40, 'reword={"2": "my-x: ship the export"}')
 check("update: reword", "ship the export" in str(mt(40).get("next")), mt(40))
 item(41, next=TWO, owner=AGENT)

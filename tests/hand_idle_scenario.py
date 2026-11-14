@@ -1,4 +1,4 @@
-"""Scenario test for handing an idle item on (audit/hand_idle.py, server._hand_idle_tick, run from the ten-minute silence tick right after the hourly line, `[audit] hand_idle`): an item on an agent that has had
+"""Scenario test for handing an idle item on (audit/hand_idle.py, service/audit_ticks._hand_idle_tick, run from the ten-minute silence tick right after the hourly line, `[audit] hand_idle`): an item on an agent that has had
 no activity for an hour and whose hourly audit line says `idle, nothing verified` goes to a free builder, and the project's -main agent is told; the owner never is. Fixture items in a temporary store, a fake
 clock (the pass is given its `now`), the pane registry replaced by a dict, no live store, no network, no model call, no message really sent.
 
@@ -64,9 +64,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
 from stackshot.web.tools import notes as _notes_tool
+from stackshot.service import client_reads as client_reads_svc, recycle as recycle_svc, merge_progress as mprog_svc
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import agents as _agents
@@ -102,7 +104,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK
+CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -139,7 +141,7 @@ def tick(at=None, **kw):
     """One pass of the hand-over at `at` (default now0), the server's clock set to it → the ids handed on."""
     at = now0 if at is None else at
     CLK.t = at
-    try: return server._hand_idle_tick(now=at, **kw)
+    try: return audit_ticks_svc._hand_idle_tick(now=at, **kw)
     finally: CLK.t = None
 def to_main(): return [x for x in sent if x[1] == U["home-main"]]
 def to_builder(name): return [x for x in sent if x[1] == U[name]]
@@ -360,19 +362,19 @@ def old_builders(project):      # the reverted rule: the project's own backgroun
 def probe_other_project():
     got, mv = first_pick(panes={"team-back": "busy", "team-aux": "busy", "other-back": "idle", "delta-one": "idle"})
     return got == [] and mv == "home-peer" and to_builder("other-back") == [] and to_builder("delta-one") == [] and len(to_main()) == 1
-rule("5 with none of the project's own free, a builder of another project is not offered, however idle: the item stays and -main is told", probe_other_project, [(server, "_hand_idle_builders", old_builders)])
+rule("5 with none of the project's own free, a builder of another project is not offered, however idle: the item stays and -main is told", probe_other_project, [(audit_ticks_svc, "_hand_idle_builders", old_builders)])
 def probe_own_project_pick():
     wipe(); on(); put(1, act=90); put(2, act=90, project="projects/beta")
     for n in ("team-back", "team-aux", "other-back", "delta-one", "delta-two"): panes[n] = "idle"
     got = tick()
     return got == ["a1", "a2"] and mover_of(1) == "team-back" and mover_of(2) == "other-back"
-rule("5 an item goes to a builder of its own project: an item of alpha to alpha's, an item of beta to beta's", probe_own_project_pick, [(server, "_hand_idle_builders", lambda project: ["other-back", "team-back"] if project == "projects/alpha" else ["team-back", "other-back"])])
+rule("5 an item goes to a builder of its own project: an item of alpha to alpha's, an item of beta to beta's", probe_own_project_pick, [(audit_ticks_svc, "_hand_idle_builders", lambda project: ["other-back", "team-back"] if project == "projects/alpha" else ["team-back", "other-back"])])
 def probe_beta_never_alpha():
     wipe(); on(); put(1, act=90, project="projects/beta"); panes["other-back"] = "busy"
     for n in ("team-back", "team-aux", "delta-one"): panes[n] = "idle"
     got = tick()
     return got == [] and mover_of(1) == "home-peer" and to_builder("team-back") == [] and to_builder("team-aux") == [] and to_builder("delta-one") == []
-rule("5 an item of beta whose own builder is in a turn is not handed to alpha's or delta's idle builder", probe_beta_never_alpha, [(server, "_hand_idle_builders", old_builders)])
+rule("5 an item of beta whose own builder is in a turn is not handed to alpha's or delta's idle builder", probe_beta_never_alpha, [(audit_ticks_svc, "_hand_idle_builders", old_builders)])
 def probe_no_background_agent():
     wipe(); on(); put(1, act=90, project="projects/gamma")
     for n in ("team-back", "team-aux", "other-back", "delta-one", "delta-two", "lone-back"): panes[n] = "idle"
@@ -381,7 +383,7 @@ def probe_no_background_agent():
     return (got == [] and mover_of(1) == "home-peer" and len(sent) == 1 and len(tm) == 1 and tm[0][3] == "stall" and "no builder was free" in tm[0][2] and "stays with home-peer" in tm[0][2]
             and len(history(1)) == 1 and "no builder was free to take it: gamma-main was told" in history(1)[0] and mt(1)["hand_idle"] == {"none_at": now0}
             and "idle, no builder free" in e.text)
-rule("5 a project with no background agent of its own keeps the item, however many builders other projects have idle: the History line and -main say so", probe_no_background_agent, [(server, "_hand_idle_builders", old_builders)])
+rule("5 a project with no background agent of its own keeps the item, however many builders other projects have idle: the History line and -main say so", probe_no_background_agent, [(audit_ticks_svc, "_hand_idle_builders", old_builders)])
 def probe_no_background_agent_once():
     wipe(); on(); put(1, act=90, project="projects/gamma"); panes["team-back"] = "idle"
     tick(); tick(now0 + 10 * MIN); tick(now0 + 23 * H)
@@ -392,7 +394,7 @@ def probe_two_builders():
     for n in ("delta-one", "delta-two", "team-back", "other-back"): panes[n] = "idle"
     got = tick()
     return got == ["a1"] and mover_of(1) == "delta-two" and mover_of(2) == "home-peer" and to_builder("team-back") == [] and to_builder("other-back") == []
-rule("5 a project with two builders: the one that moves an open item is not free, the other takes the first item, the second item stays (no builder of another project takes it)", probe_two_builders, [(server, "_hand_idle_builders", old_builders), (HI, "busy_movers", lambda items, now: [])])
+rule("5 a project with two builders: the one that moves an open item is not free, the other takes the first item, the second item stays (no builder of another project takes it)", probe_two_builders, [(audit_ticks_svc, "_hand_idle_builders", old_builders), (HI, "busy_movers", lambda items, now: [])])
 def probe_two_builders_first():
     wipe(); on(); put(1, act=90, project="projects/delta")
     for n in ("delta-one", "delta-two", "team-back"): panes[n] = "idle"
@@ -474,9 +476,9 @@ def probe_cap():
     wipe(); on()
     for i in range(1, 6): put(i, act=90)
     for n in ("team-back", "team-aux", "other-back", "lone-back"): panes[n] = "idle"
-    real = server._hand_idle_builders; server._hand_idle_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]      # four free builders, five idle items
+    real = audit_ticks_svc._hand_idle_builders; audit_ticks_svc._hand_idle_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]      # four free builders, five idle items
     try: got = tick(); more = tick(now0 + 10 * MIN)
-    finally: server._hand_idle_builders = real
+    finally: audit_ticks_svc._hand_idle_builders = real
     return len(got) == 3 and len(more) <= 3 and len(set(mover_of(i) for i in range(1, 6)) - {"home-peer"}) == len(got) + len(more)
 rule("7 at most three items are handed on in one pass (the next pass goes on with the rest)", probe_cap, [(HI, "MAX_PER_TICK", 99)])
 def probe_distinct():
@@ -517,25 +519,25 @@ check("8 an item that cannot be read at all is left out and stops no other", pro
 wipe(); on(); put(1, act=90); panes["team-back"] = "idle"
 _cfg.CFG["audit"]["hourly_line"] = True
 order = []
-real_hourly, real_hand = server._hourly_tick, server._hand_idle_tick
-server._hourly_tick = lambda *a, **k: (order.append("hourly"), real_hourly(*a, **k))[1]
-server._hand_idle_tick = lambda *a, **k: (order.append("hand"), real_hand(now=now0, *a, **k))[1]
+real_hourly, real_hand = audit_ticks_svc._hourly_tick, audit_ticks_svc._hand_idle_tick
+audit_ticks_svc._hourly_tick = lambda *a, **k: (order.append("hourly"), real_hourly(*a, **k))[1]
+audit_ticks_svc._hand_idle_tick = lambda *a, **k: (order.append("hand"), real_hand(now=now0, *a, **k))[1]
 try:
     CLK.t = now0
-    server._hourly_tick = lambda *a, **k: (order.append("hourly"), [])[1]
-    server._silence_tick()
+    audit_ticks_svc._hourly_tick = lambda *a, **k: (order.append("hourly"), [])[1]
+    audit_ticks_svc._silence_tick()
 finally:
     CLK.t = None
 check("9 `_silence_tick` runs the hand-over after the hourly line, and it hands the idle item on", order == ["hourly", "hand"] and mover_of(1) == "team-back", (order, mover_of(1)))
 def boom(*a, **k): raise OSError("store gone")
-server._hand_idle_tick = boom
+audit_ticks_svc._hand_idle_tick = boom
 order.clear()
-with _Err() as err9: server._silence_tick()
+with _Err() as err9: audit_ticks_svc._silence_tick()
 check("9 a failure in the hand-over is a stderr line and stops nothing", "idle items not handed on: OSError" in err9.text, err9.text)
-server._hourly_tick, server._hand_idle_tick = real_hourly, real_hand
+audit_ticks_svc._hourly_tick, audit_ticks_svc._hand_idle_tick = real_hourly, real_hand
 _cfg.CFG["audit"]["mode"] = "agent"
 wipe(); on(); put(1, act=90); panes["team-back"] = "idle"
-server._silence_tick()
+audit_ticks_svc._silence_tick()
 check("9 the tick stands still when the audit runs in agent mode", mover_of(1) == "home-peer")
 _cfg.CFG["audit"]["mode"] = "script"
 
