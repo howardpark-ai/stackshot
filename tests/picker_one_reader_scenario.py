@@ -64,6 +64,7 @@ from stackshot.service import store as _service_store
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import migrations as migsvc
 from stackshot.service import watching as watching_svc
+from stackshot.service import wakes as wakes_svc
 from stackshot.service import writes
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.service import telling
@@ -103,6 +104,7 @@ TABLE = [
     ("both stored and different: the legacy key wins", dict(post_wake_mover=BACK, mover=HELP), BACK),
     ("a legacy key that is he, beside an agent mover", dict(post_wake_mover=OWN, mover=HELP),  OWN),
     ("a mover that is he, beside an agent legacy key", dict(post_wake_mover=HELP, mover=OWN),  HELP),
+    ("a mover that is he, no legacy key",    dict(mover=OWN),                                  OWN),
     ("the word none as a mover",             dict(mover="None"),                               ""),
     ("the word none beside a legacy key",    dict(mover="none", post_wake_mover=HELP),         HELP),
     ("neither",                              dict(),                                           ""),
@@ -128,6 +130,7 @@ for label, st, want in TABLE:
     mo = waiting.mover_of({"needs": [], "project": "projects/zedwork", **st})
     exp_mo = (want if want and want != OWN else (model.pick_who(st.get("mover")) if model.pick_who(st.get("mover")) and model.pick_who(st.get("mover")) != OWN else "")) or waiting.fallback_mover("projects/zedwork")
     check(f"1 mover_of: {label}", mo == {"kind": "session", "who": exp_mo}, mo)
+    check(f"1 mover_of: {label}: the owner is never returned as a session name", not model.is_owner(mo["who"]), mo)
 
 # a stored picker the item never names in needs is who holds a waiting item (held_by): the legacy key reads as `then`, a stored mover as `mover`, as before
 item(1, needs=[BACK], hold=True, wake=FUT, wait_kind="time", mover=HELP, subject="[zed] a picker by mover")
@@ -195,6 +198,28 @@ check("2 a date-only wait he picks up turns to him with his ask, the then kept b
 item(26, needs=[BACK], wait_kind="time", wake=day(-1), mover=HELP, hold=True)
 moved = watching_svc.watch_pass()
 check("2 a wait with a kind and a stored mover still ends through turn_alive (unchanged)", "a26" in moved and mt(26).get("needs") == [HELP] and mt(26).get("mover") == HELP, mt(26))
+
+# the end of a wait on a date alone, by what the item stores and whether `external` is in its needs. With external the item goes back to others at its date, as it always did: only the old key turns it
+# (turn_alive); a stored mover alone ends it on the date (end_date, needs as stored). Without external a picker under either key turns it. Two forms of the date: until, and a hold with a wake.
+PICKERS = (("legacy key", dict(post_wake_mover=HELP), True, True), ("stored mover only", dict(mover=HELP), True, False), ("both", dict(post_wake_mover=HELP, mover=HELP), True, True), ("neither", dict(), False, False))
+NUM = 200
+for ext_, needs_ in ((True, ["external"]), (False, [BACK])):
+    for plabel, st, has_any, has_legacy in PICKERS:
+        for dlabel, date in (("until", dict(until=day(-1))), ("wake", dict(hold=True, wake=day(-1)))):
+            NUM += 1
+            item(NUM, needs=list(needs_), **date, **st)
+            SENT.clear(); moved = watching_svc.watch_pass() if dlabel == "until" else wakes_svc.wake_pass(); m_ = mt(NUM)      # a stored until is the watchers' pass; a hold with a wake is the wake pass's
+            turns = has_legacy if ext_ else has_any          # main's result for external; the new rule (a stored mover turns it too) only without external
+            want_needs = [HELP] if turns else list(needs_)
+            if dlabel == "until":
+                check(f"2 external={ext_}, {plabel}, a kind-less until: {'turns to the picker (needs is the picker)' if turns else 'ends on the date (needs stays as stored)'}",
+                      f"a{NUM}" in moved and m_.get("needs") == want_needs and "woke" in m_ and "until" not in m_ and "post_wake_mover" not in m_
+                      and (m_.get("mover") == HELP if turns else m_.get("mover") == st.get("mover")), m_)
+            else:      # a hold with a wake and no kind is the wake pass's (no watcher owns it): the hold and wake go, and needs and the stored picker keys stay exactly as stored, on main and here
+                check(f"2 external={ext_}, {plabel}, a kind-less hold with a wake: released by the wake pass, needs and the stored keys as stored",
+                      f"a{NUM}" in moved and m_.get("needs") == list(needs_) and "hold" not in m_ and "wake" not in m_ and m_.get("post_wake_mover") == st.get("post_wake_mover") and m_.get("mover") == st.get("mover"), m_)
+check("2 _ends_on_the_date: a wait with a kind never ends on the date; a missing needs reads as no external",
+      not watching_svc._ends_on_the_date({"wait_kind": "time"}, D(needs=[BACK], hold=True, wake=FUT, wait_kind="time")) and watching_svc._ends_on_the_date({}, D(hold=True, wake=FUT)), None)
 
 # ================================================================ 3. settle
 WAITING_HIS = lambda **m: its(mover=OWN, until=FUT, **m)

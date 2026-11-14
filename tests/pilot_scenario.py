@@ -1261,7 +1261,6 @@ _update_svc._update("a5", hold=True, wake=D(5), sender="home-beta")
 _update_svc._update("a7", hold=True, wake=D(5), sender="home-beta"); _update_svc._update("a8", hold=True, wake=D(5), sender="home-beta")
 for g, w in (("a3", D(-2)), ("a5", D(-1)), ("a8", D(0))):
     it = rd(g); setwk_(it["metadata"], w); it["updated"] = it["state_updated"] = 1000.0
-    if g == "a5": it["metadata"].pop("mover", None)      # a5 has no picker stored: a wait on the date alone ends with the date and its needs stay (one with a stored mover turns to that mover: tests/picker_one_reader_scenario.py)
     (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
 led0 = json.dumps(_web_page_debts._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
 woke = wakes_svc.wake_pass()

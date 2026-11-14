@@ -109,6 +109,17 @@ def watch_failed(gid: str, now: float) -> None:
         print(f"watch: {gid} failure not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
+def _ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
+    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker).
+    With `external` in needs the item goes back to others at its date, as it always did, whichever mover is stored: only the old post_wake_mover key turns it. Without `external`, a picker stored under
+    either key (`mod.wait.mover_explicit`) turns it, the one place a stored mover alone now ends a wait the way the old key did."""
+    if str(meta.get("wait_kind") or "").strip():
+        return False
+    if "external" in [str(n).strip().lower() for n in _wt.needs_of(meta)]:
+        return not str(meta.get(_model.LEGACY_PICKER_KEY) or "").strip()
+    return not mod.wait.mover_explicit
+
+
 def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]], detail: dict[str, str] | None = None, recheck: bool = False, ev: dict[str, Any] | None = None,
                 legacy: bool = False) -> bool:
     """The wait of `gid` is over (`cause`: time | item | backstop | relay | anchor | event): turn the item, save it, and collect the message its new mover is owed in `out` (recipient
@@ -172,7 +183,7 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             ask, opts = watch_ask(gid, meta, what)
             _watch.turn_to_owner(meta, mod.then, ask, opts, what, now)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
-        elif cause == "time" and not str(meta.get("wait_kind") or "").strip() and not mod.wait.mover_explicit:
+        elif cause == "time" and _ends_on_the_date(meta, mod):
             _watch.end_date(meta, what, post, now)       # a wait on the date alone ends with the date: needs, the open after link and the mover stay as stored
             mover = post
         else:
