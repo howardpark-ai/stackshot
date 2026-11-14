@@ -62,6 +62,8 @@ def sts(i): return [(x["status"], x.get("by") or "") for x in rd(i)["metadata"].
 def kinds(i): return [k for k, _ in sts(i)]
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S
+from stackshot.core import instance as _core_instance
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -76,7 +78,7 @@ def close(i, outcome="done", sup="", **kw):
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want), str(e))
 
 # ================================================================ 1. a close marks the open steps
@@ -114,7 +116,7 @@ check("History and the mirror's comment (steps.changes): the mark a close puts b
 # ================================================================ 2. the server's own closes
 item(10); item(11)
 checks_svc.check_close("g10", rd(10), "a done check", time.time())
-check("a done check's close marks the open steps done, by the server", kinds(10) == ["done"] * 3 and {b for _, b in sts(10)} == {server.NAME} and rd(10)["metadata"]["outcome"] == "done", sts(10))
+check("a done check's close marks the open steps done, by the server", kinds(10) == ["done"] * 3 and {b for _, b in sts(10)} == {_core_instance.NAME} and rd(10)["metadata"]["outcome"] == "done", sts(10))
 it11 = rd(11); server._watch_close(it11, "dropped on his answer", time.time())
 check("a watcher ask's drop marks the open steps dropped, by the server", [x["status"] for x in it11["metadata"]["steps"]] == ["dropped"] * 3 and it11["metadata"]["outcome"] == "dropped", it11["metadata"])
 

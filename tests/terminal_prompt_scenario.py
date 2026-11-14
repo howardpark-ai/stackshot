@@ -68,6 +68,12 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+import subprocess
+from stackshot.service import store as _service_store
+from stackshot.web import page_debts as _pdebts
+from stackshot.core import config as _cfg
+from stackshot.github import ghsync as _gh
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import get as _wt_get
@@ -76,17 +82,17 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every delivery to a session the server would make (a notice to the keeper, a relay): none is expected
 class _FakePush:
     pass
-_orig_run = server.subprocess.run
+_orig_run = subprocess.run
 def _fake_run(cmd, *a, **kw):
     if isinstance(cmd, list) and any(str(x).endswith("push.py") or str(x).endswith("fakepush.py") for x in cmd):
-        pushed.append(list(cmd)[-2:]); return server.subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
+        pushed.append(list(cmd)[-2:]); return subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
     return _orig_run(cmd, *a, **kw)
-server.subprocess.run = _fake_run
+subprocess.run = _fake_run
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); HD = {"Authorization": "Bearer " + tok}
 SALA = "https://sala.example.org/#s="
 def items(): return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit())
-def item(shown): return server._load(_model_ids._norm_id(shown))
+def item(shown): return _service_store._load(_model_ids._norm_id(shown))
 def tp(action, session="home-sparrow-builder", question="May I run the migration against the staging database?", sender="sala-hook", machine=None, **kw):
     b = {"action": action, "session": session, "sender": sender}
     if question is not None: b["question"] = question
@@ -100,21 +106,21 @@ n0 = len(items())
 Q = "May I run the migration against the staging database?"
 st, out = tp("open", "home-sparrow-builder", Q)
 check("open: 200 with the item id as shown, the session's name, the project, repeat false", st == 200 and out["session"] == "home-sparrow-builder" and out["project"] == "projects/alpha" and out["repeat"] is False
-      and out["item"] == server._gh.shown(_model_ids._norm_id(out["item"])), (st, out))
+      and out["item"] == _gh.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, filed under the session's project from the registry, marked with the resolved session name", it["status"] == "open" and m["project"] == "projects/alpha" and m["terminal_prompt"] == "home-sparrow-builder", (it["status"], m))
 check("…the subject names the session and what it waits for", it["subject"] == "[home] home-sparrow-builder is waiting for your answer in its terminal", it["subject"])
 check("…priority p1; the owner is the mover; state your-step with the one-line step, no command", m.get("priority") == "p1" and m.get("mover") == "Oliver" and m.get("state") == "your-step"
       and m.get("step") == "Answer home-sparrow-builder's question in its terminal" and "`" not in m["step"], m)
 check("…next is the one line that links the pane and carries the question", m.get("next") == nxt("home-sparrow-builder", Q), m.get("next"))
-check("…the keeper of record is the project's -main agent (not the background builder that is asking), the script is the creator", server._session_label(m["owner"]) == "home-sparrow-main"
+check("…the keeper of record is the project's -main agent (not the background builder that is asking), the script is the creator", sr._session_label(m["owner"]) == "home-sparrow-main"
       and it["filed_by"] == f"sala-hook via a script on {me}", (m["owner"], it.get("filed_by")))
 check("…the description is bullets that say who waits and who opened it", it["description"].splitlines()[0] == "- home-sparrow-builder is waiting in its terminal for Oliver's answer"
       and it["description"].splitlines()[-1] == f"- Opened by sala-hook (a script on {me}); it closes when the pane stops waiting", it["description"])
 mod = M.derive(it)
 check("…the item is alive with the owner as the mover: it is in his Your move list", H_.list_of(mod) == H_.YOUR_MOVE and mod.state == M.ALIVE, (mod.state, mod.mover))
 check("…and nothing else is made or told: one item, no message to any session", len(items()) == n0 + 1 and pushed == [], (len(items()) - n0, pushed))
-check("…the row owes no page: no debt is charged to the script, the keeper of record, the page's keeper or anyone (the page is older than the item, so a debt would stand)", server._owed_load() == {}, server._owed_load())
+check("…the row owes no page: no debt is charged to the script, the keeper of record, the page's keeper or anyone (the page is older than the item, so a debt would stand)", _pdebts._owed_load() == {}, _pdebts._owed_load())
 check("…the item is in the brief as the owner's", out["item"] in _wt_get.stackshot_get(out["item"]) and "your-step" in _wt_get.stackshot_get(out["item"]), _wt_get.stackshot_get(out["item"])[:300])
 
 # ---- 1b. a long pane name: the server's own subject is cut to the limit, never refused
@@ -149,7 +155,7 @@ st, oo = tp("open", "home-other", "Is the plan right?")
 check("another session has its own item, under the same project, owned by the same -main agent", st == 200 and oo["item"] != out["item"] and oo["repeat"] is False and len(items()) == n1 + 1
       and item(oo["item"])["metadata"]["terminal_prompt"] == "home-other", (st, oo))
 # the session found by an old name when it was renamed after the item was filed: the mark is the old name, the call uses the new one
-rn = server._load(_model_ids._norm_id(oo["item"])); rn["metadata"]["terminal_prompt"] = "home-sparrow-eng"; writes.save(_model_ids._norm_id(oo["item"]), rn)
+rn = _service_store._load(_model_ids._norm_id(oo["item"])); rn["metadata"]["terminal_prompt"] = "home-sparrow-eng"; writes.save(_model_ids._norm_id(oo["item"]), rn)
 check("a mark that holds an old name (a rename since) still matches the session by the registry", server._terminal_open_items("home-sparrow-builder") == [_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]
       or server._terminal_open_items("home-sparrow-builder") == sorted([_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]), server._terminal_open_items("home-sparrow-builder"))
 rn["metadata"]["terminal_prompt"] = "home-other"; writes.save(_model_ids._norm_id(oo["item"]), rn)
@@ -159,7 +165,7 @@ check("…and a clear of one session closes only its own item", c2["cleared"] ==
 # ---- 4. the project: the registry's, else projects/example-two
 st, ol = tp("open", "home-loner", "Which branch?")
 check("a session the registry gives no project is filed under projects/example-two, owned by its -main agent, with the subject prefix of the instance", st == 200 and ol["project"] == "projects/example-two"
-      and server._session_label(item(ol["item"])["metadata"]["owner"]) == "example-two-main" and item(ol["item"])["subject"].startswith("[home] home-loner is waiting"), (st, ol))
+      and sr._session_label(item(ol["item"])["metadata"]["owner"]) == "example-two-main" and item(ol["item"])["subject"].startswith("[home] home-loner is waiting"), (st, ol))
 st, onf = tp("open", "home-nofront", "Which branch?")
 check("…and so is a session whose project lists no front agent", st == 200 and onf["project"] == "projects/example-two", (st, onf))
 st, osl = tp("open", "home-slug", "Which branch?")
@@ -178,7 +184,7 @@ check("…it keeps no state, mover or next (a closed item is dead), and the end 
       and it["metadata"]["outcome_text"].splitlines()[0] == "- home-sparrow-builder stopped waiting in its terminal" and "pane stopped waiting" in it["metadata"]["outcome_text"]
       and "stopped waiting" not in it["description"].splitlines()[-1], it)
 check("…it is in no list (dead)", M.derive(it).state == M.DEAD, M.derive(it).state)
-check("…nothing was told to any session (the keeper of record, the builder, the router), no debt, and no item was made", pushed == [] and server._owed_load() == {} and len(items()) == n2, (pushed, server._owed_load(), len(items()) - n2))
+check("…nothing was told to any session (the keeper of record, the builder, the router), no debt, and no item was made", pushed == [] and _pdebts._owed_load() == {} and len(items()) == n2, (pushed, _pdebts._owed_load(), len(items()) - n2))
 upd = it.get("updated")
 st, cl2 = tp("clear", "home-sparrow-builder", None)
 check("clear with none open is a no-op: 200, nothing cleared, the closed item untouched", st == 200 and cl2["cleared"] == [] and item(gid).get("updated") == upd and len(items()) == n2, (st, cl2))
@@ -214,7 +220,7 @@ st, oa = tp("open", question=ALARM)
 check("a question with alarming words (kill, credentials, quota) is filed: a pane's own words are not judged", st == 200 and item(oa["item"])["metadata"]["next"] == nxt("home-sparrow-builder", ALARM), (st, oa))
 create_says = ""
 try: _wt_create.stackshot_create(subject="[home] Kill the run?", description="- Goal: A thing", project="projects/alpha", owner="home-sparrow-main", next="Oliver: kill it and rotate the credentials")
-except server.ToolError as e: create_says = str(e)
+except ToolError as e: create_says = str(e)
 check("…while the create tool refuses the same words (the exemption is that route's only)", "uses \"" in create_says and not getattr(writes.QUESTION, "on", False), create_says[:200])
 tp("clear", "home-sparrow-builder", None)
 LONG = "Should I " + " ".join(f"word{i}" for i in range(1, 40)) + " end?"
@@ -238,7 +244,7 @@ tp("clear", "home-sparrow-builder", None)
 st, ow = tp("open", session="pane/odd?name", question="Q")
 check("a session name with a slash and a question mark is url-quoted in the link", st == 200 and f"{SALA}pane%2Fodd%3Fname and answer: `Q`" in item(ow["item"])["metadata"]["next"], (st, ow))
 tp("clear", "pane/odd?name", None)
-cfg_view = server._cfg.CFG["client"]
+cfg_view = _cfg.CFG["client"]
 cfg_view["session_view"] = "https://sala.example.org/view?name={name}"
 try:
     st, ov = tp("open", question="Q")
@@ -249,22 +255,22 @@ tp("clear", "home-sparrow-builder", None)
 # ---- 8. the page-debt rules: the script owes no page; the owner is never made to answer for it
 import os as _os
 old = time.time() - 8 * 3600; _os.utime(T / "brain/projects/alpha.md", (old, old))     # the page is older than any debt, so nothing settles it
-d = server._owed_load(); d.setdefault("projects/alpha", {})[server._session_id("home-sparrow-main")] = {"ts": time.time() - 4 * 3600, "item": "s5"}; server._owed_save(d)
+d = _pdebts._owed_load(); d.setdefault("projects/alpha", {})[_pdebts._session_id("home-sparrow-main")] = {"ts": time.time() - 4 * 3600, "item": "s5"}; _pdebts._owed_save(d)
 st, od = tp("open", question="Debt check")
 check("a keeper of record who owes a page past the grace does not stop a script's open", st == 200, (st, od))
-server._owed_save({})
+_pdebts._owed_save({})
 for i in range(3):
     tp("open", question=f"burst {i}"); tp("clear", "home-sparrow-builder", None); tp("open", question=f"burst again {i}")
-owed = server._owed_load()
-OWNER_ID = server._session_id("home-sparrow-main")
-check("a burst of opens and clears leaves the keeper of record owing nothing (its own board writes are not blocked)", not any(server._same_sess(o, OWNER_ID) for os_ in owed.values() for o in os_), owed)
+owed = _pdebts._owed_load()
+OWNER_ID = _pdebts._session_id("home-sparrow-main")
+check("a burst of opens and clears leaves the keeper of record owing nothing (its own board writes are not blocked)", not any(_pdebts._same_sess(o, OWNER_ID) for os_ in owed.values() for o in os_), owed)
 check("…and no script label is made to owe a page either", not any(("sala-hook" in o or "script" in o) for os_ in owed.values() for o in os_), owed)
-tp("clear", "home-sparrow-builder", None); server._owed_save({}); _os.utime(T / "brain/projects/alpha.md", None)
+tp("clear", "home-sparrow-builder", None); _pdebts._owed_save({}); _os.utime(T / "brain/projects/alpha.md", None)
 
 # ---- 9. a state write that is refused closes the item again
 real_update = server._update
 def failing_update(gid_, *a, **kw):
-    if kw.get("step"): raise server.ToolError("Refused: a pretend refusal of the state")
+    if kw.get("step"): raise ToolError("Refused: a pretend refusal of the state")
     return real_update(gid_, *a, **kw)
 server._update = failing_update
 try:
@@ -272,7 +278,7 @@ try:
 finally: server._update = real_update
 check("a refused state write answers 400 with the refusal", st == 400 and "pretend refusal" in of.get("error", ""), (st, of))
 check("…and the item that was made for it is closed again, not left half made, so the next open files a clean one", len(items()) == before + 1 and server._terminal_open_items("home-sparrow-builder") == []
-      and server._load("s" + str(int(items()[-1])))["metadata"]["outcome"] == "dropped", (items()[-3:], server._terminal_open_items("home-sparrow-builder")))
+      and _service_store._load("s" + str(int(items()[-1])))["metadata"]["outcome"] == "dropped", (items()[-3:], server._terminal_open_items("home-sparrow-builder")))
 st, og = tp("open", question="Will this one be whole?")
 check("…the next open is a clean item in your-step", st == 200 and og["repeat"] is False and item(og["item"])["metadata"]["state"] == "your-step", (st, og))
 tp("clear", "home-sparrow-builder", None)
@@ -286,7 +292,7 @@ try:
     try: tp("open", question="OSError on the state"); raised = None
     except OSError as e: raised = e
 finally: server._update = real_update
-last = server._load("s" + str(int(items()[-1])))
+last = _service_store._load("s" + str(int(items()[-1])))
 check("an OSError on the state write propagates and the half-made item is closed (dropped), not left open", raised is not None and last["status"] == "completed" and last["metadata"]["outcome"] == "dropped"
       and server._terminal_open_items("home-sparrow-builder") == [], (raised, last["status"]))
 st, og2 = tp("open", question="After the OSError")
@@ -304,7 +310,7 @@ hm = item(half[0])["metadata"] if half else {}
 check("fixture: a crash between the create and the state write leaves an open item with the owner as mover and no state", len(half) == 1 and "state" not in hm and hm.get("mover") == "Oliver", (half, hm))
 st, og3 = tp("open", question="Crash between the writes")
 fm = item(og3["item"])["metadata"]
-check("the next open (same question) repairs it: the same item, repeat true, now your-step with its step, nothing new filed", st == 200 and og3["repeat"] is True and og3["item"] == server._gh.shown(half[0]) and fm.get("state") == "your-step"
+check("the next open (same question) repairs it: the same item, repeat true, now your-step with its step, nothing new filed", st == 200 and og3["repeat"] is True and og3["item"] == _gh.shown(half[0]) and fm.get("state") == "your-step"
       and fm.get("step") == "Answer home-sparrow-builder's question in its terminal" and server._terminal_open_items("home-sparrow-builder") == half, (st, og3, fm))
 tp("clear", "home-sparrow-builder", None)
 
@@ -413,7 +419,7 @@ check("the 404 list of the client API names the new write", "terminal-prompt" in
 check("the server's docstring and the client's usage line carry the shape", "terminal-prompt" in client.TERMINAL_PROMPT_USAGE and "Answer <session>'s question in its terminal" in " ".join(server._terminal_prompt.__doc__.split()))
 
 # [subject] fallback_prefix: the prefix of an item no session wrote when the project's scope has none of its own
-_cfgsub = server._cfg.CFG["subject"]; _was = dict(_cfgsub)
+_cfgsub = _cfg.CFG["subject"]; _was = dict(_cfgsub)
 try:
     _cfgsub["prefixes"] = ["[work] ", "[home] "]
     _cfgsub.pop("fallback_prefix", None)

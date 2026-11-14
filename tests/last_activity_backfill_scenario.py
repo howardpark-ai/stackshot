@@ -71,6 +71,10 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.anchors import anchors as _anc
+from stackshot.model import merge_tie as _mtie
+from stackshot.core import config as _cfg
+from stackshot.waits import watchers as _watch
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import telling
@@ -79,10 +83,9 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
-CFGM = server._cfg.CFG.setdefault("model", {})
+CFGM = _cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)
 sent = []
-server._tell = lambda *a, **k: sent.append(("tell", a))
 
 # ---- the store is a git repository whose commits carry the fixture's own times (a neutral identity through the environment, never through the repository's config)
 GENV = {**os.environ, "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid", "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
@@ -215,7 +218,7 @@ check("3 only metadata.last_activity changed in each filled file: every other by
 check("3 …the canon check sees a change elsewhere in the file (a byte of the description) and a changed record is no change to it", canon(bytes_of(11).replace(b"A thing", b"A thinG")) != canon(orig_bytes[11]) and canon(bytes_of(11).replace(b"step 1 done", b"step 2 done")) == canon(orig_bytes[11]), None)
 check("3 …the files of the items left as they are are byte for byte the same", all(bytes_of(i) == orig_bytes[i] for i in (15, 17, 18)), None)
 check("3 …no clock moved (updated, confirmed, activity, state_updated, written_at), no commit was made, nobody was told, nothing was held", all(all(raw(i).get(k) == orig[i].get(k) for k in ("updated", "confirmed", "activity", "state_updated", "written_at", "written_by")) for i in OPEN)
-      and head() == H0 and sent == [] and not server._watch.holding(), sent)
+      and head() == H0 and sent == [] and not _watch.holding(), sent)
 check("3 the records are the History's: step done at the real write, mover changed, created, PR merged", rec_of(11) == {"at": now0 - 3 * HR, "kind": "step_done", "what": "step 1 done"} and rec_of(12) == {"at": now0 - 90 * MIN, "kind": "state_change", "what": "mover changed"}
       and rec_of(13) == {"at": now0 - 26 * HR, "kind": "state_change", "what": "created"} and rec_of(14) == {"at": now0 - 50 * MIN, "kind": "pr_merged", "what": "PR 7 merged"}, [rec_of(i) for i in (11, 12, 13, 14)])
 check("3 the item with a record keeps it, whatever its History says", rec_of(15) == KEEP, rec_of(15))
@@ -361,7 +364,7 @@ check("10 …an undo entry naming a key the pass does not write is refused", d_[
 st_, d_ = call(op="unlastact", items=["g11"], dry=True)
 check("10 …dry goes with lastact only; an empty list is refused", st_ == 400 and call(op="lastact", items=[])[0] == 400, (st_, d_))
 st_, d_ = call(op="lastact", items=["g11"])
-check("10 …a fill needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and not server._watch.holding(), (st_, d_))
+check("10 …a fill needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and not _watch.holding(), (st_, d_))
 CFGM["migration"] = False
 
 # ---- 11. a partial apply, then --undo: a batch whose answer was lost after the server wrote it
@@ -512,7 +515,7 @@ def broken(*a, **k): raise RuntimeError("the anchors cannot be read")
 sample = [{"ts": now0 - HR, "repo": "owner/repo", "n": 9, "kind": "comment", "refs": []}]
 # the anchors file read as a whole fails (the first read of `_merge_tied`: it raises, and `ties` reports it); or the anchors are read but the pages of the repository cannot be made from them (the read `_merge_tied` used to log and
 # go on from, with no ties by anchor: now the answer carries the problem)
-for label, owner_, attr, raises in (("the anchors file", server._anc, "load", True), ("the pages made from the anchors", server._mtie, "repo_pages", False)):
+for label, owner_, attr, raises in (("the anchors file", _anc, "load", True), ("the pages made from the anchors", _mtie, "repo_pages", False)):
     keep = getattr(owner_, attr)
     RUNA = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-runa-"))
     setattr(owner_, attr, broken)

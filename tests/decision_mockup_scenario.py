@@ -71,6 +71,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import home
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import create as _wt_create
@@ -174,7 +175,7 @@ check(f"2 style: the link keeps its two words together and the question still wr
 
 # ================================================================ 4. a fleet tool's /mockup/<n> page
 from stackshot.web import render as r1
-cfgc = server._cfg.CFG.setdefault("client", {}); had_key = "mockup_hosts" in cfgc; was_key = cfgc.get("mockup_hosts")
+cfgc = _cfg.CFG.setdefault("client", {}); had_key = "mockup_hosts" in cfgc; was_key = cfgc.get("mockup_hosts")
 try:
     HOST = "mockup.example.invalid"
     cfgc.pop("mockup_hosts", None)
@@ -261,10 +262,10 @@ try:
     for bad in ([5], ["x.example:80"], ["."], [".."], ["-"], ["a..b"], [""], "", [None, "bad host/"], ("", ), "a b", 5, {"a": 1}, None, True):
         cfgc["mockup_hosts"] = bad
         check(f"4 config: a value with no usable host ({bad!r}) means no host and does not crash", r1.mockup_hosts() == () and r1.mockup_hit(SALA) == "" and r1.mockup_hit(ART) == ART, r1.mockup_hosts())
-    server._cfg.CFG.pop("client", None)
+    _cfg.CFG.pop("client", None)
     check("4 config: no [client] section at all means no host", r1.mockup_hosts() == () and r1.mockup_hit(SALA) == "" and r1.mockup_hit(ART) == ART, r1.mockup_hosts())
 finally:
-    server._cfg.CFG["client"] = cfgc
+    _cfg.CFG["client"] = cfgc
     if had_key: cfgc["mockup_hosts"] = was_key
     else: cfgc.pop("mockup_hosts", None)
 

@@ -182,19 +182,21 @@ def frozen(now: float) -> Any:
 @contextlib.contextmanager
 def fields_only(server: Any) -> Any:
     """Every reader works the alive-or-waiting decision out from the item's fields alone (model.view patched to the writer's reading): what the board showed before the pair was stored, and what a stamp must leave on show."""
-    real = server._model.view
-    server._model.view = lambda item, mod, now=None, after_open=None, check=True: server._model._shown(item, mod, now, after_open)
+    from stackshot.model import model as _model  # noqa: PLC0415
+    real = _model.view
+    _model.view = lambda item, mod, now=None, after_open=None, check=True: _model._shown(item, mod, now, after_open)
     try:
         yield
     finally:
-        server._model.view = real
+        _model.view = real
 
 
 def display_of(server: Any, it: dict[str, Any], gid: str, stored: bool = False) -> dict[str, Any]:
     """Everything the board shows of an item that the stamp must leave alone, and whether the watchers own it: the 7-state word and wait the model shows, the list word, the model line, get's text and the brief's block.
     `stored` False: as the stamp proof has always read it (the fields alone, the writer's reading). True: as the readers show it now (the stored pair decides alive or waiting and the kind of the wait)."""
+    from stackshot.model import model as _model  # noqa: PLC0415
     probe = {**it, "gid": gid}
-    mod = server._model.view(probe, server._model_of(probe), after_open=lambda i_: server._after_open(i_.get("metadata") or {}), check=stored)
+    mod = _model.view(probe, server._model_of(probe), after_open=lambda i_: server._after_open(i_.get("metadata") or {}), check=stored)
     return {"today": mod.today or "", "state": mod.state, "kind": mod.wait.kind if mod.wait else "", "until": mod.wait.until if mod.wait else "", "backstop": mod.wait.backstop if mod.wait else "",
             "conflicts": list(mod.conflicts), "list": server._item_list(probe), "model": server._model_lines(probe, short=True), "fmt": server._fmt(probe), "brief": server._fmt(probe, brief=True)}
 
@@ -219,6 +221,10 @@ def dry_run(a: argparse.Namespace) -> int:
     ensure_env()      # first: it may start this process again, and the copy's config must not be taken for the live one on the second start
     copy_dir = MM.point_at_copy(a.store)
     from stackshot.core import config as _cfg
+    from stackshot.core import store as _store  # noqa: PLC0415
+    from stackshot.github import ghsync as _gh  # noqa: PLC0415
+    from stackshot.model import model as _model  # noqa: PLC0415
+    from stackshot.waits import watchers as _watch  # noqa: PLC0415
     app = MM.DryApplier(a.sender or "dry-run")
     server = app.server
     store = _cfg.path("paths", "store")
@@ -239,17 +245,17 @@ def dry_run(a: argparse.Namespace) -> int:
         plan.update(zip(ch, d["results"]))
     with frozen(now), fields_only(server):      # one clock for the before and the after pass; the stamp between them runs on the real one. Before: what the fields give; after: what the stored pair gives
         disp0 = {g: display_of(server, items[g], g) for g in opens}
-        watch0 = {g: bool(server._watch.watches(items[g])) for g in opens}
+        watch0 = {g: bool(_watch.watches(items[g])) for g in opens}
 
     # ---- the stamp on a private scratch copy of the items (removed again), to prove what it changes
     scratch = Path(tempfile.mkdtemp(prefix="stampdry-"))
     fd = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY)
     fcntl.flock(fd, fcntl.LOCK_SH)      # systemd-tmpfiles ageing skips a folder that holds a lock
-    real_store = server._store.STORE
+    real_store = _store.STORE
     results: list[dict[str, Any]] = []
     try:
         shutil.copytree(store, scratch / "store", ignore=shutil.ignore_patterns(".git", "*.tmp"))
-        server._store.STORE = scratch / "store"
+        _store.STORE = scratch / "store"
         for ch in chunks(opens):
             st, d = app.call({"op": "stamp", "items": ch})
             if st != 200:
@@ -258,10 +264,10 @@ def dry_run(a: argparse.Namespace) -> int:
         after_items = load_dir(scratch / "store")
         with frozen(now):
             disp1 = {g: display_of(server, after_items[g], g) for g in opens}
-            watch1 = {g: bool(server._watch.watches(after_items[g])) for g in opens}
+            watch1 = {g: bool(_watch.watches(after_items[g])) for g in opens}
         outside = files_outside(items, after_items)
     finally:
-        server._store.STORE = real_store
+        _store.STORE = real_store
         os.close(fd)
         shutil.rmtree(scratch, ignore_errors=True)
 
@@ -271,9 +277,9 @@ def dry_run(a: argparse.Namespace) -> int:
         it = items[g]
         r = plan[g]
         mod_wait_until = disp0[g]["until"]
-        edge = ends_within(mod_wait_until, disp0[g]["backstop"], tz, now) if disp0[g]["state"] == server._model.WAITING else False
+        edge = ends_within(mod_wait_until, disp0[g]["backstop"], tz, now) if disp0[g]["state"] == _model.WAITING else False
         before_p, now_p = pair(it), r.get("after") or {}
-        row = {"item": server._gh.shown(g), "gid": g, "old_state": disp0[g]["today"], "old_list": disp0[g]["list"],
+        row = {"item": _gh.shown(g), "gid": g, "old_state": disp0[g]["today"], "old_list": disp0[g]["list"],
                "before": before_p, "wait_kind": (it.get("metadata") or {}).get("wait_kind"), "shown": now_p, "after": pair(after_items[g]),
                "watches": [watch0[g], watch1[g]], "change": classify(before_p, now_p, edge), "action": r.get("action"), "ends": mod_wait_until}
         rows.append(row)
@@ -283,7 +289,7 @@ def dry_run(a: argparse.Namespace) -> int:
     wk_bad = [r for r in stored_wk if r["after"].get("waits_on") != r["wait_kind"]]
     proofs = {"display_diff": [r["item"] for r in rows if disp0[r["gid"]] != disp1[r["gid"]]],
               "watches_diff": [r["item"] for r in rows if watch0[r["gid"]] != watch1[r["gid"]]],
-              "files_outside_the_two_keys": [server._gh.shown(g) for g in outside],
+              "files_outside_the_two_keys": [_gh.shown(g) for g in outside],
               "store_written_by_the_dry_run": sorted(k for k in {*hashes0, *tree_hash(store)} if hashes0.get(k) != tree_hash(store).get(k))}
     detail = {r["item"]: {k: [disp0[r["gid"]][k], disp1[r["gid"]][k]] for k in disp0[r["gid"]] if disp0[r["gid"]][k] != disp1[r["gid"]][k]} for r in rows if disp0[r["gid"]] != disp1[r["gid"]]}
     waiting_by_kind = {k: v for (p, k), v in sorted(by_pk.items()) if p == "waiting"}
@@ -297,7 +303,7 @@ def dry_run(a: argparse.Namespace) -> int:
            "refused": by_action.get("refused", 0)},
            "by_phase_and_kind": {f"{p}/{k}": v for (p, k), v in sorted(by_pk.items())}, "waiting_by_kind": waiting_by_kind, "by_change": dict(by_change), "expect": expect_line,
            "stored_wait_kind": [{"item": r["item"], "wait_kind": r["wait_kind"], "waits_on_after": r["after"].get("waits_on")} for r in stored_wk], "stored_wait_kind_exceptions": [r["item"] for r in wk_bad],
-           "closed_with_a_stale_stamp": [server._gh.shown(g) for g in closed_stale], "proofs": proofs, "display_diff_detail": detail, "rows": rows}
+           "closed_with_a_stale_stamp": [_gh.shown(g) for g in closed_stale], "proofs": proofs, "display_diff_detail": detail, "rows": rows}
     d = Path(a.report_dir).expanduser()
     jp, mp = write_report(rep, d, dt.datetime.now(tz).strftime("%Y-%m-%d"))
     say(f"report: {jp} and {mp}")

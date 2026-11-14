@@ -55,6 +55,9 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import create as create_svc
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -65,7 +68,7 @@ from stackshot.service import telling
 from stackshot.service import writes
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
-assert server._cfg.audit_agent() == AUDIT_AGENT, server._cfg.audit_agent()
+assert _cfg.audit_agent() == AUDIT_AGENT, _cfg.audit_agent()
 AUDIT = [AUDIT_AGENT, "stackshot audit"]
 
 # ---- 1. counts
@@ -129,7 +132,7 @@ check("4 stamp: a seeded clock is then kept by a later non-counting save", not A
 # ---- 5. the server's saves
 for i in range(1, 12): item(i)
 def save(i, **kw):
-    it = server._load(f"a{i}"); it["updated"] = time.time(); writes.save(f"a{i}", it, **kw)
+    it = _service_store._load(f"a{i}"); it["updated"] = time.time(); writes.save(f"a{i}", it, **kw)
 t0 = time.time()
 # a legacy item, saved first by the server itself (a nudge): the field appears, at the old value
 save(1, note="stall: the notice was sent again")
@@ -181,7 +184,7 @@ c1 = act(1)
 save(1, writer=AUDIT_AGENT, activity=A.EVENT)
 check("5 …an audit's event or message write does not", act(1) == c1)
 # unknown kind never fails a write
-writes.save("a2", server._load("a2"), writer="home-peer", activity="nonsense")
+writes.save("a2", _service_store._load("a2"), writer="home-peer", activity="nonsense")
 check("5 a save with an unknown kind is not refused and the clock is left", rd(2).get("activity") in (None, OLD) or abs(rd(2)["activity"] - OLD) < 1, rd(2).get("activity"))
 # create: a session's create is a write
 gid, _r = create_svc.create_item(subject="[home] a new item", description=DESC, project="projects/alpha", owner=U["home-peer"], next="home-peer: start", mover="home-peer")
@@ -201,7 +204,7 @@ OLD_ONLY = {"id": "40", "subject": "[home] old", "description": DESC, "status": 
             "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "home-peer: do the thing", "mover": "home-peer"}}
 (T / "store/a/40.json").write_text(json.dumps(OLD_ONLY))
 raw0 = (T / "store/a/40.json").read_bytes()
-loaded = server._load("a40")
+loaded = _service_store._load("a40")
 check("6 an item with no field loads unchanged (no key added by the load)", "activity" not in loaded and loaded == OLD_ONLY)
 check("6 …and reads as its last update", A.at(loaded) == OLD)
 check("6 …and the file is the same bytes after the reads (no migration pass)", (T / "store/a/40.json").read_bytes() == raw0)
@@ -212,7 +215,7 @@ check("6 `get` shows the same item the same with and without the field", out_wit
 (T / "store/a/40.json").write_bytes(raw0)
 a_with = {**OLD_ONLY, "activity": OLD + 5}
 check("6 the GitHub mirror's body and text are the same with and without the field",
-      server._gh.body_of("a40", OLD_ONLY) == server._gh.body_of("a40", a_with) and server._gh.body_text(OLD_ONLY) == server._gh.body_text(a_with))
+      _gh.body_of("a40", OLD_ONLY) == _gh.body_of("a40", a_with) and _gh.body_text(OLD_ONLY) == _gh.body_text(a_with))
 
 # ---- 7. the real call sites: each save the server makes on its own account is filed under the kind that moves (or leaves) the clock
 # (the step-proof saves are driven in tests/step_proof_scenario.py, which has the checkout and pull-request fixtures they need)
@@ -222,9 +225,9 @@ wakes_svc.release_after = lambda *a, **k: None
 for i in range(20, 36): item(i)
 t7 = time.time()
 # the done check's close and its "met, waits for the decision" save
-checks_svc.check_close("a20", server._load("a20"), "item_closed a2", t7)
+checks_svc.check_close("a20", _service_store._load("a20"), "item_closed a2", t7)
 check("7 the done check's close moves the clock (an event the check waited for)", (act(20) or 0) >= t7 and rd(20)["status"] == "completed", act(20))
-checks_svc.check_wait("a21", server._load("a21"), "item_closed a2")
+checks_svc.check_wait("a21", _service_store._load("a21"), "item_closed a2")
 check("7 the done check met while the item waits on a decision moves it", (act(21) or 0) >= t7, act(21))
 # the owner's comment on GitHub, stamped at the comment's own time
 def comment(i, ts, cid): return server._github_comment(f"a{i}", {"id": cid, "ts": ts, "text": "go ahead", "url": "https://example.test/c"})
@@ -249,7 +252,7 @@ rep = server._builder_report("home-front", "a31: PR 9 is live and the suites pas
 check("7 the audit's report is written onto the item too", rep.startswith("Not delivered: written onto"), rep)
 check("7 …but is not activity: the clock stays at the item's last update", abs((act(31) or 0) - OLD) < 1, (act(31), OLD))
 # the owner's recorded words for a wake: settle bookkeeping, not activity
-writes.save("a32", server._load("a32"), note="his words recorded for the wake 2026-12-01: go (his answer), by a script")
+writes.save("a32", _service_store._load("a32"), note="his words recorded for the wake 2026-12-01: go (his answer), by a script")
 check("7 a script copying the owner's stored words onto the wake (a save with no writer) leaves the clock", abs((act(32) or 0) - OLD) < 1, (act(32), OLD))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

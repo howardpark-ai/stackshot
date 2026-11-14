@@ -61,6 +61,8 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb; from stackshot.model import ids as _model_ids
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import create as _wt_create
@@ -72,7 +74,7 @@ telling.tell_woken = lambda gid, owner, note, tag="wake": None
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
 def upd(i, letter="a", **kw): return server._update(f"{letter}{i}", sender="home-front", **kw)
 def set_cfg(**kw):
-    server._cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py)
+    _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py)
 set_cfg()
 SERVER_BOX = "box-a"
 
@@ -96,13 +98,13 @@ check("1 guard: units: bullets, plain runs, no fence, no quote, link words", mg.
 check("1 guard: it is registered: a key of GUARDS, a label, a text guard", "description" in mg.GUARDS and mg.LABELS["description"] == "description not in bullets" and "description" in mg.FIELD_GUARDS, None)
 
 # ================================================================ 2. in the server: note, refuse, untouched fields, closes, the tool texts
-server._cfg.CFG["description"]["require_bullets"] = False      # the board item's bullet gate would refuse the thick text before the guard under test (note, then refuse) sees it: off for section 2
+_cfg.CFG["description"]["require_bullets"] = False      # the board item's bullet gate would refuse the thick text before the guard under test (note, then refuse) sees it: off for section 2
 THICK = ("Move the widget to shelf-2 so it syncs from shelf-1 on its own when shelf-1 is full, as Oliver asked on Mon Jun 8th: \"it should sync by itself, no button\". "
          "The plan is at https://example.org/plan/42 and the unit is `widget-sync.service`. About 12 checks run every 30 seconds, and the sync must finish within 5 minutes. "
          "Nothing is built yet; the first step is a dry run on shelf-2, and then the full sync test, which needs the second disk mounted first.")
 check("2 setup: the fixture text is thick and over 400 characters", len(THICK) > 400 and P(THICK) != "", len(THICK))
 out = _wt_create._create(subject="[home] a thick create", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go")
-gid = re.search(r"created (\S+) ", out).group(1); stored = server._load(_model_ids._norm_id(gid))
+gid = re.search(r"created (\S+) ", out).group(1); stored = _service_store._load(_model_ids._norm_id(gid))
 check("2 note: the default writes the thick description and says so in the reply", stored["description"] == THICK and "(note: description has a paragraph of" in out and "short `- ` bullets, one line each" in out, out[:900])
 out = _wt_create._create(subject="[home] a bulleted create", description=DESC, project="projects/alpha", owner="home-front", next="home-front: go")
 check("2 note: bullets draw no note", "description has" not in out and "(note: description" not in out, out[:600])
@@ -156,7 +158,7 @@ finally:
 check("2 question route: …a create under the question route's flag is exempt (a script's text is never stranded on a wording refusal)", out_q.startswith("created") and "description has" not in out_q, out_q[:200])
 set_cfg()
 
-server._cfg.CFG["description"].pop("require_bullets", None)       # back on (the default) for the rest
+_cfg.CFG["description"].pop("require_bullets", None)       # back on (the default) for the rest
 # ================================================================ 3. the report on existing items
 for k in list(T.glob("store/*/[0-9]*.json")): k.unlink()
 item(1, desc=THICK); item(2); item(3, status="completed", desc=THICK); item(4, desc=THICK + THICK)
@@ -407,11 +409,11 @@ def cdry(*extra):
 r_on, o_on = cdry()
 check("5 test: the dry run with require_bullets true says which test it used and counts per reason",
       r_on == 0 and "open items: 4 are candidates by bullet_text.judge (require_bullets = true; max_lines 8, line_max 120): marker 2, long 1, lines 1; 2 pass and are skipped" in o_on, o_on)
-server._cfg.CFG["description"]["require_bullets"] = False
+_cfg.CFG["description"]["require_bullets"] = False
 try:
     r_off, o_off = cdry()
 finally:
-    server._cfg.CFG["description"].pop("require_bullets", None)
+    _cfg.CFG["description"].pop("require_bullets", None)
 check("5 test: with require_bullets false the dry run uses the thick-block test and counts it", r_off == 0 and "1 are candidates by thick block, model_guards.description_problem (require_bullets = false" in o_off
       and "thick 1;" in o_off and "board#9018: thick," in o_off and "board#9015" not in o_off, o_off)
 hlp = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/rebullet_descriptions.py"), "--help"], capture_output=True, text=True, env=env).stdout.replace("\n", " ")

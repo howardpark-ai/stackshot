@@ -23,6 +23,7 @@ def check(name, cond, got=None):
 import tool_text as tt
 live = tt.live_snapshot()              # imports server.py on a throwaway config (state under its temp dir)
 import ast; from stackshot.web import server; from stackshot.web.tools import brief as _wt_brief; from stackshot.web import whatschanged as wc
+from stackshot.core import config as _cfg
 kept = tt.stored()
 
 # ================================================================= 1. the snapshot is the live text
@@ -297,8 +298,8 @@ check("the line shows on its day and for 7 days, and is gone on the 8th; the see
       and len(wc.lines(dt.date(2099, 3, 3), home)) == 2 and len(wc.lines(dt.date(2099, 3, 10), home)) == 2 and not wc.lines(dt.date(2099, 3, 11), home), wc.lines(d0, home))
 # the brief carries it: the server's default history path is <paths.state>/tool_text.history.json
 wc.PATH = None
-today = dt.datetime.now(server._cfg.tz()).date()
-st = server._cfg.state()
+today = dt.datetime.now(_cfg.tz()).date()
+st = _cfg.state()
 st.mkdir(parents=True, exist_ok=True)
 for f in (st / wc.HISTORY, st / wc.RELEASED):
     if f.exists(): f.unlink()

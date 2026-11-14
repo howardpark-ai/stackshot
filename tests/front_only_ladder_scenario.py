@@ -69,6 +69,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.core import instance as _core_instance
+from stackshot.anchors import anchors as _anc
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import handoff as handoff_svc
@@ -105,14 +108,14 @@ def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
-def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
+def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)
 def set_stall(**kw):
     """The [stall] section as given. A pause (enabled = false, a paused_until) names the item as its pause_item unless the call says otherwise: an item that carries Oliver's own answer,
     dated far ahead so it counts at any clock below; section 18 tests the refusals with answers of its own."""
     if (kw.get("enabled") is False or kw.get("paused_until")) and "pause_item" not in kw: kw["pause_item"] = "a97"
-    server._cfg.CFG["stall"] = dict(kw)
+    _cfg.CFG["stall"] = dict(kw)
 set_cfg(); set_stall()
-server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
+_cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
 def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
@@ -130,7 +133,7 @@ def cli_row(who, status, at):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
 handoff_svc.CLI_SESSIONS = T / "cli"
-OWN = server.OWNER
+OWN = _core_instance.OWNER
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
 ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
 MIN = 60.0
@@ -246,11 +249,11 @@ check("4 a front-only project with a -main agent -> (that agent, main)", tgt("pr
 check("4 …the quiet session is that agent (by name or by id) -> the fleet's builder", tgt("projects/beta", "home-beta-front") == ("home-fleet", "fleet", True) and tgt("projects/beta", U["home-beta-front"]) == ("home-fleet", "fleet", True), (tgt("projects/beta", "home-beta-front"), tgt("projects/beta", U["home-beta-front"])))
 check("4 a project with a builder -> the fleet's builder, whoever is quiet", tgt("projects/alpha", "home-peer") == ("home-fleet", "fleet", False) and tgt("projects/alpha", "team-back") == ("home-fleet", "fleet", False), tgt("projects/alpha", "home-peer"))
 check("4 a project nobody lists (front-only, no -main agent to name: builderless) and an empty project (no read made: not builderless) -> the fleet's builder", tgt("projects/nowhere", "home-peer") == ("home-fleet", "fleet", True) and tgt("", "home-peer") == ("home-fleet", "fleet", False), (tgt("projects/nowhere", "home-peer"), tgt("", "home-peer")))
-_real_fo = server._anc.front_only
-server._anc.front_only = lambda *a, **k: 1 / 0
+_real_fo = _anc.front_only
+_anc.front_only = lambda *a, **k: 1 / 0
 import io, contextlib
 with contextlib.redirect_stderr(io.StringIO()) as eb: boom = tgt("projects/beta", "home-peer3")
-server._anc.front_only = _real_fo
+_anc.front_only = _real_fo
 check("4 a front-only test that raises keeps the fleet's builder and says so on stderr", boom == ("home-fleet", "fleet", False) and "front-only test of projects/beta failed" in eb.getvalue(), (boom, eb.getvalue()))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

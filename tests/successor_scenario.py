@@ -42,6 +42,10 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import sessions as _wt_sessions; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import successor as S; from stackshot.model import model as M; from stackshot.waits import handoff as H; from stackshot.waits import stall as ST; from stackshot.audit import audit_run  # noqa: E402
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.projects import projects as _prj
+from stackshot.github import ghsync as _gh
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import handoff as handoff_svc
@@ -146,9 +150,9 @@ for key, (agents, back) in PAGES.items():
     path.write_text(f"---\ntitle: {key}\ndisplay-name: {key.replace('/', '-')}\nagents:\n" + "".join(f"  {a}: the front\n" for a in front)
                     + ("  background:\n" + "".join(f"    {a}: builds the code\n" for a in back) if back else "") + f"---\n\n# {key}\n\n## Current state\n\nx\n\n<!-- timeline -->\n")
 (T / "store/next-id").write_text("900"); (T / "store/anchors.json").write_text("{}")
-for sc in server._prj.scopes():
-    server._cfg.CFG.setdefault("router", {})[f"general_{sc}"] = "projects/gen"          # the scope's general -main agent, whatever scope the fixture's pages derive
-server._cfg.CFG.setdefault("audit", {})["orphan_handover"] = "apply"
+for sc in _prj.scopes():
+    _cfg.CFG.setdefault("router", {})[f"general_{sc}"] = "projects/gen"          # the scope's general -main agent, whatever scope the fixture's pages derive
+_cfg.CFG.setdefault("audit", {})["orphan_handover"] = "apply"
 DESC = "- A thing\n- It lives here\n- Done when done"
 OWNER_ID = U["gen-main"]
 def item(i, project, status="open", **meta):
@@ -156,7 +160,7 @@ def item(i, project, status="open", **meta):
     base.update(meta)
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": now0 - 3600, "state_updated": now0 - 3600,
                                                       "confirmed": now0 - 3600, "metadata": base}))
-B = lambda i: server._gh.shown(f"a{i}")      # how the board writes the item id in this instance
+B = lambda i: _gh.shown(f"a{i}")      # how the board writes the item id in this instance
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def raw(i): return (T / f"store/a/{i}.json").read_bytes()
@@ -186,17 +190,17 @@ check("4 server: …and lists what would move: the six orphans, each with its ta
       and {m["id"]: (m["to"], m["tier"]) for m in dry["moved"]} == {B(101): ("par-main", "parent"), B(102): ("gen-main", "scope"), B(103): ("live-main", "own"), B(112): ("both-build", "back"),
                                                                        B(106): ("gen-main", "scope"), B(108): ("bgp-back", "back")} and dry["left"] == [], dry)
 check("4 server: every listed move carries its reason, naming the gone session and the successor", all(m["from"] in m["why"] and "is gone" in m["why"] and m["to"] in m["why"] for m in dry["moved"]), dry["moved"][:2])
-server._cfg.CFG["audit"]["orphan_handover"] = "report"
+_cfg.CFG["audit"]["orphan_handover"] = "report"
 rep = handoff_svc.orphan_handover(apply=True, now=now0)
 check("4 server: [audit] orphan_handover = report lists the same moves and moves nothing even when asked to apply", not rep["applied"] and "nothing was moved" in rep["note"] and "apply" in rep["note"] and ids(rep["moved"]) == ids(dry["moved"]) and all(raw(i) == before[i] for i in before), rep)
-server._cfg.CFG["audit"]["orphan_handover"] = "off"
+_cfg.CFG["audit"]["orphan_handover"] = "off"
 off = handoff_svc.orphan_handover(apply=True, now=now0)
 check("4 server: [audit] orphan_handover = off checks nothing", not off["checked"] and off["found"] == 0 and "off" in off["note"] and all(raw(i) == before[i] for i in before), off)
-server._cfg.CFG["audit"]["orphan_handover"] = "apply"
-real_idx = server._sessions_index
-server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda *a, **k: {}
+_cfg.CFG["audit"]["orphan_handover"] = "apply"
+real_idx = _fleet_sessions_registry._sessions_index
+_fleet_sessions_registry._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda *a, **k: {}
 empty = handoff_svc.orphan_handover(apply=True, now=now0)
-server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = real_idx
+_fleet_sessions_registry._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = real_idx
 check("4 server: an empty heartbeat (every session would look gone) checks nothing and moves nothing", not empty["checked"] and "heartbeat is empty" in empty["note"] and all(raw(i) == before[i] for i in before), empty)
 
 # 5/6: the apply
@@ -236,9 +240,9 @@ def plan_then_write(*a, **k):
     out = orig_plan(*a, **k)
     item(110, "projects/par/kid", mover="par-main", note="written since")          # somebody took the item between the find and the move
     return out
-server._succ.plan = plan_then_write
+S.plan = plan_then_write
 skipped = handoff_svc.orphan_handover(apply=True, now=now0 + 120)
-server._succ.plan = orig_plan
+S.plan = orig_plan
 check("6 server: an item written since it was found (its mover changed) is left, counted `skipped`, not moved over the write", skipped["skipped"] == 1 and skipped["moved"] == [] and mt(110)["mover"] == "par-main"
       and not ST.log_of(mt(110)) and mt(110).get("note") == "written since", skipped)
 

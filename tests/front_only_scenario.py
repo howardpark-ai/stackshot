@@ -153,8 +153,8 @@ check("6 on every fixture project front_only agrees with the older hand-off buil
 check("6 the fixture holds both kinds of project", {a for a, _ in rows.values()} == {True, False}, rows)
 
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-nm = server._anc.names()
-roles = server._anc.session_roles()
+nm = A.names()
+roles = A.session_roles()
 fp = lambda sender, key, project: server._front_pair_ok(sender, key, project)
 check("6 front agents of a front-only project may hand an item to each other", fp(SMAIN, SDESK, "projects/sigma") is True and fp(SDESK, SMAIN, "projects/sigma/sub") is True, roles.get(SMAIN))
 check("6 ...not in a project that has a builder", fp(DMAIN, DDESK, "projects/delta") is False and fp(DMAIN, DDESK, "projects/delta/sub") is False)

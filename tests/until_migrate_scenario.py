@@ -63,6 +63,8 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as WK_, waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+import stackshot.core.config as _cfg_
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
@@ -73,7 +75,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
-CFGM = server._cfg.CFG.setdefault("model", {})
+CFGM = _cfg_.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
@@ -95,7 +97,6 @@ WAITKEYS = ("until", "wait_kind", "wake", "ask_by", "hold", "hold_set")
 wk = lambda m: {k: m.get(k) for k in WAITKEYS if k in m}
 sent = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": sent.append((gid, owner, note))
-server._tell = lambda *a, **k: sent.append(("tell", a))
 
 BASIS = {"text": f"the vendor ships {day(4)}", "wake": day(4), "by": BACK, "at": now0}
 put(31, needs=[BACK])
@@ -150,7 +151,7 @@ check("2 …a bare wake says why it stays", "backstop" in dry[6]["why"], dry[6])
 def reading(i):
     return UP.reading(server, f"g{i}", raw(i))
 before_r = {i: reading(i) for i in OPEN}
-cmeta = {i: server._load(f"g{i}")["metadata"] for i in OPEN}
+cmeta = {i: _service_store._load(f"g{i}")["metadata"] for i in OPEN}
 st_, d_ = call(op="until", items=[f"g{i}" for i in OPEN], pass_id="20260101-000000-abcdef")
 res = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 else {}
 check("3 the pass rewrites the six, leaves the bare wake, the item with none and the hold with no date, lists the until beside a wake, and refuses a wake with the kind time and no hold (it would turn held)", [res[i]["action"] for i in (1, 2, 3, 4, 5, 10)] == ["set"] * 6
@@ -168,7 +169,7 @@ check("3 the dates: the wake, the ask-by day, the earlier of an anchor's two", [
 check("3 the reading of every rewritten item is the same before and after (phase, kind of wait, mover, watched, held, the stored pair, the end date)", all(UP.same(before_r[i], reading(i)) == "" for i in (1, 2, 3, 4, 5, 10)), {i: UP.same(before_r[i], reading(i)) for i in (1, 2, 3, 4, 5, 10)})
 logs = {i: [x["text"] for x in STALL.new_entries(orig[i]["metadata"], mt(i))] for i in (1, 2, 3, 4, 5, 10)}
 check("3 each rewritten item gets exactly one History line, which says the wait was rewritten as until", all(len(v) == 1 and "rewritten as until=" in v[0] and "nothing else on the item changed" in v[0] for v in logs.values()), logs)
-check("3 nothing was closed, woken or told", all(raw(i)["status"] == "open" for i in OPEN) and sent == [] and not server._watch.holding(), sent)
+check("3 nothing was closed, woken or told", all(raw(i)["status"] == "open" for i in OPEN) and sent == [] and not WK_.holding(), sent)
 
 # ---- 4. the writers store the same wait
 put(41, needs=[BACK]); put(42, needs=[BACK], after=["g31"])
@@ -266,7 +267,7 @@ put(52, status="completed", needs=[BACK], hold=True, wake=day(3), outcome="done"
 st_, d_ = call(op="until", items=["g52"])
 check("8 …a closed item is refused and left as it is", d_["results"][0]["action"] == "refused" and "wake" in mt(52), d_)
 st_, d_ = call(op="until", items=["g51"])
-check("8 …a rewrite needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and not server._watch.holding(), (st_, d_))
+check("8 …a rewrite needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and not WK_.holding(), (st_, d_))
 CFGM["migration"] = False
 
 # ---- 9. a pass that dies after the server wrote a batch is undoable; an unrelated later History line does not stop an undo
@@ -489,7 +490,7 @@ CFGM["migration"] = False
 # ---- 14. what the old code did not act on is defined by what it read: a hold kept by a recycle with an ask_by and no kind, a wake beside an after link, the boundaries of "already due"
 import datetime as _dtm
 CFGM["migration"] = True
-tzone = server._cfg.tz()
+tzone = _cfg_.tz()
 nowz = _dtm.datetime.now(tzone)
 stamp = lambda d: d.strftime("%Y-%m-%dT%H:%M")
 put(102, needs=[BACK], hold=True, hold_set={"at": now0 - DAY, "by": BACK}, recycle={"at": now0}, ask_by=day(-30)); b102 = bytes_of(102)
@@ -633,7 +634,7 @@ r6 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
 check("16.6 needs naming the owner, and a post_wake_mover that is not the one session in needs, are listed with how the release differs; a plain hold + wake is not", r6[215]["action"] == "would_set" and "owner" in r6[215]["differs"] and r6[216]["action"] == "would_set" and "post_wake_mover home-other" in r6[216]["differs"]
       and r6[217]["differs"] == "", {i: (r6[i]["action"], r6[i]["differs"]) for i in r6})
 check("16.6 …the plan lists them (one line each), and the signature carries them so a change stops the apply", len(UM.differ_lines(list(r6.values()))) == 2 and UM.signature(list(r6.values())) != UM.signature([{**r, "differs": ""} for r in r6.values()]), UM.differ_lines(list(r6.values())))
-check("16.6 …past or future alike: the pure test does not read the date's side", UP.release_differs({"hold": True, "wake": day(-4), "needs": [OWN]}, server._model.is_owner) != "" and UP.release_differs({"wake": day(3), "needs": [OWN]}, server._model.is_owner) == "", None)
+check("16.6 …past or future alike: the pure test does not read the date's side", UP.release_differs({"hold": True, "wake": day(-4), "needs": [OWN]}, _model.is_owner) != "" and UP.release_differs({"wake": day(3), "needs": [OWN]}, _model.is_owner) == "", None)
 _e = io.StringIO()
 with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
     UM.say_watch(list(r6.values()))

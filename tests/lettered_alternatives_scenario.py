@@ -43,6 +43,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -59,14 +60,14 @@ def create(**kw):
     a = dict(subject="[home] Pick the side panel line", description=DESC, project="projects/kiwi", sender="home-kiwi-engineer", then="home-kiwi-engineer", needs=["decision"], ask=ASKB("whether to ship"))
     a.update(kw)
     try: return _wt_create.stackshot_create(**a), ""
-    except server.ToolError as e: return "", str(e)
+    except ToolError as e: return "", str(e)
 def gid_of(out):
     m = re.search(r"\b[a-z]\d+\b", out); assert m, out
     return m.group(0)
 def stored(gid): return json.loads((T / "store" / gid[0] / f"{gid[1:]}.json").read_text())
 def update(gid, **kw):
     try: return _wt_update.stackshot_update(item_id=gid, sender="home-kiwi-engineer", **kw), ""
-    except server.ToolError as e: return "", str(e)
+    except ToolError as e: return "", str(e)
 def says_options(e): return e.startswith("Refused: this needs=decision item names alternatives (") and "lists no options" in e and "Put each alternative in as one option" in e and '"recommended": true' in e and "Yes / No" in e
 
 EXACT = "which way the side panel's left line runs, A (full height, as now) or B (starts below the cards)"

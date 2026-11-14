@@ -56,6 +56,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk; from stackshot.web import render
+from stackshot.core import config as _cfg
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import watching as watching_svc
@@ -67,7 +69,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 SENT = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 (T / "state").mkdir(parents=True, exist_ok=True); (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
-CFG = server._cfg.CFG.setdefault("model", {}); CFG.update(guards=False, watchers=True, pause=False)
+CFG = _cfg.CFG.setdefault("model", {}); CFG.update(guards=False, watchers=True, pause=False)
 ZONE_HOURS = 4
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOURS * 3600))
 BACK, HELP, FRONT = "zed-back", "zed-helper", "zed-front"
@@ -143,11 +145,11 @@ item(3, needs=[BACK], hold=True, wake=day(5), wait_kind="time", mover=OWN, then=
 item(4, needs=[BACK], hold=True, wake=day(5), wait_kind="time", mover=HELP, post_wake_mover=BACK, subject="[zed] two pickers")
 item(5, needs=[BACK], mover=HELP, then=BACK, subject="[zed] an agent moves it, with a then")
 L = lambda n: _wt_get.stackshot_get(f"a{n}").split("\n")
-check("held_by: the picker holds a waiting item, as its mover when it is stored under that name", telling.held_by(server._load("a1")) == (HELP, "mover"), telling.held_by(server._load("a1")))
-check("held_by: …under the old name it reads as before, the word then", telling.held_by(server._load("a2")) == (HELP, "then"), telling.held_by(server._load("a2")))
-check("held_by: …when he picks it up, the then beside him holds it", telling.held_by(server._load("a3")) == (HELP, "then"), telling.held_by(server._load("a3")))
-check("held_by: …both stored and different, the old name is read first, as the hand-over writers read it", telling.held_by(server._load("a4")) == (BACK, "then"), telling.held_by(server._load("a4")))
-check("held_by: an alive item an agent moves is held by its mover", telling.held_by(server._load("a5")) == (HELP, "mover"), telling.held_by(server._load("a5")))
+check("held_by: the picker holds a waiting item, as its mover when it is stored under that name", telling.held_by(_service_store._load("a1")) == (HELP, "mover"), telling.held_by(_service_store._load("a1")))
+check("held_by: …under the old name it reads as before, the word then", telling.held_by(_service_store._load("a2")) == (HELP, "then"), telling.held_by(_service_store._load("a2")))
+check("held_by: …when he picks it up, the then beside him holds it", telling.held_by(_service_store._load("a3")) == (HELP, "then"), telling.held_by(_service_store._load("a3")))
+check("held_by: …both stored and different, the old name is read first, as the hand-over writers read it", telling.held_by(_service_store._load("a4")) == (BACK, "then"), telling.held_by(_service_store._load("a4")))
+check("held_by: an alive item an agent moves is held by its mover", telling.held_by(_service_store._load("a5")) == (HELP, "mover"), telling.held_by(_service_store._load("a5")))
 g1, g3, g4, g5 = L(1), L(3), L(4), L(5)
 check("get: a waiting item shows who picks it up as its mover, and no then line", "mover: zed-helper (picks it up when the wait ends)" in g1 and not any(x.startswith("then:") for x in g1), g1[:6])
 check("get: …with the owner as picker, the then is shown", f"mover: {OWN} (picks it up when the wait ends)" in g3 and "then: zed-helper" in g3, g3[:6])

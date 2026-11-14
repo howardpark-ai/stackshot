@@ -42,6 +42,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.anchors import anchors as A; from stackshot.tools import page_agent_report as PAR; from stackshot.audit import audit_run as AR
+from stackshot.core import instance as _core_instance
+from stackshot.projects import projects as _prj
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import create as _wt_create
@@ -51,7 +54,7 @@ from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
-OWNER = server.OWNER
+OWNER = _core_instance.OWNER
 NOTE = "(note: "
 NAMES = {u: n for n, u in U.items()}
 LIVE = {MAIN, BUILD, LATE, EX3_ENG, EX3_DOCS, ECHO, STRAY, GUEST}
@@ -91,7 +94,7 @@ r = mk(LATE)
 check("create by a session named for the project and off its map: created, and the reply ends with the note naming its -main agent",
       r.startswith("created") and tail(r) == f"(note: projects/delta has no agents-map line for {LATE}. Its -main agent is {MAIN}: ask it to list you or to take this work.)", tail(r))
 g_late = made(r)
-check("…the write itself was not changed by it: the item is stored under the sender", rd(g_late)["metadata"].get("project") == "projects/delta" and server._session_label(rd(g_late)["metadata"].get("owner")) == LATE, rd(g_late)["metadata"])
+check("…the write itself was not changed by it: the item is stored under the sender", rd(g_late)["metadata"].get("project") == "projects/delta" and _fleet_sessions_registry._session_label(rd(g_late)["metadata"].get("owner")) == LATE, rd(g_late)["metadata"])
 r = mk(STRAY)
 check("create by a session listed nowhere: the note", tail(r).startswith(f"(note: projects/delta has no agents-map line for {STRAY}."), tail(r))
 r = mk(ECHO, mover=BUILD)
@@ -132,10 +135,10 @@ r = _wt_update.stackshot_update(item_id=g_slug, sender=MAIN, priority="p2", proj
 check("update naming the project by a bare slug, sender listed: no note", NOTE not in r, tail(r))
 r = _wt_update.stackshot_update(item_id=g_slug, sender=LATE, priority="p3", project="delta")
 check("update naming the project by a bare slug, sender not listed: the note, with the page key", tail(r).startswith(f"(note: projects/delta has no agents-map line for {LATE}."), tail(r))
-real_to_key = server._prj.to_key
-server._prj.to_key = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("page index unreadable"))
+real_to_key = _prj.to_key
+_prj.to_key = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("page index unreadable"))
 with contextlib.redirect_stderr(io.StringIO()) as err_: r = _wt_message.stackshot_message(to="projects/delta", text="a question about the plan", sender=LATE)
-server._prj.to_key = real_to_key
+_prj.to_key = real_to_key
 check("a message whose note raises is delivered with its reply as it was", r == "held for the router — the router rules notice abc123" and "off-map note" in err_.getvalue(), r)
 
 # ---- 3. the audit's line, replayed on the moved page (items created above, read back from the store)

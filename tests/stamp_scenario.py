@@ -73,6 +73,10 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.web import search as _search
+from stackshot.github import ghsync as _gh
+from stackshot.core import instance as _core_instance
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -85,7 +89,7 @@ telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 ST = T / "state/waiting.json"
 ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
-CFGM = server._cfg.CFG.setdefault("model", {})
+CFGM = _cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False)
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 hrs = lambda n: time.strftime("%Y-%m-%d %H:%M", time.gmtime(now0 + n * 3600 + ZONE_OFFSET))      # n hours after the suite started
@@ -195,21 +199,21 @@ for n in (51, 52, 53):
     put(n, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5)) if n != 53 else put(n, needs=[BACK], state="doing")
 calls = []
 real = {(m, k): getattr(m, k) for m, k in ((fyev, "_foryou_on_save"), (fyev, "_landed_on_save"), (handoff_svc, "handoff_on_save"))}; real_tw = telling.tell_woken
-real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
+real_gh = (_gh.enabled, _gh.on_change); real_touch = _search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name); return None
     return f
 for m, k in real:
     setattr(m, k, spy(k))
 telling.tell_woken = spy("_tell_woken")
-server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch"); writes.save = spy("save")
+_gh.enabled = lambda: True; _gh.on_change = spy("gh.on_change"); _search.touch = spy("search.touch"); writes.save = spy("save")
 state0 = state_listing(); b0 = {n: bytes_of(n) for n in (51, 52, 53)}
 try:
     res = [server._stamp_one(f"g{n}") for n in (51, 52, 53)]
 finally:
     for (m, k), v in real.items(): setattr(m, k, v)
     telling.tell_woken = real_tw
-    server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch; writes.save = real_save
+    _gh.enabled, _gh.on_change = real_gh; _search.touch = real_touch; writes.save = real_save
 check("4 a stamp calls no save, no GitHub job, no notice, no For you or landed row, no hand-off, no search touch", calls == [] and [r["action"] for r in res] == ["set"] * 3, (calls, res))
 check("4 …no writer is recorded, no hand-off record is made, no clock moves", all("written_by" not in raw(n) and "handoff" not in mt(n) and raw(n)["updated"] == json.loads(b0[n])["updated"] for n in (51, 52, 53)), [raw(n) for n in (51,)])
 check("4 …and the state folder is as it was", state_listing() == state0, (state0, state_listing()))
@@ -280,7 +284,7 @@ def clock_diff(freeze):
     t_a = time.time(); clk = [t_a]; real_time = time.time; time.time = lambda: clk[0]
     seed = copy.deepcopy(its["g8"]); seed["confirmed"] = t_a - 2 * 86400 + 30
     for k in ("hold", "wake", "after", "cap_ok", "end"): seed["metadata"].pop(k, None)            # not held (a held item is never stale), so its age shows
-    seed["metadata"]["needs"] = "decision"; seed["metadata"]["mover"] = server.OWNER
+    seed["metadata"]["needs"] = "decision"; seed["metadata"]["mover"] = _core_instance.OWNER
     its[SEED] = seed; gids.append(SEED)
     def read():
         with (SP.frozen(t_a) if freeze else contextlib.nullcontext()):
@@ -389,7 +393,7 @@ def session_saves(n, body):
 rcA, outA = cli(SP.apply, app=Hooked(after=session_saves))
 errA = cli.err
 check("9b a session's save on an already-stamped item between batches: exit 0, not counted outside the two keys, listed as informational", rcA == 0 and isinstance(outA, dict) and outA["files_changed_outside_the_two_keys"] == 0
-      and outA["saved_by_a_session_since_our_stamp"] == [server._gh.shown(saved["g"])] and "informational, not a failure" in errA and server._gh.shown(saved["g"]) in errA and outA["written"] >= 6, (rcA, outA, errA[-300:]))
+      and outA["saved_by_a_session_since_our_stamp"] == [_gh.shown(saved["g"])] and "informational, not a failure" in errA and _gh.shown(saved["g"]) in errA and outA["written"] >= 6, (rcA, outA, errA[-300:]))
 check("9b …and the session's save stands in the file", raw(int(saved["g"][1:]))["metadata"]["next"] == "team-back: a session saved this between batches", None)
 # the control: a stamp that itself changes something outside the two keys still fails the run
 for i in (97, 98): put(i, needs=[BACK], state="doing")

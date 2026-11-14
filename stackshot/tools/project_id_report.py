@@ -46,6 +46,8 @@ say = MM.say
 def readers(server: Any, store: Path, now: float) -> dict[str, str]:
     """What the readers show of the store at the clock `now`: the board's markdown and brief, the server's brief, the project key each reader takes for every open item (anchors.project_of: the page), and the project each shows for it (item_project.project_of: the top-level project)."""
     from stackshot.anchors import anchors as _anc  # noqa: PLC0415
+    from stackshot.model import item_project as _ip  # noqa: PLC0415
+    from stackshot.service import store as _service_store  # noqa: PLC0415
     from stackshot.web import render as _render  # noqa: PLC0415
     from stackshot.web.tools import brief as _brief_tool  # noqa: PLC0415
     out: dict[str, str] = {}
@@ -55,8 +57,8 @@ def readers(server: Any, store: Path, now: float) -> dict[str, str]:
         out["board brief"] = b.brief()
         out["server brief"] = _brief_tool.stackshot_brief()
     items = SP.load_dir(store)
-    out["keys"] = json.dumps({g: _anc.project_of(server._load(g) or {}) for g, it in sorted(items.items(), key=lambda kv: SP.num(kv[0])) if it.get("status") == "open"}, sort_keys=True)
-    out["projects shown"] = json.dumps({g: server._ip.project_of((server._load(g) or {}).get("metadata") or {}) for g, it in sorted(items.items(), key=lambda kv: SP.num(kv[0])) if it.get("status") == "open"}, sort_keys=True)      # the top-level project every reader that shows an item's project writes (item_project.project_of)
+    out["keys"] = json.dumps({g: _anc.project_of(_service_store._load(g) or {}) for g, it in sorted(items.items(), key=lambda kv: SP.num(kv[0])) if it.get("status") == "open"}, sort_keys=True)
+    out["projects shown"] = json.dumps({g: _ip.project_of((_service_store._load(g) or {}).get("metadata") or {}) for g, it in sorted(items.items(), key=lambda kv: SP.num(kv[0])) if it.get("status") == "open"}, sort_keys=True)      # the top-level project every reader that shows an item's project writes (item_project.project_of)
     return out
 
 
@@ -77,6 +79,8 @@ def dry_run(a: argparse.Namespace) -> int:
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         from stackshot.web import server  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        from stackshot.github import ghsync as _gh  # noqa: PLC0415
+        from stackshot.model import item_project as _ip  # noqa: PLC0415
         _web_publish._publish = lambda: None
         d = root / "repo/board-data"
         now = time.time()
@@ -102,18 +106,18 @@ def dry_run(a: argparse.Namespace) -> int:
         stored = {g: (it.get("metadata") or {}).get("project_id") for g, it in after_items.items()}
         per = collections.Counter(v for v in stored.values() if v)
         print(f"\nitems with a project id after the pass: {sum(per.values())} of {len(ids)}, over {len(per)} projects; the largest: " + ", ".join(f"{k} {n}" for k, n in per.most_common(5)))
-        open_unstamped = [server._gh.shown(g) for g in opens if not stored.get(g)]
+        open_unstamped = [_gh.shown(g) for g in opens if not stored.get(g)]
         print(f"open items with no id after the pass: {len(open_unstamped)}" + (f" {open_unstamped}" if open_unstamped else ""))
         moved = []
         for g in ids:
             mb, ma = (items[g].get("metadata") or {}), (after_items[g].get("metadata") or {})
             if {k: v for k, v in mb.items() if k != "project_id"} != {k: v for k, v in ma.items() if k != "project_id"}:
-                moved.append(server._gh.shown(g))
+                moved.append(_gh.shown(g))
         print(f"items whose file differs from the original in more than the one key project_id: {len(moved)}" + (f" {moved}" if moved else ""))
         key_before = {g: str((items[g].get("metadata") or {}).get("project") or "") for g in ids}
-        key_after = {g: server._ip.key_of((after_items[g].get("metadata") or {})) for g in ids}
-        shifted = [(server._gh.shown(g), key_before[g], key_after[g]) for g in ids if key_before[g] != key_after[g]]
-        shifted_open = [(server._gh.shown(g), key_before[g], key_after[g]) for g in opens if key_before[g] != key_after[g]]
+        key_after = {g: _ip.key_of((after_items[g].get("metadata") or {})) for g in ids}
+        shifted = [(_gh.shown(g), key_before[g], key_after[g]) for g in ids if key_before[g] != key_after[g]]
+        shifted_open = [(_gh.shown(g), key_before[g], key_after[g]) for g in opens if key_before[g] != key_after[g]]
         print(f"items whose project key reads differently after the pass: {len(shifted)} ({len(shifted_open)} open)" + "".join(f"\n  {s}: {b} -> {c}" for s, b, c in shifted))
         diff = [k for k in before if before[k] != after[k]]
         print(f"readers that show the open items differently before and after: {len(diff)}" + (f" {diff}" if diff else ""))

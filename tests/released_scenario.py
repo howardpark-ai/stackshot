@@ -117,6 +117,10 @@ def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 
 from stackshot.web import server
+from stackshot.core import config as _cfg
+from stackshot.model import steps as _steps
+from stackshot.core import instance as _core_instance
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.service import proofs as proofs_svc, released as released_svc, released_live as rlive_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -126,7 +130,7 @@ from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
 server._HERE = rlive_svc.HERE = T / "repo"
-check("the last-good path is release.sh's ($LOGDIR/last-good, LOGDIR = config.py state releases)", server._cfg.state("releases", "last-good") == LAST_GOOD)
+check("the last-good path is release.sh's ($LOGDIR/last-good, LOGDIR = config.py state releases)", _cfg.state("releases", "last-good") == LAST_GOOD)
 # the delivery path is the real one: tell_woken → the front gate → push.py (a fake that logs what it was asked to send)
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
@@ -156,13 +160,13 @@ check("only open step is the release: completed, outcome done, the reason naming
       it1["status"] == "completed" and it1["metadata"].get("outcome") == "done" and it1["metadata"]["reason"].startswith(f"PR #41 is live (merged at {M[41][:7]} on ")
       and f"in the last-good commit {M[43][:7]}" in it1["metadata"]["reason"] and "main's tests passed" in it1["metadata"]["reason"] and rows.get("a1", {}).get("action") == "closed", (it1, rows.get("a1")))
 check("…its release step is marked done by the server's own label, next is gone",
-      [(s["status"], s["by"]) for s in it1["metadata"].get("steps", [])] == [("done", server.NAME)] and "next" not in it1["metadata"], it1["metadata"])
+      [(s["status"], s["by"]) for s in it1["metadata"].get("steps", [])] == [("done", _core_instance.NAME)] and "next" not in it1["metadata"], it1["metadata"])
 check("…no session turn: nobody is told of the close", not pushes_for("a1"), pushes())
 check("\"release #41\" counts too: closed", rd(15)["status"] == "completed" and rows.get("a15", {}).get("action") == "closed", rows.get("a15"))
 it2 = rd(2)
 check("a step after it: the release step is ticked done by the server, the step after it stays open in next",
       it2["status"] == "open" and it2["metadata"].get("next") == "home-builder: then check the pages"
-      and [(s["text"], s["status"], s.get("by")) for s in it2["metadata"].get("steps", [])] == [("home-builder: release PR #41", "done", server.NAME), ("home-builder: then check the pages", "open", None)]
+      and [(s["text"], s["status"], s.get("by")) for s in it2["metadata"].get("steps", [])] == [("home-builder: release PR #41", "done", _core_instance.NAME), ("home-builder: then check the pages", "open", None)]
       and rows.get("a2", {}).get("action") == "ticked", (it2["metadata"], rows.get("a2")))
 n2 = pushes_for("a2")
 check("…and its mover gets one real notice, pushed by push.py through the front gate (exempt: it asks the mover to act)",
@@ -233,13 +237,13 @@ for name, pr, sha, want in (("a PR that is not merged", url(44), NOT_MERGED, "PR
                             ("a URL of another repository", "https://github.com/someone-else/other/pull/41", M[41], "pull request URL of this repository"),
                             ("no URL", "", M[41], "pull request URL of this repository")):
     try: released_svc.released(pr, sha=sha); check(f"refused: {name}", False)
-    except server.ToolError as e: check(f"refused: {name}", want in str(e) and str(e).startswith("Refused:"), str(e))
+    except ToolError as e: check(f"refused: {name}", want in str(e) and str(e).startswith("Refused:"), str(e))
 check("…and none of them wrote or told anything", not same(s0) and len(pushes()) == p0, (same(s0), pushes()[p0:]))
 LAST_GOOD.unlink()
 try: released_svc.released(PR, sha=M[41]); check("refused: no last-good recorded", False)
-except server.ToolError as e: check("refused: no last-good recorded", "no last-good commit is recorded" in str(e), str(e))
+except ToolError as e: check("refused: no last-good recorded", "no last-good commit is recorded" in str(e), str(e))
 try: released_svc.sweep_released(); check("the sweep refused: no last-good recorded", False)
-except server.ToolError as e: check("the sweep refused: no last-good recorded", "no last-good commit is recorded" in str(e), str(e))
+except ToolError as e: check("the sweep refused: no last-good recorded", "no last-good commit is recorded" in str(e), str(e))
 good(M[43])
 check("…nothing written", not same(s0))
 
@@ -262,7 +266,7 @@ check("…the closes tell nobody; the ticks and the same-line follow-up tell the
 fixtures(); p0 = len(pushes()); s0 = snap()
 good(M[45]); g("reset", "-q", "--hard", M[43])
 try: released_svc.released(url(45), sha=M[45]); check("refused: a merge rolled back out of HEAD", False)
-except server.ToolError as e: check("refused: a merge rolled back out of HEAD", f"is not in the live checkout {M[43][:7]} (rolled back)" in str(e), str(e))
+except ToolError as e: check("refused: a merge rolled back out of HEAD", f"is not in the live checkout {M[43][:7]} (rolled back)" in str(e), str(e))
 d = released_svc.sweep_released()
 check("the sweep after a rollback: #45's item stays as it was", raw(11) == s0[11] and not [x for x in d["items"] if x.get("pr") == 45], d)
 g("reset", "-q", "--hard", M[45]); good(M[43])
@@ -317,9 +321,9 @@ def fsnap(): return {i: raw(i) for i in FOREIGN}
 def fsame(s0): return [i for i in s0 if raw(i) != s0[i]]
 ffix(); f0 = fsnap(); p0 = len(pushes())
 try: released_svc.released(surl(7), sha=SIBM[7]); check("refused: a sibling PR with no [released.repos] at all", False)
-except server.ToolError as e: check("refused: a sibling PR with no [released.repos] at all, saying that none is configured", "pull request URL of this repository" in str(e) and "none is configured" in str(e) and str(e).startswith("Refused:"), str(e))
+except ToolError as e: check("refused: a sibling PR with no [released.repos] at all, saying that none is configured", "pull request URL of this repository" in str(e) and "none is configured" in str(e) and str(e).startswith("Refused:"), str(e))
 check("…nothing written", not fsame(f0))
-server._cfg.CFG["released"] = {"repos": {SIB: {"checkout": str(SC)}}}
+_cfg.CFG["released"] = {"repos": {SIB: {"checkout": str(SC)}}}
 try:
     for name, pr, sha, want in (("a repository the table does not list, naming the one it does", "https://github.com/someone-else/other/pull/7", SIBM[7], SIB),
                                 ("a configured repository's PR whose merge is not in the checkout's HEAD (not deployed yet)", surl(8), SIBM[8], "is not live: its merge"),
@@ -329,7 +333,7 @@ try:
                                 ("a sha that holds no merge of the PR", surl(9), SIBM[7], "is not merged"),
                                 ("no sha and the PR is not in the checkout's log", surl(9), "", "is not merged")):
         try: released_svc.released(pr, sha=sha); check(f"foreign refused: {name}", False)
-        except server.ToolError as e: check(f"foreign refused: {name}", want in str(e) and str(e).startswith("Refused:"), str(e))
+        except ToolError as e: check(f"foreign refused: {name}", want in str(e) and str(e).startswith("Refused:"), str(e))
     check("…none of them wrote or told anything", not fsame(f0) and len(pushes()) == p0, (fsame(f0), pushes()[p0:]))
     r = released_svc.released(surl(7), sha=SIBM[7][:7])
     rows = {x["item"]: x for x in r["items"]}
@@ -352,11 +356,11 @@ try:
           acts.get("a30") == "closed" and acts.get("a40") == "closed" and acts.get("a41") == "closed" and acts.get("a34") == "ticked" and "a42" not in acts and "a33" not in acts and "a32" not in acts
           and raw(33) == f0[33] and raw(42) == f0[42] and raw(32) == f0[32], (acts, d["items"]))
     # a step's proof: pr_released for a listed repository is accepted, for another is refused naming the listed ones
-    cl = server._steps.view({"next": "home-builder: restart the unit"}, keeper="")
+    cl = _steps.view({"next": "home-builder: restart the unit"}, keeper="")
     meta = {}; note = proofs_svc.step_proof_set(meta, cl, [{"step": 1, "proof": f"pr_released {SIB}#8"}])
     check("step_proof: pr_released for a listed repository's PR is stored", meta.get("step_proof") == {"home-builder: restart the unit": f"pr_released {SIB}#8"} and "step 1 proof: pr_released" in note, (meta, note))
     try: proofs_svc.step_proof_set({}, cl, [{"step": 1, "proof": "pr_released other-owner/else#3"}]); check("step_proof: pr_released for an unlisted repository is refused", False)
-    except server.ToolError as e: check("step_proof: pr_released for an unlisted repository is refused, naming the listed one and pr_merged", "pr_released is for this repository's pull requests" in str(e) and SIB in str(e) and "use pr_merged" in str(e), str(e))
+    except ToolError as e: check("step_proof: pr_released for an unlisted repository is refused, naming the listed one and pr_merged", "pr_released is for this repository's pull requests" in str(e) and SIB in str(e) and "use pr_merged" in str(e), str(e))
     # a path is never taken from the client: a body field named checkout changes nothing
     ffix(); f0 = fsnap()
     with TestClient(server.mcp.http_app()) as c:
@@ -367,16 +371,16 @@ try:
         res = c.post("/client/released", json={"pr": surl(7), "sha": SIBM[7]}, headers=h)
         check("POST /client/released settles a listed repository's PR", res.status_code == 200 and rd(30)["status"] == "completed", res.text)
     drain()
-    server._cfg.CFG["github"] = {"moved": {"old-owner/sibling": SIB}}      # a moved repository's name is compared as the other checks do
+    _cfg.CFG["github"] = {"moved": {"old-owner/sibling": SIB}}      # a moved repository's name is compared as the other checks do
     try:
-        check("the table is read through [github.moved]: the old name reaches the same checkout", rlive_svc.released_foreign("Old-Owner/Sibling") == SC, server._cfg.released_repos())
+        check("the table is read through [github.moved]: the old name reaches the same checkout", rlive_svc.released_foreign("Old-Owner/Sibling") == SC, _cfg.released_repos())
     finally:
-        server._cfg.CFG.pop("github", None)
+        _cfg.CFG.pop("github", None)
 finally:
-    server._cfg.CFG.pop("released", None)
+    _cfg.CFG.pop("released", None)
 ffix(); f0 = fsnap()
 try: released_svc.released(surl(7), sha=SIBM[7]); check("with the table gone again the feature is off: refused", False)
-except server.ToolError as e: check("with the table gone again the feature is off: refused, nothing written", "none is configured" in str(e) and not fsame(f0), str(e))
+except ToolError as e: check("with the table gone again the feature is off: refused, nothing written", "none is configured" in str(e) and not fsame(f0), str(e))
 drain()
 
 sent = []

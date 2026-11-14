@@ -42,7 +42,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.model import nextlines as NL
 from stackshot.web import server
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["mode"] = "script"
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                       # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
 if min((now + ZONE_OFFSET) % 86400, 86400 - (now + ZONE_OFFSET) % 86400) < 600: now -= 900
@@ -192,7 +192,7 @@ check("4 …the report names the clocks dropped", sorted(r["front_steps"]["clear
 
 # ---- 5. the threshold
 load_fixtures()
-cfg_audit = server._cfg.CFG["audit"]
+cfg_audit = _cfg.CFG["audit"]
 cfg_audit.pop("front_step_move_hours", None)
 check("5 the default is 3 hours", _cfg.audit_front_step_move_hours() == 3.0 and FS.hours() == 3.0)
 for bad in (-1, "soon", True, None, "", float("inf")):
@@ -330,7 +330,7 @@ from stackshot.anchors import anchors as _anc
 real_roles = _anc.file_roles
 _anc.file_roles = lambda reg=None, live=None: ROLES
 cfg_audit["front_step_move_hours"] = 3
-server._cfg.CFG["audit"]["enabled"] = True
+_cfg.CFG["audit"]["enabled"] = True
 res = server._filing_tick()
 check("6 the server's tick starts the clocks through the writers it passes", res is not None and sorted(res["front_steps"]["started"]) == ["board#1", "board#5", "board#6", "board#7", "board#8"] and clock_of("a1") is not None, res)
 d = get("a1"); d["metadata"]["stuck_since"]["at"] = time.time() - 3 * H - 5; put("a1", d)

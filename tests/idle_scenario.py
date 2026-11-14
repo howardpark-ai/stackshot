@@ -64,6 +64,12 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.waits import waiting as _wt
+from stackshot.web import answers as _web_answers
+from stackshot.core import config as _cfg
+import datetime as dt
+from stackshot.projects import pages as _pages
+from stackshot.web import render as _rmod
 from stackshot.web import publish as _web_publish
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
@@ -72,8 +78,8 @@ from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, asked at the last rung
-server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
+_cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, asked at the last rung
+_wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 told = []
 HOLD = [False]                                           # True: the send is held back (a held notice returns no thread, as the front gate's does)
 def _tw(gid, owner, note, tag="wake"):
@@ -84,13 +90,13 @@ clock = [now0]
 # ---- 2b. a raise stored before the last rung existed: his button answers still apply (the item page's form posts them through server._answer)
 # The server raises no question any more, so the stored raises of items 3, 6 and 7 are set up by hand, in the shape the old pass wrote them.
 told.clear()
-park = (server.dt.datetime.fromtimestamp(clock[0], _wt_text.ZONE) + server.dt.timedelta(days=3)).strftime("%Y-%m-%d")
+park = (dt.datetime.fromtimestamp(clock[0], _wt_text.ZONE) + dt.timedelta(days=3)).strftime("%Y-%m-%d")
 ASK = "Decide: what to do with this idle item · Recommend: Park until the day · Stakes: it sat idle · By: no date"
 def legacy_raise(g_, named=()):
     it_ = rd(g_); mm = it_["metadata"]
     mm.pop("mover", None) if named else None; mm["needs"] = ["decision", *named]; mm["ask"] = ASK      # a session the item named stays named, as the old pass kept it
     mm["idle"] = {"poked": clock[0] - 600, "to": "home-stew", "raised": clock[0] - 300}
-    mm["options"] = [{"label": f"Park until {server._rmod.when_words(server.dt.date.fromisoformat(park))}", "line": f"On hold with a wake on {park}; for another day, write it in the box as YYYY-MM-DD with this choice.", "recommended": True, "wake": park},
+    mm["options"] = [{"label": f"Park until {_rmod.when_words(dt.date.fromisoformat(park))}", "line": f"On hold with a wake on {park}; for another day, write it in the box as YYYY-MM-DD with this choice.", "recommended": True, "wake": park},
                      {"label": "Not needed", "line": "It is no longer wanted: the item's mover closes it.", "recommended": False}]
     (T / f"store/a/{g_}.json").write_text(json.dumps(it_))
 legacy_raise(3); legacy_raise(6); legacy_raise(7, named=(U["home-owner"],))
@@ -106,17 +112,17 @@ check("Park until …: his decision is in and the server parks it: waiting until
 check("the answer record carries the park the server set", m3["answers"][-1].get("choice") == opts3[0]["label"] and m3["answers"][-1].get("parked") == park, m3.get("answers"))
 check("the park he set from the board stores no hold record and no old field: the one until date is the whole wait",
       "hold_set" not in m3 and "hold" not in m3 and "wake" not in m3, m3)
-check("a park is acted on by the server itself: no answer escalation waits on it", "a3" not in server._answers_load(), server._answers_load())
+check("a park is acted on by the server itself: no answer escalation waits on it", "a3" not in _web_answers._answers_load(), _web_answers._answers_load())
 check("get shows it waiting until the day", f"until: {park}" in _wt_get.stackshot_get("a3") and "waiting on a time" in _wt_get.stackshot_get("a3"), _wt_get.stackshot_get("a3"))
-later = (server._pages.zone_now() + server.dt.timedelta(days=10)).strftime("%Y-%m-%d")
+later = (_pages.zone_now() + dt.timedelta(days=10)).strftime("%Y-%m-%d")
 r = server._answer("a6", rd(6)["metadata"]["options"][0]["label"], f"not before {later}, Pat is away", "")
 m6 = rd(6)["metadata"]
 check("Park until … with a day written in the box: that day is the wake, his note kept", r == "decision" and m6.get("until") == later and "hold" not in m6
       and m6["answers"][-1].get("text") == f"not before {later}, Pat is away" and m6["answers"][-1].get("parked") == later, m6)
 check("…and the park is his own word for that wake: recorded as such (cap_ok), so the wake stands past the cap", m6.get("cap_ok", {}).get("wake") == later and m6["cap_ok"]["by"] == "a board answer"
-      and server._wt.cap_words(m6, "wake"), m6)
+      and _wt.cap_words(m6, "wake"), m6)
 check("a day in the past in the box falls back to the option's day, and an option's day that has passed to [idle] park_days from now; a time of day is kept",
-      server._idle_park_at(park, "2020-01-01 was too early") == park and server._idle_park_at("2020-01-02", "") == (server._pages.zone_now() + server.dt.timedelta(days=3)).strftime("%Y-%m-%d")
+      server._idle_park_at(park, "2020-01-01 was too early") == park and server._idle_park_at("2020-01-02", "") == (_pages.zone_now() + dt.timedelta(days=3)).strftime("%Y-%m-%d")
       and server._idle_park_at(park, f"after {later} 14:30 then") == f"{later}T14:30",
       (server._idle_park_at(park, "2020-01-01 was too early"), server._idle_park_at("2020-01-02", ""), server._idle_park_at(park, f"after {later} 14:30 then")))
 check("a session's write cannot carry a wake on an option: the gate drops the key, so no write of a session parks through an option",

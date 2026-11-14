@@ -63,6 +63,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
+from stackshot.router import routing as _routing
+from stackshot.core import config as _cfg
+from stackshot.projects import pages as _pages
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -84,7 +88,7 @@ day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOUR
 BACK, OTHER, FRONT = "team-back", "home-other", "home-front"
 UB, UO, UF = U["team-back"], U["home-other"], U["home-front"]
 OWN = model.owner_display()
-CFG = server._cfg.CFG.setdefault("model", {})
+CFG = _cfg.CFG.setdefault("model", {})
 def sent(tag=None): return [x for x in SENT if tag is None or x[3] == tag]
 def reset(): SENT.clear(); NOTES.clear()
 def notes_of(g): return [n for gid, n in NOTES if gid == g]
@@ -302,7 +306,7 @@ reset(); wakes_svc.wake_pass(); check("time (all): …a later pass tells nobody 
 reset()
 lst(111, [Tm(day(-1)), Tm(day(6)), It("a901")], mode="any")
 woke = wakes_svc.wake_pass(); m = mt(111)
-check("time (any): the first line to arrive ends the group: alive with the post-wake mover, what arrived and what was not needed", "a111" in woke and m.get("mover") == BACK and m["woke"]["what"] == f"any of 3 arrived: its date {day(-1)} came; not needed: the date {day(6)}; the close of {server._gh.shown('a901')}", m)
+check("time (any): the first line to arrive ends the group: alive with the post-wake mover, what arrived and what was not needed", "a111" in woke and m.get("mover") == BACK and m["woke"]["what"] == f"any of 3 arrived: its date {day(-1)} came; not needed: the date {day(6)}; the close of {_gh.shown('a901')}", m)
 check("time (any): …the wait's fields are gone", all(k not in m for k in GONE), m)
 check("time (any): …the message to the mover carries it", len(sent("watch")) == 1 and "any of 3 arrived:" in sent("watch")[0][2] and "; not needed: " in sent("watch")[0][2], sent())
 
@@ -312,7 +316,7 @@ lst(120, [It("a121"), It("a122"), Tm(day(7))], mode="all")
 item(121, subject="[home] first blocker"); item(122, subject="[home] second blocker")
 close(121)
 check("item (all): a closed item marks its line; the item waits on, nobody is told", arrived_of(120) == [True, False, False] and mt(120).get("wait_kind") == "list" and not sent("watch")
-      and notes_of("a120") == [f"arrived: {server._gh.shown('a121')} closed (done) by home-front (1 of 3)"], (mt(120), notes_of("a120")))
+      and notes_of("a120") == [f"arrived: {_gh.shown('a121')} closed (done) by home-front (1 of 3)"], (mt(120), notes_of("a120")))
 b120 = raw(120); reset(); close(121)
 check("item: the same close delivered again changes nothing (idempotent), writes nothing", raw(120) == b120 and not NOTES and not sent(), notes_of("a120"))
 close(122)
@@ -337,9 +341,9 @@ lst(128, [It("a129"), Re("x")], mode="any"); item(129, subject="[home] old"); it
 it = rd(129); it["status"] = "completed"; it["metadata"].update(outcome="superseded", reason="r", superseded_by="a130"); put(129, it)
 wakes_svc.release_after("a129", "superseded", "a130", "home-front")
 check("item: a superseded item is followed to its open replacement: the id in the line is replaced and the line has not arrived; the item waits on", mt(128)["waits"][0]["after"] == "a130" and arrived_of(128) == [False, False] and mt(128).get("wait_kind") == "list" and not sent("watch")
-      and notes_of("a128") == [f"{server._gh.ref('a129')} was superseded, followed to {server._gh.ref('a130')}"], (mt(128), notes_of("a128")))
+      and notes_of("a128") == [f"{_gh.ref('a129')} was superseded, followed to {_gh.ref('a130')}"], (mt(128), notes_of("a128")))
 close(130)
-check("item: …and the replacement's close then ends it", mt(128).get("mover") == BACK and "a130" not in str(mt(128).get("waits")) and f"{server._gh.shown('a130')} closed (done)" in mt(128)["woke"]["what"], mt(128))
+check("item: …and the replacement's close then ends it", mt(128).get("mover") == BACK and "a130" not in str(mt(128).get("waits")) and f"{_gh.shown('a130')} closed (done)" in mt(128)["woke"]["what"], mt(128))
 # superseded with a closed replacement
 reset()
 lst(131, [It("a132"), Re("x")], mode="any"); item(132, subject="[home] old two"); item(133, status="completed", outcome="done", reason="r", needs=[], subject="[home] a replacement already closed")
@@ -387,9 +391,9 @@ rel = wakes_svc.anchor_release("projects/beta", notice("PR #5 merged", ruling=No
 check("anchor (any): in a project nobody rules, a notice that arrived ends an `any` list on it at once", "a141" in rel and mt(141).get("mover") == BACK and "any of 2 arrived:" in mt(141)["woke"]["what"], (rel, mt(141)))
 # the minute pass finds a notice in the routing log
 lst(143, [An(AURL, "a reply"), Re("x")], mode="any")
-server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="a reply on the PR", anchor="github:o/r#5", pilot=True)
-nid = server._routing.read("projects/alpha", since=now0 - 60)[-1]["id"]
-server._routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
+_routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="a reply on the PR", anchor="github:o/r#5", pilot=True)
+nid = _routing.read("projects/alpha", since=now0 - 60)[-1]["id"]
+_routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
 time.sleep(0.01); out = wakes_svc.anchor_pass()
 check("anchor: the minute pass finds a keeper-passed notice in the routing log for an item whose list waits on the anchor", "a143" in out and mt(143).get("mover") == BACK, (out, mt(143)))
 lst(144, [An(AURL2, "a reply"), Re("x")], mode="any", watch={})
@@ -505,7 +509,7 @@ lst(190, [Tm(day(-1)), It("a191"), Re("x")], mode="all"); item(191)
 wakes_svc.wake_pass(); d = rd(190); d["metadata"]["waits"][1]["arrived"] = {"at": now0, "what": "a191 closed"}; put(190, d)        # two of three arrived
 check("edit: two of three lines have arrived: the item waits on", mt(190).get("wait_kind") == "list" and not WL.done(mt(190)), mt(190))
 d = rd(190); d["metadata"]["waits"] = d["metadata"]["waits"][:2]; put(190, d)                                                      # …and the open line is removed from the list
-check("edit: …the line that was open is removed: every line left has arrived, so the group is over and the scheduler sees it is due now", WL.done(mt(190)) and wakes_svc.next_wake() is not None and wakes_svc.next_wake() <= server._pages.zone_now(), wakes_svc.next_wake())
+check("edit: …the line that was open is removed: every line left has arrived, so the group is over and the scheduler sees it is due now", WL.done(mt(190)) and wakes_svc.next_wake() is not None and wakes_svc.next_wake() <= _pages.zone_now(), wakes_svc.next_wake())
 reset(); woke = wakes_svc.minute_wake_pass() or wakes_svc.wake_pass()
 check("edit: …and the next pass turns it", mt(190).get("mover") == BACK and mt(190)["woke"]["what"].startswith("all 2 arrived:"), mt(190))
 # a list that does not hold is a single wait: it ends as one
@@ -526,7 +530,7 @@ reset()
 lst(205, [Tm(day(9)), It("a206"), Ev("job_run weekly")], mode="all", until=day(-1)); item(206, subject="[home] the blocker of a list with the watchers off")
 woke = wakes_svc.wake_pass(); m = mt(205)
 check("legacy (watchers off): a list whose backstop day has passed ends: the post-wake mover has it, alive, with the watchers' words (nothing arrived, every line still open)", "a205" in woke and m.get("mover") == BACK and m.get("needs") == [BACK]
-      and m["woke"]["what"] == f"backstop day {day(-1)}: nothing had arrived; still open: the date {day(9)}; the close of {server._gh.shown('a206')}; a fleet event (job_run weekly)", m)
+      and m["woke"]["what"] == f"backstop day {day(-1)}: nothing had arrived; still open: the date {day(9)}; the close of {_gh.shown('a206')}; a fleet event (job_run weekly)", m)
 check("legacy (watchers off): …through end_wait: the whole wait group goes (the list, its mode, the kind, the backstop, the post-wake mover) and the hold", all(k not in m for k in GONE) and all(k not in m for k in model.WAIT_GROUP) and "hold" not in m and "ask" not in m, m)
 check("legacy (watchers off): …the mover is told in one line and the History says the item woke", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "backstop day" in sent("watch")[0][2] and any(n.startswith("woke: backstop day ") for n in notes_of("a205")), (sent(), notes_of("a205")))
 reset(); wakes_svc.wake_pass()

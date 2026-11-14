@@ -70,6 +70,7 @@ inbox.ack(ids)
 check("fixture: the three lines are gone once confirmed", inbox.waiting() == {}, inbox.waiting())
 
 from stackshot.fleet import client; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -137,8 +138,8 @@ with TestClient(app) as c:
     check("overdue: …a pause that released this session's lines no longer excuses them", [x["id"] for x in late] == [iid3], late)
     os.remove(T / "state/anchor-hub/paused-msg.json"); os.remove(T / "state/anchor-hub/release-msg.txt")
     # the flag's own lines (sent from the instance's name) are never flagged in their turn
-    iid_f = inbox.put(NAME, "a flag line to a stuck recipient", "msg", now=TN, sender=server.NAME)
-    check("overdue: a line sent by the server itself (a flag) is not flagged again", inbox.new_overdue(300.0, now=TN + 840, idx=fl.sessions(), skip_from=(server.NAME,)) == [])
+    iid_f = inbox.put(NAME, "a flag line to a stuck recipient", "msg", now=TN, sender=_core_instance.NAME)
+    check("overdue: a line sent by the server itself (a flag) is not flagged again", inbox.new_overdue(300.0, now=TN + 840, idx=fl.sessions(), skip_from=(_core_instance.NAME,)) == [])
     check("overdue: …it would be without the guard", [x["id"] for x in inbox.new_overdue(300.0, now=TN + 841, idx=fl.sessions())] == [iid_f])
     inbox.ack([iid_f])
     # two live namesakes: the reason names both
@@ -183,33 +184,33 @@ with TestClient(app) as c:
           and "+3 more" in txt["site-main"], txt["site-main"])
     check("flag pass: …and the keeper's line is one line for the session, not eight", txt["ops-keeper"].count("line(s) for site-builder") == 1 and "8 line(s) for site-builder" in txt["ops-keeper"], txt["ops-keeper"])
     sent.clear()
-    inbox.put(NAME, "[stackshot] a flag line that the server itself sent to a stuck recipient", "msg", now=TN + 2110, sender=server.NAME)
+    inbox.put(NAME, "[stackshot] a flag line that the server itself sent to a stuck recipient", "msg", now=TN + 2110, sender=_core_instance.NAME)
     fleetev.INBOX_FLAG_LAST[0] = 0.0
     check("flag pass: …and a flag line the server sent (from its own name) waiting for a stuck recipient is not flagged in its turn", fleetev.inbox_flag_tick(now=TN + 9000) == [] and sent == [], sent)
     inbox.ack([i["id"] for i in inbox._items()])
-    fleetev.INBOX_FLAG_LAST[0] = 0.0; server._cfg.CFG.setdefault("client", {})["inbox_flag_minutes"] = 0
+    fleetev.INBOX_FLAG_LAST[0] = 0.0; cfg.CFG.setdefault("client", {})["inbox_flag_minutes"] = 0
     inbox.put(NAME, "while it is off", "msg", now=TN, sender="site-main (00000004…)")
     check("flag pass: [client] inbox_flag_minutes = 0 turns it off", fleetev.inbox_flag_tick(now=TN + 2200) == [] and sent == [])
-    server._cfg.CFG["client"]["inbox_flag_minutes"] = 5
+    cfg.CFG["client"]["inbox_flag_minutes"] = 5
 
     # ============================================================= 3. what the message tool answers for a line that waits
     class _R:  # a push.py that answered "inbox": the session's machine has not fetched the line within the wait
         returncode = 0; stdout = f"inbox → {NAME}\n"; stderr = ""
-    real_run = server.subprocess.run
-    server.subprocess.run = lambda *a, **k: _R()
+    real_run = subprocess.run
+    subprocess.run = lambda *a, **k: _R()
     try:
         out = server._message(NAME, "hello", "site-main")
     finally:
-        server.subprocess.run = real_run
+        subprocess.run = real_run
     check("message: an `inbox` reply no longer calls a running session away; it says when the sender is told", out.startswith(f"inbox → {NAME} — it waits in the server's inbox") and "is away" not in out
           and "after 5 minutes" in out and "the fleet's keeper is told why" in out and "running pane" in out and "stackshot tells you" not in out, out)
-    server._cfg.CFG["client"]["inbox_flag_minutes"] = 0
-    server.subprocess.run = lambda *a, **k: _R()
+    cfg.CFG["client"]["inbox_flag_minutes"] = 0
+    subprocess.run = lambda *a, **k: _R()
     try:
         out0 = server._message(NAME, "hello", "site-main")
     finally:
-        server.subprocess.run = real_run
-    server._cfg.CFG["client"]["inbox_flag_minutes"] = 5
+        subprocess.run = real_run
+    cfg.CFG["client"]["inbox_flag_minutes"] = 5
     check("message: …with the flag off the reply promises none", out0.startswith("inbox → ") and "If the session is running" not in out0, out0)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

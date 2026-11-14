@@ -80,6 +80,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import store as _service_store
+from stackshot.core import readonly as _ro
+from stackshot.waits import watchers as _watch
+from stackshot.waits import stall as _stall
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import fleet_events as fleetev
@@ -106,7 +111,7 @@ class _Clock:
 CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first."""
-    d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts
+    d_ = _service_store._load(f"a{i}"); mutate(d_); CLK.t = ts
     try: writes.save(f"a{i}", d_, writer=writer, **kw)
     finally: CLK.t = None
 class _Err:
@@ -214,10 +219,10 @@ save_at(now0 + 10 * MIN, 300, lambda d_: d_["metadata"].update(next="home-peer: 
 save_at(now0 + 11 * MIN, 300, lambda d_: d_.update(confirmed=now0 + 11 * MIN), activity=ACT.CONFIRM)
 save_at(now0 + 12 * MIN, 300, lambda d_: None, note="still on it", activity=ACT.MESSAGE)
 check("2 a status line, a \"no change\" reply, a confirm and a note do not move it", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"}, la(300))
-d_ = server._load("a300"); server._stall.note(d_["metadata"], now0 + 13 * MIN, "its mover is live but wrote nothing for 4 hours: -main was told"); CLK.t = now0 + 13 * MIN
+d_ = _service_store._load("a300"); _stall.note(d_["metadata"], now0 + 13 * MIN, "its mover is live but wrote nothing for 4 hours: -main was told"); CLK.t = now0 + 13 * MIN
 try: writes.save("a300", d_, activity=ACT.BOOKKEEPING)
 finally: CLK.t = None
-check("2 the ladder's own History line (a save of the server's, no writer) does not move it, and the History line is on the item", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and any("-main was told" in x.get("text", "") for x in server._stall.log_of(mt(300))), mt(300).get("stall") or mt(300).keys())
+check("2 the ladder's own History line (a save of the server's, no writer) does not move it, and the History line is on the item", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and any("-main was told" in x.get("text", "") for x in _stall.log_of(mt(300))), mt(300).get("stall") or mt(300).keys())
 save_at(now0 + 20 * MIN, 300, lambda d_: d_["metadata"].update(mover="home-peer2", needs=["home-peer2"]))
 check("2 a session's state change (a new mover) moves it, newest wins", la(300) == {"at": now0 + 20 * MIN, "what": "mover changed"} and lk(300) == "state_change", la(300))
 save_at(now0 + 30 * MIN, 300, lambda d_: d_["metadata"].update(released_told=["merged acme/widgets#12"]), writer="", activity=ACT.EVENT)
@@ -284,7 +289,7 @@ put(410); put(411, wake="2999-01-01T00:00", phase="waiting", waits_on="time", ho
 d_ = rd(410); d_["description"] = f"- Waits on {W_}/pull/50\n- Done when it lands"; wr(410, d_)
 shown = lambda i: f"board#{i}"
 def ev_pass(now, **kw):
-    gh_ = server._cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
+    gh_ = _cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
     try: return server._event_activity_tick(now)
     finally:
         CLK.t = None
@@ -399,13 +404,13 @@ check("5 …and the next pass applies them", sorted(saved) == ["a420", "a421"] a
 # a read-only standby copy and a held board run nothing, and keep the offset
 emit(60, "comment", "alice", 70 * MIN)
 off_ = EL.load_offset()
-real_ro, real_hold = server._ro.is_read_only, server._watch.holding
-server._ro.is_read_only = lambda: True
+real_ro, real_hold = _ro.is_read_only, _watch.holding
+_ro.is_read_only = lambda: True
 try: out_ro = ev_pass(now0 + 71 * MIN)
-finally: server._ro.is_read_only = real_ro
-server._watch.holding = lambda *a: True
+finally: _ro.is_read_only = real_ro
+_watch.holding = lambda *a: True
 try: out_hold = ev_pass(now0 + 71 * MIN)
-finally: server._watch.holding = real_hold
+finally: _watch.holding = real_hold
 check("5 a read-only standby copy and a held board run nothing and keep the offset", out_ro == [] and out_hold == [] and EL.load_offset() == off_ and la(420)["at"] == now0 + 62 * MIN, (out_ro, out_hold))
 saved = ev_pass(now0 + 72 * MIN)
 check("5 …the pass runs when they let go", sorted(saved) == ["a420", "a421"] and la(420)["at"] == now0 + 70 * MIN, saved)
@@ -415,7 +420,7 @@ put(430, mover="home-peer")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/70", "items": ["a430"]}]}))
 ML.append({"ts": now0 + 80 * MIN, "repo": "acme/widgets", "n": 70, "refs": []}); emit(70, "pr_merged", "alice", 80 * MIN)
 CLK.t = now0 + 81 * MIN
-gh_ = server._cfg.CFG.setdefault("github", {}); gh_["issues_letter"] = "a"
+gh_ = _cfg.CFG.setdefault("github", {}); gh_["issues_letter"] = "a"
 try: moved = server._merge_progress_tick(now0 + 81 * MIN)
 finally: CLK.t = None
 check("5 the merge pass is as before: it records the merge in merged_seen and moves activity, and the record says which pull request merged", moved == ["a430"] and mt(430).get("merged_seen") == ["acme/widgets#70"] and rd(430)["activity"] == now0 + 81 * MIN
@@ -748,7 +753,7 @@ check("10 event_time: absent, empty, unreadable, boolean, infinite and negative 
 check("10 event_time: older than a day, or more than an hour ahead, is dropped (None): the rule the pass has always applied to a line; just inside both is kept",
       EL.event_time(iso_at(now10 - 25 * H), now10) is None and EL.event_time(iso_at(now10 + 2 * H), now10) is None and EL.event_time(iso_at(now10 - 23 * H), now10) == now10 - 23 * H and EL.event_time(iso_at(now10 + 0.5 * H), now10) == now10 + 0.5 * H, None)
 check("10 a naive time is read in the instance's timezone, as the hub writes its own",
-      abs(EL.event_time(__import__("datetime").datetime.fromtimestamp(now10 - 2 * H, server._cfg.tz()).strftime("%Y-%m-%d %H:%M:%S"), now10) - (now10 - 2 * H)) < 1, None)
+      abs(EL.event_time(__import__("datetime").datetime.fromtimestamp(now10 - 2 * H, _cfg.tz()).strftime("%Y-%m-%d %H:%M:%S"), now10) - (now10 - 2 * H)) < 1, None)
 check("10 lines_for: the line carries the event's own time; an event outside the window writes none, one with no time the hub's",
       lines(A_, "", "comment", now=now10, ts=iso_at(now10 - 10 * H))[0]["ts"] == now10 - 10 * H and lines(A_, "", "comment", now=now10, ts=iso_at(now10 - 30 * H)) == [] and lines(A_, "", "comment", now=now10, ts=iso_at(now10 + 3 * H)) == []
       and lines(A_, "", "comment", now=now10)[0]["ts"] == now10 and lines(A_, "", "pr_merged", now=now10, ts=iso_at(now10 - 2 * H))[0]["ts"] == now10 - 2 * H, None)

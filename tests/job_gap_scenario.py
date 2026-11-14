@@ -57,17 +57,22 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+import subprocess
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
+from stackshot.web import page_debts as _pdebts
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.model import field_gates as _fg
 from stackshot.web.tools import get as _wt_get
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
-_orig_run = server.subprocess.run
+_orig_run = subprocess.run
 def _fake_run(cmd, *a, **kw):
     if isinstance(cmd, list) and any(str(x).endswith("push.py") or str(x).endswith("fakepush.py") for x in cmd):
-        pushed.append(list(cmd)[-2:]); return server.subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
+        pushed.append(list(cmd)[-2:]); return subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
     return _orig_run(cmd, *a, **kw)
-server.subprocess.run = _fake_run
+subprocess.run = _fake_run
 def settle():
     """The notices go out on threads: wait for them (at most 3 s each)."""
     for t in threading.enumerate():
@@ -75,27 +80,27 @@ def settle():
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); HD = {"Authorization": "Bearer " + tok}
 def items(): return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit())
-def item(shown): return server._load(_model_ids._norm_id(shown))
+def item(shown): return _service_store._load(_model_ids._norm_id(shown))
 def jg(action, timer="sala-foo.timer", code="no-lane", repo="acme/alpha", sender="sala-unit-gaps", machine=None, **kw):
     b = {"action": action, "timer": timer, "code": code, "repo": repo, "sender": sender}
     b.update(kw)
     return server._client_post(machine or me, "job-gap", {k: v for k, v in b.items() if v is not None})
 def open_for(timer, code): return server._jobgap_open_items(f"{timer}: {code}")
 # the repo map of this instance: the test repos over the defaults
-server._cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/nobuild": "projects/nobuild", "acme/gamma": "projects/gamma", "acme/ghost": "projects/ghost", "Acme/Mixed-Case": "projects/alpha"}}
+_cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/nobuild": "projects/nobuild", "acme/gamma": "projects/gamma", "acme/ghost": "projects/ghost", "Acme/Mixed-Case": "projects/alpha"}}
 n0 = len(items())
 
 # ---- 1. open: the item and its shape
 st, out = jg("open", detail="/home/user/.config/systemd/user/sala-foo.timer, script /home/user/bin/foo.sh")
 check("open: 200 with the item id as shown, the timer, the code, the project, the mover, the keeper, repeat false, no fallback",
       st == 200 and out["timer"] == "sala-foo.timer" and out["code"] == "no-lane" and out["project"] == "projects/alpha" and out["mover"] == "home-sparrow-builder" and out["owner"] == "home-sparrow-main"
-      and out["repeat"] is False and out["fallback"] is False and out["item"] == server._gh.shown(_model_ids._norm_id(out["item"])), (st, out))
+      and out["repeat"] is False and out["fallback"] is False and out["item"] == _gh.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, filed under the repo's project page, marked with the timer and the code", it["status"] == "open" and m["project"] == "projects/alpha" and m["job_gap"] == "sala-foo.timer: no-lane", (it["status"], m))
 check("…the subject names the unit and the gap", it["subject"] == "[home] sala-foo.timer: has no X-Model-Lane", it["subject"])
-check("…p2; the project's builder (the one whose mandate builds, not the notes keeper) is the mover and is in needs", m.get("priority") == "p2" and server._session_label(m.get("mover")) == "home-sparrow-builder"
-      and [server._session_label(x) for x in m.get("needs") or []] == ["home-sparrow-builder"], m)
-check("…the keeper of record is the project's -main agent (not the builder, not the docs agent); the script is the creator", server._session_label(m["owner"]) == "home-sparrow-main"
+check("…p2; the project's builder (the one whose mandate builds, not the notes keeper) is the mover and is in needs", m.get("priority") == "p2" and sr._session_label(m.get("mover")) == "home-sparrow-builder"
+      and [sr._session_label(x) for x in m.get("needs") or []] == ["home-sparrow-builder"], m)
+check("…the keeper of record is the project's -main agent (not the builder, not the docs agent); the script is the creator", sr._session_label(m["owner"]) == "home-sparrow-main"
       and it["filed_by"] == f"sala-unit-gaps via a script on {me}", (m["owner"], it.get("filed_by")))
 check("…next is one line that names the builder and the fix: the unit in the repo with X-Model-Lane, linked from there", m.get("next", "").startswith("home-sparrow-builder: put sala-foo.timer's unit file in acme/alpha with an X-Model-Lane= line, linked from there")
       and "\n" not in m["next"].strip(), m.get("next"))
@@ -104,7 +109,7 @@ check("…the description is bullets: the gap, the detail, the fix, the repo, wh
       and "script /home/user/bin/foo.sh" in d[1] and d[2].startswith("- Fix: put sala-foo.timer") and "acme/alpha" in d[3] and d[4] == f"- Opened by sala-unit-gaps (a script on {me}); it closes when the watcher finds the gap fixed", it["description"])
 settle()
 check("…the builder is told once and no one else is: no push names the keeper of record or another agent", len(pushed) == 1 and pushed[0][0] in ("home-sparrow-builder", S["build"]) and out["item"] in pushed[0][1] and "now needs you" in pushed[0][1], pushed)
-check("…one item filed, and the row owes no page: no debt is charged to the script, the builder or the keeper", len(items()) == n0 + 1 and server._owed_load() == {}, (len(items()) - n0, server._owed_load()))
+check("…one item filed, and the row owes no page: no debt is charged to the script, the builder or the keeper", len(items()) == n0 + 1 and _pdebts._owed_load() == {}, (len(items()) - n0, _pdebts._owed_load()))
 check("…the item is alive with the builder as the mover (not in the owner's list)", M.derive(it).state == M.ALIVE and M.derive(it).mover == "home-sparrow-builder", (M.derive(it).state, M.derive(it).mover))
 check("…the item is in the brief", out["item"] in _wt_get.stackshot_get(out["item"]), _wt_get.stackshot_get(out["item"])[:300])
 gid1 = out["item"]
@@ -160,7 +165,7 @@ check("…the item is completed, outcome done, a one-line reason within the limi
       and "no-lane is fixed on sala-foo.timer" in it["metadata"].get("reason", "") and len(it["metadata"]["reason"]) <= _fg._close_reason_max() and it["metadata"]["outcome_text"].splitlines()[0] == "- sala-foo.timer: the gap (no-lane) is fixed"
       and it["metadata"]["outcome_text"].splitlines()[-1].startswith("- Closed by sala-unit-gaps (a script on") and "is fixed" not in it["description"], (it["status"], it["metadata"].get("reason"), it["description"]))
 settle()
-check("…the close tells no session and charges no page; the other gaps stay open", pushed == [] and server._owed_load() == {} and open_for("sala-foo.timer", "not-git") != [] and open_for("sala-foo.timer", "no-lane") == [], (pushed, server._owed_load()))
+check("…the close tells no session and charges no page; the other gaps stay open", pushed == [] and _pdebts._owed_load() == {} and open_for("sala-foo.timer", "not-git") != [] and open_for("sala-foo.timer", "no-lane") == [], (pushed, _pdebts._owed_load()))
 st, c2 = jg("clear", repo=None)
 check("clear with none open: 200, nothing cleared, a note that says so", st == 200 and c2["cleared"] == [] and "no open item for sala-foo.timer: no-lane" in c2["note"], (st, c2))
 st, c3 = jg("clear", timer="never-seen.timer", code="no-lane", repo=None)
@@ -188,7 +193,7 @@ check("a project with no builder: 200, the -main agent is mover and keeper, the 
       and o["project"] == "projects/nobuild", (st, o))
 settle()
 check("…the item says so: a description bullet and a next that names the -main agent; nobody is in needs and no one is pushed", "lists no builder" in it["description"] and it["metadata"]["next"].startswith("home-nobuild-main: ")
-      and not it["metadata"].get("needs") and server._session_label(it["metadata"].get("mover")) == "home-nobuild-main" and pushed == [], (it["description"], it["metadata"], pushed))
+      and not it["metadata"].get("needs") and sr._session_label(it["metadata"].get("mover")) == "home-nobuild-main" and pushed == [], (it["description"], it["metadata"], pushed))
 st, o7 = jg("open", timer="sala-nb.timer", repo="acme/nobuild")
 check("…and a repeat answers the same item with the fallback still true", st == 200 and o7["item"] == o["item"] and o7["repeat"] is True and o7["fallback"] is True, (st, o7))
 jg("clear", timer="sala-nb.timer", repo=None)
@@ -197,9 +202,9 @@ check("a project that lists no front agent: 409, nothing filed", st == 409 and "
 st, e = jg("open", timer="sala-g.timer", repo="acme/ghost")
 check("a repo mapped to a page that is not in the registry: 409 that says to fix the map", st == 409 and "projects/ghost" in e["error"] and "no project page" in e["error"], (st, e))
 # the defaults: no [job_gap] section at all -> the fleet's three repos
-server._cfg.CFG.pop("job_gap", None)
+_cfg.CFG.pop("job_gap", None)
 check("the defaults (no [job_gap.repos]): no repo is listed (the code names none)", server._jobgap_repos() == {}, server._jobgap_repos())
-server._cfg.CFG["job_gap"] = {"repos": {"example-owner/ops-hub": "ops/general", "example-org/fleet-tool": "projects/fleet-tool", "example-org/board": "projects/board"}}   # the example-owner instance's table
+_cfg.CFG["job_gap"] = {"repos": {"example-owner/ops-hub": "ops/general", "example-org/fleet-tool": "projects/fleet-tool", "example-org/board": "projects/board"}}   # the example-owner instance's table
 pushed.clear()
 st, o = jg("open", timer="sala-hub.timer", repo="example-owner/ops-hub", code="not-git")
 check("…ledger-hub is ops/general, its builder heron-engineer is the mover, heron-main the keeper", st == 200 and o["project"] == "ops/general" and o["mover"] == "heron-engineer" and o["owner"] == "heron-main"
@@ -207,10 +212,10 @@ check("…ledger-hub is ops/general, its builder heron-engineer is the mover, he
 settle()
 check("…and the builder is told", len(pushed) == 1 and pushed[0][0] in ("heron-engineer", S["gbuild"]), pushed)
 jg("clear", timer="sala-hub.timer", code="not-git", repo=None)
-server._cfg.CFG["job_gap"] = {"repos": "not a table"}
+_cfg.CFG["job_gap"] = {"repos": "not a table"}
 st, e = jg("open", repo="acme/alpha")
 check("a [job_gap] repos that is not a table lists no repo: 400 'none is listed'", st == 400 and "none is listed" in e["error"], (st, e))
-server._cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/odd": 7}}
+_cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/odd": 7}}
 check("…an entry that is not text is skipped", server._jobgap_repos() == {"acme/alpha": "projects/alpha"}, server._jobgap_repos())
 
 # ---- 5. the sender gate: the terminal prompt's (a label of at most 80 characters on one line, never the owner's name); none given is client.py
@@ -231,7 +236,7 @@ st, o = jg("open", timer="sala-label80.timer", sender="s" * 80)
 check("a sender of exactly 80 characters is taken", st == 200, (st, o)); jg("clear", timer="sala-label80.timer", repo=None, sender="s" * 80)
 
 # ---- 6. a subject that is too long is cut, never refused
-server._cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/nobuild": "projects/nobuild"}}
+_cfg.CFG["job_gap"] = {"repos": {"acme/alpha": "projects/alpha", "acme/nobuild": "projects/nobuild"}}
 LONG = "sala-" + "very-long-unit-name-" * 5 + "x.timer"          # 105 characters: the subject would be over 80
 st, o = jg("open", timer=LONG, code="no-lane")
 sub = item(o["item"])["subject"] if st == 200 else ""

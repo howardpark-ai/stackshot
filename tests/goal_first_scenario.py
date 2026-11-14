@@ -42,13 +42,15 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import bullet_text as BT; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.core import config as _cfg
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import writes
-server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
+_cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
 MAIN = "falcon-main"
@@ -71,7 +73,7 @@ def legacy(i, desc="- A thing\n- It lives here\n- Done when done"):
 def refusal(f):
     try:
         f(); return ""
-    except server.ToolError as e:
+    except ToolError as e:
         return str(e)
 
 # ---- 1. the pure readers
@@ -175,10 +177,10 @@ finally:
 check("the re-bullet route's filing edit is not judged, inside a session write too", stored("a47")["description"].startswith("- Re-bulleted"), out)
 
 # ---- 6. the switch
-server._cfg.CFG["description"]["require_bullets"] = False
+_cfg.CFG["description"]["require_bullets"] = False
 r = create("Plain prose, as before.")[0]
 check("require_bullets = false: the goal check is off with the other form checks (the way back)", r.startswith("created"), r)
-server._cfg.CFG["description"]["require_bullets"] = True
+_cfg.CFG["description"]["require_bullets"] = True
 check("…and back on by default", "must open with its goal" in refusal(lambda: create("- A thing")), None)
 
 # ---- 7. the text sessions learn the rule from

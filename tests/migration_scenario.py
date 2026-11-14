@@ -134,6 +134,12 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.router import routing as _routing
+from stackshot.github import ghsync as _gh
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.core import config as _cfg
+from stackshot.waits import waiting as _wt
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -151,7 +157,7 @@ def _tell(gid, owner, note, tag="wake", result=None):
     if result is not None: result.update(ok=not FAIL_PUSH[0], why="push said: failed — session gone" if FAIL_PUSH[0] else "")
     if not FAIL_PUSH[0]: SENT.append((gid, owner, note, tag))
 telling.tell_woken = _tell
-CFG = server._cfg.CFG.setdefault("model", {})
+CFG = _cfg.CFG.setdefault("model", {})
 def cfg(**kw):
     for k, v in kw.items(): CFG[k] = v
 cfg(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False)
@@ -386,7 +392,7 @@ refused("unrecorded: the guard of a new close refuses it (update with status=com
 refused("unrecorded: …and the gate itself", lambda: gates.gate_close("g90", rd(90), "unrecorded", "r", "", "new text"), "unrecorded")
 check("unrecorded: …the item is still open", rd(90)["status"] == "open", None)
 check("unrecorded: GitHub's close for it is plain `completed` (a change to nothing); dropped and superseded stay `not_planned`",
-      server._gh.state_of(rd(24)) == ("closed", "completed") and server._gh.state_of(rd(21)) == ("closed", "not_planned") and server._gh.state_of(rd(22)) == ("closed", "not_planned"), None)
+      _gh.state_of(rd(24)) == ("closed", "completed") and _gh.state_of(rd(21)) == ("closed", "not_planned") and _gh.state_of(rd(22)) == ("closed", "not_planned"), None)
 bd = ui_render.Board(f"{tmp}/store")
 pg = _html.unescape(re.sub(r"<[^>]+>", "", bd.item_html("g24")))
 check("unrecorded: the item page says closed (no outcome recorded), not an invented outcome", "no outcome recorded" in pg and "unrecorded" not in pg.replace("no outcome recorded", ""), pg[:400])
@@ -446,7 +452,7 @@ check("front: the live fixture has no reassignment of a front agent's item: the 
 
 # ---- the gate of the route
 wk.release()
-CFGM = server._cfg.CFG["model"]
+CFGM = _cfg.CFG["model"]
 GB = lambda **kw: {"op": "begin", "sender": "falcon-redesign-engineer", **kw}
 check("gate: [model] migration is off by default", migsvc.migration_on() is False, None)
 st_, d_ = server._client_post("box-a", "migrate", GB())
@@ -524,13 +530,13 @@ check("forged: …a basis with no date in it is refused too", r_["action"] == "r
 r_ = call("apply", writes=[{"item": "board#84", "set": {"wait_basis": {"text": f"the trip ends {day(10)}", "wake": day(9), "by": "migration", "at": 1.0}}, "expect": E(84), "expect_sig": S(84)}])["results"][0]
 check("forged: …and one that follows the rule (by the migration, its wake the item's, a real date from the wake on) is stored", r_["action"] == "set" and mt(84)["wait_basis"]["by"] == "migration", (r_, mt(84).get("wait_basis")))
 # the guard that cannot judge counts as refused here
-_chk = server._mg.check
-server._mg.check = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the guard broke"))
+_chk = mg.check
+mg.check = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the guard broke"))
 try:
     r_ = call("apply", writes=[{"item": "board#85", "set": {"mover": BACK}, "expect": E(85), "expect_sig": S(85)}])["results"][0]
     quiet = gates.gate_model({"status": "open", "metadata": {"mover": BACK}}, {"mover"}, "g85")
 finally:
-    server._mg.check = _chk
+    mg.check = _chk
 check("strict: a guard that fails to judge refuses the write in the migration (it writes as before everywhere else)", r_["action"] == "refused" and "could not judge" in r_["why"] and "mover" not in mt(85) and quiet == "", r_)
 call("end")
 # a restart mid-pass: the hold is gone, the next apply is refused, and the pass begun again finds the item done
@@ -548,8 +554,8 @@ BTN = {"kind": "decision", "choice": "wait_oct28", "choice_line": "Wait for Oct 
 item(91, hold=True, hold_set={"at": OLDEST, "by": "home-front"}, wake=day(9), su=now0 - 5 * DAY, needs=[BACK], owner=UB, subject="[home] held by his button", answers=[BTN])
 item(92, hold=True, hold_set={"at": OLDEST, "by": "home-front"}, wake=day(9), su=now0 - 5 * DAY, needs=[BACK], owner=UB, subject="[home] his button is no park",
      answers=[{"kind": "decision", "choice": "approve", "choice_line": "Approve", "ts": OLDEST - 20, "via": "board"}])
-check("button: his words in an answer are what he typed; for a button he pressed the option and its line (\"<choice>: <line>\"), or the one of them there is", server._wt.answer_words({"text": "park it", "choice_line": "L"}) == "park it" and server._wt.answer_words(BTN) == "wait_oct28: Wait for Oct 28th"
-      and server._wt.answer_words({"choice": "wait_oct28"}) == "wait_oct28" and server._wt.answer_words({"choice_line": "L"}) == "L" and server._wt.answer_words({}) == "" and server._wt.answer_words(None) == "", None)
+check("button: his words in an answer are what he typed; for a button he pressed the option and its line (\"<choice>: <line>\"), or the one of them there is", _wt.answer_words({"text": "park it", "choice_line": "L"}) == "park it" and _wt.answer_words(BTN) == "wait_oct28: Wait for Oct 28th"
+      and _wt.answer_words({"choice": "wait_oct28"}) == "wait_oct28" and _wt.answer_words({"choice_line": "L"}) == "L" and _wt.answer_words({}) == "" and _wt.answer_words(None) == "", None)
 q91 = M.park_quote(rd(91), time.time())
 check("button: an answer made by a button alone (no text) stands behind the hold as his parking word, and his quote is the button's line", q91 is not None and M.cap_ok_from(rd(91), q91)["quote"] == "wait_oct28: Wait for Oct 28th", q91)
 check("button: …but a button that is no park (\"Approve\") is not", M.park_quote(rd(92), time.time()) is None, None)
@@ -572,7 +578,7 @@ for k_, (ent, want) in enumerate(TABLE):
          answers=[{"kind": "decision", "ts": OLDEST - 20, "via": "board", **ent}])
     try: server._cap_words_entry("g98", {"ts": OLDEST - 20}, rd(98)); cw = True
     except Exception: cw = False
-    tab.append((ent, want, server._wt.answer_parks(rd(98)["metadata"]["answers"][0]), M.park_quote(rd(98), time.time()) is not None, cw))
+    tab.append((ent, want, _wt.answer_parks(rd(98)["metadata"]["answers"][0]), M.park_quote(rd(98), time.time()) is not None, cw))
 check("words table: what parks and what does not agrees in the plan's park_quote, the cap-words job and waiting.answer_parks",
       all(w == a == q == c for _e, w, a, q, c in tab), [t for t in tab if not (t[1] == t[2] == t[3] == t[4])])
 (T / "store/g/98.json").unlink()
@@ -629,7 +635,7 @@ class LiveToServer:
     def __init__(self, sender): self.sender = sender
     def call(self, body):
         try: return 200, migsvc.migrate_write({**body, "sender": self.sender}, "testbox")
-        except server.ToolError as e: return 400, {"error": str(e)}
+        except ToolError as e: return 400, {"error": str(e)}
 SND = "falcon-redesign-engineer"
 pid5 = e_g1["pass_id"]
 rec5 = migsvc.pass_load(pid5)
@@ -748,31 +754,31 @@ check("S2: a push that fails is reported `sent: false` with its reason, the owne
       and MM.ledger_of(runs3) >= {MM.row_key(r) for r in rows_g1 if r["item"] in ("board#95", "board#97")}, (rc_f, direct_f, owners_f, led_f, rc_ok, len(sent("migration"))))
 
 # ---- the anchor pass stands still with the pass held
-_rd, _rel = server._routing.read, wakes_svc.anchor_release
+_rd, _rel = _routing.read, wakes_svc.anchor_release
 RC: list = []
-server._routing.read = lambda *a, **k: (RC.append(a), _rd(*a, **k))[1]; wakes_svc.anchor_release = lambda *a, **k: []
+_routing.read = lambda *a, **k: (RC.append(a), _rd(*a, **k))[1]; wakes_svc.anchor_release = lambda *a, **k: []
 try:
     wk.hold(BY, 600, begin=True); held_r = wakes_svc.anchor_pass(); n_held = len(RC); wk.release(); wakes_svc.anchor_pass(); n_free = len(RC)
 finally:
-    server._routing.read, wakes_svc.anchor_release = _rd, _rel; wk.release()
+    _routing.read, wakes_svc.anchor_release = _rd, _rel; wk.release()
 check("anchor pass: it releases nothing and reads no notice while the pass holds the board; free, it reads the log", held_r == [] and n_held == 0 and n_free > 0, (held_r, n_held, n_free))
 
 # ---- the mirror on: an item with an issue gets its one job, an item with none gets none (a job for it would create an issue)
 for n_ in (87, 88): item(n_, needs=[BACK], subject=f"[home] mirror {n_}")
-server._gh.record_issue("g87", 87)
-_en = server._gh.enabled; server._gh.enabled = lambda: True
-for q_ in server._gh.pending(): q_.unlink()
+_gh.record_issue("g87", 87)
+_en = _gh.enabled; _gh.enabled = lambda: True
+for q_ in _gh.pending(): q_.unlink()
 call("begin")
 try:
     ra = call("apply", writes=[{"item": "board#87", "set": {"mover": BACK}, "expect": E(87), "expect_sig": S(87), "note": "mover set"}, {"item": "board#88", "set": {"mover": BACK}, "expect": E(88), "expect_sig": S(88), "note": "mover set"}])["results"]
-    jobs = [json.loads(q_.read_text()) for q_ in server._gh.pending()]
+    jobs = [json.loads(q_.read_text()) for q_ in _gh.pending()]
 finally:
-    server._gh.enabled = _en; call("end")
-    for q_ in server._gh.pending(): q_.unlink()
+    _gh.enabled = _en; call("end")
+    for q_ in _gh.pending(): q_.unlink()
 check("mirror: with the mirror on, the migration's writes (a mover, which the issue does not carry) queue no job for the item with an issue nor for the one with none",
       [x["action"] for x in ra] == ["set", "set"] and jobs == [], (ra, jobs))
 for n_ in (81, 82, 83, 84, 85, 86, 87, 88, 89, 91, 92, 93, 94, 95, 96, 97, 99, 19): (T / f"store/g/{n_}.json").unlink()
-m_ = server._gh.load_map(); m_["issues"].pop("g87", None); server._gh.save_map(m_)
+m_ = _gh.load_map(); m_["issues"].pop("g87", None); _gh.save_map(m_)
 
 # ================================================================ the script, over a copy
 live_before = {p.name: p.read_text() for p in (T / "store/g").glob("*.json")}
@@ -806,8 +812,8 @@ gc = rc["github"]
 check("script: --max-writes under the slim mirror: a migration write on an open item (a mover, a state) is no change of what the issue carries, so it costs no GitHub write and nothing is deferred; the count is reported",
       pc.returncode == 0 and gc.get("cap") == 4 and gc.get("items_with_issue") == 3 and gc.get("total") == 0 and gc.get("deferred", []) == [] and not [r for r in rc["residue"] if r["kind"] == "deferred"] and gc.get("items_no_issue", 0) > 5, (pc.stderr[-300:], gc))
 import types as _ty
-_ico, _gco = server._gh.issue_of, MM.github_cost
-server._gh.issue_of = lambda g, store=None: 5 if g.startswith("g") else 0
+_ico, _gco = _gh.issue_of, MM.github_cost
+_gh.issue_of = lambda g, store=None: 5 if g.startswith("g") else 0
 ws_ = [_ty.SimpleNamespace(gid=f"g{n}", set={}, drop=[]) for n in (2, 3, 4)] + [_ty.SimpleNamespace(gid="a9", set={}, drop=[])]
 its_ = {w_.gid: {"status": "open", "metadata": {}} for w_ in ws_}
 try:
@@ -815,7 +821,7 @@ try:
     MM.github_cost = lambda *a, **k: {"edit": 1, "bound": 0}          # a write that does change the subject, state or description of an item with an issue costs one edit
     t1_, l1_, u1_ = MM.select_writes(ws_, 2, its_)
 finally:
-    server._gh.issue_of, MM.github_cost = _ico, _gco
+    _gh.issue_of, MM.github_cost = _ico, _gco
 check("script: select_writes: with no cost every write is taken; with a cost of one edit each, an item with no issue is always taken, items with an issue in order until the cap, the rest left",
       len(t0_) == 4 and l0_ == [] and u0_ == 0 and [w_.gid for w_ in t1_] == ["g2", "g3", "a9"] and [w_.gid for w_ in l1_] == ["g4"] and u1_ == 2, (t0_, l0_, u0_, t1_, l1_, u1_))
 if reps:
@@ -856,7 +862,7 @@ cfg(switchover_fallback=True)
 check("switchover on: the old wake pass stands down only when the fallback is off", server._old_wait_off() is False and (cfg(switchover_fallback=False), server._old_wait_off())[1] is True, None)
 cfg(switchover_fallback=True)
 item(71, needs=["home-gone"], subject="[home] a mover whose pane is gone, no hand-off record", next="home-gone: the thing", mover="home-gone")
-sess = server._sessions_index()
+sess = _fleet_sessions_registry._sessions_index()
 env_h = handoff_svc.handoff_env(time.time())
 check("switchover on: the hand-off pass covers an item with no record (cover_all)", env_h.cover_all is True and ho.plan({"g71": {**rd(71), "gid": "g71"}}, env_h) is not None, None)
 dead = ho.Env(now=time.time(), derive=handoff_svc.ho_derive, pane=lambda who: "no pane" if who == "home-nobody" else "", cover_all=True, background=lambda p: [BACK], label=str)

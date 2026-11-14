@@ -240,30 +240,31 @@ d.pop(N); fs.write_text(json.dumps(d))
 
 # ---- 5. the server's ledger
 from stackshot.web import server
+from stackshot.web import page_debts as _pdebts
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.web.routes import client_api as _rt_client
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-check("server: a keeper's debt is strict, an agent's is not", server._strict(S) and server._strict(B) and not server._strict(A))
-server._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() - 30, "item": "s2"}}})
+check("server: a keeper's debt is strict, an agent's is not", _pdebts._strict(S) and _pdebts._strict(B) and not _pdebts._strict(A))
+_pdebts._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() - 30, "item": "s2"}}})
 time.sleep(1.1); b = T / "brain/projects/beta.md"
 b.write_text(b.read_text(encoding="utf-8") + "- **2026-01-02** | t — a timeline line\n", encoding="utf-8")
-d = server._owed_settle().get("projects/beta", {})
+d = _pdebts._owed_settle().get("projects/beta", {})
 check("a timeline line settles the agent's debt, not the keeper's", B in d and A not in d, d)
-n = server._nag(B); check("the nag says why, to a page keeper", "As a page keeper" in n and "not what is true now" in n, n)
-check("…and not to a session that keeps no page", "As a page keeper" not in server._nag(A), server._nag(A))
-n = server._nag(A); check("the pages-owed line marks a keeper's debt as settled only by Current state", "pages owed:" in n and "a keeper: settles on a Current-state edit" in n, n)
-server._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() + 3600, "item": "s2"}}})
-n = server._nag(B); check("…and leaves a non-keeper's debt plain", "pages owed:" in n and "a keeper:" not in n, n)
-server._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}}})
+n = _pdebts._nag(B); check("the nag says why, to a page keeper", "As a page keeper" in n and "not what is true now" in n, n)
+check("…and not to a session that keeps no page", "As a page keeper" not in _pdebts._nag(A), _pdebts._nag(A))
+n = _pdebts._nag(A); check("the pages-owed line marks a keeper's debt as settled only by Current state", "pages owed:" in n and "a keeper: settles on a Current-state edit" in n, n)
+_pdebts._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() + 3600, "item": "s2"}}})
+n = _pdebts._nag(B); check("…and leaves a non-keeper's debt plain", "pages owed:" in n and "a keeper:" not in n, n)
+_pdebts._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}}})
 b.write_text(b.read_text(encoding="utf-8").replace("- small state.", "- small state, now different."), encoding="utf-8")
-check("a Current-state edit settles it", B not in server._owed_settle().get("projects/beta", {}))
+check("a Current-state edit settles it", B not in _pdebts._owed_settle().get("projects/beta", {}))
 
 # ---- 5b. `pages.py clear <key>` drops the caller's own debt only (a clear once wiped a keeper's
 # reminder); another writer's is named and kept; --force drops every writer's, as clear did before
-LEDGER = server._owed_path(); kept_ledger = LEDGER.read_text(encoding="utf-8") if LEDGER.exists() else None
+LEDGER = _pdebts._owed_path(); kept_ledger = LEDGER.read_text(encoding="utf-8") if LEDGER.exists() else None
 def clear(*args, sid=S):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"}
     if sid: env["CLAUDE_CODE_SESSION_ID"] = sid
@@ -330,18 +331,18 @@ check("flavor gbrain: the nag names add_timeline_entry, then edit_page, and put_
       and "put_page only for a whole rewrite" in gb and "with expected_revision" in gb
       and RETIRED_SCRIPT not in gb and "EXAMPLE_PAGE_PUSH" not in gb and "on the server box only" not in gb, gb)
 p._cfg.CFG["pages"]["flavor"] = "plain"
-check("flavor gbrain: the server's wording is today's text, byte for byte", server._page_how("gbrain") ==
+check("flavor gbrain: the server's wording is today's text, byte for byte", _pdebts._page_how("gbrain") ==
       "dated line → add_timeline_entry; other edits → get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page with expected_revision (the read's revision) "
-      "and edits [{old_text, new_text}]; put_page only for a whole rewrite; never edit or git inside the brain mirror", server._page_how("gbrain"))
-_ph = server._page_how("gbrain")
+      "and edits [{old_text, new_text}]; put_page only for a whole rewrite; never edit or git inside the brain mirror", _pdebts._page_how("gbrain"))
+_ph = _pdebts._page_how("gbrain")
 check("flavor gbrain: the server's wording names add_timeline_entry, then edit_page; no retired script, no push override",
       _ph.index("add_timeline_entry") < _ph.index("edit_page") and "put_page only for a whole rewrite" in _ph
       and RETIRED_SCRIPT not in _ph and "EXAMPLE_PAGE_PUSH" not in _ph, _ph)
-server._owed_save({"projects/gamma": {B: {"ts": time.time() + 3600, "item": "s9"}}})       # a debt the page cannot have settled yet
+_pdebts._owed_save({"projects/gamma": {B: {"ts": time.time() + 3600, "item": "s9"}}})       # a debt the page cannot have settled yet
 check("flavor plain: the server's nag and refusal say edit the file",
-      server._page_how() == f"edit {tmp}/brain/<key>.md (its Current state, and a dated line under its Timeline), commit and push"
-      and f"({server._page_how()})" in server._nag(B), (server._page_how(), server._nag(B)))
-server._owed_save({})
+      _pdebts._page_how() == f"edit {tmp}/brain/<key>.md (its Current state, and a dated line under its Timeline), commit and push"
+      and f"({_pdebts._page_how()})" in _pdebts._nag(B), (_pdebts._page_how(), _pdebts._nag(B)))
+_pdebts._owed_save({})
 # F4: the keeper's injection follows the flavor; gbrain's wording is today's, byte for byte
 saved_ex = p.excerpts; p.excerpts = lambda keys, total: "<EXCERPTS>"
 inj = p.inject_text(B, "home-beta", ["projects/beta"])

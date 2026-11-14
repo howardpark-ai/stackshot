@@ -70,6 +70,9 @@ def accepted(name, f):
         check(name, False, str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.core import config as _cfg
+from stackshot.anchors import anchors as _anc
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import route as _wt_route
@@ -79,12 +82,12 @@ from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
-CFG = server._cfg.CFG.setdefault("model", {})
+CFG = _cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, watchers=True, pause=False)       # the write guards have their own suite
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOURS * 3600))
 BACK, FRONT = "team-back", "home-front"
 A1, A2, A3, A4, A5 = (f"https://github.com/o/r/pull/{n}" for n in (101, 102, 103, 104, 105))
-def anchors(**pages): server._anc.save({k.replace("_", "/", 1): v for k, v in pages.items()})
+def anchors(**pages): _anc.save({k.replace("_", "/", 1): v for k, v in pages.items()})
 def entry(url, items=None): return {"url": url, "items": items, "added": now0, "by": "x"}
 def wait(gid, url, **kw):
     return server._update(gid, sender=FRONT, wait_kind="anchor", wait_anchor=url, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none", **kw)
@@ -98,7 +101,7 @@ except Exception as e:
     msg = str(e)
     check("update: an anchor that is not on the project's list is refused", "Refused" in msg, msg)
     check("update: …the message names the anchor and the project", A1 in msg and "projects/alpha" in msg and "anchors list" in msg, msg)
-    check("update: …and the anchors call that adds it scoped to this item, then the wait again", f'anchors(project="projects/alpha", add=["{A1}"], items=["{server._gh.shown("a60")}"])' in msg and "set the wait again" in msg, msg)
+    check("update: …and the anchors call that adds it scoped to this item, then the wait again", f'anchors(project="projects/alpha", add=["{A1}"], items=["{_gh.shown("a60")}"])' in msg and "set the wait again" in msg, msg)
 check("update: …nothing was stored", raw(60) == before, mt(60))
 
 anchors(projects_alpha=[entry(A2, ["a60"])])

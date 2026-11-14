@@ -70,6 +70,9 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
+from stackshot.fleet import liveness as _lv
+from stackshot.core import config as _cfg
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import watching as watching_svc, event_waits as evwaits_svc
@@ -95,7 +98,7 @@ ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no dayligh
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 BACK, FRONT = "team-back", "home-front"
 UB = U["team-back"]
-CFG = server._cfg.CFG.setdefault("model", {})
+CFG = _cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, watchers=True, pause=False)
 def sent(tag=None): return [x for x in SENT if tag is None or x[3] == tag]
 def reset(): SENT.clear(); NOTES.clear()
@@ -140,9 +143,9 @@ except Exception as e:
     why = str(e)
 m_seen = re.search(r"last checked in at (\d{4}-\d\d-\d\d \d\d:\d\d) (\S+)\)", why); m_after = re.search(r"that check-in, that is after (\d{4}-\d\d-\d\d \d\d:\d\d) (\S+);", why)
 _tfmt = lambda t: datetime.datetime.fromtimestamp(t, _wt_text.ZONE).strftime("%Y-%m-%d %H:%M")
-_seen_ts = server._lv.ts(json.loads((T / "state/clients/state.json").read_text())["machines"]["host-a"]["puller"])
+_seen_ts = _lv.ts(json.loads((T / "state/clients/state.json").read_text())["machines"]["host-a"]["puller"])
 check("write: ...the refusal says when the machine last checked in and the time after which the same write is accepted (check-in + online_minutes), in the instance zone, and no UTC beside it",
-      m_seen and m_after and m_seen.group(1) == _tfmt(_seen_ts) and m_after.group(1) == _tfmt(_seen_ts + 600) and m_seen.group(2) == m_after.group(2) == server._cfg.tz_abbr() and "UTC" not in why, why)
+      m_seen and m_after and m_seen.group(1) == _tfmt(_seen_ts) and m_after.group(1) == _tfmt(_seen_ts + 600) and m_seen.group(2) == m_after.group(2) == _cfg.tz_abbr() and "UTC" not in why, why)
 check("write: ...a refused write leaves the item as it was", "wait_kind" not in mt(12) and mt(12).get("mover") == BACK, mt(12))
 refused("write: ...and the hostname of an online machine is refused the same way", lambda: server._update("a12", sender=BACK, wait_kind="event", wait_event="box_online host-a", ask_by=day(5), post_wake_mover=BACK, mover="none"), "box-a is online now")
 # two records of one fleet name: the newest check-in speaks for the machine, whichever the file lists first
@@ -173,7 +176,7 @@ try:
                                   wait_kind="event", wait_event="box_online box-b", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="boxon-create-1")
 except Exception as e:
     g, cout = None, f"ERR {e}"
-check("create: an item can be filed already waiting on a machine, the gate the same", g and server._load(g)["metadata"].get("wait_event") == "box_online box-b" and "event wait:" in cout, cout[-400:])
+check("create: an item can be filed already waiting on a machine, the gate the same", g and _service_store._load(g)["metadata"].get("wait_event") == "box_online box-b" and "event wait:" in cout, cout[-400:])
 refused("create: ...and a create for a machine online now is refused", lambda: create_svc.create_item(subject="[home] filed waiting on box-a", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing",
         goal="Done when box-a ran it.", wait_kind="event", wait_event="box_online box-a", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="boxon-create-2"), "box-a is online now")
 

@@ -395,6 +395,7 @@ for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write g
 for _n, _f in REAL_MOVED.items(): setattr(MOVED[_n][0], MOVED[_n][1], _f)      # and the real field and decision rules
 for _n, _f in REAL_TELLING.items(): setattr(telling, _n, _f)      # and the real notices
 from stackshot.web import server, page_debts
+from stackshot.model import model as _model
 from stackshot.web.tools import text as _wt_text
 tbl = update._hooks()
 check("10 no write gate is a hook of the update: the update calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(update.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))
@@ -488,7 +489,7 @@ CASES = [
     ("loose: a hold with a wake and no reason takes its next's window line", lambda: loose(LIVE, {"hold": True, "wake": "2099-03-02"}, LOGS, "", "2099-03-02"), (('collect the logs until 2099-03-02, then review', ('\n(fixed: this hold had a wake and no wait reason, and your next says what it waits for ("collect the logs until 2099-03-02, then review"), so that line is the wait_basis. Send wait_basis="<what it waits on, with its date YYYY-MM-DD>" to use other words: the server then leaves the field alone)', '2099-03-02', 'wait reason: the hold had a wake and no reason; the next line "collect the logs until 2099-03-02, then review" is its wait_basis. A wait_basis sent in a later write replaces it')), [('collect the logs until 2099-03-02, then review', '2099-03-02')])),
     ("loose: the description is read when next says nothing of the wait", lambda: loose(LIVE, {"hold": True}, "alpha-main: begin", "- Goal: collect the logs until 2099-03-02, then review", "2099-03-02"), (('collect the logs until 2099-03-02, then review', ('\n(fixed: this hold had a wake and no wait reason, and your description says what it waits for ("collect the logs until 2099-03-02, then review"), so that line is the wait_basis. Send wait_basis="<what it waits on, with its date YYYY-MM-DD>" to use other words: the server then leaves the field alone)', '2099-03-02', 'wait reason: the hold had a wake and no reason; the description line "collect the logs until 2099-03-02, then review" is its wait_basis. A wait_basis sent in a later write replaces it')), [('collect the logs until 2099-03-02, then review', '2099-03-02')])),
     ("loose: next's line wins over the description's", lambda: loose(LIVE, {"hold": True}, LOGS, "- Goal: wait until 2099-03-02 for the vendor", "2099-03-02"), (('collect the logs until 2099-03-02, then review', ('\n(fixed: this hold had a wake and no wait reason, and your next says what it waits for ("collect the logs until 2099-03-02, then review"), so that line is the wait_basis. Send wait_basis="<what it waits on, with its date YYYY-MM-DD>" to use other words: the server then leaves the field alone)', '2099-03-02', 'wait reason: the hold had a wake and no reason; the next line "collect the logs until 2099-03-02, then review" is its wait_basis. A wait_basis sent in a later write replaces it')), [('collect the logs until 2099-03-02, then review', '2099-03-02')])),
-    ("loose: an item the owner moves is left to the refusal", lambda: loose({**LIVE, "mover": server._model.owner_display()}, {"hold": True}, LOGS, "", "2099-03-02"), (('', ('', '', '')), [])),
+    ("loose: an item the owner moves is left to the refusal", lambda: loose({**LIVE, "mover": _model.owner_display()}, {"hold": True}, LOGS, "", "2099-03-02"), (('', ('', '', '')), [])),
     ("loose: a reason already stored for the wake is left alone", lambda: loose({**LIVE, "wake": "2099-03-02", "wait_basis": {"text": "vendor", "wake": "2099-03-02"}}, {"hold": True}, LOGS, "", ""), (('', ('', '', '')), [])),
     ("loose: a wait that is the owner's decision is left alone", lambda: loose({**LIVE, "needs": ["decision"]}, {"hold": True}, LOGS, "", "2099-03-02"), (('', ('', '', '')), [])),
     ("loose: a basis the gate refuses is no fix (the refusal stays)", lambda: loose(LIVE, {"hold": True}, LOGS, "", "2099-03-02", gate=_refuse), (('', ('', '', '')), [])),
@@ -524,11 +525,11 @@ try:
 finally: server._update = real_upd
 check("10 the complete reaches the server's `_update` by a late lookup (a suite that replaces it there still reaches the close)", via_update == "<patched update>", via_update)
 check("10 no flag and no notice is a hook of the update: the flags are service/writes.py's and the notices service/telling.py's, each read on its module", not ({"session_next", "reformat", "terminal_row", "question", "close_was_set"} | set(REAL_TELLING) | {"quiet"}) & {f.name for f in dataclasses.fields(update.Hooks)}, sorted({f.name for f in dataclasses.fields(update.Hooks)} & ({"session_next", "reformat", "terminal_row", "question", "close_was_set", "quiet"} | set(REAL_TELLING))))
-check("10 the zone the confirm reply is told in is the server's own ZONE, looked up when the reply is made", tbl.zone() is server.ZONE, tbl.zone())
-real_zone = server.ZONE
-server.ZONE = datetime.timezone(datetime.timedelta(hours=-5))
+check("10 the zone the confirm reply is told in is the server's own ZONE, looked up when the reply is made", tbl.zone() is _wt_text.ZONE, tbl.zone())
+real_zone = _wt_text.ZONE
+_wt_text.ZONE = datetime.timezone(datetime.timedelta(hours=-5))
 try: seen_zone = tbl.zone()
-finally: server.ZONE = real_zone
+finally: _wt_text.ZONE = real_zone
 check("10 …so a later change of it reaches the update", seen_zone == datetime.timezone(datetime.timedelta(hours=-5)), seen_zone)
 
 # ---------------------------------------------------------------- 11. the layers

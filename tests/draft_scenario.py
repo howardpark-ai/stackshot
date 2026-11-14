@@ -58,6 +58,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import create as _wt_create
@@ -70,7 +71,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
 get = lambda i: _wt_get.stackshot_get(f"a{i}")
-GUARDS = server._cfg.CFG.setdefault("model", {})
+GUARDS = _cfg.CFG.setdefault("model", {})
 
 JA = "こんにちは、オリバーです。\n\n  - 第一: 日程はそのままです。\n  - 第二: <b>リンク</b>は https://example.com/a?b=1&c=2 です。\n\nよろしくお願いします。\nThanks, Alex."
 POST = "Post the message in #general (the text is on the item)"
@@ -93,7 +94,7 @@ check("3 link: …a doc, Drive, Notion, Slack, a file in a repo and the issues l
       "https://docs.google.com/document/d/1/edit", "https://drive.google.com/file/d/1/view", "https://www.notion.so/x-123", "https://x.slack.com/archives/C1/p1", "https://github.com/o/r/blob/main/draft.md",
       "https://gist.github.com/o/1", "https://github.com/o/r/discussions/3", "https://example.com/issues/5")), None)
 check("3 link: …one that counts among ones that do not still counts", D.has_link("https://github.com/o/r/pull/1 and https://docs.google.com/document/d/1"), None)
-BU = str(server._cfg.get("instance", "board_url") or "").rstrip("/")
+BU = str(_cfg.get("instance", "board_url") or "").rstrip("/")
 check("3 link: the board's own links (the configured public base URL) cannot hold it", bool(BU) and not D.has_link(BU + "/items/12") and not D.has_link(BU) and D.has_link(BU + ".evil.example/x") and D.has_link("https://other.example/" + BU), BU)
 check("3 stem: a link in the text is found; a bare word is not", D.has_link("see https://docs.google.com/d/1") and D.has_link("x", "[doc](http://example.com/x)") and not D.has_link("see the doc", "ftp://x", None))
 

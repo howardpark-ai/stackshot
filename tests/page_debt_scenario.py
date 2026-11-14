@@ -103,22 +103,23 @@ os.environ.update(ANTHROPIC_API_KEY="[masked secret]", ANTHROPIC_AUTH_TOKEN="tok
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import page_debt; from stackshot.projects import pages as _pg
 _ct_changed_since = _pg.ct_changed_since       # the real one: section 9 patches it
 from stackshot.web import server
+from stackshot.web import page_debts as _pdebts
 from stackshot.web import publish as _web_publish
 from stackshot.service import page_debt as pdebt_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]; server._pdebts._page_ts = lambda key: 0.0
-server._cfg.CFG.setdefault("pilot", {})["writer_owes_page"] = True
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]; _pdebts._page_ts = lambda key: 0.0
+_cfg.CFG.setdefault("pilot", {})["writer_owes_page"] = True
 ZONE = _cfg.tz()
 DAY = lambda h, m=0, d=16: dt.datetime(2026, 10, d, h, m, tzinfo=ZONE).timestamp()
 def rcfg(**kw): _cfg.CFG["router"] = {"command": [sys.executable, str(T / "fake_claude.py")], "timeout_seconds": 20, **kw}
 def brain(k): return (T / f"brain/{k}.md").read_bytes()
 def routing_bytes(): return {p.name: p.read_bytes() for p in sorted(routing.DIR.glob("*.jsonl"))}
-def reset(): server._owed_save({}); page_debt.write_days({})
+def reset(): _pdebts._owed_save({}); page_debt.write_days({})
 def owe(key, writer, gid, what, settle="ct", moves="work-osprey"):
-    d = server._owed_load(); d.setdefault(key, {})[writer] = {"ts": time.time() - 31 * 60, "item": gid, "settle": settle, "moves": moves, "what": what}; server._owed_save(d)
+    d = _pdebts._owed_load(); d.setdefault(key, {})[writer] = {"ts": time.time() - 31 * 60, "item": gid, "settle": settle, "moves": moves, "what": what}; _pdebts._owed_save(d)
 def dlog(): return page_debt.read_log()
 
 class FakeIO:
@@ -163,7 +164,7 @@ n0 = len(pushes()); k = server._pilot_fallback_tick(); p = wait_push(n0 + 2)[n0:
 lv_a = [n for n in routing.read("projects/alpha") if n.get("kind") == "board" and n.get("live")]; lv_g = [n for n in routing.read("projects/gamma") if n.get("kind") == "board" and n.get("live")]; lv = lv_a + lv_g
 check("off: three debts past the grace move; every project is the router's, so they are recorded for the router, one notice each, and pushed to no keeper",
       k == 3 and not p and len(lv) == 3 and all(not n.get("to") for n in lv) and len(lv_a) == 2 and len(lv_g) == 1, (p, lv))
-led = server._owed_load()
+led = _pdebts._owed_load()
 check("the moved entries are marked (moved), with each debt's item, what changed and its writer",
       led["projects/alpha"]["work-osprey"].get("moved") is True and [(x["item"], x["what"], x["writer"]) for x in led["projects/alpha"]["work-osprey"]["debts"]] == [("a1", "changed (description)", A), ("a2", "changed (next)", X)]
       and led["projects/alpha"]["work-osprey"]["settle"] == "ct" and "moves" not in led["projects/alpha"]["work-osprey"], led["projects/alpha"])
@@ -172,7 +173,7 @@ check("off: the pass runs nothing and returns {}", pdebt_svc.page_debt_pass(now=
 # ---- 3. shadow: one call per page for an audit run, once per run
 _cfg.CFG["router"].update(page_debt=True)
 check("page_debt on, no shadow key: shadow", page_debt.mode() == "shadow")
-before = (brain("projects/alpha"), brain("projects/gamma"), json.dumps(server._owed_load(), sort_keys=True), routing_bytes(), len(pushes()))
+before = (brain("projects/alpha"), brain("projects/gamma"), json.dumps(_pdebts._owed_load(), sort_keys=True), routing_bytes(), len(pushes()))
 fake("good", EDIT_A, **{"projects/gamma": json.dumps({"edits": [{"old_text": "- Launch: planned for the 15th.", "new_text": "- Launch: moved to the 22nd."}], "reason": "moved"})})
 RUN1 = "2026-10-16-050000"; RUN2 = "2026-10-16-200000"
 out = pdebt_svc.page_debt_pass(now=DAY(5, 0), run=RUN1)
@@ -194,7 +195,7 @@ check("shadow log, alpha: the proposal, that it applies, the items, the call", d
       and dl["projects/alpha"]["items"] == ["a1", "a2"] and dl["projects/alpha"]["proposal"]["edits"][0]["new_text"].startswith("- Vendor: the quote came in") and dl["projects/alpha"]["call"] and dl["projects/alpha"]["status"] == "ok"
       and dl["projects/alpha"]["usage"]["input_tokens"] == 1500, dl["projects/alpha"])
 check("shadow log, gamma: an old_text that is not on the page would fall back, with the reason", dl["projects/gamma"]["result"] == "would_fall_back" and dl["projects/gamma"]["applies"] is False and "occurs 0 times" in dl["projects/gamma"]["why"], dl["projects/gamma"])
-after = (brain("projects/alpha"), brain("projects/gamma"), json.dumps(server._owed_load(), sort_keys=True), routing_bytes(), len(wait_push(len(pushes()))))
+after = (brain("projects/alpha"), brain("projects/gamma"), json.dumps(_pdebts._owed_load(), sort_keys=True), routing_bytes(), len(wait_push(len(pushes()))))
 check("shadow changed nothing: the pages, the debts, the routing log and the messages are as they were", before[:2] == after[:2] and before[2] == after[2] and before[3] == after[3] and before[4] == after[4], (before[2], after[2]))
 cr = [c for c in router._read(router.calls_path()) if c.get("kind") == "page_debt"]
 check("each call is a line in calls.jsonl (kind page_debt, with usage and cost)", len(cr) == 2 and all(c["status"] == "ok" and c["usage"]["input_tokens"] == 1500 and c["cost_usd"] == 0.0123 for c in cr), cr)
@@ -214,14 +215,14 @@ _cfg.CFG["router"].update(page_debt_shadow=False)
 check("page_debt_shadow = false is live", page_debt.live() and page_debt.mode() == "live")
 reset(); owe("projects/alpha", A, "a1", "changed (description)"); owe("projects/alpha", X, "a2", "changed (next)", settle="any")
 n0 = len(pushes()); server._pilot_fallback_tick(); time.sleep(0.5)
-check("live: the 30-minute move marks the debt and tells the keeper nothing", len(pushes()) == n0 and server._owed_load()["projects/alpha"]["work-osprey"].get("moved") is True, pushes()[n0:])
+check("live: the 30-minute move marks the debt and tells the keeper nothing", len(pushes()) == n0 and _pdebts._owed_load()["projects/alpha"]["work-osprey"].get("moved") is True, pushes()[n0:])
 io = FakeIO(**{"projects/alpha": alpha_page()}); fake("good", EDIT_A); nc = len(calls()); n0 = len(pushes()); r0 = routing_bytes()
 out = pdebt_svc.page_debt_pass(now=DAY(9, 30), io=io)
 want = alpha_page("- Vendor: the quote came in; signing is next.")
 check("live: applied once, one call", out == {"pages": 1, "applied": 1} and len(calls()) == nc + 1, out)
 check("live: one put, with the revision that was read; the page holds the edit in its Current state and is otherwise byte for byte the same", io.puts == [("projects/alpha", "r1")] and io.pages["projects/alpha"][0] == want, (io.puts, io.pages["projects/alpha"][0][:300]))
 time.sleep(0.4)
-check("live: the debts are settled and nobody is told", "projects/alpha" not in server._owed_load() and len(pushes()) == n0 and routing_bytes() == r0, (server._owed_load(), pushes()[n0:]))
+check("live: the debts are settled and nobody is told", "projects/alpha" not in _pdebts._owed_load() and len(pushes()) == n0 and routing_bytes() == r0, (_pdebts._owed_load(), pushes()[n0:]))
 last = dlog()[-1]
 check("live: the log says applied", last["result"] == "applied" and last["mode"] == "live" and last["applies"] is True and last["items"] == ["a1", "a2"], last)
 check("live: the pages checkout is untouched by the pass (the coordinator owns it)", brain("projects/alpha") == alpha_page().encode())
@@ -233,7 +234,7 @@ def fallback_case(name, mode, text, why_has, *, io_mode="", timeout=20, page=Non
     io = FakeIO(**{"projects/alpha": page or alpha_page(), "projects/gamma": GAMMA}); io.mode = io_mode
     fake(mode, text); n0, nc = len(pushes()), len(calls())
     out = pdebt_svc.page_debt_pass(now=DAY(9, 40), io=io); p = wait_push(n0 + 1)[n0:]
-    last = dlog()[-1]; led = server._owed_load().get(key, {})
+    last = dlog()[-1]; led = _pdebts._owed_load().get(key, {})
     orig = page or (GAMMA if key.endswith("gamma") else alpha_page())
     check(f"{name}: falls back" + ("" if writes else ", nothing is written to the page"), out.get("fallback") == 1 and last["result"] == "fallback" and last["applies"] is False and (writes or io.pages[key][0] == orig), (out, last))
     if no_call: check(f"{name}: no call was started", len(calls()) == nc, len(calls()) - nc)
@@ -274,7 +275,7 @@ def route_case(name, key, to, marked, *, moves="work-osprey", mode="good", text=
     io = FakeIO(**{key: alpha_page()}); io.mode = io_mode
     fake(mode, text); n0 = len(pushes())
     out = pdebt_svc.page_debt_pass(now=DAY(9, 45), io=io); p = wait_push(n0 + 1)[n0:]
-    last = dlog()[-1]; led = server._owed_load().get(key, {}); first = p[0][1].split("\n")[0] if p else ""
+    last = dlog()[-1]; led = _pdebts._owed_load().get(key, {}); first = p[0][1].split("\n")[0] if p else ""
     check(f"{name}: falls back to {to}, in one message", out.get("fallback") == 1 and last["to"] == to and len(p) == 1 and p[0][0] == to, (out, last, p))
     check(f"{name}: the message {'opens with the [for Oliver] mark' if marked else 'is the plain relay text, no mark'}",
           first.startswith(_wt_text._FOR_OWNER + f" [board] 1 page update on {key} is yours to write") if marked else first.startswith(f"[board] 1 page update on {key} is yours to write"), first)
@@ -294,7 +295,7 @@ route_case("a page with no agent of its own: its hub's -main agent", "projects/e
 reset(); rcfg(page_debt=True, page_debt_shadow=False)
 owe("projects/delta", A, "a1", "changed (description)", moves="work-delta"); server._pilot_fallback_tick(); time.sleep(0.4)
 io = FakeIO(**{"projects/delta": alpha_page()}); fake("good", CANNOT); n0 = len(pushes())
-out = pdebt_svc.page_debt_pass(now=DAY(9, 45), io=io); time.sleep(0.4); last = dlog()[-1]; led = server._owed_load().get("projects/delta", {})
+out = pdebt_svc.page_debt_pass(now=DAY(9, 45), io=io); time.sleep(0.4); last = dlog()[-1]; led = _pdebts._owed_load().get("projects/delta", {})
 check("no agent anywhere: the page and its hub list none and no general -main agent exists: the fallback tells nobody, a keeper included", out.get("fallback") == 1 and last["to"] == "" and len(pushes()) == n0, (out, last, pushes()[n0:]))
 check("…and the debt stays moved (to the keeper's name, which nobody reads), for the next audit run's call", list(led) == ["work-delta"] and led["work-delta"].get("moved") is True, led)
 route_case("a page's agent also gets a failed write (a put that timed out and left no edit)", "projects/alpha/vendor", "work-osprey-x", False, text=EDIT_A, io_mode="timeout_lost")
@@ -309,7 +310,7 @@ io = FakeIO(**{"projects/alpha": alpha_page()}); io.mode = "timeout_lands"; fake
 out = pdebt_svc.page_debt_pass(now=DAY(9, 50), io=io); time.sleep(0.4); last = dlog()[-1]
 check("a put that timed out and whose read back shows the edit: applied, the page is read back (two reads)", out == {"pages": 1, "applied": 1} and last["result"] == "applied" and io.gets == 2 and len(io.puts) == 1
       and io.pages["projects/alpha"][0] == alpha_page("- Vendor: the quote came in; signing is next."), (out, last, io.gets))
-check("…the debts are settled, nobody is told, the log notes that the answer was missing", "projects/alpha" not in server._owed_load() and len(pushes()) == n0 and "got no answer" in last["why"] and "taken as written" in last["why"], (server._owed_load(), last["why"]))
+check("…the debts are settled, nobody is told, the log notes that the answer was missing", "projects/alpha" not in _pdebts._owed_load() and len(pushes()) == n0 and "got no answer" in last["why"] and "taken as written" in last["why"], (_pdebts._owed_load(), last["why"]))
 io, last = fallback_case("a put that timed out and whose read back shows no edit", "good", EDIT_A, "got no answer", io_mode="timeout_lost")
 check("…the page was read back before the fallback, and the log says the edit is not on the page", io.gets == 2 and "a read back does not show the edit" in last["why"] and last["result"] == "fallback", (io.gets, last["why"]))
 
@@ -346,14 +347,14 @@ check("the day marks are in the state dir, per page and mode", page_debt.read_da
 
 # ---- 9. the debts a keeper already settled are not called for
 reset(); owe("projects/alpha", A, "a1", "changed (description)"); server._pilot_fallback_tick(); time.sleep(0.3)
-server._pdebts._page_ts = lambda key: time.time() + 500; _pg.ct_changed_since = lambda key, ts: True
+_pdebts._page_ts = lambda key: time.time() + 500; _pg.ct_changed_since = lambda key, ts: True
 nc = len(calls()); out = pdebt_svc.page_debt_pass(now=DAY(14, d=18))
-check("a debt whose page changed meanwhile is settled by the ledger and costs no call", out == {"pages": 0} and len(calls()) == nc and "projects/alpha" not in server._owed_load(), (out, server._owed_load()))
-server._pdebts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
+check("a debt whose page changed meanwhile is settled by the ledger and costs no call", out == {"pages": 0} and len(calls()) == nc and "projects/alpha" not in _pdebts._owed_load(), (out, _pdebts._owed_load()))
+_pdebts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
 reset(); owe("projects/alpha", A, "a1", "changed (description)"); server._pilot_fallback_tick(); time.sleep(0.3)
-d = server._owed_load(); d["projects/gamma"] = {"work-gamma": {"ts": time.time(), "item": "a3"}}; server._owed_save(d)
+d = _pdebts._owed_load(); d["projects/gamma"] = {"work-gamma": {"ts": time.time(), "item": "a3"}}; _pdebts._owed_save(d)
 nc = len(calls()); out = pdebt_svc.page_debt_pass(now=DAY(14, d=19), io=FakeIO(**{"projects/alpha": alpha_page()}))
-check("only moved debts are called for: the keeper's own debt is not", out == {"pages": 1, "applied": 1} and "projects/gamma" in server._owed_load(), (out, server._owed_load()))
+check("only moved debts are called for: the keeper's own debt is not", out == {"pages": 1, "applied": 1} and "projects/gamma" in _pdebts._owed_load(), (out, _pdebts._owed_load()))
 
 # ---- 10. off again
 reset(); rcfg(page_debt=False); owe("projects/alpha", A, "a1", "changed (description)"); server._pilot_fallback_tick(); time.sleep(0.3)

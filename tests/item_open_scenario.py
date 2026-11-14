@@ -60,16 +60,20 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+import subprocess
+from stackshot.service import store as _service_store
+from stackshot.web import page_debts as _pdebts
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.model import field_gates as _fg
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
-_orig_run = server.subprocess.run
+_orig_run = subprocess.run
 def _fake_run(cmd, *a, **kw):
     if isinstance(cmd, list) and any(str(x).endswith("push.py") or str(x).endswith("fakepush.py") for x in cmd):
-        pushed.append(list(cmd)[-2:]); return server.subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
+        pushed.append(list(cmd)[-2:]); return subprocess.CompletedProcess(cmd, 0, "delivered\n", "")
     return _orig_run(cmd, *a, **kw)
-server.subprocess.run = _fake_run
+subprocess.run = _fake_run
 def settle():
     """The notices go out on threads: wait for them (at most 3 s each)."""
     for t in threading.enumerate():
@@ -77,7 +81,7 @@ def settle():
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); HD = {"Authorization": "Bearer " + tok}
 def items(): return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit())
-def item(shown): return server._load(_model_ids._norm_id(shown))
+def item(shown): return _service_store._load(_model_ids._norm_id(shown))
 
 def bare_at(text): return re.search(r"(?<!\w)@(?!\u200b)\w", str(text)) is not None
 def io_(marker="test_trim:alpha", **kw):
@@ -93,12 +97,12 @@ n0 = len(items())
 # ---- 1. open: the item and its shape
 st, out = io_()
 check("open: 200 with the item id as shown, the marker, the project, the mover, the creator, repeat false", st == 200 and out["marker"] == "test_trim:alpha" and out["project"] == "projects/alpha" and out["mover"] == "home-sparrow-builder"
-      and out["owner"] == "home-sparrow-main" and out["repeat"] is False and out["item"] == server._gh.shown(_model_ids._norm_id(out["item"])), (st, out))
+      and out["owner"] == "home-sparrow-main" and out["repeat"] is False and out["item"] == _gh.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, filed under the project page, marked with the marker", it["status"] == "open" and m["project"] == "projects/alpha" and m["item_open"] == "test_trim:alpha", (it["status"], m))
 check("…the subject is the caller's words under the project scope's prefix", it["subject"] == "[home] Deep-scan the alpha suites", it["subject"])
-check("…the mover is the page's background agent and is in needs; the project's -main agent is the creator; the script is recorded as the writer", server._session_label(m.get("mover")) == "home-sparrow-builder"
-      and [server._session_label(x) for x in m.get("needs") or []] == ["home-sparrow-builder"] and server._session_label(m["owner"]) == "home-sparrow-main"
+check("…the mover is the page's background agent and is in needs; the project's -main agent is the creator; the script is recorded as the writer", sr._session_label(m.get("mover")) == "home-sparrow-builder"
+      and [sr._session_label(x) for x in m.get("needs") or []] == ["home-sparrow-builder"] and sr._session_label(m["owner"]) == "home-sparrow-main"
       and it["filed_by"] == "test-trim-job (a script on a client machine)", (m, it.get("filed_by")))
 check("…next is the one step, and it names the mover", m.get("next", "").strip() == "home-sparrow-builder: deep-scan the suites, delete what is obsolete, report", m.get("next"))
 d = it["description"].splitlines()
@@ -106,7 +110,7 @@ check("…the description is the caller's bullets, then who opened it", d == ["-
       "- Opened by test-trim-job (a script on a client machine)"], d)
 check("…no host name in the item (description, subject, creator), and none in what the call answered", me not in json.dumps(it) and me not in json.dumps(out), me)
 settle()
-check("…the mover is told once, no one else is: nothing is owed to the page", len(pushed) == 1 and pushed[0][0] in ("home-sparrow-builder", S["build"]) and out["item"] in pushed[0][1] and server._owed_load() == {}, (pushed, server._owed_load()))
+check("…the mover is told once, no one else is: nothing is owed to the page", len(pushed) == 1 and pushed[0][0] in ("home-sparrow-builder", S["build"]) and out["item"] in pushed[0][1] and _pdebts._owed_load() == {}, (pushed, _pdebts._owed_load()))
 check("…the item is alive with the builder as its mover", M.derive(it).state == M.ALIVE and M.derive(it).mover == "home-sparrow-builder", (M.derive(it).state, M.derive(it).mover))
 gid1 = out["item"]
 
@@ -143,7 +147,7 @@ for who, why in (("home-sparrow-main", "a front agent"), ("home-sparrow-docs", "
 st, e = io_(project="projects/nobuild", mover="home-nobuild-main", step="home-nobuild-main: deep-scan")
 check("a page that lists no background agent: 400 that says so", st == 400 and "lists none" in e["error"] and len(items()) == n3, (st, e))
 st, o = io_(marker="test_trim:notes", mover="home-sparrow-notes", step="home-sparrow-notes: deep-scan the suites")
-check("any background agent of the page is taken (not only the builder)", st == 200 and o["mover"] == "home-sparrow-notes" and server._session_label(item(o["item"])["metadata"]["mover"]) == "home-sparrow-notes", (st, o))
+check("any background agent of the page is taken (not only the builder)", st == 200 and o["mover"] == "home-sparrow-notes" and sr._session_label(item(o["item"])["metadata"]["mover"]) == "home-sparrow-notes", (st, o))
 close(o["item"])
 
 # ---- 5. bad bullets: refused, never cut, nothing filed

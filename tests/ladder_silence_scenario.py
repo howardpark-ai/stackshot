@@ -82,6 +82,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.core import config as _cfg
+from stackshot.service import store as _service_store
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import handoff as handoff_svc
@@ -110,11 +113,11 @@ def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fl
 def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
-def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
+def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)
 def ladder_cfg(enabled=True, **kw):
-    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, **kw}.items() if v is not None}
-set_cfg(); server._cfg.CFG["stall"] = {}
-server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
+    _cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, **kw}.items() if v is not None}
+set_cfg(); _cfg.CFG["stall"] = {}
+_cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
 COLD_MSGS = []
 def cold(answer, status="ok"):
     def run(msg):
@@ -142,7 +145,7 @@ def env():
 def clear_records():
     for p in (T / "state/audit").glob("*.json"): p.unlink()
     sent.clear()
-def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
+def load(*ids): return {f"a{i}": _service_store._load(f"a{i}") for i in ids}
 def enter(ids, at=None):
     """The dates pass's entry for these items at `at`: what `audit_run.dates_pass` does for each fresh finding that reached its mover (`entered=ladder_svc.ladder_enter_quiet`), without the pass's own message. → {"entered": n}."""
     now_ = now0 if at is None else at; n = 0
@@ -488,9 +491,9 @@ p0 = len(pushes()); d1 = stk(now0 + 50 * MIN)
 n_alpha = [p for p in pushes()[p0:] if p[0] == U["home-front"] and "background movers" in p[1]]
 n_beta = [p for p in pushes()[p0:] if p[0] == U["home-beta-front"] and "background mover" in p[1]]
 check("11e three items due for one -main in one pass: ONE notice that lists all three (id, project, mover, time since the last write), the fourth item's notice goes to its own -main",
-      sorted(d1) == ["a75", "a76", "a78", "a79"] and len(n_alpha) == 1 and len(n_beta) == 1 and all(server._gh.shown(f"a{i}") in n_alpha[0][1] for i in (75, 76, 78))
+      sorted(d1) == ["a75", "a76", "a78", "a79"] and len(n_alpha) == 1 and len(n_beta) == 1 and all(_gh.shown(f"a{i}") in n_alpha[0][1] for i in (75, 76, 78))
       and n_alpha[0][1].count("\n- ") == 3 and n_alpha[0][1].splitlines()[0] == "[for Oliver]" and n_alpha[0][1].count("(projects/alpha): mover ") == 3 and "mover home-docs" in n_alpha[0][1] and "mover team-back" in n_alpha[0][1]
-      and "no write since" in n_alpha[0][1] and "To stop the repeats, write to the item, hold it or set its wait" in n_alpha[0][1] and server._gh.shown("a79") not in n_alpha[0][1] and "a79" in n_beta[0][1], (d1, n_alpha, n_beta))
+      and "no write since" in n_alpha[0][1] and "To stop the repeats, write to the item, hold it or set its wait" in n_alpha[0][1] and _gh.shown("a79") not in n_alpha[0][1] and "a79" in n_beta[0][1], (d1, n_alpha, n_beta))
 check("11e …every listed item's entry is stamped and has its History line; the next pass sends nothing more", all(entry(i).get("main_at") == now0 + 50 * MIN for i in (75, 76, 78, 79)) and all(any("was told to decide" in x["text"] for x in log_of(i)) for i in (75, 76, 78, 79))
       and not stk(now0 + 50 * MIN + 60) and len(pushes()) == p0 + 2, [entry(i) for i in (75, 79)])
 close(75, 76, 78, 79)

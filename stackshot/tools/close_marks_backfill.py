@@ -40,8 +40,9 @@ def main(argv: list[str]) -> int:
     import logging
     logging.disable(logging.INFO)
     from stackshot.web import server
-    if not server._store.STORE.is_dir():
-        print(f"store {server._store.STORE}: not a folder", file=sys.stderr)
+    from stackshot.core import store as _store  # noqa: PLC0415
+    if not _store.STORE.is_dir():
+        print(f"store {_store.STORE}: not a folder", file=sys.stderr)
         return 2
     rows = server._close_marks_pass(apply=False)
     if a.json:

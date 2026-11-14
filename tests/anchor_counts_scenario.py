@@ -90,12 +90,13 @@ check("completion_due: the same anchor on two pages is asked about on each (each
 
 # ---- the readers built on it
 from stackshot.web import server
+from stackshot.anchors import anchors as ANC
 from stackshot.web import publish as _web_publish
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
-server._anc.save({k: v for k, v in store.items()})
+ANC.save({k: v for k, v in store.items()})
 check("the server reads an anchor held by another project's page (_scoped_anchors)", urls(server._scoped_anchors(A, "a1")) == [SOLO, DM] and urls(server._scoped_anchors(A, "b2")) == [DM, PR]
       and server._scoped_anchors(A, "z9") == [], (urls(server._scoped_anchors(A, "a1")), urls(server._scoped_anchors(A, "b2"))))
 check("...and from the anchors a pass already loaded", urls(server._scoped_anchors(A, "a1", store)) == [SOLO, DM] and server._scoped_anchors(A, "a1", None) == server._scoped_anchors(A, "a1"))

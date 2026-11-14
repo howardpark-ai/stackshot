@@ -57,6 +57,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc
@@ -66,7 +67,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
-CFGM = server._cfg.CFG.setdefault("model", {})
+CFGM = _cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
@@ -88,7 +89,6 @@ WAITKEYS = ("until", "wait_kind", "wake", "ask_by", "hold", "hold_set")
 wk = lambda m: {k: m.get(k) for k in WAITKEYS if k in m}
 sent = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": sent.append((gid, owner, note))
-server._tell = lambda *a, **k: sent.append(("tell", a))
 
 
 import datetime as _dtm, itertools, random
@@ -153,7 +153,7 @@ def sig_of(g, b, a, told):
 def tick(epoch):
     """{id: what the tick did} for the ids a tick at `epoch` acted on (a file rewritten, or a message that names the item); the store is put back after."""
     before = snapshot(); sent.clear()
-    wakes_svc.wake_pass(_dtm.datetime.fromtimestamp(epoch, server._cfg.tz()))
+    wakes_svc.wake_pass(_dtm.datetime.fromtimestamp(epoch, _cfg.tz()))
     after = snapshot()
     notes = {}
     for entry in sent:
@@ -192,9 +192,9 @@ for label, ep in (("+1 minute", epoch1), ("+3 days", epoch2), ("+20 days", epoch
     if label == "+1 minute":
         check(f"2 {label}: the tick after the migration acts on nothing the tick before did not ({len(extra)} new of {len(post)})", not extra, CASEWORDS(extra))
     else:
-        unlisted = {g for g in extra if g not in newly or _dtm.datetime.fromtimestamp(ep, server._cfg.tz()).date() < _dtm.date.fromisoformat(newly[g][:10])}
+        unlisted = {g for g in extra if g not in newly or _dtm.datetime.fromtimestamp(ep, _cfg.tz()).date() < _dtm.date.fromisoformat(newly[g][:10])}
         check(f"3 {label}: the only items the tick newly acts on are the listed newly watched ones, on or after their own date ({len(extra)} new, {len(unlisted)} unlisted)", not unlisted, CASEWORDS(unlisted))
-    differ = {g for g in pre & post if not json.loads(S0[f"{g[1:]}.json"])["metadata"].get("hold") and pre_sig[g] != post_sig[g] and not (g in newly and _dtm.datetime.fromtimestamp(ep, server._cfg.tz()).date() >= _dtm.date.fromisoformat(newly[g][:10]))}
+    differ = {g for g in pre & post if not json.loads(S0[f"{g[1:]}.json"])["metadata"].get("hold") and pre_sig[g] != post_sig[g] and not (g in newly and _dtm.datetime.fromtimestamp(ep, _cfg.tz()).date() >= _dtm.date.fromisoformat(newly[g][:10]))}
     check(f"5 {label}: an item with no hold that both ticks act on gets the same treatment (a notice stays a notice, a release a release, the kind kept alike; a hold's release is checked by 1-3) unless it is listed as newly watched ({len(differ)} differ)", not differ, [f"{g} [{desc[g]}] {pre_sig[g]} -> {post_sig[g]}" for g in sorted(differ)[:8]])
 
 # ---- the classes by name: what the old code read is migrated and unlisted; what it did not is left (past) or listed (future)

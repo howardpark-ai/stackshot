@@ -58,6 +58,9 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
+from stackshot.anchors import anchors as _anc
+from stackshot.service import store as _service_store
+from stackshot.waits import watchers as _watch
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import brief as _wt_brief
@@ -70,7 +73,7 @@ telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": time.time() - 100 * 86400, "seen": {}, "reported": []}))
 MODEL_CFG = dict(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False)
-server._cfg.CFG.setdefault("model", {}).update(MODEL_CFG)
+config.CFG.setdefault("model", {}).update(MODEL_CFG)
 ZONE = zoneinfo.ZoneInfo("Asia/Dubai"); H = 3600.0; DAY = 86400.0
 T0 = float(int(time.time() // 60 * 60))
 local = lambda ep: dt.datetime.fromtimestamp(ep, ZONE).strftime("%Y-%m-%dT%H:%M")
@@ -164,18 +167,18 @@ def counts(store, t, on):
         c = collections.Counter(); w = {}
         for g, it in items.items():
             if it.get("status") != "open": continue
-            m = server._model.view(dict(it, gid=g), server._model_of(dict(it, gid=g)), after_open=lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
-            c[_model.shown_pair(m)] += 1; w[g] = bool(server._watch.watches(it))
+            m = _model.view(dict(it, gid=g), server._model_of(dict(it, gid=g)), after_open=lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
+            c[_model.shown_pair(m)] += 1; w[g] = bool(_watch.watches(it))
         return dict(c), w
 def with_store(src, fn):
     """fn(path) on a private copy of `src`, the server pointed at it and removed after, whatever happens."""
-    R_ = pathlib.Path(_scratch.mkdtemp(prefix="storedpair-copy-")); real, anc = _core_store.STORE, server._anc.FILE
+    R_ = pathlib.Path(_scratch.mkdtemp(prefix="storedpair-copy-")); real, anc = _core_store.STORE, _anc.FILE
     try:
         shutil.copytree(src, R_ / "store", ignore=shutil.ignore_patterns(".git", "*.tmp", ".*"))
-        _core_store.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
+        _core_store.STORE = R_ / "store"; _anc.FILE = R_ / "store/anchors.json"
         return fn(R_ / "store")
     finally:
-        _core_store.STORE, server._anc.FILE = real, anc
+        _core_store.STORE, _anc.FILE = real, anc
         shutil.rmtree(R_, ignore_errors=True)
 def counters(): return _model.UNSTAMPED["count"]
 def quietly(fn, *a):
@@ -224,8 +227,8 @@ check("2 …reading writes nothing (store bytes equal)", hashes(STORE) == H0, No
 def one_read(g, stored, t=T0):
     """(list word, unstamped reads counted, the shown (phase, kind)) for one read of item g at clock t, the decision from the stored pair (stored) or the fields alone."""
     with frozen(t), reading(stored):
-        u0 = counters(); it = server._load(g); w = quietly(server._item_list, it); u1 = counters()
-        m = server._model.view(dict(it, gid=g), server._model_of(dict(it, gid=g)), t, lambda i_: server._after_open(i_.get("metadata") or {}), check=True)
+        u0 = counters(); it = _service_store._load(g); w = quietly(server._item_list, it); u1 = counters()
+        m = _model.view(dict(it, gid=g), server._model_of(dict(it, gid=g)), t, lambda i_: server._after_open(i_.get("metadata") or {}), check=True)
     return w, u1 - u0, _model.shown_pair(m)
 W = {g: (one_read(g, True), one_read(g, False)) for g in ("g43", "g44", "g45", "g46", "g47", "g48", "g49", "g50")}
 for g, what, stored_word, field_word in (("g43", "a plain doing item stored waiting on a time", "waiting", "agents"), ("g44", "a relay wait stored alive", "agents", "waiting"),
@@ -277,7 +280,7 @@ shift_proof("fixture", STORE, SHIFTS)
 w_old, _u, p_old = one_read("g1", True, T0 + 6 * H); w_fld, _u2, p_fld = one_read("g1", False, T0 + 6 * H)
 check("4 a dated wait the clock has outdated (g1, six hours on) lists as waiting on its stored pair until the sweep, and as the fields give it (agents) after it", w_old == "waiting" and p_old == ("waiting", "time") and w_fld == "agents" and p_fld == ("alive", ""), (w_old, p_old, w_fld, p_fld))
 def after_sweep(store, done, derived, items, opens):
-    with frozen(T0 + 6 * H): return quietly(server._item_list, server._load("g1")), "g1" in done
+    with frozen(T0 + 6 * H): return quietly(server._item_list, _service_store._load("g1")), "g1" in done
 check("4 …and one sweep at that clock stamps it alive", swept_at(STORE, T0 + 6 * H, after_sweep) == ("agents", True), None)
 src = pathlib.Path(os.environ.get("PHASE_REPLAY_STORE") or "/nonexistent").expanduser()
 if src.is_dir() and any(q.is_dir() and len(q.name) == 1 for q in src.iterdir()):
