@@ -71,7 +71,7 @@ check("setup never called sudo", not (T / "sudo-called").exists())
 check("the config is at ~/.config/stackshot/stackshot.toml", CFG.is_file())
 
 # the config, read through config.py exactly as the server and the hooks read it
-r = subprocess.run([sys.executable, "-c", "import config, json; print(json.dumps({'file': str(config.PATH), 'cfg': config.CFG, "
+r = subprocess.run([sys.executable, "-c", "from stackshot.core import config; import json; print(json.dumps({'file': str(config.PATH), 'cfg': config.CFG, "
                     "'store': str(config.path('paths','store')), 'brain': str(config.path('paths','brain')), 'secrets': str(config.secrets())}))"],
                    capture_output=True, text=True, env=ENV, cwd=STACK)
 check("config.py loads it (found through HOME, no STACKSHOT_CONFIG)", r.returncode == 0, r.stderr[-500:])
@@ -121,7 +121,7 @@ fn = (DATA / "session-names.tsv").read_text(encoding="utf-8").splitlines()
 rows = [l.split("\t") for l in fn if l.strip() and not l.startswith("#")]
 check("session-names.tsv: one row, hostname ⇥ name ⇥ the publisher letter", rows == [[socket.gethostname(), socket.gethostname(), "a"]], fn)
 sys.path.insert(0, STACK)
-r = subprocess.run([sys.executable, "-c", "import clients, json; print(json.dumps(clients.names_table()))"], capture_output=True, text=True, env=ENV, cwd=STACK)
+r = subprocess.run([sys.executable, "-c", "from stackshot.fleet import clients; import json; print(json.dumps(clients.names_table()))"], capture_output=True, text=True, env=ENV, cwd=STACK)
 check("clients.py reads that row", r.returncode == 0 and json.loads(r.stdout).get(socket.gethostname().lower()) == [socket.gethostname(), "a"], r.stdout + r.stderr[-300:])
 
 # the page registry
@@ -135,7 +135,7 @@ check("the registry entry: title, keeper, active, a commit time, no mirror link"
 git("checkout", "--", "board-data/projects.json")
 
 # a page inside the data repo: the keeper's settle test reads its git history relative to the pages dir
-r = subprocess.run([sys.executable, "-c", "import pages, time; print(pages.ct_at('projects/getting-started', time.time() + 600) is not None and "
+r = subprocess.run([sys.executable, "-c", "from stackshot.projects import pages; import time; print(pages.ct_at('projects/getting-started', time.time() + 600) is not None and "
                     "'## Current state' in pages.ct_at('projects/getting-started', time.time() + 600))"], capture_output=True, text=True, env=ENV, cwd=STACK)
 check("pages.ct_at reads a page nested inside the data repo", r.stdout.strip() == "True", r.stdout + r.stderr[-300:])
 
@@ -143,7 +143,7 @@ check("pages.ct_at reads a page nested inside the data repo", r.stdout.strip() =
 (DATA / "board-data/s").mkdir(exist_ok=True)
 (DATA / "board-data/s/1.json").write_text(json.dumps({"id": "1", "subject": "[todo] try the board", "description": "The first item.", "status": "open",
                                                       "metadata": {"owner": "tester-getting-started", "project": "projects/getting-started", "next": "look at it"}}))
-r = subprocess.run([sys.executable, "-c", "import json, render, config; from ui import render as ui_render; d = str(config.path('paths','store')); print(json.dumps({'md': render.render(d, 'full'), 'html': (lambda b: b.html() + ''.join(b.routing_html(k) for k in b.proj))(ui_render.Board(d))}))"],
+r = subprocess.run([sys.executable, "-c", "import json; from stackshot.web import render; from stackshot.core import config; from stackshot.web.ui import render as ui_render; d = str(config.path('paths','store')); print(json.dumps({'md': render.render(d, 'full'), 'html': (lambda b: b.html() + ''.join(b.routing_html(k) for k in b.proj))(ui_render.Board(d))}))"],
                    capture_output=True, text=True, env=ENV, cwd=STACK)
 bd = json.loads(r.stdout) if r.returncode == 0 else {"md": "", "html": ""}
 check("render: markdown names the page without an empty link", r.returncode == 0 and "- project: `projects/getting-started`" in bd["md"] and "](" + ")" not in bd["md"], r.stderr[-500:] or bd["md"][:600])
@@ -202,7 +202,7 @@ r2 = ss("client", "install", "--no-systemd")
 check("a second client install changes nothing", r2.returncode == 0 and SP.read_text(encoding="utf-8") == first and "already" in r2.stdout, r2.stdout[-400:])
 check("…and makes no second backup", len(list(SP.parent.glob("settings.json.bak-*"))) == 1)
 
-# the hooks run: the forwarder reaches pages.py, the session-start hook prints the brief or nothing, never fails
+# the hooks run: the page hook reaches stackshot/projects/pages.py, the session-start hook prints the brief or nothing, never fails
 pt = subprocess.run(["bash", os.path.join(STACK, "client/hooks/project-page.sh"), "touch"], input=json.dumps({"session_id": "x", "tool_name": "Read"}),
                     capture_output=True, text=True, env=ENV)
 check("project-page.sh touch runs pages.py and exits 0", pt.returncode == 0, pt.stderr[-300:])
@@ -263,7 +263,7 @@ r = ss("doctor", "--no-systemd", env=nodir)
 check("doctor without a config exits 1 and says to run setup", r.returncode == 1 and "stackshot setup" in r.stdout, r.stdout)
 
 # ---- the plain flavor's wording (the item follow-up): no pages copy → one parenthesis
-r = subprocess.run([sys.executable, "-c", "import json, pages, time; "
+r = subprocess.run([sys.executable, "-c", "import json, time; from stackshot.projects import pages; "
                     "pages.BRAIN = '/nonexistent'; print(json.dumps(pages.describe('projects/getting-started', {'ts': int(time.time()), 'task': 's1'})))"],
                    capture_output=True, text=True, env=ENV, cwd=STACK)
 wd = json.loads(r.stdout) if r.returncode == 0 else r.stderr[-300:]
@@ -332,7 +332,7 @@ check("…writes the client's config from the server's settings", lc.get("instan
       and lc["pages"]["flavor"] == "gbrain" and lc["paths"]["brain"] == "~/remote-brain" and lc["subject"]["prefixes"] == ["[x] "] and lc["page_gate"] == {"keeper_currency": "keepers"}
       and lc["gbrain"]["mirror_url"] == SETTINGS["gbrain"]["mirror_url"] and lc["client"]["url"] == FURL, (r.stdout[-400:], lc.get("instance"), lc.get("page_gate")))
 check("…and says so, naming the timezone and flavor", "config → " in r.stdout and "timezone Asia/Dubai" in r.stdout and "flavor gbrain" in r.stdout, r.stdout[-500:])
-r = subprocess.run([sys.executable, "-c", "import pages, time; print(pages.describe('projects/x', {'ts': int(time.time()), 'task': 's1'}))"],
+r = subprocess.run([sys.executable, "-c", "from stackshot.projects import pages; import time; print(pages.describe('projects/x', {'ts': int(time.time()), 'task': 's1'}))"],
                    capture_output=True, text=True, env=lenv, cwd=STACK)
 check("the client's nag speaks in the instance's zone and flavor", " +04 but the project page `projects/x`" in r.stdout and "add_timeline_entry" in r.stdout, r.stdout + r.stderr[-300:])
 before_c = (ls / "stackshot.toml").read_bytes()

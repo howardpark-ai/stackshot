@@ -1,8 +1,8 @@
 """session_ids.py — the one-shot migration to permanent session ids.
 
-  python3 session_ids.py migrate --dry-run     read-only: say what would change and what would stay, change nothing
-  python3 session_ids.py migrate --request     ask the server to apply it at its next start (writes the request file, nothing else)
-  python3 session_ids.py rollback <undo file>  ask the server to put an applied migration back at its next start (same request file)
+  stackshot session-ids migrate --dry-run     read-only: say what would change and what would stay, change nothing
+  stackshot session-ids migrate --request     ask the server to apply it at its next start (writes the request file, nothing else)
+  stackshot session-ids rollback <undo file>  ask the server to put an applied migration back at its next start (same request file)
 
 What it rewrites, where the fleet tool's registry (sessions_registry.py) resolves the stored value to ONE session: on the OPEN items in the store,
 metadata.owner, the session entries of metadata.needs, and metadata.observers → the permanent id. decision and external stay as words; a needs
@@ -203,7 +203,7 @@ def main(a: list[str]) -> int:
         _refuse_unconfigured()
         _prj.write_atomic(request_path(), "apply\n")
         print(f"requested: the server applies the migration at its next start and writes {_cfg.state(UNDO.format(ts='<UTC time>'))}; "
-              f"undo with: python3 session_ids.py rollback <that file>")
+              f"undo with: stackshot session-ids rollback <that file>")
         return 0
     if len(a) == 2 and a[0] == "rollback":
         _refuse_unconfigured()
@@ -216,7 +216,7 @@ def main(a: list[str]) -> int:
         _prj.write_atomic(request_path(), f"rollback {undo}\n")
         print(f"requested: the server puts back the {len(d['changes'])} change(s) of {undo.name} at its next start")
         return 0
-    sys.exit("usage: python3 session_ids.py migrate --dry-run | migrate --request | rollback <undo file>")
+    sys.exit("usage: stackshot session-ids migrate --dry-run | migrate --request | rollback <undo file>")
 
 
 if __name__ == "__main__":

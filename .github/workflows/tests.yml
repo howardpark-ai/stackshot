@@ -23,8 +23,8 @@
 #       until it lands release.sh still waits for main's run, which a proven commit passes in a few minutes.
 #   D5  The step "run every suite, measured" keeps its name in a stamped main run, though nothing is measured there (it says which merge-queue run proved the commit). release.sh and the suites read the name.
 # Dependencies are pinned: the package has one pyproject.toml and one uv.lock, and the suites run with --locked against it (the `tests` dependency group); the first step fails when uv.lock is stale.
-# The root forwarders that a caller outside this repository may still start as `uv run --locked --script <file>` (server.py, anchor-hub.py, audit.py ...) keep their PEP 723 header and their <script>.lock
-# (the forwarders go on 2026-11-22); the second step fails when one of those locks no longer matches its header. The units run the package: `uv run --locked --extra ... stackshot <program>`.
+# No script carries a PEP 723 header or a lock of its own any more (the root forwarders that had them are gone); the second step stays as the guard: a tracked script that grows a header must carry a <script>.lock,
+# and it fails when that lock no longer matches. The units run the package: `uv run --locked --extra ... stackshot <program>`.
 # The suites run in ONE environment: tests/run-suite is `uv run --locked --only-group tests python <suite>` with
 # UV_PROJECT_ENVIRONMENT at ~/.cache/stackshot/test-venv, so a checkout path no longer builds a new
 # set of environments in uv's cache, and a stale uv.lock fails the suite instead of resolving afresh.

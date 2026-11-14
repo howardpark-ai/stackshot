@@ -2,7 +2,7 @@
 <state>/site/favicon.svg). The server serves the committed PNGs as they are and needs no renderer; run this only when
 the mark changes, and commit the PNGs with it:
 
-    uv run --locked tools/make_icons.py
+    uv run --locked --extra icons python -m stackshot.tools.make_icons      (from the checkout)
 
 Every PNG is full bleed and opaque: the mark's tile colour to the edges, no rounded or transparent corners, and the
 check drawn from the mark's own path and stroke, so it matches the favicon. The launcher or iOS rounds the corners itself.

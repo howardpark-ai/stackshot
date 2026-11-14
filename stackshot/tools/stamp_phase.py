@@ -21,7 +21,7 @@ update takes its turn at the item's lock. Run it at a quiet time, away from the 
                                                   (no recorded result) takes its real keys from the server's pass record, not the planned ones.
 
 Exit 0 · 1 when a proof line reads other than 0, an item was refused, or a batch could not be made. Python 3.12 or later; the dry run runs itself in the tests' uv environment when fastmcp is missing
-(run the script as `uv run --no-project python tools/stamp_phase.py …`)."""
+(run it as `uv run --no-project python -m stackshot.tools.stamp_phase …` from the checkout)."""
 from __future__ import annotations
 import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable

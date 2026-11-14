@@ -109,7 +109,7 @@ def py(inst: dict, code: str, timeout: int = 120):
 TOOLS = r'''
 import asyncio, json, logging, sys
 logging.disable(logging.WARNING)
-import server
+from stackshot.web import server
 tools = {t.name: {"description": t.description, "parameters": t.parameters} for t in asyncio.run(server.mcp.list_tools())}
 res = {str(r.uri): [r.name, r.description] for r in asyncio.run(server.mcp.list_resources())}
 print(json.dumps({"instructions": server.mcp.instructions, "tools": tools, "resources": res}, sort_keys=True, ensure_ascii=False))
@@ -131,20 +131,21 @@ check("the owner's name is the only difference: the tool text with owner = Alex 
       [(a, b) for a, b in zip(sorted(json.loads(text_alex.replace(OWNER, "the owner"))["tools"]), sorted(json.loads(text_dflt)["tools"])) if a != b])
 
 # ---- 2. the settings that were code defaults
-rc, out, err = py(inst, "import config as c, rename_page as r, runners, step_commands as s, projects as p; print(c.gbrain_bin(), r.G, c.page_flavor(), c.owner(), c.owner_names(), p.scopes(), p.default_scope(), s.shell_rule())")
+rc, out, err = py(inst, "from stackshot.core import config as c; from stackshot.projects import rename_page as r, projects as p; from stackshot.web import runners; from stackshot.model import step_commands as s; print(c.gbrain_bin(), r.G, c.page_flavor(), c.owner(), c.owner_names(), p.scopes(), p.default_scope(), s.shell_rule())")
 check("the neutral settings: gbrain on PATH, plain pages, the owner from [instance], scopes [general], no shell rule",
       rc == 0 and out.split()[:4] == ["gbrain", "gbrain", "plain", OWNER] and "['general'] general" in out and out.strip().endswith("False"), (rc, out, err[-300:]))
-rc, out, err = py(inst, "import runners; runners.repos() if hasattr(runners, 'repos') else None; print(runners.DEFAULTS['owner'] == '', runners.DEFAULTS['boxes'] == [], runners.DEFAULTS['local_box'] == '')")
+rc, out, err = py(inst, "from stackshot.web import runners; runners.repos() if hasattr(runners, 'repos') else None; print(runners.DEFAULTS['owner'] == '', runners.DEFAULTS['boxes'] == [], runners.DEFAULTS['local_box'] == '')")
 check("the runners page names no owner, no box, no local box by default", rc == 0 and out.strip() == "True True True", (rc, out, err[-300:]))
 bin_toml = inst["conf"].read_text(encoding="utf-8").replace('bin = "gbrain"', 'bin = "~/tools/gbrain"', 1)
 (inst["root"] / "bin.toml").write_text(bin_toml, encoding="utf-8")
-rc, out, err = py({**inst, "env": {**inst["env"], "STACKSHOT_CONFIG": str(inst["root"] / "bin.toml")}}, "import rename_page as r; print(r.G)")
+rc, out, err = py({**inst, "env": {**inst["env"], "STACKSHOT_CONFIG": str(inst["root"] / "bin.toml")}}, "from stackshot.projects import rename_page as r; print(r.G)")
 check("[gbrain] bin is a setting: ~ is expanded to the home directory", rc == 0 and out.strip() == f"{inst['home']}/tools/gbrain", (rc, out, err[-300:]))
 
 # ---- 3. plain pages, with no server: the page store, the gbrain-only tools, the router's note
 PLAIN = r'''
 import json, os, pathlib
-import page_debt as pd, router_live as rl, config as c
+from stackshot.router import page_debt as pd, router_live as rl
+from stackshot.core import config as c
 io = pd.page_io(); out = {"io": type(io).__name__}
 body, rev = io.get("projects/alpha")
 out["get"] = bool(body and rev and "# Alpha" in body)

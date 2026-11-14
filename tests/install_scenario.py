@@ -130,7 +130,7 @@ for unit, rx in (("stackshot.service", r"ExecStart=\S+ run --project " + S_ + r"
                  ("stackshot-puller.service", r"ExecStart=/usr/bin/python3 " + S_ + r"/stackshot/fleet/puller\.py")):
     check(f"{unit} starts the package's program (the locked project environment for the two with an extra, the bare python3 for the puller)",
           len(re.findall(r"(?m)^" + rx + "$", U.get(unit, ""))) == 1, re.findall(r"(?m)^ExecStart=.*", U.get(unit, "")))
-check("no unit starts a root forwarder or a uv --script: every Exec line names the package", not re.search(r"(?m)^Exec\w*=.*(--script|" + S_ + r"/[\w-]+\.py)", uout),
+check("no unit starts a root script or a uv --script: every Exec line names the package", not re.search(r"(?m)^Exec\w*=.*(--script|" + S_ + r"/[\w-]+\.py)", uout),
       re.findall(r"(?m)^Exec\w*=.*(?:--script|" + S_ + r"/[\w-]+\.py).*", uout))
 check("the server units keep the header the user-scope rendering always had (an upgrade reports them unchanged)",
       all(U.get(n, "").split("\n", 1)[0] == f'# Rendered by install.sh from units/{n}.in for the user manager ([units] scope = "user") — edit the template, not this file.' for n in SERVER), [U.get(n, "").split("\n", 1)[0] for n in SERVER])

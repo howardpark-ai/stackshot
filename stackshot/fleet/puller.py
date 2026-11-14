@@ -92,7 +92,7 @@ class _Stopped(BaseException):
 
 
 _VERSION_LINE = re.compile(r'^VERSION\s*=\s*"([^"]+)"', re.M)   # the form the provisioning script and clients.puller_current read too
-_PULLER = ("stackshot", "fleet", "puller.py")   # where the puller sits in the checkout (the root puller.py only forwards to it, and carries the same VERSION line)
+_PULLER = ("stackshot", "fleet", "puller.py")   # where the puller sits in the checkout (the root has no puller.py any more)
 _RELOAD_FILES = ("stackshot/fleet/puller.py", "stackshot/fleet/client.py", "stackshot/core/config.py", "stackshot/model/said.py")   # the source the puller runs from (relative to the checkout): all must compile before a reload
 _BAD_RELOAD_ENV = "STACKSHOT_PULLER_BAD_RELOAD"   # digest of the files of a reload that failed to load; the environment outlives the re-run, module state does not
 _RELOAD_FAIL_PAUSE = 5.0   # s to wait after a reload that failed to load, before the old code polls again

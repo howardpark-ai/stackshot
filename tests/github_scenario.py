@@ -848,7 +848,7 @@ check("with GitHub up a create takes its issue number straight away, no local id
       and not list((STORE / "l").glob("*.json")) and G.load_map(STORE)["local_last"] == 2, (out[:60], list((STORE / "l").glob("*.json"))))
 G.drain(GH, STORE, say=lambda s: None)
 # the counter survives a restart: a fresh process allocates from the map, not from memory
-sub = subprocess.run([sys.executable, "-c", f"import sys, pathlib; sys.path.insert(0, {STACK!r}); import ghsync; print(ghsync.allocate_local(pathlib.Path({str(STORE)!r})))"],
+sub = subprocess.run([sys.executable, "-c", f"import sys, pathlib; sys.path.insert(0, {STACK!r}); from stackshot.github import ghsync; print(ghsync.allocate_local(pathlib.Path({str(STORE)!r})))"],
                      capture_output=True, text=True, env=os.environ, timeout=60)
 check("the local counter is not reused after a restart: a fresh process hands out l3", sub.stdout.strip() == "l3" and G.load_map(STORE)["local_last"] == 3, (sub.stdout, sub.stderr[-300:]))
 # a re-key a crash cut short (the map saved, the old file left behind) is finished by the next job
@@ -967,7 +967,7 @@ r = G.poll_comments(GH, STORE, say=lambda s: None); st = G.comments_state()
 check("a second read delivers nothing twice: the id is in seen, the cursor a second before its update (never behind where it started), one GET and no second GET /user",
       r["new"] == 0 and not told and st["seen"] == [c1["id"]] and G._epoch(st["since"]) == max(G._epoch(st["started"]), G._epoch(c1["updated_at"]) - 1)
       and [(m_, p_) for m_, p_, _t in F.log] == [("GET", REPO + "/issues/comments")], (r, told, st, F.log))
-sub = subprocess.run([sys.executable, "-c", f"import sys, pathlib, json; sys.path.insert(0, {STACK!r}); import ghsync as G\n"
+sub = subprocess.run([sys.executable, "-c", f"import sys, pathlib, json; sys.path.insert(0, {STACK!r}); from stackshot.github import ghsync as G\n"
                       f"def hook(gid, c): raise RuntimeError('delivered again: ' + gid)\n"
                       f"G.on_comment = hook; print(json.dumps(G.poll_comments(G.GitHub('o/r', {API!r}, 'test-token'), pathlib.Path({str(STORE)!r}), say=lambda s: None)))"],
                      capture_output=True, text=True, env=os.environ, timeout=60)
@@ -1540,7 +1540,7 @@ check("a conditional read answered 304 is not counted (the first of two counts, 
       _gb.count("r") == r0 + 3 and GR.cached == 1 and F.not_modified == nm0 + 1, (_gb.count("r") - r0, GR.cached, F.not_modified - nm0))
 GR.edit_issue(n_led, body="a write on the ledger")
 check("a write is a write in the ledger", _gb.count("w") == w0 + 1 and _gb.count("r") == r0 + 3, (_gb.count("w") - w0, _gb.count("r") - r0))
-sub = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); import ghbudget as g; [g.note('r') for _ in range(3)]; g.note('w'); print(g.count('r'), g.count('w'))"],
+sub = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); from stackshot.core import ghbudget as g; [g.note('r') for _ in range(3)]; g.note('w'); print(g.count('r'), g.count('w'))"],
                      capture_output=True, text=True)
 check("another process (anchor-hub's way in) adds to the same ledger: its three reads and one write are counted here", sub.returncode == 0 and _gb.count("r") == r0 + 6 and _gb.count("w") == w0 + 2
       and sub.stdout.split() == [str(r0 + 6), str(w0 + 2)], (sub.stdout, sub.stderr[-300:], _gb.count("r") - r0, _gb.count("w") - w0))
@@ -1588,7 +1588,7 @@ try:
 finally:
     checks_svc.check_gh = _cg_
 check("the done check's merged-PR read is kept under 'done_check' in the ledger (and the tag is gone afterwards)", ok_ is True and err_ == "" and _dc(d_a, d_b, "reads", "done_check") == 1 and _dc(d_a, d_b, "reads", "other") == 0 and _gb.current() == "", (d_a, d_b))
-sub2 = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); import ghbudget as g; g.note('r', caller='receivers'); g.note('r', caller='receivers'); g.note('r'); print(g.by_caller()['reads'].get('receivers', 0))"],
+sub2 = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); from stackshot.core import ghbudget as g; g.note('r', caller='receivers'); g.note('r', caller='receivers'); g.note('r'); print(g.by_caller()['reads'].get('receivers', 0))"],
                       capture_output=True, text=True)
 check("another process's tagged calls are in the same ledger under its tag (anchor-hub's way in: receivers)", sub2.returncode == 0 and sub2.stdout.split() == [str(_cal()["reads"].get("receivers", 0))]
       and _cal()["reads"].get("receivers", 0) - c_["reads"].get("receivers", 0) == 2, (sub2.stdout, sub2.stderr[-300:]))
@@ -1781,7 +1781,7 @@ finally:
     took = time.monotonic() - t0_; os.close(fd_); _gb.LOCK_WAIT_S = _lw
 check("a lock held too long: the call waits at most its deadline, then uses memory, and raises nothing", not err2 and 0.25 <= took < 5, (err2, took))
 led.unlink(missing_ok=True); _gb._MEM["r"].clear(); _gb._MEM["w"].clear(); _gb._MEM["by"] = {"w": {}, "r": {}}
-procs_ = [subprocess.Popen([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); import ghbudget as g\nfor _ in range(40): g.note('r'); g.note('w')"]) for _ in range(6)]
+procs_ = [subprocess.Popen([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); from stackshot.core import ghbudget as g\nfor _ in range(40): g.note('r'); g.note('w')"]) for _ in range(6)]
 rcs_ = [p_.wait(timeout=120) for p_ in procs_]
 check("six processes noting 40 reads and 40 writes each, at once, add up exactly: 240 and 240, none lost to the lock", rcs_ == [0] * 6 and _gb.count("r") == 240 and _gb.count("w") == 240, (rcs_, _gb.count("r"), _gb.count("w")))
 

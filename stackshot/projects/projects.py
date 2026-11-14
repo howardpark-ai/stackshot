@@ -9,7 +9,7 @@ key; every API entry point accepts the id or the key.
                                 "marks": {<id>: {scope?, on_purpose?, made?}}}
                                 the one place an id is minted and kept (committed with the store). `ids` is cumulative: an id whose page
                                 has gone stays reserved, and a rename is `rename(old_key, new_key)`, one edit of its value (rename_page.py
-                                calls it; so does `python3 projects.py rename <old> <new>`). A file that exists but is damaged raises and
+                                calls it; so does `stackshot projects rename <old> <new>`). A file that exists but is damaged raises and
                                 is never rewritten: nothing is minted over it, and the registry's `id` fields (a second copy) answer reads
                                 and restore a lost file. Every write goes under one flock and through a temp file in the state dir.
   <store>/projects.json         the page registry (pages.py); each page gets `id`, `key` and `agent_records` beside the old fields

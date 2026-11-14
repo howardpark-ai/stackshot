@@ -41,7 +41,7 @@ def _ui_days() -> int:
 
 
 _UI_COOKIE, _UI_FLOW = "stackshot_ui", "stackshot_ui_flow"
-# The installed app's PNG icons, committed in the checkout's icons/ (rebuilt from _ICON by tools/make_icons.py): name → (px, purpose)
+# The installed app's PNG icons, committed in the checkout's icons/ (rebuilt from _ICON by stackshot/tools/make_icons.py): name → (px, purpose)
 _APP_ICONS = {"icon-192.png": (192, "any"), "icon-512.png": (512, "any"), "icon-maskable-512.png": (512, "maskable"), "apple-touch-icon.png": (180, "any")}
 _APP_ICON_DIR = _paths.ROOT / "icons"
 _FONT_PATH = "fonts/" + _rmod.FONT_FILE                          # a bundled monospace font (OFL), from the checkout like the icons
