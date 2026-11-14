@@ -232,6 +232,18 @@ def _wait_refs(meta: dict[str, Any], names: tuple[str, ...]) -> set[str]:
     return out
 
 
+def _list_end_words(waits: Any, wake: str, clear_wake: bool, meta: dict[str, Any]) -> str:
+    """The words of the clock-renewal refusal for `waits=[]` beside a later `until` on a stored list ("" when the write is no such one). It only names the case and judges nothing: whether the write moves
+    the day out and carries progress is gates.gate_clock_renewal's own test, which takes these words as its refusal in place of its general ones (a write with progress goes through, as it does on a list-free item)."""
+    if not (_wlw.clearing(waits) and wake.strip() and not clear_wake and _wl.valid(meta)):
+        return ""
+    old_, new_ = _uw.date_of(meta), str(_hooks().parse_wake(wake))
+    if not old_:
+        return ""
+    return (f"Refused: waits=[] ends the list, and until={new_} beside it would be a later day than the list's backstop day {old_}: moving a date out is not progress. Send waits=[] alone to end the wait "
+            f"(or until={old_} or earlier to wait on that date alone)")
+
+
 def _list_plan(waits: Any, wait_mode: str, *, gid: str, meta: dict[str, Any], proj_for: str, wake: str, clear_wake: bool, status: str, others: dict[str, Any]) -> "_gates.WaitsPlan | None":
     """The `waits` and `wait_mode` of an update (gates.gate_waits, with the gates of the single waits as its callbacks), judged on the item's metadata as the write works on it (the stored `until` stands as the wake). The backstop
     day is the one this call gives (`wake`, which `until` came in as), else the one the item holds. None when the call passes neither."""
@@ -240,11 +252,6 @@ def _list_plan(waits: Any, wait_mode: str, *, gid: str, meta: dict[str, Any], pr
     if leaves_list and not _wlw.passed(waits) and wake.strip() and not clear_wake and _wl.valid(meta):      # a new backstop day alone (until=…) on a stored list: a time line later than it could never arrive, as when the list is sent again with it
         gate_dates = [(i, ln["until"]) for i, ln in enumerate(_wl.lines(meta), 1) if ln["kind"] == "time" and not _wl.arrived(ln)]
         _gates.gate_time_lines(gate_dates, str(h.parse_wake(wake)))
-    if _wlw.clearing(waits) and wake.strip() and not clear_wake and _wl.valid(meta):      # waits=[] ends the list: a later day beside it is no backstop of anything, only the date of a wait on that date alone, and a date moved out is a renewal
-        old_, new_ = _uw.date_of(meta), str(h.parse_wake(wake))
-        if old_ and _wlw.time_before(old_, new_):
-            raise ToolError(f"Refused: waits=[] ends the list, and until={new_} beside it would be a later day than the list's backstop day {old_}: moving a date out is not progress. Send waits=[] alone to end the wait "
-                            f"(or until={old_} or earlier to wait on that date alone)")
     if waits is None and not str(wait_mode or "").strip():
         return None
     if _wlw.passed(waits) and not _wlw.clearing(waits):
@@ -553,6 +560,7 @@ def update_unlocked(
             _needs_store(meta, _canon_needs([*kinds, _gates.gate_needs_session(agent, proj_for, own_for, _model.norm_who(meta.get("then")))], _anc.names()))
     state_st, state_given, step_withdrawn = _gates.gate_state_args({"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies})   # a bad value is refused before anything is written
     draft_set, clear_draft = _gates.gate_draft_args(draft, clear_draft)   # a bad draft is refused before anything is written
+    list_end_words = _list_end_words(waits, wake, clear_wake, meta)      # read on the item as it stands, before the write changes it
     list_plan = _list_plan(waits, wait_mode, gid=gid, meta=meta, proj_for=project or str(meta.get("project") or ""), wake=wake, clear_wake=clear_wake, status=status or str(item.get("status") or ""),
                            others={"wait_kind": wait_kind.strip(), "wait_anchor": wait_anchor.strip(), "wait_event": wait_event.strip(), "after": after if after is not None and after != [] and str(after).strip() else "",
                                    "ask_by": ask_by.strip(), "hold": hold, "wait_basis": str(wait_basis or "").strip(), "clear_hold": clear_hold, "clear_after": clear_after,
@@ -1103,7 +1111,7 @@ def update_unlocked(
             meta.pop("watch_reason", None)      # a reason belongs to the wake it was given for: another wake without one, or no wake, drops it
         _gates.gate_decision_again(item_was, meta, was_needs, ask_was, gid)
         if _writes.session_next() and h.model_guards_on() and not (reopening or _writes.reformat()) and item_was.get("status") == "open":
-            _gates.gate_clock_renewal(item_was, meta, gid, steps_old, steps_new, description, said_l, sender)      # no clock renewal without progress: a session's write only
+            _gates.gate_clock_renewal(item_was, meta, gid, steps_old, steps_new, description, said_l, sender, list_end_words)      # no clock renewal without progress: a session's write only
         _gates.gate_repark(item_was, item_now, meta, gid, said_l)
         _mark_next_stale(item_was, item_now, meta, debtor, naming_added, next_touch)
         touched_m = {k for k, v in (("next", next_touch), ("ask", ask), ("subject", subject), ("description", description.strip()),("needs", needs_set or clear_needs or agent.strip()), ("hold", hold or clear_hold),

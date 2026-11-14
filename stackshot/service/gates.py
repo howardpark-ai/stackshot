@@ -792,7 +792,7 @@ def _open_step_keys(steps: list[dict[str, Any]]) -> list[str]:
 
 
 def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str, steps_old: list[dict[str, Any]], steps_new: list[dict[str, Any]] | None,
-                        description: str, said_l: list[dict[str, Any]], sender: str = "") -> None:
+                        description: str, said_l: list[dict[str, Any]], sender: str = "", list_end_words: str = "") -> None:
     """No clock renewal without progress: refuse a session's write that pushes a wake or an ask_by to a LATER time than the item already holds while the item's reason and its
     open steps are as they were. A reason changed is a new description or wait_basis text, or the owner's words in the write (a NEW said entry that
     _owner_words_on accepts: Acked-by, checked against a transcript, recent; a message (msg) the item already holds does not count again, whatever the quote, nor does a board answer already on it), or a change to what the wait stands on (wait_kind, wait_event,
@@ -800,7 +800,7 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
     step marked done or dropped, or a new line (the open lines differ; a line reworded in next alone reads as a new one). `reword=` is no progress: it restates a step that stays the same step, so a reword-only write does not renew a clock. A wait_reason is no reason here: it is not stored, so it cannot be compared and any text would pass.
     Setting a clock for the first time, pulling one in, leaving it as it is, clearing it and a real hand-off are not renewals: a hand-off is a write after which the item's effective holder
     (the stored mover, else the first session in needs), resolved through the registry, is another session than before AND is not the sender (a holder who sets its own clock is the same
-    session by another name, or a flip back and forth). Writes nothing."""
+    session by another name, or a flip back and forth). `list_end_words`: the refusal's own words for a write that ends a stored list (`waits=[]`) beside a later day; the refusal is then these, and a write with progress is let through as any other. Writes nothing."""
     h = _hooks()
     m0 = item_was.get("metadata") or {}
     struct_progress = _struct_progress(m0, meta)      # first: it records the structure of every write, whether or not a clock moves
@@ -843,6 +843,8 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
                             f"Only a step, the reason, {OWNER}'s own new words or a hand-off to another session resets the count. The item model: {h.model_page}")
         meta["clock_struct_n"] = struct_n + 1
         return
+    if list_end_words:
+        raise ToolError(f"{list_end_words}, or change something real in the same write: {real}.")
     event = ("the event-wait form (wait_kind=\"event\", wait_event=<the event>, ask_by=<the backstop day>, post_wake_mover=<who takes it when it happens>)")
     if _waits_decision(meta):
         ways = f"Change something real in the same write: {real}. An item on {OWNER}'s decision cannot be held, so the date stays as it is until a step or the reason changes."

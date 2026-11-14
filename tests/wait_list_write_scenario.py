@@ -661,6 +661,10 @@ fresh(303, [Ev("recycle"), Re("the Lease")], until=w(6))
 arrive(303, 1)
 bupd(303, waits=[Ev("recycle"), Re("the lease")], until=w(6))
 check("7a a relay line that differs only in case stays a different line (its text is the owner's words, not a canonical phrase): the arrival is not carried", not mt(303)["waits"][1].get("arrived"), mt(303))
+fresh(304, [Re("Recycle"), Re("a")], until=w(6))
+check("7a a relay line whose text happens to parse as an event phrase (`Recycle`) is stored as written, not canonicalized as an event line would be", mt(304)["waits"][0] == {"kind": "relay", "event": "Recycle"}, mt(304))
+bupd(304, waits=[Re("Recycle"), Re("a"), Re("b")], until=w(6))
+check("7a …and sent again it stays `Recycle`", [ln["event"] for ln in mt(304)["waits"]] == ["Recycle", "a", "b"], mt(304))
 
 # ---- 7b a backstop earlier than an open time line, whichever parameter says it
 for name_, kw_ in (("ask_by", {"ask_by": w(4)}), ("after=none and until", {"after": "none", "until": w(4)}), ("hold and until", {"hold": True, "until": w(4)}), ("clear_hold and until", {"clear_hold": True, "until": w(4)}),
@@ -716,10 +720,15 @@ check("7d a list collapsed to a date later than the backstop: the reply says the
 fresh(343, [Tm(w(5)), Re("a")], until=w(6))
 o_ = bupd(343, waits=[Tm(w(5))], until=w(5))
 check("7d …a date the backstop does not pass is as the line has it", mt(343)["until"] == w(5) and f"the date {w(5)}" in o_, (mt(343), o_[-300:]))
-# waits=[] beside a later until
+# waits=[] beside a later until: the clock-renewal gate's own test decides (a write with progress goes through, as it does on main)
+def tryu(i, **kw):
+    """The write's reply and the refusal it met ("" for none), so a write that is refused fails its own check instead of ending the run."""
+    try: return bupd(i, **kw), ""
+    except Exception as e: return "", str(e)
+NEWDESC = "- Goal: the list ends\n- It lives here\n- Done when done\n- And it waits on a later date now"
 for i_, kw_ in ((344, dict(waits=[], until=w(7))), (345, dict(waits="none", until=w(7))), (346, dict(waits="[]", until=w(7)))):
     fresh(i_, [Tm(w(5)), Re("a")], until=w(6))
-    refused(f"7d waits={kw_['waits']!r} beside an until later than the list's backstop is refused in its own words, not as a pushed-out clock", lambda i_=i_, kw_=kw_: bupd(i_, **kw_), "waits=[] ends the list", f"until={w(7)}", f"backstop day {w(6)}", "waits=[] alone")
+    refused(f"7d waits={kw_['waits']!r} beside an until later than the list's backstop, with no progress, is refused in its own words, not as a pushed-out clock", lambda i_=i_, kw_=kw_: bupd(i_, **kw_), "waits=[] ends the list", f"until={w(7)}", f"backstop day {w(6)}", "waits=[] alone", "or change something real in the same write")
     check(f"7d …nothing changed ({i_})", listed(mt(i_)) and mt(i_)["until"] == w(6), mt(i_))
 fresh(347, [Tm(w(5)), Re("a")], until=w(6))
 bupd(347, waits=[], until=w(6))
@@ -727,6 +736,30 @@ check("7d waits=[] beside the same day ends the list and leaves the date wait (a
 fresh(348, [Tm(w(5)), Re("a")], until=w(6))
 bupd(348, waits=[], until=w(3))
 check("7d …and beside an earlier one", not mt(348).get("waits") and mt(348)["until"] == w(3), mt(348))
+# …with progress, as on main: stored as the date wait on the later day
+fresh(349, [Tm(w(5)), Re("a")], until=w(6))
+_, why_ = tryu(349, waits=[], until=w(7), description=NEWDESC)
+check("7d waits=[] beside a later until with a new description is accepted: the list ends, the item waits on the later date", not why_ and not mt(349).get("waits") and not mt(349).get("wait_kind") and mt(349)["until"] == w(7), mt(349))
+fresh(350, [Tm(w(5)), Re("a")], until=w(6))
+_, why_ = tryu(350, waits=[], until=w(7), next=f"{BACK}: look again on {w(7)}")
+check("7d …with a new next step", not why_ and not mt(350).get("waits") and mt(350)["until"] == w(7) and "look again" in str(mt(350).get("next")), mt(350))
+fresh(352, [Tm(w(5)), Re("a")], until=w(6))
+refused("7d clear_wait beside waits=[] and a later until is refused as it is on a list-free item (it is no progress)", lambda: bupd(352, waits=[], clear_wait=True, until=w(7)), "Refused:")
+check("7d …nothing changed (clear_wait)", listed(mt(352)) and mt(352)["until"] == w(6), mt(352))
+# the owner's checked words lift it too: his words, from a transcript, in this very write
+SAY_SESSION, SAY_MSG = "22222222-3333-4444-8555-666666666666", "bbbbbbbb-bbbb-4bbb-8bbb-000000000001"
+(T / f"transcripts/-home-x/{SAY_SESSION}.jsonl").write_text(json.dumps({"type": "user", "uuid": SAY_MSG, "timestamp": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "origin": {"kind": "human"},
+                                                                       "message": {"role": "user", "content": "yes, the list can end and the date can move out"}}) + "\n", encoding="utf-8")
+fresh(353, [Tm(w(5)), Re("a")], until=w(6))
+_, why_ = tryu(353, waits=[], until=w(7), said=[{"tag": "Acked-by", "quote": "the list can end and the date can move out", "msg": SAY_MSG, "session": SAY_SESSION}])
+check("7d …and so do his words, checked against a transcript: the list ends, the item waits on the later date", not why_ and not mt(353).get("waits") and mt(353)["until"] == w(7) and mt(353).get("said"), mt(353))
+# an item that stores no list: waits=[] clears nothing, and the gate speaks its own words, never the list's
+item(354, needs=[BACK], wait_kind="anchor", wait_anchor=A1, wait_event="merged", until=w(5), post_wake_mover=BACK)
+try: bupd(354, waits=[], until=w(6)); why_ = "stored"
+except Exception as e: why_ = str(e)
+check("7d waits=[] with a later until on an item that stores no list is refused as a pushed-out clock, never as the end of a list", "pushed out" in why_ and "ends the list" not in why_ and "waits=[] alone" not in why_, why_[:400])
+out, why_ = tryu(354, waits=[], until=w(6), description=NEWDESC)
+check("7d …with progress it goes through as on main: the date moves, and the reply says there was no list to clear", not why_ and mt(354)["until"] == w(6) and "stores none" in out, (mt(354), out[-300:], why_[:300]))
 
 # ---- 7e the count is judged before the lines are read
 class Walked_(list):
@@ -750,7 +783,7 @@ check("7e event_phrases and judged_as read a list over the limit as one that doe
 for n_ in ("create", "update"):
     d_ = tools_[n_].parameters["properties"]["waits"]["description"]
     check(f"7f {n_}: the waits text names every parameter a list does not go with (clear_* for the clears), the stored backstop, and says until is not the only way to give it",
-          all(x in d_ or (x.startswith("clear_") and "clear_*" in d_) for x in WLW.SINGLE if x != "until") and "wait_basis" in d_ and "or the stored one" in d_ and "Needs until" not in d_, d_)
+          all(x in d_ or (x.startswith("clear_") and "clear_*" in d_) for x in WLW.SINGLE if x != "until") and "wait_basis" in d_ and "Needs until, the backstop day (an update may omit it)" in d_ and "or the stored one" not in d_, d_)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": wait list write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

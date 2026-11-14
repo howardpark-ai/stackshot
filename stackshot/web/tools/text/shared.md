@@ -313,7 +313,7 @@ day) or a time wait (check back on a date). "none" clears it.
 
 ## param WAITS
 A wait on a list: 2 to 8 lines {"kind": time|anchor|item|relay|event, plus its fields: until; anchor, event; after;
-event}. Needs the backstop day (until or the stored one); no wait_kind, wait_anchor, wait_event, after, wake, ask_by,
+event}. Needs until, the backstop day (an update may omit it); no wait_kind, wait_anchor, wait_event, after, wake, ask_by,
 hold, wait_basis or clear_*. Replaces the list: send the remaining lines, [] ends it.
 
 ## param WAIT_MODE
