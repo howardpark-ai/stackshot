@@ -269,7 +269,7 @@ for g_ in (False, True):
     m_ = ruled(108, {**WAITING_KEYS, "mover": OWN, "then": HELP}, clear_wait=True)
     check(f"5 clear_wait with a stored mover that is he (he picked the item up when the wait ended): it goes with the wait {tag}", "wait_kind" not in m_ and "mover" not in m_ and LEG not in m_, m_)
     m_ = ruled(109, {**WAITING_KEYS, "mover": HELP, LEG: BACK}, clear_wait=True)
-    check(f"5 clear_wait with both stored: the old key goes with the wait, the agent mover stays {tag}", "wait_kind" not in m_ and m_.get("mover") == HELP and LEG not in m_, m_)
+    check(f"5 clear_wait with both stored: the picker the reader answered first (the old key) is the one kept as mover, the old key goes {tag}", "wait_kind" not in m_ and m_.get("mover") == BACK and LEG not in m_, m_)
     m_ = ruled(110, {**WAITING_KEYS, LEG: OWN, "mover": HELP}, clear_wait=True)
     check(f"5 clear_wait with the old key that is he beside an agent mover: the old key goes, the agent stays {tag}", "wait_kind" not in m_ and m_.get("mover") == HELP and LEG not in m_, m_)
 guards(False)
