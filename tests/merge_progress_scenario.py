@@ -70,6 +70,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -107,7 +108,7 @@ def cli_row(who, status, at):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
 handoff_svc.CLI_SESSIONS = T / "cli"
-server._stall_since(B)
+stall_svc.stall_since(B)
 def log_of(i): return S.log_of(mt(i))
 ROLES = {"home-peer": {"role": "background"}, "home-peer2": {"role": "background"}, "home-peer3": {"role": "background"}, "team-back": {"role": "background"}, "home-front": {"role": "front"}}
 sent = []
@@ -119,7 +120,7 @@ def clear_records():
     for p in (T / "state/audit").glob("*.json"): p.unlink()
     sent.clear()
 def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
-def entry(i): return server._stall_load().get(f"a{i}")
+def entry(i): return stall_svc.stall_load().get(f"a{i}")
 
 from stackshot.model import progress as PG; from stackshot.model import activity as ACT
 class _Clock:
@@ -127,7 +128,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK; writes.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = stall_svc.time = stalltick_svc.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp is the one a live write takes."""
     d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts

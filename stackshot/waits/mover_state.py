@@ -1,6 +1,6 @@
 """mover_state.py — one engine for "who moves this item, and has that session had a turn running".
 
-The stall pass (stall.py, server._stall_tick) and the audit (audit_run.py) ask the same two questions of an open item: which session moves it,
+The stall pass (stall.py, service/stall_tick.py) and the audit (audit_run.py) ask the same two questions of an open item: which session moves it,
 and is that session idle, for how long. This module answers them in one place, so the two never disagree. Through liveness.py it reads the CLI's own registry (`~/.claude/sessions/<pid>.json`, the files
 push.py reads too) and decides nothing about what to do next; the stall pass acts on the answer, the audit reports it.
 

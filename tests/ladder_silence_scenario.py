@@ -1,5 +1,5 @@
 """Scenario test for the one ladder's quiet entry: with `[ladder] enabled` the dates pass brings an item to the one ladder, and a pane with no turn running no longer does (ladder.py, audit_run.dates_pass `entered`,
-server._ladder_enter_quiet, _ladder_quiet_look, _stall_tick). The file once also tested the retired 45-minute news ask, the other way in ( `enter` below makes the entry the dates pass makes after its message). Fixture items,
+service/ladder.py ladder_enter_quiet and ladder_quiet_look, service/stall_tick.py stall_tick). The file once also tested the retired 45-minute news ask, the other way in ( `enter` below makes the entry the dates pass makes after its message). Fixture items,
 panes that are files in a temp folder, messages recorded by a fake push, a fake clock (every pass is given its `now`), no live store, no network, no model call.
 
   1  the switch: `[ladder] enabled` alone is the whole switch (there is no `silence` key); the dates tick gives the ladder to the dates pass only then; with the one ladder off the stall pass starts a ladder from a pane with no
@@ -84,6 +84,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -123,11 +124,11 @@ def cli_row(who, status, at):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
 handoff_svc.CLI_SESSIONS = T / "cli"
-server._stall_since(B)
+stall_svc.stall_since(B)
 def stk(at):
     """One stall pass at `at` (the 20-second gate reset), the threads it started finished → the items it acted on."""
-    server._STALL_LAST[0] = 0.0
-    out = server._stall_tick(at); drain()
+    stall_svc.STALL_LAST[0] = 0.0
+    out = stalltick_svc.stall_tick(at); drain()
     return out
 def log_of(i): return S.log_of(mt(i))
 ROLES = {"home-peer": {"role": "background"}, "home-peer2": {"role": "background"}, "home-peer3": {"role": "background"}, "team-back": {"role": "background"}, "home-front": {"role": "front"}}
@@ -141,19 +142,19 @@ def clear_records():
     sent.clear()
 def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
 def enter(ids, at=None):
-    """The dates pass's entry for these items at `at`: what `audit_run.dates_pass` does for each fresh finding that reached its mover (`entered=server._ladder_enter_quiet`), without the pass's own message. → {"entered": n}."""
+    """The dates pass's entry for these items at `at`: what `audit_run.dates_pass` does for each fresh finding that reached its mover (`entered=ladder_svc.ladder_enter_quiet`), without the pass's own message. → {"entered": n}."""
     now_ = now0 if at is None else at; n = 0
     for gid, it in load(*ids).items():
-        n += bool(server._ladder_enter_quiet(gid, str((it.get("metadata") or {}).get("mover") or ""), now_, "no activity"))
+        n += bool(ladder_svc.ladder_enter_quiet(gid, str((it.get("metadata") or {}).get("mover") or ""), now_, "no activity"))
     return {"entered": n}
-def entry(i): return server._stall_load().get(f"a{i}")
+def entry(i): return stall_svc.stall_load().get(f"a{i}")
 IDLE_SINCE = now0 - 50 * MIN        # the pane went idle then (the silent item's last activity was 60 minutes before now0)
 
 # ================================================================ 1. the switch
 ladder_cfg(False)
-check("1 off: with `enabled` false the one ladder is off", not server._ladder_on(), None)
+check("1 off: with `enabled` false the one ladder is off", not ladder_svc.ladder_on(), None)
 ladder_cfg(True)
-check("1 on: `enabled` alone turns the one ladder on, and the look is 30 minutes", server._ladder_on() and server._ladder_look() == 30.0, None)
+check("1 on: `enabled` alone turns the one ladder on, and the look is 30 minutes", ladder_svc.ladder_on() and ladder_svc.ladder_look() == 30.0, None)
 spy = []
 _real_dates = AR.dates_pass
 AR.dates_pass = lambda **kw: spy.append(kw.get("entered")) or {}
@@ -165,13 +166,13 @@ try:
 finally:
     AR.dates_pass = _real_dates
 ladder_cfg(True)
-check("1 wiring: the dates tick gives the ladder to the dates pass only with the one ladder on", [e is server._ladder_enter_quiet for e in on_spy] == [True] and off_spy == [None], (on_spy, off_spy))
+check("1 wiring: the dates tick gives the ladder to the dates pass only with the one ladder on", [e is ladder_svc.ladder_enter_quiet for e in on_spy] == [True] and off_spy == [None], (on_spy, off_spy))
 # a pane with no turn running starts a ladder with the one ladder off, and none with it on
 put(1, act=30); cli_row("home-peer", "idle", IDLE_SINCE)
 ladder_cfg(False)
 done = stk(now0 + 1)
 check("1 off: with the one ladder off an item whose pane has had no turn for 10 minutes gets the stall notice and a via=stall entry, as before", "a1" in done and len(stall_notices("home-peer", 1)) == 1 and LD.via_of(entry(1)) == "stall", (done, pushes(), entry(1)))
-close(1); server._stall_save({})
+close(1); stall_svc.stall_save({})
 ladder_cfg(True)
 
 # ================================================================ 2. the ask
@@ -269,7 +270,7 @@ close(21)
 # ================================================================ 7. the dates pass: a passed expected time is the same ladder
 clear_records()
 put(30, act=300, wake=local(now0 - 2 * H)); d = rd(30); d["written_at"] = now0 - 5 * H; (T / "store/a/30.json").write_text(json.dumps(d)); cli_row("home-peer", "idle", IDLE_SINCE)
-rd_ = AR.dates_pass(now=now0, items=load(30), anchors={}, env=env(), entered=server._ladder_enter_quiet)
+rd_ = AR.dates_pass(now=now0, items=load(30), anchors={}, env=env(), entered=ladder_svc.ladder_enter_quiet)
 e30 = entry(30)
 check("7 dates: an item past its own wake with no write since is sent its message and put on the ladder at the look, the same record as silence",
       rd_["fresh"] == 1 and len(sent) == 1 and sent[0][0] == "home-peer" and e30 and e30.get("via") == "silence" and e30.get("step") == 1 and e30.get("last") == now0 and "past its wake" in log_of(30)[0]["text"], (rd_, sent, e30, log_of(30)))
@@ -316,7 +317,7 @@ set_live("home-docs"); set_live("team-back")
 ladder_cfg(True)
 # 10a. the builder's pane is busy (a turn, or subagents, running) and the item is past due: the look is sent all the same, in the new wording
 clear_records(); put(50, act=300, mover="team-back", wake=local(now0 - 2 * H)); d = rd(50); d["written_at"] = now0 - 5 * H; (T / "store/a/50.json").write_text(json.dumps(d)); cli_row("team-back", "busy", now0 - 20 * MIN)
-AR.dates_pass(now=now0, items=load(50), anchors={}, env=env(), entered=server._ladder_enter_quiet)
+AR.dates_pass(now=now0, items=load(50), anchors={}, env=env(), entered=ladder_svc.ladder_enter_quiet)
 check("10a busy builder: the past-due item is on the ladder at the look", (entry(50) or {}).get("step") == 1 and LD.quiet(entry(50)), entry(50))
 check("10a busy builder: 29 minutes after the ask nothing is sent", "a50" not in stk(now0 + 29 * MIN) and not look_notices("team-back", 50), pushes_to("team-back", "a50"))
 done = stk(now0 + 31 * MIN)

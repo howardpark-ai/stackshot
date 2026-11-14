@@ -45,7 +45,6 @@ class Hooks:
     rmod_parse_ask: Callable[..., Any]  # server._rmod.parse_ask
     rmod_whose: Callable[[], Any]  # server._rmod.WHOSE
     session_id: Callable[..., Any]  # server._session_id
-    stall_when: Callable[..., Any]  # server._stall_when
     state_end: Callable[..., Any]  # server._state_end
     told_recent: Callable[..., Any]  # server._told_recent
     zone: Callable[[], Any]  # server.ZONE
