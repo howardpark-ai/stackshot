@@ -65,6 +65,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.core import readonly as _ro
+from stackshot.core import config as _cfg
+from stackshot.web.tools import text as _web_tools_text
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -88,8 +92,8 @@ class _Clock:
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
 CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
-server._cfg.CFG["audit"]["pattern_review"] = "off"
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["pattern_review"] = "off"
+_cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
 def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
 telling.tell_woken = fake_tell
@@ -102,7 +106,7 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
+_fleet_sessions_registry._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
 sent_at = []                                                       # when (the fake clock) each notice was sent, in step with `sent`
 def fake_tell2(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); sent_at.append(CLK.t); return None
@@ -132,7 +136,7 @@ def lines(i): return HL.log_of(mt(i))
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     sent.clear(); sent_at.clear(); panes.clear(); dead.clear(); server._BALANCE_LOGGED.clear(); (T / "store/anchors.json").write_text("{}")
-    for k in ("busy_tell", "busy_tell_hours", "hourly_line", "hand_idle"): server._cfg.CFG["audit"].pop(k, None)
+    for k in ("busy_tell", "busy_tell_hours", "hourly_line", "hand_idle"): _cfg.CFG["audit"].pop(k, None)
 def at(m): return now0 + m * MIN                                    # `m` minutes after the item's last activity in the timelines (act=0)
 def hourly(t):
     CLK.t = t
@@ -174,29 +178,29 @@ check("1 the example config documents `busy_tell = true` and `busy_tell_hours = 
 wipe()
 check("1 with the keys absent the code's defaults are on and 4 hours", BT.enabled() is True and BT.hours() == 4.0)
 def hours_of(v):
-    server._cfg.CFG["audit"]["busy_tell_hours"] = v
+    _cfg.CFG["audit"]["busy_tell_hours"] = v
     try: return BT.hours()
-    finally: server._cfg.CFG["audit"].pop("busy_tell_hours", None)
+    finally: _cfg.CFG["audit"].pop("busy_tell_hours", None)
 check("1 busy_tell_hours: a number is taken, never under 1; text, a boolean, nan and infinity read as 4", hours_of(6) == 6.0 and hours_of(2.5) == 2.5 and hours_of(0) == 1.0 and hours_of(-3) == 1.0 and all(hours_of(v) == 4.0 for v in ("5", True, float("nan"), float("inf"), None, [3])),
       [hours_of(v) for v in (6, 0, -3)])
 for label, val in (("false", False), ("the string true", "true"), ("1", 1), ("yes", "yes")):
-    wipe(); put(1, act=400, log=seed([("pane", 50), ("pane", 100), ("pane", 395)])); server._cfg.CFG["audit"]["busy_tell"] = val
+    wipe(); put(1, act=400, log=seed([("pane", 50), ("pane", 100), ("pane", 395)])); _cfg.CFG["audit"]["busy_tell"] = val
     check(f"1 {label} leaves it off (only a TOML true leaves it on): nobody is told, nothing is written", BT.enabled() is False and tick(now0) == [] and sent == [] and "busy_tell" not in mt(1))
 wipe(); put(1, act=400, log=SEVEN)
-server._cfg.CFG["audit"]["busy_tell"] = True
+_cfg.CFG["audit"]["busy_tell"] = True
 check("1 a TOML true switches it on", tick(now0) == ["a1"] and len(to_main()) == 1, sent)
-for label, tgt, name, val in (("a read-only standby copy", server._ro, "is_read_only", lambda: True), ("a paused board", handoff_svc, "handoff_paused", lambda: True)):
+for label, tgt, name, val in (("a read-only standby copy", _ro, "is_read_only", lambda: True), ("a paused board", handoff_svc, "handoff_paused", lambda: True)):
     wipe(); put(1, act=400, log=SEVEN)
     real = getattr(tgt, name); setattr(tgt, name, val)
     try: got = tick(now0)
     finally: setattr(tgt, name, real)
     check(f"1 {label} tells nobody", got == [] and sent == [] and "busy_tell" not in mt(1))
-wipe(); put(1, act=400, log=SEVEN); server._cfg.CFG["audit"]["hourly_line"] = False
+wipe(); put(1, act=400, log=SEVEN); _cfg.CFG["audit"]["hourly_line"] = False
 check("1 with the hourly line off the busy tell stands still (the lines it reads are not being written)", tick(now0) == [] and sent == [])
-wipe(); put(1, act=400, log=SEVEN); server._cfg.CFG["audit"]["mode"] = "agent"
+wipe(); put(1, act=400, log=SEVEN); _cfg.CFG["audit"]["mode"] = "agent"
 server._silence_tick()
 check("1 …and so does the tick in agent mode", sent == [])
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["mode"] = "script"
 
 # ================================================================ 2. the timeline
 wipe(); put(1, act=0); pane_busy("team-back")
@@ -208,7 +212,7 @@ got = tick(at(240))
 check("2 4 h: the -main agent is told, once", got == ["a1"] and len(sent) == 1 and S0()[1] == U["home-main"] and S0()[0] == "a1", (got, sent))
 m = S0()[2]
 check("2 the message is the front agent's form: `[for <owner>]` on line 1, the item and its project, the mover, about 4 hours, a request to look, no reply owed, the tag the ladder's notices use",
-      m.startswith(server._FOR_OWNER + "\n[stackshot] ") and '[home] item 1' in m and "projects/alpha" in m and "team-back" in m and "about 4 hours" in m and "Please look" in m and "pane is in a turn" in m and "No reply is owed" in m and S0()[3] == "stall", m)
+      m.startswith(_web_tools_text._FOR_OWNER + "\n[stackshot] ") and '[home] item 1' in m and "projects/alpha" in m and "team-back" in m and "about 4 hours" in m and "Please look" in m and "pane is in a turn" in m and "No reply is owed" in m and S0()[3] == "stall", m)
 check("2 one History line says who was told, and the record is on the item (told at 4 h, the stretch counting from the last activity)", len(history(1)) == 1 and "home-main was told" in history(1)[0] and "about 4 hours" in history(1)[0]
       and mt(1).get("busy_tell") == {"at": at(240), "to": "home-main", "kind": "main", "since": now0}, (history(1), mt(1).get("busy_tell")))
 told2 = run(250, 360)
@@ -257,7 +261,7 @@ check("5 a front agent's item: nobody is told before 4 h", told == [] and sent =
 told = run(240, 360)
 check("5 at 4 h the front agent ITSELF is told, once (beta-main holds it; -main of the project, home-main, is not), never the owner", told == ["a1"] and len(sent) == 1 and S0()[1] == U["beta-main"] and to_main() == [] and owner_free(), (told, sent))
 m = S0()[2]
-check("5 its message is for the holder: the front mark on line 1, no write but the hourly lines for about 4 hours, write a line or say what blocks it, no reply owed", m.startswith(server._FOR_OWNER + "\n[stackshot] ") and "no write on it but the hourly audit lines" in m and "about 4 hours" in m and "No reply is owed" in m and S0()[3] == "stall", m)
+check("5 its message is for the holder: the front mark on line 1, no write but the hourly lines for about 4 hours, write a line or say what blocks it, no reply owed", m.startswith(_web_tools_text._FOR_OWNER + "\n[stackshot] ") and "no write on it but the hourly audit lines" in m and "about 4 hours" in m and "No reply is owed" in m and S0()[3] == "stall", m)
 check("5 the History line names the front agent and the record says kind front", len(history(1)) == 1 and "beta-main was told" in history(1)[0] and mt(1).get("busy_tell", {}).get("kind") == "front" and mt(1).get("busy_tell", {}).get("to") == "beta-main", (history(1), mt(1).get("busy_tell")))
 wipe(); put(1, mover="beta-main", act=0); panes["beta-main"] = "idle"
 told = run(10, 250)
@@ -351,12 +355,12 @@ check("8 a front test that cannot answer reads as front: the holder is told, nev
 
 # ================================================================ 9. the threshold in the config, never the owner, the tick
 for hrs, expect in ((2, 120), (6, 360)):
-    wipe(); put(1, act=0); pane_busy("team-back"); server._cfg.CFG["audit"]["busy_tell_hours"] = hrs
+    wipe(); put(1, act=0); pane_busy("team-back"); _cfg.CFG["audit"]["busy_tell_hours"] = hrs
     told = run(10, expect - 10); before = list(sent); told += run(expect, expect + 10)
     check(f"9 busy_tell_hours = {hrs}: nobody told before {hrs} h, the -main agent told at {hrs} h, the message says about {hrs} hours", before == [] and told == ["a1"] and first_told() == expect and f"about {hrs} hours" in S0()[2], (before, told, first_told()))
-wipe(); put(1, act=0); pane_busy("team-back"); server._cfg.CFG["audit"]["busy_tell"] = False
+wipe(); put(1, act=0); pane_busy("team-back"); _cfg.CFG["audit"]["busy_tell"] = False
 check("9 the switch off: nothing is told and nothing written over 6 h", run(10, 360) == [] and sent == [] and "busy_tell" not in mt(1))
-server._cfg.CFG["audit"]["busy_tell"] = True
+_cfg.CFG["audit"]["busy_tell"] = True
 check("9 …and switched on again, the stretch that ran meanwhile is told of at the next tick", tick(at(370)) == ["a1"] and len(sent) == 1)
 order = []
 real = (server._hourly_tick, server._hand_idle_tick, server._busy_tell_tick)
@@ -405,9 +409,9 @@ wipe(); put(1, act=400, log=SEVEN)
 check("10 a background mover's stretch that is 6 h 40 min old when first seen says about 6 hours (the real time in whole hours, rounded down)", tick(now0) == ["a1"] and "about 6 hours" in S0()[2] and "about 6 hours" in history(1)[0], (sent, history(1)))
 wipe(); put(1, act=0); pane_busy("team-back"); run(10, 235); told = run(240, 250)
 check("10 …and a stretch told on the tick it turns 4 h still says about 4 hours", told == ["a1"] and "about 4 hours" in S0()[2] and "about 4 hours" in history(1)[0], (sent, history(1)))
-wipe(); put(1, act=70, log=[(50, "pane"), (60, "pane")]); server._cfg.CFG["audit"]["busy_tell_hours"] = 1
+wipe(); put(1, act=70, log=[(50, "pane"), (60, "pane")]); _cfg.CFG["audit"]["busy_tell_hours"] = 1
 check("10 a one-hour threshold reads `about 1 hour`, never `1 hours`", tick(now0) == ["a1"] and "about 1 hour (" in S0()[2] and "1 hours" not in S0()[2] and "about 1 hour:" in history(1)[0], (sent, history(1)))
-wipe(); put(1, act=0); pane_busy("team-back"); server._cfg.CFG["audit"]["busy_tell_hours"] = 2.5; run(10, 140)
+wipe(); put(1, act=0); pane_busy("team-back"); _cfg.CFG["audit"]["busy_tell_hours"] = 2.5; run(10, 140)
 check("10 a threshold of 2.5 hours keeps its own wording when the stretch is just that long (never below it: 2 h 30 min is not `2 hours`)", tick(at(150)) == ["a1"] and "about 2.5 hours" in S0()[2], sent)
 check("10 BT.span: the real hours rounded down, never under the threshold", BT.span(0.0, 4 * H, 4) == "4 hours" and BT.span(0.0, 4 * H + 60, 4) == "4 hours" and BT.span(0.0, 50.3 * H, 4) == "50 hours" and BT.span(0.0, 3 * H, 4) == "4 hours"
       and BT.span(0.0, 3.2 * H, 2.5) == "3 hours" and BT.span(0.0, 2.6 * H, 2.5) == "2.5 hours" and BT.span(0.0, 2.5 * H, 2.5) == "2.5 hours" and BT.span(0.0, 6.9 * H, 4) == "6 hours" and BT.span(0.0, H, 1) == "1 hour", [BT.span(0.0, x * H, 4) for x in (4, 50.3, 3)])
@@ -549,13 +553,13 @@ wipe(); put(1, act=400, log=SEVEN); put(2, act=400, log=SEVEN); put(3, mover="te
 rows = BT.due_all(NR.load_all(None), now0, lambda w, p: False, _BadQueue({"a9": "a8"}), 4.0)
 check("11 BT.due_all: an item whose reading raises is left out and the others are still returned, in id order", [g for g, _r in rows] == ["a1", "a3"], rows)
 
-server._cfg.CFG.setdefault("model", {})["queued_behind"] = True
+_cfg.CFG.setdefault("model", {})["queued_behind"] = True
 try:
     wipe(); put(1, act=400, log=SEVEN); put(2, act=400, log=SEVEN, last_activity={"at": now0 - 10 * MIN, "kind": "audit", "what": "audit verified the mover's pane is in a turn"})      # a2 is the item in hand (activity within the hour: an audit stamp, which holds no tell back), a1 waits behind it
     qm = SL.queued(NR.load_all(None), now0, server._silence_env())
     told_ = tick(now0)
     check("11 a queued item is not told: of two items of one mover, the one the board queues behind the item in hand is left out, and the item in hand is told", qm == {"a1": "a2"} and told_ == ["a2"] and len(to_main()) == 1 and "busy_tell" not in mt(1) and "busy_tell" in mt(2), (qm, told_, sent))
-finally: server._cfg.CFG["model"].pop("queued_behind", None)
+finally: _cfg.CFG["model"].pop("queued_behind", None)
 wipe(); put(1, act=400, log=SEVEN)
 check("11 BT.due: an item the queue shows behind another is not due (the queue passed in is read)", BT.due(NR.load_all(None), "a1", now0, lambda w, p: False, {"a1": "a2"}, 4.0) is None and BT.due(NR.load_all(None), "a1", now0, lambda w, p: False, {"a2": "a1"}, 4.0) is not None)
 
@@ -650,7 +654,7 @@ check("12 a front agent's item keeps counting from its last real activity (its l
 
 # ================================================================ 13. a config that still carries the retired [ladder] keys (main_hours, silence): the rule tells exactly as before, once each
 # The ladder's old four-hour hand-up is gone and its key is read by nothing; with the keys present (and the ladder on) a long busy stretch tells -main once for a background mover and the front agent itself once for a front agent's item, and nothing else tells.
-server._cfg.CFG["ladder"] = {"enabled": True, "main_hours": 1, "silence": True}
+_cfg.CFG["ladder"] = {"enabled": True, "main_hours": 1, "silence": True}
 try:
     wipe(); put(1, act=0); pane_busy("team-back")
     told = run(10, 230)
@@ -664,7 +668,7 @@ try:
     check("13 …at 4 h the front agent itself is told, once, never -main", tick(at(240)) == ["a1"] and len(sent) == 1 and S0()[1] == U["beta-main"] and to_main() == [], sent)
     run(250, 480)
     check("13 …and nothing more at 6 h and 8 h", len(sent) == 1, sent)
-finally: server._cfg.CFG.pop("ladder", None)
+finally: _cfg.CFG.pop("ladder", None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

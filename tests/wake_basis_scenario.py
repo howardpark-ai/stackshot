@@ -56,6 +56,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import fleet_events as fleetev
@@ -190,7 +191,7 @@ for cls in (render, ui_render):
 
 # ---- 9. the end-of-turn board question skips a basis wait, as it skips a held item
 rows = {x["shown"]: x for x in json.loads(server._client_items(U["team-back"])[2])["items"]}
-sh = lambda n: server._gh.shown(f"g{n}")
+sh = lambda n: _gh.shown(f"g{n}")
 check("9 the items the client reads carry held: true for a basis wait (the hook skips held rows), and false for a plain doing item, a spent wake and a reminder",
       all(rows[sh(n)]["held"] for n in (1, 2, 6, 17, 22)) and not any(rows[sh(n)]["held"] for n in (3, 4, 5, 18)) and rows[sh(1)]["list"] == "waiting", {n: rows.get(sh(n), {}).get("held") for n in (1, 2, 3, 4, 5, 6, 17, 18, 22)})
 from stackshot.projects import pages as _pages

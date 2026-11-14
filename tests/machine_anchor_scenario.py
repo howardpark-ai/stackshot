@@ -75,6 +75,9 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import route as _wt_route; from stackshot.anchors import machine_anchor as MA; from stackshot.anchors import anchors as ANC; from stackshot.service import create as create_svc
+from stackshot.github import ghsync as _gh
+from stackshot.core import instance as _core_instance
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import event_waits as evwaits_svc
@@ -90,10 +93,10 @@ ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no dayligh
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 BACK, FRONT = "team-back", "home-front"
 UB = U["team-back"]
-CFG = server._cfg.CFG.setdefault("model", {})
+CFG = _cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, watchers=True, pause=False)
 def reset(): SENT.clear()
-R = server._gh.shown
+R = _gh.shown
 def anchors(**kw): return _wt_anchors._anchors("projects/alpha", who=BACK, **kw)
 def tick(): return evwaits_svc.evwait_poll(time.time())
 def mstore(): return json.loads((T / "store/machine-anchors.json").read_text()) if (T / "store/machine-anchors.json").exists() else {}
@@ -128,7 +131,7 @@ item(32, mover=BACK, subject="[home] project-wide: its step names box-b", next="
 item(33, mover=BACK, subject="[home] project-wide: no step names a machine", next="team-back: write the report")
 item(34, mover=BACK, subject="[home] has its own box_online wait")
 item(35, mover=BACK, subject="[home] closed", status="completed")
-item(36, mover=server.OWNER, subject="[home] his step", next=f"{server.OWNER}: plug box-b in")
+item(36, mover=_core_instance.OWNER, subject="[home] his step", next=f"{_core_instance.OWNER}: plug box-b in")
 item(37, mover=BACK, subject="[home] needs box-a, which stays online")
 before = (T / "store/anchors.json").read_text()
 out = anchors(add=["machine:BOX-B"], items=["a30", "a31"])
@@ -227,8 +230,8 @@ check("own wait: a wait on another machine does not stop the notice for this one
 reset()
 for i in (60, 61, 62, 63):
     (T / f"store/a/{i}.json").unlink(missing_ok=True)
-item(60, mover=BACK, then=BACK, subject="[home] waits on box-d, then his", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=server.OWNER, needs=[])
-item(63, mover=server.OWNER, then=BACK, subject="[home] waits on box-d, his by the mover", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), needs=[])
+item(60, mover=BACK, then=BACK, subject="[home] waits on box-d, then his", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=_core_instance.OWNER, needs=[])
+item(63, mover=_core_instance.OWNER, then=BACK, subject="[home] waits on box-d, his by the mover", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), needs=[])
 item(61, mover=BACK, then=BACK, subject="[home] waits on box-d, then the back agent", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=BACK, needs=[])
 anchors(add=["machine:box-b"], items=["a60", "a61", "a63"])
 go_offline("host-b"); tick(); reset()
@@ -237,7 +240,7 @@ told_gids = [g for x in notices() for g in x[0].split(",")]
 check("waiting item: one whose post-wake mover is the owner gets no notice, though `then` and its stored mover are sessions; the same item with a session after the wait still does",
       "a60" not in told_gids and "a61" in told_gids, (SENT, mt(60)))
 check("waiting item: ...and the owner's item stays as it was (nothing turned, nothing saved)", mt(60).get("post_wake_mover") and mt(60).get("wait_kind") == "event", mt(60))
-check("waiting item: one the owner picks up by its mover (no post_wake_mover) gets no notice either, and stays as it was", "a63" not in told_gids and mt(63).get("mover") == server.OWNER and mt(63).get("wait_kind") == "event", (SENT, mt(63)))
+check("waiting item: one the owner picks up by its mover (no post_wake_mover) gets no notice either, and stays as it was", "a63" not in told_gids and mt(63).get("mover") == _core_instance.OWNER and mt(63).get("wait_kind") == "event", (SENT, mt(63)))
 
 # a box_online wait on machine A that turns an item and an anchor on machine B for it: A is told by the wait only, B is still told
 reset()

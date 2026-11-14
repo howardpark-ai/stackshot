@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live
 from stackshot.web import server
+from stackshot.web import render as _rmod
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -105,7 +106,7 @@ check("2: a notice the router has not ruled yet says it is still held, who sent 
       and field(t_wait, "ruled") is None and field(t_wait, "reason") is None, t_wait)
 check("2: …the sent time is the notice's own, in the instance timezone, in the server's time style (Wed Jun 17th 14:23)",
       re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th) \d\d:\d\d", field(t_wait, "sent") or "")
-      and field(t_wait, "sent") == server._rmod.when_words(dt.datetime.fromtimestamp(n_pass["ts"], ZONE)), t_wait)
+      and field(t_wait, "sent") == _rmod.when_words(dt.datetime.fromtimestamp(n_pass["ts"], ZONE)), t_wait)
 check("2: …and its text is one line of at most 120 characters, cut with an ellipsis", len(field(t_wait, "text")) <= 120 and field(t_wait, "text").endswith("…") and field(t_wait, "text").startswith("please look at the quote"), field(t_wait, "text"))
 
 # ---- 3. the tick: passed (the call), held, dropped, merged; each one's ruling shows

@@ -53,7 +53,7 @@ def item(i, status="open", su=None, desc=DESC, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": desc, "status": status,
                                                        "updated": su, "state_updated": su, "confirmed": su,
                                                        "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "do the thing", **meta}}))
-def mof(g): return server._load(g)["metadata"]
+def mof(g): return _service_store._load(g)["metadata"]
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 mt = lambda i: rd(i)["metadata"]
 fails = []; ran = []
@@ -62,12 +62,13 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.anchors import anchors as _anc
+from stackshot.service import store as _service_store
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import update as _wt_update
 _web_publish._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
-server._front_sender = lambda who: False
 BACK = "team-back"
 def bupd(i, **kw):
     if kw.get("wake") or kw.get("until") or kw.get("ask_by") or kw.get("wait_kind"): kw.setdefault("wait_reason", "the vendor replies only after that date")
@@ -85,10 +86,10 @@ def refused(name, f, *want):
 
 
 A1 = "https://github.com/o/r/pull/101"
-server._anc.save({"projects/alpha": [{"url": A1, "items": [f"a{n}" for n in range(1, 12)], "added": now0, "by": "x"}]})
+_anc.save({"projects/alpha": [{"url": A1, "items": [f"a{n}" for n in range(1, 12)], "added": now0, "by": "x"}]})
 REL = dict(needs=["external"], until=w(5), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)      # needs external: with the stored state gone the item reads as an outside wait
 EVT = dict(needs=["external"], until=w(5), wait_kind="event", wait_event="box_online testbox", post_wake_mover=BACK)
-conflicts = lambda g: list(MODEL.derive(server._load(g)).conflicts)
+conflicts = lambda g: list(MODEL.derive(_service_store._load(g)).conflicts)
 STATE_CONFLICT = "which is alive: the wait wins"
 
 # ================================================================ 1. hold ends the stored state

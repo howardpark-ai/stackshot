@@ -72,6 +72,9 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.service import landed as ld; from stackshot.service import foryou as fy; from stackshot.notify import landed as ld_rules
 from stackshot.web import server
+from stackshot.service import store as _service_store
+from stackshot.core import instance as _core_instance
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -173,18 +176,18 @@ check("before any close the header carries the Closed card at 0, its number mute
 cl(1); cl(2, outcome="dropped", reason="not needed any more")
 check("an agent's close, done or dropped, is a record: uncleared, with the item's project, the outcome and who closed it", set(recs()) == {"a1", "a2"}
       and recs()["a1"]["outcome"] == "done" and recs()["a2"]["outcome"] == "dropped" and not recs()["a1"]["cleared"] and recs()["a1"]["project"] == "projects/alpha"
-      and server._session_label(recs()["a1"]["by"]) == "work-osprey-x", recs())
+      and _fleet_sessions_registry._session_label(recs()["a1"]["by"]) == "work-osprey-x", recs())
 cl(3, outcome="superseded", reason="replaced", superseded_by="a1")
 check("a close to superseded makes no record", "a3" not in recs() and rd(3)["status"] == "completed", recs())
 # Oliver's own closes: his answer on the board (author), and a write whose sender is he (the tools refuse that sender, a server path may write as him)
 it4 = rd(4); it4["status"] = "completed"; it4["metadata"].update(outcome="dropped", reason="drop it"); it4["updated"] = it4["state_updated"] = time.time()
-writes.save("a4", it4, author=(server.OWNER, "board"))
+writes.save("a4", it4, author=(_core_instance.OWNER, "board"))
 it5 = rd(5); it5["status"] = "completed"; it5["metadata"].update(outcome="done", reason="he did it"); it5["updated"] = it5["state_updated"] = time.time()
 writes.save("a5", it5, writer="Oliver")
 check("Oliver's own close makes no record, whether it is his board answer or a write whose sender is he", "a4" not in recs() and "a5" not in recs() and rd(4)["status"] == rd(5)["status"] == "completed", recs())
 # the server's own close on a done check: a record with no closer
 item(6, check="item_closed a1")
-checks_svc.check_close("a6", server._load("a6"), "item_closed a1", time.time())
+checks_svc.check_close("a6", _service_store._load("a6"), "item_closed a1", time.time())
 check("the server's own close on a done check is a record with no closer, shown as stackshot", "a6" in recs() and recs()["a6"]["by"] == "" and recs()["a6"]["outcome"] == "done", recs().get("a6"))
 cl(9, sender="home-beta")
 check("a close in another project is a record too", set(recs()) == {"a1", "a2", "a6", "a9"}, set(recs()))
@@ -507,7 +510,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     # a close by Oliver of an item an agent closed before and that was reopened: no record
     _wt_update.stackshot_update("a10", status="open", sender="home-beta", description="- Goal: A thing\n- It lives here\n- Finished when it is done for good", next="home-beta: once more")
     it10 = rd(10); it10["status"] = "completed"; it10["metadata"].update(outcome="done", reason="he closed it"); it10["updated"] = it10["state_updated"] = time.time()
-    writes.save("a10", it10, author=(server.OWNER, "board"))
+    writes.save("a10", it10, author=(_core_instance.OWNER, "board"))
     check("a close by Oliver after a reopen: no record, nothing on the page", "a10" not in recs() and board().landed_count() == 0)
     agree("a close by Oliver after a reopen", 0)
 

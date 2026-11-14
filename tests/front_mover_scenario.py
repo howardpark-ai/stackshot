@@ -45,6 +45,8 @@ def put(i, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server
+from stackshot.core import instance as _core_instance
+from stackshot.anchors import anchors as _anc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
@@ -57,8 +59,8 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
-SID = server._session_id
-OWNER = server.OWNER
+SID = _web_page_debts._session_id
+OWNER = _core_instance.OWNER
 
 def refusal(fn):
     try:
@@ -157,15 +159,15 @@ check("owed agent gone: the plain refusal is back", msg.startswith("Refused:") a
 
 # ---- a failing roles read lets the write through (one stderr line)
 import io, contextlib
-_real_roles = server._anc.session_roles
+_real_roles = _anc.session_roles
 def _boom(*a, **k): raise RuntimeError("roles unreadable")
-server._anc.session_roles = _boom
+_anc.session_roles = _boom
 errbuf = io.StringIO()
 try:
     with contextlib.redirect_stderr(errbuf):
         msg = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{MAIN}: check it"))
 finally:
-    server._anc.session_roles = _real_roles
+    _anc.session_roles = _real_roles
 check("roles read fails: the front-mover gate lets the write through and says so on stderr", "no hand-off notice" not in msg and "front-mover gate" in errbuf.getvalue() and "roles unreadable" in errbuf.getvalue(), (msg, errbuf.getvalue()))
 
 # ---- the server's own moves do not come through the tools' gate

@@ -72,6 +72,11 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.github import ghsync as _gh
+from stackshot.core import config as _cfg
+from stackshot.web import render as _rmod
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc
@@ -96,7 +101,7 @@ def refused(name, f, *want, i=None):
     was = rd(i) if i is not None else None
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
 def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
 def mk(**kw):
@@ -112,7 +117,7 @@ OPEN = lambda t: ("open", t)
 import contextlib
 @contextlib.contextmanager
 def noguards():
-    g = server._cfg.CFG.setdefault("model", {}); was = g.get("guards", True); g["guards"] = False
+    g = _cfg.CFG.setdefault("model", {}); was = g.get("guards", True); g["guards"] = False
     try: yield
     finally: g["guards"] = was
 with noguards():
@@ -124,7 +129,7 @@ with noguards():
     for who in ("home-agent", "Oliver", "Kim", "Anthropic support"):
         try:
             r = mk(next=f"home-agent: build it\n{who}: do the next thing" if who != "home-agent" else "home-agent: do the next thing"); ok = r.startswith("created")
-        except server.ToolError as e:
+        except ToolError as e:
             ok, r = False, str(e)
         check(f"create: a line opening `{who}:` passes", ok, r)
     r = mk(next="home-agent: build it\n- check the log\n- then say so")
@@ -154,7 +159,7 @@ check("guards ON, create: a `- ` sub-line at column 0 under a named step passes 
 for nm, f in (("create", lambda: mk(next="build it")), ("update", lambda: upd(50, next="build it"))):
     try:
         f(); check(f"guards ON, {nm}: an unnamed line is refused", False, "not refused")
-    except server.ToolError as e:
+    except ToolError as e:
         m = str(e)
         check(f"guards ON, {nm}: an unnamed line is refused once, by N1's message, with no second refusal from the model guard", m.startswith("Refused: a line of next names no one") and m.count("Refused") == 1 and "does not say who takes it" not in m and "open the line with who takes it" in m, m)
 refused("guards ON, update: a stray `- ` line with no step above it is refused by N1", lambda: upd(50, next="- check the log"), "names no one", i=50)
@@ -174,7 +179,7 @@ check("N1 (c): hint() of a plain line without a name is empty and of a label nam
 # the guard itself, for the writes N1 does not judge (a script's, the server's own): any name passes, an unnamed line is refused
 from stackshot.model import model_guards as _MG
 _it = lambda nx: {"id": "a1", "status": "open", "subject": "[home] x", "description": "- x", "metadata": {"project": "projects/alpha", "next": nx, "mover": "home-agent", "needs": ["home-agent"]}}
-_ctx = _MG.Ctx(label=server._session_label, shown=server._gh.shown)
+_ctx = _MG.Ctx(label=_fleet_sessions_registry._session_label, shown=_gh.shown)
 _keys = lambda nx: [p.key for p in _MG.check(_it(nx), _ctx, touched={"next"})[0]]
 check("model guard next_unnamed: an outside name, a two-word name and a sub-line under a named step pass", "next_unnamed" not in _keys("Kim: send it\nhome-agent: do it\n- sub") and "next_unnamed" not in _keys("Anthropic support: answer it"), _keys("Kim: send it"))
 check("model guard next_unnamed (part 3): a `Status:` label is no name for it either, and its message carries the hint",
@@ -185,7 +190,7 @@ check("model guard next_unnamed: a line with no name is still refused (a script'
 check("unnamed: the words none and clear and an empty text are no line", NR.unnamed("none") == [] and NR.unnamed("clear") == [] and NR.unnamed("-") == [] and NR.unnamed("") == [], NR.unnamed("none"))
 check("unnamed: named lines and their sub-lines are quiet; an unnamed line and a stray bullet are listed",
       NR.unnamed("home-agent: a\n- sub\nOliver: b\nKim: c") == [] and NR.unnamed("a thing\n- sub") == ["a thing", "- sub"] and NR.unnamed("home-agent: a\nand then b") == ["and then b"], NR.unnamed("a thing\n- sub"))
-check("unnamed: the ask line a client without the ask parameter writes first is no unnamed line", NR.unnamed(f"{ASK}\nhome-agent: build it", skip_first=lambda ln: server._rmod.parse_ask(ln) is not None) == [], NR.unnamed(f"{ASK}\nhome-agent: build it"))
+check("unnamed: the ask line a client without the ask parameter writes first is no unnamed line", NR.unnamed(f"{ASK}\nhome-agent: build it", skip_first=lambda ln: _rmod.parse_ask(ln) is not None) == [], NR.unnamed(f"{ASK}\nhome-agent: build it"))
 with noguards():
     r = upd(5, next=f"{ASK}\nhome-agent: build it")
 check("update: an ask written as the first next line by a client without the ask parameter is not refused as unnamed", "home-agent: build it" in mt(5)["next"], (r, mt(5)))
@@ -259,7 +264,7 @@ def n7(name, text, quiet=False, *want):
     i = next(ids)
     try:
         r = upd(i, next=f"home-agent: {text}", dropped=[1])
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, False, str(e)); return
     note = "next reads like a report" in r
     ok = (not note) if quiet else (note and all(w in r for w in want))
@@ -316,28 +321,28 @@ _ng = noguards(); _ng.__enter__()
 try:
     r = server._update("a44", next="build it, no name on the line", sender="home-agent", dropped=[1])
     check("internal: server._update with an unnamed line is not refused (a script's, the router's and the server's own writes read the line as they always did)", "build it, no name" in mt(44)["next"], (r, mt(44)))
-except server.ToolError as e:
+except ToolError as e:
     check("internal: server._update with an unnamed line is not refused", False, str(e))
 try:
     server._update("a45", next="home-agent: write the docs", sender="home-agent", dropped=[1])
     r = server._update("a45", next="home-agent: write the docs, now at work since 23:28", sender="home-agent", dropped=[2])
     check("internal: server._update is not held to N3 (an old step plus words is accepted as before)", "at work since 23:28" in mt(45)["next"], (r, mt(45)))
-except server.ToolError as e:
+except ToolError as e:
     check("internal: server._update is not held to N3", False, str(e))
 try:
     r = server._update("a46", next="none", sender="home-agent", dropped=[1])
     check("internal: server._update that leaves no open step is not refused (N6 is a session's write only)", rd(46)["status"] == "open", (r, mt(46)))
-except server.ToolError as e:
+except ToolError as e:
     check("internal: server._update that leaves no open step is not refused", False, str(e))
 try:
     r = _wt_create._create(subject="[home] made by the server", description=DESC, project="projects/alpha", owner="home-agent", next="")
     check("internal: _wt_create._create with no next is not refused (the router, the cold call and the recycle write create items this way)", str(r).startswith("created"), r)
-except server.ToolError as e:
+except ToolError as e:
     check("internal: _wt_create._create with no next is not refused", False, str(e))
 try:
     r = _wt_create._create(subject="[home] made by the server again", description=DESC, project="projects/alpha", owner="home-agent", next="an unnamed line")
     check("internal: _wt_create._create with an unnamed line is not refused", str(r).startswith("created"), r)
-except server.ToolError as e:
+except ToolError as e:
     check("internal: _wt_create._create with an unnamed line is not refused", False, str(e))
 refused("a refused tool call leaves the flag off again", lambda: mk(next="build it"), "names no one")
 check("…the flag is off after a tool call, refused or not", not getattr(writes.SESSION_NEXT, "on", False), None)

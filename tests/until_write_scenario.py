@@ -50,7 +50,7 @@ def item(i, status="open", su=None, desc=DESC, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": desc, "status": status,
                                                        "updated": su, "state_updated": su, "confirmed": su,
                                                        "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "do the thing", **meta}}))
-def mof(g): return server._load(g)["metadata"]
+def mof(g): return _service_store._load(g)["metadata"]
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 mt = lambda i: rd(i)["metadata"]
 fails = []; ran = []
@@ -59,6 +59,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
+from stackshot.web import render as _rmod
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc, watching as watching_svc
@@ -131,12 +134,12 @@ try:
     check("1 …and until still works", bupd(6, until=w(2)) and W.stored_until(mt(6)) == w(2), mt(6))
 finally:
     server._wait_alias_until = real_gate
-_held_open = server._cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)      # the suites hold the window open (tests/_instance.py); the code's own default is read with the key unset
+_held_open = _cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)      # the suites hold the window open (tests/_instance.py); the code's own default is read with the key unset
 try:
     check("1 the window is a config value read at use: [model] wait_alias_until, the code's default when unset", server._wait_alias_until() == dt.date.fromisoformat(UW.ALIAS_UNTIL), None)
 finally:
     if _held_open is not None:
-        server._cfg.CFG["model"]["wait_alias_until"] = _held_open
+        _cfg.CFG["model"]["wait_alias_until"] = _held_open
 import pathlib as _pl
 _example = (_pl.Path(__file__).resolve().parent.parent / "stackshot.example.toml").read_text(encoding="utf-8")
 check("1 stackshot.example.toml lists wait_alias_until with the code's date, next to owner_param_until (so a start from it warns of nothing)",
@@ -322,27 +325,27 @@ check("5.10 listing: a decision with an until is held False, a date-only wait Tr
 (T / "board.md").write_text("", encoding="utf-8")
 brief10 = _wt_brief.stackshot_brief(); act10, _, hold10 = brief10.partition("\n\nOn hold (")
 check("5.10 brief: a decision with an until is among the active items, a date-only wait among the parked", "a67 [open" in act10 and "a67 [open" not in hold10 and "a68 [open" in hold10 and "a68 [open" not in act10, (act10[-300:], hold10[:300]))
-check("5.10 all three read the one rule: _is_parked is render.is_held", server._is_parked(rd(68)) and not server._is_parked(rd(67)) and server._is_parked(rd(68)) == server._rmod.is_held(rd(68)) and server._is_parked(rd(67)) == server._rmod.is_held(rd(67)), None)
+check("5.10 all three read the one rule: _is_parked is render.is_held", server._is_parked(rd(68)) and not server._is_parked(rd(67)) and server._is_parked(rd(68)) == _rmod.is_held(rd(68)) and server._is_parked(rd(67)) == _rmod.is_held(rd(67)), None)
 
 # 5.11 the alias window's own end is read from the config: a missing [model] wait_alias_until is said once at the start
 import contextlib, io as _io
-was_model = dict(server._cfg.CFG.get("model") or {})
+was_model = dict(_cfg.CFG.get("model") or {})
 try:
-    server._cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)
+    _cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)
     buf11 = _io.StringIO()
     with contextlib.redirect_stderr(buf11):
         server._wait_alias_check()
     miss11 = buf11.getvalue()
-    server._cfg.CFG["model"]["wait_alias_until"] = "2030-01-01"
+    _cfg.CFG["model"]["wait_alias_until"] = "2030-01-01"
     buf11b = _io.StringIO()
     with contextlib.redirect_stderr(buf11b):
         server._wait_alias_check()
-    server._cfg.CFG["model"]["wait_alias_until"] = "soon"
+    _cfg.CFG["model"]["wait_alias_until"] = "soon"
     buf11c = _io.StringIO()
     with contextlib.redirect_stderr(buf11c):
         server._wait_alias_check()
 finally:
-    server._cfg.CFG["model"] = was_model
+    _cfg.CFG["model"] = was_model
 check("5.11 a missing [model] wait_alias_until is warned once, naming the default it stands on", "wait_alias_until is missing" in miss11 and UW.ALIAS_UNTIL in miss11 and miss11.count("config:") == 1, miss11)
 import inspect
 src11 = inspect.getsource(server._start_background)
@@ -352,9 +355,9 @@ check("5.11 ...a date there is silent, and a value that is not a date is warned 
 
 # 5.12 the keeper's relay names a date-only wait as the park it replaces, and the minute loop is woken by it
 rel12 = []
-real_charge, real_relay, real_owes = telling.pilot_charge, telling.pilot_relay, server._writer_owes
+real_charge, real_relay, real_owes = telling.pilot_charge, telling.pilot_relay, _web_page_debts._writer_owes
 telling.pilot_charge = lambda project, who: ("home-stew", "name")
-server._writer_owes = lambda: False
+_web_page_debts._writer_owes = lambda: False
 telling.pilot_relay = lambda project, gid, item, what, debtor, stew, role, tail="": (rel12.append(what), "told")[1]
 try:
     item(69, needs=[BACK]); runner_svc.WAKE_EVENT.clear()
@@ -362,7 +365,7 @@ try:
     woke12 = runner_svc.WAKE_EVENT.is_set()
     bupd(69, clear_hold=True)
 finally:
-    telling.pilot_charge, telling.pilot_relay, server._writer_owes = real_charge, real_relay, real_owes
+    telling.pilot_charge, telling.pilot_relay, _web_page_debts._writer_owes = real_charge, real_relay, real_owes
 check("5.12 a write that sets a date-only wait tells the keeper 'put on hold', and one that clears it 'released from hold'", len(rel12) == 2 and rel12[0] == "put on hold" and rel12[1] == "released from hold", rel12)
 check("5.12 ...and the minute loop is woken by the write that parks it", woke12, None)
 

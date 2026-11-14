@@ -34,11 +34,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.core import config as cfg; from stackshot.fleet import fleet; from stackshot.fleet import clients; from stackshot.waits import mover_state; from stackshot.waits import stall; from stackshot.fleet import inbox; from stackshot.fleet import push; from stackshot.fleet import liveness as LV; from stackshot.web import server
+from stackshot.anchors import anchors as _anc
 NOW = float(int(time.time()))        # whole seconds: the stamps below are second-granular, so an edge case lands exactly on the edge
 iso = lambda delta: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW - delta))
 UU = lambda n: f"{n:08d}-0000-4000-8000-000000000000"
 def setcfg(**kw):
-    for k, v in kw.items(): server._cfg.CFG.setdefault("client", {})[k] = v
+    for k, v in kw.items(): cfg.CFG.setdefault("client", {})[k] = v
 
 # ================================================================= the old readers, frozen (the code as it stood before liveness.py), one block per file
 import datetime as dt
@@ -60,7 +61,7 @@ o_reported_lately = lambda seen, now: now - o_ts(seen) <= o_grace()             
 o_hook_expired = lambda seen, now: now - o_ts(seen) > o_ttl()                                       # clients._expire
 o_past_horizon = lambda gone, now: now - o_ts(gone) > o_horizon()                                   # clients._expire
 def o_idle_live(who, nm, idx):                                                                      # server._idle_live
-    sid = server._anc.canonical(who, nm); rec = idx.get(sid.lower()) or idx.get(sid)
+    sid = _anc.canonical(who, nm); rec = idx.get(sid.lower()) or idx.get(sid)
     return bool(rec) and o_running(rec)
 def o_machine_unreachable(letter, started, now=None):                                               # server._machine_unreachable (started = server._STARTED)
     on = fleet.read(str(letter or ""), "machine").get("online") if letter else None
@@ -69,7 +70,7 @@ def o_machine_unreachable(letter, started, now=None):                           
     basis = max(o_ts(on.get("since")), started)
     return "its machine's puller is not checking in" if now - basis >= o_grace() else ""
 def o_session_down(who, nm, idx, stuck, started, now=None):                                         # server._session_down
-    sid = server._anc.canonical(who, nm); rec = idx.get(sid.lower()) or idx.get(sid)
+    sid = _anc.canonical(who, nm); rec = idx.get(sid.lower()) or idx.get(sid)
     if not isinstance(rec, dict) or not rec: return ""
     if o_running(rec):
         why = stuck(sid) if stuck is not None else server._pane_stuck(sid, nm, idx)

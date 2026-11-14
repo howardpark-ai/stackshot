@@ -65,6 +65,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import model as MODEL; from stackshot.waits import server_fixes as SF; from stackshot.waits import wait_end as WE; from stackshot.core import config as CFG; from stackshot.waits import watchers as WATCH
+from stackshot.core import instance as _core_instance
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import event_waits as evwaits_svc
@@ -116,7 +118,7 @@ g = gaps("team-back: wait for board#" "999 to close")
 check("1 …a closed or unknown item is nothing to wait for", g == [], g)
 g = gaps("home-other: wait for board#" "812 to close")
 check("1 …another session's step is not read", g == [], g)
-g = gaps(f"{server.OWNER}: wait for board#" "812 to close")
+g = gaps(f"{_core_instance.OWNER}: wait for board#" "812 to close")
 check("1 …nor is the owner's", g == [], g)
 g = gaps("team-back: do not wait for board#" "812 to close; write the summary now")
 check("1 …a negated wait is no wait", g == [], g)
@@ -259,7 +261,7 @@ check("4 …and is not set again", not mt(9215).get("step_proof"), mt(9215))
 
 # ================================================================ 5. never
 for p in (T / "store/g").glob("*.json"): p.unlink()
-item(9301, f"{server.OWNER}: wait for board#" "9302 to close", mover=server.OWNER, needs=[server.OWNER])
+item(9301, f"{_core_instance.OWNER}: wait for board#" "9302 to close", mover=_core_instance.OWNER, needs=[_core_instance.OWNER])
 item(9302, "home-other: build the thing")
 item(9303, "home-front: wait for board#" "9302 to close", mover="home-front", needs=["home-front"])
 item(9304, "team-back: wait for board#" "9302 to close", hold=True, wake=(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=2)).strftime("%Y-%m-%d"))
@@ -332,7 +334,7 @@ for p in (T / "store/g").glob("*.json"): p.unlink()
 item(9621, "team-back: wait for the reply in https://github.com/acme/widgets/issues/21")
 anchors_before = (T / "store/anchors.json").read_text()
 real_wow = server._watch_on_write
-def refusing(*a, **k): raise server.ToolError("Refused: the wait is refused by a later gate")
+def refusing(*a, **k): raise ToolError("Refused: the wait is refused by a later gate")
 server._watch_on_write = refusing
 try:
     wipe()

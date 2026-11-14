@@ -90,6 +90,10 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.service import foryou as fy, foryou_events as fyev, foryou_slack as fyslack; from stackshot.notify import foryou as fy_rules
 from stackshot.web import server
+from stackshot.service import store as _service_store
+from stackshot.waits import waiting as _wt
+from stackshot.github import ghsync as _gh
+from stackshot.web import answers as _web_answers
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -236,7 +240,7 @@ check("(d) a close by another session: the front agent owner still gets its one 
 CHK = "item_closed a99"
 item(92); item(93); item(94, owner="Oliver"); item(95, owner="an-outside-party"); item(96)
 fy.set_flag("a93", "mute")
-p0 = len(pushes()); checks_svc.check_close("a92", server._load("a92"), CHK, time.time()); settle()
+p0 = len(pushes()); checks_svc.check_close("a92", _service_store._load("a92"), CHK, time.time()); settle()
 check("done check: its close tells the front agent owner at once, one marked line, the same shape as a session's close with the check as the closer",
       len(to_owner(A, "a92", p0)) == 1 and to_owner(A, "a92", p0)[0].startswith("[for Oliver] [stackshot] a92 [home] item 92: closed by stackshot's done check: done (done check passed: ")
       and to_owner(A, "a92", p0)[0].endswith(f") \u2192 {BOARD}/items/a92"), pushes()[p0:])
@@ -245,14 +249,14 @@ PRESENT[0] = False; item(67, needs=["osprey-x"]); p0 = len(pushes()); n0 = len(r
 check("Oliver not there for the pane: a close tells the front agent owner nothing, the reply still names it, and the routing log holds a line ruled `held` for it",
       not to_owner(A, "a67", p0) and rd(67)["status"] == "completed"
       and [n for n in routing.read("projects/alpha")[n0:] if n.get("ruling") == "held" and "a67" in str(n.get("label", "")) + str(n.get("text", ""))], (pushes()[p0:], routing.read("projects/alpha")[n0:], outh))
-p0 = len(pushes()); checks_svc.check_close("a93", server._load("a93"), CHK, time.time()); settle()
+p0 = len(pushes()); checks_svc.check_close("a93", _service_store._load("a93"), CHK, time.time()); settle()
 check("…a muted item: the owner is not told", not to_owner(A, "a93", p0), pushes()[p0:])
-p0 = len(pushes()); checks_svc.check_close("a94", server._load("a94"), CHK, time.time()); checks_svc.check_close("a95", server._load("a95"), CHK, time.time()); settle()
+p0 = len(pushes()); checks_svc.check_close("a94", _service_store._load("a94"), CHK, time.time()); checks_svc.check_close("a95", _service_store._load("a95"), CHK, time.time()); settle()
 check("…the owner Oliver, or a name that is no session: nobody is marked for it", not [x for x in pushes()[p0:] if ("a94" in x[1] or "a95" in x[1]) and "[for Oliver]" in x[1]], pushes()[p0:])
 # the other small gaps: [board] tell_owner off, and an owner that is Oliver or no session, on a close and on a handed-back step
 _cfg.CFG.setdefault("board", {})["tell_owner"] = False
 item(97, needs=["osprey-x"], next="osprey-x: only"); item(98, needs=["external", "osprey-x"])
-p0 = len(pushes()); checks_svc.check_close("a96", server._load("a96"), CHK, time.time()); out = cl(97); outh = server._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
+p0 = len(pushes()); checks_svc.check_close("a96", _service_store._load("a96"), CHK, time.time()); out = cl(97); outh = server._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
 check("tell_owner off: a done check's close, a session's close and an item back with the owner alone tell the front agent owner nothing", not [x for x in pushes()[p0:] if x[0] == A and re.search(r"a9[678]\b", x[1]) and x[1].startswith("[for Oliver]")]
       and "told at once" not in out + outh, (pushes()[p0:], out, outh))
 _cfg.CFG["board"]["tell_owner"] = True
@@ -278,7 +282,7 @@ d11 = of("a11", "decision"); check("a11's decision row is there", len(d11) == 1)
 # ---- 4. reopen, a failed check
 server._update("a1", status="open", next="osprey-x: one more thing", sender="osprey-x")
 check("a reopen of a watched item: a reopened row", len(of("a1", "reopened")) == 1 and of("a1", "reopened")[0]["what"].startswith("reopened by osprey-x"), of("a1"))
-it21 = server._load("a21"); n21 = len(of("a21"))
+it21 = _service_store._load("a21"); n21 = len(of("a21"))
 checks_svc.check_fail("a21", it21, "pr_merged https://example.invalid/pr/1", "the pull request was closed unmerged", time.time())
 c21 = of("a21", "check_failed")
 check("a check that can no longer pass: a check_failed row naming it and why", len(c21) == 1 and "can no longer end: the pull request was closed unmerged" in c21[0]["what"], c21)
@@ -292,7 +296,7 @@ def due_item(i, days, **meta):
     item(i, **{"due": d}, **meta); return d
 d_soon = due_item(30, 0, said=SAID); due_item(31, 0); due_item(32, 0, said=SAID); due_item(33, 10, said=SAID); due_item(34, -10, said=SAID); due_item(35, -0, answers=ANS)
 fy.set_flag("a32", "mute")
-end30 = server._wt.due_epoch(d_soon)
+end30 = _wt.due_epoch(d_soon)
 slack.clear(); fyev._FORYOU_LAST[0] = 0.0
 pub0 = pub[0]
 made = fyev._foryou_tick(end30 - 10 * 3600); fyslack._foryou_slack_wait()      # the Slack post is the worker thread's: wait for its queue
@@ -341,7 +345,7 @@ def urgent(text, key=None, **kw):
 fyslack._foryou_slack_wait()
 
 # ---- 7. the stub every later section reads
-server._wt.cap_needs_owner = lambda: False
+_wt.cap_needs_owner = lambda: False
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 
@@ -389,7 +393,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path)
     wtok = lambda g: _rt_answers._watch_token(EMAIL, g)
-    atok = lambda g: server._answer_token(EMAIL, g)
+    atok = lambda g: _web_answers._answer_token(EMAIL, g)
     g_in, g_out = page("/items/a51"), page("/items/a51", cookie=None)
     check("the item page, signed in, carries the For you control: Watch, Mute and Default, with this item's token",
           g_in.status_code == 200 and 'class="iwatch"' in g_in.text and 'action="/items/a51/watch"' in g_in.text and f'value="{wtok("a51")}"' in g_in.text
@@ -519,7 +523,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     jw = r_w.json()
     check("watch: board#<a> (percent-encoded in the path) → 200 {ok, item: \"board#<a>\", state: \"watch\", flags: the whole map by shown id}",
           r_w.status_code == 200 and set(jw) == {"ok", "item", "state", "flags"} and jw["ok"] is True and jw["item"] == f"board#{BID_A}" and jw["state"] == "watch"
-          and jw["flags"] == {**fy.payload(server._gh.shown)["flags"]} and jw["flags"].get(f"board#{BID_A}") == "watch" and jw["flags"].get("a51") == "mute" and jw["flags"].get("a7") == "watch",
+          and jw["flags"] == {**fy.payload(_gh.shown)["flags"]} and jw["flags"].get(f"board#{BID_A}") == "watch" and jw["flags"].get("a51") == "mute" and jw["flags"].get("a7") == "watch",
           (r_w.status_code, r_w.text[:300]))
     check("…the flag is stored under the store id, is visible in GET /client/for-you, and the change is logged with the sender and published",
           fy.flag("g9160") == "watch" and get_fy()["flags"] == jw["flags"] and "fleet-web" in log_w and f"board#{BID_A}" in log_w and pub[0] == p3 + 1, (fy.flags(), log_w, pub[0] - p3))
@@ -666,7 +670,7 @@ fy._save = disk_full
 try:
     with contextlib.redirect_stderr(err12):
         out60 = cl(60); out62 = cl(62); settle()
-        it61 = server._load("a61"); it61["status"] = "completed"; it61["state_updated"] = time.time(); it61["metadata"] = {**it61["metadata"], "outcome": "done", "reason": "its check passed"}
+        it61 = _service_store._load("a61"); it61["status"] = "completed"; it61["state_updated"] = time.time(); it61["metadata"] = {**it61["metadata"], "outcome": "done", "reason": "its check passed"}
         writes.save("a61", it61); told61 = telling.tell_check_closed("a61", it61, "item_closed a99"); settle()
 finally:
     fy._save = orig_save
@@ -688,7 +692,7 @@ fp.write_text(json.dumps({"rows": [
     {"id": 41, "key": "release:abc:1", "ts": now0 - 2600, "kind": "release_failed", "gid": "", "item": "", "project": "projects/example", "what": "[release] PR #27 FAILED at the build", "url": "", "urgent": True, "slacked": 1.0, "slack_tries": 1},
     {"id": 40, "key": "a1:closed:1", "ts": now0 - 5000, "kind": "closed", "gid": "a1", "item": "a1", "project": "projects/alpha", "what": "closed by x: old row", "url": "", "urgent": False, "slacked": 0, "slack_tries": 0}],
     "flags": {"a9": "mute"}, "keys": {"release:abc:1": now0 - 2600, "a1:closed:1": now0 - 5000}, "seq": 41}), encoding="utf-8")
-rs14 = fy.rows(); pl14 = fy.payload(server._gh.shown)
+rs14 = fy.rows(); pl14 = fy.payload(_gh.shown)
 check("an old file with a release_failed row: the row is not in rows() or the payload, the other row is",
       [r["id"] for r in rs14] == [40] and [r["id"] for r in pl14["rows"]] == [40] and pl14["rows"][0]["what"] == "closed by x: old row", (rs14, pl14))
 html14 = ui_render.Board(str(T / "store")).for_you_html()

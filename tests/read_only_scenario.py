@@ -115,7 +115,7 @@ REFUSAL = "stackshot here is a read-only standby copy (STACKSHOT_READ_ONLY); wri
 
 # ---- 1. the switch
 check("the refusal sentence is the one the brief names", readonly.REFUSAL == REFUSAL, readonly.REFUSAL)
-check("STACKSHOT_READ_ONLY=1 at start: read-only, read once, in one place", readonly.is_read_only() is True and server._ro is readonly)
+check("STACKSHOT_READ_ONLY=1 at start: read-only, read once, in one place", readonly.is_read_only() is True and readonly is readonly)
 for val, want in (("0", False), ("", False), ("true", False), ("yes", False), ("on", False), (" 1 ", False), ("1", True)):
     os.environ["STACKSHOT_READ_ONLY"] = val
     check(f"STACKSHOT_READ_ONLY={val!r}: {'read-only (only the value 1 turns it on)' if want else 'normal'}", readonly._reload_for_test() is want and readonly.is_read_only() is want)

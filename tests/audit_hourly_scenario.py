@@ -78,6 +78,13 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.fleet import sessions_registry as SR24
+from stackshot.service import writes as WR24
+from stackshot.core import readonly as _ro
+from stackshot.service import store as _service_store
+from stackshot.core import instance as _core_instance
+from stackshot.core import config as _cfg
+from stackshot.model import model as _model
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -104,8 +111,8 @@ class _Clock:
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
 CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = stall_svc.time = stalltick_svc.time = CLK
-server._cfg.CFG["audit"]["pattern_review"] = "off"
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["pattern_review"] = "off"
+_cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
 telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
@@ -116,7 +123,13 @@ def fake_status(who, idx=None):
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
-server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = lambda: {}
+REAL_SR_INDEX, REAL_SR_LABEL = SR24._sessions_index, SR24._session_label      # the registry's own reader and the label that reads it inside the module: the index this suite replaces below is the one the server's callers read, and the label keeps the real one
+def label_on_real_index(name):
+    cur = SR24._sessions_index; SR24._sessions_index = REAL_SR_INDEX
+    try: return REAL_SR_LABEL(name)
+    finally: SR24._sessions_index = cur
+SR24._session_label = label_on_real_index
+SR24._sessions_index =fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0 (a bare confirm and the server's saves are recent)."""
@@ -138,8 +151,8 @@ def tick(at=None, **kw):
     kw.setdefault("subagents", lambda who: SUBS.get(who, [])); kw.setdefault("anchored", ANCH)
     try: return server._hourly_tick(now=at, **kw)
     finally: CLK.t = None
-def on(): server._cfg.CFG["audit"]["hourly_line"] = True
-def off(): server._cfg.CFG["audit"]["hourly_line"] = False
+def on(): _cfg.CFG["audit"]["hourly_line"] = True
+def off(): _cfg.CFG["audit"]["hourly_line"] = False
 def hm(at): return time.strftime("%H:%M", time.gmtime(at + 4 * 3600))      # the instance zone is Asia/Dubai, UTC+4
 def clean_pane(): panes.clear(); SUBS.clear(); ANCH.clear()
 class _Err:
@@ -154,19 +167,19 @@ def work(state, ago_min, agent="home-peer"): return [{"id": "build-it", "text": 
 put(1, act=90); panes["home-peer"] = "busy"
 check("6 the example config documents `hourly_line = true` in [audit]", re.search(r"(?m)^hourly_line = true\b", pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
 check("6 …and the config as loaded (from that example) has it on", HR.enabled() is True)
-server._cfg.CFG["audit"].pop("hourly_line", None)
+_cfg.CFG["audit"].pop("hourly_line", None)
 check("6 …and with the key absent the code's default is on: a pass writes the line", HR.enabled() is True and tick() == ["a1"] and len(lines(1)) == 1, lines(1))
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, act=90)
 for label, val in (("false", False), ("the string true", "true"), ("1", 1), ("yes", "yes")):
-    server._cfg.CFG["audit"]["hourly_line"] = val
+    _cfg.CFG["audit"]["hourly_line"] = val
     check(f"6 {label} leaves it off (only a TOML true leaves it on)", HR.enabled() is False and tick() == [] and lines(1) == [])
 on()
 check("6 a TOML true switches it on", HR.enabled() is True)
-ro = server._ro.is_read_only
-server._ro.is_read_only = lambda: True
+ro = _ro.is_read_only
+_ro.is_read_only = lambda: True
 check("6 a read-only standby copy writes nothing", tick() == [] and lines(1) == [])
-server._ro.is_read_only = ro
+_ro.is_read_only = ro
 
 # ================================================================ 1. due and verified
 clean_pane(); put(1, mover="team-back", act=90); put(2, act=90); put(3, act=90); put(4, act=90); put(5, act=90); put(6, act=90, work=work("in progress", 30))
@@ -303,11 +316,11 @@ check("7 …a front agent in a turn is verified the same", lines(1)[1]["text"] =
 clean_pane(); panes["home-peer"] = "busy"
 for p in (T / "store/a").glob("*.json"): p.unlink()
 put(1, act=90); put(2, act=90)
-server._cfg.CFG["audit"]["enabled"] = False
+_cfg.CFG["audit"]["enabled"] = False
 check("8 `_silence_tick` stands still while the audit is off: no line", server._silence_tick() is None and lines(1) == [])
-server._cfg.CFG["audit"]["enabled"] = True; server._cfg.CFG["audit"]["mode"] = "agent"
+_cfg.CFG["audit"]["enabled"] = True; _cfg.CFG["audit"]["mode"] = "agent"
 check("8 …and in agent mode (the rollback)", server._silence_tick() is None and lines(1) == [])
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["mode"] = "script"
 real_now = time.time
 res = server._silence_tick()
 check("8 with the audit on in script mode the audit tick writes the hourly line: one on each item", len(lines(1)) == 1 and len(lines(2)) == 1, (res, lines(1), lines(2)))
@@ -316,14 +329,14 @@ for i in (1, 2): put(i, act=90)
 server._silence_tick()
 check("8 …and with `hourly_line` off the same tick writes none", lines(1) == [] and lines(2) == [])
 on()
-real_save = server._writes.save
+real_save = WR24.save
 def save_fail(gid, *a, **k):
     if gid == "a1": raise OSError("disk full")
     return real_save(gid, *a, **k)
-server._writes.save = save_fail
+WR24.save = save_fail
 for i in (1, 2): put(i, act=90)
 with _Err() as e8: got8 = tick()
-server._writes.save = real_save
+WR24.save = real_save
 check("8 one item that cannot be saved stops no other, and the failure is logged", got8 == ["a2"] and "a1 hourly line not written: OSError" in e8.text and lines(2) != [], (got8, e8.text))
 real_hourly = server._hourly_tick
 def boom(**kw): raise RuntimeError("pass failed")
@@ -336,9 +349,9 @@ check("8 a hourly pass that raises never stops the audit tick that called it", e
 clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, act=90); put(2, act=90)
-server._cfg.CFG["audit"]["enabled"] = False
+_cfg.CFG["audit"]["enabled"] = False
 server._silence_tick()
-server._cfg.CFG["audit"]["enabled"] = True
+_cfg.CFG["audit"]["enabled"] = True
 check("13 with the audit off the tick stands still as a whole: no line", lines(1) == [] and lines(2) == [])
 
 # ================================================================ 10. the cap on lines, a clock that goes backwards
@@ -368,7 +381,7 @@ put(1, act=90, stall={"log": ladder_log})
 before11 = rd(1)
 tick(); tick(now0 + 61 * MIN); tick(now0 + 122 * MIN)
 check("11 the lines are not in the stall ladder's log: its eight entries are exactly as they were, none crowded out, and no Audit text is in it", mt(1)["stall"] == {"log": ladder_log} and len(lines(1)) == 3, (mt(1).get("stall"), len(lines(1))))
-txt11 = server._fmt(server._load("a1"))
+txt11 = server._fmt(_service_store._load("a1"))
 check("11 `get` prints the newest line with its own prefix (audit:) and the ladder's last three as stall: lines, never an Audit line as a stall step",
       sum(1 for l in txt11.splitlines() if l.startswith("audit: ")) == 1 and "Audit " + hm(now0 + 122 * MIN) in txt11 and not any(l.startswith("stall: ") and "Audit " in l for l in txt11.splitlines())
       and sum(1 for l in txt11.splitlines() if l.startswith("stall: ")) == 3, [l for l in txt11.splitlines() if l.startswith(("audit:", "stall:"))])
@@ -393,7 +406,7 @@ check("12 a last-activity record dated ahead of the clock is no recorded event (
       lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and mt(1)["last_activity"]["at"] == now0 + 10 * MIN
       and lines(2)[0]["text"] == f"Audit {hm(now0)}: verified CI failed on PR 6" and mt(2)["last_activity"] == {"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"}, (lines(1), mt(1).get("last_activity"), lines(2)))
 put(3, act=90); off()
-check("12 with `hourly_line = false` in the loaded config the pass is off and writes nothing", server._cfg.CFG["audit"]["hourly_line"] is False and HR.enabled() is False and tick() == [] and lines(3) == [])
+check("12 with `hourly_line = false` in the loaded config the pass is off and writes nothing", _cfg.CFG["audit"]["hourly_line"] is False and HR.enabled() is False and tick() == [] and lines(3) == [])
 on()
 
 # ================================================================ 14. tick jitter: an hour on the grid is an hour
@@ -419,7 +432,7 @@ good = {"at": now0 - 600, "text": "Audit 10:00: idle, nothing verified", "kind":
 torn = [{"at": "bad", "text": "x", "kind": "audit"}, {"at": float("inf"), "text": "x", "kind": "audit"}, {"at": 1e30, "text": "x", "kind": "audit"}, {"at": float("nan"), "text": "x", "kind": "audit"},
         {"at": now0 - 300, "kind": "audit"}, {"at": now0 - 200, "text": 7, "kind": "audit"}, {"at": None, "text": "x", "kind": "audit"}, "not a dict", {"at": True, "text": "x", "kind": "audit"}]
 put(1, act=90, hourly_audit={"log": [good] + torn})
-txt15 = server._fmt(server._load("a1"))
+txt15 = server._fmt(_service_store._load("a1"))
 check("15 `get` on an item whose log holds torn entries (a time that is no number, inf, 1e30, nan, no text, a text that is no string, not a dict) does not raise and prints the one good line", sum(1 for l in txt15.splitlines() if l.startswith("audit: ")) == 1 and "Audit 10:00: idle, nothing verified" in txt15, [l for l in txt15.splitlines() if l.startswith("audit:")])
 check("15 …the torn entries are left out of the log, not read", HL.log_of(mt(1)) == [good] and HR.last_line(mt(1))["at"] == good["at"])
 put(2, act=90); base15 = rd(2)
@@ -825,9 +838,9 @@ try:
     check("20 …and past the cap, tied or not, it is dropped: both read idle", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     # an ABSENT registry row is idle as before; a PRESENT one that is no interactive pane reads unknown
     one_agent("Build part D", "nothing", 60)
-    row_path.unlink(missing_ok=True); real_idx0 = server._sessions_index; server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = lambda: OTHER_ROW      # a whole fleet index that holds no row of the mover
+    row_path.unlink(missing_ok=True); real_idx0 = SR24._sessions_index; SR24._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = lambda: OTHER_ROW      # a whole fleet index that holds no row of the mover
     try: k_, t_ = kinds20()
-    finally: server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx0
+    finally: SR24._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx0
     check("20 a mover with NO registry row on this box (gone, or elsewhere), in a fleet index that was read whole, reads idle as built: nothing is claimed for it, and the orphan and idle hand-overs may act", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     registry("busy", kind="headless"); k_, t_ = kinds20()
     check("20 a PRESENT registry row that is no interactive pane (headless) reads UNKNOWN, never idle: not idle-marked, so not handed on", k_ == ["audit_unknown", "audit_unknown"] and all("could not be read" in x for x in t_) and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_, t_))
@@ -835,21 +848,23 @@ try:
     check("20 a PRESENT row with a status the server does not know reads UNKNOWN too", k_ == ["audit_unknown", "audit_unknown"], (k_, t_))
     # no row on this box: the fleet's heartbeat decides. A session it holds running is on another machine (unknown); one it marks gone, or holds not at all, is gone (idle)
     row_path.unlink(missing_ok=True)
-    real_idx = server._sessions_index
+    real_idx = SR24._sessions_index
     def hb(**rows): return {u_: {"machine": "b", "name": n_, "seen": "2026-01-01T00:00:00Z", **extra_} for u_, (n_, extra_) in rows.items()}
     def tick_with_index(idx_):
-        server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = idx_ if callable(idx_) else (lambda: idx_)
+        SR24._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = idx_ if callable(idx_) else (lambda: idx_)
         try:
             with _Err(): out_ = kinds20()
-        finally: server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx
+        finally: SR24._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx
         return out_
     live_hb = hb(u1=("home-peer", {})); gone_hb = hb(u1=("home-peer", {"gone": "2026-01-01T00:00:00Z"})); other_hb = hb(u1=("home-stew", {}))
     r_live = raises(lambda: server._mover_subagents("home-peer", live_hb, now0), TIE.Unreadable)
     r_gone = server._mover_subagents("home-peer", gone_hb, now0) == []
     r_none = server._mover_subagents("home-peer", OTHER_ROW, now0) == [] and server._mover_subagents("home-peer", other_hb, now0) == []
-    def no_index(): raise OSError("heartbeat unreadable")
-    server_idx_none = raises(lambda: (setattr(server, "_sessions_index", no_index), server._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
-    server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx
+    def no_index():      # the index the server's own reads cannot get: the registry's other readers (the session label inside the module) keep the real one
+        if sys._getframe(1).f_globals is vars(server): raise OSError("heartbeat unreadable")
+        return REAL_SR_INDEX()
+    server_idx_none = raises(lambda: (setattr(SR24, "_sessions_index", no_index), server._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
+    SR24._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = real_idx
     check("20 no registry row on this box: the fleet heartbeat holds the session running (on another machine) → Unreadable (unknown); marked gone → none; no row anywhere (or only another session's) → none; the index cannot be read → Unreadable", r_live and r_gone and r_none and server_idx_none, (r_live, r_gone, r_none, server_idx_none))
     k_live = tick_with_index(live_hb); k_gone = tick_with_index(gone_hb); k_none = tick_with_index(OTHER_ROW); k_bad = tick_with_index(no_index)
     check("20 …through the audit: a mover on another machine (live heartbeat row, no local row) reads UNKNOWN on every item, not idle-marked (so never handed on to a second builder); a gone row, no row anywhere → idle as built; an unreadable index → unknown",
@@ -873,10 +888,10 @@ try:
     # the real index: a machine whose sessions.json is torn or absent is listed, and the index says so
     (T / "fleet/b").mkdir(exist_ok=True); (T / "fleet/b/machine.json").write_text(json.dumps({"letter": "b", "fleet": "otherbox", "claude": "1.0.0"}))
     (T / "fleet/b/sessions.json").write_text("{torn")
-    got_torn = (FL.sessions_unreadable(), SR._sessions_index().unreadable)
+    got_torn = (FL.sessions_unreadable(), REAL_SR_INDEX().unreadable)
     (T / "fleet/b/sessions.json").unlink(); got_absent = FL.sessions_unreadable()
     (T / "fleet/b/sessions.json").write_text("[]"); got_list = FL.sessions_unreadable()
-    (T / "fleet/b/sessions.json").write_text(json.dumps({"sess-b1": {"name": "home-peer", "machine": "b"}})); got_ok = (FL.sessions_unreadable(), SR._sessions_index().unreadable)
+    (T / "fleet/b/sessions.json").write_text(json.dumps({"sess-b1": {"name": "home-peer", "machine": "b"}})); got_ok = (FL.sessions_unreadable(), REAL_SR_INDEX().unreadable)
     for f_ in (T / "fleet/b").glob("*.json"): f_.unlink()
     (T / "fleet/b").rmdir()
     check("21 the fleet index lists the machines whose sessions.json is torn, absent or not an object (`.unreadable`), and none when every machine's file reads", got_torn == (["b"], ["b"]) and got_absent == ["b"] and got_list == ["b"] and got_ok == ([], []), (got_torn, got_absent, got_list, got_ok))
@@ -1288,7 +1303,7 @@ def tagged(text, state="in progress", ts=0.0, who="home-peer"):
     return st
 def save24(i, at, mutate, writer="home-peer", **kw):
     """A real save of item `i` by `writer` at the fake time `at`, `mutate` changing the loaded item's metadata first."""
-    d_ = server._load(f"a{i}"); mutate(d_["metadata"]); CLK.t = at
+    d_ = _service_store._load(f"a{i}"); mutate(d_["metadata"]); CLK.t = at
     try: WR24.save(f"a{i}", d_, writer=writer, **kw)
     finally: CLK.t = None
 def status_of(i, text, state="in progress", ts=0.0, who="home-peer"): return lambda m: m.update(steps=[tagged(text, state, ts, who)])
@@ -1315,7 +1330,7 @@ save24(2, T0, status_of(2, "building the fix", ts=T0), writer="home-front")
 save24(2, T0 + MIN, status_of(2, "somebody else's words", ts=T0 + MIN), writer="home-peer2")
 save24(2, T0 + 2 * MIN, status_of(2, "the owner's words", ts=T0 + 2 * MIN), writer="", author=("Oliver", "board"))
 save24(2, T0 + 3 * MIN, status_of(2, "a bookkeeping save", ts=T0 + 3 * MIN), writer="")
-save24(2, T0 + 4 * MIN, status_of(2, "the audit's own write", ts=T0 + 4 * MIN), writer=server.NAME)
+save24(2, T0 + 4 * MIN, status_of(2, "the audit's own write", ts=T0 + 4 * MIN), writer=_core_instance.NAME)
 check("24 a status written by someone who is not the item's mover (a front agent, another session, the owner's answer, the server's own save, the audit's writer) is no update: the item has no record", rec24(2) is None, rec24(2))
 save24(3, T0, status_of(3, "by the session id", ts=T0), writer=U["home-peer"])
 check("24 the mover writing under its session id (not its name) is the mover", rec24(3) == {"at": T0, "kind": "update", "what": "by the session id"}, rec24(3))
@@ -1351,8 +1366,8 @@ put(7, mover="home-peer", act=90, steps=[S1, S2], next="home-peer: stage 2")
 save24(7, T0, lambda m: m.update(steps=[S1, {**S2, "tag": {"text": "waiting for CI", "state": "in progress", "ts": T0}}]))
 check("24 a status text the mover used on an earlier stage is a first status on a later step that already existed with none: it is an update", rec24(7) == {"at": T0, "kind": "update", "what": "waiting for CI"}, rec24(7))
 # a mover that is the audit's own name: the audit's writes are never an update
-put(8, mover=server.NAME, act=90, steps=[tagged(None, who=server.NAME)], next=f"{server.NAME}: do the thing", needs=[server.NAME])
-save24(8, T0, status_of(8, "the audit's own words", ts=T0, who=server.NAME), writer=server.NAME)
+put(8, mover=_core_instance.NAME, act=90, steps=[tagged(None, who=_core_instance.NAME)], next=f"{_core_instance.NAME}: do the thing", needs=[_core_instance.NAME])
+save24(8, T0, status_of(8, "the audit's own words", ts=T0, who=_core_instance.NAME), writer=_core_instance.NAME)
 check("24 the audit's own writer is no mover for this: the audit's name as the item's mover and as the writer stamps no update (the audit's writes never count as work)", rec24(8) is None, rec24(8))
 # a mover's write filed under another kind of activity, or under none the clock counts
 put(9, mover="home-peer", act=90, steps=[tagged(None)])
@@ -1365,20 +1380,20 @@ check("24 …while the same mover's plain write (no kind given) does", rec24(9) 
 # the owner is the mover (the item waits on his decision): a session's status write is no update
 put(10, mover="home-peer", act=90, steps=[tagged(None)], needs=["decision"], state="your-call")
 save24(10, T0, status_of(10, "building while he decides", ts=T0))
-check("24 a session writing a status while the owner is the item's mover (it waits on his decision) is no update, whatever mover the item stores", (rec24(10) or {}).get("kind") != "update" and server._model.is_owner(server._model.derive(rd(10)).mover), (rec24(10), server._model.derive(rd(10)).mover))
+check("24 a session writing a status while the owner is the item's mover (it waits on his decision) is no update, whatever mover the item stores", (rec24(10) or {}).get("kind") != "update" and _model.is_owner(_model.derive(rd(10)).mover), (rec24(10), _model.derive(rd(10)).mover))
 put(16, mover="home-peer", act=90, steps=[tagged(None)]); d16 = rd(16); d16["metadata"].pop("mover"); (T / "store/a/16.json").write_text(json.dumps(d16))      # no stored mover: the model reads it from the needs
 save24(16, T0, status_of(16, "mover read from the needs", ts=T0), ctx=WR24.QUIET)
 put(17, mover="Oliver", act=90, steps=[tagged(None, who="Oliver")], next="Oliver: do the thing", needs=["decision"], state="your-call")
 save24(17, T0, status_of(17, "a session named as the owner", ts=T0, who="Oliver"), writer="Oliver")
 check("24 the mover is the model's, not the stored field alone (an item with no stored mover whose needs name the session: its write is an update), and a session that carries the owner's name while he is the mover is not him: no update",
-      rec24(16) == {"at": T0, "kind": "update", "what": "mover read from the needs"} and rec24(17) is None and server._model.is_owner(server._model.derive(rd(17)).mover), (rec24(16), rec24(17), mt(16).get("mover")))
+      rec24(16) == {"at": T0, "kind": "update", "what": "mover read from the needs"} and rec24(17) is None and _model.is_owner(_model.derive(rd(17)).mover), (rec24(16), rec24(17), mt(16).get("mover")))
 # a mover known by another name of the same session: the registry's alias, and its id
 from stackshot.fleet import sessions_registry as SR24
 sala24 = T / "sala/a"; sala24.mkdir(parents=True)
 PID = "00000000-0000-4000-8000-0000000000aa"
 (sala24 / "session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-10-22T07:00:00Z", "sessions": {PID: {"id": PID, "name": "home-peer-new", "aliases": ["home-peer-old"], "project": None, "project_key": None,
         "role": None, "lane": "max", "model": "opus", "effort": "medium", "pane": "home-peer-new", "cwd": "/srv/work", "state": "live", "created": "2026-10-21T21:00:00Z", "retired_at": None, "transcripts": []}}}))
-cl24 = server._cfg.CFG.setdefault("client", {}); had24 = cl24.get("session_links"); cl24["session_links"] = str(T / "sala"); SR24.reset()
+cl24 = _cfg.CFG.setdefault("client", {}); had24 = cl24.get("session_links"); cl24["session_links"] = str(T / "sala"); SR24.reset()
 try:
     put(11, mover="home-peer-old", act=90, steps=[tagged(None, who="home-peer-old")], next="home-peer-old: do the thing", needs=["home-peer-old"])
     save24(11, T0, status_of(11, "under its new name", ts=T0, who="home-peer-old"), writer="home-peer-new")
@@ -1396,17 +1411,17 @@ finally:
 check("24 a mover stored under an old name (the registry's alias) is the mover when its current name writes, and one stored as its permanent id likewise; another session is still not",
       a24_ == {"at": T0, "kind": "update", "what": "under its new name"} and b24_ == {"at": T0, "kind": "update", "what": "by its name, stored as its id"} and c24_ is None, (a24_, b24_, c24_))
 # an odd earlier version or item never takes the step, state or merge stamp of the same save with it
-d24 = server._load("a7"); d24["metadata"]["steps"] = "not a list"; CLK.t = T0 + MIN
+d24 = _service_store._load("a7"); d24["metadata"]["steps"] = "not a list"; CLK.t = T0 + MIN
 try: WR24.save("a7", d24, writer="home-peer")
 finally: CLK.t = None
-bad_before = server._load("a7"); bad_before["metadata"] = ["torn"]
+bad_before = _service_store._load("a7"); bad_before["metadata"] = ["torn"]
 err24 = _Err()
 with err24: ups24 = WR24._update_signals(rd(7), bad_before, "home-peer", T0), WR24._update_signals({"id": "x", "metadata": None}, None, "home-peer", T0), WR24._update_signals({"id": "x"}, {"metadata": 3}, "home-peer", T0)
 check("24 an earlier version or item that is not what it should be gives no update and never raises out of the save's stamp", ups24 == ([], [], []), (ups24, err24.text))
 def tripped(*a, **k): raise RuntimeError("fleet unreadable")
 mv24 = WR24._is_mover; WR24._is_mover = tripped
 try:
-    put(14, mover="home-peer", act=90, steps=[tagged(None)]); d14 = server._load("a14"); d14["metadata"]["state"] = "verifying"; d14["metadata"]["steps"] = [tagged("x", ts=T0)]; CLK.t = T0
+    put(14, mover="home-peer", act=90, steps=[tagged(None)]); d14 = _service_store._load("a14"); d14["metadata"]["state"] = "verifying"; d14["metadata"]["steps"] = [tagged("x", ts=T0)]; CLK.t = T0
     with _Err() as e14: WR24.save("a14", d14, writer="home-peer")
 finally: WR24._is_mover = mv24; CLK.t = None
 check("24 a mover test that fails costs only the update: the save is written, the state change of the same save is still stamped, and the failure is on stderr", rec24(14) is not None and rec24(14)["kind"] == "state_change" and "update not recorded" in e14.text, (rec24(14), e14.text))

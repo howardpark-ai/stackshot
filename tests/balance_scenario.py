@@ -62,6 +62,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.core import readonly as _ro
+from stackshot.anchors import anchors as _anc
+from stackshot.core import config as _cfg
+from stackshot.github import ghsync as _gh
+from stackshot.model import model as _model
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -89,8 +95,8 @@ class _Clock:
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
 CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
-server._cfg.CFG["audit"]["pattern_review"] = "off"
-server._cfg.CFG["audit"]["mode"] = "script"
+_cfg.CFG["audit"]["pattern_review"] = "off"
+_cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
 def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
 telling.tell_woken = fake_tell
@@ -103,7 +109,7 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
+_fleet_sessions_registry._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", last=None, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. `last` = minutes ago (or (minutes, kind)) of its `last_activity` record, which the queue rule reads."""
@@ -125,9 +131,9 @@ def mover_of(i): return mt(i).get("mover")      # the stored mover (a waiting it
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     sent.clear(); panes.clear(); dead.clear(); (T / "store/anchors.json").write_text("{}")
-    server._BALANCE_LOGGED.clear(); server._cfg.CFG["audit"].pop("balance_minutes", None); off()      # the baseline of every section is the switch off until it says `on()`
-def on(): server._cfg.CFG["audit"]["balance"] = True
-def off(): server._cfg.CFG["audit"]["balance"] = False
+    server._BALANCE_LOGGED.clear(); _cfg.CFG["audit"].pop("balance_minutes", None); off()      # the baseline of every section is the switch off until it says `on()`
+def on(): _cfg.CFG["audit"]["balance"] = True
+def off(): _cfg.CFG["audit"]["balance"] = False
 def tick(at=None, **kw):
     """One pass of the balancer at `at` (default now0), the server's clock set to it → the ids moved."""
     at = now0 if at is None else at
@@ -138,7 +144,7 @@ def to_main(): return [x for x in sent if x[1] == U["home-main"]]
 def to_builder(name): return [x for x in sent if x[1] == U[name]]
 def told(tag, name=None): return [x for x in sent if x[3] == tag and (name is None or x[1] == U[name])]
 def history(i): return [e["text"] for e in ST.log_of(mt(i))]
-def shown(i): return server._gh.shown(f"a{i}")
+def shown(i): return _gh.shown(f"a{i}")
 def disregard(i, to): return f"Disregard: {shown(i)} is now with {to}. Drop it, stop any work or subagent on it, and write nothing to it. No reply is owed."
 def busy_on(name, n, first=50):
     """`n` open items on builder `name`, each with activity a few minutes ago: the builder's load, none of them waited long enough to move."""
@@ -172,21 +178,21 @@ EXAMPLE = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-
 wipe(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
 check("1 the example config documents `balance = true` and `balance_minutes = 10` in [audit]",
       re.search(r"(?m)^balance = true\b", EXAMPLE) is not None and re.search(r"(?m)^balance_minutes = 10\b", EXAMPLE) is not None)
-server._cfg.CFG["audit"].pop("balance", None)
+_cfg.CFG["audit"].pop("balance", None)
 check("1 …and with the key absent the code's default is on", HI.balance_enabled() is True)
 for label, val in (("false", False), ("the string true", "true"), ("1", 1), ("yes", "yes")):
-    server._cfg.CFG["audit"]["balance"] = val
+    _cfg.CFG["audit"]["balance"] = val
     check(f"1 {label} leaves it off (only a TOML true leaves it on)", HI.balance_enabled() is False and tick() == [] and mover_of(1) == "home-peer")
 on()
 check("1 a TOML true switches it on", HI.balance_enabled() is True)
-ro = server._ro.is_read_only
-server._ro.is_read_only = lambda: True
+ro = _ro.is_read_only
+_ro.is_read_only = lambda: True
 check("1 a read-only standby copy moves nothing", tick() == [] and mover_of(1) == "home-peer" and sent == [])
-server._ro.is_read_only = ro
+_ro.is_read_only = ro
 def minutes_of(v):
-    server._cfg.CFG["audit"]["balance_minutes"] = v
+    _cfg.CFG["audit"]["balance_minutes"] = v
     try: return HI.balance_minutes()
-    finally: server._cfg.CFG["audit"].pop("balance_minutes", None)
+    finally: _cfg.CFG["audit"].pop("balance_minutes", None)
 check("1 balance_minutes is 10 when unset, a number is taken, and it never goes under 1", HI.balance_minutes() == 10.0 and minutes_of(25) == 25.0 and minutes_of(2.5) == 2.5 and minutes_of(0) == 1.0 and minutes_of(-3) == 1.0 and minutes_of(0.2) == 1.0,
       [minutes_of(v) for v in (25, 0, -3)])
 check("1 …and a value that is no number (text, a boolean, nan, infinity) reads as 10", all(minutes_of(v) == 10.0 for v in ("5", True, float("nan"), float("inf"), None, [3])))
@@ -196,9 +202,9 @@ def probe_off():
 rule("1 off by default does nothing", probe_off, [(HI, "balance_enabled", lambda: True)])
 def probe_audit_off():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
-    server._cfg.CFG["audit"]["mode"] = "agent"
+    _cfg.CFG["audit"]["mode"] = "agent"
     try: return tick() == [] and mover_of(1) == "home-peer"
-    finally: server._cfg.CFG["audit"]["mode"] = "script"
+    finally: _cfg.CFG["audit"]["mode"] = "script"
 check("1 it stands still while the audit runs in agent mode", probe_audit_off() is True)
 
 # ================================================================ 2. an untaken hand-off moves to the least-loaded builder
@@ -249,9 +255,9 @@ def probe_wait():
     return waited(5) is False and mover_of(1) == "home-peer"
 rule("3 the clock counts from the delivery: 5 minutes is too soon", probe_wait, [(HI, "balance_minutes", lambda: 0.01)])
 def probe_custom():
-    wipe(); on(); server._cfg.CFG["audit"]["balance_minutes"] = 3; put(1, act=15, **ho("home-peer", 5)); panes["team-aux"] = "idle"
+    wipe(); on(); _cfg.CFG["audit"]["balance_minutes"] = 3; put(1, act=15, **ho("home-peer", 5)); panes["team-aux"] = "idle"
     try: return tick() == ["a1"] and "not started in 3 min" in history(1)[0]
-    finally: server._cfg.CFG["audit"].pop("balance_minutes", None)
+    finally: _cfg.CFG["audit"].pop("balance_minutes", None)
 rule("3 `balance_minutes` is read at use: with 3, a hand-off 5 minutes old moves and the History line says 3 min", probe_custom, [(HI, "balance_minutes", lambda: 10.0)])
 check("3 a hand-off never delivered counts from the time it was made", waited(12, delivered_at=None) is True and waited(8, delivered_at=None) is False)
 check("3 …and a torn delivery time (text, a boolean) is no signal: the time it was made counts", waited(12, delivered_at="yesterday") is True and waited(12, delivered_at=True) is True)
@@ -268,7 +274,7 @@ def queue_setup(n_queued=1, queued_meta=None, hand_last=3, queued_last=30, build
     put(1, act=hand_last, last=hand_last)
     for k in range(n_queued): put(2 + k, act=queued_last, last=queued_last, **(queued_meta or {}))
     for n in builders_idle: panes[n] = "idle"
-check("4 `[model] queued_behind` is off in this suite: the balancer reads the queue itself", server._queued.enabled() is False)
+check("4 `[model] queued_behind` is off in this suite: the balancer reads the queue itself", Q.enabled() is False)
 queue_setup()
 before_q = rd(2)
 check("4 a queued item (its mover works on another, a1) is queued by the rule read over the balancer's window", HI.balance_queue(NR.load_all(None), now0, 600.0, None) == {"a2": "a1"})
@@ -350,11 +356,11 @@ rule("5 an item its mover started after the pass read it is read again under the
      [(HI, "balance_due", lambda items, gid, now, minutes, front, behind, same, anchored=None, builder=None: {"mover": "home-peer", "project": "projects/alpha", "kind": "queued", "tried": [], "told_none": False, "capped": False})])
 def probe_anchors_unreadable():
     queue_setup()
-    real = server._anc.load
+    real = _anc.load
     def boom(*a, **k): raise OSError("anchors gone")
-    server._anc.load = boom
+    _anc.load = boom
     try: return tick() == [] and mover_of(2) == "home-peer"
-    finally: server._anc.load = real
+    finally: _anc.load = real
 check("5 an anchor store that cannot be read counts as an anchor: nothing moves on a guess", probe_anchors_unreadable() is True)
 
 
@@ -514,8 +520,8 @@ def probe_owner_main():
     none_setup(); real = server._main_agent; server._main_agent = lambda p: "Oliver"
     try: tick()
     finally: server._main_agent = real
-    return not any(x[1] in ("Oliver", server._session_id("Oliver")) for x in sent)
-rule("7 a page that names the owner as -main tells him nothing", probe_owner_main, [(server._model, "is_owner", lambda who: False)])
+    return not any(x[1] in ("Oliver", _web_page_debts._session_id("Oliver")) for x in sent)
+rule("7 a page that names the owner as -main tells him nothing", probe_owner_main, [(_model, "is_owner", lambda who: False)])
 
 # ================================================================ 8. no flapping: 24 hours, the lifetime cap, `tried`
 def reopen_untaken(i, at, mins=30):
@@ -713,19 +719,19 @@ rule("13 …and the cap of three per pass still holds", probe_send_fails_cap, [(
 # ================================================================ 14. the gates: [model] handoff, [audit] enabled, a pane that is gone
 def probe_handoff_off():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
-    server._cfg.CFG.setdefault("model", {})["handoff"] = False
+    _cfg.CFG.setdefault("model", {})["handoff"] = False
     try: return tick() == [] and mover_of(1) == "home-peer" and sent == []
-    finally: server._cfg.CFG["model"].pop("handoff", None)
+    finally: _cfg.CFG["model"].pop("handoff", None)
 rule("14 with `[model] handoff` off the balancer stands still, as the hand-off tick does", probe_handoff_off, [(handoff_svc, "handoff_on", lambda: True)])
 def probe_audit_disabled():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
-    old = server._cfg.CFG["audit"].get("enabled"); server._cfg.CFG["audit"]["enabled"] = False
+    old = _cfg.CFG["audit"].get("enabled"); _cfg.CFG["audit"]["enabled"] = False
     try: return tick() == [] and mover_of(1) == "home-peer" and sent == []
-    finally: server._cfg.CFG["audit"]["enabled"] = old
-rule("14 with `[audit] enabled` false the balancer stands still (it needs the audit on, not hand_idle or hourly_line)", probe_audit_disabled, [(server._cfg, "audit_enabled", lambda: True)])
+    finally: _cfg.CFG["audit"]["enabled"] = old
+rule("14 with `[audit] enabled` false the balancer stands still (it needs the audit on, not hand_idle or hourly_line)", probe_audit_disabled, [(_cfg, "audit_enabled", lambda: True)])
 def probe_needs_only_audit():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
-    for k in ("hand_idle", "hourly_line"): server._cfg.CFG["audit"][k] = False
+    for k in ("hand_idle", "hourly_line"): _cfg.CFG["audit"][k] = False
     return HI.enabled() is False and tick() == ["a1"]
 check("14 …and it runs with hand_idle and hourly_line off", probe_needs_only_audit() is True)
 def probe_dead_former():
@@ -761,8 +767,8 @@ rule("16 a maintainer of another project is a builder (its item may be balanced)
 # ================================================================ 17. only the builders of the item's own project
 def old_builders(project):      # the reverted rule: the project's own builders, then the `build` builders of every other project
     out = [n for c, _o, n in handoff_svc.handoff_ranked(project) if c < 2]
-    reg = server._anc.registry()
-    return out + [n for n, r in server._anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
+    reg = _anc.registry()
+    return out + [n for n, r in _anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
                   and re.search(r"\bbuild", str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""), re.I)]
 def probe_own_only_list():
     return (server._balance_builders("projects/alpha") == ["team-back", "team-aux"] and server._balance_builders("projects/beta") == ["other-back"]

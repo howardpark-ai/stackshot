@@ -88,6 +88,9 @@ for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
 from stackshot.web import server; from stackshot.service import projects as _psvc; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.anchors import anchors as _A
+from stackshot.service import store as _service_store
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import create as _wt_create
@@ -95,8 +98,8 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.projects import project_registry as _projects_registry
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-check("start-time backfill: stamps every page with its existing id (none minted afresh), once", server._prj.stamp_registry() is True
-      and {k: e["id"] for k, e in reg().items()} == ids0 and server._prj.stamp_registry() is False, {k: e.get("id") for k, e in reg().items()})
+check("start-time backfill: stamps every page with its existing id (none minted afresh), once", prj.stamp_registry() is True
+      and {k: e["id"] for k, e in reg().items()} == ids0 and prj.stamp_registry() is False, {k: e.get("id") for k, e in reg().items()})
 check("the server's start runs the backfill before the first roles/projects write", "_prj.stamp_registry()" in open(f"{STACK}/stackshot/web/server.py").read().split('def _start_background')[-1]
       and open(f"{STACK}/stackshot/web/server.py").read().split('def _start_background')[-1].index("_prj.stamp_registry()") < open(f"{STACK}/stackshot/web/server.py").read().split('def _start_background')[-1].index("_roles_sync_safe()"))
 A_ID, B_ID, G_ID, SUB_ID, TOOL_ID = (ids0[k] for k in ("projects/alpha", "projects/beta", "projects/gamma", "projects/alpha/sub", "ops/alpha-tool"))
@@ -167,7 +170,7 @@ page("projects/alpha.md", ALPHA); p.cmd_registry(quiet=True); _projects_registry
 check("an empty registry writes nothing (a stale file is the reader's cue, an empty one would say there are no projects)", _projects_registry._projects_sync(now=t0 + 9999) is False and pj()["projects"], pj()["generated"])
 (T / "store/projects.hold").rename(T / "store/projects.json")
 (T / "state/projects.json").unlink()
-server._roles_sync_safe()
+_projects_registry._roles_sync_safe()
 check("the roles pass (start, publish, the create gate, the fleet watch's 20-s tick) writes projects.json too", PJ.exists() and set(pj()["projects"]) == set(ids0.values())
       and "_projects_sync_safe(now)" in open(f"{STACK}/stackshot/projects/project_registry.py").read().split("def _roles_sync_safe")[1].split("def _projects_sync")[0])
 os.chmod(T / "state", 0o500)      # an unwritable state dir is logged, never raised: the board does not stop for it
@@ -321,24 +324,24 @@ with TestClient(app) as c:
 def create(project, owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, owner=owner, **{"next": f"{owner}: carry on", **kw})
 r = create(A_ID, "home-sparrow-main", next="home-sparrow-engineer: carry on"); gid = r.split()[1]
 gid = _model_ids._norm_id(gid)
-check("create: project = the id; the item stores the page's key (the replies and the store keep writing the key)", server._load(gid)["metadata"]["project"] == "projects/alpha", server._load(gid)["metadata"])
-check("create: …and the item is on the project, as any key-filed item", server._anc.project_of(server._load(gid)) == "projects/alpha" and "projects/alpha" in r and A_ID not in r, r)
+check("create: project = the id; the item stores the page's key (the replies and the store keep writing the key)", _service_store._load(gid)["metadata"]["project"] == "projects/alpha", _service_store._load(gid)["metadata"])
+check("create: …and the item is on the project, as any key-filed item", _A.project_of(_service_store._load(gid)) == "projects/alpha" and "projects/alpha" in r and A_ID not in r, r)
 try: create("prj_00000000", "home-sparrow-main"); r2 = ""
-except server.ToolError as e: r2 = str(e)
+except ToolError as e: r2 = str(e)
 check("create: an id that names no page is refused as an unknown project is", "names no page" in r2, r2)
 r = create("projects/beta", "home-beta", mover="home-beta"); gid2 = _model_ids._norm_id(r.split()[1])
 try: out = _wt_update.stackshot_update(item_id=gid2, project=A_ID, sender="home-sparrow-main", owner="home-sparrow-main"); r3 = ""
-except server.ToolError as e: r3 = str(e)
-check("update: project = the id moves the item there, stored as the key", server._load(gid2)["metadata"]["project"] == "projects/alpha" and not r3, (r3, server._load(gid2)["metadata"]))
+except ToolError as e: r3 = str(e)
+check("update: project = the id moves the item there, stored as the key", _service_store._load(gid2)["metadata"]["project"] == "projects/alpha" and not r3, (r3, _service_store._load(gid2)["metadata"]))
 r4 = _wt_anchors.stackshot_anchors(project=A_ID); r5 = _wt_anchors.stackshot_anchors(project="projects/alpha")
 check("anchors: the id lists the same as the key", r4 == r5 and r4, (r4, r5))
 URL = "https://x.slack.com/archives/C0000000009"
 _wt_anchors.stackshot_anchors(project=A_ID, add=[URL])
-check("anchors: add by id lands on the page's key", [e["url"] for e in server._anc.load().get("projects/alpha", [])] == [URL] and A_ID not in server._anc.load(), server._anc.load())
+check("anchors: add by id lands on the page's key", [e["url"] for e in _A.load().get("projects/alpha", [])] == [URL] and A_ID not in _A.load(), _A.load())
 _wt_anchors.stackshot_anchors(project=A_ID, remove=[URL])
-check("anchors: remove by id", not server._anc.load().get("projects/alpha"), server._anc.load())
+check("anchors: remove by id", not _A.load().get("projects/alpha"), _A.load())
 try: _wt_anchors.stackshot_anchors(project="prj_00000000"); r6 = ""
-except server.ToolError as e: r6 = str(e)
+except ToolError as e: r6 = str(e)
 check("anchors: an unknown id is refused as an unknown project is", "names no page" in r6, r6)
 pushlog = T / "push.log"
 (T / "fakepush.py").write_text("import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\n"
@@ -350,7 +353,7 @@ from stackshot.router import routing
 check("message: to = the project's id is held for the router as to its key (every project is the router's), delivered to no session, the keeper's name included", r7.startswith("held for the router") and not pushes, (r7, pushes[-1:]))
 check("message: …and it is on the project's routing log under the key, with no recipient", any(n.get("label") == "message to projects/alpha" and n.get("live") is True and not n.get("to") for n in routing.read("projects/alpha")), routing.read("projects/alpha")[-1:])
 try: server._message("prj_00000000", "x", "home-outsider"); r8 = ""
-except server.ToolError as e: r8 = str(e)
+except ToolError as e: r8 = str(e)
 check("message: an unknown id is refused like an unknown session", r8.startswith("Refused"), r8)
 check("the client API: items?key= is a session's, not a project's — unchanged (a project id is no session)", server._client_get("items", {"key": "home-sparrow-main"})[0] == 200
       and json.loads(server._client_get("items", {"key": A_ID})[2])["items"] == [])

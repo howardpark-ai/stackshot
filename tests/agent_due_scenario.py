@@ -61,6 +61,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import states
+from stackshot.model import model as _model
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import brief as _wt_brief
@@ -237,7 +238,7 @@ check("window note: a write that sets no wake stays quiet about the stored next"
 item(126, needs=[BACK])
 out = bupd(126, next=f"team-back: collect logs until {w2}, then review", hold=True, wake=w2, wait_basis=f"log collection ends {w2}; logs reviewed then")
 check("window note: hold=true + wake + wait_basis on the mover's own item is accepted and parked (no note)", hd_(mt(126)) is True and wk_(mt(126)) == w2 and isinstance(mt(126).get("wait_basis"), dict) and WN_HEAD not in out, (out, mt(126)))
-check("window note: …and it reads as waiting on a time", server._model.derive({**json.loads(raw(126)), "gid": "a126"}).state == "waiting", None)
+check("window note: …and it reads as waiting on a time", _model.derive({**json.loads(raw(126)), "gid": "a126"}).state == "waiting", None)
 NX = f"team-back: collect logs until {w2}, then review"
 item(127, needs=[BACK], next=NX)
 out = bupd(127, wake=f"{w2}T09:00")

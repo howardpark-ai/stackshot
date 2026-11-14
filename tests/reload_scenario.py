@@ -51,6 +51,9 @@ def reload_with(text):
     return out, err.getvalue()
 
 from stackshot.core import config; from stackshot.projects import pages; from stackshot.fleet import clients; from stackshot.fleet import fleet; from stackshot.web import server
+from stackshot.web import page_debts as _pdebts
+from stackshot.waits import waiting as _wt
+from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 from stackshot.web.auth import signin as _signin
@@ -59,9 +62,9 @@ from stackshot.web.ui import render as ui_render
 from stackshot.anchors.anchorhub import core as hubcore
 
 # ---- 1. a valid change: every reader sees it at its next read, nothing restarted
-before = (server._page_slack(), clients._online(), fleet._grace(), _web_publish._publish_every(), ui_render._stale_s(), hubcore._quiet_max())
+before = (_pdebts._page_slack(), clients._online(), fleet._grace(), _web_publish._publish_every(), ui_render._stale_s(), hubcore._quiet_max())
 check("before: the example's values", before == (300, 600.0, 600.0, 600.0, 900, 10800), before)
-check("before: plain flavor, the default page dirs", config.page_flavor() == "plain" and pages.norm("x") == "projects/x" and "edit " in server._page_how(), server._page_how())
+check("before: plain flavor, the default page dirs", config.page_flavor() == "plain" and pages.norm("x") == "projects/x" and "edit " in _pdebts._page_how(), _pdebts._page_how())
 LIVE = edit(BASE, (r"(?m)^slack_seconds = 300", "slack_seconds = 120"), (r"(?m)^online_minutes = 10", "online_minutes = 3"),
             (r"(?m)^every_minutes = 10", "every_minutes = 4"), (r'(?m)^flavor = "plain"', 'flavor = "gbrain"'),
             (r'(?m)^dirs = \["projects", "ops"\]', 'dirs = ["areas", "systems"]'), (r"(?m)^quiet_max_hold = 10800", "quiet_max_hold = 600"),
@@ -72,13 +75,13 @@ check("valid: reload returns the live keys that changed", out == sorted(["page_r
                                                                          "pages.dirs", "anchor_hub.quiet_max_hold", "auth.ui_open", "pilot.waiting_minutes"]), out)
 check("valid: CFG is a new dict, swapped whole", config.CFG is not cfg_was and config.get("page_rule", "slack_seconds") == 120)
 check("valid: nothing logged for a clean reload", log == "", log)
-after = (server._page_slack(), clients._online(), fleet._grace(), _web_publish._publish_every(), hubcore._quiet_max())
+after = (_pdebts._page_slack(), clients._online(), fleet._grace(), _web_publish._publish_every(), hubcore._quiet_max())
 check("valid: the server, clients, fleet and anchor-hub read the new values at once", after == (120, 180.0, 180.0, 240.0, 600), after)
 check("valid: [auth] ui_open is read at each request", _signin._ui_open() is False)
 check("derived: the board page's stale threshold follows [publish] every_minutes", ui_render._stale_s() == 360 and ui_render._every_m() == 4.0, ui_render._stale_s())
 check("derived: the page-dirs regex and a bare slug follow [pages] dirs", config.page_dirs_re() == "(?:areas|systems)" and pages.norm("x") == "areas/x"
       and re.fullmatch(config.page_dirs_re() + r"/[\w./-]+", "systems/box") and not re.fullmatch(config.page_dirs_re() + r"/[\w./-]+", "projects/box"), pages.norm("x"))
-check("derived: the nag's wording follows [pages] flavor", server._page_how().startswith("dated line → add_timeline_entry") and config.page_flavor() == "gbrain", server._page_how())
+check("derived: the nag's wording follows [pages] flavor", _pdebts._page_how().startswith("dated line → add_timeline_entry") and config.page_flavor() == "gbrain", _pdebts._page_how())
 out, log = reload_with(LIVE)
 check("valid, unchanged: an empty list, nothing logged", out == [] and log == "", (out, log))
 
@@ -94,7 +97,7 @@ OLDEB = edit(LIVE, (r"(?m)^cap_days = 7", "default_days = 3\nagent_hours = 3\nca
 out, log = reload_with(OLDEB)
 check("retired keys: a file that still has [waiting] default_days and agent_hours and [idle] hours loads, they are only listed as changed, and nothing is logged",
       sorted(out) == ["idle.hours", "waiting.agent_hours", "waiting.default_days"] and log == "", (out, log))
-check("retired keys: …the waiting module reads neither (its defaults hold only the cap, the basis weekday and the dated-wait minimum)", set(server._wt.DEFAULTS) == {"cap_days", "cap_needs_owner", "basis_weekday", "dated_wait_min_hours"}, sorted(server._wt.DEFAULTS))
+check("retired keys: …the waiting module reads neither (its defaults hold only the cap, the basis weekday and the dated-wait minimum)", set(_wt.DEFAULTS) == {"cap_days", "cap_needs_owner", "basis_weekday", "dated_wait_min_hours"}, sorted(_wt.DEFAULTS))
 check("retired keys: …config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
 out, log = reload_with(LIVE)
 
@@ -109,7 +112,7 @@ out, log = reload_with(LIVE)
 # ---- 2. an invalid file keeps the running config, and says why
 running = config.CFG
 out, log = reload_with(LIVE.replace("[publish]", "[publish", 1))
-check("bad TOML: refused (None), CFG untouched", out is None and config.CFG is running and server._page_slack() == 120, out)
+check("bad TOML: refused (None), CFG untouched", out is None and config.CFG is running and _pdebts._page_slack() == 120, out)
 check("bad TOML: the log names the file and the parse error", "config reload: " in log and str(CONF) in log and "TOMLDecodeError" in log and "kept" in log, log)
 r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True)
 check("bad TOML: config.py check refuses it too", r.returncode != 0, r.returncode)
@@ -127,11 +130,11 @@ RS = edit(LIVE, (r"(?m)^port = 8020", "port = 9999"), (r'(?m)^owner = "the owner
           (r'(?m)^store = "[^"]*"', f'store = "{tmp}/elsewhere"'), (r'(?m)^at = \["05:00", "20:00"\]', 'at = "06:30"'),
           (r"(?m)^call_days = 1", "call_days = 2"), (r"(?m)^slack_seconds = 120", "slack_seconds = 90"))
 out, log = reload_with(RS)
-check("restart-only: only the live key is applied", out == ["page_rule.slack_seconds"] and server._page_slack() == 90, out)
+check("restart-only: only the live key is applied", out == ["page_rule.slack_seconds"] and _pdebts._page_slack() == 90, out)
 check("restart-only: the running values stay in CFG", config.get("server", "port") == 8020 and config.get("instance", "owner") == "the owner"
       and str(config.path("paths", "store")) == f"{tmp}/store" and config.audit_at() == ["05:00", "20:00"] and config.freshness_days()["call_days"] == 1.0,
       (config.get("server", "port"), config.get("instance", "owner"), config.path("paths", "store")))
-check("restart-only: what was wired at import agrees with CFG", server.OWNER == "the owner" and _core_store.STORE == T / "store")
+check("restart-only: what was wired at import agrees with CFG", _core_instance.OWNER == "the owner" and _core_store.STORE == T / "store")
 for k in ("instance.owner", "paths.store", "freshness.call_days"):
     check(f"restart-only: {k} is logged as waiting for the restart", f"config reload: {k} changed: takes effect at the next restart\n" in log, log)
 for k in ("audit.at", "server.port"):

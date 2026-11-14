@@ -74,6 +74,8 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as pg; from stackshot.projects import project_registry as PR; from stackshot.model import item_project as IP
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import brief as _wt_brief
@@ -86,7 +88,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
-CFGM = server._cfg.CFG.setdefault("model", {})
+CFGM = _cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False, migration=False)
 pg.cmd_registry(quiet=True)                                     # mints the ids of the pages above and writes <store>/project-record.json
 REG = json.loads((T / "store/projects.json").read_text())["pages"]
@@ -161,7 +163,7 @@ def reads(open_only=True):
             B_ = mod.Board(str(T / "store"))
             out[tag + " md"] = B_.markdown()
             out[tag + " brief"] = B_.brief()
-    its = {i: server._load(f"g{i}") for i in OPEN}
+    its = {i: _service_store._load(f"g{i}") for i in OPEN}
     out["keys"] = json.dumps({i: [ANC.project_of(it), R1.proj_key(it), R2.proj_key(it)] for i, it in its.items()}, sort_keys=True)
     return out
 before_reads = reads()
@@ -194,24 +196,24 @@ for name in before_reads:
 put(12, "projects/old-gamma"); server._pid_one("g12")
 b12 = bytes_of(12)
 put(13, "projects/old-gamma")                                         # an open item the pass has not reached: no id
-check("7 a stored item on a former key reads at the page now, in the anchors, both render modules and the project counts, with no write", ANC.project_of(server._load("g12")) == "projects/gamma"
-      and R1.proj_key(server._load("g12")) == "projects/gamma" and R2.proj_key(server._load("g12")) == "projects/gamma" and bytes_of(12) == b12, (ANC.project_of(server._load("g12")), mt(12)))
-RC = PRJ.recent_items(server._registry("projects"), now=now0)
+check("7 a stored item on a former key reads at the page now, in the anchors, both render modules and the project counts, with no write", ANC.project_of(_service_store._load("g12")) == "projects/gamma"
+      and R1.proj_key(_service_store._load("g12")) == "projects/gamma" and R2.proj_key(_service_store._load("g12")) == "projects/gamma" and bytes_of(12) == b12, (ANC.project_of(_service_store._load("g12")), mt(12)))
+RC = PRJ.recent_items(PR._registry("projects"), now=now0)
 check("7 …the project counts see the stored items under the page now; only the item with no id is still counted under the former key", RC.get("projects/gamma", 0) == 2 and RC.get("projects/old-gamma", 0) == 1, RC)
-check("7 …an item with no id reads as it stored (the pass has not reached it)", ANC.project_of(server._load("g13")) == "projects/old-gamma", ANC.project_of(server._load("g13")))
+check("7 …an item with no id reads as it stored (the pass has not reached it)", ANC.project_of(_service_store._load("g13")) == "projects/old-gamma", ANC.project_of(_service_store._load("g13")))
 d1 = record(); d1["projects"][G]["page"] = "projects/gamma2"; d1["projects"][G]["former_keys"] = ["projects/old-gamma", "projects/gamma"]; write_record(d1)
-check("7 the record moves the page again and the stored items follow, the former key and the first page both", ANC.project_of(server._load("g12")) == "projects/gamma2" and ANC.project_of({"metadata": {"project": "projects/gamma", "project_id": G}}) == "projects/gamma2"
-      and R2.proj_key(server._load("g12")) == "projects/gamma2" and bytes_of(12) == b12, ANC.project_of(server._load("g12")))
+check("7 the record moves the page again and the stored items follow, the former key and the first page both", ANC.project_of(_service_store._load("g12")) == "projects/gamma2" and ANC.project_of({"metadata": {"project": "projects/gamma", "project_id": G}}) == "projects/gamma2"
+      and R2.proj_key(_service_store._load("g12")) == "projects/gamma2" and bytes_of(12) == b12, ANC.project_of(_service_store._load("g12")))
 d1["projects"][G]["page"] = "projects/gamma"; d1["projects"][G]["former_keys"] = ["projects/old-gamma"]; write_record(d1)
 
 # ---- 8. the write paths
-it = server._load("g1"); it["metadata"]["project"] = "projects/beta"; writes.save("g1", it)
+it = _service_store._load("g1"); it["metadata"]["project"] = "projects/beta"; writes.save("g1", it)
 check("8 a save of an item re-filed under another project sets that project's id", mt(1)["project"] == "projects/beta" and mt(1)["project_id"] == B, mt(1))
-it = server._load("g1"); it["metadata"]["project"] = "projects/alpha/sub"; writes.save("g1", it)
+it = _service_store._load("g1"); it["metadata"]["project"] = "projects/alpha/sub"; writes.save("g1", it)
 check("8 …a sub-page's key sets the id of the project that owns it and stays the stored key", mt(1)["project"] == "projects/alpha/sub" and mt(1)["project_id"] == A, mt(1))
-it = server._load("g7"); it["metadata"]["subject_note"] = "x"; writes.save("g7", it)
+it = _service_store._load("g7"); it["metadata"]["subject_note"] = "x"; writes.save("g7", it)
 check("8 …a key that names no project leaves the item without an id (nothing is made up)", "project_id" not in mt(7), mt(7))
-m12 = dict(mt(12)); it = server._load("g12"); writes.save("g12", it)
+m12 = dict(mt(12)); it = _service_store._load("g12"); writes.save("g12", it)
 check("8 …a save of an item whose page moved stores the page now, the id stays, and the move is no re-file (no refile record, the contact and mover as they were)",
       mt(12)["project"] == "projects/gamma" and mt(12)["project_id"] == G and "refiled" not in mt(12) and mt(12).get("contact") == m12.get("contact") and mt(12).get("mover") == m12.get("mover"), (m12, mt(12)))
 r_ = _wt_update.stackshot_update("g4", sender="home-sparrow-main", project="projects/alpha")
@@ -230,10 +232,10 @@ check("8b the fixture: beta is a page, and no project of the record owns it", "p
 check("8b …the item to re-file stores alpha's id", mt(4)["project"] == "projects/alpha" and mt(4)["project_id"] == A, mt(4))
 r_ = _wt_update.stackshot_update("g4", sender="home-sparrow-main", project="projects/beta")
 check("8b (a) update(project=…) to such a page takes the old project's id out of the file", mt(4)["project"] == "projects/beta" and "project_id" not in mt(4), (mt(4), str(r_)[:200]))
-check("8b (a) …and the item reads as its new key, through key_of and the anchors, not as the project it left", IP.key_of(mt(4)) == "projects/beta" and ANC.project_of(server._load("g4")) == "projects/beta"
-      and R1.proj_key(server._load("g4")) == "projects/beta" and R2.proj_key(server._load("g4")) == "projects/beta", (IP.key_of(mt(4)), ANC.project_of(server._load("g4"))))
+check("8b (a) …and the item reads as its new key, through key_of and the anchors, not as the project it left", IP.key_of(mt(4)) == "projects/beta" and ANC.project_of(_service_store._load("g4")) == "projects/beta"
+      and R1.proj_key(_service_store._load("g4")) == "projects/beta" and R2.proj_key(_service_store._load("g4")) == "projects/beta", (IP.key_of(mt(4)), ANC.project_of(_service_store._load("g4"))))
 put(14, "projects/beta", project_id=A)                                                            # a file a build without the fix left: beta's key, alpha's id
-check("8b …a file that already holds the stale id reads as its key too (a page that exists and no project owns wins over the id)", IP.key_of(mt(14)) == "projects/beta" and ANC.project_of(server._load("g14")) == "projects/beta", (IP.key_of(mt(14)), ANC.project_of(server._load("g14"))))
+check("8b …a file that already holds the stale id reads as its key too (a page that exists and no project owns wins over the id)", IP.key_of(mt(14)) == "projects/beta" and ANC.project_of(_service_store._load("g14")) == "projects/beta", (IP.key_of(mt(14)), ANC.project_of(_service_store._load("g14"))))
 check("8b …a page that moved (its old key is no page, and no project owns it) still follows the id", IP.key_of({"project": "projects/old-alpha", "project_id": A}) == "projects/alpha", IP.key_of({"project": "projects/old-alpha", "project_id": A}))
 b14 = bytes_of(14)
 r14 = server._pid_one("g14", dry=True)
@@ -356,10 +358,10 @@ check("12 …a key that names no project reads as stored, and so does an empty o
       and PO(project="") == "" and PO() == "" and IP.project_of(None) == "" and IP.top_of("") == "" and IP.top_of("projects/nowhere") == "projects/nowhere", None)
 check("12 …a stale id never wins over a page another project owns, a pageless project's id is its own key, and an id alone reads as its project's page", PO(project="projects/beta", project_id=A) == "projects/beta" and PO(project=PL, project_id=PL) == PL and PO(project_id=A) == "projects/alpha", None)
 check("12 …an item filed on a former key reads as the project's page now, with its id and without it", PO(project="projects/old-gamma", project_id=G) == "projects/gamma" and PO(project="projects/old-gamma") == "projects/gamma"
-      and IP.project_of(server._load("g25")["metadata"]) == "projects/gamma", (PO(project="projects/old-gamma", project_id=G), PO(project="projects/old-gamma")))
+      and IP.project_of(_service_store._load("g25")["metadata"]) == "projects/gamma", (PO(project="projects/old-gamma", project_id=G), PO(project="projects/old-gamma")))
 d12 = record(); d12["projects"][G]["page"] = "projects/gamma2"; d12["projects"][G]["former_keys"] = ["projects/old-gamma", "projects/gamma"]; write_record(d12)
 check("12 …and follows the page when the record moves it again (a renamed project), the stored item too", PO(project="projects/old-gamma", project_id=G) == "projects/gamma2" and PO(project="projects/old-gamma") == "projects/gamma2"
-      and IP.project_of(server._load("g25")["metadata"]) == "projects/gamma2", (PO(project="projects/old-gamma"), IP.project_of(server._load("g25")["metadata"])))
+      and IP.project_of(_service_store._load("g25")["metadata"]) == "projects/gamma2", (PO(project="projects/old-gamma"), IP.project_of(_service_store._load("g25")["metadata"])))
 write_record(REC12)
 check("12 line_of: the top-level key and `(filed on <page>)` for an item on a sub-page or a hub page; the stored value as it was for any other; a project alone is its key",
       IP.line_of({"project": "projects/alpha/sub"}) == "projects/alpha (filed on projects/alpha/sub)" and IP.line_of({"project": "ops/alpha-tool"}) == "projects/alpha (filed on ops/alpha-tool)"
@@ -404,7 +406,7 @@ lab_top = bd["ui/render.py"].proj_label("projects/alpha")
 check("12 the item page's Project line names the top-level project and links the page the item is filed on; a top-level item's line is unchanged",
       f">{lab_top}</a>" in dd(page20) and 'projects/alpha/sub"' in dd(page20) and f">{lab_top}</a>" in dd(page22) and 'ops/alpha-tool"' in dd(page22)
       and f">{lab_top}</a>" in dd(page21) and 'projects/alpha"' in dd(page21) and "alpha/sub" not in re.sub(r"<[^>]*>", "", dd(page20)), (lab_top, dd(page20), dd(page21), dd(page22)))
-it20, it22 = server._load("g20"), server._load("g22")
+it20, it22 = _service_store._load("g20"), _service_store._load("g22")
 check("12 the readers that need the PAGE keep it: key_of, proj_key (both modules), anchors.project_of and the board row read the page the item is filed on",
       IP.key_of(it20["metadata"]) == "projects/alpha/sub" and R1.proj_key(it20) == "projects/alpha/sub" and R2.proj_key(it20) == "projects/alpha/sub" and ANC.project_of(it20) == "projects/alpha/sub"
       and R1.proj_key(it22) == "ops/alpha-tool" and R2.proj_key(it22) == "ops/alpha-tool" and ANC.project_of(it22) == "ops/alpha-tool"

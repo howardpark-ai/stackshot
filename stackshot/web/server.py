@@ -18,7 +18,6 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
 
-import contextlib
 import datetime as dt
 import difflib
 import json
@@ -29,11 +28,12 @@ import re
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
-import time
+import time as _time_mod
 from pathlib import Path
 from typing import Any, Callable
+
+time = _time_mod        # the clock this module's own code reads (`time.time()`): a suite that pins it sets it here, and sets the `time` of each other module the clock must reach on that module
 
 _EARLY_HUP: list[int] = []
 if __name__ == "__main__":      # a reload signal before the loop's handler is up (the imports below take seconds) is kept, never fatal
@@ -109,14 +109,12 @@ from stackshot.model import model as _model  # noqa: E402  — the item model of
 from stackshot.model import queued as _queued  # noqa: E402  — a mover busy on another item: the rule that reads its other on-agent items as waiting, queued behind it (queued.py; `[model] queued_behind`)
 from stackshot.waits import dated_wait as _dw  # noqa: E402  — a doing item the board lists as waiting for its wake (dated_wait.py; the end-of-turn question skips a basis wait)
 from stackshot.web import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
-from stackshot.core import call_log as _calls  # noqa: E402  — the count of refused writes and the corrections the server made instead (call_log.py)
 from stackshot.model import model_guards as _mg  # noqa: E402  — the item model's write guards and the report on existing items (model_guards.py)
 from stackshot.model import steps as _steps  # noqa: E402  — the checklist behind next: done, dropped and open steps, next derived from it (steps.py)
 from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fleet event (wait_kind=event): the phrase, what matches it (event_waits.py)
 from stackshot.waits import watchers as _watch  # noqa: E402  — the waits' watchers of the item model: what ends a wait, the relay's ask, the chases (watchers.py)
 from stackshot.waits import wait_list as _wl  # noqa: E402  — a wait on a list of waits (wait_kind=list): the lines, what has arrived, when the group is over (wait_list.py; the one reader of `waits`)
 from stackshot.waits import handoff as _ho  # noqa: E402  — the hand-off machinery of the item model: the record, the clock, section 5 (handoff.py)
-from stackshot.waits import successor as _succ  # noqa: E402  — the closest live agent for an open item whose mover is gone: the audit's hand-over (successor.py)
 from stackshot.model import rebullet as _rebullet  # noqa: E402  — the re-bullet pass's checks: a rewrite that lost a link, a number or a quote is refused (rebullet.py)
 from stackshot.model import migration as _mig  # noqa: E402  — the migration onto the item model: the planner; the server applies its writes (_migrations.migrate_write)
 from stackshot.model import nextlines as _nl  # noqa: E402  — whose lines are in an item's next: update replaces only the sender's, clear_next wipes all (nextlines.py)
@@ -155,8 +153,6 @@ from stackshot.service import fleet_events as _fleetev  # noqa: E402  — the fl
 from stackshot.service import migrations as _migrations  # noqa: E402  — the start-up migrations and the passes of the migration route (service/migrations.py)
 from stackshot.service import page_debt as _pdsvc  # noqa: E402  — the page-debt call: its pass, its calls per page and the fallback to the page's keeper (service/page_debt.py)
 from stackshot.service import passes_hooks as _passes_hooks  # noqa: E402  — what the page-debt call, the migrations and the fleet events still reach on this module (service/passes_hooks.py)
-from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line a front agent's notice always leaves on the item (quiet.py)
-from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
 from stackshot.waits import reports as _reports  # noqa: E402  — does a background agent's message to a front agent ask for anything: a report goes onto the item it names instead (reports.py)
 from stackshot.service import foryou as _fy  # noqa: E402  — the For you list's file: the board's route that serves it to the fleet tool reads its payload (service/foryou.py)
@@ -169,8 +165,9 @@ from stackshot.core import instance as _inst  # noqa: E402  — the owner's name
 from stackshot.core.instance import NAME, OWNER  # noqa: E402  — NAME and OWNER: the one read of [instance] (core/instance.py)
 from stackshot.model.bullet_text import _clip_line  # noqa: E402  — free text as one line of a notice (model/bullet_text.py)
 from stackshot.model.ids import _GID, _ITEM_REF, _norm_id, _plain_text, _without_mq_groups  # noqa: E402  — item ids and where they are read (model/ids.py)
-from stackshot.model.needs import _NEEDS_KINDS, _after_of, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _observers_of, _waits_decision  # noqa: E402  — needs, after and observers (model/needs.py)
-from stackshot.web.tools.text import MSG_MAX, ZONE, _ANCHOR_SHAPES, _ASK_NONE, _CLOSE_REFUSAL, _DESC_LINE_MAX, _DESC_MAX_LINES, _FOR_OWNER, _GMAIL_TERMS, _MODEL_PAGE, _NEXT_LINE_MAX  # noqa: E402  — the words and limits the tools state (web/tools/text.py), which this module's passes read too
+from stackshot.model.needs import _NEEDS_KINDS, _after_of, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store, _observers_of, _waits_decision  # noqa: E402  — needs, after and observers (model/needs.py)
+from stackshot.web.tools import text as _wttext  # noqa: E402  — the words and limits the tools state, and the board's time zone (`ZONE`, read on this module when a line says a time, so a suite that pins it sets it there; web/tools/text.py)
+from stackshot.web.tools.text import MSG_MAX, _ANCHOR_SHAPES, _ASK_NONE, _CLOSE_REFUSAL, _DESC_LINE_MAX, _DESC_MAX_LINES, _FOR_OWNER, _GMAIL_TERMS, _MODEL_PAGE, _NEXT_LINE_MAX  # noqa: E402  — the words and limits the tools state (web/tools/text.py), which this module's passes read too
 from stackshot.web.middleware import _unlink_ids  # noqa: E402  — the shown form of an id turned back to the stored one (web/middleware.py), read where a write's text is stored
 # A front agent's pane wakes only for what the owner has to do; a build hand-back, a
 # result or an FYI goes to the project's keeper. A marked message whose text says, in one of these fixed phrases, that nothing is
@@ -187,10 +184,11 @@ def _pub_letter() -> str:
 
 
 from stackshot.core import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import), its item files, the next id and the file write (core/store.py); `STORE` is read and set on that module, never here
-from stackshot.core.store import _item_files, _next_id  # noqa: E402  — core/store.py
+from stackshot.core.store import _item_files  # noqa: E402  — core/store.py
 from stackshot.service import writes as _writes  # noqa: E402  — the one write path of an item: its lock (`ITEM_LOCK`), its save (`save`) and the write context (service/writes.py)
 from stackshot.service import telling as _telling  # noqa: E402  — who is told of a write: the senders, the gate in front of a front agent, the holds and the notices (service/telling.py)
-from stackshot.service.store import _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of one item (service/store.py)
+from stackshot.service import store as _svcstore  # noqa: E402  — the readers of one item: `_load` and `_shown_ids` are called on this module, so a suite that replaces one sets it there (service/store.py)
+from stackshot.service.store import _legacy_hold, _legacy_needs, _path  # noqa: E402  — the readers of one item (service/store.py)
 from stackshot.service import create as _create_svc  # noqa: E402  — creating an item: every gate and write of the create tool in their order, and the request map (service/create.py)
 from stackshot.service import gates as _gates  # noqa: E402  — the write gates of the create, update and complete tools and the checks before the item lock (service/gates.py)
 from stackshot.service import update as _update_svc  # noqa: E402  — updating, completing and confirming an item: every gate and write of the update tool in their order (service/update.py)
@@ -262,7 +260,7 @@ def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
             continue
         try:
             with _writes.ITEM_LOCK:
-                it = _load(gid)
+                it = _svcstore._load(gid)
                 m = it.get("metadata")
                 if it.get("status") != "open" or not isinstance(m, dict) or ("rank" not in m and m.get("state") != "queued"):
                     continue
@@ -302,7 +300,7 @@ def _close_marks_pass(apply: bool = True) -> list[dict[str, Any]]:
             continue
         try:
             with _writes.ITEM_LOCK:
-                it = _load(gid)
+                it = _svcstore._load(gid)
                 m = it.get("metadata") or {}
                 cl = _steps.view(m, closed=True)
                 open_ix = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN]
@@ -343,7 +341,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
             continue
         try:
             with _writes.ITEM_LOCK:
-                it = _load(gid)
+                it = _svcstore._load(gid)
                 m = it.get("metadata") or {}
                 if it.get("status") != "open" or _model.norm_who(m.get("mover")) or _needs_sessions(m):
                     continue
@@ -352,7 +350,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
                     continue
                 project = str(m.get("project") or "")
                 who = _telling.fallback_mover(project)
-                out.append({"gid": gid, "item": _gh.shown(gid), "project": project, "mover": who, "creator": _session_label(str(m.get("owner") or "")) or str(m.get("owner") or "")})
+                out.append({"gid": gid, "item": _gh.shown(gid), "project": project, "mover": who, "creator": _sr._session_label(str(m.get("owner") or "")) or str(m.get("owner") or "")})
                 if apply and who:
                     it.setdefault("metadata", {})["mover"] = who
                     _writes.save(gid, it, mirror=False, ctx=_writes.QUIET)
@@ -398,7 +396,7 @@ def _session_ids_pass() -> str:
                 plan: list[tuple[str, str, Any, Any]] = []
                 for gid, _p in _item_files():
                     try:
-                        it = _load(gid)
+                        it = _svcstore._load(gid)
                     except Exception:  # noqa: BLE001
                         continue
                     for field, (old, new) in (_sid.plan_item(gid, it, rep) or {}).items():
@@ -407,7 +405,7 @@ def _session_ids_pass() -> str:
                 if plan:
                     rep["undo"] = str(_sid.write_undo(plan))              # on disk before the first item changes
                     for gid in dict.fromkeys(g for g, _f, _o, _n in plan):
-                        it = _load(gid)
+                        it = _svcstore._load(gid)
                         moved = False
                         for g, f, o, n in (x for x in plan if x[0] == gid):
                             if _sid.apply_to(it, f, o, n):
@@ -422,7 +420,7 @@ def _session_ids_pass() -> str:
                 for c in d["changes"]:
                     gid, f = str(c["gid"]), str(c["field"])
                     try:
-                        it = _load(gid)
+                        it = _svcstore._load(gid)
                     except Exception:  # noqa: BLE001
                         rep["skipped"].append((gid, f, "no such item now")); continue
                     if _sid.apply_to(it, f, c["new"], c["old"]):
@@ -561,7 +559,7 @@ def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
     meta = item.get("metadata") or {}
     owner = _telling.holder(item)
     if owner and _telling.front_keeper(owner, str(meta.get("project") or ""))[0]:
-        print(f"owner: {old} is now {new}; its mover {_session_label(owner)} is a front agent, not told (the old id still resolves)", file=sys.stderr, flush=True)
+        print(f"owner: {old} is now {new}; its mover {_sr._session_label(owner)} is a front agent, not told (the old id still resolves)", file=sys.stderr, flush=True)
         return
     _telling.tell_woken(new, _session_id(owner) if owner else "", f"[stackshot] {_gh.shown(old)} is now {_gh.shown(new)} (the item took its issue number; "
                 f"{_gh.shown(old)} still names it): {item.get('subject') or ''} → {_inst.BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
@@ -583,7 +581,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
     a restart between the save and the reader's mark, tells nobody again)."""
     with _writes.ITEM_LOCK:        # it reads, changes the hand-off record and saves, so it takes turns with an update and an answer
         try:
-            item = _load(gid)
+            item = _svcstore._load(gid)
         except ToolError:
             return False
         meta = item.get("metadata")
@@ -624,33 +622,25 @@ from stackshot.model.field_gates import (  # noqa: E402
 )
 
 
-# The page rule's debts (page_debts.py), kept on this module as well: the writes, the tools and the suites call `server.<name>`. Private names no caller on this module reads stay in that module:
+# The page rule's debts (page_debts.py), the names this module's own code uses. A suite or a script that reads or sets one of the others reaches it on page_debts.py. Private names nobody here reads stay in that module:
 # _KEEPER_WHY, _age, _brain_dir, _debt_strict.
 from stackshot.web import page_debts as _pdebts  # noqa: E402,F401  — the suites that put a page's time in place of the real one set `_page_ts` on this module (`server._pdebts._page_ts`)
 from stackshot.web.page_debts import (  # noqa: E402,F401
     _OWED_LOCK,
-    _STATE_FIELDS,
     _debt_mover,
     _grace_min,
-    _nag,
     _owed_brain_skip,
     _owed_load,
     _owed_mark,
-    _owed_path,
     _owed_readable,
     _owed_save,
     _owed_settle,
-    _page_how,
-    _page_slack,
-    _page_ts,
     _role_name,
     _same_sess,
     _session_id,
     _shown_needs,
     _shown_ref,
     _store_ref,
-    _strict,
-    _writer_owes,
 )
 
 
@@ -744,7 +734,7 @@ def _follow_superseded(gid: str, seen: set[str] | None = None) -> str:
     """An item id → itself, or, when it closed as superseded, the item that replaced it (followed through a chain)."""
     seen = set() if seen is None else seen
     try:
-        m = _load(gid).get("metadata") or {}
+        m = _svcstore._load(gid).get("metadata") or {}
     except ToolError:
         return gid
     rep = str(m.get("superseded_by") or "")
@@ -765,7 +755,7 @@ def _after_reaches(start: list[str], target: str, seen: set[str] | None = None) 
             continue
         seen.add(g)
         try:
-            it = _load(g)
+            it = _svcstore._load(g)
         except ToolError:
             continue
         if it.get("status") == "open" and _after_reaches(_after_of(it.get("metadata") or {}) + _wl.item_ids(it.get("metadata") or {}), target, seen):
@@ -844,7 +834,7 @@ def _open_item_named(ref: str) -> str:
     """`board#N` as a session wrote it in a next line → the store id of that item when it exists and is open, else "" (a closed or unknown item is nothing to wait for). Read only."""
     try:
         g = _norm_id(ref)
-        return g if _load(g).get("status") == "open" else ""
+        return g if _svcstore._load(g).get("status") == "open" else ""
     except Exception:  # noqa: BLE001
         return ""
 
@@ -918,7 +908,7 @@ def _owner_then_default(item_was: dict[str, Any] | None, meta: dict[str, Any], s
     if not who:
         return ""
     meta["then"] = who
-    return f"\n(then {_session_label(who) or who}: the agent doing the work takes it after {OWNER}'s answer or step; pass then=<session> to name another)"
+    return f"\n(then {_sr._session_label(who) or who}: the agent doing the work takes it after {OWNER}'s answer or step; pass then=<session> to name another)"
 
 
 def _settle_apply(meta: dict[str, Any], ch: dict[str, str]) -> None:
@@ -957,9 +947,9 @@ def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bo
     if ch["mover"] == h:
         keep = ch["then"]
         back = "" if keep == mover_s else f" (to have it come back to you instead, set then=<you>)"
-        return f"\n(mover: {_session_label(mover_s) or mover_s} → {h}: the item is in his state ({_eff_state(item_now)}), so he moves it; then {_session_label(keep) or keep} takes it after his answer or Done){back}"
+        return f"\n(mover: {_sr._session_label(mover_s) or mover_s} → {h}: the item is in his state ({_eff_state(item_now)}), so he moves it; then {_sr._session_label(keep) or keep} takes it after his answer or Done){back}"
     to = ch["mover"]
-    return (f"\n(mover: {h} → {_session_label(to) or to}: the item is out of his hands, so {_session_label(to) or to} moves it again)" if to
+    return (f"\n(mover: {h} → {_sr._session_label(to) or to}: the item is out of his hands, so {_sr._session_label(to) or to} moves it again)" if to
             else f"\n(mover: {h} dropped: the item is out of his hands, so its default mover moves it)")
 
 
@@ -1015,7 +1005,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
         if _model.stood_his(item, after):
             _hs.ensure(meta, _owner_want(meta), keeper, NAME, now, NAME)
         elif (_model.stood_his(before, after) or _hs.recorded(meta)) and not (author and author[1] == "board"):    # it stood on him before this write, or the server's step is still recorded open (the item stopped waiting on him by a wait earlier, and the step stayed): either way no ask or step of his stands now
-            _hs.drop_open(meta, keeper, _session_label(writer) or writer or NAME, now, also=_owner_want((before or {}).get("metadata") or {}) if _model.stood_his(before, after) else "")
+            _hs.drop_open(meta, keeper, _sr._session_label(writer) or writer or NAME, now, also=_owner_want((before or {}).get("metadata") or {}) if _model.stood_his(before, after) else "")
         else:
             _hs.forget_closed(meta, keeper)
         return was != (meta.get("steps"), meta.get("next"), _hs.recorded(meta))
@@ -1046,7 +1036,7 @@ def _state_check_notes(item: dict[str, Any]) -> list[str]:
     ns = m.get("next_stale")
     if isinstance(ns, dict) and ns.get("fields"):
         try:
-            when = " " + _rmod.when_words(dt.datetime.fromtimestamp(float(ns["at"]), ZONE))
+            when = " " + _rmod.when_words(dt.datetime.fromtimestamp(float(ns["at"]), _wttext.ZONE))
         except (KeyError, TypeError, ValueError, OverflowError, OSError):
             when = ""
         out.append(f"(next may be stale: {ns.get('by') or 'another session'} changed {', '.join(str(x) for x in ns['fields'])}{when})")
@@ -1114,7 +1104,7 @@ def _back_agent(who: str, idx: dict[str, dict[str, Any]] | None = None) -> str:
         roles = _anc.session_roles()
     except Exception:
         return ""
-    idx = _sessions_index() if idx is None else idx
+    idx = _sr._sessions_index() if idx is None else idx
     name = _role_name(roles, who, str((idx.get(who) or {}).get("name") or ""))
     return name if name and roles[name]["role"] == "back" else ""
 
@@ -1138,18 +1128,18 @@ def _one_mover_clash(item: dict[str, Any], agent: str) -> str:
     if not bool(_cfg.get("model", "one_mover", default=True)) or not _model_guards_on():
         return ""
     try:
-        project, ctx = str(meta.get("project") or ""), _mg.Ctx(label=_session_label, shown=_gh.shown)
+        project, ctx = str(meta.get("project") or ""), _mg.Ctx(label=_sr._session_label, shown=_gh.shown)
         if ctx.background_of(agent, project):
             return ""
         needs_now = _needs_of(meta)
         if _mg.second_mover_in([*needs_now, _store_ref(agent)], project, ctx):
             others = _mg.counted_movers(needs_now, project, ctx)
-            return f"{', '.join(_session_label(x) for x in others)} already moves it" if others else f"it waits on {_model.owner_display()}'s call (needs decision)"
+            return f"{', '.join(_sr._session_label(x) for x in others)} already moves it" if others else f"it waits on {_model.owner_display()}'s call (needs decision)"
         stored = _model.pick_who(meta.get("mover"))      # the legacy literal `none` names nobody
         # The stored mover is the agent being named: naming it keeps one mover, so it is no clash (and the reply would say the agent "already moves it" and tell it to hand the item to itself).
         if (stored and not _model.is_owner(stored) and not ctx.background_of(stored, project) and _anc.canonical(stored) != _anc.canonical(agent)
                 and not any(_anc.canonical(stored) == _anc.canonical(x) for x in needs_now)):
-            return f"{_session_label(stored)} already moves it"
+            return f"{_sr._session_label(stored)} already moves it"
         return ""
     except Exception as e:  # noqa: BLE001  — a registry that cannot be read names the agent as before
         print(f"naming: one-mover check failed for {agent}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -1182,7 +1172,7 @@ def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str
     already = list(_needs_sessions(meta))
     _needs_store(meta, _canon_needs([*_needs_of(meta), _store_ref(agent)], nm))
     _writes.save(gid, item, note=f"named {agent}: {why}")
-    was = ", ".join(_session_label(s) for s in already)
+    was = ", ".join(_sr._session_label(s) for s in already)
     told = ""
     if tail:
         told = _telling.tell_owner(gid, item, f"now names {agent} in its needs" + (f" too ({was} {'was' if len(already) == 1 else 'were'} already named)" if already else "") + f", {tail}", writer, to=prev)
@@ -1198,10 +1188,10 @@ def _name_on_handover(to: str, text: str, sender: str, idx: dict[str, dict[str, 
     out, nm = "", _anc.names()
     for g in _item_refs(text):
         try:
-            it = _load(g)
+            it = _svcstore._load(g)
         except ToolError:
             continue
-        out += _auto_name(g, it, agent, sender, f"handover message from {_session_label(sender)}" + (f" ({via})" if via else ""), "handed over", nm, one_mover=True)
+        out += _auto_name(g, it, agent, sender, f"handover message from {_sr._session_label(sender)}" + (f" ({via})" if via else ""), "handed over", nm, one_mover=True)
     if out:
         _pubmod._publish()
     return out
@@ -1230,10 +1220,10 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
         return nothing
     if _never_named(agent, nm):
         return nothing
-    why = f"{'close' if closing else 'update'} by {_session_label(sender)}"
+    why = f"{'close' if closing else 'update'} by {_sr._session_label(sender)}"
     if not closing:
         _needs_store(meta, _canon_needs([*_needs_of(meta), _store_ref(agent)], nm))
-    return lambda: _auto_name(gid, _load(gid), agent, sender, why, "" if closing else "after its update", nm)
+    return lambda: _auto_name(gid, _svcstore._load(gid), agent, sender, why, "" if closing else "after its update", nm)
 
 
 def _router_delivered(target: str, text: str, outcome: str) -> str:
@@ -1277,7 +1267,7 @@ def _pilot_fallback_tick(now: float | None = None) -> int:
     for key, o, e in due:
         gid = str(e.get("item") or "")
         try:
-            item = _load(gid)
+            item = _svcstore._load(gid)
         except Exception:
             item = {}
         if not _telling.front_keeper(str(e["moves"]), key)[0] or _router_live.holds(key, str(e["moves"])):     # a front agent gets no page-owed notice (as pilot_relay), unless it is only the address of a nameless page's notices: the router's
@@ -1285,7 +1275,7 @@ def _pilot_fallback_tick(now: float | None = None) -> int:
     for stew, rows in out.items():
         if len(rows) == 1:
             key, gid, item, what, o = rows[0]
-            _telling.pilot_relay(key, gid, item, what, o, stew, tail=f"{_session_label(o)} left its page update undone past {_grace_min()} min, so it is yours as its keeper")
+            _telling.pilot_relay(key, gid, item, what, o, stew, tail=f"{_sr._session_label(o)} left its page update undone past {_grace_min()} min, so it is yours as its keeper")
         else:
             _telling.pilot_relay_many(stew, rows)
     return len(due)
@@ -1299,7 +1289,6 @@ from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's re
 from stackshot.model import last_activity as _lastact  # noqa: E402  — the item's one "last activity" record, `metadata.last_activity` (last_activity.py)
 from stackshot.anchors import anchor_scope as _ascope  # noqa: E402  — which anchors count for an item: the one reader, from every project's page (anchor_scope.py)
 from stackshot.web import render as _rmod  # noqa: E402
-from stackshot.model import option_labels as _option_labels  # noqa: E402,F401  — the letter an option label repeats from its badge: dropped on read, the pick that names it still lands (option_labels.py)
 from stackshot.model import ask_read as _ar  # noqa: E402  — how an ask and its options are read (open question, alternatives, Yes/No pair, Recommend), shared with the audit (ask_read.py)
 from stackshot.router import routing as _routing  # noqa: E402  — the routing log (the pilot)
 from stackshot.router import router as _router  # noqa: E402  — the router's judging half: the rules in code and the thin call (router_live.py acts on them)
@@ -1310,9 +1299,7 @@ from stackshot.projects import projects as _prj  # noqa: E402  — the project r
 from stackshot.projects import project_archive as _archive  # noqa: E402  — a project whose last agent is retired, with no open item, is archived (project_archive.py)
 from stackshot.fleet import session_ids as _sid  # noqa: E402  — the migration to permanent session ids: applied from here at start, under the item lock
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
-from stackshot.fleet.sessions_registry import _session_label, _sessions_index  # noqa: E402  — a session's name for any reference to it, and the heartbeat index by transcript id or permanent id (fleet/sessions_registry.py)
 from stackshot.model.ids import _item_url  # noqa: E402  — an item's page on the board (model/ids.py)
-from stackshot.model.said import _owner_words  # noqa: E402  — what shows the owner's own words are on an item (model/said.py)
 from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe  # noqa: E402  — a registry file of the store, and roles.json with projects.json beside it (projects/project_registry.py)
 from stackshot.web import publish as _pubmod  # noqa: E402  — the debounced publish: the writes here call `_pubmod._publish()` and the hook tables look its functions up on that module, so a suite that replaces one sets it on `stackshot.web.publish` (the timer is `_PUB_TIMER` there)
 from stackshot.web.publish import _publish_if_idle  # noqa: E402  — the idle test the board's runner rebuild asks (`_runners.ON_CHANGE` in __main__)
@@ -1395,7 +1382,7 @@ def _ask_stamp(item: dict[str, Any], before: dict[str, Any] | None, writer: str)
     try:
         was = (before or {}).get("metadata")
         was = was if isinstance(was, dict) else None
-        who = (_session_label(writer) or writer) if writer and _askl.changed(meta, was) else ""      # the label may read every machine's sessions.json: only a save that changes the ask needs it
+        who = (_sr._session_label(writer) or writer) if writer and _askl.changed(meta, was) else ""      # the label may read every machine's sessions.json: only a save that changes the ask needs it
         _askl.stamp(meta, was, who, time.time())
     except Exception as e:  # noqa: BLE001
         print(f"ask: {item.get('id')} record not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -1415,7 +1402,7 @@ def _ask_lookup(ref: str) -> "tuple[str, str, float, str] | None":
     dropped; a replacement that is open or done is where the question went on, and the ask stands."""
     try:
         gid = _norm_id(f"board#{ref}") if ref.isdigit() else _norm_id(ref)
-        it = _load(gid)
+        it = _svcstore._load(gid)
     except Exception:  # noqa: BLE001
         return None
     chain, seen = [], {gid}
@@ -1429,7 +1416,7 @@ def _ask_lookup(ref: str) -> "tuple[str, str, float, str] | None":
                 return None
             seen.add(nxt)
             chain.append(nxt)
-            it = _load(nxt)
+            it = _svcstore._load(nxt)
         except Exception:  # noqa: BLE001
             return None
     try:
@@ -1442,7 +1429,7 @@ def _ask_lookup(ref: str) -> "tuple[str, str, float, str] | None":
 
 
 def _ask_when(ts: float) -> str:
-    return _rmod.when_words(dt.datetime.fromtimestamp(ts, ZONE))
+    return _rmod.when_words(dt.datetime.fromtimestamp(ts, _wttext.ZONE))
 
 
 def _ask_authors(item: dict[str, Any]) -> "list[str]":
@@ -1461,7 +1448,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
     answers nothing for him, writes no ask and closes nothing. → the reply line ("" when nothing was taken off)."""
     with _writes.ITEM_LOCK:
         try:
-            item = _load(gid)
+            item = _svcstore._load(gid)
         except ToolError:
             return ""
         meta = item.get("metadata")
@@ -1489,7 +1476,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
     item["gid"] = gid
     to = _telling.holder(item)
     line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said it is wrong: {_clip_line(why, 140)}). "
-            f"The item is back with {_session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _telling.notice_link(gid)}")
+            f"The item is back with {_sr._session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _telling.notice_link(gid)}")
     if to and not (sender.strip() and _handoff.ho_same(to, sender)):
         try:
             _telling.tell_woken(gid, _session_id(to), f"{_FOR_OWNER} {line}" if _telling.front_keeper(to, str(meta.get("project") or ""))[0] else line, tag="ask")
@@ -1497,7 +1484,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
             print(f"ask: {gid} mover not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     print(f"ask: {gid} taken off the owner's move (its author's word): {why}", file=sys.stderr, flush=True)
     return (f"\n(the server took the ask off {OWNER}'s move: you said it is wrong, \"{_clip_line(why, 110)}\". "
-            f"The item is back with {_session_label(to) if to else 'its default mover'}; History says so. His late answer, if one comes, is kept as a comment.)")
+            f"The item is back with {_sr._session_label(to) if to else 'its default mover'}; History says so. His late answer, if one comes, is kept as a comment.)")
 
 
 def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]") -> str:
@@ -1513,7 +1500,7 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
         return ""
     try:
         with _writes.ITEM_LOCK:
-            item = _load(gid)
+            item = _svcstore._load(gid)
         now_ask = _ask_stands(item)
         meta = item.get("metadata") or {}
         if not now_ask or clear_ask:
@@ -1581,7 +1568,7 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
     for i, o in enumerate(options, 1):
         if not isinstance(o, dict):
             raise ToolError(f"Refused: option {i} is not an object: {_OPT_FORM}")
-        label, line, rec = _shown_ids(str(o.get("label") or "").strip()), _shown_ids(_unlink_ids(str(o.get("line") or "").strip())), o.get("recommended", False)
+        label, line, rec = _svcstore._shown_ids(str(o.get("label") or "").strip()), _svcstore._shown_ids(_unlink_ids(str(o.get("line") or "").strip())), o.get("recommended", False)
         if isinstance(rec, str):
             rec = rec.strip().lower() in ("true", "yes", "1")
         if not label or not line:
@@ -1646,7 +1633,7 @@ def _watch_anchor_seen(project: str, url: str, since: float) -> str:
     if rows:
         out += (f"\n(anchor wait: anchor-hub already recorded {len(rows)} notice{'s' if len(rows) != 1 else ''} on {url} since the item's last move, "
                 f"which this wait does not count; read {'them' if len(rows) != 1 else 'it'} before waiting for more:\n"
-                + "\n".join(f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(n.get('ts') or 0), ZONE))} {_clip_line(str(n.get('text') or ''), 160)} ({n.get('ruling') or 'unruled'})" for n in rows[-8:]) + ")")
+                + "\n".join(f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(n.get('ts') or 0), _wttext.ZONE))} {_clip_line(str(n.get('text') or ''), 160)} ({n.get('ruling') or 'unruled'})" for n in rows[-8:]) + ")")
     else:
         out += f"\n(anchor wait: anchor-hub recorded nothing on {url} since the item's last move)"
     return out
@@ -1663,7 +1650,7 @@ def _evw_box_spec(sp: "_ew.Spec") -> "_ew.Spec":
     fleet, rec = hit
     if rec and _lv.puller_online(rec):
         seen, mins = _lv.ts(rec["puller"]), _lv.online_window() / 60.0
-        shown = lambda t: dt.datetime.fromtimestamp(t, ZONE).strftime("%Y-%m-%d %H:%M %Z")
+        shown = lambda t: dt.datetime.fromtimestamp(t, _wttext.ZONE).strftime("%Y-%m-%d %H:%M %Z")
         raise ToolError(f"Refused: {fleet} is online now (its puller last checked in at {shown(seen)}), so there is nothing to wait for. If it is really down, the same write is accepted once {mins:g} minutes have passed since that "
                         f"check-in, that is after {shown(seen + _lv.online_window())}; otherwise hand the item to the step that follows, or wait for something that has not happened")
     return _ew.Spec(sp.kind, "", fleet)
@@ -1768,7 +1755,7 @@ def _machine_note(gid: str, item: dict[str, Any], keeper: str = "") -> str:
             if online or fleet.lower() in have or not any(_ma.names_in(t, aliases) for t in texts):
                 continue
             seen = _lv.ts((boxes[fleet.lower()][1] or {}).get("puller"))
-            off[fleet] = f"last checked in {dt.datetime.fromtimestamp(seen, ZONE).strftime('%Y-%m-%d %H:%M %Z')}" if seen else "has not checked in yet"
+            off[fleet] = f"last checked in {dt.datetime.fromtimestamp(seen, _wttext.ZONE).strftime('%Y-%m-%d %H:%M %Z')}" if seen else "has not checked in yet"
         return _ma.missing_note(_gh.shown(gid), project, list(off), off)
     except Exception as e:  # noqa: BLE001  — the write is saved: a note that fails is a stderr line
         print(f"machine anchor: {gid} note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -1896,7 +1883,7 @@ def _front_step_mark(gid: str, h: "str | None", now: float, mover: str = "") -> 
     from stackshot.audit import audit_checks as _ac  # noqa: PLC0415
     from stackshot.audit import front_step as _fs  # noqa: PLC0415
     with _writes.ITEM_LOCK:
-        item = _load(gid)
+        item = _svcstore._load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict):
             return False
@@ -1908,7 +1895,7 @@ def _front_step_mark(gid: str, h: "str | None", now: float, mover: str = "") -> 
             first = _ac.first_open_step(meta)
             if item.get("status") != "open" or not first or not mover or _fs.step_hash(first) != h or _fs.clock(meta, h, mover) is not None:
                 return False
-            if _fs.still_holds(gid, item, _load, mover, now):
+            if _fs.still_holds(gid, item, _svcstore._load, mover, now):
                 return False
             meta[_fs.CLOCK] = {"step": h, "mover": mover, "at": now}
         _writes.save(gid, item)
@@ -1923,7 +1910,7 @@ def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, no
     from stackshot.audit import audit_checks as _ac  # noqa: PLC0415
     from stackshot.audit import front_step as _fs  # noqa: PLC0415
     with _writes.ITEM_LOCK:
-        item = _load(gid)
+        item = _svcstore._load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open":
             return {"moved": False, "why": "the item is not open"}
@@ -1933,9 +1920,9 @@ def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, no
         at = _fs.clock(meta, h, mover)
         if at is None or now - at < hours * 3600:
             return {"moved": False, "why": "its clock is not due"}
-        if (why := _fs.still_holds(gid, item, _load, mover, now)):
+        if (why := _fs.still_holds(gid, item, _svcstore._load, mover, now)):
             return {"moved": False, "why": why}
-        name = _session_label(mover) or mover
+        name = _sr._session_label(mover) or mover
         new_text = _fs.reopen(first, name)
         if not new_text:
             return {"moved": False, "why": "the step's first line cannot be reopened with the mover's name"}
@@ -1958,7 +1945,7 @@ def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, no
         meta[_fs.LANDED] = {"step": _fs.step_hash(new_text), "mover": mover, "at": now}       # the hourly audit line counts the mover's quiet time from here, wake or none
         meta[_fs.MOVED] = [*[x for x in (meta.get(_fs.MOVED) if isinstance(meta.get(_fs.MOVED), list) else []) if x != h], h][-_fs.MOVED_KEEP:]
         shown = f"{(now - at) / 3600:.1f}".rstrip("0").rstrip(".")
-        _stall.note(meta, now, f"step moved from {_session_label(opener) or opener} to {name} after {shown} hours open with the stuck-elsewhere finding unanswered (reword it back to undo): "
+        _stall.note(meta, now, f"step moved from {_sr._session_label(opener) or opener} to {name} after {shown} hours open with the stuck-elsewhere finding unanswered (reword it back to undo): "
                     f"\"{_clip_line(_steps.strip_opener(_steps.first_line(first)), 70)}\"")
         _writes.save(gid, item, note="front step moved to the mover")
         return {"moved": True, "why": "", "line": _steps.first_line(new_text)}
@@ -2081,7 +2068,7 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
     there must not read idle and be handed on), a sessions index that cannot be read, one that is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
     from stackshot.audit import subagent_tie as _tie
     try:
-        idx = _sessions_index() if idx is None else idx
+        idx = _sr._sessions_index() if idx is None else idx
     except Exception as e:  # noqa: BLE001
         raise _tie.Unreadable(f"the fleet's sessions index cannot be read ({e.__class__.__name__})") from e
     row = _handoff.handoff_pane_row(who, idx)
@@ -2089,7 +2076,7 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
         if _handoff.handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
             raise _tie.Unreadable("the session is registered here but is no interactive pane this server can look into")
         w = str(who or "").strip()
-        names = {x for x in (w, _session_label(w)) if x}
+        names = {x for x in (w, _sr._session_label(w)) if x}
         rows = [r for r in dict.values(idx) if isinstance(r, dict) and r.get("name") in names]
         byid = idx.get(w) if w else None
         if isinstance(byid, dict) and not any(byid is r for r in rows):
@@ -2131,7 +2118,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     items = items if items is not None else _nr.load_all(None)
     env = env if env is not None else _silence_env()
     try:
-        idx = _sessions_index() if (pane is None or subagents is None) else {}
+        idx = _sr._sessions_index() if (pane is None or subagents is None) else {}
         idx_ok = True
     except Exception as e:  # noqa: BLE001  — the pane reads then see this box's registry alone; the subagents read tries the index again and is unknown when it still fails
         idx, idx_ok = {}, False
@@ -2159,7 +2146,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     for gid, _line in _hourly.pass_(items, now, env, pane, _handoff.ho_same, subagents, anchored):
         try:
             with _writes.ITEM_LOCK:
-                item = _load(gid)
+                item = _svcstore._load(gid)
                 line = _hourly.due({**items, gid: item}, gid, now, env, pane, _handoff.ho_same, subagents, anchored)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
@@ -2214,18 +2201,18 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 _balance_log_once(gid, "busy-tell-no-main", now, f"audit: {gid} busy stretch not told: no -main agent to tell")
                 continue
             with _writes.ITEM_LOCK:
-                item = _load(gid)
+                item = _svcstore._load(gid)
                 cur = _bt.due({**items, gid: item}, gid, now, front, None, hrs)      # read again under the lock: the item may have been written, held, closed or told of since
                 if cur is None or not _handoff.ho_same(cur["mover"], mover):
                     continue
                 meta = item.setdefault("metadata", {})
                 span = _bt.span(cur["shown"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back; a background mover's stretch is measured only as far back as its audit lines show (`shown`)
                 _bt.mark(meta, now, to, kind, cur["since"])
-                _stall.note(meta, now, f"{_session_label(mover)}'s item has had {'no write but the hourly audit lines' if kind == _bt.KIND_FRONT else 'only a busy pane for its hourly audit lines'} for about {span}: {_session_label(to)} was told")
+                _stall.note(meta, now, f"{_sr._session_label(mover)}'s item has had {'no write but the hourly audit lines' if kind == _bt.KIND_FRONT else 'only a busy pane for its hourly audit lines'} for about {span}: {_sr._session_label(to)} was told")
                 _writes.save(gid, item, note="audit: busy stretch told")
             lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
             line = (f"{lead}: no write on it but the hourly audit lines for about {span}. If you are at work on it, write a line on it; if you are not, say what blocks it or hand it on" if kind == _bt.KIND_FRONT else
-                    f"{lead}: {_session_label(mover)} has looked busy for about {span} (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing")
+                    f"{lead}: {_sr._session_label(mover)} has looked busy for about {span} (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing")
             told.setdefault(to, []).append((gid, kind, line))
             done.append(gid)
             print(f"audit: {gid} busy stretch told to {to} ({kind})", file=sys.stderr, flush=True)
@@ -2268,7 +2255,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     if not rows:
         return []
     if status is None or dead is None:
-        idx = _sessions_index()
+        idx = _sr._sessions_index()
         status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
     busy = _hi.busy_movers(items, now)
@@ -2295,26 +2282,26 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                         return False
                     _hi.mark_handed(item.setdefault("metadata", {}), now, st.frm, st.to)
                     return True
-                st = _ho.Step("move", gid, f"{_hi.WHY} (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
+                st = _ho.Step("move", gid, f"{_hi.WHY} (it was with {_sr._session_label(row['mover'])})", row["mover"], to, via="orphan")
                 if not _handoff.handoff_exec([st], now, verify=False, recheck=still):
                     continue
                 handed.append(gid)
                 busy.append(to)
                 if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, so it went from {_session_label(row['mover'])} to {_session_label(to)}"))
+                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, so it went from {_sr._session_label(row['mover'])} to {_sr._session_label(to)}"))
                 print(f"audit: {gid} idle, handed from {row['mover']} to {to}", file=sys.stderr, flush=True)
             elif not row["told_none"]:
                 with _writes.ITEM_LOCK:
-                    item = _load(gid)
+                    item = _svcstore._load(gid)
                     cur = _hi.due({**items, gid: item}, gid, now, front)
                     if cur is None or cur["told_none"] or not _handoff.ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_none(meta, now)
-                    _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
                     _writes.save(gid, item, note="audit: idle, no builder free")
                 if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with {_session_label(row['mover'])}"))
+                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with {_sr._session_label(row['mover'])}"))
                 print(f"audit: {gid} idle, no builder free", file=sys.stderr, flush=True)
         except Exception as e:  # noqa: BLE001  — one item never stops the others
             print(f"audit: {gid} idle item not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -2399,7 +2386,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     if not rows:
         return []
     if status is None or dead is None:
-        idx = _sessions_index()
+        idx = _sr._sessions_index()
         status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
     load = _hi.load_counts(_hi.busy_movers(items, now), _handoff.ho_same)
@@ -2422,16 +2409,16 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({project})"
             if row["capped"]:
                 with _writes.ITEM_LOCK:
-                    item = _load(gid)
+                    item = _svcstore._load(gid)
                     cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
                     if cur is None or not cur["capped"] or not _handoff.ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_balance_capped(meta, now)
-                    _stall.note(meta, now, f"already moved {_hi.BALANCE_LIFETIME} times by the balancer, so it stays with {_session_label(row['mover'])} and the ladders have it: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _stall.note(meta, now, f"already moved {_hi.BALANCE_LIFETIME} times by the balancer, so it stays with {_sr._session_label(row['mover'])} and the ladders have it: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
                     _writes.save(gid, item, note="balance: at its lifetime cap")
                 if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_session_label(row['mover'])} to the ladders"))
+                    told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_sr._session_label(row['mover'])} to the ladders"))
                 print(f"balance: {gid} at its lifetime cap", file=sys.stderr, flush=True)
                 continue
             to = _hi.pick_least(builders[project], load, status, dead, _handoff.ho_same, row["mover"], row["tried"], front, project)
@@ -2444,12 +2431,12 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                         return False
                     _hi.mark_balanced(item.setdefault("metadata", {}), now, st.frm, st.to)
                     return True
-                st = _ho.Step("move", gid, _hi.balance_why(row["kind"], minutes) + f" (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
+                st = _ho.Step("move", gid, _hi.balance_why(row["kind"], minutes) + f" (it was with {_sr._session_label(row['mover'])})", row["mover"], to, via="orphan")
                 try:
                     ok = bool(_handoff.handoff_exec([st], now, verify=False, recheck=still))
                 except Exception as e:  # noqa: BLE001  — a send after the save failed: the move itself was made when the item carries this pass's record
                     print(f"balance: {gid} sending after the move failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-                    ok = (((_load(gid).get("metadata") or {}).get(_hi.BALANCE_KEY) or {}).get("at") == now)
+                    ok = (((_svcstore._load(gid).get("metadata") or {}).get(_hi.BALANCE_KEY) or {}).get("at") == now)
                 if not ok:
                     continue
                 moved.append(gid)
@@ -2460,16 +2447,16 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                 _balance_log_once(gid, "alone", now, f"balance: {gid} stays with {row['mover']}: no other builder to move it to")      # a mover that is the only builder has nobody to lose: no note, no message
             else:
                 with _writes.ITEM_LOCK:
-                    item = _load(gid)
+                    item = _svcstore._load(gid)
                     cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
                     if cur is None or cur["capped"] or cur["told_none"] or not _handoff.ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_balance_none(meta, now)
-                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no live builder could take it, so it stays with {_session_label(row['mover'])}: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no live builder could take it, so it stays with {_sr._session_label(row['mover'])}: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
                     _writes.save(gid, item, note="balance: no live builder")
                 if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no live builder could take it, so it stays with {_session_label(row['mover'])}"))
+                    told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no live builder could take it, so it stays with {_sr._session_label(row['mover'])}"))
                 print(f"balance: {gid} no live builder", file=sys.stderr, flush=True)
         except Exception as e:  # noqa: BLE001  — one item never stops the others
             print(f"balance: {gid} not balanced: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -2479,9 +2466,9 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                 continue      # a front agent is never sent it unmarked; a pane that is gone cannot take it (and a failed send would leave an `undelivered` note on the item that just moved)
             mine = [(g, t) for f, g, t in gone if f == frm]
             if len(mine) == 1:
-                text = f"Disregard: {_gh.shown(mine[0][0])} is now with {_session_label(mine[0][1])}. Drop it, stop any work or subagent on it, and write nothing to it. No reply is owed."
+                text = f"Disregard: {_gh.shown(mine[0][0])} is now with {_sr._session_label(mine[0][1])}. Drop it, stop any work or subagent on it, and write nothing to it. No reply is owed."
             else:
-                text = (f"Disregard: {len(mine)} items are now with other sessions:\n" + "\n".join(f"- {_gh.shown(g)} is now with {_session_label(t)}" for g, t in mine)
+                text = (f"Disregard: {len(mine)} items are now with other sessions:\n" + "\n".join(f"- {_gh.shown(g)} is now with {_sr._session_label(t)}" for g, t in mine)
                         + "\nDrop them, stop any work or subagent on them, and write nothing to them. No reply is owed.")
             _telling.tell_woken(",".join(g for g, _t in mine), _session_id(frm) or frm, text, tag="balance")
         except Exception as e:  # noqa: BLE001
@@ -2580,7 +2567,7 @@ def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried
     """The History line of a recovery request (metadata.stall.log, shown on the item as a line said by the server): which session is quiet, what happened to the request
     (`outcome`, as _recovery_tell reports it: asked, held, self, nobody, failed) and what the ladder tried. The line names the session asked by its own name, so it
     says the same whether that is the fleet's builder or a front-only project's -main agent. Written onto `item` in place; the caller saves it. → the text."""
-    label = _session_label(to) or to
+    label = _sr._session_label(to) or to
     said = {"asked": f"{label} was asked to recover it",
             "held": f"not sent: the message to {label} was held back, not delivered",
             "self": f"not sent: {label} is the fleet's builder itself, so nobody else could be asked",      # only a fleet request can be its own quiet session: the -main agent is never chosen for itself (_recovery_target)
@@ -2595,7 +2582,7 @@ def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: 
     """Write the History line of a recovery request once its outcome is known: on a fresh read of the item under the lock (the send's thread may have recorded a failure on it meanwhile). Never raises."""
     try:
         with _writes.ITEM_LOCK:
-            item = _load(gid)
+            item = _svcstore._load(gid)
             if item.get("status") != "open":
                 return
             _recovery_note(item, time.time() if now is None else now, quiet, why, tried, outcome, to)
@@ -2703,7 +2690,7 @@ class _WaitCtx:
     def load(self, gid: str) -> dict[str, Any] | None:
         if gid not in self._items:
             try:
-                self._items[gid] = _load(gid)
+                self._items[gid] = _svcstore._load(gid)
             except Exception:  # noqa: BLE001
                 self._items[gid] = None
         return self._items[gid]
@@ -2828,7 +2815,7 @@ def _contact_label(item: dict[str, Any]) -> str:
     """The contact as people read it (the session's current name): an open item's live contact, a closed item's stored one; "" when none."""
     m = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     c = _contact_of(m) if item.get("status") == "open" else str(m.get("contact") or "").strip()
-    return _session_label(c) if c else ""
+    return _sr._session_label(c) if c else ""
 
 
 def _main_agent_without(project: str, name: str) -> str:
@@ -2850,7 +2837,7 @@ def _main_agent_without(project: str, name: str) -> str:
 def _contact_set(gid: str, new: str, was: str, why: str) -> bool:
     """Store a contact on an open item as a filing write by the server (the migration author): no state, clock, hand-off or page moves. → True when written."""
     with _writes.ITEM_LOCK:
-        it = _load(gid)
+        it = _svcstore._load(gid)
         meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
         if it.get("status") != "open" or str(meta.get("contact") or "") != was:
             return False                                        # the item moved on since it was read
@@ -2870,7 +2857,7 @@ def _contact_fall_retired(name: str) -> list[str]:
     try:
         for gid, _p in _item_files():
             try:
-                it = _load(gid)
+                it = _svcstore._load(gid)
             except Exception:  # noqa: BLE001
                 continue
             meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
@@ -2879,7 +2866,7 @@ def _contact_fall_retired(name: str) -> list[str]:
                 continue
             main = _main_agent_without(str(meta.get("project") or ""), name)
             new = _store_ref(main) if main and not _contact_same(main, name) else ""
-            if _contact_set(gid, new, str(meta.get("contact") or ""), f"contact {_session_label(c)} retired: now {_session_label(new) if new else 'none'}"):
+            if _contact_set(gid, new, str(meta.get("contact") or ""), f"contact {_sr._session_label(c)} retired: now {_sr._session_label(new) if new else 'none'}"):
                 moved.append(_gh.shown(gid))
     except Exception as e:  # noqa: BLE001
         print(f"contact: retire pass for {name} stopped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -2893,7 +2880,7 @@ def _contact_follow_rename(old: str, new: str) -> list[str]:
     try:
         for gid, _p in _item_files():
             try:
-                it = _load(gid)
+                it = _svcstore._load(gid)
             except Exception:  # noqa: BLE001
                 continue
             c = str((it.get("metadata") if isinstance(it.get("metadata"), dict) else {}).get("contact") or "").strip()
@@ -2925,7 +2912,7 @@ def _contact_backfill(dry: bool = True) -> dict[str, Any]:
     written = 0
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _svcstore._load(gid)
         except Exception:  # noqa: BLE001
             continue
         meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
@@ -2939,9 +2926,9 @@ def _contact_backfill(dry: bool = True) -> dict[str, Any]:
         counts[rule] += 1
         if rule in (_contact.RULE_CLOSED, _contact.RULE_HAS):
             continue
-        row = {"item": _gh.shown(gid), "project": project, "rule": rule, "was": _session_label(str(meta.get("contact") or "")), "to": _session_label(new)}
+        row = {"item": _gh.shown(gid), "project": project, "rule": rule, "was": _sr._session_label(str(meta.get("contact") or "")), "to": _sr._session_label(new)}
         if new and not dry:
-            ok = _contact_set(gid, _store_ref(new), str(meta.get("contact") or ""), f"contact filled in: {_session_label(new)} ({rule})")
+            ok = _contact_set(gid, _store_ref(new), str(meta.get("contact") or ""), f"contact filled in: {_sr._session_label(new)} ({rule})")
             row["written"] = ok
             written += int(ok)
         rows.append(row)
@@ -3002,7 +2989,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
     if not _anc.pilot_root(key):
         return None
     who = f"{sender} (a script on {machine})"
-    gist = _shown_ids(text.strip())
+    gist = _svcstore._shown_ids(text.strip())
     nid = _routing.record(key, kind="message", to="", label=f"message to {key}", who=who, text=gist, url=pr,
                           target="project-wide", pilot=True, log_only=True, reason="log-only: a green release")
     _routing.rule(nid, "merged", reason="log-only: a green release, ruled automatically", by=AUTO_RULER)
@@ -3010,7 +2997,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
     note = "released: " + _clip_line(re.sub(r"^\[release\]\s*", "", gist), 400)
     for g in dict.fromkeys(g for gs in _pr_items([pr]).values() for g in gs):
         try:
-            _writes.save(g, _load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
+            _writes.save(g, _svcstore._load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
             commented.append(g)
         except Exception as e:  # noqa: BLE001  — a comment that fails never fails the log line
             print(f"release: {g} not commented: {e}", file=sys.stderr, flush=True)
@@ -3184,7 +3171,7 @@ def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only:
     if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not any(_handoff.ho_same(mod.mover, x) for x in senders):
         return []
     return _dw.timed_wait_lines(meta.get("next"), _wt.wake_value(meta), _pages.zone_now().date(),
-                                lambda who: _handoff.ho_same(mod.mover, who) or _session_label(mod.mover).casefold() == who.casefold(), dated_only)
+                                lambda who: _handoff.ho_same(mod.mover, who) or _sr._session_label(mod.mover).casefold() == who.casefold(), dated_only)
 
 
 def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any, wake_in: str, senders: tuple[str, ...], reason: str) -> tuple[str, str]:
@@ -3231,7 +3218,7 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
     (the model is `_front_step_move`). Read again under the lock. Nothing for an item that is not open or that the owner moves, a wake the mover sent back, or one `_date_only_wait` does not park
     (the finding stands then). Never closes an item and writes no ask. → {"parked": bool, "wake": str, "why": str}."""
     with _writes.ITEM_LOCK:
-        item = _load(gid)
+        item = _svcstore._load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open" or not _wt.wake_value(meta) or meta.get("hold"):
             return {"parked": False, "why": "not an open item with a wake and no hold"}
@@ -3269,7 +3256,7 @@ def _wait_end_facts() -> "_we.Facts":
 
     def scoped(gid: str) -> list[str]:
         try:
-            project = str((_load(gid).get("metadata") or {}).get("project") or "")
+            project = str((_svcstore._load(gid).get("metadata") or {}).get("project") or "")
         except Exception:  # noqa: BLE001
             return []
         return [str(e["url"]) for e in _scoped_anchors(project, gid, store)]
@@ -3317,7 +3304,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
     if op == "event":
         _evwait_preread("event", plan.get("phrase"))
     with _writes.ITEM_LOCK:
-        item = _load(gid)
+        item = _svcstore._load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open" or meta.get("hold") or _waits_decision(meta):
             return no("not an open item the mover moves")
@@ -3336,7 +3323,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
         # a backstop day is a date (watchers.day_epoch): a stored until, ask_by or wake that is no date is no backstop, and the cap day takes its place
         dated = [str(v) for v in (_wt.stored_until(meta), meta.get("ask_by"), meta.get("wake")) if _watch.day_epoch(v) is not None]
         has_back = bool(dated)
-        back = dated[0] if dated else _we.backstop_day(now, _wt.cap_days(), ZONE)
+        back = dated[0] if dated else _we.backstop_day(now, _wt.cap_days(), _wttext.ZONE)
         anchor_undo: "tuple[Any, Any] | None" = None
         saved = False
 
@@ -3397,7 +3384,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 _anchor_wait_gate(was["metadata"], meta, gid)
                 what = f"wait_anchor={_clip_line(plan.get('url'), 50)}"
             _watch_on_write(gid, was, meta, {}, set(), "", False)       # the wait's stamp, and the event wait's gate (a wait for what has already happened is refused)
-            _sf.record(meta, _sf.WAIT_END, tok, _we.history({**plan, "pos": gap.pos}, gap.line, gap.pos, back, _session_label(mover) or mover), now)
+            _sf.record(meta, _sf.WAIT_END, tok, _we.history({**plan, "pos": gap.pos}, gap.line, gap.pos, back, _sr._session_label(mover) or mover), now)
             _writes.save(gid, item, note="wait set")
             saved = True
         except ToolError as e:
@@ -3521,7 +3508,7 @@ def _holds_unexplained() -> list[dict[str, Any]]:
         if _hold_held_by(gid, meta):
             continue
         owner = _telling.holder(it)
-        rows.append({"gid": gid, "owner": _session_label(_session_id(owner)) if owner else "", "wake": str(_wt.wake_value(meta) or ""),
+        rows.append({"gid": gid, "owner": _sr._session_label(_session_id(owner)) if owner else "", "wake": str(_wt.wake_value(meta) or ""),
                      "by": _rmod.hold_by(it), "at": _rmod.hold_at(it), "subject": str(it.get("subject") or "")})
     return sorted(rows, key=lambda r: (r["at"], r["gid"]))
 
@@ -3534,7 +3521,7 @@ def _holds_report() -> str:
     out = [f"{len(rows)} open item(s) on hold that nothing holds now (no open after, pane recycle, needs external or item-scoped anchor); "
            "its mover releases each with update clear_hold=true (the server takes it from any session that writes the item), or gives it its condition; the mover shown is who holds it:"]
     for r in rows:
-        when = _rmod.when_words(dt.datetime.fromtimestamp(r["at"], ZONE)) if r["at"] else "before the record"
+        when = _rmod.when_words(dt.datetime.fromtimestamp(r["at"], _wttext.ZONE)) if r["at"] else "before the record"
         out.append(f"{_gh.shown(r['gid'])} · mover {r['owner'] or 'none'} · wake {r['wake'] or 'none'} · set by {r['by'] or 'unknown'} ({when}) · {r['subject']}")
     return "\n".join(out) + "\n"
 
@@ -3560,10 +3547,10 @@ def _model_report(max_age: float = 60.0) -> "_mg.Report":
         items: dict[str, dict[str, Any]] = {}
         for gid, _p in _item_files():
             try:
-                items[gid] = _load(gid)
+                items[gid] = _svcstore._load(gid)
             except Exception:  # noqa: BLE001  — one unreadable item never stops the report
                 continue
-        rep = _mg.report(items, _mg.Ctx(now=now, label=_session_label, shown=_gh.shown), one_mover=bool(_cfg.get("model", "one_mover", default=True)))
+        rep = _mg.report(items, _mg.Ctx(now=now, label=_sr._session_label, shown=_gh.shown), one_mover=bool(_cfg.get("model", "one_mover", default=True)))
         _GUARD_REPORT.update(at=now, rep=rep)
         return rep
 
@@ -3583,7 +3570,7 @@ def _mover_lines(item: dict[str, Any]) -> list[str]:
     the answer or step; it stands only beside the owner). A waiting item shows who picks it up when the wait ends as its mover, and `then:` only when he is that one; a closed one has none at all. [] when the reading fails: a get never fails over it."""
     try:
         mod = _model_of(item)
-        who = lambda w: _session_label(w) if w and not _model.is_owner(w) else (w or "no one")
+        who = lambda w: _sr._session_label(w) if w and not _model.is_owner(w) else (w or "no one")
         if mod.state == _model.ALIVE:
             return [f"mover: {who(mod.mover)}" + ("" if mod.mover_explicit else " (derived)")] + ([f"then: {who(mod.then)}" + ("" if mod.then_explicit else " (derived)")] if mod.then else [])
         if mod.state == _model.WAITING and mod.wait:
@@ -3619,9 +3606,9 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
         mod = _model_of(item)
         shown_as = _shown_waiting_note(item, mod)
         if short:
-            return [_model.words(mod, _session_label, _gh.shown, derived=False, when=_arrival_when) + shown_as] if mod.state != _model.DEAD else []
-        extra = [x for x in (_watch.chases_line(item.get("metadata") or {}, _session_label), _watch.woke_line(item.get("metadata") or {}, _session_label)) if x and item.get("status") == "open"]
-        return [_model.words(mod, _session_label, _gh.shown, when=_arrival_when) + shown_as] + extra + [f"model conflict: {c}" for c in mod.conflicts]
+            return [_model.words(mod, _sr._session_label, _gh.shown, derived=False, when=_arrival_when) + shown_as] if mod.state != _model.DEAD else []
+        extra = [x for x in (_watch.chases_line(item.get("metadata") or {}, _sr._session_label), _watch.woke_line(item.get("metadata") or {}, _sr._session_label)) if x and item.get("status") == "open"]
+        return [_model.words(mod, _sr._session_label, _gh.shown, when=_arrival_when) + shown_as] + extra + [f"model conflict: {c}" for c in mod.conflicts]
     except Exception as e:  # noqa: BLE001
         print(f"model: {item.get('gid') or item.get('id')} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return []
@@ -3649,7 +3636,7 @@ def _old_wait_off() -> bool:
 
 def _load_or_none(gid: str) -> dict[str, Any] | None:
     try:
-        return _load(gid)
+        return _svcstore._load(gid)
     except Exception:  # noqa: BLE001
         return None
 
@@ -3675,7 +3662,7 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
     lines = []
     for g in seen[:_NEXT_NAMES_MAX]:
         try:
-            it = _load(g); it["gid"] = g
+            it = _svcstore._load(g); it["gid"] = g
         except ToolError:
             lines.append(f"- {_gh.shown(g)}: not found")
             continue
@@ -3685,12 +3672,12 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
         if it.get("status") == "completed":
             at = float(it.get("state_updated") or it.get("updated") or 0)
             sup = str(cm.get("superseded_by") or "")
-            lines.append(f"- {_gh.shown(g)}: closed" + (f" {_rmod.when_words(dt.datetime.fromtimestamp(at, ZONE))}" if at else "")
+            lines.append(f"- {_gh.shown(g)}: closed" + (f" {_rmod.when_words(dt.datetime.fromtimestamp(at, _wttext.ZONE))}" if at else "")
                          + f" ({_rmod.outcome_word(cm.get('outcome') or 'done')}{' by ' + _gh.shown(sup) if sup else ''})")
             continue
         try:
             mod = _model.view(it, _model_of(it), after_open=lambda i_: _after_open(i_.get("metadata") or {}))      # the same view as the home page, so a long-doing item reads as waiting here too
-            who = lambda w: _session_label(w) if w and not _model.is_owner(w) else (w or "no one")
+            who = lambda w: _sr._session_label(w) if w and not _model.is_owner(w) else (w or "no one")
             if mod.state == _model.WAITING:
                 left = _after_open(cm)
                 lines.append(f"- {_gh.shown(g)}: open, waiting" + (f" after {', '.join(_gh.shown(x) for x in left)}" if left else ""))
@@ -3749,11 +3736,11 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     if _is_parked(item) and _rmod.hold_set_of(item):   # who set the hold, and when
         hs = _rmod.hold_set_of(item)
         out.append(f"hold: set by {_rmod.hold_by(item) or 'unknown'}"
-                   + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), ZONE))}" if _rmod.hold_at(item) else ""))
+                   + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), _wttext.ZONE))}" if _rmod.hold_at(item) else ""))
     if item.get("status") == "open" and _wt.basis_of(m):   # a wake past the cap that stands on a real-world date, and who said so
         wb = m["wait_basis"]
         out.append(f"wait basis: {_wt.basis_of(m)} (lifts the {_wt.cap_days():g}-day cap for the wake {_wt.wake_value(m)} only; set by {wb.get('by') or 'unknown'}"
-                   + (f" {_rmod.when_words(dt.datetime.fromtimestamp(float(wb['at']), ZONE))}" if isinstance(wb.get("at"), (int, float)) else "") + ")")
+                   + (f" {_rmod.when_words(dt.datetime.fromtimestamp(float(wb['at']), _wttext.ZONE))}" if isinstance(wb.get("at"), (int, float)) else "") + ")")
     if item.get("status") == "open" and _wt.words_of(m):   # his words behind the wake, quoted, and where they came from
         ww = _wt.words_of(m)
         out.append(f"{OWNER}'s words behind the wake {_wt.wake_value(m)}: “{_clip_line(ww['quote'], 300)}”" + (f" ({ww['source']})" if ww["source"] else ""))
@@ -3761,7 +3748,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         states = []
         for g in _after_of(m):
             try:
-                states.append(f"{g} ({_load(g).get('status')})")
+                states.append(f"{g} ({_svcstore._load(g).get('status')})")
             except ToolError:
                 states.append(f"{g} (missing)")
         out.append("after: " + ", ".join(states) + ("" if _after_open(m) else " — all closed" if item.get("status") == "open" else ""))
@@ -3770,8 +3757,8 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     if item.get("status") != "completed" and _work.lines_of(m):   # what is in motion on it, one line (the item page shows each on its step)
         out.append("step status: " + _work.words(m))
     for e in _said.entries_of(m):            # the trailers: his words on the item, each with where it was checked; an acted entry is a pasted result that proves a step, not his words
-        sess_ = _session_label(e["session"]) or "unknown session"
-        when_ = f" · {_rmod.when_words(dt.datetime.fromtimestamp(e['ts'], ZONE))}" if e["ts"] else ""
+        sess_ = _sr._session_label(e["session"]) or "unknown session"
+        when_ = f" · {_rmod.when_words(dt.datetime.fromtimestamp(e['ts'], _wttext.ZONE))}" if e["ts"] else ""
         if e["kind"] == _said.ACTED:
             out.append(f"{e['tag']}: pasted in {sess_}{when_} · " + ("checked against the transcript" if e["checked"] else "unchecked") + f" (proof of a step, not his words) · “{_clip_line(e['quote'], 200)}”")
             continue
@@ -3780,20 +3767,20 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     ans = _rmod.answers_of(item)
     if ans:                                  # phase 3: his answers from the board, the last three, oldest first
         out.append(f"{OWNER}'s answers on the board" + (f" (last 3 of {len(ans)})" if len(ans) > 3 else "") + ":\n" + "\n".join(
-            f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(a.get('ts') or 0), ZONE))} {'comment' if a.get('kind') == 'comment' else 'note on his step' if a.get('kind') == 'step-reply' else 'answer'}: "
+            f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(a.get('ts') or 0), _wttext.ZONE))} {'comment' if a.get('kind') == 'comment' else 'note on his step' if a.get('kind') == 'step-reply' else 'answer'}: "
             + _answer_words(a, 1200) + (f" [chosen option: {a['choice']}: {a['choice_line']}]" if a.get("choice") and a.get("choice_line") else "") for a in ans[-3:]))
     idle = m.get("idle") if isinstance(m.get("idle"), dict) else {}
     if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm. The idle pass only ever asked the fleet's builder (no code writes `recovery` now; the line reads the record it left), so this line keeps that wording: the hand-off and stall ladders, which can ask a front-only project's -main agent, write their own lines ("handoff:", "stall:")
-        w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), ZONE))
+        w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), _wttext.ZONE))
         out.append(f"idle: poked {idle.get('to') or '?'} {w('poked')}" + (f", the fleet's builder was asked to recover it {w('recovery')}" if idle.get("recovery") else ""))
     from stackshot.audit import hourly_log as _hlog
     for x in _hlog.log_of(m)[-1:]:           # the newest hourly audit line (audit/hourly.py), with its own prefix: it is no step of the stall pass
-        out.append(f"audit: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), ZONE))} {x.get('text') or ''}")
+        out.append(f"audit: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}")
     for x in _stall.log_of(m)[-3:]:          # what the stall pass did (its mover's pane had no turn running), the last three, oldest first
-        out.append(f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), ZONE))} {x.get('text') or ''}")
+        out.append(f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}")
     if _rmod.waits_recycle(item):            # waits for a pane recycle, since when
         at = m.get("recycle_at")
-        out.append("recycle: waits for a pane recycle" + (f" (since {_rmod.when_words(dt.datetime.fromtimestamp(float(at), ZONE))})" if isinstance(at, (int, float)) else ""))
+        out.append("recycle: waits for a pane recycle" + (f" (since {_rmod.when_words(dt.datetime.fromtimestamp(float(at), _wttext.ZONE))})" if isinstance(at, (int, float)) else ""))
     gid = str(item.get("gid") or "")
     if item.get("status") == "open" and m.get("check"):   # the done check: what closes it, and what the last pass found
         out.append("check: " + _checks.check_label(str(m["check"])) + _checks.check_words(gid, item))
@@ -3811,15 +3798,15 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     if item.get("status") == "open" and _GID.match(gid):   # a wait that can no longer end
         fail = _wt.failed_of(m)
         if fail:
-            out.append(f"wait failed: {fail.get('what') or 'a wait'}: {fail.get('why') or 'it can no longer end'} ({_rmod.when_words(dt.datetime.fromtimestamp(float(fail['at']), ZONE))})")
+            out.append(f"wait failed: {fail.get('what') or 'a wait'}: {fail.get('why') or 'it can no longer end'} ({_rmod.when_words(dt.datetime.fromtimestamp(float(fail['at']), _wttext.ZONE))})")
     if item.get("status") == "open" and isinstance(m.get("undelivered"), list) and m["undelivered"]:   # a notice that was not delivered (a log line nobody read)
         out.append("undelivered notices:\n" + "\n".join(
-            f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(u.get('at') or 0), ZONE))} ({u.get('tag') or 'notice'}) to {u.get('to') or '?'}: {u.get('why') or 'not delivered'}"
+            f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(u.get('at') or 0), _wttext.ZONE))} ({u.get('tag') or 'notice'}) to {u.get('to') or '?'}: {u.get('why') or 'not delivered'}"
             for u in m["undelivered"] if isinstance(u, dict)))
     seen = _rmod.confirmed_at(item, _path(gid) if _GID.match(gid) else None)
     if seen:                                 # when the item was last confirmed true, and whether that is stale for its lane
         fresh, age = _rmod.freshness(item, time.time())
-        out.append(f"confirmed: {_rmod.when_words(dt.datetime.fromtimestamp(seen, ZONE))} ({'stale ' + _rmod.age_words(age) if fresh == 'stale' else fresh})")
+        out.append(f"confirmed: {_rmod.when_words(dt.datetime.fromtimestamp(seen, _wttext.ZONE))} ({'stale ' + _rmod.age_words(age) if fresh == 'stale' else fresh})")
     if m.get("next"):
         out.append("next:\n" + str(m["next"]))
         if item.get("status") == "open" and not brief:
@@ -3829,7 +3816,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         if any(x["status"] != _steps.OPEN for x in cl):
             def _cl_line(i: int, x: dict[str, Any]) -> str:
                 who = f" · {x['by']}" if x.get("by") else ""
-                when = f" · {_rmod.when_words(dt.datetime.fromtimestamp(float(x['at']), ZONE))}" if x.get("at") else ""
+                when = f" · {_rmod.when_words(dt.datetime.fromtimestamp(float(x['at']), _wttext.ZONE))}" if x.get("at") else ""
                 return f"{i}. [{x['status']}{who}{when}] {_clip_line(_steps.first_line(x['text']), 110)}"
             out.append("checklist:\n" + "\n".join(_cl_line(i, x) for i, x in enumerate(cl, 1)))
     except Exception:  # noqa: BLE001  — a reading that fails never fails the get
@@ -3877,7 +3864,7 @@ def _notice_report(nid: str) -> str:
         raise ToolError(f"no notice {nid} in the routing log — a notice id is the six hex characters a message to a project returns (\"notice a1b2c3\"); an item id reads board#<n>"
                         + (f" (and the store holds no item {nid})" if _GID.match(nid) else ""))
     key, n = hit
-    when = lambda t: _rmod.when_words(dt.datetime.fromtimestamp(float(t), ZONE))
+    when = lambda t: _rmod.when_words(dt.datetime.fromtimestamp(float(t), _wttext.ZONE))
     text = " ".join(str(n.get("text") or "").split())
     text = text if len(text) <= 120 else text[:119].rstrip() + "…"
     out = [f"notice {nid}: {n.get('label') or n.get('kind') or 'a notice'}", f"project: {key}", f"sender: {n.get('who') or 'unknown'}",
@@ -3970,7 +3957,7 @@ def _fallback_wait_date(meta: dict[str, Any], next_text: Any, description: Any, 
     other: list[str] = []
     for g in _wt.after_of(meta):
         try:
-            other.append(_wt.until_of((_load(g).get("metadata") or {})))
+            other.append(_wt.until_of((_svcstore._load(g).get("metadata") or {})))
         except Exception:  # noqa: BLE001  — an item that cannot be read gives no date
             continue
     d, how, said = _uw.fallback_date(texts, today, _watch.parse_date, _wt.cap_days(), str(due or meta.get("due") or ""), other)
@@ -4022,7 +4009,7 @@ _telling.install(_telling.Hooks(
     same_sess=_late("_same_sess"),
     session_id=_late("_session_id"),
     shown_needs=_late("_shown_needs"),
-    zone=lambda: ZONE,
+    zone=lambda: _wttext.ZONE,
 ))
 
 
@@ -4067,7 +4054,7 @@ _wake_hooks.install(_wake_hooks.Hooks(
     rmod_whose=lambda: _rmod.WHOSE,
     session_id=_late("_session_id"),
     state_end=_late("_state_end"),
-    zone=lambda: ZONE,
+    zone=lambda: _wttext.ZONE,
 ))
 
 
@@ -4130,7 +4117,7 @@ _stall_hooks.install(_stall_hooks.Hooks(
     silence_minutes=lambda *a, **k: _silence_mod().minutes(*a, **k),
     silence_subagent_running=lambda *a, **k: _silence_mod().subagent_running(*a, **k),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
-    zone=lambda: ZONE,
+    zone=lambda: _wttext.ZONE,
 ))
 
 
@@ -4182,7 +4169,7 @@ _passes_hooks.install(_passes_hooks.Hooks(
     stamp_write_op=_late("_stamp_write_op"),
     switchover_on=_late("_switchover_on"),
     watch_on_write=_late("_watch_on_write"),
-    zone=lambda: ZONE,
+    zone=lambda: _wttext.ZONE,
 ))
 
 # What the For you rows still reach on this module (service/foryou_events.py): the debounced publish of the board, the page's parser of an ask line and the words for a date. A hook leaves this table when the
@@ -4222,7 +4209,7 @@ _create_svc.install(_create_svc.Hooks(
     session_id=_late("_session_id"),
     wait_alias_gate=_late("_wait_alias_gate"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
-    writer_owes=_late("_writer_owes"),
+    writer_owes=_late_in(_pdebts, "_writer_owes"),
     ask_none=_ASK_NONE,
 ))
 
@@ -4248,7 +4235,7 @@ def _sender_not_owner(sender: str) -> None:
         return
     norm = lambda x: re.sub(r"[^0-9a-z]+", " ", str(x or "").lower()).strip()
     o = norm(OWNER)
-    if o and {norm(s), norm(_session_label(s))} & {o, o + " board"}:
+    if o and {norm(s), norm(_sr._session_label(s))} & {o, o + " board"}:
         raise ToolError(f"Refused: sender names {OWNER}. Only the board writes as {OWNER} (his answer from the item's page); "
                         f"pass sender=<your own session name or id>. When you write down what {OWNER} said, you are its author.")
 
@@ -4257,7 +4244,7 @@ def _said_note(entries: list[dict[str, Any]]) -> str:
     """The reply's lines on what the write recorded: checked against which transcript, or stored unchecked and why."""
     out = ""
     for e in entries:
-        label = _session_label(str(e.get("session") or "")) or "the sender"
+        label = _sr._session_label(str(e.get("session") or "")) or "the sender"
         what = f"{e['tag']} (kind acted: proof he did a step, not his words)" if e.get("kind") == _said.ACTED else e["tag"]
         out += f"\n(said: {what} " + (f"checked against {label}'s transcript" if e.get("checked") else f"stored unchecked: {e.get('why') or 'the transcript could not be read'}") + ")"
     return out
@@ -4397,12 +4384,12 @@ def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     gid = _norm_id(str(spec.get("item") or ""))
     # The cheap gates first, on a read taken before the lock: the entry must be his and read as a park. Only then the store's history is read (a
     # subprocess that can take seconds, never while holding the item lock, which every other write waits on); the result is checked again under the lock.
-    item0 = _load(gid)
+    item0 = _svcstore._load(gid)
     wake0, hit0 = _cap_words_entry(gid, spec, item0)
     read_prior = not _wt.entry_current(item0, hit0.get("ts"), time.time())
     prior = _wt.prior_state_ts(gid, wake0) if read_prior else None
     with _writes.ITEM_LOCK:
-        item = _load(gid)
+        item = _svcstore._load(gid)
         meta = dict(item.get("metadata") or {})
         wake, hit = _cap_words_entry(gid, spec, item)
         text = _wt.answer_words(hit)
@@ -4417,7 +4404,7 @@ def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
         quote = str(spec.get("quote") or "")
         if quote and " ".join(quote.split()) != " ".join(text.split()):
             raise ToolError(f"Refused: the quote is not what the entry says ({_clip_line(text, 80)!r}); the server records the entry's own text")
-        when = _rmod.when_words(dt.datetime.fromtimestamp(float(hit.get("ts") or 0), ZONE))
+        when = _rmod.when_words(dt.datetime.fromtimestamp(float(hit.get("ts") or 0), _wttext.ZONE))
         kind = "comment" if hit.get("kind") == "comment" else "answer"
         src = f"{OWNER}'s {kind} on {'the board' if hit.get('via') == 'board' else 'GitHub'}, {when}" + (f" (comment {hit['comment_id']}, {str(hit.get('url') or '').strip()})" if hit.get("comment_id") is not None else "")
         commit = re.sub(r"[^0-9a-f]", "", str(spec.get("commit") or "").lower())[:12]
@@ -4455,7 +4442,7 @@ def _rebullet_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     if not isinstance(old, str) or not isinstance(new, str) or not new.strip():
         raise ToolError("Refused: old (the description the rewrite was made from) and description (the rewrite) are required strings")
     with _writes.ITEM_LOCK:
-        item = _load(gid)
+        item = _svcstore._load(gid)
         if item.get("status") != "open":
             raise ToolError(f"Refused: {_gh.shown(gid)} is not open; a closed item is left alone")
         cur = str(item.get("description") or "")
@@ -4600,7 +4587,7 @@ def _phase_sweep() -> list[str]:
     stamped: list[str] = []
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _svcstore._load(gid)
         except Exception:  # noqa: BLE001  — a file that vanished or does not read is left to the pass that owns it
             continue
         meta = it.get("metadata")
@@ -4956,7 +4943,7 @@ _gates.install(_gates.Hooks(
     store_ref=_late("_store_ref"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
-    zone=lambda: ZONE,
+    zone=lambda: _wttext.ZONE,
 ))
 
 
@@ -5028,8 +5015,8 @@ _update_svc.install(_update_svc.Hooks(
     wake_step_note=_late("_wake_step_note"),
     wake_window_note=_late("_wake_window_note"),
     watch_on_write=_late("_watch_on_write"),
-    writer_owes=_late("_writer_owes"),
-    zone=lambda: ZONE,      # looked up when the reply is made, as the confirm tool did before the move
+    writer_owes=_late_in(_pdebts, "_writer_owes"),
+    zone=lambda: _wttext.ZONE,      # looked up when the reply is made, as the confirm tool did before the move
 ))
 
 
@@ -5182,19 +5169,19 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
             return ""
         tid = _session_id(target)
         for gid in gids:                                  # an item that waits on his decision, or names the front agent in its needs, is the front agent's business
-            m_ = _load(gid).get("metadata") or {}
+            m_ = _svcstore._load(gid).get("metadata") or {}
             if "decision" in _needs_kinds(m_) or (tid and tid in {_session_id(x) for x in _needs_sessions(m_)}):
                 return ""
         line = f"{sname} reported to {target} (not sent to it: a plain status report): {_clip_line(body, 1500)}"
         for gid in gids:
             with _writes.ITEM_LOCK:
-                _writes.save(gid, _load(gid), note=line, activity=_activity.AUDIT if _activity.audit_writer([sender, sname], _writes.audit_writer_names()) else _activity.MESSAGE)      # a background agent's report written onto the item is a message about the work, unless the audit sent it
+                _writes.save(gid, _svcstore._load(gid), note=line, activity=_activity.AUDIT if _activity.audit_writer([sender, sname], _writes.audit_writer_names()) else _activity.MESSAGE)      # a background agent's report written onto the item is a message about the work, unless the audit sent it
         shown = ", ".join(_gh.shown(g) for g in gids)
         try:
             MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
             with open(MSG_LOG, "a", encoding="utf-8") as f:
                 f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": "", "to": via or target,
-                                    "outcome": f"written onto {shown}, not delivered", "error": "", "text": _shown_ids(raw)}, ensure_ascii=False) + "\n")
+                                    "outcome": f"written onto {shown}, not delivered", "error": "", "text": _svcstore._shown_ids(raw)}, ensure_ascii=False) + "\n")
         except Exception:  # noqa: BLE001
             pass
         return (f"Not delivered: written onto {shown} as a History line from {sname}, because {target} is a front agent, a session {OWNER} talks to, and this "
@@ -5246,7 +5233,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     to = _prj.to_key(to)                            # phase A: a project's id addresses it as its key does (an unknown id stays as written and is refused below)
     ref = to                                        # the target as the sender wrote it; push.py hands it to the inbox, which stores the permanent id it resolves to on the line
     to = _sr.delivery(to)                           # step B: a permanent session id addresses its session by the name it has now
-    text = _shown_ids(raw)
+    text = _svcstore._shown_ids(raw)
     if not sender:
         raise ToolError("Refused: sender is required — your own session id (cse_… for a cloud/Cowork session, the transcript UUID for a pane) or your pane name, the same value you pass as sender to the board tools")
     if not to:
@@ -5255,7 +5242,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         raise ToolError("Refused: empty message")
     if len(raw) > MSG_MAX:
         raise ToolError(f"Refused: message longer than {MSG_MAX} characters — put the long form somewhere both sessions can read (a gbrain page, a file in the repo) and send the pointer")
-    idx = _sessions_index()
+    idx = _sr._sessions_index()
     fyi = bool(fyi) and not _model.is_owner(sender)
     if not re.match(_cfg.page_dirs_re() + "/", to):
         reported = _gate_front(to, raw, idx, "" if origin else sender)     # a front agent takes only what is for <owner>: a builder's report on an item goes onto it, not to the pane
@@ -5331,7 +5318,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 pass
             return (f"held for {to}'s next turn (fyi: it asks nothing, so it starts no turn) — it is handed over with the first turn {to} takes, whatever causes it, once, "
                     "oldest first; it names no item in its needs. If it does ask something, send it again without fyi.")
-    now = dt.datetime.now(ZONE).strftime("%Y-%m-%d %H:%M %Z")
+    now = dt.datetime.now(_wttext.ZONE).strftime("%Y-%m-%d %H:%M %Z")
     envelope = (
         f"[stackshot message] from {who} · {now}{tag}\n"
         f"{text}\n"
@@ -5548,7 +5535,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
             key = key[:-3]
         if not re.fullmatch(_cfg.page_dirs_re() + r"/[\w./-]+", key) or ".." in key:
             return 400, "text/plain", "key = a page key, " + " or ".join(f"{d}/<slug>" for d in _cfg.page_dirs())
-        ts = int(_page_ts(key))
+        ts = int(_pdebts._page_ts(key))
         return 200, "application/json", json.dumps({"key": key, "ts": ts or None})
     if what == "items":
         return _client_items(str(params.get("key") or ""))
@@ -5582,7 +5569,7 @@ def _wait_fields(gid: str, it: dict[str, Any], ctx: "_WaitCtx") -> dict[str, Any
     if mv.get("kind") == _wt.OWNER_KIND:
         mv["kind"] = _cfg.owner_mover_kind()      # [items_api] owner_mover_kind: the word a reader of the API matches for the owner's move ("legacy" by default, or "owner")
     elif mv.get("kind") == "session":
-        mv["who"] = _session_label(str(mv.get("who") or "")) or str(mv.get("who") or "")
+        mv["who"] = _sr._session_label(str(mv.get("who") or "")) or str(mv.get("who") or "")
     if mv.get("via"):
         mv["via"] = _gh.shown(str(mv["via"]))
     return {"mover": mv, "expected_by": None, "wait": "", "overdue": None}
@@ -5699,7 +5686,7 @@ def _item_mover_label(item: dict[str, Any], names: dict[str, str], who: str | No
         who = _item_mover(item) if who is None else who
         if not who or _model.is_owner(who):
             return who
-        return names.get(_anc.canonical(who, names), "") or _session_label(who)
+        return names.get(_anc.canonical(who, names), "") or _sr._session_label(who)
     except Exception:  # noqa: BLE001
         return ""
 
@@ -5745,7 +5732,7 @@ def _client_item_facts(key: str, ids: str) -> tuple[int, str, str]:
             except (TypeError, ValueError):
                 ts = 0.0
             if ts:
-                row["closed"], row["closed_words"] = ts, _rmod.when_words(dt.datetime.fromtimestamp(ts, ZONE))
+                row["closed"], row["closed_words"] = ts, _rmod.when_words(dt.datetime.fromtimestamp(ts, _wttext.ZONE))
             if m.get("outcome"):
                 row["outcome"] = str(m["outcome"])
         out[g] = row
@@ -5759,7 +5746,7 @@ from stackshot.fleet import inbox as _inbox      # noqa: E402  — the server-si
 def _on_machine(machine: str):
     """→ (names, on): the fleet's names (for _anc.canonical) and a test of whether a session id runs on `machine`, by the
     fleet's live heartbeat or by the sessions the client API holds for that machine."""
-    nm, idx, fleet = _anc.names(), _sessions_index(), _fleetev.fleet_names()
+    nm, idx, fleet = _anc.names(), _sr._sessions_index(), _fleetev.fleet_names()
     here = set(_clients.sessions_on(machine))
     def on(owner: str) -> bool:
         rec = idx.get(owner.lower()) or idx.get(owner)
@@ -5807,7 +5794,7 @@ def _recycle_wanted_rows(machine: str) -> list[tuple[str, dict[str, Any]]]:
     last, out = _last_recycle(machine), []
     for gid, p in _item_files():
         try:
-            it = _load(gid)
+            it = _svcstore._load(gid)
         except Exception:
             continue
         if not _rmod.waits_recycle(it) or not _rmod.recycle_due(it, _after_open(it.get("metadata") or {})):   # the board's status line uses the same test
@@ -5896,13 +5883,13 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
     nm, on_machine = _on_machine(machine)
     skip = {_anc.canonical(s, nm) for s in (skipped or []) if str(s).strip()}
     _note_recycle(machine, flag_at or started)
-    when = _rmod.when_words(dt.datetime.fromtimestamp(started, ZONE))
+    when = _rmod.when_words(dt.datetime.fromtimestamp(started, _wttext.ZONE))
     what = "reboot" if kind == "reboot" else "recycle"
     cleared: dict[tuple[str, str], list[tuple[str, bool]]] = {}   # (to, the front mover it is told for, else "") → its rows
     kept: list[dict[str, str]] = []
     for gid, p in _item_files():
         try:
-            it = _load(gid)
+            it = _svcstore._load(gid)
         except Exception:
             continue
         meta = dict(it.get("metadata") or {})
@@ -5928,7 +5915,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
         _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
               + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _is_held(it) or _date_parked(it) else ""))
         for sid, _why in _telling.notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
-            to = (sid, "") if sid == owner else (sid, _session_label(owner) or owner)
+            to = (sid, "") if sid == owner else (sid, _sr._session_label(owner) or owner)
             cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _is_held(it) or _date_parked(it) else ""))
         print(f"recycle: {gid} no longer waits ({kind} on {machine})", file=sys.stderr, flush=True)
     for (to, front), rows in cleared.items():
@@ -5981,7 +5968,7 @@ def _pr_items(refs: list[str]) -> dict[str, list[str]]:
             for g in e["items"]:
                 try:
                     gid = _norm_id(g)
-                    if _load(gid).get("status") == "open" and gid not in out.setdefault(e["url"], []):
+                    if _svcstore._load(gid).get("status") == "open" and gid not in out.setdefault(e["url"], []):
                         out[e["url"]].append(gid)
                 except ToolError:
                     continue
@@ -6008,17 +5995,17 @@ def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
                             f"(anchors(project, add=[url], items=[id])) and run this again; if none does, {_when_idle()}")
     else:
         gids = [_norm_id(item)]
-        if _load(gids[0]).get("status") != "open":
+        if _svcstore._load(gids[0]).get("status") != "open":
             raise ToolError(f"Refused: {gids[0]} is completed; a recycle waits on an open item. If no open item covers the change, {_when_idle()}")
     done = []
     with _RECYCLE_DUE_LOCK:
         for g in gids:
-            it = _load(g)
+            it = _svcstore._load(g)
             action = "already" if _rmod.waits_recycle(it) else "set"
             if action == "set":
                 _update(g, recycle=True, sender=f"a script on {machine}")   # the script's write, not the owner's (the History names it)
-                it = _load(g)
-            done.append({"item": g, "action": action, "held": _is_held(it) or _date_parked(it), "owner": _session_label(_telling.holder(it)),
+                it = _svcstore._load(g)
+            done.append({"item": g, "action": action, "held": _is_held(it) or _date_parked(it), "owner": _sr._session_label(_telling.holder(it)),
                          "needs": [_shown_ref(x) for x in _needs_sessions(it.get("metadata") or {})]})
     return {"items": done, "pr": pr}
 
@@ -6091,7 +6078,7 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
     projects: dict[str, str] = {}
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _svcstore._load(gid)
             if it.get("status") != "open":
                 continue
             meta = it.get("metadata") or {}
@@ -6153,7 +6140,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
         for gid, how in tied.items():
             try:
                 with _writes.ITEM_LOCK:
-                    it = _load(gid)
+                    it = _svcstore._load(gid)
                     meta = it.get("metadata")
                     if it.get("status") != "open" or not isinstance(meta, dict):
                         continue
@@ -6234,7 +6221,7 @@ def _event_activity_tick(now: float | None = None) -> list[str]:
                 newest = _lastact.record(None, sigs, now)      # the newest of the item's signals (the last given of those at the same time)
                 try:
                     with _writes.ITEM_LOCK:
-                        it = _load(gid)
+                        it = _svcstore._load(gid)
                         # read again under the lock: the item may have closed, been put on hold or begun a wait since the tie was made (the same test as _merge_tied)
                         if it.get("status") == "open" and _event_item_live(it, now) and newest is not None and _lastact.apply(it, [newest], now):
                             _writes.save(gid, it, activity=_activity.BOOKKEEPING)
@@ -6381,15 +6368,15 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         with _QUESTION_LOCK:       # the check of the request map and the write are one step, so two calls with one triple file one item
             _writes.QUESTION.on = True
             try:
-                subject = _fit(_shown_ids(subject), _subject_max())      # a script's subject is cut to the limit (ids expanded first), never refused: a script's item must not be lost on a 400
+                subject = _fit(_svcstore._shown_ids(subject), _subject_max())      # a script's subject is cut to the limit (ids expanded first), never refused: a script's item must not be lost on a 400
                 gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=front[0], then=front[0], needs=["decision"], ask=ask, options=options,      # the project's -main agent takes it after the owner
                                            by=f"{sender} (a script on {machine})", request_id=f"question\x1f{machine}\x1f{sender}\x1f{rid}")
             finally:
                 _writes.QUESTION.on = False
-        meta = _load(gid).get("metadata") or {}
+        meta = _svcstore._load(gid).get("metadata") or {}
     except ToolError as e:
         return 400, {"error": str(e)}
-    return 200, {"item": _gh.shown(gid), "project": str(meta.get("project") or key), "owner": _session_label(str(meta.get("owner") or "")) or front[0],
+    return 200, {"item": _gh.shown(gid), "project": str(meta.get("project") or key), "owner": _sr._session_label(str(meta.get("owner") or "")) or front[0],
                  "repeat": _reply.startswith("already created")}
 
 
@@ -6411,7 +6398,7 @@ def _terminal_fallback() -> str:
 def _terminal_same(a: str, b: str) -> bool:
     """Do two references name one session? As permanent ids when the registry resolves both, else as strings or as the names the fleet gives them."""
     t = _sr.same(a, b)
-    return (a == b or _session_label(a) == _session_label(b)) if t is None else t
+    return (a == b or _sr._session_label(a) == _sr._session_label(b)) if t is None else t
 
 
 def _terminal_bullets(*lines: str) -> str:
@@ -6427,7 +6414,7 @@ def _terminal_open_items(session: str) -> list[str]:
         try:
             if '"terminal_prompt"' not in p.read_text(encoding="utf-8"):
                 continue
-            it = _load(gid)
+            it = _svcstore._load(gid)
         except (OSError, ValueError, ToolError):
             continue
         mark = str((it.get("metadata") or {}).get("terminal_prompt") or "")
@@ -6513,7 +6500,7 @@ def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str,
             return 400, {"error": f"question must be one line (it is shown on {OWNER}'s row); shorten it, the pane has the rest"}
         if len(question) > _TERMINAL_Q_MAX or any(ord(c) < 32 or ord(c) == 127 for c in question):
             return 400, {"error": f"question must be one line of at most {_TERMINAL_Q_MAX} characters ({len(question)} now); shorten it, the pane has the rest"}
-    name = _session_label(session)
+    name = _sr._session_label(session)
     by = f"{sender} via a script on {machine}"
     try:
         with _TERMINAL_LOCK:         # the look for an open item and the write that follows are one step, so two calls for one session file one item
@@ -6557,7 +6544,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
     nxt = _terminal_next(name, question)
     if found:
         gid = found[0]
-        meta = _load(gid).get("metadata") or {}
+        meta = _svcstore._load(gid).get("metadata") or {}
         if str(meta.get("next") or "").strip() != nxt.strip():
             _update(gid, next=nxt, sender=f"a script on {machine}", dropped=[i + 1 for i, x in enumerate(_steps.view(meta)) if x["status"] == _steps.OPEN and _terminal_question_line(x["text"])])       # a script's line is the creator's (the item's first writer), which this write replaces (next_writer in _update); the old question is a dropped step
         if meta.get("state") != "your-step" or not _states.clean(meta.get("step")):
@@ -6572,7 +6559,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
     owner = sorted(_hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))[0]
     desc = _terminal_bullets(f"{name} is waiting in its terminal for {OWNER}'s answer", f"Opened by {sender} (a script on {machine}); it closes when the pane stops waiting")
     pfx_, tail_ = _terminal_subject_prefix(str(rec.get('scope') or '')), " is waiting for your answer in its terminal"
-    name_ = _shown_ids(name)
+    name_ = _svcstore._shown_ids(name)
     room_ = (_subject_max() - len(pfx_) - len(tail_)) if _subject_max() else 0      # a long pane name is cut so the server's own subject is never refused
     subject = f"{pfx_}{_fit(name_, room_) if 0 < room_ < len(name_) else name_}{tail_}"
     gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=nxt, priority="p1", mover=OWNER, then=owner, by=by, extra={"terminal_prompt": name})      # The owner answers, then the project's -main agent takes it
@@ -6585,7 +6572,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
         except Exception as e2:  # noqa: BLE001
             print(f"terminal prompt: {_gh.shown(gid)} left open half made, not closed: {e2}", file=sys.stderr, flush=True)
         raise
-    meta = _load(gid).get("metadata") or {}
+    meta = _svcstore._load(gid).get("metadata") or {}
     return 200, {"item": _gh.shown(gid), "session": name, "project": str(meta.get("project") or key), "repeat": False}
 
 
@@ -6639,7 +6626,7 @@ def _jobgap_open_items(mark: str) -> list[str]:
         try:
             if '"job_gap"' not in p.read_text(encoding="utf-8"):
                 continue
-            it = _load(gid)
+            it = _svcstore._load(gid)
         except (OSError, ValueError, ToolError):
             continue
         if it.get("status") == "open" and str((it.get("metadata") or {}).get("job_gap") or "") == mark:
@@ -6722,9 +6709,9 @@ def _jobgap_clear(found: list[str], timer: str, code: str, sender: str, machine:
 
 def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, code: str, detail: str, sender: str, machine: str, by: str, mark: str) -> tuple[int, dict[str, Any]]:
     if found:
-        meta = _load(found[0]).get("metadata") or {}
-        return 200, {"item": _gh.shown(found[0]), "timer": timer, "code": code, "project": str(meta.get("project") or ""), "mover": _session_label(str(meta.get("mover") or "")),
-                     "owner": _session_label(str(meta.get("owner") or "")), "repeat": True, "fallback": bool(meta.get("job_gap_fallback"))}
+        meta = _svcstore._load(found[0]).get("metadata") or {}
+        return 200, {"item": _gh.shown(found[0]), "timer": timer, "code": code, "project": str(meta.get("project") or ""), "mover": _sr._session_label(str(meta.get("mover") or "")),
+                     "owner": _sr._session_label(str(meta.get("owner") or "")), "repeat": True, "fallback": bool(meta.get("job_gap_fallback"))}
     key = rec["key"]
     front = sorted(_hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
     if not front:
@@ -6742,7 +6729,7 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
     lines.append(f"Opened by {sender} (a script on {machine}); it closes when the watcher finds the gap fixed")
     desc = _terminal_bullets(*lines)
     pfx_, tail_ = _terminal_subject_prefix(str(rec.get("scope") or "")), f": {gap}"
-    timer_ = _shown_ids(timer)
+    timer_ = _svcstore._shown_ids(timer)
     room_ = (_subject_max() - len(pfx_) - len(tail_)) if _subject_max() else 0      # a long unit name is cut so the server's own subject is never refused (as the terminal prompt's)
     subject = f"{pfx_}{_fit(timer_, room_) if 8 <= room_ < len(timer_) else timer_}{tail_}"
     if _subject_max():
@@ -6752,8 +6739,8 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
     if not builder:
         extra["job_gap_fallback"] = True
     gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=nxt, needs=[builder] if builder else "", priority="p2", mover=mover, by=by, extra=extra)
-    meta = _load(gid).get("metadata") or {}
-    return 200, {"item": _gh.shown(gid), "timer": timer, "code": code, "project": str(meta.get("project") or key), "mover": _session_label(mover), "owner": _session_label(owner),
+    meta = _svcstore._load(gid).get("metadata") or {}
+    return 200, {"item": _gh.shown(gid), "timer": timer, "code": code, "project": str(meta.get("project") or key), "mover": _sr._session_label(mover), "owner": _sr._session_label(owner),
                  "repeat": False, "fallback": not builder}
 
 
@@ -6777,7 +6764,7 @@ def _itemopen_open_items(project: str) -> list[tuple[str, str]]:
         try:
             if '"item_open"' not in p.read_text(encoding="utf-8"):
                 continue
-            it = _load(gid)
+            it = _svcstore._load(gid)
         except (OSError, ValueError, ToolError):
             continue
         meta = it.get("metadata") or {}
@@ -6868,7 +6855,7 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     owner = front[0]
     by = f"{sender} (a script on a client machine)"
     prefixes = list(_cfg.CFG["subject"]["prefixes"])
-    subject = _shown_ids(subject)
+    subject = _svcstore._shown_ids(subject)
     bare = [p.strip() for p in prefixes if p.strip()]
     def _prefix_at_start(text: str) -> str:
         """the instance prefix the text starts with, when it is a prefix of its own: a space, the end of the text or another prefix follows it (so `[work]-style fix` keeps its bracket word)"""
@@ -6889,9 +6876,9 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
             open_here = _itemopen_open_items(key)
             found = [g for g, m_ in open_here if m_ == marker]
             if found:
-                meta = _load(found[0]).get("metadata") or {}
-                return 200, {"item": _gh.shown(found[0]), "marker": marker, "project": str(meta.get("project") or key), "mover": _session_label(str(meta.get("mover") or "")),
-                             "owner": _session_label(str(meta.get("owner") or "")), "repeat": True}
+                meta = _svcstore._load(found[0]).get("metadata") or {}
+                return 200, {"item": _gh.shown(found[0]), "marker": marker, "project": str(meta.get("project") or key), "mover": _sr._session_label(str(meta.get("mover") or "")),
+                             "owner": _sr._session_label(str(meta.get("owner") or "")), "repeat": True}
             if len(open_here) >= _ITEMOPEN_OPEN_MAX:
                 return 400, {"error": f"{key} already has {len(open_here)} open items filed by this route and the cap is {_ITEMOPEN_OPEN_MAX}: an open item must close before another is filed "
                                       "(a repeat of an open marker is always answered; a marker that changes on every run is the usual cause)"}
@@ -6902,8 +6889,8 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
                 _writes.TERMINAL_ROW.on = False
     except ToolError as e:
         return 400, {"error": str(e)}
-    meta = _load(gid).get("metadata") or {}
-    return 200, {"item": _gh.shown(gid), "marker": marker, "project": str(meta.get("project") or key), "mover": _session_label(mover), "owner": _session_label(owner), "repeat": False}
+    meta = _svcstore._load(gid).get("metadata") or {}
+    return 200, {"item": _gh.shown(gid), "marker": marker, "project": str(meta.get("project") or key), "mover": _sr._session_label(mover), "owner": _sr._session_label(owner), "repeat": False}
 
 
 def _answer_line(item: dict[str, Any]) -> str:
@@ -6920,7 +6907,7 @@ def _answer_line(item: dict[str, Any]) -> str:
     a = next((x for x in reversed(ans) if x.get("kind") != "comment"), ans[-1])
     one = lambda v: " / ".join(" ".join(ln.split()) for ln in str(v or "").splitlines() if ln.strip())
     try:
-        when = dt.datetime.fromtimestamp(float(a["ts"]), ZONE).isoformat(timespec="seconds")
+        when = dt.datetime.fromtimestamp(float(a["ts"]), _wttext.ZONE).isoformat(timespec="seconds")
     except (KeyError, TypeError, ValueError, OverflowError, OSError):
         when = ""
     return f"{'comment' if a.get('kind') == 'comment' else 'decision'}\t{one(a.get('choice'))}\t{one(a.get('text'))}\t{when}"
@@ -6932,7 +6919,7 @@ def _client_answer(key: str) -> tuple[int, str, str]:
     if not key.strip():
         return 400, "text/plain", "key = an item id as shown: board#<n>"
     try:
-        it = _load(_norm_id(key))
+        it = _svcstore._load(_norm_id(key))
     except ToolError as e:
         return 404, "text/plain", str(e)
     line = _answer_line(it)
@@ -7149,16 +7136,13 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
     return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
-# The answer form's helpers (answers.py), kept on this module as well: the answer routes, the tick and the suites call `server.<name>`. Private names no caller on this module reads stay in that module:
+# The answer form's helpers (answers.py), the names this module's own code uses. A suite or a script that reads or sets one of the others reaches it on answers.py. Private names nobody here reads stay in that module:
 # _origin_of, _LETTERED_CHOICE, _choice_words, _answers_path.
+from stackshot.web import answers as _answers_mod  # noqa: E402  — the answer lock is taken on this module (`_ANSWER_LOCK`), so a suite that puts a spy in its place sets it there
 from stackshot.web.answers import (  # noqa: E402,F401
-    _ANSWER_BODY_MAX,
     _ANSWER_ESCALATE_S,
-    _ANSWER_LOCK,
     _ANSWER_TEXT_MAX,
     _answer_note,
-    _answer_same_origin,
-    _answer_token,
     _answer_words,
     _answers_load,
     _answers_save,
@@ -7170,7 +7154,7 @@ from stackshot.web.answers import (  # noqa: E402,F401
 def _answer_ack(gid: str, writer: str) -> None:
     """A session's write to an item settles the decision answer pending on it when that session was told of the answer (its
     mover, or a session named in its needs): the keeper is then not told."""
-    with _ANSWER_LOCK:
+    with _answers_mod._ANSWER_LOCK:
         st = _answers_load()
         e = st.get(gid)
         if not e or _session_id(writer) not in (e.get("told") or []):
@@ -7194,17 +7178,17 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         step = _states.clean(rec.get("step"))
         step = step if len(step) <= 240 else step[:240].rstrip() + " …"
         note = f", with his note: “{_answer_words({'text': rec.get('text')}, 300)}”" if rec.get("text") else ""
-        line = f"[stackshot] {OWNER} did his step on {_gh.shown(gid)}: {step}. It goes to {_session_label(then)} now{note} → {url}"
+        line = f"[stackshot] {OWNER} did his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now{note} → {url}"
     judge = ""
     if then and rec.get("kind") == "step-reply":      # his note on the step, sent with no Done: the session that takes the item judges it (only its own line says so)
-        line = (f"[stackshot] {OWNER} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_session_label(then)} now with his note: "
+        line = (f"[stackshot] {OWNER} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now with his note: "
                 f"“{_answer_words({'text': rec.get('text')}, 300)}” → {url}")
         judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {OWNER} "
                  f"with a new step (step=…); if it says he will do the step at a later time, put the item on hold until then "
                  f"(update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
                  f"leave his step open and hand no new step back.")
     yours = ("" if _answer_words(rec).rstrip()[-1:] in (".", "!", "?", ")") else ".") + " It's yours now" if handed and not then else ""      # a decision handed over: the mover's line plus the tail
-    to_then = lambda t: t.replace(f"It goes to {_session_label(then)} now", "It's yours now", 1).replace(f" → {url}", f"{yours}{judge} → {url}", 1)      # the then-mover's own line: "It's yours now", and for a note the instruction to judge it
+    to_then = lambda t: t.replace(f"It goes to {_sr._session_label(then)} now", "It's yours now", 1).replace(f" → {url}", f"{yours}{judge} → {url}", 1)      # the then-mover's own line: "It's yours now", and for a note the instruction to judge it
     told: list[str] = []
     if judge and rec.get("applied"):      # the server read his note and applied it (note_read.py): the then-mover is told what was done instead of being asked to judge the note
         judge = ". " + str(rec["applied"])
@@ -7376,8 +7360,8 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
     if len(text) > _ANSWER_TEXT_MAX:
         return "toolong"
-    with _writes.ITEM_LOCK, _ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
-        item = _load(gid)
+    with _writes.ITEM_LOCK, _answers_mod._ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
+        item = _svcstore._load(gid)
         if item.get("status") != "open":
             return _keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
         meta = dict(item.get("metadata") or {})
@@ -7473,7 +7457,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
                 until = _wakes.parse_wake(until)
                 meta["until"] = until           # the one date the wait ends on (until_write.py); no hold and no wake are stored
-                _cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_rmod.when_words(dt.datetime.fromtimestamp(now, ZONE))}")
+                _cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")
             item["state_updated"] = item["confirmed"] = now
         if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
             mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
@@ -7492,7 +7476,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 _state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
                 meta["until"] = parked          # the one date the wait ends on (until_write.py); no hold and no wake are stored
                 _cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
-                            source=f"{OWNER}'s answer on the board, {_rmod.when_words(dt.datetime.fromtimestamp(now, ZONE))}")   # "Park until <date>" is his own word for that date
+                            source=f"{OWNER}'s answer on the board, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")   # "Park until <date>" is his own word for that date
             item["state_updated"] = item["confirmed"] = now
             effect = _watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop
             if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
@@ -7529,7 +7513,7 @@ def _answer_tick(now: float | None = None) -> list[str]:
     or missing item drops it silently, and so does a keeper that is the mover itself. → the gids escalated."""
     now = time.time() if now is None else now
     out: list[str] = []
-    with _ANSWER_LOCK:
+    with _answers_mod._ANSWER_LOCK:
         st = _answers_load()
         due = [g for g, e in st.items() if now - float(e.get("ts") or 0) >= _ANSWER_ESCALATE_S]
         if not due:
@@ -7537,7 +7521,7 @@ def _answer_tick(now: float | None = None) -> list[str]:
         for gid in due:
             e = st.pop(gid)
             try:
-                it = _load(gid)
+                it = _svcstore._load(gid)
             except ToolError:
                 continue
             if it.get("status") != "open":
@@ -7549,8 +7533,8 @@ def _answer_tick(now: float | None = None) -> list[str]:
             if not sid or sid == _session_id(owner):
                 print(f"answer: {gid} unacted after {_ANSWER_ESCALATE_S / 60:g} min, but no keeper other than its mover to tell", file=sys.stderr, flush=True)
                 continue
-            at = _rmod.when_words(dt.datetime.fromtimestamp(float(e.get("ts") or now), ZONE))
-            olabel = _session_label(owner) if owner else "none"
+            at = _rmod.when_words(dt.datetime.fromtimestamp(float(e.get("ts") or now), _wttext.ZONE))
+            olabel = _sr._session_label(owner) if owner else "none"
             _telling.tell_woken(gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
                                   f"in {_ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: see that his answer is acted on "
                                   f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}", tag="answer")

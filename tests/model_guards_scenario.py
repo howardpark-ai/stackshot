@@ -77,6 +77,11 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.service import store as _service_store
+from stackshot.github import ghsync as _gh
+from stackshot.anchors import anchors as _anc
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -103,7 +108,7 @@ def upd(i, **kw): return server._update(f"a{i}", sender="home-front", **kw)
 def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 def set_cfg(**kw):
-    server._cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py); a suite that sets [model] whole keeps it
+    _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py); a suite that sets [model] whole keeps it
 set_cfg()
 
 # ================================================================ the words (pure)
@@ -185,9 +190,9 @@ check("1 mover: a cloud session (cse_ id) is accepted, and with no registry and 
 item(63, needs=[BACK])
 refused_nw("2 wait: an anchor wait names its anchor and its event, and has an end", 63, lambda: upd(63, wait_kind="anchor"), "waits on an anchor event", "names its anchor", "wait_anchor=<url>", "the event it expects", "wait_event=")
 refused_nw("2 wait: …the event is missing", 63, lambda: upd(63, wait_kind="anchor", wait_anchor="https://github.com/x/y/pull/1", ask_by=FUT), "the event it expects", none=("names its anchor",))
-server._anc.save({"projects/alpha": [{"url": "https://github.com/x/y/pull/1", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
+_anc.save({"projects/alpha": [{"url": "https://github.com/x/y/pull/1", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
 upd(63, wait_kind="anchor", wait_anchor="https://github.com/x/y/pull/1", wait_event="merged", ask_by=FUT)
-check("2 wait: …anchor, event and an end pass; the item reads as waiting on the anchor", model.derive(server._load("a63")).wait.kind == "anchor" and ab_(mt(63)) == FUT, mt(63))
+check("2 wait: …anchor, event and an end pass; the item reads as waiting on the anchor", model.derive(_service_store._load("a63")).wait.kind == "anchor" and ab_(mt(63)) == FUT, mt(63))
 item(64, needs=[BACK])
 refused_nw("2 wait: an item wait names the items it waits after", 64, lambda: upd(64, wait_kind="item", ask_by=FUT), "another item's close", "after=[\"board#N\"]")
 upd(64, wait_kind="item", after=["a63"], ask_by=FUT)
@@ -195,7 +200,7 @@ check("2 wait: …with its after and an end it passes", mt(64)["after"] == ["a63
 item(65, needs=[BACK])
 refused_nw("2 wait: a relay wait names the party or event", 65, lambda: upd(65, wait_kind="relay", ask_by=FUT), "news only", "wait_event=<who or what>")
 upd(65, wait_kind="relay", wait_event="Robin's reply on the contract", ask_by=FUT)
-check("2 wait: …with its event and an ask-by day it passes (the post-wake mover defaults to the owner)", mt(65)["wait_kind"] == "relay" and model.derive(server._load("a65")).wait.post_wake_mover == OWN, mt(65))
+check("2 wait: …with its event and an ask-by day it passes (the post-wake mover defaults to the owner)", mt(65)["wait_kind"] == "relay" and model.derive(_service_store._load("a65")).wait.post_wake_mover == OWN, mt(65))
 item(66, needs=[BACK])
 item(166, needs=[BACK])
 out = upd(166, wait_kind="time")
@@ -461,10 +466,10 @@ upd(143, next=f"{BACK}: carry on")
 check("6c mover: an item that never stood in his state keeps a mover Oliver a writer stored (the conflict note stays; no hand-back from nothing)", mt(143)["mover"] == OWN, mt(143))
 # the server's own saves: an idle raise adds decision to needs and saves, with no update behind it
 item(29, needs=[BACK], mover=BACK)
-it_b = server._load("a29"); it_b["metadata"]["needs"] = ["decision", BACK]; it_b["metadata"]["ask"] = ASK
+it_b = _service_store._load("a29"); it_b["metadata"]["needs"] = ["decision", BACK]; it_b["metadata"]["ask"] = ASK
 writes.save("a29", it_b)
 check("6c mover: a save the server makes itself on an item that waits on him settles it too: he is the mover, the agent in then", mt(29)["mover"] == OWN and mt(29)["then"] == BACK, mt(29))
-it_b = server._load("a29"); it_b["metadata"]["needs"] = [BACK]; it_b["metadata"].pop("ask")
+it_b = _service_store._load("a29"); it_b["metadata"]["needs"] = [BACK]; it_b["metadata"].pop("ask")
 writes.save("a29", it_b)
 check("6c mover: …and when his wait ends in the server's own save, the agent has it back", mt(29)["mover"] == BACK and "then" not in mt(29), mt(29))
 # his answer on the board
@@ -484,7 +489,7 @@ check("6c mover: a wait that replaces his state hands the agent in then the pick
 # the guards off: nothing is flipped by the backstop
 set_cfg(guards=False)
 item(32, needs=[BACK], mover=BACK)
-it_c = server._load("a32"); it_c["metadata"]["needs"] = ["decision", BACK]; it_c["metadata"]["ask"] = ASK
+it_c = _service_store._load("a32"); it_c["metadata"]["needs"] = ["decision", BACK]; it_c["metadata"]["ask"] = ASK
 writes.save("a32", it_c)
 check("6c mover: [model] guards = false: the save leaves the stored mover as it is", mt(32)["mover"] == BACK and "then" not in mt(32), mt(32))
 set_cfg()
@@ -513,16 +518,16 @@ item(36, needs=[BACK], mover=OWN, then=OWN, wait_kind="relay", wait_event="Robin
 before_mig = {n: raw(n) for n in (143, 152, 155, 156, 158, 159)}
 (T / "store/a/32.json").unlink()                                                           # the guards-off fixture above is an item the pass would rightly fix
 GH_CALLS = []
-real_enabled, real_on_change = server._gh.enabled, server._gh.on_change
-server._gh.enabled = lambda: True; server._gh.on_change = lambda *a, **k: GH_CALLS.append(a[0])
+real_enabled, real_on_change = _gh.enabled, _gh.on_change
+_gh.enabled = lambda: True; _gh.on_change = lambda *a, **k: GH_CALLS.append(a[0])
 try:
-    item(37, needs=[BACK]); writes.save("a37", server._load("a37"))
+    item(37, needs=[BACK]); writes.save("a37", _service_store._load("a37"))
     check("6c migration: (probe) the mirror stub sees an ordinary save", GH_CALLS == ["a37"], GH_CALLS)
     GH_CALLS.clear()
     done = migsvc.migrate_owner_mover()
     mig_calls = list(GH_CALLS)
 finally:
-    server._gh.enabled, server._gh.on_change = real_enabled, real_on_change
+    _gh.enabled, _gh.on_change = real_enabled, real_on_change
 check("6c migration: it posts nothing to GitHub (mirror off), though it rewrote items", len(done) >= 5 and mig_calls == [], (done, mig_calls))
 check("6c migration: it rewrites the items that need it, and no other", sorted(g for g in done if g in {f"a{n}" for n in [*range(28, 37), 49, 50]}) == ["a34", "a35", "a36", "a49", "a50"], done)
 check("6c migration: an old answer followed by a deliberate mover=Oliver (with a later record, or no record) is left byte for byte", all(raw(n) == before_mig[n] for n in (158, 159)), None)
@@ -548,9 +553,9 @@ check("6c migration: an alive hand-back where then holds he: the mover drops to 
 check("6c migration: …and with no then at all the mover just drops", "a39" in done2 and "mover" not in mt(39) and "then" not in mt(39), mt(39))
 # a live save where a wait replaces his state: then survives, not only the mover
 item(40, needs=[BACK], mover=BACK)
-it_d = server._load("a40"); it_d["metadata"]["needs"] = ["decision", BACK]; it_d["metadata"]["ask"] = ASK
+it_d = _service_store._load("a40"); it_d["metadata"]["needs"] = ["decision", BACK]; it_d["metadata"]["ask"] = ASK
 writes.save("a40", it_d)
-it_d = server._load("a40"); it_d["metadata"].update(needs=[BACK], wait_kind="relay", wait_event="Robin relays the quote", ask_by=day(5)); it_d["metadata"].pop("ask")
+it_d = _service_store._load("a40"); it_d["metadata"].update(needs=[BACK], wait_kind="relay", wait_event="Robin relays the quote", ask_by=day(5)); it_d["metadata"].pop("ask")
 writes.save("a40", it_d)
 check("6c mover: a save where a wait replaces his state makes the agent in then the mover who picks it up, and then goes", mt(40).get("mover") == BACK and "then" not in mt(40), mt(40))
 set_cfg(guards=False, handoff=False)
@@ -724,7 +729,7 @@ upd(95, next="no name here, a leak, waiting for it", mover="home-nobody", needs=
 check("switch: [model] guards = false: none of the guards refuses (and no flag is written)", mt(95)["next"].startswith("no name") and mt(95)["mover"] == "home-nobody" and "model_flags" not in mt(95), mt(95))
 refused_nw("switch: …the form checks of PR 1 still do (a bad wait_kind)", 95, lambda: upd(95, wait_kind="soon"), "wait_kind is one of")
 set_cfg()
-server._cfg.CFG.pop("model", None)
+_cfg.CFG.pop("model", None)
 refused_nw("switch: removing the section leaves the default: on", 95, lambda: upd(95, next="no name again"), "does not say who takes it")
 # [model] guards = false restores today's behaviour entirely: the re-park test and the wait_basis rule too
 item(202, needs=[BACK], hold=True, wake=day(2), wait_basis={"text": f"visit on {day(9)}", "wake": day(2), "by": "x", "at": 1.0})
@@ -773,7 +778,7 @@ item(14, status="completed", needs=[], outcome="done", next="")                 
 item(15, status="completed", needs=[], next="")                                                          # closed without
 item(16, status="completed", needs=[], next="")
 item(17, needs=[BACK], hold=True, wake=day(3), wait_basis={"text": f"visit {day(4)}", "wake": day(3), "by": "x", "at": 1.0})   # waiting, a real date: fine, default post-wake
-ctx = mg.Ctx(now=now0, label=server._session_label, shown=server._gh.shown)
+ctx = mg.Ctx(now=now0, label=_fleet_sessions_registry._session_label, shown=_gh.shown)
 items = {f"a{i}": rd(i) for i in range(1, 18)}
 rep = mg.report(items, ctx)
 ids = lambda k: sorted(int(g[1:]) for g in rep.ids.get(k, []))
@@ -787,7 +792,7 @@ check("report: what rests on a default is counted (alive items with no stored mo
 line = mg.brief_line(rep)
 check("report: the brief line is one line of counts", line.startswith("model guards would refuse on existing items: mover 2 · wait input 1 · post-wake mover 1 · snooze 1 · filler 1 · wait with no end 2 · decision with a hold 1 · second mover 2 · next line with no name 1 · wait in next 1 · alarming word 1 · closed without an outcome 2")
       and "\n" not in line, line)
-text = mg.full_text(rep, server._gh.shown)
+text = mg.full_text(rep, _gh.shown)
 check("report: the full text lists the ids per guard, an example refusal each, the flags and the defaults", "mover: 2: a2, a3" in text and "closed without an outcome: 2: a15, a16" in text and "e.g. a2:" in text and "flagged for broad wait words in next (when, once, after, until; accepted, not refused): 1: a12" in text and "resting on a default" in text, text)
 check("report: a clean board says nothing", mg.brief_line(mg.report({"a1": rd(1), "a14": rd(14)}, ctx)) == "", None)
 server._GUARD_REPORT.update(at=0.0, rep=None)

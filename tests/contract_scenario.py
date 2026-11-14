@@ -233,6 +233,7 @@ check("…a line addressed by that name records the live session's id", line["uu
 iid = inbox.put(U(1), "for the retired pane", "hub"); d = inbox.take({U(31): "work-y2"})
 check("a line addressed by id to a session gone past the grace follows its name to the live namesake (a retired id strands nothing)", len(d) == 1 and d[0]["session"] == U(31) and d[0]["ids"] == [iid], d); inbox.ack([iid])
 from stackshot.web import server
+from stackshot.web import page_debts as _pdebts
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -613,7 +614,7 @@ with TestClient(app) as c:
     real_brain, real_reg = pg.BRAIN, pg.REG
     real_local = pg.LOCAL_ONLY; pg.LOCAL_ONLY = False   # this block plays a client machine; the server process itself never calls its own API (pages.LOCAL_ONLY)
     # client and server share one `pages` module in this process: the server's own answer is pinned to the real brain first
-    real_ts = server._page_ts; server._page_ts = lambda key: os.path.getmtime(T / "brain" / (key + ".md")) if (T / "brain" / (key + ".md")).exists() else 0.0
+    real_ts = _pdebts._page_ts; _pdebts._page_ts = lambda key: os.path.getmtime(T / "brain" / (key + ".md")) if (T / "brain" / (key + ".md")).exists() else 0.0
     pg.BRAIN = str(T / "no-brain-here"); pg.REG = str(T / "no-checkout/projects.json")
     reg = pg.load_registry()
     check("pane gate off the server box: the page registry comes from the server, with no checkout on the machine", reg is not None and "projects/alpha" in reg, reg)
@@ -643,7 +644,7 @@ with TestClient(app) as c:
 
     # every project page is the router's, so a pane owes nothing for a write on it unless [pilot] writer_owes_page is on: the "(no project)"
     # cases below are about a pane that does owe, so the switch is on for them
-    _writer_owes = server._cfg.CFG.setdefault("pilot", {}).get("writer_owes_page"); server._cfg.CFG["pilot"]["writer_owes_page"] = True
+    _writer_owes = cfg.CFG.setdefault("pilot", {}).get("writer_owes_page"); cfg.CFG["pilot"]["writer_owes_page"] = True
     # a portal write whose script returns a trimmed reply (no `project:` line): the item's project is asked of the server by the
     # call's item_id (item-facts), so the touch is not stuck under "(no project)"; when the server cannot be asked, the touch falls
     # back to "(no project)" with the item id on it, and a later write of the same item that carries the project settles it
@@ -748,8 +749,8 @@ with TestClient(app) as c:
     else: os.environ["CLAUDE_CODE_SESSION_ID"] = real_csid
     check("no project: `clear \"(no project)\"` clears the literal key (no norm())", rc_ == 0 and not pg.load_state(sid).get("touches")
           and out.getvalue().startswith("cleared (no project) for you, ") and ": 1 session state(s)" in out.getvalue(), (out.getvalue(), pg.load_state(sid)))
-    pg.BRAIN = real_brain; server._page_ts = real_ts; pg.LOCAL_ONLY = real_local
-    server._cfg.CFG["pilot"]["writer_owes_page"] = _writer_owes
+    pg.BRAIN = real_brain; _pdebts._page_ts = real_ts; pg.LOCAL_ONLY = real_local
+    cfg.CFG["pilot"]["writer_owes_page"] = _writer_owes
 
     # ============================================================= 8. the board's own sign-in
     check("the cookie signature holds, and a tampered cookie is nothing", _signin._ui_unsign(_signin._ui_sign("payload")) == "payload" and _signin._ui_unsign((lambda v: v[:-1] + ("0" if v[-1] != "0" else "1"))(_signin._ui_sign("payload"))) == "" and _signin._ui_unsign("") == "")
@@ -824,7 +825,7 @@ with TestClient(app) as c:
     check("titles: the board keeps the instance's title as it is in every title bar and tab",
           all(x.status_code == 200 for x in _pages.values())
           and all("stackshot: example" in _site(_pages[u].text) for u in ("/", "/closed", "/search?q=item")), {u: (x.status_code, _site(x.text), _tab(x.text)) for u, x in _pages.items()})
-    _bt = server._rmod.Board(str(_core_store.STORE)); _md = _bt.markdown()
+    _bt = render.Board(str(_core_store.STORE)); _md = _bt.markdown()
     check("titles: Board.title is the plain instance title, and the markdown render (board.md) heads with it", _bt.title == "stackshot: example" and _md.startswith("# stackshot: example\n"), (_bt.title, _md[:60]))
     check("…and the files next to the board are served as before", c.get("/healthz").text == "ok" and c.get("/board.md", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code in (200, 503)
           and c.get("/nothing.txt", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code == 404)
@@ -881,7 +882,7 @@ with TestClient(app) as c:
     check("…?v=<its version>: kept a year and never revalidated (immutable); a stale version is not",
           rv.status_code == 200 and rv.content == fb and rv.headers.get("cache-control") == "public, max-age=31536000, immutable"
           and rv.headers.get("content-type", "").split(";")[0] == "font/woff2" and rs.status_code == 200 and "cache-control" not in rs.headers, (dict(rv.headers), dict(rs.headers)))
-    check("…and the pages' stylesheet names exactly that URL, versioned by the file's bytes", f"{fu}?v={fv0}" == server._rmod.font_href(), (server._rmod.font_href(), fv0))
+    check("…and the pages' stylesheet names exactly that URL, versioned by the file's bytes", f"{fu}?v={fv0}" == render.font_href(), (render.font_href(), fv0))
     check("…a name next to it is 404 (no directory listing, no other file under /fonts/)", all(c.get(u, follow_redirects=False).status_code in (404, 302) for u in ("/fonts/", "/fonts/OFL.txt", "/fonts/../server.py", "/fonts/README.md")))
     check("…and /manifest.webmanifest/x is not it", c.get("/manifest.webmanifest/x", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code == 404)
     fav = T / "state/site/favicon.svg"; fv = _hv(fav)
@@ -900,9 +901,9 @@ with TestClient(app) as c:
     exp = _signin._ui_sign(json.dumps({"email": "you@example.com", "exp": time.time() - 5})); r2 = c.get("/", cookies={"stackshot_ui": exp}, follow_redirects=False)
     gone = _signin._ui_sign(json.dumps({"email": "left@example.com", "exp": time.time() + 999})); r3 = c.get("/", cookies={"stackshot_ui": gone}, follow_redirects=False)
     check("a forged, an expired and a no-longer-allowed cookie all go back to the sign-in", (r.status_code, r2.status_code, r3.status_code) == (302, 302, 302))
-    server._cfg.CFG["auth"]["ui_open"] = True                       # read at each request: no restart
+    cfg.CFG["auth"]["ui_open"] = True                       # read at each request: no restart
     check("ui_open true (today's setting): the board is served without a sign-in, as before", c.get("/", follow_redirects=False).status_code == 200 and c.get("/ui/login", follow_redirects=False).headers["location"] == "/")
-    server._cfg.CFG["auth"]["ui_open"] = False
+    cfg.CFG["auth"]["ui_open"] = False
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": contract scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush()

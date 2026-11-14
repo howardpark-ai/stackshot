@@ -132,6 +132,8 @@ STORE = T / "store"
 DESC = "- A thing\n- It lives here\n- Finished when it works"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.waits import waiting as _wt
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -140,10 +142,10 @@ from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-server._wt.cap_needs_owner = lambda: False
+_wt.cap_needs_owner = lambda: False
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
-GHC = server._cfg.CFG["github"]
+GHC = _cfg.CFG["github"]
 
 
 def repo_calls():
@@ -188,7 +190,7 @@ check("the client's path helper: the id's path when set, the name's otherwise",
       and G.GitHub(NAME, API, "t", repo_id_=0).repo_path() == BY_NAME, None)
 
 # ---- 2. the id set: every call for the issues repo goes to /repositories/<id>/...
-server._cfg.reload()
+_cfg.reload()
 check("the config sets the id and the name", G.repo_id() == RID and G.repo() == NAME and G.enabled() and G.issue_ids(), (G.repo_id(), G.repo()))
 F.log.clear()
 gid_a, n_a = round_trip("made with the id set")
@@ -207,7 +209,7 @@ check("after a move the writes land by id: no call met the redirect", all(p.star
 F.moved = False
 
 # ---- 3. the id unset: every call goes to /repos/<owner>/<name>/..., as before
-write_toml('""'); server._cfg.reload()
+write_toml('""'); _cfg.reload()
 check("the config's empty id is not set", G.repo_id() == 0 and G.repo() == NAME, G.repo_id())
 F.log.clear()
 gid_b, n_b = round_trip("made with the id unset")

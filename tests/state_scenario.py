@@ -63,6 +63,9 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.model import model as _model
+from stackshot.service import store as _service_store
+from stackshot.projects import pages as _pages
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import checks as checks_svc
@@ -122,8 +125,8 @@ check("doing: …a bare date is the same: nothing stored", mt(3)["state"] == "do
 
 # ================================================================ queued (retired): a stored one still loads
 item(9, needs=[BACK], state="queued")
-check("queued: a stored one loads as doing", server._states.stored(rd(9)) == "doing" and server._states.of(rd(9)) == ("doing", False), server._states.of(rd(9)))
-check("queued: …and is no state the item can be written in", "queued" not in server._states.STATES, None)
+check("queued: a stored one loads as doing", states.stored(rd(9)) == "doing" and states.of(rd(9)) == ("doing", False), states.of(rd(9)))
+check("queued: …and is no state the item can be written in", "queued" not in states.STATES, None)
 
 # ================================================================ your-call: a stored one stands on needs decision and the ask; a write that takes either away drops the word
 item(11, needs=["decision"], ask=ASK, state="your-call")
@@ -178,7 +181,7 @@ upd(11, status="open", next="home-front: back again")
 check("close: …a reopen does not bring it back", "state" not in mt(11), mt(11))
 item(27, needs=[BACK], state="doing", expected_by=hrs(2), check="item_closed a99")
 with contextlib.redirect_stderr(io.StringIO()):
-    checks_svc.check_close("a27", server._load("a27"), "item_closed a99", time.time())
+    checks_svc.check_close("a27", _service_store._load("a27"), "item_closed a99", time.time())
 check("close: a close on a done check drops it too", rd(27)["status"] == "completed" and "state" not in mt(27) and "expected_by" not in mt(27), mt(27))
 item(28, needs=[BACK], after=["a29"], state="blocked", supplies="the numbers"); item(29, needs=[OTHER], subject="[home] what 28 waits on")
 upd(29, status="completed", outcome="done", reason="finished", description="- The thing is done and live")
@@ -188,7 +191,7 @@ item(31, needs=[BACK], hold=True, wake=day(20), cap_ok={"wake": day(20), "by": "
 item(32, needs=[BACK], wake=day(20), cap_ok={"wake": day(20), "by": "the owner", "quote": "park it until then"}, state="parked")
 item(33, needs=[BACK], state="doing", expected_by=hrs(2), hold=True, wake=day(20))
 with contextlib.redirect_stderr(io.StringIO()):
-    wakes_svc.wake_pass(server._pages.zone_now() + datetime.timedelta(days=21))
+    wakes_svc.wake_pass(_pages.zone_now() + datetime.timedelta(days=21))
 check("release: a wake that fires ends the park that stood on it (held, and a reminder alike)", "wake" not in mt(31) and "hold" not in mt(31) and "state" not in mt(31) and "state" not in mt(32) and "wake" not in mt(32), (mt(31), mt(32)))
 check("release: …a state that did not stand on the wake is kept", mt(33).get("state") == "doing" and mt(33).get("expected_by") == hrs(2) and "wake" not in mt(33), mt(33))
 
@@ -238,7 +241,7 @@ out = upd(38, hold=True, wake=day(3), wait_basis=f"paper delivery confirmed {day
 check("hold: hold=true on a doing item drops the stored state and says why", "state" not in mt(38) and "expected_by" not in mt(38) and hd_(mt(38)) is True
       and "stored state doing dropped: a hold ends it; the item reads parked" in out, (mt(38), out[-300:]))
 check("hold: …it reads as waiting on a time from its until (the hold and the wake are stored as that one date) and shows no state word",
-      server._model.derive({**rd(38), "gid": "a38"}).state == "waiting" and _WT.stored_until(mt(38)) and "state: " not in server._fmt({**rd(38), "gid": "a38"}), None)
+      _model.derive({**rd(38), "gid": "a38"}).state == "waiting" and _WT.stored_until(mt(38)) and "state: " not in server._fmt({**rd(38), "gid": "a38"}), None)
 item(132, needs=[BACK], hold=True, wake=day(30), wait_basis={"text": f"Printer order confirmed {day(35)}", "wake": day(30), "by": "x", "at": now0}, state="parked")
 upd(132, hold=True)
 check("hold: hold=true again on a parked item keeps its state", mt(132)["state"] == "parked", mt(132))

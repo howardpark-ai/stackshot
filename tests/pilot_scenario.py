@@ -101,6 +101,9 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.model import decision_gates as _dg
@@ -131,7 +134,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends; the held case has its own check (front_quiet_scenario)
 _real_verdict = telling.front_verdict
 telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
-server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
+_WT.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 from fastmcp.exceptions import ToolError
 def refused(fn):
     try: fn(); return False
@@ -160,16 +163,16 @@ def wait_push(n):
     return [json.loads(l) for l in push_log.read_text().splitlines()] if push_log.exists() else []
 res = server._update("a1", next="call the vendor", sender="work-osprey-main")
 check("agent told it was charged to the keeper", "charged to the keeper work-osprey" in res and "[nag]" not in res, res)
-owed = server._owed_load(); check("ledger: the keeper owes projects/alpha", list(owed.get("projects/alpha", {})) == [S], owed)
+owed = _web_page_debts._owed_load(); check("ledger: the keeper owes projects/alpha", list(owed.get("projects/alpha", {})) == [S], owed)
 p = wait_push(1); check("keeper notified of the board write", len(p) == 1 and p[0][0] == S and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — \[home\] item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — the page update is yours as its keeper · notice [0-9a-f]{6}$", p[0][1])
       and "#task-" not in p[0][1], p)
 check("board write in the routing log", any(x["kind"] == "board" and x["pilot"] for x in routing.read("projects/alpha")))
 res = server._update("a1", next="keeper edits", sender="work-osprey"); check("the keeper's own write is not relayed", "charged to the keeper" not in res and len(wait_push(1)) == 1, res)
-res = server._update("a3", next="beta step", sender="home-beta"); owed = server._owed_load()
+res = server._update("a3", next="beta step", sender="home-beta"); owed = _web_page_debts._owed_load()
 check("ordinary project: the writer owes, nobody is told", list(owed.get("projects/beta", {})) == [B] and "charged" not in res and len(wait_push(1)) == 1, owed)
-res = server._update("a2", priority="p1", sender="work-osprey-main"); check("a filing edit owes and relays nothing", "charged" not in res and "projects/alpha/sub" not in server._owed_load() and len(wait_push(1)) == 1, res)
+res = server._update("a2", priority="p1", sender="work-osprey-main"); check("a filing edit owes and relays nothing", "charged" not in res and "projects/alpha/sub" not in _web_page_debts._owed_load() and len(wait_push(1)) == 1, res)
 res = server._update("a2", status="completed", sender="work-osprey-main", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place"); p = wait_push(2)
-check("completion on a sub-page: charged to the root's keeper", list(server._owed_load().get("projects/alpha/sub", {})) == [S] and len(p) == 2 and "a2 completed (done) by work-osprey-main" in p[1][1], p)
+check("completion on a sub-page: charged to the root's keeper", list(_web_page_debts._owed_load().get("projects/alpha/sub", {})) == [S] and len(p) == 2 and "a2 completed (done) by work-osprey-main" in p[1][1], p)
 
 # ---- 5. a message addressed to a project: the router rules it (every project since), so it is recorded and held, and delivered to no session here
 from stackshot.router import router_live as _rl
@@ -246,7 +249,7 @@ e = refusal("home-beta-nope")
 check("retired-agent: …an unknown name the same, and the heartbeat-miss branch names that page as the one it is an agent of", "if it is an agent of projects/mmm-two" in e and "aaa-none" not in e, e)
 e = refusal("home-beta-listed")
 check("retired-agent: …a name that one page's agents map lists wins over the page with more agents (it is a front agent there: the gate names that page)", "projects/zzz-one" in e and "mmm-two" not in e, e)
-check("retired-agent: …and with no roles to go by, the exact listing is found among the pages of the prefix (home-beta-listed → zzz-one, not mmm-two with more agents)", server._project_of_name("home-beta-listed", {}, server._sessions_index()) == "projects/zzz-one", server._project_of_name("home-beta-listed", {}, server._sessions_index()))
+check("retired-agent: …and with no roles to go by, the exact listing is found among the pages of the prefix (home-beta-listed → zzz-one, not mmm-two with more agents)", server._project_of_name("home-beta-listed", {}, _fleet_sessions_registry._sessions_index()) == "projects/zzz-one", server._project_of_name("home-beta-listed", {}, _fleet_sessions_registry._sessions_index()))
 e = refusal("home-gamma-dead")
 check("retired-agent: …a top-level page whose key slug is the name's last part (home-gamma → gamma) wins over a sub-page with more agents and a page with none", "message(to='projects/gamma'" in e and "gamma/sub" not in e and "aaa-g" not in e, e)
 e = refusal("home-gamma-nope")
@@ -744,9 +747,9 @@ general(False)
 # ---- 9. an item on a sub-page an agent keeps is that agent's, not the keeper's
 n0 = len(wait_push(0)); res = server._update("a4", next="a step on the kept page", sender="work-osprey-main")
 check("writer told the change is charged to the page's agent", "charged to the agent work-osprey-x" in res and "charged to the keeper" not in res, res)
-owed = server._owed_load(); check("ledger: the agent owes the kept page, the keeper does not", list(owed.get("projects/alpha/kept", {})) == [X], owed)
+owed = _web_page_debts._owed_load(); check("ledger: the agent owes the kept page, the keeper does not", list(owed.get("projects/alpha/kept", {})) == [X], owed)
 p = wait_push(n0 + 1); check("the agent is told, the keeper is not", len(p) == n0 + 1 and p[-1][0] == X and "the page update is yours as its agent" in p[-1][1], p[-1:])
-res = server._update("a4", next="the agent edits its own page's item", sender="work-osprey-x"); owed = server._owed_load()
+res = server._update("a4", next="the agent edits its own page's item", sender="work-osprey-x"); owed = _web_page_debts._owed_load()
 check("the agent's own write is not relayed and is its own debt", "charged" not in res and len(wait_push(n0 + 1)) == n0 + 1 and list(owed.get("projects/alpha/kept", {})) == [X], res)
 res = server._update("a2", next="a step on the keeper-less sub-page", sender="home-beta"); p = wait_push(n0 + 2)
 check("a keeper-less sub-page still charges the keeper", "charged to the keeper work-osprey" in res and p[-1][0] == S, res)
@@ -1173,7 +1176,7 @@ def refusal(fn):
     except ToolError as e: return str(e)
 rd = lambda g: json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 held_ = lambda g: rd(g)["status"] == "open" and hd_(rd(g)["metadata"]) is True
-today = server._pages.zone_now().date(); D = lambda n: (today + datetime.timedelta(days=n)).isoformat()
+today = pages.zone_now().date(); D = lambda n: (today + datetime.timedelta(days=n)).isoformat()
 NEW_FORM = "Refused: status must be open | completed; on hold is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it"
 HINT = "\nstill on hold: pass clear_hold=true to release it"
 for i in (5, 6, 7, 8): item(i, "projects/beta", B)
@@ -1185,24 +1188,24 @@ check("minute loop: no next wake while nothing is on hold", wakes_svc.next_wake(
 # an item waiting on the owner is never held. The refusal
 # names the after form; a hold whose next says it waits on him is noted, never refused (a wake on an item he has answered is fine)
 check("hold (owner wait): the refusal names the after form for a hold that waits on the owner's decision",
-      f"An item waiting on {server.OWNER} is never parked: needs=decision with its ask, or after=[<the item that carries the ask>]" in e, e)
-NOTE_OWNER = f"this hold's next says it waits on {server.OWNER}: an item waiting on {server.OWNER} is never parked. Give it needs=decision with its ask, or after=[<the item that carries the ask>]"
+      f"An item waiting on {_core_instance.OWNER} is never parked: needs=decision with its ask, or after=[<the item that carries the ask>]" in e, e)
+NOTE_OWNER = f"this hold's next says it waits on {_core_instance.OWNER}: an item waiting on {_core_instance.OWNER} is never parked. Give it needs=decision with its ask, or after=[<the item that carries the ask>]"
 for i in (74, 75, 76): item(i, "projects/beta", B)
-res = server._update("a74", hold=True, wake=D(2), next=f"waiting on {server.OWNER}'s call on the pricing", sender="home-beta")
+res = server._update("a74", hold=True, wake=D(2), next=f"waiting on {_core_instance.OWNER}'s call on the pricing", sender="home-beta")
 check("hold (owner wait): a hold whose next says it waits on the owner gets the note and still applies", NOTE_OWNER in res and held_("a74") and wk_(rd("a74")["metadata"]) == D(2), res)
-res = server._update("a75", hold=True, wake=D(2), next=f"- deploy once the CI run is green\n- until {server.OWNER} decides, keep the old flag", sender="home-beta")
+res = server._update("a75", hold=True, wake=D(2), next=f"- deploy once the CI run is green\n- until {_core_instance.OWNER} decides, keep the old flag", sender="home-beta")
 check("hold (owner wait): 'until <owner> decides' is noted too", NOTE_OWNER in res and held_("a75"), res)
-res = server._update("a76", hold=True, wake=D(2), next=f"per {server.OWNER}'s call of Mon Mar 2nd, deploy after the CI run; tell {server.OWNER} when it is live", sender="home-beta")
-check("hold (owner wait): a hold that mentions the owner only in passing gets no note", "waits on " + server.OWNER not in res and held_("a76"), res)
-check("hold (owner wait): the matcher stays narrow", [server._waits_on_owner(t) for t in (f"blocked on {server.OWNER}", f"pending his answer", f"needs {server.OWNER}'s go-ahead",
-      f"for {server.OWNER} to pick A or B", f"held until {server.OWNER}'s trip ends, then ship", f"{server.OWNER}'s decision of Mon: ship it", f"ask {server.OWNER} about the logo on Thu",
-      f"waiting on the CI run {server.OWNER} asked for")] == [True, True, True, True, False, False, False, False])
+res = server._update("a76", hold=True, wake=D(2), next=f"per {_core_instance.OWNER}'s call of Mon Mar 2nd, deploy after the CI run; tell {_core_instance.OWNER} when it is live", sender="home-beta")
+check("hold (owner wait): a hold that mentions the owner only in passing gets no note", "waits on " + _core_instance.OWNER not in res and held_("a76"), res)
+check("hold (owner wait): the matcher stays narrow", [server._waits_on_owner(t) for t in (f"blocked on {_core_instance.OWNER}", f"pending his answer", f"needs {_core_instance.OWNER}'s go-ahead",
+      f"for {_core_instance.OWNER} to pick A or B", f"held until {_core_instance.OWNER}'s trip ends, then ship", f"{_core_instance.OWNER}'s decision of Mon: ship it", f"ask {_core_instance.OWNER} about the logo on Thu",
+      f"waiting on the CI run {_core_instance.OWNER} asked for")] == [True, True, True, True, False, False, False, False])
 for i in (74, 75, 76): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: the sections below count the held items
 runner_svc.WAKE_EVENT.clear()
 res = server._update("a3", hold=True, wake=D(2), sender="home-beta")
 check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and wk_(rd("a3")["metadata"]) == D(2) and res.startswith("updated a3.\na3 [open · on hold] "), res)
 check("hold: hold=true wakes the minute loop", runner_svc.WAKE_EVENT.is_set())
-check("hold: the hold is a state change (the writer owes the page)", "a3" in json.dumps(server._owed_load().get("projects/beta", {})), server._owed_load())
+check("hold: the hold is a state change (the writer owes the page)", "a3" in json.dumps(_web_page_debts._owed_load().get("projects/beta", {})), _web_page_debts._owed_load())
 res = server._update("a3", wake=D(3), sender="home-beta")
 check("hold: a wake set on an item already waiting on a date, shown as the until", wk_(rd("a3")["metadata"]) == D(3) and f"until: {D(3)}" in res and held_("a3"), res)
 res = server._update("a5", hold=True, wake=D(2), due=D(9), needs="external", sender="home-beta"); m5 = rd("a5")["metadata"]
@@ -1255,7 +1258,7 @@ server._update("a7", hold=True, wake=D(5), sender="home-beta"); server._update("
 for g, w in (("a3", D(-2)), ("a5", D(-1)), ("a8", D(0))):
     it = rd(g); setwk_(it["metadata"], w); it["updated"] = it["state_updated"] = 1000.0
     (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
-led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
+led0 = json.dumps(_web_page_debts._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
 woke = wakes_svc.wake_pass()
 a3, a5, a7, a8 = rd("a3"), rd("a5"), rd("a7"), rd("a8")
 check("wake pass: the items due (yesterday's and today's wake) are released, the one not due stays on hold", sorted(woke) == ["a3", "a5", "a8"]
@@ -1270,7 +1273,7 @@ _w3 = sorted(p[n0][1].splitlines()[1:]) if len(p) == n0 + 1 else []
 check("wake pass (the turn rule's fourth build): the owner is told once for the three, one line each, naming the wake as stored and the lane",
       len(p) == n0 + 1 and p[n0][0] == B and p[n0][1].startswith("[stackshot] 3 items are yours now, their waits ended:\n")
       and [x.split(" [home]")[0] for x in _w3 if x.startswith("- a")] == [f"- a3: its until {D(-2)} came.", f"- a5: its until {D(-1)} came.", f"- a8: its until {D(0)} came."], p[n0:])
-check("wake pass: it owes no page", json.dumps(server._owed_load(), sort_keys=True) == led0)
+check("wake pass: it owes no page", json.dumps(_web_page_debts._owed_load(), sort_keys=True) == led0)
 check("wake pass: a second run finds nothing and tells nobody", wakes_svc.wake_pass() == [] and len(wait_push(0)) == n0 + 1)
 # the item (the item before it): an item whose needs names no session wakes the keeper of its page, whatever its needs (an agent prepares the ask):
 # its keeper; on a sub-page that names an agent, that agent. The keeper's own item: the owner's line
@@ -1315,7 +1318,7 @@ check("wake pass: a failed owner notice is logged to stderr, the item released a
       and f"watch: a7 notice to {B} not delivered: no result — boom" in _err.getvalue(), _err.getvalue())
 server._update("a7", hold=True, wake=D(5), sender="home-beta")
 # a time of day (2099-01-09, "hold until noon"): stored with a T, due at that minute, fired by the minute loop
-item(9, "projects/beta", B); now_ = server._pages.zone_now(); d2 = D(2); tz_ = now_.tzinfo; n9 = len(wait_push(0))
+item(9, "projects/beta", B); now_ = pages.zone_now(); d2 = D(2); tz_ = now_.tzinfo; n9 = len(wait_push(0))
 runner_svc.WAKE_EVENT.clear(); res = server._update("a9", hold=True, wake=f"{d2} 12:00", sender="home-beta")
 check("timed wake: a time of day in the future is accepted (a space for the T) and stored with a T", held_("a9") and wk_(rd("a9")["metadata"]) == f"{d2}T12:00" and f"until: {d2}T12:00" in res, res)
 check("timed wake: the update that set it wakes the minute loop", runner_svc.WAKE_EVENT.is_set())
@@ -1377,7 +1380,7 @@ for i_, w_ in ((91, D(3)), (92, "")):
     d_ = {"id": str(i_), "subject": f"[home] legacy {i_}", "description": "Held the old way.", "status": "on_hold",
           "metadata": {"owner": B, "project": "projects/beta", "needs": "external", **({"wake": w_} if w_ else {})}, "updated": 1234.0, "state_updated": 1200.0}
     (T / f"store/a/{i_}.json").write_text(json.dumps(d_))
-check("legacy: before the migration, _load reads it as open + hold", server._load("a91")["status"] == "open" and server._load("a91")["metadata"].get("hold") is True
+check("legacy: before the migration, _load reads it as open + hold", _service_store._load("a91")["status"] == "open" and _service_store._load("a91")["metadata"].get("hold") is True
       and json.loads((T / "store/a/91.json").read_text())["status"] == "on_hold")
 check("legacy: before the migration, its wake is on the minute loop's list", "a91" in [g for g, *_ in wakes_svc.wake_rows()])
 bl_ = ui_render.Board(str(T / "store"))
@@ -1422,7 +1425,7 @@ check("wake alone: a wake on an item with a session in needs is no hold either",
 for g in ("a30", "a25"):
     it = rd(g); setwk_(it["metadata"], D(-1)); (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
 clk = {g: (rd(g)["state_updated"], rd(g).get("confirmed")) for g in ("a30", "a25")}; nd_b = rd("a25")["metadata"].get("needs")
-led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0))
+led0 = json.dumps(_web_page_debts._owed_load(), sort_keys=True); n0 = len(wait_push(0))
 woke = wakes_svc.wake_pass(); r_wk1, r_wk2 = rd("a30"), rd("a25"); p = wait_push(n0 + 2)
 check("wake alone pass: both items are told their date came; the date and kind are gone, next and status as they were",
       sorted(woke) == ["a25", "a30"] and all(x["status"] == "open" and "until" not in x["metadata"] and "wait_kind" not in x["metadata"] and "hold" not in x["metadata"] for x in (r_wk1, r_wk2))
@@ -1433,7 +1436,7 @@ check("wake alone pass: the mover of a30 is told its one line, and a25's mover (
       and [m[1].split(" [home]")[0] for m in _rem_s] == [f"[stackshot] a25 is yours now: its until {D(-1)} came."], p[n0:])
 pj = json.load(open(T / "store/projects.json")); pj["pages"].pop("projects/zz"); (T / "store/projects.json").write_text(json.dumps(pj))
 check("wake alone pass: it owes no page, and a second pass finds nothing and tells nobody",
-      json.dumps(server._owed_load(), sort_keys=True) == led0 and wakes_svc.wake_pass() == [] and len(wait_push(0)) == n0 + 2)
+      json.dumps(_web_page_debts._owed_load(), sort_keys=True) == led0 and wakes_svc.wake_pass() == [] and len(wait_push(0)) == n0 + 2)
 b_ = ui_render.Board(str(T / "store"))
 check("wake alone pass: the items stay in their lane, still active", {"a30", "a25"} <= {r["gid"] for r in b_.agent} and not {"a30", "a25"} & {r["gid"] for r in b_.held})
 # hold=true with a wake parks and releases as before; an item stored held with a wake before the change still releases at its wake
@@ -1475,7 +1478,7 @@ for i in (30, 25, 34, 31, 35, 36, 37): (T / f"store/a/{i}.json").unlink()   # ou
 wait_push(0)
 
 # ---- 17. the ask line, last confirmed and staleness
-CF = server._cfg.CFG; CF.setdefault("ask", {})["refuse_after"] = ""
+CF = _cfg.CFG; CF.setdefault("ask", {})["refuse_after"] = ""
 ASK = "Decide: whether to take vendor A · Recommend: yes, it is cheaper · Stakes: B costs a month either way · By: Mon Mar 2nd"
 SHAPE = 'Refused: ask must read "Decide: … · Recommend: … · Stakes: … · By: …" in one line of at most 240 characters'
 NEED = 'Refused: a needs=decision item needs an ask line: ask="Decide: … · Recommend: … · Stakes: … · By: …" (≤ 240 chars). A client whose tool has no ask parameter writes the line as the first line of next instead.'
@@ -1512,7 +1515,7 @@ res = server._update(g3, ask=ASK, sender="home-beta"); check("ask: adding the as
 later_ = today + datetime.timedelta(days=7); CF["ask"]["refuse_after"] = later_.isoformat()
 res = server._update(g2, priority="p3", sender="home-beta")
 check("ask: before [ask] refuse_after the nag names the date in words", NAG[:-1] + f"; refused from {render.when_words(later_)})" in res.splitlines(), res)
-CF["ask"]["refuse_after"] = "soon"; check("ask: a refuse_after that is not a date reads as none (nag)", server._cfg.ask_refuse_after() == "" and NAG in server._update(g2, priority="p2", sender="home-beta").splitlines())
+CF["ask"]["refuse_after"] = "soon"; check("ask: a refuse_after that is not a date reads as none (nag)", _cfg.ask_refuse_after() == "" and NAG in server._update(g2, priority="p2", sender="home-beta").splitlines())
 # stage two (from refuse_after): refused, nothing saved
 CF["ask"]["refuse_after"] = today.isoformat()
 n_ = nfiles(); e = refusal(lambda: mk(needs="decision")); check("ask: from refuse_after, a needs=decision create without an ask is refused, nothing created", e == NEED and nfiles() == n_, e)
@@ -1646,7 +1649,7 @@ def actor_hits(label, line):
     return _dg._actor_note({"options": opt_pair(label, line)}, ask=False)
 res = actor_hits("I unpublish", "you click Unpublish")
 check("actor: the real case (label \"I unpublish\", line \"you click Unpublish\") is noted once for that option, with an example",
-      res.count("name who acts") == 1 and "option \u201cI unpublish\u201d says \u201cI\u201d" in res and f"\u201c{server.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d" in res, res)
+      res.count("name who acts") == 1 and "option \u201cI unpublish\u201d says \u201cI\u201d" in res and f"\u201c{_core_instance.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d" in res, res)
 res = actor_hits("Pat unpublishes", "you click Unpublish")
 check("actor: a named label with a \"you\" line is noted as the option's line", "the line of option \u201cPat unpublishes\u201d says \u201cyou\u201d: name who acts" in res, res)
 for word in ["I", "I'm", "I'll", "I've", "me", "my", "mine", "myself", "we", "we'll", "our", "ours", "us", "you", "your", "yours", "you'll", "yourself"]:
@@ -1673,7 +1676,7 @@ res = _dg._actor_note({"options": opt_pair("I a", "you b") + [{"label": "C: me",
 check("actor: the module holds the word-list names", all(hasattr(_dg, n) for n in ("_OPT_PRONOUN_RX", "_ACTOR_EXAMPLE", "_PRONOUN_HEAD", "_PRONOUN_TAIL")), "")
 check("actor: at most three option notes, one per option", res.count("name who acts") == 3, res)
 res = _dg._actor_note({"ask": "Decide: do you ship it", "options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
-check("actor: three option notes fill the cap and the ask-line note still comes after them", res.count("name who acts") == 4 and res.rstrip().endswith("name who acts, e.g. " + f"\u201c{server.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d.)") and "the ask line says \u201cyou\u201d" in res.split("\n")[-1], res)
+check("actor: three option notes fill the cap and the ask-line note still comes after them", res.count("name who acts") == 4 and res.rstrip().endswith("name who acts, e.g. " + f"\u201c{_core_instance.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d.)") and "the ask line says \u201cyou\u201d" in res.split("\n")[-1], res)
 res = actor_hits("", "you click Unpublish")
 check("actor: an option with an empty label is named by its place, not by empty quotes", "the line of option 1 says \u201cyou\u201d" in res and "\u201c\u201d" not in res, res)
 res = mk(needs="decision", ask=NAMED_ASK, options=opt_pair("A: flag", "you approve it, we wait")); gl = gid_of(res)
@@ -1827,7 +1830,7 @@ _sjy = json.loads((T / "fleet/a/sessions.json").read_text())      # the backgrou
 for _i, _n in enumerate(("work-osprey-y",)): _sjy[f"ffffffff-ffff-4fff-8fff-ffffffffff0{_i}"] = {"name": _n, "machine": "a", "url": "", "seen": "x"}
 (T / "fleet/a/sessions.json").write_text(json.dumps(_sjy))
 mka = lambda **kw: _wt_create.stackshot_create(**{"subject": "[home] linked test", "description": "- Goal: A thing\n- It lives here\n- Done when done", "project": "projects/alpha", "owner": "work-osprey-main", "next": "work-osprey-main: carry on", **kw})
-ya = server._session_id("work-osprey-y")
+ya = _web_page_debts._session_id("work-osprey-y")
 n0 = len(wait_push(0)); res = mka(needs=["work-osprey-y"]); gl = gid_of(res); p = wait_push(n0 + 2)   # the keeper's board line and the named session's, from two threads
 check("needs: a background agent of the hub is named, stored as a list, and get shows it", rd(gl)["metadata"].get("needs") == ["work-osprey-y"] and "agent" not in rd(gl)["metadata"]
       and "\nneeds: work-osprey-y\n" in res and "\nneeds: work-osprey-y\n" in _wt_get.stackshot_get(gl) and "keeper:" not in _wt_get.stackshot_get(gl), res)
@@ -1852,7 +1855,7 @@ res = server._update(gd, agent="none", sender="work-osprey"); check("agent=\"non
 res = server._update(gd, needs=["home-beta"], sender="work-osprey"); check("needs: the keeper of another project may be named (a cross-project doer)", rd(gd)["metadata"].get("needs") == ["home-beta"], res)
 _rg2 = json.loads((T / "store/projects.json").read_text()); _rg2["pages"]["projects/beta"].update(agents={"home-beta-main": "front", "home-beta-ops": "builds and releases the code"}, back_agents={"home-beta-ops": "builds and releases the code"})
 (T / "store/projects.json").write_text(json.dumps(_rg2))
-server._cfg.CFG.setdefault("model", {})["handoff"] = False      # home-beta-ops is the keeper of projects/beta, whose pushes these suites read by name: it has no heartbeat row here, so the hand-off guard (handoff suite) is off for the needs= lines below
+_cfg.CFG.setdefault("model", {})["handoff"] = False      # home-beta-ops is the keeper of projects/beta, whose pushes these suites read by name: it has no heartbeat row here, so the hand-off guard (handoff suite) is off for the needs= lines below
 res = server._update(gd, needs="home-beta-ops", sender="work-osprey"); check("needs: …or one of its background agents (a one-word string reads as a list)", rd(gd)["metadata"].get("needs") == ["home-beta-ops"], res)
 e = refusal(lambda: server._update(gd, needs=["home-beta-main"], sender="work-osprey")); check("needs: …never a user-facing agent of another project", e.startswith("Refused: home-beta-main is a user-facing agent of projects/beta") and rd(gd)["metadata"].get("needs") == ["home-beta-ops"], e)
 res = server._update(gd, needs=["external", "decision", "home-beta-ops", "home-beta-ops"], ask=ASK, sender="work-osprey")
@@ -1862,10 +1865,10 @@ server._update(gd, needs=["external", "home-beta-ops"], next="wait on Kim", send
 check("needs: …external without decision → on others", gd in [r["gid"] for r in ui_render.Board(str(T / "store")).n_relay])
 server._update(gd, needs=["home-beta-ops"], sender="work-osprey")
 check("needs: …a session alone → on agent", gd in [r["gid"] for r in ui_render.Board(str(T / "store")).agent])
-server._cfg.CFG.setdefault("model", {})["handoff"] = True
+_cfg.CFG.setdefault("model", {})["handoff"] = True
 e = refusal(lambda: server._update(gd, needs=["decision", "nope"], ask=ASK, sender="work-osprey"))
 check("needs: an unknown word among the entries is refused as a session name, nothing stored", "nope is not a background agent" in e and rd(gd)["metadata"].get("needs") == ["home-beta-ops"], e)
-st_, _ct, body = server._client_items(server._session_id("home-beta")); st2, _ct2, body2 = server._client_items(S)
+st_, _ct, body = server._client_items(_web_page_debts._session_id("home-beta")); st2, _ct2, body2 = server._client_items(S)
 check("items: a session's list carries the items its needs names, marked role agent; the keeper's list does not", st_ == 200
       and not [x for x in json.loads(body)["items"] if x["gid"] == gd] and not [x for x in json.loads(body2)["items"] if x["gid"] == gd and x.get("role") == "agent"], (body, body2))
 ok_ = [x for x in json.loads(server._client_items("home-beta-ops")[2])["items"] if x["gid"] == gd]
@@ -1895,7 +1898,7 @@ n0 = len(wait_push(0))
 res = server._update("a74", needs="decision", ask=ASKO, options=OPTS, sender="work-osprey-y"); wait_push(n0 + 2); time.sleep(0.5); p = wait_push(0)
 mo_ = [m for m in p[n0:] if m[0] == S and "a74 now needs" in m[1]]
 check("D2: a move to needs=decision by another agent reaches the mover, with the ask and the options, unmarked", len(mo_) == 1
-      and mo_[0][1].startswith(f"[stackshot] a74 now needs {server.OWNER}'s call") and ASKO in mo_[0][1] and "Vendor A (recommended): Cheaper" in mo_[0][1]
+      and mo_[0][1].startswith(f"[stackshot] a74 now needs {_core_instance.OWNER}'s call") and ASKO in mo_[0][1] and "Vendor A (recommended): Cheaper" in mo_[0][1]
       and "set by work-osprey-y" in mo_[0][1] and _wt_text._FOR_OWNER not in mo_[0][1] and "keeper of record" not in res, (p[n0:], res))
 _wt_complete.stackshot_complete("a74", sender="work-osprey", outcome="dropped", reason="test item", description="- Goal: Dropped"); time.sleep(0.5)
 n0 = len(wait_push(0)); res = server._update(gl, next="a next step", sender="work-osprey-y"); time.sleep(0.5)
@@ -1919,7 +1922,7 @@ check("decided: adding a session beside decision tells it 'now needs you' (not '
 n0 = len(wait_push(0)); res = server._update(gl, needs=["work-osprey-y"], next="his call: vendor A; place the order", sender="work-osprey-main"); p = wait_push(n0 + 2)
 dd = [m for m in p[n0:] if m[0] == ya]
 check("decided: decision leaving needs tells the session still named at once, with the next line, and the reply says so", len(dd) == 1
-      and dd[0][1].startswith(f"[stackshot] {gl}: {server.OWNER} has decided (decision left its needs, by work-osprey-main), so the move is yours as named in its needs:")
+      and dd[0][1].startswith(f"[stackshot] {gl}: {_core_instance.OWNER} has decided (decision left its needs, by work-osprey-main), so the move is yours as named in its needs:")
       and "next: his call: vendor A; place the order" in dd[0][1] and "work-osprey-y has been told the move is its now that the decision is in" in res, (p[n0:], res))
 check("decided: the create and update descriptions carry the sequencing rule", all(x in _wt_text._NEEDS_FORM for x in ("needs names only who can move now", "the session goes first and adds decision when it is done", "when unsure, in sequence", "the sessions still named are told at once"))
       and _wt_text._NEEDS_FORM in _wt_update._UPDATE_DESC)
@@ -1927,7 +1930,7 @@ n0 = len(wait_push(0)); server._update(gl, clear_needs=True, sender="work-osprey
 # the item rows 3-5: the page-owed notice never goes to a front agent keeper (the writer owes it, the keeper past the grace); an item a
 # front agent owns wakes its keeper when no linked agent takes the wake; a back agent, a keeper or a session with no role is unchanged
 _kr = telling.pilot_charge("projects/alpha/kept", B)
-check("a back or no-role keeper of a sub-page is charged as before", _kr == (server._session_id("work-osprey-x"), "agent"), _kr)
+check("a back or no-role keeper of a sub-page is charged as before", _kr == (_web_page_debts._session_id("work-osprey-x"), "agent"), _kr)
 n0 = len(wait_push(0)); r_ = telling.pilot_relay("projects/alpha/kept", "a4", rd("a4"), "changed (next)", B, "work-osprey-x", "agent"); pk = wait_push(n0 + 1)
 check("…and told, unmarked", "charged to the agent work-osprey-x" in r_ and any(m[0] == "work-osprey-x" and m[1].startswith("[board] a4 ") for m in pk[n0:]), pk[n0:])
 _rg3 = json.loads((T / "store/projects.json").read_text()); _rg3["pages"]["projects/alpha"]["agents"]["work-osprey-x"] = "front"
@@ -1941,17 +1944,17 @@ for i, ow in ((47, "home-beta-main"), (48, "nobody-roleless")):
     item(i, "projects/beta", ow); it = rd(f"a{i}"); it["metadata"].update(hold=True, wake=D(-1)); (T / f"store/a/{i}.json").write_text(json.dumps(it))
 n0 = len(wait_push(0)); woke = wakes_svc.wake_pass(); pw = wait_push(n0 + 2)[n0:]
 check("an item wakes its mover alone, whoever it is (a front agent or a session with no role): each hears its own, short, with no keeper of record named",
-      sorted(m[0] for m in pw) == sorted([server._session_id("home-beta-main"), server._session_id("nobody-roleless")]) and all(m[1].startswith("[stackshot] a4") and "keeper of record" not in m[1] for m in pw), pw)
+      sorted(m[0] for m in pw) == sorted([_web_page_debts._session_id("home-beta-main"), _web_page_debts._session_id("nobody-roleless")]) and all(m[1].startswith("[stackshot] a4") and "keeper of record" not in m[1] for m in pw), pw)
 for i in (47, 48): (T / f"store/a/{i}.json").unlink()
 # sala's recycle-done notice: an item a front agent owns goes to its project's keeper instead, unmarked, naming the owner;
 # a no-role owner is told itself, and a pilot item's linked agent as before (the fleet test is stubbed, recycles.json restored after)
 _rp = server._recycles_path(); _rp0 = _rp.read_text() if _rp.exists() else None; _om = server._on_machine
-server._on_machine = lambda m: (server._anc.names(), lambda o: True)
+server._on_machine = lambda m: (a.names(), lambda o: True)
 for i, pr, ow in ((50, "projects/beta", "home-beta-main"), (51, "projects/beta", "nobody-roleless"), (52, "projects/alpha", A)):
     item(i, pr, ow); it = rd(f"a{i}"); it["metadata"].update(recycle=True, recycle_at=1.0); (T / f"store/a/{i}.json").write_text(json.dumps(it))
 n0 = len(wait_push(0)); rr = server._recycled("testbox", "recycle", time.time(), "ok", []); pw = wait_push(n0 + 3)[n0:]
 r50 = [m for m in pw if "a50" in m[1]]; r51 = [m for m in pw if "a51" in m[1]]; r52 = [m for m in pw if "a52" in m[1]]
-_sid = server._session_id
+_sid = _web_page_debts._session_id
 check("a recycle done is told to the item's mover alone, whoever it is (a front agent, a session with no role, the page's -main agent), with no keeper of record named; the recycle flag goes",
       len(r50) == 1 and r50[0][0] == "home-beta-main" and r50[0][1].startswith("[stackshot] the recycle you waited for has run (testbox, ") and "re-read a50 and resume." in r50[0][1]
       and "keeper of record" not in r50[0][1] and "recycle" not in rd("a50")["metadata"], (rr, pw))
@@ -1965,14 +1968,14 @@ else: _rp.write_text(_rp0)
 # a keeper that is a front agent on another page is still the keeper of its own project: charged, told and woken there
 _rg4 = json.loads((T / "store/projects.json").read_text()); _rg4["pages"]["projects/beta"]["agents"]["work-osprey"] = "front"
 (T / "store/projects.json").write_text(json.dumps(_rg4))
-check("session_roles ranks alpha's keeper front (for beta), yet it is not front for an alpha item", server._anc.session_roles().get("work-osprey", {}).get("role") == "front"
-      and telling.front_keeper("work-osprey", "projects/alpha") == (False, "") and telling.front_keeper("work-osprey", "projects/beta")[0], server._anc.session_roles().get("work-osprey"))
+check("session_roles ranks alpha's keeper front (for beta), yet it is not front for an alpha item", a.session_roles().get("work-osprey", {}).get("role") == "front"
+      and telling.front_keeper("work-osprey", "projects/alpha") == (False, "") and telling.front_keeper("work-osprey", "projects/beta")[0], a.session_roles().get("work-osprey"))
 check("…so it is still charged as alpha's keeper", telling.pilot_charge("projects/alpha", B) == (S, "name"), telling.pilot_charge("projects/alpha", B))
 n0 = len(wait_push(0)); r_ = telling.pilot_relay("projects/alpha", "a1", rd("a1"), "changed (next)", B, S); pk = wait_push(n0 + 1)
 check("…and gets alpha's page-owed notice, unmarked", "charged to the keeper" in r_ and any(m[0] == S and m[1].startswith("[board] a1 ") for m in pk[n0:]), (r_, pk[n0:]))
 item(49, "projects/alpha", A); it = rd("a49"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/49.json").write_text(json.dumps(it))
 n0 = len(wait_push(0)); wakes_svc.wake_pass(); pw = [m for m in wait_push(n0 + 1)[n0:] if " a49 " in m[1]]
-check("…and alpha's wake goes to the item's mover, unmarked", len(pw) == 1 and pw[0][0] == server._session_id("work-osprey-main") and pw[0][1].startswith("[stackshot] a49 woke") and _wt_text._FOR_OWNER not in pw[0][1], pw)
+check("…and alpha's wake goes to the item's mover, unmarked", len(pw) == 1 and pw[0][0] == _web_page_debts._session_id("work-osprey-main") and pw[0][1].startswith("[stackshot] a49 woke") and _wt_text._FOR_OWNER not in pw[0][1], pw)
 (T / "store/a/49.json").unlink(); _rg4["pages"]["projects/beta"]["agents"].pop("work-osprey"); (T / "store/projects.json").write_text(json.dumps(_rg4))
 check("needs: the create, update and get descriptions say it; agent=, observers and after are parameters of both tools", _wt_text._NEEDS_FORM in _wt_update._UPDATE_DESC and "agent=\"none\" takes the sessions out" in _wt_text._NEEDS_FORM
       and all(k in __import__("inspect").signature(f).parameters for f in (_wt_create.stackshot_create, _wt_update.stackshot_update) for k in ("needs", "agent", "observers", "after")))
@@ -1983,7 +1986,7 @@ for g in (gl, gd): (T / f"store/{g[0]}/{g[1:]}.json").unlink()
 CMDN = "this item waits on the owner running a command or a paste, but next carries neither the command"
 ASKC = "Decide: run the setup paste on the laptop · Recommend: yes · Stakes: the box stays offline · By: no date"
 res = mk(needs="decision", ask=ASKC, next="home-beta: run the 20-line paste in PowerShell"); gc = gid_of(res)
-check("command: a decision item whose ask or next says run or paste, with no link or code span in next → the note, the item created", CMDN in res and server._path(gc).exists(), res)
+check("command: a decision item whose ask or next says run or paste, with no link or code span in next → the note, the item created", CMDN in res and _service_store._path(gc).exists(), res)
 res = mk(needs="decision", ask=ASKC, next="home-beta: run the paste on [the project page](https://example.com/p#setup)"); check("command: …quiet with a link in next", CMDN not in res, res)
 res = mk(needs="decision", ask=ASKC, next="home-beta: run `sala provision home-z` in a shell"); check("command: …quiet with a code span in next", CMDN not in res, res)
 res = mk(needs="external", next="Kim: paste the command on their side"); check("command: …quiet on needs=external", CMDN not in res, res)
@@ -2029,7 +2032,7 @@ check("form: the update description carries the rules that moved", all(x in _wt_
 # an item put on someone outside with no anchor scoped to it draws one note to anchor the thread, never a refusal
 EXTN = "this item now waits on someone outside, and no thread is anchored to it: anchor the thread it waits on in this same turn"
 res = _wt_create.stackshot_create(subject="[home] ext anchor note", description="- Goal: Waits on Kim's email\n- Done when she answers", project="beta", owner="home-beta", needs="external", next="Kim: answer the email"); gx = gid_of(res)
-check("ext anchor: create with needs=external and no anchor → the note naming the item, the item created", EXTN in res and f"items=[{gx}]" in res and server._path(gx).exists(), res)
+check("ext anchor: create with needs=external and no anchor → the note naming the item, the item created", EXTN in res and f"items=[{gx}]" in res and _service_store._path(gx).exists(), res)
 res = server._update(gx, priority="p2", sender="home-beta"); check("ext anchor: an update that leaves external as it was → no note", EXTN not in res, res)
 res = _wt_create.stackshot_create(subject="[home] ext anchor note decision", description="- Goal: Waits on Oliver\n- Done when decided", project="beta", owner="home-beta", needs="decision",
                               ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver: pick one"); gdx = gid_of(res)
@@ -2080,15 +2083,15 @@ for name_, nx_ in (
         ("a word of hex letters only", "ops-x: check the defaced and decaded pages"),
         ("a date", "ops-x: review by 20261023"),
         ("add tests", "ops-x: add 3 tests for the parser"),
-        ("a command Oliver runs, hash included", f"{server.OWNER}: `stackshot-rollback --rev 0a0a0a0a0`"),
-        ("a long command Oliver runs", f"{server.OWNER}: `" + "x " * 150 + "`"),
-        ("Oliver's line reporting", f"{server.OWNER}: merged and 12 tests passed"),
+        ("a command Oliver runs, hash included", f"{_core_instance.OWNER}: `stackshot-rollback --rev 0a0a0a0a0`"),
+        ("a long command Oliver runs", f"{_core_instance.OWNER}: `" + "x " * 150 + "`"),
+        ("Oliver's line reporting", f"{_core_instance.OWNER}: merged and 12 tests passed"),
         ("a line of 150 characters", "ops-x: " + "word " * 28)):
     check(f"report note: {name_} → no note", rnote(nx_) == "", (nx_, rnote(nx_)))
 r_ = rnote("merged 0a0a0a0a0, 12 tests passed\nPR #3 deployed")
 check("report note: one note however many lines match, each kind named once", r_.count("next reads like a report") == 1 and "a commit hash" in r_ and "a test count" in r_ and "a past-tense report" in r_, r_)
 res = _wt_create.stackshot_create(subject="[home] report note", description="- Goal: Waits on Kim\n- Done when she answers", project="beta", owner="home-beta", next="ops-x: merged 0a0a0a0a0, 12 tests passed"); gn = gid_of(res)
-check("report note: create → one note, the item still written with that next", res.count(RN) == 1 and server._path(gn).exists() and rd(gn)["metadata"]["next"].startswith("ops-x: merged"), res)
+check("report note: create → one note, the item still written with that next", res.count(RN) == 1 and _service_store._path(gn).exists() and rd(gn)["metadata"]["next"].startswith("ops-x: merged"), res)
 res = server._update(gn, next="ops-x: merge PR #12 after green CI", sender="home-beta"); check("report note: an update to an action line → no note", RN not in res, res)
 res = server._update(gn, next="ops-x: PR #12 deployed, all suites green", sender="home-beta"); check("report note: an update to a report → the note, next stored", res.count(RN) == 1 and rd(gn)["metadata"]["next"].startswith("ops-x: PR #12 deployed"), res)
 res = server._update(gn, description="- Goal: Merged in 0a0a0a0a0\n- Done when decided", sender="home-beta"); check("report note: a hash in the description alone → no note (only next counts)", RN not in res, res)
@@ -2154,25 +2157,25 @@ t0 = time.time(); server._update(g4, next="pick one", sender="home-beta"); check
 # the confirm tool: confirmed only; no page, no relay; published
 pubs = []; _pub_ = _web_publish._publish; _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: pubs.append(1)
 setf("a1", confirmed=1000.0, updated=2000.0, state_updated=2000.0); before = rd("a1")
-led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
+led0 = json.dumps(_web_page_debts._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
 res = _wt_complete.stackshot_confirm("a1", sender="work-osprey-main"); after_ = rd("a1"); time.sleep(0.5)
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = _pub_
 check("confirm: sets confirmed only (updated, state_updated, metadata, status as they were); the writer stamp beside it (written_at: when the session last wrote the item) is the one other field that moves",
       after_["confirmed"] >= t0 and after_.get("written_at", 0) >= t0 and {k: v for k, v in after_.items() if k not in ("confirmed", "written_at")} == {k: v for k, v in before.items() if k not in ("confirmed", "written_at")}, (before, after_))
 check("confirm: replies 'confirmed <gid> at <time>.' and the item", re.match(r"confirmed a1 at \w{3} \w{3} \d{1,2}(st|nd|rd|th) \d\d:\d\d\.\na1 \[open\] ", res) is not None
       and f"confirmed: {render.when_words(datetime.datetime.fromtimestamp(after_['confirmed'], _wt_text.ZONE))} (fresh)" in res, res)
-check("confirm: owes no page and tells no keeper on a pilot project", json.dumps(server._owed_load(), sort_keys=True) == led0 and len(wait_push(0)) == n0 and "charged" not in res, (server._owed_load(), wait_push(0)[n0:]))
+check("confirm: owes no page and tells no keeper on a pilot project", json.dumps(_web_page_debts._owed_load(), sort_keys=True) == led0 and len(wait_push(0)) == n0 and "charged" not in res, (_web_page_debts._owed_load(), wait_push(0)[n0:]))
 check("confirm: publishes", pubs == [1], pubs)
 check("confirm: a bad id is refused", refusal(lambda: _wt_complete.stackshot_confirm("zz9")).startswith("bad item id"))
 # with the GitHub mirror off (the default here), a tool write without a sender is still the owner's, as before
 _save_, saved = writes.save, []
 writes.save = lambda gid, item, writer="", note="", **kw: (saved.append((gid, writer)), _save_(gid, item, writer=writer, note=note, **kw))[1]
-res = mk(); g_ns = gid_of(res); own_ns = server._session_id(telling.holder(rd(g_ns))); saved.clear()
+res = mk(); g_ns = gid_of(res); own_ns = _web_page_debts._session_id(telling.holder(rd(g_ns))); saved.clear()
 _wt_complete.stackshot_confirm(g_ns); _wt_update.stackshot_update(g_ns, next="home-beta: take the owner's step")
 _wt_complete.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- Goal: The test item's work is in place")
 writes.save = _save_
 check("mirror off: update, confirm and complete without a sender go through, written as the item's mover", rd(g_ns)["status"] == "completed"
-      and rd(g_ns)["metadata"].get("outcome") == "done" and [server._session_id(w) for g, w in saved if g == g_ns] == [own_ns] * 3 and own_ns, (own_ns, saved))
+      and rd(g_ns)["metadata"].get("outcome") == "done" and [_web_page_debts._session_id(w) for g, w in saved if g == g_ns] == [own_ns] * 3 and own_ns, (own_ns, saved))
 # the wake pass leaves confirmed alone; an item without one keeps the reading it had
 res = mk(); g6 = gid_of(res); res = mk(); g7 = gid_of(res)
 setf(g6, confirmed=5000.0, state_updated=5000.0, metadata={**rd(g6)["metadata"], "hold": True, "wake": D(-1)})
@@ -2198,7 +2201,7 @@ fp_ = T / "fresh-mtime.json"; fp_.write_text("{}"); os.utime(fp_, (NOW - 5 * DAY
 check("freshness: no clock at all → the file's mtime", render.freshness({"status": "open", "metadata": {}, "_path": str(fp_)}, NOW) == ("stale", 5 * DAY)
       and render.confirmed_at({}, str(fp_)) == NOW - 5 * DAY and render.confirmed_at({}) == 0.0)
 check("freshness: takes an aware datetime as well", render.freshness({"status": "open", "metadata": {}, "confirmed": NOW - 60}, datetime.datetime.fromtimestamp(NOW, _wt_text.ZONE)) == ("fresh", 60))
-check("freshness: limits default to 1 / 1 / 3 days", server._cfg.freshness_days() == {"call_days": 1.0, "agent_days": 1.0, "external_days": 3.0})
+check("freshness: limits default to 1 / 1 / 3 days", _cfg.freshness_days() == {"call_days": 1.0, "agent_days": 1.0, "external_days": 3.0})
 CF["freshness"] = {"external_days": 5, "call_days": "x", "agent_days": 0.5}
 check("freshness: [freshness] overrides a limit; a value that is not a positive number keeps its default", fr("external", 4 * DAY)[0] == "fresh" and fr("decision", DAY)[0] == "stale" and fr("", DAY / 2)[0] == "stale")
 del CF["freshness"]
@@ -2704,41 +2707,41 @@ check("sala link: with [client] session_view unset no name links", mb.sess_href(
 
 # ---- the writer owes the page update; the keeper gets it only past the grace ([pilot] writer_owes_page)
 from stackshot.projects import pages as _pg
-_ct0, _pts0 = _pg.ct_changed_since, server._pdebts._page_ts
-server._pdebts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False      # no page written yet
-server._owed_save({}); server._cfg.CFG["pilot"]["writer_owes_page"] = True
+_ct0, _pts0 = _pg.ct_changed_since, _web_page_debts._page_ts
+_web_page_debts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False      # no page written yet
+_web_page_debts._owed_save({}); _cfg.CFG["pilot"]["writer_owes_page"] = True
 (T / "store/a/40.json").write_text(json.dumps({"id": "40", "subject": "[home] item 40", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": A, "project": "projects/alpha"}, "updated": 1.0}))
 n0 = len(wait_push(0))
 res = server._update("a1", next="call the vendor again", sender="work-osprey-main"); time.sleep(0.5)
-e = server._owed_load().get("projects/alpha", {})
+e = _web_page_debts._owed_load().get("projects/alpha", {})
 check("a next-only write is the writer's, any page write settles it", list(e) == [A] and e[A].get("settle") == "any" and e[A].get("moves") == S, e)
 check("the keeper is not told at once", len(wait_push(0)) == n0, wait_push(0)[n0:])
 check("the writer's reply says the update is its own, and the fallback",
       "the page update is yours in this turn: projects/alpha, any page write" in res and "after 30 min, it moves to the router, which passes the page update to the agent that keeps the page" in res and "charged to the keeper" not in res, res)
 res = server._update("a1", description="- Goal: A thing, now with a vendor\n- It lives here\n- Done when done", sender="work-osprey-main")
-e = server._owed_load()["projects/alpha"][A]; check("a state change asks for the Current state", e.get("settle") == "ct" and "its Current state" in res, (e, res))
+e = _web_page_debts._owed_load()["projects/alpha"][A]; check("a state change asks for the Current state", e.get("settle") == "ct" and "its Current state" in res, (e, res))
 server._update("a1", next="and then the next step", sender="work-osprey-main")
-check("a later next-only write never loosens it", server._owed_load()["projects/alpha"][A].get("settle") == "ct", server._owed_load())
+check("a later next-only write never loosens it", _web_page_debts._owed_load()["projects/alpha"][A].get("settle") == "ct", _web_page_debts._owed_load())
 res = server._update("a1", next="a step by someone else", sender="work-osprey-x")
-check("each writer owes its own", sorted(server._owed_load()["projects/alpha"]) == sorted([A, X]) and server._owed_load()["projects/alpha"][X]["settle"] == "any")
-d = server._owed_load(); d["projects/alpha"][A]["ts"] -= 3600; server._owed_save(d)
+check("each writer owes its own", sorted(_web_page_debts._owed_load()["projects/alpha"]) == sorted([A, X]) and _web_page_debts._owed_load()["projects/alpha"][X]["settle"] == "any")
+d = _web_page_debts._owed_load(); d["projects/alpha"][A]["ts"] -= 3600; _web_page_debts._owed_save(d)
 try: _web_page_debts._refuse_if_owing(A); ok = True
 except ToolError: ok = False
 check("the writer is never refused for a pilot debt", ok)
-check("the nag says it moves instead", "Still missing after 30 min, it moves to the router" in server._nag(A) and "refuses your next board write" not in server._nag(A), server._nag(A))
-d = server._owed_load(); d["projects/alpha"][A]["ts"] += 3600; server._owed_save(d)
-server._pdebts._page_ts = lambda key: time.time() + 5           # a timeline line: the page is newer, its Current state is not
-o = server._owed_settle().get("projects/alpha", {})
+check("the nag says it moves instead", "Still missing after 30 min, it moves to the router" in _web_page_debts._nag(A) and "refuses your next board write" not in _web_page_debts._nag(A), _web_page_debts._nag(A))
+d = _web_page_debts._owed_load(); d["projects/alpha"][A]["ts"] += 3600; _web_page_debts._owed_save(d)
+_web_page_debts._page_ts = lambda key: time.time() + 5           # a timeline line: the page is newer, its Current state is not
+o = _web_page_debts._owed_settle().get("projects/alpha", {})
 check("a timeline line settles the next-only debt, not the state change", list(o) == [A], o)
 _pg.ct_changed_since = lambda key, ts: True
-check("a Current-state edit settles it", "projects/alpha" not in server._owed_settle(), server._owed_load())
-server._pdebts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
+check("a Current-state edit settles it", "projects/alpha" not in _web_page_debts._owed_settle(), _web_page_debts._owed_load())
+_web_page_debts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
 # the fallback: still missing past the grace → the keeper's, with today's notice saying who left it
 server._update("a1", next="one more step", sender="work-osprey-main")
 check("inside the grace nothing moves", server._pilot_fallback_tick() == 0)
-d = server._owed_load(); d["projects/alpha"][A]["ts"] -= 31 * 60; server._owed_save(d); n0 = len(wait_push(0))
+d = _web_page_debts._owed_load(); d["projects/alpha"][A]["ts"] -= 31 * 60; _web_page_debts._owed_save(d); n0 = len(wait_push(0))
 check("past the grace it moves", server._pilot_fallback_tick() == 1)
-e = server._owed_load().get("projects/alpha", {}); p = wait_push(n0 + 1)
+e = _web_page_debts._owed_load().get("projects/alpha", {}); p = wait_push(n0 + 1)
 check("re-marked to the keeper, dropped from the writer", list(e) == [S] and "moves" not in e[S] and e[S].get("settle") == "any", e)
 check("the keeper gets the board notice, saying who left it undone",
       len(p) == n0 + 1 and p[-1][0] == S and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — \[home\] item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — work-osprey-main left its page update undone past 30 min, so it is yours as its keeper · notice [0-9a-f]{6}$", p[-1][1]), p[-1:])
@@ -2748,8 +2751,8 @@ check("and the routing log has the line, linked to the item page, never the card
 check("nothing moves twice", server._pilot_fallback_tick() == 0)
 # the turn rule: the debts that move to one keeper in the same tick go in one message, each with its
 # own notice; a debt still moves at the first tick past the grace (the keeper's condition: a digest never holds one past 30 min)
-server._owed_save({}); t5 = time.time()
-server._owed_save({"projects/alpha": {A: {"ts": t5 - 31 * 60, "item": "a1", "settle": "any", "moves": S, "what": "changed (next)"},
+_web_page_debts._owed_save({}); t5 = time.time()
+_web_page_debts._owed_save({"projects/alpha": {A: {"ts": t5 - 31 * 60, "item": "a1", "settle": "any", "moves": S, "what": "changed (next)"},
                                       X: {"ts": t5 - 30 * 60 - 1, "item": "a40", "settle": "ct", "moves": S, "what": "changed (description)"}},
                    "projects/alpha/sub": {A: {"ts": t5 - 29 * 60, "item": "a2", "settle": "any", "moves": S, "what": "changed (next)"}},
                    "projects/beta": {X: {"ts": t5 - 40 * 60, "item": "a3", "settle": "any", "moves": B, "what": "changed (next)"}}})
@@ -2763,9 +2766,9 @@ check("debt digest: the message counts them and lists each with its item, writer
       and re.search(r"^- a1 changed \(next\) by work-osprey-main — \[home\] item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 · notice [0-9a-f]{6}$", mS[0], re.M)
       and re.search(r"^- a40 changed \(description\) by work-osprey-x — \[home\] item 40 \(projects/alpha\) → https://stackshot\.example\.com/items/a40 · notice [0-9a-f]{6}$", mS[0], re.M), mS)
 check("debt digest: the one at 30 min was not held for a later digest: moved in this tick, the writer's dropped, the keeper's marked",
-      X not in server._owed_load().get("projects/alpha", {}) and S in server._owed_load().get("projects/alpha", {}), server._owed_load())
+      X not in _web_page_debts._owed_load().get("projects/alpha", {}) and S in _web_page_debts._owed_load().get("projects/alpha", {}), _web_page_debts._owed_load())
 check("debt digest: one alone keeps its old text", mB and re.match(r"\[board\] a3 changed \(next\) by work-osprey-x — .* — work-osprey-x left its page update undone past 30 min, so it is yours as its keeper · notice [0-9a-f]{6}$", mB[0]), mB)
-check("debt digest: the one inside the grace stays with its writer, and holds nothing back", A in server._owed_load().get("projects/alpha/sub", {}), server._owed_load())
+check("debt digest: the one inside the grace stays with its writer, and holds nothing back", A in _web_page_debts._owed_load().get("projects/alpha/sub", {}), _web_page_debts._owed_load())
 rd5 = [n for n in routing.read("projects/alpha") if mS and n["id"] in re.findall(r"notice ([0-9a-f]{6})", mS[0])]
 check("debt digest: each debt has its own routing-log line, the two sharing one batch id; the audit counts the message once",
       len(rd5) == 2 and rd5[0].get("batch") and rd5[0].get("batch") == rd5[1].get("batch") and _turns(rd5) == 1, rd5)
@@ -2775,12 +2778,12 @@ n0 = len(wait_push(0))
 k = server._pilot_fallback_tick(now=t5 + 61); p = wait_push(n0 + 1)
 check("debt digest: …and at its own first tick past 30 min it moves, alone, in its old text",
       k == 1 and len(p) == n0 + 1 and p[-1][0] == S and p[-1][1].startswith("[board] a2 changed (next) by work-osprey-main") and "so it is yours as its keeper · notice" in p[-1][1]
-      and A not in server._owed_load().get("projects/alpha/sub", {}), p[n0:])
-server._owed_save({})
+      and A not in _web_page_debts._owed_load().get("projects/alpha/sub", {}), p[n0:])
+_web_page_debts._owed_save({})
 # a close: the writer owes it; the keeper is told only when anchors are scoped to the item
-server._owed_save({}); n0 = len(wait_push(0))
+_web_page_debts._owed_save({}); n0 = len(wait_push(0))
 res = server._update("a1", status="completed", sender="work-osprey-main", outcome="done", reason="the vendor called back", description="- Goal: The vendor is signed and the thing is in use")
-p = wait_push(n0 + 1); e = server._owed_load().get("projects/alpha", {})
+p = wait_push(n0 + 1); e = _web_page_debts._owed_load().get("projects/alpha", {})
 check("closing an item with scoped anchors: the writer owes Current state", list(e) == [A] and e[A]["settle"] == "ct", e)
 check("and the keeper is told for the anchors, owing nothing",
       len(p) == n0 + 1 and p[-1][0] == S and "a1 completed (done) by work-osprey-main" in p[-1][1] and "no page update is owed by you (work-osprey-main writes it); this notice is for the anchors scoped to a1" in p[-1][1], p[-1:])
@@ -2788,16 +2791,16 @@ n0 = len(wait_push(0))
 server._update("a40", status="completed", sender="work-osprey-main", outcome="dropped", reason="no longer needed", description="- Goal: Nothing more is needed here"); time.sleep(0.5)
 check("a close without anchors tells nobody", len(wait_push(0)) == n0, wait_push(0)[n0:])
 res = server._update("a4", next="the kept page's item, switch on", sender="work-osprey-main")
-check("a sub-page an agent keeps still charges that agent", "charged to the agent work-osprey-x" in res and X in server._owed_load().get("projects/alpha/kept", {}), res)
+check("a sub-page an agent keeps still charges that agent", "charged to the agent work-osprey-x" in res and X in _web_page_debts._owed_load().get("projects/alpha/kept", {}), res)
 res = _wt_create._create(subject="[home] a new thing", description="- Goal: A new thing\n- It lives here\n- Done when done", project="projects/alpha", owner="work-osprey-main")
 gid_new = re.search(r"created ([a-z]\d+)", res).group(1); time.sleep(0.3)
-check("a create by an agent is its own debt, Current state", server._owed_load()["projects/alpha"][A].get("item") == gid_new and server._owed_load()["projects/alpha"][A]["settle"] == "ct" and "its Current state" in res, res)
+check("a create by an agent is its own debt, Current state", _web_page_debts._owed_load()["projects/alpha"][A].get("item") == gid_new and _web_page_debts._owed_load()["projects/alpha"][A]["settle"] == "ct" and "its Current state" in res, res)
 res = server._update(gid_new, next="the keeper's own step", sender="work-osprey")
-check("the keeper's own write is its own, as before", S in server._owed_load()["projects/alpha"] and "moves" not in server._owed_load()["projects/alpha"][S] and "page update is yours in this turn" not in res, res)
-server._cfg.CFG["pilot"]["writer_owes_page"] = False; server._owed_save({}); n0 = len(wait_push(0))
+check("the keeper's own write is its own, as before", S in _web_page_debts._owed_load()["projects/alpha"] and "moves" not in _web_page_debts._owed_load()["projects/alpha"][S] and "page update is yours in this turn" not in res, res)
+_cfg.CFG["pilot"]["writer_owes_page"] = False; _web_page_debts._owed_save({}); n0 = len(wait_push(0))
 res = server._update(gid_new, next="switch off again", sender="work-osprey-main"); p = wait_push(n0 + 1)
-check("off: today's behaviour (the keeper charged and told at once)", "charged to the keeper work-osprey" in res and list(server._owed_load()["projects/alpha"]) == [S] and len(p) == n0 + 1 and p[-1][0] == S, res)
-server._pdebts._page_ts, _pg.ct_changed_since = _pts0, _ct0
+check("off: today's behaviour (the keeper charged and told at once)", "charged to the keeper work-osprey" in res and list(_web_page_debts._owed_load()["projects/alpha"]) == [S] and len(p) == n0 + 1 and p[-1][0] == S, res)
+_web_page_debts._page_ts, _pg.ct_changed_since = _pts0, _ct0
 # ---- the pane gate follows [pilot] writer_owes_page, and settles as the server does
 from stackshot.projects import pages as _pg2
 _pg2._cfg.CFG["pilot"]["writer_owes_page"] = True
@@ -2836,8 +2839,8 @@ def why(fn):
 n0 = len(wait_push(0)); MK = _wt_text._FOR_OWNER
 r = why(lambda: server._message("work-osprey-main", "can you look at the vendor thread?", "home-beta"))
 check("an unmarked message to a front agent is refused, naming the mark and the project, where the router rules it",
-      r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {server.OWNER} talks to, and it takes a message only when the message's first line "
-           f"carries {MK}. Put {MK} on the first line if this is for {server.OWNER}; anything else goes to the project, where the router rules it (to='projects/alpha') instead.", r)
+      r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and it takes a message only when the message's first line "
+           f"carries {MK}. Put {MK} on the first line if this is for {_core_instance.OWNER}; anything else goes to the project, where the router rules it (to='projects/alpha') instead.", r)
 check("…by its transcript id too, and nothing was delivered", why(lambda: server._message(A, "unmarked", "home-beta")).startswith("Refused: work-osprey-main is a front agent")
       and len(wait_push(0)) == n0)
 check("…and the mark below the first line does not count", why(lambda: server._message("work-osprey-main", f"a status line\n{MK} decide this", "home-beta")).startswith("Refused:"))
@@ -2852,12 +2855,12 @@ res = server._message("projects/alpha", "a plain line for the project", "home-be
 check("a message to the project page is held for the router, unaffected: nobody is messaged", res.startswith("held for the router") and len(pp) == n0 + 3, (res, pp[-1:]))
 # a marked message that says nothing is needed from him is refused too, and sent to the keeper
 n0 = len(wait_push(0)); NOT = server._NOT_FOR_OWNER
-check("gate: the phrase list is short and fixed", NOT == (f"nothing needed from {server.OWNER}", f"nothing for {server.OWNER}", "no action needed", f"no action for {server.OWNER}",
+check("gate: the phrase list is short and fixed", NOT == (f"nothing needed from {_core_instance.OWNER}", f"nothing for {_core_instance.OWNER}", "no action needed", f"no action for {_core_instance.OWNER}",
                                                        "no decision needed", "nothing to decide", "FYI", "for your information", "for the record", "no reply needed"), NOT)
 for ph in NOT:
     r = why(lambda: server._message("work-osprey-main", f"{MK} the build is live. {ph}, the rest is on the page.", "home-beta"))
     check(f"gate: a marked message to a front agent that says {ph!r} is refused, naming the phrase and the project",
-          r.startswith(f"Refused: work-osprey-main is a front agent of projects/alpha, a session {server.OWNER} talks to, and {MK} marks only what {server.OWNER} has to do; "
+          r.startswith(f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and {MK} marks only what {_core_instance.OWNER} has to do; "
                        f"this message says nothing is needed from him ({ph!r}). A hand-back, a result or an FYI goes to the project, where the router rules it (to='projects/alpha') instead"), r)
 r = why(lambda: server._message(A, f"{MK} the release\nis live: NO ACTION NEEDED.", "home-beta"))
 check("gate: …without regard to case, on a later line, and by its transcript id", r.startswith("Refused: work-osprey-main is a front agent") and "('NO ACTION NEEDED')" in r, r)
@@ -2866,7 +2869,7 @@ res = server._message("work-osprey-main", f"{MK} Decide: is the satisfying optio
 check("gate: a marked message with something to decide is delivered (a phrase inside a word does not count)", res.startswith("delivered") and pp[-1][0] == "work-osprey-main", (res, pp[-1:]))
 res = server._message("work-osprey-x", "the build is live, no action needed", "home-beta"); pp = wait_push(n0 + 2)
 check("gate: the same words to a background agent are delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-x", pp[-1:])
-res = server._message("work-osprey", f"{MK} FYI the build is live, nothing for {server.OWNER}", "home-beta"); pp = wait_push(n0 + 3)
+res = server._message("work-osprey", f"{MK} FYI the build is live, nothing for {_core_instance.OWNER}", "home-beta"); pp = wait_push(n0 + 3)
 check("gate: …and to the keeper, marked or not", res.startswith("delivered") and pp[-1][0] == "work-osprey", pp[-1:])
 (T / "store/projects.json").write_text(_reg_a)
 
@@ -2930,8 +2933,8 @@ check("after: create takes it too", rd(mk2(after=[a5_]))["metadata"].get("after"
 # the migration: an item stored before (needs a word, the linked agent under agent) reads as a list, and the start step rewrites the open ones once
 (T / "store/a/90.json").write_text(json.dumps({"id": "90", "subject": "[home] old 90", "description": "x", "status": "open", "metadata": {"owner": "home-beta", "project": "projects/beta", "needs": "decision", "agent": "home-beta-ops", "ask": ASK}, "updated": 1.0, "state_updated": 1.0}))
 (T / "store/a/91.json").write_text(json.dumps({"id": "91", "subject": "[home] old 91", "description": "x", "status": "completed", "metadata": {"owner": "home-beta", "project": "projects/beta", "needs": "external", "agent": "home-beta-ops", "outcome": "done"}, "updated": 1.0, "state_updated": 1.0}))
-check("legacy: a one-word needs and an agent read as the list, in memory", server._load("a90")["metadata"].get("needs") == ["decision", "home-beta-ops"] and "agent" not in server._load("a90")["metadata"], server._load("a90")["metadata"])
-check("legacy: a closed item's needs reads as a list too; its agent is not carried into it", server._load("a91")["metadata"].get("needs") == ["external"] and "agent" not in server._load("a91")["metadata"], server._load("a91")["metadata"])
+check("legacy: a one-word needs and an agent read as the list, in memory", _service_store._load("a90")["metadata"].get("needs") == ["decision", "home-beta-ops"] and "agent" not in _service_store._load("a90")["metadata"], _service_store._load("a90")["metadata"])
+check("legacy: a closed item's needs reads as a list too; its agent is not carried into it", _service_store._load("a91")["metadata"].get("needs") == ["external"] and "agent" not in _service_store._load("a91")["metadata"], _service_store._load("a91")["metadata"])
 check("legacy: render reads both shapes", render.needs_of({"metadata": {"needs": "external"}}) == ["external"] and render.needs_kind({"metadata": {"needs": "external"}}) == "relay"
       and render.needs_kind({"metadata": {"needs": ["home-beta-ops"]}}) == "" and render.needs_kind({"metadata": {"needs": ["home-beta-ops", "decision"]}}) == "call" and render.needs_sessions({"metadata": {"needs": ["decision", "home-beta-ops"]}}) == ["home-beta-ops"])
 mig = migsvc.migrate_needs()
@@ -2949,12 +2952,12 @@ _rgw["pages"]["projects/alpha"].update(agents={"work-osprey-main": "front", "wor
 (T / "store/projects.json").write_text(json.dumps(_rgw))
 tags_of = lambda g: [(_stp.opener(x["text"]), x["status"], (x.get("tag") or {}).get("text"), (x.get("tag") or {}).get("state")) for x in rd(g)["metadata"].get("steps") or []]
 w1 = mk2(); st0, cf0 = rd(w1)["state_updated"], rd(w1)["confirmed"]; next0 = rd(w1)["metadata"]["next"]
-n0 = len(wait_push(0)); owed0 = server._owed_load().get("projects/beta", {}).get(B); time.sleep(0.02)   # the create's own debt, as it stands
+n0 = len(wait_push(0)); owed0 = _web_page_debts._owed_load().get("projects/beta", {}).get(B); time.sleep(0.02)   # the create's own debt, as it stands
 res = server._update(w1, work={"text": "migrating the ids"}, sender="home-beta")
 check("work: the owner sets the status of its open step: stored on the step (in progress), the step's words and the list unchanged; the reply shows the change",
       tags_of(w1) == [("home-beta", "open", "migrating the ids", "in progress")] and rd(w1)["metadata"]["next"] == next0 and "work" not in rd(w1)["metadata"]
       and "\nstep status: migrating the ids — in progress (home-beta)\n" in res and "\nstatus: migrating the ids \u00b7 in progress (home-beta)" in res, (tags_of(w1), res))
-owed1 = server._owed_load().get("projects/beta", {}).get(B)
+owed1 = _web_page_debts._owed_load().get("projects/beta", {}).get(B)
 check("work: a filing edit: no page owed (the ledger's beta entry is the create's or gone), nobody told, the state clock and the confirm untouched, the item's own clock moved",
       (owed1 is None or owed1 == owed0) and "charged" not in res and len(wait_push(0)) == n0
       and rd(w1)["state_updated"] == st0 and rd(w1)["confirmed"] == cf0 and rd(w1)["updated"] > st0, (owed0, owed1, rd(w1)))
@@ -3186,11 +3189,11 @@ check("auto-name: a finish on a completed item is refused as before, the writer 
 # …and the status text is the one the update path gets: it rewrites a bare store id (g9999) to first (patched here so that g9999 maps)
 e7 = mk46()
 from stackshot.service import update as _upd_svc      # the update path reads `_shown_ids` in its owner, service/update.py (the server's copy is the telling's)
-_shown_was = (server._shown_ids, _upd_svc._shown_ids); server._shown_ids = _upd_svc._shown_ids = lambda t: str(t or "").replace("g9999", f"board#{BID_B}")
+_shown_was = (_service_store._shown_ids, _upd_svc._shown_ids); _service_store._shown_ids = _upd_svc._shown_ids = lambda t: str(t or "").replace("g9999", f"board#{BID_B}")
 try:
     res = server._update(e7, work={"text": "wait for g9999 now"}, sender="work-osprey-x")
 finally:
-    server._shown_ids, _upd_svc._shown_ids = _shown_was
+    _service_store._shown_ids, _upd_svc._shown_ids = _shown_was
 check(f"auto-name: a status whose text the update path rewrites (g9999 → board#{BID_B}) is stored as rewritten, and the writer is named",
       needs46(e7) == ["work-osprey-x"] and "(named" in res and ("work-osprey-x", "open", f"wait for board#{BID_B} now") in st46(e7), (needs46(e7), st46(e7), res))
 wait_push(0)
@@ -3212,7 +3215,7 @@ check("auto-name: …and refuses a body without a sender", server._client_post("
 O = "55555555-5555-4555-8555-555555555555"; _fl46 = (T / "fleet/a/sessions.json").read_text()
 (T / "fleet/a/sessions.json").write_text(json.dumps({**json.loads(_fl46), O: {"name": "work-osprey-ops", "machine": "a", "url": "", "seen": "x"}}))
 _rg46["pages"]["projects/alpha"]["agents"]["work-osprey-ops"] = "back"; _rg46["pages"]["projects/alpha"]["back_agents"]["work-osprey-ops"] = "back"
-(T / "store/projects.json").write_text(json.dumps(_rg46)); server._cfg.CFG["pilot"]["never_named"] = ["work-osprey-ops"]
+(T / "store/projects.json").write_text(json.dumps(_rg46)); _cfg.CFG["pilot"]["never_named"] = ["work-osprey-ops"]
 m_a = mk46(); n0 = len(wait_push(0))
 res = server._message("work-osprey-ops", f"release PR #102, which touches {m_a} in passing", "home-beta"); wait_push(n0 + 1); time.sleep(0.3)
 check("never_named: a message-tool handover to a listed background agent that names an item names nobody", "needs" not in rd(m_a)["metadata"] and "(named" not in res, (rd(m_a)["metadata"], res))
@@ -3224,7 +3227,7 @@ m_b = mk46(); res = server._update(m_b, next="x", sender="work-osprey-x")
 check("never_named: …and an update by it still names it", needs46(m_b) == ["work-osprey-x"] and f"(named work-osprey-x in {m_b}'s needs: update by work-osprey-x)" in res, (needs46(m_b), res))
 v3 = mk46(); server._update(v3, needs=["work-osprey-ops"], sender="work-osprey-main")
 check("never_named: a listed agent can still be named by hand through needs=", needs46(v3) == ["work-osprey-ops"], rd(v3)["metadata"])
-server._cfg.CFG["pilot"]["never_named"] = []; v4 = mk46(); res = server._update(v4, next="x", sender="work-osprey-ops")
+_cfg.CFG["pilot"]["never_named"] = []; v4 = mk46(); res = server._update(v4, next="x", sender="work-osprey-ops")
 check("never_named: read at each naming (a reload applies it): off the list, the same agent is named again", needs46(v4) == ["work-osprey-ops"] and "(named work-osprey-ops" in res, (needs46(v4), res))
 (T / "fleet/a/sessions.json").write_text(_fl46)
 time.sleep(0.4); (T / "store/projects.json").write_text(_reg46)
@@ -3243,11 +3246,11 @@ item47(33, check="pr_merged example-owner/stackshot#113", next="work-osprey-x: m
 _anc47 = (T / "store/anchors.json").read_text()
 (T / "store/anchors.json").write_text(json.dumps({**json.loads(_anc47), "projects/alpha": json.loads(_anc47)["projects/alpha"] + [{"url": PRU, "items": ["a33"], "added": 1, "by": "t"}]}))
 GREEN = "[release] PR #113 merged and deployed — a change — main at 0606060, restarted: stackshot.service, healthz ok · log /x/pr-113.log"
-n0 = len(wait_push(0)); owed0 = json.dumps(server._owed_load(), sort_keys=True); comments = []
-_ge, _goc = server._gh.enabled, server._gh.on_change
-server._gh.enabled = lambda: True; server._gh.on_change = lambda gid, before, after, name="", sid="", note="", background=False: comments.append((gid, before == {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in after.items() if k not in ("activity",)}, name, note, after.get("activity")))      # an item from before the activity clock gains the field at its first save (seeded from its last update, so a server note moves nothing), and an open item gains its stored phase: the item is otherwise unchanged
+n0 = len(wait_push(0)); owed0 = json.dumps(_web_page_debts._owed_load(), sort_keys=True); comments = []
+_ge, _goc = _ghs.enabled, _ghs.on_change
+_ghs.enabled = lambda: True; _ghs.on_change = lambda gid, before, after, name="", sid="", note="", background=False: comments.append((gid, before == {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in after.items() if k not in ("activity",)}, name, note, after.get("activity")))      # an item from before the activity clock gains the field at its first save (seeded from its last update, so a server note moves nothing), and an open item gains its stored phase: the item is otherwise unchanged
 st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
-server._gh.enabled, server._gh.on_change = _ge, _goc
+_ghs.enabled, _ghs.on_change = _ge, _goc
 time.sleep(0.3)
 m47 = re.search(r"notice ([0-9a-f]{6}) on projects/alpha", str(body.get("result")))
 check("green release: answered as logged, not delivered, ruled by stackshot (auto), kept on the routing page",
@@ -3264,7 +3267,7 @@ check("green release: no notice left pending", nid47 not in [n["id"] for n in ro
 check("green release: the open item anchored to the PR is saved with the item unchanged, and the server's note no longer travels to GitHub as a comment (the hook gets the item before and after, nothing else)",
       comments == [("a33", True, "", "", 5.0)]
       and rd("a33")["updated"] == 5.0 and rd("a33")["status"] == "open", comments)
-check("green release: no page is owed", json.dumps(server._owed_load(), sort_keys=True) == owed0, server._owed_load())
+check("green release: no page is owed", json.dumps(_web_page_debts._owed_load(), sort_keys=True) == owed0, _web_page_debts._owed_load())
 _prm = checks_svc.pr_merged; checks_svc.pr_merged = lambda ref, now, gh_st: (ref == "example-owner/stackshot#113", "")
 checks_svc.CHECK_LAST[0] = 0; closed47 = checks_svc.check_tick(); checks_svc.pr_merged = _prm; time.sleep(0.3)
 check("green release: the item waiting on the PR still closes on its pr_merged check",
@@ -3325,7 +3328,7 @@ check("the digest machinery is gone: no _digest_tick, no _digest_rows, no digest
 # releases the held item scoped to its anchor, as the keeper's own `merged` would
 import types as _types
 from stackshot.anchors.anchorhub import github as ghr
-server._cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot", "example-org/*"]
+_cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot", "example-org/*"]
 PR48, HUB48, FOR48, BETA48 = ("https://github.com/example-owner/stackshot/pull/116", "https://github.com/example-org/board-repo",
                               "https://github.com/example-upstream/tool/pull/77", "https://github.com/example-owner/stackshot/pull/117")
 A48, AH48, AF48, AB48 = "github:example-owner/stackshot#116", "github:example-org/board-repo@notifications", "github:example-upstream/tool#77", "github:example-owner/stackshot#117"
@@ -3385,9 +3388,9 @@ for et, txt in ROUT48.items():
     delivered48(f"foreign repo (example-upstream/tool), {et}", AF48, et, txt, who="example-upstream")
 got, ln = ev48(AB48, "pr_merged", "merged it")
 check("own repo, a page with one session (beta: the router rules every page): a routine merge is logged and ruled automatically like alpha's, not delivered", got == [] and isinstance(ln, dict) and ln.get("log_only") and ln.get("ruled_by") == "stackshot (auto)", (got, ln))
-server._cfg.CFG["pilot"]["own_repos"] = []
+_cfg.CFG["pilot"]["own_repos"] = []
 delivered48("own_repos empty (the default): nothing is own", A48, "pr_merged", "merged it")
-server._cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"
+_cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"
 got, ln = ev48(A48, "pr_closed", "closed it")
 check("own_repos as one comma-separated string reads the same", got == [] and isinstance(ln, dict) and ln.get("log_only"), (got, ln))
 if isinstance(ln, dict): auto48.append(ln["id"])
@@ -3398,7 +3401,7 @@ check("the repo match is exact (no prefix match) and an owner wildcard is that o
 # the list or in the comma string, matches the event's repository.id (Event.repo_id) under any owner; a name entry matches the name; an event with no ID
 # is matched by name only; a different ID does not match
 ID_A48, ID_B48 = 9000019, 9000020
-server._cfg.CFG["pilot"]["own_repos"] = [ID_A48]
+_cfg.CFG["pilot"]["own_repos"] = [ID_A48]
 got, ln = ev48(AF48, "pr_merged", "merged it", who="example-upstream", repo_id=ID_A48)
 check("own_repos ID entry (an int) matches an event carrying that ID under a different owner (example-upstream/tool): logged, not delivered", got == [] and isinstance(ln, dict) and ln.get("log_only") and ln.get("ruled_by") == "stackshot (auto)", (got, ln))
 if isinstance(ln, dict): auto48.append(ln["id"])
@@ -3406,18 +3409,18 @@ got, ln = ev48(AF48, "pr_merged", "merged it", who="example-upstream", repo_id=I
 check("own_repos ID entry does not match a different ID: delivered as before", len(got) == 1 and got[0][0] == S and isinstance(ln, dict) and not ln.get("log_only"), (got, ln))
 got, ln = ev48(A48, "pr_merged", "merged it")
 check("an ID-only list and an event with no ID: the name does not match (no name entry), delivered", len(got) == 1 and got[0][0] == S and isinstance(ln, dict) and not ln.get("log_only"), (got, ln))
-server._cfg.CFG["pilot"]["own_repos"] = [str(ID_A48)]
+_cfg.CFG["pilot"]["own_repos"] = [str(ID_A48)]
 got, ln = ev48(AF48, "pr_closed", "closed it", who="example-upstream", repo_id=ID_A48)
 check("own_repos ID entry as a digit string matches the same", got == [] and isinstance(ln, dict) and ln.get("log_only"), (got, ln))
 if isinstance(ln, dict): auto48.append(ln["id"])
-server._cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot", ID_A48]
+_cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot", ID_A48]
 got, ln = ev48(A48, "pr_merged", "merged it")
 check("a name entry beside an ID entry still matches an event with no ID (falls back to the name)", got == [] and isinstance(ln, dict) and ln.get("log_only"), (got, ln))
 if isinstance(ln, dict): auto48.append(ln["id"])
 got, ln = ev48(A48, "pr_merged", "merged it", repo_id=ID_B48)
 check("a name entry matches by name even when the event carries some other ID", got == [] and isinstance(ln, dict) and ln.get("log_only"), (got, ln))
 if isinstance(ln, dict): auto48.append(ln["id"])
-server._cfg.CFG["pilot"]["own_repos"] = f"example-org/*, {ID_A48}"
+_cfg.CFG["pilot"]["own_repos"] = f"example-org/*, {ID_A48}"
 got, ln = ev48(AF48, "pr_opened", "opened it", who="example-upstream", repo_id=ID_A48)
 check("own_repos as a comma-separated string with an ID reads the same", got == [] and isinstance(ln, dict) and ln.get("log_only"), (got, ln))
 if isinstance(ln, dict): auto48.append(ln["id"])
@@ -3427,8 +3430,8 @@ check("is_own by ID: exact digits, any owner, no ID or another ID falls to the n
       and core.is_own("o/r", ["o/r", str(ID_A48)], ID_B48) and core.is_own("o/r", ["o/r"], None) and not core.is_own("", [str(ID_A48)])
       and core.is_own("", [str(ID_A48)], ID_A48) is True
       and core._repo_id(ID_A48) == ID_A48 and core._repo_id(str(ID_A48)) == ID_A48 and core._repo_id(None) == 0 and core._repo_id("x") == 0 and core._repo_id(True) == 0 and core._repo_id(-5) == 0)
-check("own_repos reads an int entry from a list as digits", (lambda: (server._cfg.CFG["pilot"].__setitem__("own_repos", [ID_A48, True, "Oliver/Repo"]), core.own_repos())[1])() == [str(ID_A48), "oliver/repo"], core.own_repos())
-server._cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"
+check("own_repos reads an int entry from a list as digits", (lambda: (_cfg.CFG["pilot"].__setitem__("own_repos", [ID_A48, True, "Oliver/Repo"]), core.own_repos())[1])() == [str(ID_A48), "oliver/repo"], core.own_repos())
+_cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"
 _rec48 = routing.record_auto; routing.record_auto = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
 got, ln = ev48(A48, "pr_merged", "merged it")
 routing.record_auto = _rec48
@@ -3472,21 +3475,21 @@ def green48(**extra):
                       "etype": "ci_passed", "vouched": "ci_passed", **extra}, kind="github-state")
     return list(out48), len(lines48("projects/alpha", A48)) - k0, len(_el48.read(0)[0]) - n0_
 for label, own in (("own_repos set", ["example-owner/stackshot", "example-org/*"]), ("own_repos empty", [])):
-    server._cfg.CFG["pilot"]["own_repos"] = own
+    _cfg.CFG["pilot"]["own_repos"] = own
     got, newlines, newrows = green48(record_only=True)
     check(f"record_only green head, {label}: one line in the event log, nothing delivered, no routing line, nothing held for a follow-up", got == [] and newlines == 0 and newrows == 1 and not hub48.pending, (got, newlines, newrows, hub48.pending))
     check(f"record_only green head, {label}: the item held on the anchor stays held (no automatic release)", wakes_svc.anchor_pass() == [] and server._is_held(rd("a54")))
     check(f"record_only green head, {label}: the stored anchor wait on it does not turn either (no routing-log line for the minute pass to replay)", rd("a59")["metadata"].get("wait_kind") == "anchor" and "woke" not in rd("a59")["metadata"] and wakes_svc.anchor_pass() == [], rd("a59")["metadata"])
-server._cfg.CFG["pilot"]["own_repos"] = []
+_cfg.CFG["pilot"]["own_repos"] = []
 got, newlines, newrows = green48()
 check("the same event without record_only (own_repos empty): delivered with its routing line, as a CI result was before", len(got) == 1 and got[0][0] == S and newlines == 1 and newrows == 1, (got, newlines, newrows))
 for n in routing.read("projects/alpha"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="control for the record_only checks", by="work-osprey")
-server._cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot"]
+_cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot"]
 got, newlines, newrows = green48(); turned_ = wakes_svc.anchor_pass()
 check("the same green on an own repository without record_only (control): a log-only line, ruled merged automatically, and it turns the stored anchor wait and releases the hold, which is what record_only prevents",
       got == [] and newlines == 1 and "a59" in turned_ and "wait_kind" not in rd("a59")["metadata"], (got, newlines, turned_, rd("a59")["metadata"]))
-server._cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"
+_cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"
 server._update("a54", hold=False, sender="work-osprey-main")
 # an item whose done check is pr_merged, and the item after it: untouched by the log-only path, closed by the check as before
 item48(57, check="pr_merged example-owner/stackshot#116", next="work-osprey-x: merge PR #116"); item48(58, after=["a57"], next="after the merge")
@@ -3566,13 +3569,13 @@ check("receiver → hub: merged and ci_passed on own repos logged; the comment, 
                (A48, "ci_passed"): False, (A48, "pr_merged"): False}, dl48)
 for n in routing.read("projects/alpha"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="done with the PR-event checks", by="work-osprey")
-server._cfg.CFG["pilot"]["own_repos"] = []
+_cfg.CFG["pilot"]["own_repos"] = []
 (T / "store/anchors.json").write_text(_anc48)
 
 # ---- 48b. [github.moved]: after a repository is transferred to another owner, its old and its new owner/repo are one wherever names are compared.
 # Matching only (stored anchors, items and URLs are never rewritten); the table is empty by default and read at each use.
 def moved49(tbl):
-    g = server._cfg.CFG.setdefault("github", {})
+    g = _cfg.CFG.setdefault("github", {})
     if tbl is None: g.pop("moved", None)
     else: g["moved"] = tbl
 OLD49, NEW49 = "oldowner/thing", "newowner/thing"
@@ -3586,20 +3589,20 @@ try:
     # the table itself: empty and absent change nothing, a malformed one is ignored, an entry is read per call
     moved49(None)
     check("moved: no table = nothing moved; canon_repo only lower-cases, canon_name leaves a name exactly as written",
-          server._cfg.moved_repos() == {} and server._cfg.canon_repo(" Old/Thing ") == "old/thing" and server._cfg.canon_name("Old/Thing") == "Old/Thing" and server._cfg.canon_repo("") == "")
+          _cfg.moved_repos() == {} and _cfg.canon_repo(" Old/Thing ") == "old/thing" and _cfg.canon_name("Old/Thing") == "Old/Thing" and _cfg.canon_repo("") == "")
     moved49({})
-    check("moved: an empty table = nothing moved", server._cfg.moved_repos() == {} and server._cfg.canon_repo(OLD49) == OLD49 and server._cfg.canon_name(OLD49) == OLD49)
+    check("moved: an empty table = nothing moved", _cfg.moved_repos() == {} and _cfg.canon_repo(OLD49) == OLD49 and _cfg.canon_name(OLD49) == OLD49)
     for why, bad in (("a string", "oldowner/thing = newowner/thing"), ("a list", [OLD49, NEW49]), ("a number", 5)):
-        moved49(bad); check(f"moved: a table that is {why} is ignored", server._cfg.moved_repos() == {} and server._cfg.canon_repo(OLD49) == OLD49, server._cfg.moved_repos())
+        moved49(bad); check(f"moved: a table that is {why} is ignored", _cfg.moved_repos() == {} and _cfg.canon_repo(OLD49) == OLD49, _cfg.moved_repos())
     moved49({"noslash": "a/b", "a/b": "noslash", "a/b/c": "d/e", "o/r": "o/r", "x/y": ["z/w"], "p/q": 7, "": "a/b", "has space/x": "a/b", "a/*": "b/*", "UP/Low": " New/Name "})
     check("moved: malformed entries are ignored one by one (no owner/repo form, a list, a number, a wildcard, itself); a valid one is lower-cased",
-          server._cfg.moved_repos() == {"up/low": "new/name"}, server._cfg.moved_repos())
+          _cfg.moved_repos() == {"up/low": "new/name"}, _cfg.moved_repos())
     moved49({"a/b": "c/d", "c/d": "e/f", "x/y": "z/w", "z/w": "x/y", "p/q": "r/s", "r/s": "t/u", "t/u": "p/q", "m/n": "p/q"})
-    check("moved: a chain is followed to the end; every entry of a loop (two names or three) is dropped, one leading into a loop stays", server._cfg.canon_repo("A/B") == "e/f" and server._cfg.canon_repo("c/d") == "e/f"
-          and server._cfg.moved_repos() == {"a/b": "c/d", "c/d": "e/f", "m/n": "p/q"} and server._cfg.canon_repo("x/y") == "x/y" and server._cfg.canon_repo("p/q") == "p/q" and server._cfg.canon_repo("m/n") == "p/q"
-          and server._cfg.repo_aliases("e/f") == {"a/b", "c/d", "e/f"}, (server._cfg.moved_repos(), server._cfg.repo_aliases("e/f")))
+    check("moved: a chain is followed to the end; every entry of a loop (two names or three) is dropped, one leading into a loop stays", _cfg.canon_repo("A/B") == "e/f" and _cfg.canon_repo("c/d") == "e/f"
+          and _cfg.moved_repos() == {"a/b": "c/d", "c/d": "e/f", "m/n": "p/q"} and _cfg.canon_repo("x/y") == "x/y" and _cfg.canon_repo("p/q") == "p/q" and _cfg.canon_repo("m/n") == "p/q"
+          and _cfg.repo_aliases("e/f") == {"a/b", "c/d", "e/f"}, (_cfg.moved_repos(), _cfg.repo_aliases("e/f")))
     moved49(TBL49)
-    check("moved: read per call: a table set now applies at once, and removed it applies no longer", server._cfg.canon_repo(OLD49) == NEW49 and (moved49(None) or server._cfg.canon_repo(OLD49) == OLD49))
+    check("moved: read per call: a table set now applies at once, and removed it applies no longer", _cfg.canon_repo(OLD49) == NEW49 and (moved49(None) or _cfg.canon_repo(OLD49) == OLD49))
 
     # anchor identity: anchor_id, the anchor store's add and remove
     moved49(None)
@@ -3641,7 +3644,7 @@ try:
     moved49(None)
     refused49 = ""
     try: server._recycle_due("testbox", pr=newpr49(300))
-    except server.ToolError as e: refused49 = str(e)
+    except ToolError as e: refused49 = str(e)
     check("recycle_due --pr, no table: the new-name URL finds no item anchored under the old name (refused as before)", "no open item is anchored" in refused49, refused49)
     check("_pr_items, no table: nothing crosses names", server._pr_items([newpr49(300)]) == {} and server._pr_items([oldpr49(300)]) == {oldpr49(300): ["a71"]})
     (T / "store/anchors.json").write_text(_anc49)
@@ -3693,21 +3696,21 @@ try:
           not core.is_own("newowner/other", ["oldowner/*"]) and not core.is_own("oldowner/other", ["newowner/*"]) and not core.is_own("newowner/other", [OLD49]) and not core.is_own("evil/thing", [OLD49]) and not core.is_own("", [OLD49]))
     check("repo_of: an old-name anchor reads as the current name", core.repo_of(f"github:{OLD49}#5") == core.repo_of(f"github:{NEW49}@releases") == NEW49 and core.repo_of("slack:C1") == "")
     ev49 = lambda anchor, et: core.Event(anchor=anchor, kind="github-state", title="x", who="w", text="merged it", url="u", ts="1", etype=et)
-    server._cfg.CFG["pilot"]["own_repos"] = [OLD49]
+    _cfg.CFG["pilot"]["own_repos"] = [OLD49]
     r_a = core.routine_own(ev49(f"github:{NEW49}#5", "pr_merged"))
-    server._cfg.CFG["pilot"]["own_repos"] = [NEW49]
+    _cfg.CFG["pilot"]["own_repos"] = [NEW49]
     r_b = core.routine_own(ev49(f"github:{OLD49}#5", "pr_merged"))
     check("routine_own: a new-name event on an own_repos entry written with the old name is routine, and the reverse", r_a.startswith("log-only: pr_merged on newowner/thing") and r_b.startswith("log-only: pr_merged on newowner/thing"), (r_a, r_b))
     moved49(None)
-    server._cfg.CFG["pilot"]["own_repos"] = [OLD49]; r_c = core.routine_own(ev49(f"github:{NEW49}#5", "pr_merged"))
-    server._cfg.CFG["pilot"]["own_repos"] = [NEW49]; r_d = core.routine_own(ev49(f"github:{OLD49}#5", "pr_merged"))
+    _cfg.CFG["pilot"]["own_repos"] = [OLD49]; r_c = core.routine_own(ev49(f"github:{NEW49}#5", "pr_merged"))
+    _cfg.CFG["pilot"]["own_repos"] = [NEW49]; r_d = core.routine_own(ev49(f"github:{OLD49}#5", "pr_merged"))
     check("routine_own, no table: an entry with the other name does not cover the repository", r_c == "" and r_d == "", (r_c, r_d))
-    server._cfg.CFG["pilot"]["own_repos"] = []
+    _cfg.CFG["pilot"]["own_repos"] = []
 
     # the hub's direct lane is keyed by the current name
-    moved49(TBL49); server._cfg.CFG.setdefault("anchor_hub", {})["direct"] = {f"github:{OLD49}#8": "none"}
+    moved49(TBL49); _cfg.CFG.setdefault("anchor_hub", {})["direct"] = {f"github:{OLD49}#8": "none"}
     check("direct: a key written with the old name is found by the new-name anchor", core.direct().get(f"github:{NEW49}#8") == "none" and f"github:{OLD49}#8" not in core.direct(), core.direct())
-    server._cfg.CFG["anchor_hub"].pop("direct", None)
+    _cfg.CFG["anchor_hub"].pop("direct", None)
 
     # the hub's dedupe: a notification thread of a PR (or a release) another anchor reports, under the other name
     caught48.clear(); evs49 = []
@@ -3764,19 +3767,19 @@ try:
               [(e.anchor, e.etype) for e in evs49])
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _gsub, _gthr, _gtime
-    moved49(None); server._OWN_REPO[:] = ["example-owner/stackshot"]; server._cfg.CFG["pilot"]["own_repos"] = []; server._cfg.CFG.get("anchor_hub", {}).pop("direct", None)
+    moved49(None); server._OWN_REPO[:] = ["example-owner/stackshot"]; _cfg.CFG["pilot"]["own_repos"] = []; _cfg.CFG.get("anchor_hub", {}).pop("direct", None)
     (T / "store/anchors.json").write_text(_anc49)
 
 # ---- the owner hears what another session changed ([board] tell_owner; a builder's `next` on another
 # session's item, or a non-owner's close, is told to the owner at once). The switch is off for every check above.
-server._cfg.CFG["board"]["tell_owner"] = True
-server._cfg.CFG["pilot"]["writer_owes_page"] = True     # every page is the router's, so a write would also relay a page-owed notice to the keeper at once; the writer owes it here, and the pushes counted below are the owner notices only
+_cfg.CFG["board"]["tell_owner"] = True
+_cfg.CFG["pilot"]["writer_owes_page"] = True     # every page is the router's, so a write would also relay a page-owed notice to the keeper at once; the writer owes it here, and the pushes counted below are the owner notices only
 _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 Xn = "work-osprey-x"
 def told_owner(to, g):
     """The [board] lines this section's notices put to one session for one item (the pilot relay's own lines start `[board] a1 changed`)."""
     return [m for m in wait_push(0) if m[0] == to and m[1].startswith(f"[board] {g} [home] item ")]
-for i_, o_ in ((78, B), (79, B), (93, server.OWNER), (94, "Kim Lee")): item(i_, "projects/beta", o_)
+for i_, o_ in ((78, B), (79, B), (93, _core_instance.OWNER), (94, "Kim Lee")): item(i_, "projects/beta", o_)
 item(95, "projects/alpha", A)
 time.sleep(0.3); n0 = len(wait_push(0))
 res = server._update("a78", next="Live since 09:15", sender=Xn); wait_push(n0 + 1); time.sleep(0.3)
@@ -3808,7 +3811,7 @@ n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a79", sender=Xn, 
 t7 = [m for m in wait_push(0) if m[0] == B and m[1].startswith("[stackshot] a79 was completed")]
 check("tell owner: …and a close with no change before it is told too", len(t7) == 1 and "(dropped: not needed) by work-osprey-x" in t7[0][1] and not told_owner(B, "a79"), (t7, told_owner(B, "a79")))
 n1 = len(wait_push(0)); server._update("a93", next="a step", sender=Xn); server._update("a94", next="a step", sender=Xn); time.sleep(0.5)
-check("tell owner: an item Oliver moves, or one whose mover is no session, tells no one named Oliver or Kim; the project's default holder (here its keeper) hears the one change", not told_owner(server.OWNER, "a93") and not told_owner("Kim Lee", "a94") and len(wait_push(0)) <= n1 + 2, wait_push(0)[n1:])
+check("tell owner: an item Oliver moves, or one whose mover is no session, tells no one named Oliver or Kim; the project's default holder (here its keeper) hears the one change", not told_owner(_core_instance.OWNER, "a93") and not told_owner("Kim Lee", "a94") and len(wait_push(0)) <= n1 + 2, wait_push(0)[n1:])
 
 def to_page(n1): return [m for m in wait_push(0)[n1:] if "may need to act" in m[1]]
 # the reviewer's five scenarios, and the page key's own cases: one event makes at most one inbound
@@ -3866,19 +3869,19 @@ check("tell owner: a builder marking its last step done by a status done, or tak
 general(False)      # a page with no agent of its own and no scope general behind it
 item2(20, "projects/epsilon", A); n1 = len(wait_push(0)); res = server._update("a20", next="no page behind it", sender=Xn); time.sleep(0.5)
 check("tell owner: a front agent owner's item on a page with no keeper or stand-in sends nothing and records no undelivered notice", not to_page(n1) and "undelivered" not in rd("a20")["metadata"] and "went to" not in res, (wait_push(0)[n1:], rd("a20")["metadata"]))
-_rec = server._routing.record
+_rec = routing.record
 def _boom(*a, **k): raise OSError("disk full")
-server._routing.record = _boom
+routing.record = _boom
 item2(22, "projects/delta", A); n1 = len(wait_push(0)); res = server._update("a22", next="when the log cannot be written", sender="plain-y"); time.sleep(0.5)
-server._routing.record = _rec
+routing.record = _rec
 general(False)
 check("tell owner: when the routing record cannot be written nothing is pushed (no fall-through to a push naming a builder), and the write goes through",
       not to_page(n1) and rd("a22")["metadata"]["next"].endswith("when the log cannot be written") and "needs" not in rd("a22")["metadata"], (wait_push(0)[n1:], rd("a22")["metadata"]))
-server._cfg.CFG["board"]["tell_owner"] = False; item(95, "projects/beta", B); n1 = len(wait_push(0))
+_cfg.CFG["board"]["tell_owner"] = False; item(95, "projects/beta", B); n1 = len(wait_push(0))
 server._update("a95", next="with the switch off", sender=Xn); _wt_complete.stackshot_complete("a95", sender=Xn, outcome="done", reason="closed with it off", description="- Goal: Done"); time.sleep(0.5)
 check("tell owner: with [board] tell_owner = false neither a next change nor a close sends a '[board]' line: the close is told once by the older close notice alone",
       not told_owner(B, "a95") and [m[1] for m in wait_push(0)[n1:] if m[0] == B] == ["[stackshot] a95 was completed (done: closed with it off) by work-osprey-x: [home] item 95 \u2192 https://stackshot.example.com/items/a95"], wait_push(0)[n1:])
-server._cfg.CFG["board"]["tell_owner"] = True
+_cfg.CFG["board"]["tell_owner"] = True
 
 # the keepers are retired: with home-beta's pane not running, a non-pilot page of user-facing agents answers its page key with its -main agent,
 # a front agent. Nothing is ever pushed to a front agent, the owner itself included; the reply says the board shows it (the reviewer's A, A2, B, K)

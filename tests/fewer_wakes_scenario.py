@@ -94,6 +94,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
 from stackshot.web import server
+from stackshot.anchors import anchors as _anc_y
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import update as _wt_update
@@ -120,7 +122,7 @@ writes.save = _spy_save
 def to(name, since): return [x for x in pushes()[since:] if x[0] == name]
 def why(fn):
     try: fn(); return ""
-    except server.ToolError as e: return str(e)
+    except ToolError as e: return str(e)
 MK = _wt_text._FOR_OWNER
 
 # ---- 0. reports.report_doubt: only what clearly reads as a status report is held back; everything else is delivered
@@ -153,7 +155,7 @@ check("reports: the reason names what stopped it", reports.report_doubt("is it l
       and reports.report_doubt("merged, osprey-main knows", FRONT) == "the name osprey-main" and reports.report_doubt("") == "nothing said", reports.report_doubt("live; ask Oliver"))
 
 # ---- 1. the message tool
-roles = server._anc.session_roles()
+roles = _anc_y.session_roles()
 check("fixture: osprey-main and osprey-front2 are front agents, osprey-x a background one", roles["osprey-main"]["role"] == "front" and roles["osprey-front2"]["role"] == "front" and roles["osprey-x"]["role"] == "back", {k: v["role"] for k, v in roles.items()})
 p0, s0 = len(pushes()), len(saved)
 rep = server._message("osprey-main", f"{MK} a1: PR 18 is live and the suites pass. The step is merged.", "osprey-x"); settle()

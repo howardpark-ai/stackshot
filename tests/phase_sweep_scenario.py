@@ -60,6 +60,12 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.web import search as _search
+from stackshot.github import ghsync as _gh
+from stackshot.core import config as _cfg
+from stackshot.core import readonly as _ro
+from stackshot.service import store as _service_store
+from stackshot.anchors import anchors as _anc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import handoff as handoff_svc, foryou_events as fyev
@@ -72,7 +78,7 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": time.time() - 100 * 86400, "seen": {}, "reported": []}))
-server._cfg.CFG.setdefault("model", {}).update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False)
+_cfg.CFG.setdefault("model", {}).update(guards=True, watchers=True, pause=False, one_mover=True, handoff=True, switchover=False)
 ZONE = zoneinfo.ZoneInfo("Asia/Dubai"); H = 3600.0; DAY = 86400.0
 T0 = float(int(time.time() // 60 * 60))                                   # the suite's clock, on a minute
 local_str = lambda ep: dt.datetime.fromtimestamp(ep, ZONE).strftime("%Y-%m-%dT%H:%M")
@@ -93,7 +99,7 @@ def pair(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
 KEYS = ("phase", "waits_on")
 def without(d): return {**d, "metadata": {k: v for k, v in d["metadata"].items() if k not in KEYS}}
 def want(i, t):
-    with frozen(t): return server._stamp_values(f"g{i}", server._load(f"g{i}"))
+    with frozen(t): return server._stamp_values(f"g{i}", _service_store._load(f"g{i}"))
 def sweep(t):
     with frozen(t): return server._phase_sweep()
 def state_listing(): return sorted(str(p.relative_to(T / "state")) for p in (T / "state").rglob("*"))
@@ -147,7 +153,7 @@ edge("1 E3 (local midnight: the day a dated step waits for becomes today)", 3, M
 # ---- 2. the edges no clock marks
 TL = MID_D + 120                                                       # one clock for the rest: after every edge above, so the items above stay as they are
 # E4: g30 closes while the old release stands down (switchover on, no fallback): only the sweep restamps g31
-CFGM = server._cfg.CFG["model"]; CFGM.update(switchover=True, switchover_fallback=False)
+CFGM = _cfg.CFG["model"]; CFGM.update(switchover=True, switchover_fallback=False)
 try:
     d30 = raw(30); d30["status"] = "completed"; d30["metadata"]["outcome"] = "done"
     (T / "store/g/30.json").write_text(json.dumps(d30, ensure_ascii=False, indent=1))
@@ -200,18 +206,18 @@ d = raw(60); d["metadata"]["phase"] = "alive"; d["metadata"].pop("waits_on")
 (T / "store/g/60.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))                     # stale: the fields read waiting
 calls = []
 real = {(m, k): getattr(m, k) for m, k in ((fyev, "_foryou_on_save"), (fyev, "_landed_on_save"), (handoff_svc, "handoff_on_save"), (telling, "tell_woken"), (telling, "push_noted"), (wakes_svc, "wake_tell"))}
-real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
+real_gh = (_gh.enabled, _gh.on_change); real_touch = _search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name)
     return f
 for m, k in real: setattr(m, k, spy(k))
-server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch"); writes.save = spy("save")
+_gh.enabled = lambda: True; _gh.on_change = spy("gh.on_change"); _search.touch = spy("search.touch"); writes.save = spy("save")
 state0 = state_listing()
 try:
     done = sweep(TL)
 finally:
     for (m, k), v in real.items(): setattr(m, k, v)
-    server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch; writes.save = real_save
+    _gh.enabled, _gh.on_change = real_gh; _search.touch = real_touch; writes.save = real_save
 check("4 a sweep that stamps calls no save, no GitHub job, no notice, no For you or landed row, no hand-off, no search touch", done == ["g60"] and calls == [], (done, calls))
 check("4 …no writer is recorded, no clock moves, the state folder is as it was, no temporary file is left", "written_by" not in raw(60) and raw(60)["updated"] == T0 - 10 * DAY and state_listing() == state0 and not list((T / "store/g").glob(".*")), raw(60))
 from stackshot.web import render as root_render
@@ -258,11 +264,11 @@ check("6 …the next sweep stamps it, and the session's change survives", done =
 # ---- 7. the standby copy
 d = raw(10); d["metadata"]["hold"] = True; d["metadata"]["wake"] = local_str(TL + 5 * DAY); (T / "store/g/10.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))
 b, runs0 = bytes_of(10), server._PHASE_SWEEP["runs"]
-server._ro._reload_for_test(True)
+_ro._reload_for_test(True)
 try:
     got = (sweep(TL), server._phase_tick(), server._stamp_one("g10")["action"])
 finally:
-    server._ro._reload_for_test(False)
+    _ro._reload_for_test(False)
 check("7 STACKSHOT_READ_ONLY: the sweep and the tick return nothing, count no run, and write nothing (the stamp itself is refused)", got == ([], [], "refused") and bytes_of(10) == b and server._PHASE_SWEEP["runs"] == runs0, got)
 check("7 …off the standby the same sweep stamps it", sweep(TL) == ["g10"] and pair(10) == ("waiting", "time"), pair(10))
 
@@ -304,22 +310,22 @@ check("9 the four items for the clocks start waiting on a time", sweep(TL) == ["
 @contextlib.contextmanager
 def fields_only():
     """Every reader works the decision out from the fields alone (model.view patched to the writer's reading): what the board showed before the pair was stored."""
-    real = server._model.view
-    server._model.view = lambda item, mod, now=None, after_open=None, check=True: server._model._shown(item, mod, now, after_open)
+    real = _model.view
+    _model.view = lambda item, mod, now=None, after_open=None, check=True: _model._shown(item, mod, now, after_open)
     try:
         yield
     finally:
-        server._model.view = real
+        _model.view = real
 def shift_proof(label, src_store, base, anchors_file=None):
     nxt_mid = midnight(day_of(base + 60) + dt.timedelta(days=1)) + 60
     shifts = (("+30 min", base + 1800), ("+1 h", base + H), ("+6 h", base + 6 * H), ("next local midnight", nxt_mid), ("+3 days", base + 3 * DAY), ("+40 days", base + 40 * DAY))
     stamped_total = 0
     for name, t in shifts:
         R_ = pathlib.Path(_scratch.mkdtemp(prefix="phasesweep-shift-"))
-        real_store, real_anc = _core_store.STORE, server._anc.FILE
+        real_store, real_anc = _core_store.STORE, _anc.FILE
         try:
             shutil.copytree(src_store, R_ / "store", ignore=shutil.ignore_patterns(".git", "*.tmp", ".*"))
-            _core_store.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
+            _core_store.STORE = R_ / "store"; _anc.FILE = R_ / "store/anchors.json"
             items0 = SP.load_dir(R_ / "store")
             opens = sorted((g for g, it in items0.items() if it.get("status") == "open"), key=SP.num)
             with frozen(t):
@@ -328,7 +334,7 @@ def shift_proof(label, src_store, base, anchors_file=None):
                 first_ = server._phase_sweep()
                 items1 = SP.load_dir(R_ / "store")
                 d1 = {g: SP.display_of(server, items1[g], g) for g in opens}
-                derived = {g: server._stamp_values(g, server._load(g)) for g in opens}
+                derived = {g: server._stamp_values(g, _service_store._load(g)) for g in opens}
             stamped_total += len(first_)
             check(f"9 {label} {name}: after one sweep every open item ({len(opens)}) stores the pair derived now", all((items1[g]["metadata"].get("phase") or "", items1[g]["metadata"].get("waits_on") or "") == derived[g] for g in opens), [g for g in opens if (items1[g]["metadata"].get("phase") or "", items1[g]["metadata"].get("waits_on") or "") != derived[g]][:5])
             check(f"9 {label} {name}: …only the two keys changed, on the items stamped alone, and no closed item was touched", SP.files_outside(items0, items1) == [] and all(items0[g] == items1[g] for g in items0 if g not in opens) and sorted(first_) == sorted(g for g in opens if SP.pair(items0[g]) != SP.pair(items1[g])), (SP.files_outside(items0, items1)[:5], first_[:5]))
@@ -338,7 +344,7 @@ def shift_proof(label, src_store, base, anchors_file=None):
                 again = server._phase_sweep()
             check(f"9 {label} {name}: …and a second sweep writes nothing (mtimes equal)", again == [] and ms == {p: p.stat().st_mtime_ns for p in (R_ / "store").rglob("*.json")}, again)
         finally:
-            _core_store.STORE, server._anc.FILE = real_store, real_anc
+            _core_store.STORE, _anc.FILE = real_store, real_anc
             shutil.rmtree(R_, ignore_errors=True)
     return stamped_total
 

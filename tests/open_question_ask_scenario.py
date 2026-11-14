@@ -79,6 +79,7 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.waits import handoff as _ho
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.model import decision_gates as _dg
@@ -193,7 +194,7 @@ for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_option
     m2 = {**m, "options": None}
     passes(f"4 watcher: {what} without its options is still the watcher's own and passes the open-question gate", lambda m2=m2: _dg._gate_open_question(m2))
 wm = {"needs": ["decision"], "ask": "Decide: what has arrived? · Options: arrived / not yet, ask again on <date> / drop", "watch": {"asked": "relay"}}
-check("4 watcher: a watcher's own ask that happens to open with an interrogative word is read as the watcher's and not refused", _dg._open_question(wm) != "" and server._watch.asked_of(wm) == "relay", wm)
+check("4 watcher: a watcher's own ask that happens to open with an interrogative word is read as the watcher's and not refused", _dg._open_question(wm) != "" and wk.asked_of(wm) == "relay", wm)
 passes("4 watcher: …the open-question gate lets it stand with no options", lambda: _dg._gate_open_question(wm))
 refused("4 watcher: …while the same words with no watcher mark on the item are refused", lambda: _dg._gate_open_question({k: v for k, v in wm.items() if k != "watch"}), *OQ[:3])
 ask, opts = watching_svc.watch_ask("a1", {}, "its wait ended")
@@ -202,7 +203,7 @@ check("4 post-wake: the question the server builds opens with “what” and lis
 passes("4 post-wake: …and passes the open-question gate and names its recommended label", lambda: (_dg._gate_open_question(m), _dg._recommend_missing(m)))
 # a cold call's ask_owner answer is written through the update, so the gates read it
 item(20, needs=["team-back"], mover="team-back", next="team-back: look at it")
-cold = server._ho.COLD
+cold = _ho.COLD
 refused_nw("4 cold call: an ask_owner whose question is open and whose options are missing is refused", 20,
            lambda: server._update("a20", needs=["decision"], ask=OPEN("which layout to ship"), next="Oliver: answer the ask on the item", clear_next=True, sender=cold, clear_mover=True), *OQ)
 passes("4 cold call: …with two to four options naming the recommended label it is written", lambda: server._update("a20", needs=["decision"], ask=OPEN("which layout to ship"), options=OPTS,

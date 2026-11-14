@@ -75,6 +75,9 @@ from stackshot.fleet import sessions_registry as sr; from stackshot.anchors impo
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import page_debts as _pdebts
+from stackshot.service import store as _service_store
+from stackshot.web import render as _rmod
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -87,7 +90,7 @@ from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 def create(owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner=owner, **{"mover": owner, "next": f"{owner}: carry on", **kw})
-def item(gid): return json.loads(server._path(gid).read_text(encoding="utf-8"))
+def item(gid): return json.loads(_service_store._path(gid).read_text(encoding="utf-8"))
 def meta(gid): return item(gid)["metadata"]
 
 # ---- 1. no registry yet: everything behaves as before
@@ -201,8 +204,8 @@ check("delivery: a row with no name goes to its latest transcript, never a bare 
 iid = inbox.put(uid(153), "to a nameless row", "msg", sender="tester"); got = [i for i in inbox._items("msg") if i["id"] == iid][0]
 check("inbox.put to a nameless sala id: `to` is its latest transcript, not the id", got["to"] == Tr["fresh"], got)
 roles_t = {"home-sparrow": {"role": "x"}, "home-other": {"role": "y"}}
-check("_role_name: a retired row never takes a live row's roles entry by alias", server._role_name(roles_t, uid(152)) == "" and server._role_name(roles_t, S["main"]) == "home-sparrow"
-      and server._role_name(roles_t, uid(151)) == "home-other", (server._role_name(roles_t, uid(152)), server._role_name(roles_t, S["main"])))
+check("_role_name: a retired row never takes a live row's roles entry by alias", _pdebts._role_name(roles_t, uid(152)) == "" and _pdebts._role_name(roles_t, S["main"]) == "home-sparrow"
+      and _pdebts._role_name(roles_t, uid(151)) == "home-other", (_pdebts._role_name(roles_t, uid(152)), _pdebts._role_name(roles_t, S["main"])))
 put_registry()
 
 # ---- 3. what an item stores, and what people read
@@ -232,14 +235,14 @@ check("a work line by the engineer named in needs: by the sala id and by the old
       and "Refused" not in server._update(g2, work={"text": "tests", "state": "in progress"}, sender="site-builder"))
 
 # ---- 4. a rename: the item is untouched, the readings follow
-before = hashlib.sha256(server._path(g1).read_bytes()).hexdigest()
+before = hashlib.sha256(_service_store._path(g1).read_bytes()).hexdigest()
 put_registry([r_ if r_["id"] != S["main"] else {**r_, "name": "home-sparrow-lead", "aliases": ["home-sparrow", "home-sparrow-main"]} for r_ in ROWS] )
 put_fleet({**FLEET, Tr["main_b"]: "home-sparrow-lead"})
-check("rename: the stored item did not change", hashlib.sha256(server._path(g1).read_bytes()).hexdigest() == before)
+check("rename: the stored item did not change", hashlib.sha256(_service_store._path(g1).read_bytes()).hexdigest() == before)
 check("rename: get shows the new name", "mover: home-sparrow-lead" in _wt_get.stackshot_get(g1), _wt_get.stackshot_get(g1))
-check("rename: the web page shows the new name, the board.md the new name", "home-sparrow-lead" in ui_render.Board(str(_core_store.STORE)).item_html(g1) and "home-sparrow-lead" in server._rmod.render(str(_core_store.STORE), "full"))
+check("rename: the web page shows the new name, the board.md the new name", "home-sparrow-lead" in ui_render.Board(str(_core_store.STORE)).item_html(g1) and "home-sparrow-lead" in _rmod.render(str(_core_store.STORE), "full"))
 check("rename: the item page never shows the bare id", S["main"] not in ui_render.Board(str(_core_store.STORE)).item_html(g1))
-check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", server._same_sess("home-sparrow-main", meta(g1)["owner"]) and server._same_sess("home-sparrow-lead", meta(g1)["owner"]) and server._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
+check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", _pdebts._same_sess("home-sparrow-main", meta(g1)["owner"]) and _pdebts._same_sess("home-sparrow-lead", meta(g1)["owner"]) and sr._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
 check("rename: the client API lists the item for the session by its new name, its old name, its id and its first transcript", all(
       g1 in {i["gid"] for i in json.loads(server._client_items(k)[2])["items"]} for k in ("home-sparrow-lead", "home-sparrow-main", S["main"], Tr["main_a"], Tr["main_b"])))
 check("rename: the client API names the needs by name", [i for i in json.loads(server._client_items("home-sparrow-docs")[2])["items"] if i["gid"] == g2][0]["needs"] == ["site-builder"])
@@ -333,8 +336,8 @@ taken = inbox.take(live, only_src="msg")
 check("inbox.take: with nothing held the lines go to the pane", taken and taken[0]["session"] == Tr["main_b"], taken)
 check("push: a hold file that lists the sala id holds the name", (T / "state/anchor-hub/held-msg.txt").write_text(S["main"] + "\n") and push.paused("home-sparrow-main") and not push.paused("home-sparrow-docs"))
 (T / "state/anchor-hub/held-msg.txt").write_text("")
-check("sessions index: a lookup by sala id finds the pane's row with the registry's name; iteration lists each session once", server._sessions_index().get(S["main"], {}).get("name") == "home-sparrow-main"
-      and S["main"] not in list(server._sessions_index()) and len(list(server._sessions_index())) == len(FLEET) and S["main"] in server._sessions_index())
+check("sessions index: a lookup by sala id finds the pane's row with the registry's name; iteration lists each session once", sr._sessions_index().get(S["main"], {}).get("name") == "home-sparrow-main"
+      and S["main"] not in list(sr._sessions_index()) and len(list(sr._sessions_index())) == len(FLEET) and S["main"] in sr._sessions_index())
 
 # ---- 7. roles.json and the mirror
 RJ = T / "state/roles.json"
@@ -353,7 +356,7 @@ mig["name"] = create("home-sparrow-docs").split()[1]; it = item(mig["name"]); it
 mig["closed"] = create("home-sparrow-docs").split()[1]; server._update(mig["closed"], status="completed", sender="home-sparrow-docs", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
 it = item(mig["closed"]); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-sparrow-main"; it["metadata"]["needs"] = ["site-builder"]; writes.save(mig["closed"], it)
 mig["good"] = g1
-files = {k: server._path(g) for k, g in mig.items()}
+files = {k: _service_store._path(g) for k, g in mig.items()}
 digest = lambda: {k: hashlib.sha256(f.read_bytes()).hexdigest() for k, f in files.items()}
 d0 = digest()
 HELD = T / "state/anchor-hub/held-msg.txt"; HELD.write_text("home-sparrow-main\nsomebody-else\n", encoding="utf-8")
@@ -447,7 +450,7 @@ check("said, no registry: as before (a wrong quote refused, a right one accepted
 put_registry()
 
 # ---- 8c. `pages.py clear` finds the caller's own debt when the server keyed it by the sala id (B3)
-LEDGER = server._owed_path(); E = lambda: {"ts": time.time(), "item": "s11"}
+LEDGER = _pdebts._owed_path(); E = lambda: {"ts": time.time(), "item": "s11"}
 def clear(*args, sid_=Tr["main_b"], env_extra=None):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"} | (env_extra or {})
     if sid_: env["CLAUDE_CODE_SESSION_ID"] = sid_

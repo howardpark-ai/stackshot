@@ -90,9 +90,9 @@ def owner_defs(alias):
     return {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | {t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)}
 owner_missing = sorted(f"{a}.{n}" for (a, n) in late_owned if (owner_defs(a) is None or n not in owner_defs(a)))
 check("3 every late lookup on an owner module (`_late_in`) names a module the server imports and something that module defines", bool(late_owned) and not owner_missing, owner_missing)
-check("3 the publish functions and the page rule's refusal are looked up on their owner modules (a suite that replaces one there reaches every table), never on the server",
-      {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_refuse_if_owing"}
-      and not {"_publish", "_publish_now", "_publish_every", "_refuse_if_owing"} & set(late_names), (sorted(late_owned), sorted(late_names)))
+check("3 the publish functions, the page rule's refusal and its owed-writer test are looked up on their owner modules (a suite that replaces one there reaches every table), never on the server",
+      {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_refuse_if_owing", "_writer_owes"}
+      and not {"_publish", "_publish_now", "_publish_every", "_refuse_if_owing", "_writer_owes"} & set(late_names), (sorted(late_owned), sorted(late_names)))
 runner_tab = next((n.value.args[0] for n, t in installs if t == "_runner"), None)
 is_late = lambda v: late_call(v) is not None
 runner_plain = [kw.arg for kw in runner_tab.keywords if not is_late(kw.value)] if isinstance(runner_tab, ast.Call) else ["no table"]

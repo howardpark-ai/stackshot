@@ -53,6 +53,12 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.github import ghsync as G
+from stackshot.web import page_debts as _pdebts
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
+from stackshot.fleet import sessions_registry as _fleet_sessions_registry
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import get as _wt_get
@@ -75,17 +81,17 @@ def q(machine=None, **kw):
     return server._client_post(machine or me, "question", {k: v for k, v in b.items() if v is not None})
 def items():
     return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit() and p_.stem != "1")
-def item(shown): return server._load(_model_ids._norm_id(shown))
+def item(shown): return _service_store._load(_model_ids._norm_id(shown))
 n0 = len(items())
 
 # ---- 1. a question filed over the client API
 st, out = q()
 check("filed: 200 with the item's id as shown, the project's key and its -main agent", st == 200 and out["project"] == "projects/alpha" and out["owner"] == "home-sparrow-main" and out["repeat"] is False
-      and out["item"] == server._gh.shown(_model_ids._norm_id(out["item"])), (st, out))
+      and out["item"] == G.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, needs = decision, with the ask and the two options (one recommended)", it["status"] == "open" and m["needs"] == ["decision"] and m["ask"] == ASK
       and m["options"] == OPTS, (it["status"], m))
-check("…owned by the project's -main agent (not the first front agent by name), filed under the page's key", server._session_label(m["owner"]) == "home-sparrow-main" and m["project"] == "projects/alpha", m)
+check("…owned by the project's -main agent (not the first front agent by name), filed under the page's key", _fleet_sessions_registry._session_label(m["owner"]) == "home-sparrow-main" and m["project"] == "projects/alpha", m)
 check("…the text is the description, ending with the line that says who filed it; the subject is the one given", it["description"] == desc() and it["subject"] == SUBJ, (it["description"], it["subject"]))
 check("…the sender is recorded as the creator, a script on this machine", it["filed_by"] == f"q-script (a script on {me})", it.get("filed_by"))
 check("…the item is in the board's brief as waiting on the owner's decision", out["item"] in _wt_get.stackshot_get(out["item"]) and "needs: decision" in _wt_get.stackshot_get(out["item"]), _wt_get.stackshot_get(out["item"])[:300])
@@ -112,7 +118,7 @@ def refused(name, status, needle, **kw):
 def tool_says(**kw):
     a = dict(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", needs=["decision"], ask=ASK); a.update(kw)
     try: _wt_create.stackshot_create(**a); return ""
-    except server.ToolError as e: return str(e)
+    except ToolError as e: return str(e)
 e = refused("a bad ask is refused with the tool's own text", 400, "Refused: ask must read", ask="please decide")
 ALARM_ASK = "Decide: whether to kill the stuck run and rotate the credentials · Recommend: yes · Stakes: the quota is nearly spent · By: Fri Mar 13th"
 st, out = q(subject="[home] Kill the run? The credentials leaked", ask=ALARM_ASK)
@@ -162,18 +168,18 @@ st, out = server._client_post(me, "question", {"project": "alpha", "ask": ASK, "
 
 # ---- 3. the page-debt rules: a script owes no page, the owner is charged none, and its own debt is not the script's to be refused for
 old = time.time() - 8 * 3600; os.utime(T / "brain/projects/alpha.md", (old, old))     # the page is older than the debt, so nothing settles it
-d = server._owed_load(); d.setdefault("projects/alpha", {})[server._session_id("home-sparrow-main")] = {"ts": time.time() - 4 * 3600, "item": "s5"}; server._owed_save(d)
+d = _pdebts._owed_load(); d.setdefault("projects/alpha", {})[_pdebts._session_id("home-sparrow-main")] = {"ts": time.time() - 4 * 3600, "item": "s5"}; _pdebts._owed_save(d)
 debt = tool_says()
 check("fixture: the -main agent owes a page past the grace, so the create tool would refuse its own filing", "you owe a project-page update" in debt, debt)
 st, out = q()
 check("…and the script's filing for it still goes through", st == 200, (st, out))
-server._owed_save({})                                                           # (the page stays older than any new debt, so a reply's settling pass drops none)
-OWNER_ID = server._session_id("home-sparrow-main")
-def owes(who): return {k: e for k, os_ in server._owed_load().items() for o, e in os_.items() if o == who}
+_pdebts._owed_save({})                                                           # (the page stays older than any new debt, so a reply's settling pass drops none)
+OWNER_ID = _pdebts._session_id("home-sparrow-main")
+def owes(who): return {k: e for k, os_ in _pdebts._owed_load().items() for o, e in os_.items() if o == who}
 for _ in range(3): q()
-check("a burst of script filings leaves the owner owing nothing (so its own board writes are not blocked); the page's keeper carries them", owes(OWNER_ID) == {} and set(server._owed_load()) <= {"projects/alpha"}, server._owed_load())
+check("a burst of script filings leaves the owner owing nothing (so its own board writes are not blocked); the page's keeper carries them", owes(OWNER_ID) == {} and set(_pdebts._owed_load()) <= {"projects/alpha"}, _pdebts._owed_load())
 check("…and the tool's own create by that session, whose keeper is the page's own agent, charges nobody (a project page's keeper is never charged for its own filing; every project is the router's)", (_wt_create.stackshot_create(subject="[home] a thing by the session", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", next="home-sparrow-engineer: carry on"), owes(OWNER_ID))[1] == {}, owes(OWNER_ID))
-server._owed_save({})
+_pdebts._owed_save({})
 # a pilot project: the page's keeper is charged and told, the owner still is not
 pushlog = T / "push.log"
 (T / "fakepush.py").write_text("import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\n"
@@ -184,25 +190,25 @@ def pilot_toml(roots):
 pilot_toml(["projects/alpha"])
 try:
     st, out = q()
-    pend = server._owed_load()
-    STEW = server._session_id("home-sparrow")
+    pend = _pdebts._owed_load()
+    STEW = _pdebts._session_id("home-sparrow")
     check("in a pilot project the script's filing is charged to the page's keeper, not to the owner", st == 200 and owes(OWNER_ID) == {} and "projects/alpha" in pend and STEW in pend["projects/alpha"] and OWNER_ID not in pend["projects/alpha"], (st, pend))
 finally:
-    pilot_toml([]); server._owed_save({})
+    pilot_toml([]); _pdebts._owed_save({})
 os.utime(T / "brain/projects/alpha.md", None)
 
 # ---- 3a. the page-debt ledger under concurrent writers
 errs = []
 def mark(i):
-    try: server._owed_mark("projects/alpha", f"lock-test-{i}", f"s{i}")
+    try: _pdebts._owed_mark("projects/alpha", f"lock-test-{i}", f"s{i}")
     except Exception as e: errs.append(e)
 os.utime(T / "brain/projects/alpha.md", (old, old))
 ths = [threading.Thread(target=mark, args=(i,)) for i in range(40)]
 [t.start() for t in ths]; [t.join() for t in ths]
-led = server._owed_load().get("projects/alpha", {})
+led = _pdebts._owed_load().get("projects/alpha", {})
 check("forty threads charging debts at once lose none and fail none", not errs and all(f"lock-test-{i}" in led for i in range(40)), (errs[:2], len(led)))
-check("…and leave no temporary file beside the ledger", not [f for f in os.listdir(server._owed_path().parent) if f.startswith(".ledger.json.")], os.listdir(server._owed_path().parent))
-server._owed_save({}); os.utime(T / "brain/projects/alpha.md", None)
+check("…and leave no temporary file beside the ledger", not [f for f in os.listdir(_pdebts._owed_path().parent) if f.startswith(".ledger.json.")], os.listdir(_pdebts._owed_path().parent))
+_pdebts._owed_save({}); os.utime(T / "brain/projects/alpha.md", None)
 
 # ---- 3b. a request id makes a repeat safe
 n1 = len(items())
@@ -219,18 +225,18 @@ st, r4c = q(machine="home-other", request_id="park-17")
 check("…and each machine's repeat is its own item again", r4c["item"] == r4b["item"] and r4c["repeat"] is True and len(items()) == n1 + 3, r4c)
 st, r5 = q(request_id="park-18"); st, r6 = q()
 check("another request id files a new item each time", len({r1["item"], r5["item"], r6["item"]}) == 3 and len(items()) == n1 + 5 and r6["repeat"] is False, (r5, r6))
-check("the triple is kept in the server's request map", server._gh.resolve(create_svc._requests()[f"question\x1f{me}\x1fq-script\x1fpark-17"]) == _model_ids._norm_id(r1["item"]), list(create_svc._requests())[-3:])
+check("the triple is kept in the server's request map", G.resolve(create_svc._requests()[f"question\x1f{me}\x1fq-script\x1fpark-17"]) == _model_ids._norm_id(r1["item"]), list(create_svc._requests())[-3:])
 st, rg = q(project="gamma", request_id="park-19")
 check("a refused call remembers nothing: after the project is fixed the same id files", st == 409 and "park-19" not in " ".join(create_svc._requests()) and q(request_id="park-19")[0] == 200)
 # a stale entry: the mapped item is gone -> filed anew, the map follows
-gone = server._path(_model_ids._norm_id(r5["item"])); gone.unlink()
+gone = _service_store._path(_model_ids._norm_id(r5["item"])); gone.unlink()
 n2 = len(items()); st, r7 = q(request_id="park-18")
 check("a request id whose item no longer exists files anew (no previous entry), and the map now names the new item", st == 200 and r7["repeat"] is False and r7["item"] != r5["item"] and len(items()) == n2 + 1
-      and server._gh.resolve(create_svc._requests()[f"question\x1f{me}\x1fq-script\x1fpark-18"]) == _model_ids._norm_id(r7["item"]), (st, r7))
+      and G.resolve(create_svc._requests()[f"question\x1f{me}\x1fq-script\x1fpark-18"]) == _model_ids._norm_id(r7["item"]), (st, r7))
 check("…and the same id again is a repeat of that new item", q(request_id="park-18")[1]["item"] == r7["item"])
 # the tool's own request_id, same fix
 tk = dict(subject="[home] a tool thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", request_id="tool-req-1", next="home-sparrow-engineer: carry on")
-t1 = _wt_create.stackshot_create(**tk); tg = _model_ids._norm_id(t1.split()[1]); server._path(tg).unlink()
+t1 = _wt_create.stackshot_create(**tk); tg = _model_ids._norm_id(t1.split()[1]); _service_store._path(tg).unlink()
 t2 = _wt_create.stackshot_create(**tk)
 check("the create tool: a request id whose item is gone creates anew instead of failing", t2.startswith("created ") and _model_ids._norm_id(t2.split()[1]) != tg, t2[:120])
 # concurrency: one triple from many threads is one item; different ids from many threads all land in the map
@@ -254,7 +260,7 @@ import datetime as _dt
 def W(ts): return _dt.datetime.fromtimestamp(ts, _wt_text.ZONE).isoformat(timespec="seconds")      # the line's fourth field
 def TS(i): return 1_800_000_000 + 100 * i
 def put_answers(shown, *answers):
-    gid = _model_ids._norm_id(shown); it = server._load(gid)
+    gid = _model_ids._norm_id(shown); it = _service_store._load(gid)
     it["metadata"]["answers"] = [{"ts": TS(i), "via": "board", **a} for i, a in enumerate(answers)]; writes.save(gid, it)
 st, ct, body = server._client_get("answer", {"key": out["item"]})
 check("get answer: an empty body before he answers", st == 200 and body == "", (st, body))
@@ -323,7 +329,7 @@ with TestClient(app) as c:
     check("client.py post question: exactly the item id on stdout, nothing on stderr, exit 0", rc == 0 and re.fullmatch(r"\S+", o.rstrip("\n")) and o.endswith("\n") and o.count("\n") == 1 and e == "" and len(items()) == before + 1, (rc, o, e))
     it = item(gid_cli); m = it["metadata"]
     check("…the item has the options (the recommended one by label, any case), the ask, the owner, the subject, the description, the creator", it["status"] == "open" and m["needs"] == ["decision"] and m["options"] == OPTS and m["ask"] == ASK
-          and server._session_label(m["owner"]) == "home-sparrow-main" and it["subject"] == "[home] Cut the nightly retry?" and it["description"] == desc("cli-script") and it["filed_by"] == f"cli-script (a script on {me})", (it, m))
+          and _fleet_sessions_registry._session_label(m["owner"]) == "home-sparrow-main" and it["subject"] == "[home] Cut the nightly retry?" and it["description"] == desc("cli-script") and it["filed_by"] == f"cli-script (a script on {me})", (it, m))
     rc, o, e = run("get", "answer", gid_cli); check("client.py get answer: nothing printed before he answers, exit 0", rc == 0 and o == "" and e == "", (rc, o, e))
     put_answers(gid_cli, {"kind": "decision", "choice": "Cut", "text": "Do it."})
     rc, o, e = run("get", "answer", gid_cli); check("client.py get answer: the line after he answers, exit 0", rc == 0 and o == f"decision\tCut\tDo it.\t{W(TS(0))}\n" and e == "", (rc, o, e))
@@ -390,7 +396,7 @@ check("the item page shows the line that says who filed it", LINE in ui_render.B
 check("…and the description ends with it, as a bullet", item(pv["item"])["description"].splitlines()[-1] == "- " + LINE, item(pv["item"])["description"])
 def write_toml(sync):
     t = (T / "stackshot.toml").read_text(encoding="utf-8"); t, n = re.subn(r'(?m)^sync = (true|false)', f'sync = {"true" if sync else "false"}', t); assert n == 1
-    (T / "stackshot.toml").write_text(t, encoding="utf-8"); server._cfg.reload()
+    (T / "stackshot.toml").write_text(t, encoding="utf-8"); _cfg.reload()
 write_toml(True)
 try:
     check("fixture: the mirror is on", G.enabled())
@@ -399,7 +405,7 @@ try:
     new_jobs = [p_ for p_ in G.pending() if p_.name not in before_jobs]
     gid_pm = _model_ids._norm_id(pm["item"])
     check("with the mirror on, filing a question queues one job for the new issue and it is the script's item", st == 200 and len(new_jobs) == 1 and json.loads(new_jobs[0].read_text(encoding="utf-8"))["gid"] == gid_pm, (st, [p_.name for p_ in new_jobs]))
-    body_md = G.body_of(gid_pm, server._load(gid_pm))
+    body_md = G.body_of(gid_pm, _service_store._load(gid_pm))
     check("…the GitHub issue body carries the same line (the description is in it) and no Ask or Options section", LINE in body_md and "### Ask" not in body_md and "### Options" not in body_md, body_md[:400])
     check("…the item records the script as its creator (filed_by), the issue comment is not claimed", item(pm["item"])["filed_by"] == f"nightly-job (a script on {me})")
 finally: write_toml(False)

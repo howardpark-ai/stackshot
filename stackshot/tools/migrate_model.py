@@ -188,18 +188,20 @@ class DryApplier:
         from stackshot.service import migrations
         from stackshot.web import server
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        from stackshot.github import ghsync as _gh  # noqa: PLC0415
         logging.disable(logging.INFO)
         self.server = server
         self.migrations = migrations
         _web_publish._publish = lambda: None
         self.sender = sender
-        if server._gh.enabled():
+        if _gh.enabled():
             raise SystemExit("the copy's config has the GitHub mirror on; refusing")
 
     def call(self, body: dict[str, Any]) -> tuple[int, Any]:
+        from fastmcp.exceptions import ToolError  # noqa: PLC0415
         try:
             return 200, self.migrations.migrate_write({**body, "sender": self.sender}, "dry-run")
-        except self.server.ToolError as e:
+        except ToolError as e:
             return 400, {"error": str(e)}
 
 
@@ -233,7 +235,8 @@ def apply_writes(app: Any, writes: list[Any], rows_for: Any = None, dry: bool = 
             results += d.get("results") or []
     finally:
         if dry:
-            app.server._watch.release()
+            from stackshot.waits import watchers as _watch  # noqa: PLC0415
+            _watch.release()
         else:
             try:
                 rows = rows_for(results) if rows_for else []
@@ -633,12 +636,13 @@ def main(argv: list[str]) -> int:
         kept_rows = rows_that_stand(residue_wake_rows(residue), planned, results, set())
         wake_detail = app.migrations.migrate_wake(kept_rows)
         wake = {k: v["text"] for k, v in wake_detail.items()}
+        from stackshot.waits import watchers as _watch  # noqa: PLC0415
         after_items = load_all()
         for gid, it in sorted(after_items.items(), key=lambda kv: M._num(kv[0])):
             if it.get("status") != "open":
                 continue
             try:
-                if app.server._watch.watches(it) and app.server._watch.due(it, time.time(), env2.after_open(it)):
+                if _watch.watches(it) and _watch.due(it, time.time(), env2.after_open(it)):
                     wake_preview.append(M.shown(gid))
             except Exception:  # noqa: BLE001
                 continue

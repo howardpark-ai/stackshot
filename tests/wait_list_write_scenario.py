@@ -55,7 +55,7 @@ def item(i, status="open", su=None, desc=DESC, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": desc, "status": status,
                                                        "updated": su, "state_updated": su, "confirmed": su,
                                                        "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "do the thing", **meta}}))
-def mof(g): return server._load(g)["metadata"]
+def mof(g): return _service_store._load(g)["metadata"]
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 mt = lambda i: rd(i)["metadata"]
 fails = []; ran = []
@@ -64,6 +64,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.anchors import anchors as _anc
+from stackshot.service import store as _service_store
+from stackshot.model import ids as _model_ids
+from stackshot.core import store as _store
+from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import brief as _wt_brief
@@ -82,7 +87,7 @@ w = day
 FRONT = "home-front"
 A1, A2, A3 = "https://github.com/o/r/pull/5", "https://github.com/o/r/pull/6", "https://github.com/o/r/pull/7"
 def entry(url, items=None): return {"url": url, "items": items, "added": now0, "by": "x"}
-server._anc.save({"projects/alpha": [entry(A1), entry(A2)]})        # project-wide anchors: a create and an update may wait on them
+_anc.save({"projects/alpha": [entry(A1), entry(A2)]})        # project-wide anchors: a create and an update may wait on them
 Tm = lambda d: {"kind": "time", "until": d}
 An = lambda url, ev="PR merged": {"kind": "anchor", "anchor": url, "event": ev}
 It = lambda g: {"kind": "item", "after": g}
@@ -94,8 +99,8 @@ def mk(**kw):
     return _wt_create.stackshot_create(**base)
 def gid_of(out): return re.search(r"created board#(\d+)", out).group(1) if re.search(r"created board#(\d+)", out) else re.search(r"created (\S+)", out).group(1)
 def shown_id(out):
-    m = re.search(r"created (\S+)", out); return server._norm_id(m.group(1)) if m else None
-def mof_(g): return server._load(g)["metadata"]
+    m = re.search(r"created (\S+)", out); return _model_ids._norm_id(m.group(1)) if m else None
+def mof_(g): return _service_store._load(g)["metadata"]
 def Mt(g): return mof_(g)
 GONE = ("waits", "wait_mode", "wait_kind", "until")
 def listed(m): return m.get("wait_kind") == "list" and WL.valid(m)
@@ -112,7 +117,7 @@ check("1 a list through create stores wait_kind=list, the lines, the mode all an
       and [ln["kind"] for ln in m["waits"]] == ["item", "relay"] and m["waits"][0]["after"] == "a900" and m["waits"][1]["event"] == "the lease" and not any(k in m for k in ("wait_anchor", "wait_event", "ask_by", "wake", "hold")), m)
 check("1 …no line carries an arrival, and the reply says what the item waits on", all("arrived" not in ln for ln in m["waits"]) and "wait list: 2 waits, all:" in out and f"backstop day {w(6)}" in out, out[-500:])
 check("1 …`get` reads it back as a wait on several things", "waiting on several things (all of 2, 0 arrived" in _wt_get.stackshot_get(g1), _wt_get.stackshot_get(g1)[:1500])
-check("1 …the model reads a waiting item with a list wait of two lines", MODEL.derive({**server._load(g1), "gid": g1}).wait.kind == "list" and len(MODEL.derive({**server._load(g1), "gid": g1}).waits) == 2, None)
+check("1 …the model reads a waiting item with a list wait of two lines", MODEL.derive({**_service_store._load(g1), "gid": g1}).wait.kind == "list" and len(MODEL.derive({**_service_store._load(g1), "gid": g1}).waits) == 2, None)
 out = mk(waits=[Tm(w(3)), An(A1, "merged"), Ev("recycle"), It("a901"), Re()], wait_mode="any", until=w(6), subject="[home] a list of five")
 m = Mt(shown_id(out))
 check("1 all five kinds go through, in order, with wait_mode any", listed(m) and m["wait_mode"] == "any" and [ln["kind"] for ln in m["waits"]] == ["time", "anchor", "event", "item", "relay"]
@@ -134,7 +139,7 @@ refused("1 one line is refused (a single wait is written with wait_kind)", lambd
 refused("1 nine lines are refused", lambda: mk(waits=[Re(f"news {i}") for i in range(9)], until=w(5)), "2 to 8 lines (got 9)")
 check("1 …eight are not", listed(Mt(shown_id(mk(waits=[Re(f"news {i}") for i in range(8)], until=w(5), subject="[home] eight lines")))), None)
 refused("1 a line twice is refused, naming both", lambda: mk(waits=[Re("x"), It("a900"), Re("x")], until=w(5)), "waits[3] repeats waits[1]")
-refused("1 …an item twice, whichever way it is written", lambda: mk(waits=[It("a900"), It(server._gh.shown("a900"))], until=w(5)), "waits[2] repeats waits[1]")
+refused("1 …an item twice, whichever way it is written", lambda: mk(waits=[It("a900"), It(_gh.shown("a900"))], until=w(5)), "waits[2] repeats waits[1]")
 check("1 …two anchor lines on one anchor with different events are two waits", listed(Mt(shown_id(mk(waits=[An(A1, "merged"), An(A1, "closed")], until=w(5), subject="[home] one anchor twice")))), None)
 refused("1 an anchor over 300 characters is refused, naming the line and the limit", lambda: mk(waits=[Re(), An(A1 + "x" * 300)], until=w(5)), "waits[2]", "anchor is at most 300 characters (got")
 refused("1 an item id over 300 characters is refused, naming the line and the limit", lambda: mk(waits=[Re(), It("a" + "9" * 300)], until=w(5)), "waits[2]", "item id is at most 300 characters")
@@ -159,10 +164,10 @@ refused("1 a date that is no date is refused, naming the line", lambda: mk(waits
 refused("1 a date later than the backstop day could never arrive and is refused", lambda: mk(waits=[Re(), Tm(w(8))], until=w(5)), "waits[2]", "later than the backstop day")
 refused("1 a backstop in the past is refused as any until is", lambda: mk(waits=[Re(), It("a900")], until=w(-1)), "until must be in the future")
 refused("1 an until that is no date is refused", lambda: mk(waits=[Re(), It("a900")], until="soon"), "until is YYYY-MM-DD")
-n_items_ = len(list(server._item_files()))
+n_items_ = len(list(_store._item_files()))
 try: mk(waits=[It("a900")], until=w(5), subject="[home] refused")
 except Exception: pass
-check("1 a refused create stored nothing", len(list(server._item_files())) == n_items_, None)
+check("1 a refused create stored nothing", len(list(_store._item_files())) == n_items_, None)
 
 # ================================================================ 2. update
 def bupd(i, **kw):
@@ -361,11 +366,11 @@ check("4 a list the tool wrote ends the way the read side says: the item it wait
 got_, why_ = WL.write_line({"kind": "time", "until": w(3), "arrived": {"at": 1.0, "what": "x"}})
 check("4 the stored-line reader the write path uses never takes an `arrived` from the caller (it is dropped, not kept)", got_ == {"kind": "time", "until": w(3)} and why_ == "", (got_, why_))
 fresh(80, [An(A1, "merged"), Re("a")])
-server._anc.save({"projects/alpha": [entry(A2)]})                  # the anchor the stored line waits on is no longer on the list
+_anc.save({"projects/alpha": [entry(A2)]})                  # the anchor the stored line waits on is no longer on the list
 bupd(80, waits=[An(A1, "merged"), Re("a")], wait_mode="any")
 check("4 a line the stored list holds is not judged again: sending the list again with a new mode works though its anchor has left the list", mt(80)["wait_mode"] == "any" and len(mt(80)["waits"]) == 2, mt(80))
 refused("4 …while a new anchor line that is not on the list is refused", lambda: bupd(80, waits=[An(A1, "merged"), Re("a"), An(A3, "merged")]), "waits[3]")
-server._anc.save({"projects/alpha": [entry(A1), entry(A2)]})
+_anc.save({"projects/alpha": [entry(A1), entry(A2)]})
 fresh(81, [Re("a"), Re("b")], until=w(6))
 bupd(81, waits=[Re("a")], until=w(5) + "T10:00")
 check("4 a relay line left alone takes the ask-by day alone, not a time of day", mt(81).get("wait_kind") == "relay" and mt(81).get("until") == w(5) and "T" not in str(mt(81).get("until")), mt(81))

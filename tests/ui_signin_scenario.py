@@ -41,6 +41,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""), flush=True)
 
 from stackshot.web import server
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -117,10 +118,10 @@ with TestClient(app) as c:
     legacy = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": T0 + 25 * DAY}))                # the cookie as it was written before (email and exp only) is read and renewed
     r = c.get("/", cookies={"stackshot_ui": legacy}, headers=NAV, follow_redirects=False)
     check("a cookie written by the earlier release still works and is renewed", r.status_code == 200 and renewed(r) == T0 + DAYS * DAY, (r.status_code, renewed(r)))
-    server._cfg.CFG["auth"]["ui_open"] = True
+    _cfg.CFG["auth"]["ui_open"] = True
     r = c.get("/", cookies={"stackshot_ui": old}, headers=NAV, follow_redirects=False)
     check("ui_open true (an access proxy decides who reaches the board): no session cookie is written", r.status_code == 200 and not set_cookies(r, "stackshot_ui"))
-    server._cfg.CFG["auth"]["ui_open"] = False
+    _cfg.CFG["auth"]["ui_open"] = False
 
     # ============================================================= 3. the Allow page
     def ui_http(method, path, data, form=False):

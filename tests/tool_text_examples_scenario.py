@@ -82,6 +82,8 @@ def mt(i): return rd(i)["metadata"]
 
 
 from stackshot.web import server; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
+from stackshot.router import routing as _routing
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors
@@ -142,7 +144,7 @@ def runs(name, tool, frags, fn, *, swap=None, **extra):
         out = fn(**kw)
         check(f"{name}: the server takes the example", True)
         return out
-    except server.ToolError as e:
+    except ToolError as e:
         check(f"{name}: the server takes the example", False, str(e))
     except Exception as e:
         check(f"{name}: the server takes the example", False, f"{type(e).__name__}: {e}")
@@ -196,7 +198,7 @@ check("update: a description", "takes 9 minutes" in rd(6)["description"], rd(6)[
 item(9)
 try:
     _wt_update.stackshot_update("a9", sender="home-agent", wake="2099-03-02T09:00", wait_reason="the nightly run finishes at 03:00"); check("update: a wake far past the cap without a wait_basis is refused", False)
-except server.ToolError as e:
+except ToolError as e:
     check("update: a wake far past the cap without a wait_basis is refused", "wait_basis" in str(e) or "days" in str(e), str(e))
 check("update: …and the text says a wake past the cap needs a wait_basis", "needs a wait_basis" in SNAP["update"]["description"][:CLI_CUT] + SNAP["update"]["parameters"]["wake"]["description"])
 
@@ -242,7 +244,7 @@ item(8)
 runs("confirm", "confirm", ['item_id="board#N", sender="my-x"'], lambda **k: _wt_complete.stackshot_confirm(**k), swap=[("board#N", "a8")])
 check("confirm: the example is written as confirm(...)", 'confirm(item_id="board#N", sender="my-x")' in SNAP["confirm"]["description"][:CLI_CUT])
 
-nid = server._routing.record("projects/alpha", kind="board", to=AGENT, label="board note", who="hub", text="a note for the export work", target="project-wide")
+nid = _routing.record("projects/alpha", kind="board", to=AGENT, label="board note", who="hub", text="a note for the export work", target="project-wide")
 out = runs("route", "route", ['notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work", sender="my-x"'], lambda **k: _wt_route.stackshot_route(**k),
            swap=[("a1b2c3", nid), ('to="my-x"', 'to="home-builder"')])
 check("route: the example is written as route(...)", 'route(notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work", sender="my-x")' in SNAP["route"]["description"][:CLI_CUT])
@@ -256,12 +258,12 @@ check("update: the check example is in the parameter text and the description", 
 try:
     out = _wt_update.stackshot_update("a10", sender="home-agent", **kwargs_of(CHK, swap=[("other-x", "home-builder")])); check("update a10: the server takes the check example", True)
     check("update a10: the check is stored", "pr_merged" in json.dumps(mt(10)), mt(10))
-except server.ToolError as e:
+except ToolError as e:
     check("update a10: the server takes the check example", False, str(e))
 
 try:
     out = _wt_create.stackshot_create(sender="home-agent", mover="home-agent", **kwargs_of(P, SUBJ, DESC_X, CHK, swap=[("other-x", "home-builder")])); check("create: the server takes the check example", bool(out) and "created" in out, out)
-except server.ToolError as e:
+except ToolError as e:
     check("create: the server takes the check example", False, str(e))
 check("create: the check example is in the parameter text", 'check="pr_merged acme/widgets#12"' in SNAP["create"]["parameters"]["check"]["description"])
 

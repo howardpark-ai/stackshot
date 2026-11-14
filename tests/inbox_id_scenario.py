@@ -249,12 +249,12 @@ with TestClient(app) as c:
     seen = []
     class _R:
         returncode = 0; stdout = "inbox → x\n"; stderr = ""
-    real_run = server.subprocess.run
-    server.subprocess.run = lambda argv, *a, **k: (seen.append(argv), _R())[1]
+    real_run = subprocess.run
+    subprocess.run = lambda argv, *a, **k: (seen.append(argv), _R())[1]
     try:
         server._message(ENG, "hello", "site-main")
     finally:
-        server.subprocess.run = real_run
+        subprocess.run = real_run
     check("the message tool passes the permanent id on to push.py (the inbox resolves it once, from what the sender wrote)", seen and seen[-1][seen[-1].index("--from") + 2] == ENG, seen[-1:] )
     # the poll: placeholder name for the pane, the old transcript still reported too
     d = poll([S(OLD, NAME), S(NEW, "demo-3f", name_source="derived", user="home"), S(SENDER, "site-main")])
@@ -309,7 +309,7 @@ with TestClient(app) as c:
           sorted(told) == ["ops-keeper", "site-main"] and "to ops-builder" in txt["site-main"] and "2 line(s) for ops-builder" in txt["ops-keeper"], (told, txt))
     inbox.ack(list(items()))
     # the message tool's own text is unchanged
-    server._cfg.CFG.setdefault("client", {})["inbox_flag_minutes"] = 5
+    cfg.CFG.setdefault("client", {})["inbox_flag_minutes"] = 5
 
 # the pull of everything above: nothing is left in the inbox
 check("nothing waits at the end", inbox.waiting() == {}, inbox.waiting())

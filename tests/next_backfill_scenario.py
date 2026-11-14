@@ -64,6 +64,7 @@ def mt(i): return rd(i)["metadata"]
 def digest(): return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((T / "store").glob("*/*.json"))}
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_backfill as NB; from stackshot.model import owner_steps as HS; from stackshot.model import migration as M
+from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import migrations as migsvc
@@ -106,7 +107,7 @@ a_, h_ = edge(-NB.NEAR - 0.1); check("near edge: …on either side", len(a_) == 
 item(8, answers=[ANS(T1, choice="Ship", ask=ASK)])
 
 # ---- 4. the server's write
-CFGM = server._cfg.CFG.setdefault("model", {})
+CFGM = _cfg.CFG.setdefault("model", {})
 CFGM.update(guards=True, watchers=True, pause=False, migration=True, migration_senders=["falcon-engineer"], migration_machines=["testbox"])
 def call(op, **kw):
     try: return migsvc.migrate_write({"op": op, "sender": "falcon-engineer", **kw}, "testbox")

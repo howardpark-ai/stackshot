@@ -41,6 +41,11 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.service import store as _service_store
+from stackshot.core import config as _cfg
+from stackshot.core import instance as _core_instance
+from stackshot.web import render as _rmod
+from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
 from stackshot.model import field_gates as _fg
 from stackshot.service import checks as checks_svc
@@ -49,7 +54,7 @@ from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
-server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
+_cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
 MAIN = "falcon-main"
@@ -66,12 +71,12 @@ def create(desc="- Goal: A thing\n- It lives here\n- Done when done", **kw):
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, all(w in str(e) for w in want), str(e))
 def passes(name, f):
     try:
         f(); check(name, True)
-    except server.ToolError as e:
+    except ToolError as e:
         check(name, False, str(e))
 def prose_item(i):
     """an item stored before the gate: a prose description and a long next line, as the live store has"""
@@ -126,27 +131,27 @@ check("_next_len: the characters after the prefix; a line with no prefix, or a l
       [_fg._next_len(x) for x in ("home-other: abc", "my-x (builder): abc", "1. **my-x:** abc", "abc def ghi", "Status: abc", "home-other:abc")])
 refused("a long line among short ones is refused", lambda: create(next="home-other: first\n- " + n_long), "a line of next is")
 passes("a link in next counts by its text", lambda: create(next=f"home-other: read {link} " + "w" * 150))
-passes("a long command line of the owner's is not judged", lambda: create(next=f"{server.OWNER}: `" + "x " * 150 + "`"))
+passes("a long command line of the owner's is not judged", lambda: create(next=f"{_core_instance.OWNER}: `" + "x " * 150 + "`"))
 r, g = create(next="ops-x: merged 0109c0de0, 12 tests passed")
-check("the report notes stay notes: the item is created and the reply carries the note", "next reads like a report" in r and server._path(g).exists(), r)
+check("the report notes stay notes: the item is created and the reply carries the note", "next reads like a report" in r and _service_store._path(g).exists(), r)
 check("a line over 200 characters is no longer a note", server._report_note("ops-x: " + "word " * 60) == "", server._report_note("ops-x: " + "word " * 60))
 
 # ---- 3. updates judge only the text written in the call
 prose_item(30)
 passes("an update without description or next on a prose item is not refused", lambda: server._update("a30", priority="p2", sender=MAIN))
 passes("…nor one that sets a due date", lambda: server._update("a30", due="2026-12-01", sender=MAIN))
-check("…and the stored text is untouched", server._load("a30")["description"] == "A thing. It lives here. Done when done." and len(server._load("a30")["metadata"]["next"]) > 200)
+check("…and the stored text is untouched", _service_store._load("a30")["description"] == "A thing. It lives here. Done when done." and len(_service_store._load("a30")["metadata"]["next"]) > 200)
 refused("an update that carries a prose description is refused", lambda: server._update("a30", description="Reworded. Still prose.", sender=MAIN), "not a `- ` bullet")
 refused("an update that carries a long next line is refused", lambda: server._update("a30", next=n_long, sender=MAIN), "a line of next is 201 characters")
 passes("an update that carries a bullet description passes", lambda: server._update("a30", description="- Goal: Reworded\n- As bullets", sender=MAIN))
 prose_item(31)
 passes("an update that carries only a short next passes although the stored description is prose", lambda: server._update("a31", next="home-other: do it", dropped=[1], sender=MAIN))
-check("…and the stored prose description is untouched", server._load("a31")["description"] == "A thing. It lives here. Done when done.")
+check("…and the stored prose description is untouched", _service_store._load("a31")["description"] == "A thing. It lives here. Done when done.")
 
 # ---- 4. a close judges its new description
 prose_item(32); prose_item(33); prose_item(34)
 refused("complete with a prose description is refused", lambda: _wt_complete.stackshot_complete("a32", outcome="done", reason="finished", description="It is done and in use.", sender=MAIN), "not a `- ` bullet")
-check("…and the item stays open", server._load("a32")["status"] == "open")
+check("…and the item stays open", _service_store._load("a32")["status"] == "open")
 passes("complete with bullets passes", lambda: _wt_complete.stackshot_complete("a32", outcome="done", reason="finished", outcome_text="- It is done\n- In use", sender=MAIN))
 refused("update with status=completed and a prose description is refused",
         lambda: server._update("a33", status="completed", outcome="done", reason="finished", description="Done and in use.", sender=MAIN), "not a `- ` bullet")
@@ -154,7 +159,7 @@ refused("complete with a bullet over 120 characters is refused", lambda: _wt_com
         "outcome_text bullet is 130 characters")
 
 # ---- 5. the limits come from the config
-d_cfg, n_cfg = server._cfg.CFG["description"], server._cfg.CFG["metadata"]["next"]
+d_cfg, n_cfg = _cfg.CFG["description"], _cfg.CFG["metadata"]["next"]
 was = (d_cfg.get("max_lines"), d_cfg.get("line_max"), n_cfg.get("line_max"))
 check("the shipped defaults: 8 lines, 120 characters, next 200", was == (8, 120, 200), was)
 d_cfg["max_lines"], d_cfg["line_max"], n_cfg["line_max"] = 2, 30, 40
@@ -196,13 +201,13 @@ for name, md in (("a titled link", f'[board#1]({url} "a title")'), ("a titled li
 refused("…while text after such a link still counts", lambda: create(f'- See [board#1]({url} "a title") ' + "w" * 120), "description bullet is")
 
 # ---- 6c. next: the owner exemption is a whole backtick command, the ask exemption only next's first line without an ask
-cmd = f"{server.OWNER}: `" + "x " * 150 + "`"
+cmd = f"{_core_instance.OWNER}: `" + "x " * 150 + "`"
 passes("a long command in one backtick span is not judged", lambda: create(next=cmd))
 passes("…also under a bullet marker and with a closing full stop", lambda: create(next="- " + cmd + "."))
-refused("a long prose line starting with the owner's name is judged and refused", lambda: create(next=f"{server.OWNER}: " + "please read this and decide " * 10), "a line of next is")
-refused("…even when it holds a backtick span", lambda: create(next=f"{server.OWNER}: run `ls` " + "and then think about it " * 10), "a line of next is")
+refused("a long prose line starting with the owner's name is judged and refused", lambda: create(next=f"{_core_instance.OWNER}: " + "please read this and decide " * 10), "a line of next is")
+refused("…even when it holds a backtick span", lambda: create(next=f"{_core_instance.OWNER}: run `ls` " + "and then think about it " * 10), "a line of next is")
 ASKL = "Decide: " + "ship it " * 20 + "· Recommend: ship · Stakes: a week · By: no date"
-check("fixture: the ask line is over 200 characters and a valid ask", 200 < len(ASKL) <= 240 and server._rmod.parse_ask(ASKL) is not None, (len(ASKL), server._rmod.parse_ask(ASKL)))
+check("fixture: the ask line is over 200 characters and a valid ask", 200 < len(ASKL) <= 240 and _rmod.parse_ask(ASKL) is not None, (len(ASKL), _rmod.parse_ask(ASKL)))
 passes("an ask line as next's first line is not judged when the call passes no ask", lambda: create(next=ASKL + "\nhome-other: do it", needs=["decision"], options=[{"label": "A", "line": "a", "recommended": True}, {"label": "B", "line": "b"}]))
 refused("…but it is judged when the call also passes an ask", lambda: create(next=ASKL, ask="Decide: x · Recommend: y · Stakes: z · By: no date", needs=["decision"]), "a line of next is")
 refused("…and an ask-shaped line that is not the first line is judged", lambda: create(next="home-other: first\n" + ASKL), "a line of next is")
@@ -255,16 +260,16 @@ def timed(name, f, limit=2.0):          # CPU time of this process, so a loaded 
     check(f"timing: {name} takes under {limit:g} s", dt_ < limit, round(dt_, 2))
 for name, line in (("brackets", "[" * 40000), ("closing brackets", "]" * 40000), ("open links", "[a](<" * 8000), ("open titles", "[a](x (" * 6000), ("open quotes", '[a](x "' * 6000),
                    ("spaces after a destination", "[a](x" + " " * 40000), ("spaces inside the paren", "[a](" + " " * 40000), ("urls", "http://" * 5700), ("parens", "[a](" + "(" * 40000),
-                   ("backticks", "`" * 40000), ("link texts", "[a]" * 13000), ("words", "word " * 8000), ("a command line", server.OWNER + ": `" + "x" * 40000)):
+                   ("backticks", "`" * 40000), ("link texts", "[a]" * 13000), ("words", "word " * 8000), ("a command line", _core_instance.OWNER + ": `" + "x" * 40000)):
     timed(f"_visible_len on {name}", lambda line=line: _fg._visible_len(line))
-for name, line in (("words", "home-other: " + "word " * 8000), ("brackets", "home-other: " + "[" * 40000), ("open links", "home-other: " + "[a](<" * 8000), ("a command", server.OWNER + ": `" + "x" * 40000), ("spaces", server.OWNER + ":" + " " * 40000 + "x")):
+for name, line in (("words", "home-other: " + "word " * 8000), ("brackets", "home-other: " + "[" * 40000), ("open links", "home-other: " + "[a](<" * 8000), ("a command", _core_instance.OWNER + ": `" + "x" * 40000), ("spaces", _core_instance.OWNER + ":" + " " * 40000 + "x")):
     def run_next(line=line):
         try: _fg._gate_next(line)
-        except server.ToolError: pass
+        except ToolError: pass
     timed(f"_gate_next on {name}", run_next)
     def run_desc(line=line):
         try: _fg._gate_description("- " + line)
-        except server.ToolError: pass
+        except ToolError: pass
     timed(f"_gate_description on {name}", run_desc)
 t0 = time.process_time(); BT.clip_bullet("- " + "word " * 8000 + "[a](x) " * 2000, 120); BT.bullets("\n".join("word " * 600 for _ in range(8)), 8, 120)
 check("timing: clipping a 40k line takes under 2 s of CPU", time.process_time() - t0 < 2.0, round(time.process_time() - t0, 2))
@@ -274,7 +279,7 @@ timed("judge on 8 lines that open a fence and never close it, 40k times over a l
 timed("judge on a fenced block of 40,000 characters of words", lambda: BT.judge("```\n" + "word " * 8000 + "\n```", 8, 120))
 check("judge: fences pair off one at a time (a second block is a block, an unpaired last fence is none)",
       BT.judge("```\nprose a\n```\n- ok\n```x\nprose b\n```\n```\nprose c", 10, 120) == ("marker", "```", 0), BT.judge("```\nprose a\n```\n- ok\n```x\nprose b\n```\n```\nprose c", 10, 120))
-check("an owner-name line with spaces round the backticks is the whole-command form; prose after it is not", _fg._owner_command(f"  {server.OWNER}: `ls -l`  ") and not _fg._owner_command(f"{server.OWNER}: `ls` and more"), None)
+check("an owner-name line with spaces round the backticks is the whole-command form; prose after it is not", _fg._owner_command(f"  {_core_instance.OWNER}: `ls -l`  ") and not _fg._owner_command(f"{_core_instance.OWNER}: `ls` and more"), None)
 
 # ---- 6g. the way back, and the re-bullet pass held to the same line limit
 from stackshot.model import rebullet as RB
@@ -316,7 +321,7 @@ for name, txt in (("a quote line", "- ok\n> his words"), ("a long quote line", "
                   ("a long bullet", "- " + "word " * 40), ("nine lines", "\n".join("- x" for _ in range(9))), ("a clean text", "- a\n- b")):
     try:
         _fg._gate_description(txt); gate_says = True
-    except server.ToolError:
+    except ToolError:
         gate_says = False
     form = RB.verdict("Zq " + txt, txt, line_max=120)       # the old text is the text with a word before it: nothing lost, the form is all that is judged
     refuses = any(k in form for k in ("a line is not a bullet", "a line of", "lines, over"))
@@ -348,7 +353,7 @@ for _ in range(3000):
         continue
     try:
         _fg._gate_description(out)
-    except server.ToolError as e:
+    except ToolError as e:
         bad.append((text[:200], out[:300], str(e)[:200])); break
 check("fuzz: 3000 random texts through bullet_text.bullets all pass _gate_description", not bad, bad)
 bad = []
@@ -425,7 +430,7 @@ passes("update: an unrelated write on an item with a stored 137-character subjec
 passes("…so does one that sets the very subject it has", lambda: server._update("a61", subject=OLD_LONG, sender=MAIN))
 check("…and the stored subject stays as it was", json.loads((T / "store/a/61.json").read_text())["subject"] == OLD_LONG)
 refused("update: a subject without a scope prefix is still refused first", lambda: server._update("a61", subject="no prefix", sender=MAIN), "subject must start with one of")
-s_cfg = server._cfg.CFG["subject"]; was_s = s_cfg.get("max_length")
+s_cfg = _cfg.CFG["subject"]; was_s = s_cfg.get("max_length")
 s_cfg["max_length"] = 30
 refused("config: [subject] max_length is the limit", lambda: create(subject=subj(31)), "is 31 characters and the limit is 30")
 passes("…and 30 passes", lambda: create(subject=subj(30)))
@@ -461,14 +466,14 @@ long_subject_item(65, "[home] done check")
 d65 = json.loads((T / "store/a/65.json").read_text()); d65["metadata"]["check"] = "item_closed a67"; (T / "store/a/65.json").write_text(json.dumps(d65))
 was_label = checks_svc.check_label; checks_svc.check_label = lambda c: "label " * 60
 try:
-    it65 = server._load("a65"); telling.tell_check_closed = lambda *a, **k: None; wakes_svc.release_after = lambda *a, **k: None
+    it65 = _service_store._load("a65"); telling.tell_check_closed = lambda *a, **k: None; wakes_svc.release_after = lambda *a, **k: None
     checks_svc.check_close("a65", it65, "item_closed a67", time.time())
 finally:
     checks_svc.check_label = was_label
 m65 = json.loads((T / "store/a/65.json").read_text())
 check("a done check's close writes a reason within 120 characters, starting with the check's words", m65["status"] == "completed" and m65["metadata"]["outcome"] == "done"
       and m65["metadata"]["reason"].startswith("done check passed: label") and len(m65["metadata"]["reason"]) <= 120, m65["metadata"].get("reason"))
-it66 = server._load("a66"); server._watch_close(it66, "dropped on his answer on the board: " + "something " * 40, time.time())
+it66 = _service_store._load("a66"); server._watch_close(it66, "dropped on his answer on the board: " + "something " * 40, time.time())
 check("a watcher's drop writes a reason within 120 characters", it66["status"] == "completed" and 0 < len(it66["metadata"]["reason"]) <= 120, it66["metadata"].get("reason"))
 
 # ---- 7. the tool texts state the limits
