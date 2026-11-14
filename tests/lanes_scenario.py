@@ -12,7 +12,7 @@ no network, no server.
   4b a malformed row (no code, aliases that are not words, not an object) is left out with one line on standard error, the other rows are kept; a file with no "lanes" list gives no data
   5  where: STACKSHOT_LANE_NAMES wins when set and not empty; otherwise the tool's own place under HOME
   6  the tool's other lane files (the usage-limit watch's json with its per-pane lane, the sign-in watch's state with its `<lane>.seen` keys) are read by no code of stackshot: a reader added later must
-     read each lane word through lanes.code (a first code and its current one are one lane), and this check then says so (the lane record, lanes.tsv and lane-default, is read by server.py's _lane_record: tests/check_scenario.py)
+     read each lane word through lanes.code (a first code and its current one are one lane), and this check then says so (the lane record, lanes.tsv and lane-default, is read by service/checks.py's lane_record: tests/check_scenario.py)
 
     python3 tests/lanes_scenario.py        → exit 0 / 1"""
 import contextlib, io, json, os, pathlib, sys, time

@@ -39,7 +39,9 @@ from stackshot.model import next_rules as _nr
 from stackshot.model import steps as _steps
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_sessions
 from stackshot.projects import pages as _pages
+from stackshot.service import checks as _checks
 from stackshot.service import gates as _gates
+from stackshot.service import proofs as _proofs
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path, _shown_ids
@@ -112,7 +114,6 @@ class Hooks:
     options_note: Callable[..., Any]
     owed_mark: Callable[..., Any]
     owner_then_default: Callable[..., Any]
-    parse_check: Callable[..., Any]
     parse_wake: Callable[..., Any]
     project_subject_prefix: Callable[..., Any]
     publish: Callable[..., Any]
@@ -121,7 +122,6 @@ class Hooks:
     said_note: Callable[..., Any]
     session_id: Callable[..., Any]
     similar_note: Callable[..., Any]
-    step_proof_set: Callable[..., Any]
     wait_alias_gate: Callable[..., Any]
     wake_at: Callable[..., Any]
     writer_owes: Callable[..., Any]
@@ -221,7 +221,7 @@ def create_item(
     aft = _gates.gate_after(after) if (after if isinstance(after, list) else after.strip()) and str(after).strip().lower() not in h.ask_none else []
     owner = h.session_id(owner)                                 # a pane name becomes its transcript id when the heartbeat knows it
     said_l = _gates.gate_said(said, owner, owner)                    # the trailers: his words checked against the transcript; a failed check refuses the create
-    chk = h.parse_check(check) if check.strip() and check.strip().lower() not in h.ask_none else ""   # the done check: gated on its form; a create is never refused for a hand-off
+    chk = _checks.parse_check(check) if check.strip() and check.strip().lower() not in h.ask_none else ""   # the done check: gated on its form; a create is never refused for a hand-off
     meta: dict[str, Any] = {"owner": owner, "project": project, **(extra or {})}     # extra = a script route's own marks (the terminal prompt's), written with the item
     until_v = _model.clean(until)
     if until_v.lower() in h.ask_none:
@@ -259,7 +259,7 @@ def create_item(
             meta[k] = v
     if next:
         h.next_put(meta, next, owner, owner)     # the writer of a create's lines is its creator (a script's filing included: its label is no session)
-    proof_note = h.step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
+    proof_note = _proofs.step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
     _gates.gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
     meta.update(model_set)
     if list_plan is not None:

@@ -96,7 +96,6 @@ if __name__ == "__main__":
 
 from stackshot.github import ghsync as _gh  # noqa: E402  — the GitHub mirror and the id switch, both off unless [github] says so
 from stackshot.core import ghbudget as _gb  # noqa: E402  — the hourly ledger of GitHub calls: the PR-state readers tag theirs (a done check, a step proof, an event wait)
-from stackshot.github import pr_state as _prs  # noqa: E402  — the one reader of a pull request's merged state behind _pr_merged: one shared record, one GitHub read for the done check, the step proof and the event wait (pr_state.py)
 from stackshot.model import work as _work  # noqa: E402  — a step's status: what is in motion on an item
 from stackshot.web import whatschanged as _wc  # noqa: E402  — the brief's what-changed lines for 7 days after a release that changes a tool
 from stackshot.model import said as _said  # noqa: E402  — the owner's words on an item, checked against his message's transcript (the trailers)
@@ -124,7 +123,6 @@ from stackshot.model import nextlines as _nl  # noqa: E402  — whose lines are 
 from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on the checklist: the server makes `<owner>: <what to decide>` for an ask or a your-step, ticks it with his answer, and a session cannot (owner_steps.py)
 from stackshot.model import next_backfill as _nbf  # noqa: E402  — the one-off fill-in of his past decisions as done steps, worked out from the item's own saved answers (next_backfill.py)
 from stackshot.model import step_proof as _sp  # noqa: E402  — a step that names the event which completes it: the patterns for its words and the explicit form (step_proof.py)
-from stackshot.waits import handover as _hv  # noqa: E402  — a finished step hands the item to the session the next step names (handover.py)
 from stackshot.waits import builderless as _bl  # noqa: E402  — a project with no builder: whom an answered step goes to, and a front agent handing an item to another front agent of its project (builderless.py)
 from stackshot.model import contact as _contact  # noqa: E402  — an item's contact: the front agent the person talks to about it (contact.py)
 from stackshot.model import next_rules as _nr  # noqa: E402  — the write checks of Next: a line names who takes it (N1), a reworded step is no rewrite (N3), an open item keeps an open step (N6) (next_rules.py)
@@ -151,13 +149,17 @@ from stackshot.service import handoff_hooks as _handoff_hooks  # noqa: E402  —
 from stackshot.service import stall as _stallsvc  # noqa: E402  — the stall pass's state, its pause and its steps (service/stall.py)
 from stackshot.service import ladder as _laddersvc  # noqa: E402  — the one ladder of the stall pass and the hand-off audit (service/ladder.py)
 from stackshot.service import stall_hooks as _stall_hooks  # noqa: E402  — what those two and the pass itself (service/stall_tick.py) still reach on this module (service/stall_hooks.py)
+from stackshot.service import checks as _checks  # noqa: E402  — the done check: its forms, its readers and its minute pass (service/checks.py)
+from stackshot.service import released_live as _rlive  # noqa: E402  — what is live in a checkout, read from git, and the pull requests anchored to an item (service/released_live.py)
+from stackshot.service import proofs as _proofs  # noqa: E402  — a step's proof, the settle of one item for one event and the hand-over after it (service/proofs.py)
+from stackshot.service import released as _relsvc  # noqa: E402  — a live pull request settles the items built for it (service/released.py)
+from stackshot.service import checks_hooks as _checks_hooks  # noqa: E402  — what those four still reach on this module (service/checks_hooks.py)
 from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line a front agent's notice always leaves on the item (quiet.py)
 from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
 from stackshot.waits import reports as _reports  # noqa: E402  — does a background agent's message to a front agent ask for anything: a report goes onto the item it names instead (reports.py)
 from stackshot.web import foryou as _fy  # noqa: E402  — the owner's For you list: rows for what he should see, in place of messages to a front agent (foryou.py)
 from stackshot.web import foryou_slack as _fyslack  # noqa: E402,F401  — the For you list's Slack hook, its queue and its worker thread; the suites stub the hook and read its switch on this module (foryou_slack.py)
-from stackshot.core import lanes as _lanes  # noqa: E402  — the fleet tool's lane names: a lane word to its code, a code to its display name, read from the tool's lane-names file (lanes.py)
 from stackshot.model import draft as _draft  # noqa: E402  — an item's draft: the verbatim text the owner pastes elsewhere, its size cap and the write guard (draft.py)
 from stackshot.web import runners as _runners  # noqa: E402  — the Runners page: each CI runner by machine and repo, idle, running or offline with the CI switch's reason (runners.py)
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
@@ -1997,7 +1999,7 @@ def _evw_box_spec(sp: "_ew.Spec") -> "_ew.Spec":
 
 def _evwait_preread(kind: Any, phrase: Any) -> None:
     """Before the item lock: the facts an event wait's write gate reads (_evwait_gate), so the gate itself makes no GitHub call and no git log under the lock every other write waits on. A pr_merged
-    wait reads its pull request on GitHub (paced like the done check: _pr_merged, kept in _evwaits.EVW_GH); a pr_released wait warms the git answers for the last-good commit. A failure is the gate's
+    wait reads its pull request on GitHub (paced like the done check: checks.pr_merged, kept in _evwaits.EVW_GH); a pr_released wait warms the git answers for the last-good commit. A failure is the gate's
     case of 'cannot be read': the wait is stored and the catch-up reads it later."""
     k = str(kind or "").strip().lower()
     if (k and k != "event") or not str(phrase or "").strip():
@@ -2006,11 +2008,11 @@ def _evwait_preread(kind: Any, phrase: Any) -> None:
         sp = _watching.event_spec(phrase)
         if sp.kind == _ew.PR_MERGED:
             with _gb.tag("event_wait"):
-                _pr_merged(sp.key, time.time(), _evwaits.EVW_GH)
+                _checks.pr_merged(sp.key, time.time(), _evwaits.EVW_GH)
         elif sp.kind == _ew.PR_RELEASED and sp.key.rpartition("#")[0] != _cfg.canon_repo(_own_repo()):
-            _foreign_prs(sp.key.rpartition("#")[0])      # a [released.repos] repository: warm the checkout's merges
+            _rlive.foreign_prs(sp.key.rpartition("#")[0])      # a [released.repos] repository: warm the checkout's merges
         elif sp.kind == _ew.PR_RELEASED:
-            good, head = _released_live_base()
+            good, head = _rlive.released_live_base()
             hit = _evwaits.evw_merge(good, _ew.pr_number(sp))
             if hit:
                 _evwaits.evw_live_why(hit[0], good, head)
@@ -2043,21 +2045,21 @@ def _evwait_gate(old: dict[str, Any], meta: dict[str, Any], creating: bool = Fal
     if sp.kind == _ew.PR_RELEASED:
         repo = sp.key.rpartition("#")[0]
         foreign = repo != _cfg.canon_repo(_own_repo())
-        if foreign and _released_foreign(repo) is None:
-            raise ToolError(f"Refused: pr_released is release.sh's event and release.sh releases only {_own_repo() or 'this repository'}'s pull requests and those of [released.repos] ({_released_foreign_why()}); wait for {repo}#{n} with pr_merged {repo}#{n}")
+        if foreign and _rlive.released_foreign(repo) is None:
+            raise ToolError(f"Refused: pr_released is release.sh's event and release.sh releases only {_own_repo() or 'this repository'}'s pull requests and those of [released.repos] ({_rlive.released_foreign_why()}); wait for {repo}#{n} with pr_merged {repo}#{n}")
         try:
             if foreign:
                 good, head = "", ""
-                hit = _foreign_prs(repo)[1].get(n)       # a merge in the checkout's HEAD is live
+                hit = _rlive.foreign_prs(repo)[1].get(n)       # a merge in the checkout's HEAD is live
             else:
-                good, head = _released_live_base()
+                good, head = _rlive.released_live_base()
                 hit = _evwaits.evw_merge(good, n)
         except ToolError:
             hit = None                                   # no last-good or HEAD to read: the wait is stored and the catch-up reads it later
         if hit and (foreign or not _evwaits.evw_live_why(hit[0], good, head)):
             raise ToolError(f"Refused: PR #{n} is already merged and live, so there is nothing to wait for. Hand the item to the step that follows it, or wait for something that has not happened")
     elif sp.kind == _ew.PR_MERGED:
-        rec = _evwaits.EVW_GH.get(_check_ref(sp.key)) or {}      # only what _evwait_preread read before the item lock: no GitHub call is made here
+        rec = _evwaits.EVW_GH.get(_checks.check_ref(sp.key)) or {}      # only what _evwait_preread read before the item lock: no GitHub call is made here
         if rec.get("merged"):
             raise ToolError(f"Refused: {sp.key} is already merged, so there is nothing to wait for. Hand the item to the step that follows it")
         if rec.get("dead"):
@@ -2170,7 +2172,7 @@ def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], mo
 
 
 def _watch_close(item: dict[str, Any], reason: str, now: float) -> None:
-    """Close the item as not planned on the owner's answer to a watcher ask ("drop"): the server's own act, as _check_close: outcome dropped, the live fields cleared as a session's close clears them."""
+    """Close the item as not planned on the owner's answer to a watcher ask ("drop"): the server's own act, as checks.check_close: outcome dropped, the live fields cleared as a session's close clears them."""
     meta = dict(item.get("metadata") or {})
     _steps.close_meta(meta, "dropped", NAME, now)       # a close marks the open steps, the server's own close included
     for k in ("next", "next_by", "owner_step", "ask", "needs", "options", "after", "hold", "hold_set", "wake", "recycle", "recycle_at", "idle", "check", "watch_reason", "waiting", "wait_failed", "wait_basis", "cap_ok", "undelivered",
@@ -2477,7 +2479,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
             return seen[who]
     if anchored is None:
         try:
-            anchored = _released_anchors()      # {item id: the pull requests anchored to it}: a subagent whose brief names one of them is tied to the item
+            anchored = _rlive.released_anchors()      # {item id: the pull requests anchored to it}: a subagent whose brief names one of them is tied to the item
         except Exception as e:  # noqa: BLE001  — without the anchors a subagent is tied by the item's own id alone
             anchored = {}
             print(f"audit: anchors not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -3089,438 +3091,6 @@ def _idle_live(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]]) -> 
     server and does not count: its time is never live time."""
     sid = _anc.canonical(who, nm)
     return _lv.idle_live(idx.get(sid.lower()) or idx.get(sid))
-
-
-# ----------------------------------------------------------------------------- the done check
-# An item whose mover handed its work to another session (its next named that session, or its needs did) stayed open after the
-# work was done: nothing triggered the mover's check-and-close step, and a session turn spent on asking is what he wants least
-#. So a hand-off carries one of two things. A wake: the mover is told at the date, as any wake
-# tells. Or a done check, metadata.check, one of a fixed list the server reads itself on its minute pass (never free shell):
-#   pr_merged <owner>/<repo>#<n>   the pull request is merged: one GET of the PR through ghsync's client, at most one per PR
-#                                  every [check] github_minutes, shared by the items that name it, backing off while GitHub is down
-#   item_closed <id>               that board item is completed (the store)
-#   lane <session> <lane>          the fleet tool's lane record puts that pane on that lane: its row in [client] lanes_file, else
-#                                  the default lane (lane-default beside it; lanes.DEFAULT_CODE when that file is absent), as the fleet tool
-#                                  reads them; the lane a running claude is on is in its environment, which the server never reads.
-#                                  Off while lanes_file is unset (refused at the write). `sala_lane`, its former name,
-#                                  is still read on a stored item and taken on a write, stored as `lane`. A lane's old code and its current one
-#                                  are one lane in every comparison (_lane_name, lanes.code), as is
-#                                  any other lane's old code and its current one (sala's lane-names file lists the aliases); shown as the current code
-#   unit_active <unit>             the systemd user unit is loaded and active on the server box (one `systemctl --user show`)
-# When a check passes the server closes the item itself: outcome done, the reason naming the check, as the server's own act (no
-# page owed, like a wake or a release). The rule: a close nobody was told of is a wait that ended
-# unseen, so the keeper of the item's page is told in one line (a close with his own words on the item is a row on his For you list,
-# not a message to the mover); the sessions in its needs and the observers are not, so no session turn is spent checking. With the mirror on
-# the server's note goes to the History, and the items that waited on it (after) are released and told as any close releases them.
-# A check that passes while the item waits on the owner's decision (needs holds decision, so an ask is open) closes nothing: closing would
-# drop the ask he has not answered (a past defect). The item stays open, one note says the check is met and waits for the
-# decision (_check_wait, once per check: the pass's record items[gid]["met"] keeps it), and the first pass after the decision is cleared closes
-# the item as for any passed check. Every other needs (external, a session) closes as before.
-# The same rule makes the other end fail at once: a pr_merged whose pull request was closed without being merged can never pass,
-# so the wait is recorded as failed (metadata.wait_failed) and the keeper told at once (_check_fail). A check the server cannot read (GitHub down, a unit name not found, no lane
-# data) never closes: it is logged once per error and tried again each pass. The gate: an update that creates the hand-off is
-# refused unless the item carries a check or a wake (a front agent's hand-off is not asked for either, and its own wake or check on an item another
-# session moves is refused: gates.gate_sender_watch). A hand-off is a line of next in its form `<session>: <action>`: a session
-# other than the mover and the writer, one a page or the fleet knows, at the start of a line (after a list marker, "- " or
-# "1. ", at most), followed by a colon. A name anywhere else in next is not one: inside a page slug (projects/my-project), a
-# `#s=<name>` link or a sentence that mentions the session ("other-engineer merged it; verify") hands nothing over
-# (a review of the first cut: the plain-word match fired on all three). A write that leaves an
-# existing hand-off as it was is not asked again, and an item already in that state before this rule is never retro-refused. A
-# session named in needs alone is not a gated hand-off: it is asked about the item at each of its turn ends and told to close it
-# or hand it back (tell_needed). A check alone is a filing edit: no page owed, the state clock unmoved. The pass's own state
-# (the last error per item, the GitHub answers and backoff) lives in <state>/checks.json, out of the store, so a pass that
-# reads touches no item file.
-_CHECK_FORMS = ("pr_merged <owner>/<repo>#<n> (or the PR's URL)", "item_closed <item id>", "lane <session> <lane>",
-                "unit_active <unit>.service (a systemd user unit on the server box; .timer, .socket, .path, .target, .mount too)")
-_CHECK_HOW = "one of: " + " | ".join(_CHECK_FORMS) + "; check=\"none\" clears it"
-_PR_RX = re.compile(r"^(?:https?://github\.com/)?([\w.-]+)/([\w.-]+?)(?:/pull/|#)(\d+)/?$")   # an owner or repo of dots alone (., ..) is refused after the match
-_PANE_RX = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
-_LANE_RX = re.compile(r"^(?=.{1,20}$)[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")   # one lowercase word, hyphens inside allowed (aws-platform)
-# A lane may be renamed on the fleet tool's side, so either word may be in lanes.tsv, lane-default, limit.json, lane-signin.state or a stored check.
-# Every comparison and every shown name goes through _lane_name: the two words are one lane, in both directions. Stored data is never rewritten.
-# The words are lanes.py's: the fleet tool's lane-names file (a lane's aliases) over a fixed floor of old codes; stackshot never spells a lane's plan name, its display name comes from the file (lanes.display_name).
-
-
-def _lane_name(lane: Any) -> str:
-    """A lane name as stackshot compares and shows it: the current code of the lane a word names (an old code or alias reads as the current one), else the name as it is."""
-    return _lanes.code(lane)
-
-
-def _lane_codes_hint() -> str:
-    """`; the tool's lanes: a, b (Name)` with the lane codes (and display names) the fleet tool's lane-names file lists, for a refusal. With no file (or none listed)
-    `; lanes such as a, b`: the floor's codes and the plain ones (lanes.FALLBACK_CODES), so the refusal always names valid lanes."""
-    cs = _lanes.codes()
-    if cs:
-        return "; the tool's lanes: " + ", ".join(_lanes.shown(c) for c in cs)
-    return "; lanes such as " + ", ".join(_lanes.FALLBACK_CODES)
-
-
-def _check_changed(new: Any, old: Any) -> bool:
-    """A write changed an item's check: the two stored strings differ once each lane word is read by its code (a re-sent old word over a stored one is no change)."""
-    return _check_lane_shown(new or "") != _check_lane_shown(old or "")
-
-
-def _check_lane_shown(check: str) -> str:
-    """A stored lane check with its lane name in the current word (an old code in `lane box-a <old>` reads as the current one); any
-    other text as it is."""
-    parts = str(check or "").split(" ")
-    if len(parts) == 3 and parts[0] in ("lane", "sala_lane"):
-        parts[2] = _lane_name(parts[2])
-    return " ".join(parts)
-# A unit name starts with a letter or a digit: one starting with "-" would read as an option to systemctl (-Hhost.service reaches
-# another host), and the argv puts "--" before it besides (the review of the first cut).
-_UNIT_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_.\\@-]{0,199}\.(?:service|timer|socket|path|target|mount|slice|scope)$")
-_CHECK_EVERY = 60.0            # seconds between passes; the runner calls it every 60 s
-_CHECK_GH_BACKOFF_MAX = 3600.0  # while GitHub is down: the wait doubles from [check] github_minutes up to this
-_CHECK_LAST = [0.0]
-_CHECK_LOGGED: dict[str, str] = {}   # gid → the error last logged for it: one stderr line per new error, not one per pass
-_CHECK_GH: dict[str, Any] = {}       # "<api> <owner/repo>" → the ghsync client that reads that repo's pull requests
-
-
-def _parse_check(text: str, gid: str = "") -> str:
-    """A done check as a session writes it → its stored form (the kind, then its argument, normalised); refused, with the valid
-    forms, when it is none of them. `gid` = the item it is written on (item_closed may not name the item itself)."""
-    s = " ".join(str(text or "").split())
-    kind, _, arg = s.partition(" ")
-    kind = kind.lower()
-    bad = lambda why: ToolError(f"Refused: check {text!r}: {why}. check is {_CHECK_HOW}")
-    if kind == "pr_merged":
-        m = _PR_RX.match(arg)
-        if not m or not m.group(1).strip(".") or not m.group(2).strip("."):   # ./x, ../.., a/..: not a repo, a path
-            raise bad("pr_merged names the pull request as <owner>/<repo>#<n> or by its URL")
-        return f"pr_merged {m.group(1)}/{m.group(2)}#{m.group(3)}"
-    if kind == "item_closed":
-        try:
-            g = _norm_id(arg)
-        except ToolError:
-            raise bad("item_closed names a board item by its id (or <letter><n> for an older item)")
-        if not _path(g).exists():
-            raise bad(f"item_closed names {_gh.shown(g)}, which does not exist")
-        if gid and g == gid:
-            raise bad("item_closed cannot name the item itself")
-        return f"item_closed {g}"
-    if kind in ("lane", "sala_lane"):        # sala_lane: the kind's former name, stored as lane
-        parts = arg.split()
-        if len(parts) != 2 or not _PANE_RX.match(parts[0]) or not _LANE_RX.match(parts[1]):
-            raise bad(f"lane takes a session name and a lane (a short lowercase word: a lane code, or an old word of one{_lane_codes_hint()})")
-        if _lanes_file() is None:
-            raise bad("lane needs a lane record, and none is configured ([client] lanes_file is empty), so it could never pass")
-        return f"lane {parts[0]} {_lane_name(parts[1])}"
-    if kind == "unit_active":
-        if not arg or " " in arg or not _UNIT_RX.match(arg):
-            raise bad("unit_active takes one systemd user unit name with its type suffix (stackshot.service, backup.timer)")
-        return f"unit_active {arg}"
-    raise bad("not a check the server knows")
-
-
-def _check_label(check: str) -> str:
-    """A stored check as a session reads it: an item_closed's id as shown (never the store id)."""
-    kind, _, arg = str(check or "").partition(" ")
-    return f"item_closed {_gh.shown(arg)}" if kind == "item_closed" and arg else _check_lane_shown(check)
-
-
-def _unit_run(argv: list[str]) -> str:
-    """Run `argv` (systemctl's), its stdout: no shell. Replaced by a test with a stub that records the argv."""
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=20)
-    return r.stdout
-
-
-def _unit_show(unit: str) -> str:
-    """`systemctl --user show -p LoadState -p ActiveState -- <unit>`, its stdout: the unit name an argument the gate has matched
-    against _UNIT_RX (a letter or digit first), behind `--` so that systemctl never reads it as an option."""
-    return _unit_run(["systemctl", "--user", "show", "-p", "LoadState", "-p", "ActiveState", "--", unit])
-
-
-def _unit_active(unit: str) -> tuple[bool, str]:
-    """→ (the unit is loaded and active, the error): a unit systemd does not know (LoadState not-found) or an answer with no
-    state is an error, never a fail, so a mistyped or removed unit never closes an item."""
-    try:
-        out = str(_unit_show(unit) or "")
-    except (OSError, subprocess.SubprocessError) as e:
-        return False, f"systemctl did not answer: {e}"
-    kv = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
-    load, active = kv.get("LoadState", "").strip(), kv.get("ActiveState", "").strip()
-    if not load or not active:
-        return False, f"systemctl gave no state for {unit}"
-    if load != "loaded":
-        return False, f"unit {unit} is {load}"
-    return active == "active", ""
-
-
-def _lanes_file() -> Path | None:
-    """[client] lanes_file, read at use (a reload is live): the fleet tool's lane record, one row per session, `<session>\\t<lane>`;
-    None when unset or empty (no lane data: the lane check is off)."""
-    v = str(_cfg.get("client", "lanes_file") or "").strip()
-    return Path(os.path.expanduser(v)) if v else None
-
-
-def _lane_record(pane: str) -> tuple[str, str]:
-    """→ (the lane the fleet tool's record puts `pane` on, the error). The record, as the tool reads it (the stackshot–sala
-    contracts): the session's row in lanes_file, else the first line of lane-default beside it, else lanes.DEFAULT_CODE. No lanes_file at all
-    is an error (the path may be wrong, and a pass that cannot read never closes); no lane-default is the tool's own fallback."""
-    p = _lanes_file()
-    if p is None:
-        return "", "no lane data: [client] lanes_file is empty"
-    try:
-        rows = p.read_text(encoding="utf-8").splitlines()
-    except OSError as e:
-        return "", f"lane data not readable: {p} ({e.strerror or e})"
-    rec = ""
-    for ln in rows:
-        parts = ln.rstrip("\r").split("\t")
-        if len(parts) >= 2 and parts[0] == pane:
-            rec = parts[1].strip(); break
-    if not rec:
-        try:
-            rec = (p.with_name("lane-default").read_text(encoding="utf-8").splitlines() or [""])[0].strip()
-        except OSError:
-            rec = ""
-        rec = rec or _lanes.DEFAULT_CODE
-    return _lane_name(rec), ""
-
-
-def _lane(pane: str, lane: str) -> tuple[bool, str]:
-    """→ (the lane record puts `pane` on `lane`, the error): _lane_record against the lane asked."""
-    rec, err = _lane_record(pane)
-    return (False, err) if err else (rec == _lane_name(lane), "")
-
-
-def _check_gh_every() -> float:
-    """[check] github_minutes, in seconds: how often one pull request is read at most (5 min when unset; 0 = every pass)."""
-    v = _cfg.get("check", "github_minutes")
-    try:
-        return max(0.0, 60.0 * (5.0 if v is None or v == "" else float(v)))
-    except (TypeError, ValueError):
-        return 300.0
-
-
-def _check_gh(repo: str) -> Any:
-    """ghsync's client for the PR's repo (the mirror's own when it is that repo, else one of its own on the same token and
-    API base), kept for the process. Reads are not paced by the client; the pass's cadence is the pace."""
-    if _cfg.canon_name(repo) == _cfg.canon_name(_gh.repo()):
-        return _gh.client()       # not kept here: ghsync keeps it, keyed by the current [github] issues_repo and issues_repo_id
-    key = f"{_gh.api_url()} {repo}"
-    c = _CHECK_GH.get(key)
-    if c is None:
-        c = _CHECK_GH[key] = _gh.GitHub(repo, _gh.api_url(), shared=True)
-    return c
-
-
-def _check_ref(ref: str) -> str:
-    """A pr_merged check's argument "owner/repo#n" with its repo through [github.moved] (config.canon_name: a name the table does not know is
-    left exactly as written), the key its answer is kept under in checks.json. Read at each call."""
-    repo, sep, n = str(ref or "").partition("#")
-    return _cfg.canon_name(repo) + sep + n
-
-
-def _pr_merged(ref: str, now: float, gh_st: dict[str, Any]) -> tuple[bool, str]:
-    """→ (the PR `ref` (owner/repo#n) is merged, the error). One GET per PR every [check] github_minutes, its answer kept in the one shared record
-    store of pr_state.py (read by the done check, the step proof and the event wait alike) and in `gh_st` (the caller's own dict: checks.json, the
-    step proof's file, the event waits' memory) for the items that name the same PR and for the passes in between; GitHub down or rate-limited
-    backs off (doubling, at most an hour, or what GitHub asked for), a refusal (a PR that is not there, a token that cannot read the repo) is an
-    error tried again at the normal cadence. The reader itself is pr_state.merged."""
-    ref = _check_ref(ref)       # [github.moved]: the PR by its current name, so the old and the new name of one PR share one read and one kept answer
-    return _prs.merged(ref, now, gh_st, _check_gh, _check_gh_every(), _CHECK_GH_BACKOFF_MAX)
-
-
-def _check_dead(check: str, gh_st: dict[str, Any]) -> str:
-    """Why a check can no longer pass, "" while it can: a pr_merged whose pull request was closed without being merged. Read
-    from the answer _pr_merged kept for the PR (the same read, no second GET)."""
-    kind, _, arg = str(check or "").partition(" ")
-    arg = _check_ref(arg) if kind == "pr_merged" else arg
-    rec = gh_st.get(arg) if kind == "pr_merged" and isinstance(gh_st.get(arg), dict) else {}
-    return str(rec.get("dead") or "")
-
-
-def _check_eval(check: str, now: float, gh_st: dict[str, Any]) -> tuple[bool, str]:
-    """One stored check → (passed, error). An error is a condition the server could not read this pass; (False, "") is a check
-    that has not passed yet."""
-    kind, _, arg = str(check or "").partition(" ")
-    if kind == "item_closed":
-        try:
-            return _load(arg).get("status") == "completed", ""
-        except ToolError:
-            return False, f"no item {arg}"
-    if kind == "unit_active":
-        return _unit_active(arg)
-    if kind in ("lane", "sala_lane"):        # sala_lane: an item stored before the rename
-        parts = arg.split()
-        return _lane(parts[0], parts[1]) if len(parts) == 2 else (False, f"{kind} needs a session and a lane")
-    if kind == "pr_merged":
-        with _gb.tag("done_check"):
-            return _pr_merged(arg, now, gh_st)
-    return False, f"not a check the server knows: {kind}"
-
-
-def _checks_path() -> Path:
-    return _cfg.state("checks.json")
-
-
-def _checks_load() -> dict[str, Any]:
-    try:
-        d = json.load(open(_checks_path(), encoding="utf-8"))
-    except Exception:
-        d = {}
-    return {"items": d.get("items") if isinstance(d.get("items"), dict) else {}, "github": d.get("github") if isinstance(d.get("github"), dict) else {}}
-
-
-def _check_words(gid: str, item: dict[str, Any] | None = None) -> str:
-    """The item's check line's tail for get and the replies: what the pass found last."""
-    rec = _checks_load()["items"].get(gid) or {}
-    err = str(rec.get("err") or "")
-    cur = " ".join(str(((item or {}).get("metadata") or {}).get("check") or "").split())      # the note is true only of the check now on the item, while his decision is still open
-    met = f"; met, and waiting for {OWNER}'s decision before it closes the item" if item and rec.get("met") and rec.get("met") == cur and _rmod.needs_kind(item) == "call" else ""
-    return " (the server closes the item when it passes" + met + (f"; not readable at the last pass: {err}" if err else "") + ")"
-
-
-def _check_close(gid: str, it: dict[str, Any], check: str, now: float) -> None:
-    """Close `gid` on its check, the server's own act: outcome done, the reason naming the check, the live fields cleared as a
-    session's close clears them, the description as it stands (the reason says how it ended). No page owed; the History
-    and the after releases are the record. The owner's one rule: a close that nobody was told of is a wait that ended unseen, so the
-    item's mover is told (tell_check_closed); a close with his words on the item is a row on his For you list (_foryou_on_save)."""
-    _telling.CLOSE_WAS.item = json.loads(json.dumps(it))      # the close is told to the mover, which the close drops
-    meta = dict(it.get("metadata") or {})
-    _steps.close_meta(meta, "done", NAME, now)       # a close marks the open steps, the server's own close included
-    for k in ("next", "next_by", "owner_step", "ask", "needs", "options", "after", "hold", "hold_set", "wake", "recycle", "recycle_at", "idle", "check", "watch_reason", "waiting", "wait_failed", "wait_basis", *_states.DROP_ON_CLOSE, *_states.CLOSE_EXTRA, *_model.DROP_ON_CLOSE, *_watch.DROP_ON_CLOSE):
-        meta.pop(k, None)
-    label = _check_label(check)
-    meta["outcome"], meta["reason"] = "done", _fit(f"done check passed: {label}", _close_reason_max())     # kept to the reason limit a session's close is held to
-    it["status"] = "completed"; it["metadata"] = meta
-    it["updated"] = it["state_updated"] = it["confirmed"] = now
-    _writes.save(gid, it, activity=_activity.EVENT)      # no writer, no note: the History line is the change itself ("completed · done — done check passed: …"); the event the check waited for is activity
-    print(f"check: {gid} closed, {label} — {it.get('subject')}", file=sys.stderr, flush=True)
-    try:
-        _telling.tell_check_closed(gid, it, label)
-    except Exception as e:  # noqa: BLE001
-        print(f"check: {gid} closed but its keeper was not told: {e}", file=sys.stderr, flush=True)
-    _telling.CLOSE_WAS.item = None
-    try:
-        _wakes.release_after(gid, "done", "", "")
-    except Exception as e:  # noqa: BLE001
-        print(f"check: {gid} closed but its after releases failed: {e}", file=sys.stderr, flush=True)
-
-
-def _check_fail(gid: str, it: dict[str, Any], check: str, why: str, now: float) -> None:
-    """A done check that can no longer pass (a pr_merged whose pull request was closed unmerged, the owner's one rule) fails at once
-    instead of reading "not yet" for ever: the check goes, the failure is recorded on the item (metadata.wait_failed),
-    the item stays open and both clocks move, as a wait ending does. The server's own act:
-    no page owed, the History says it. The item's mover is told at once (tell_wait_failed)."""
-    meta = dict(it.get("metadata") or {})
-    meta.pop("check", None); meta.pop("idle", None); meta.pop("waiting", None); meta.pop("watch_reason", None)
-    label = _check_label(check)
-    meta["wait_failed"] = {"what": f"check {label}", "why": why, "at": now}
-    it["metadata"] = meta
-    it["updated"] = it["state_updated"] = now
-    _writes.save(gid, it, note=f"check failed: {label}: {why}; the item stays open")
-    print(f"check: {gid} failed, {label}: {why} — {it.get('subject')}", file=sys.stderr, flush=True)
-    _telling.tell_wait_failed(gid, it, f"check {label}", why)
-
-
-def _check_wait(gid: str, it: dict[str, Any], check: str) -> None:
-    """A done check that is met while the item waits on the owner's decision (needs holds decision) does not close it: closing would drop
-    the ask he has not answered. The item stays open, as it was (no clock moves, nothing cleared), and one line says the check is met and
-    waits for the decision: the server's own note and the History. The pass calls this once per check (its record,
-    items[gid]["met"], keeps the check text); the first pass after the decision is cleared closes the item as any passed check does."""
-    label = _check_label(check)
-    _writes.save(gid, it, note=f"done check met: {label}; the item needs {OWNER}'s decision, so it stays open and the server closes it once the decision is cleared", activity=_activity.EVENT)
-    print(f"check: {gid} met, {label}: waits for the decision before it closes — {it.get('subject')}", file=sys.stderr, flush=True)
-
-
-def _check_unchanged(gid: str, it: dict[str, Any]) -> dict[str, Any] | None:
-    """The item read again after its check passed → the fresh record when it is still open and as it was at the load (the store
-    keeps no revision counter: `updated` moves on every write, and the whole record is compared, which catches a re-key or a
-    write that left the clock alone too), else None. The check's call (a GET of up to 20 s) runs between the load and the
-    close; a session's write in that window (a new next, a cleared check, a close of its own) would be overwritten by the
-    loaded copy, so such a pass skips the item and the next pass reads it afresh (the review of the first cut)."""
-    try:
-        again = _load(gid)
-    except Exception:
-        return None
-    if again.get("status") != "open" or again.get("updated") != it.get("updated") or again != it:
-        return None
-    return again
-
-
-def _check_tick(now: float | None = None) -> list[str]:
-    """One pass over the open items' done checks (at most once a minute; the runner calls it every 60 s). → the gids closed."""
-    now = time.time() if now is None else now
-    if now - _CHECK_LAST[0] < _CHECK_EVERY:
-        return []
-    _CHECK_LAST[0] = now
-    st = _checks_load()
-    items: dict[str, Any] = {}
-    closed: list[str] = []
-    failed = 0
-    seen_refs: set[str] = set()
-    for gid, _p in _item_files():
-        try:
-            it = _load(gid)
-        except Exception:
-            continue
-        meta = it.get("metadata") or {}
-        check = " ".join(str(meta.get("check") or "").split())
-        if it.get("status") != "open" or not check:
-            continue
-        keep = {"met": check} if (st["items"].get(gid) or {}).get("met") == check else {}     # the waiting note was written for this check: a pass that cannot tell (an error, a race) keeps the record, only a clean "not met" resets it
-        try:
-            ok, err = _check_eval(check, now, st["github"])
-        except Exception as e:  # noqa: BLE001  — a check that raises is an error like any other: logged, tried again
-            ok, err = False, f"{type(e).__name__}: {e}"
-        if not err and ok and _rmod.needs_kind(it) == "call":     # met while his decision is open: the item waits (one line, once), and the check closes it on a later pass
-            fresh = _check_unchanged(gid, it)
-            if fresh is not None and _rmod.needs_kind(fresh) == "call":
-                if not keep:
-                    _check_wait(gid, fresh, check)
-                items[gid] = {"err": "", "at": now, "met": check}
-                _CHECK_LOGGED.pop(gid, None)
-            else:
-                print(f"check: {gid} changed while its check ran, left for the next pass", file=sys.stderr, flush=True)
-                if keep:
-                    items[gid] = {"err": "", "at": now, **keep}
-            if check.startswith("pr_merged "):
-                seen_refs.add(_check_ref(check[len("pr_merged "):]))
-            continue
-        if not err and ok:
-            fresh = _check_unchanged(gid, it)
-            if fresh is not None:
-                _check_close(gid, fresh, check, now)
-                closed.append(gid)
-                _CHECK_LOGGED.pop(gid, None)
-                continue
-            # written or closed while the check ran: this pass leaves it (its GitHub answer kept, no error recorded), the next reads it afresh
-            print(f"check: {gid} changed while its check ran, left for the next pass", file=sys.stderr, flush=True)
-            if check.startswith("pr_merged "):
-                seen_refs.add(_check_ref(check[len("pr_merged "):]))
-            continue
-        dead = "" if (err or ok) else _check_dead(check, st["github"])     # The owner's one rule: a check that can never pass fails now, never "not yet" for ever
-        if dead:
-            fresh = _check_unchanged(gid, it)
-            if fresh is not None:
-                _check_fail(gid, fresh, check, dead, now)
-                failed += 1
-                _CHECK_LOGGED.pop(gid, None)
-                continue
-            print(f"check: {gid} changed while its check ran, left for the next pass", file=sys.stderr, flush=True)
-            seen_refs.add(_check_ref(check[len("pr_merged "):]))
-            continue
-        if check.startswith("pr_merged "):   # the PR's answer is kept while an item still open names it
-            seen_refs.add(_check_ref(check[len("pr_merged "):]))
-        if err and _CHECK_LOGGED.get(gid) != err:
-            _CHECK_LOGGED[gid] = err
-            print(f"check: {gid} {check}: not readable, tried again next pass: {err}", file=sys.stderr, flush=True)
-        elif not err:
-            _CHECK_LOGGED.pop(gid, None)
-        items[gid] = {"err": err, "at": now, **(keep if err else {})}
-    st["items"] = items
-    st["github"] = {k: v for k, v in st["github"].items() if k in seen_refs}
-    try:
-        p = _checks_path(); p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps(st, indent=1) + "\n", encoding="utf-8"); os.replace(tmp, p)
-    except Exception as e:
-        print(f"check: state not saved: {e}", file=sys.stderr, flush=True)
-    if closed or failed:
-        _publish()
-    return closed
 
 
 # ----------------------------------------------------------------------------- whose move it is
@@ -4161,7 +3731,7 @@ def _wait_end_sent_back(meta: dict[str, Any], kinds: "tuple[str, ...]") -> None:
 def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, Any]":
     """The ten-minute filing pass's fix of a wait a next line states in words (audit_run.wait_end_pass; server_fixes.WAIT_END; wait_end.py): the item is read again under the lock and the gap found again
     from its words (a line that changed, a wait the mover sent back, a decision on the owner, a held item: nothing is written), then the plan is set through the gates a write passes: `after`
-    (gates.gate_after), an event wait (_evwait_gate), an anchor wait (the link is added to the anchors scoped to the item, _anchor_wait_gate) or a step proof (_step_proof_set), a backstop day (the wake or ask_by it
+    (gates.gate_after), an event wait (_evwait_gate), an anchor wait (the link is added to the anchors scoped to the item, _anchor_wait_gate) or a step proof (proofs.step_proof_set), a backstop day (the wake or ask_by it
     has, else now plus [waiting] cap_days), and a History line (server_fixes.record). A waiting item takes its mover as post_wake_mover. The server's own save: no writer. A gate's refusal leaves the item as
     it was. Never closes an item and writes no ask. -> {"fixed": bool, "what": str, "why": str}."""
     tok, op = str(plan.get("token") or ""), str(plan.get("op") or "")
@@ -4241,7 +3811,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
             elif op == "proof":
                 if _we.line_hash(_steps.view(meta)[int(plan["pos"]) - 1]["text"]) != tok.rpartition("|")[2]:
                     return no("the step changed")
-                _step_proof_set(meta, _steps.view(meta), [{"step": int(plan["pos"]), "proof": str(plan["proof"])}])
+                _proofs.step_proof_set(meta, _steps.view(meta), [{"step": int(plan["pos"]), "proof": str(plan["proof"])}])
                 what = f"step {plan['pos']} proof {plan['proof']}"
             elif op == "backstop":
                 if not has_back:
@@ -4658,9 +4228,9 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         out.append("recycle: waits for a pane recycle" + (f" (since {_rmod.when_words(dt.datetime.fromtimestamp(float(at), ZONE))})" if isinstance(at, (int, float)) else ""))
     gid = str(item.get("gid") or "")
     if item.get("status") == "open" and m.get("check"):   # the done check: what closes it, and what the last pass found
-        out.append("check: " + _check_label(str(m["check"])) + _check_words(gid, item))
+        out.append("check: " + _checks.check_label(str(m["check"])) + _checks.check_words(gid, item))
     if item.get("status") == "open" and isinstance(m.get("step_proof"), dict) and m["step_proof"]:   # a step that names the event which ticks it (step_proof)
-        told_ = {str(x) for x in (m.get(_RELEASED_TOLD) or [])}
+        told_ = {str(x) for x in (m.get(_proofs.RELEASED_TOLD) or [])}
         sp_, dead_ = [], False
         for i, s_ in enumerate(_steps.view(m, keeper=str(m.get("owner") or "")), 1):
             if s_["status"] == _steps.OPEN and _steps.key(s_["text"]) in m["step_proof"]:
@@ -4859,8 +4429,8 @@ def _late(name: str) -> Callable[..., Any]:
 _telling.install(_telling.Hooks(
     back_agent=_late("_back_agent"),
     builder_for=_late("_builder_for"),
-    check_changed=_late("_check_changed"),
-    check_lane_shown=_late("_check_lane_shown"),
+    check_changed=lambda *a, **k: _checks.check_changed(*a, **k),
+    check_lane_shown=lambda *a, **k: _checks.check_lane_shown(*a, **k),
     debt_mover=_late("_debt_mover"),
     foryou_failed=lambda: _FORYOU_FAILED,
     foryou_key=_late("_foryou_key"),
@@ -4891,8 +4461,6 @@ _telling.install(_telling.Hooks(
 # that holds it moves under service/ (the wake, anchor and event wait ticks are service/wakes.py's and service/event_waits.py's, imported by the table).
 _runner.install(_runner.Hooks(
     phase_tick=_late("_phase_tick"),
-    check_tick=_late("_check_tick"),
-    proof_tick=_late("_proof_tick"),
     balance_tick=_late("_balance_tick"),
     answer_tick=_late("_answer_tick"),
     roles_sync_safe=_late("_roles_sync_safe"),
@@ -4913,27 +4481,18 @@ _runner.install(_runner.Hooks(
 # proof and release readers, the renderer's answers, the publish and the time zone. A hook leaves this table when the area that holds it moves under service/.
 _wake_hooks.install(_wake_hooks.Hooks(
     after_open=_late("_after_open"),
-    check_ref=_late("_check_ref"),
     event_activity_tick=_late("_event_activity_tick"),
     follow_superseded=_late("_follow_superseded"),
-    foreign_prs=_late("_foreign_prs"),
     hand_stored_then=_late("_hand_stored_then"),
     hold_flag=_late("_hold_flag"),
     is_held=_late("_is_held"),
     item_mover_model=_late("_item_mover_model"),
     load_or_none=_late("_load_or_none"),
     merge_progress_tick=_late("_merge_progress_tick"),
-    merged_prs=_late("_merged_prs"),
     model_of=_late("_model_of"),
     old_wait_off=_late("_old_wait_off"),
     own_repo=_late("_own_repo"),
-    pr_merged=_late("_pr_merged"),
-    pr_shown=_late("_pr_shown"),
-    proof_git=_late("_proof_git"),
     publish=_late("_publish"),
-    released_foreign=_late("_released_foreign"),
-    released_is_live=_late("_released_is_live"),
-    released_live_base=_late("_released_live_base"),
     rmod_confirmed_at=lambda *a, **k: _rmod.confirmed_at(*a, **k),
     rmod_needs_kind=lambda *a, **k: _rmod.needs_kind(*a, **k),
     rmod_options_of=lambda *a, **k: _rmod.options_of(*a, **k),
@@ -4941,7 +4500,6 @@ _wake_hooks.install(_wake_hooks.Hooks(
     rmod_whose=lambda: _rmod.WHOSE,
     session_id=_late("_session_id"),
     state_end=_late("_state_end"),
-    told_recent=_late("_told_recent"),
     zone=lambda: ZONE,
 ))
 
@@ -5014,6 +4572,29 @@ _stall_hooks.install(_stall_hooks.Hooks(
 ))
 
 
+# What the done check, the release settle and the step proofs still reach outside service/ (service/checks.py, service/released_live.py, service/released.py and service/proofs.py): this checkout's repository and
+# the pull-request key, the hold readers of the item model, the publish, the session ids and rosters, the write gates' field limits, the renderer's answer for whose move it is and the mark of a wait the server set
+# back. A hook leaves this table when the area that holds it moves under service/.
+_checks_hooks.install(_checks_hooks.Hooks(
+    close_reason_max=_late("_close_reason_max"),
+    date_parked=_late("_date_parked"),
+    fit=_late("_fit"),
+    hold_flag=_late("_hold_flag"),
+    is_held=_late("_is_held"),
+    own_repo=_late("_own_repo"),
+    pr_key=_late("_pr_key"),
+    pr_url=lambda: _PR_URL,
+    publish=_late("_publish"),
+    rmod_needs_kind=lambda *a, **k: _rmod.needs_kind(*a, **k),
+    role_name=_late("_role_name"),
+    same_sess=_late("_same_sess"),
+    session_down=_late("_session_down"),
+    session_id=_late("_session_id"),
+    session_roster=_late("_session_roster"),
+    wait_end_sent_back=_late("_wait_end_sent_back"),
+))
+
+
 # What a create still reaches on this module (service/create.py runs the create in its order): the gates and notices the update tool, the close and the telling share, the three thread-local flags
 # and two constants. A hook leaves this table when the area that holds it moves under service/.
 _create_svc.install(_create_svc.Hooks(
@@ -5049,7 +4630,6 @@ _create_svc.install(_create_svc.Hooks(
     options_note=_late("_options_note"),
     owed_mark=_late("_owed_mark"),
     owner_then_default=_late("_owner_then_default"),
-    parse_check=_late("_parse_check"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     project_subject_prefix=_late("_project_subject_prefix"),
     publish=_late("_publish"),
@@ -5058,7 +4638,6 @@ _create_svc.install(_create_svc.Hooks(
     said_note=_late("_said_note"),
     session_id=_late("_session_id"),
     similar_note=_late("_similar_note"),
-    step_proof_set=_late("_step_proof_set"),
     wait_alias_gate=_late("_wait_alias_gate"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     writer_owes=_late("_writer_owes"),
@@ -6256,7 +5835,7 @@ _gates.install(_gates.Hooks(
     front_pair_ok=_late("_front_pair_ok"),
     gate_description=_late("_gate_description"),
     handoffs_in=_late("_handoffs_in"),
-    handover_kind=_late("_handover_kind"),
+    handover_kind=lambda *a, **k: _proofs.handover_kind(*a, **k),
     hub_sessions=_late("_hub_sessions"),
     item_mover=_late("_item_mover"),
     main_agent=_late("_main_agent"),
@@ -6293,7 +5872,6 @@ _update_svc.install(_update_svc.Hooks(
     basis_words=_BASIS_WORDS,
     cap_ok_drop=_late("_cap_ok_drop"),
     cap_ok_put=_late("_cap_ok_put"),
-    check_how=_CHECK_HOW,
     contact_alive=_late("_contact_alive"),
     contact_fronts=_late("_contact_fronts"),
     contact_same=_late("_contact_same"),
@@ -6321,7 +5899,6 @@ _update_svc.install(_update_svc.Hooks(
     gate_recommend_stance=_late("_gate_recommend_stance"),
     gate_subject=_late("_gate_subject"),
     handoffs_in=_late("_handoffs_in"),
-    handover=_late("_handover"),
     hold_held_by=_late("_hold_held_by"),
     hold_set=_late("_hold_set"),
     is_held=_late("_is_held"),
@@ -6342,7 +5919,6 @@ _update_svc.install(_update_svc.Hooks(
     owner_state_mover=_late("_owner_state_mover"),
     owner_then_default=_late("_owner_then_default"),
     owner_want=_late("_owner_want"),
-    parse_check=_late("_parse_check"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     publish=_late("_publish"),
     record_fixes=_late("_record_fixes"),
@@ -6359,8 +5935,6 @@ _update_svc.install(_update_svc.Hooks(
     session_roster=_late("_session_roster"),
     state_apply=_late("_state_apply"),
     state_end=_late("_state_end"),
-    step_proof_prune=_late("_step_proof_prune"),
-    step_proof_set=_late("_step_proof_set"),
     store_ref=_late("_store_ref"),
     switchover_on=_late("_switchover_on"),
     update=_late("_update"),
@@ -7369,821 +6943,9 @@ def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
     return {"items": done, "pr": pr}
 
 
-# ----------------------------------------------------------------------------- a live PR settles the items built for it
-# release.sh's result notice is log-only, so an item's mover never hears that the PR it waited on went live, and an item seldom carries a
-# pr_merged check. So once main's full run passes on a released merge and release.sh records it as the last good commit, it calls
-# `client.py released --pr <url> --sha <merge>`, and the server settles the open items built for that PR. Which steps count, exactly:
-#   - only a release step: one whose words say it releases that PR, "release PR #N", "release #N", "release pull request #N", or "release <the PR's URL>";
-#   - and only on an item anchored to that PR, or one whose description or steps name the PR's URL ("release PR #N" on any other item may be another repository's #N).
-#   - never a negated one: "do not release PR #N yet", "don't release #N", "pre-release #N".
-# A release step is pure only when nothing follows the release phrase, or only a short parenthetical naming nothing to do ("(in its turn)", "(after #7)");
-# anything else after it ("and verify the pages", ", restart x", " - check prod", "(needs an ok)", "then …") is a follow-up (when unsure, it is one): the step is
-# not ticked, nothing closes, and the mover is told once.
-# A step that merely mentions the PR (investigate, review or verify PR #N, "the salamander PR #N", another repository's PR) is never ticked and never closes
-# the item. An item whose only open steps are this PR's release closes (outcome done, by the server, with no session turn); an item with any other open
-# step (a step after it, or another step naming the PR) gets the release step ticked and its mover one real notice ("PR #N is live; its step is ticked; the
-# item's other open steps remain"), stamped on the item so a rerun never sends a second; when every other open step is itself a pure release of another PR,
-# the step is ticked and nobody is told. Live means passed: the merge commit must be an ancestor of the last-good commit release.sh records ($LOGDIR/last-good) and of
-# the checkout's HEAD read at call time, so a rollback or a main run still going settles nothing. `client.py sweep-released` applies the same rule to
-# every PR merged into last-good. Held items, items whose needs name a decision or a session other than the mover, and closed ones are left alone.
-_RELEASED_MERGE = re.compile(r"^Merge pull request #(\d+) from ")
-_RELEASED_TOLD = "released_told"     # metadata: the PR keys ("owner/repo#n") this item's mover was told are live: a rerun tells nobody twice
-
-
-def _released_anchors() -> dict[str, set[str]]:
-    """{item id: the keys ("owner/repo#n") of the pull requests anchored to it}."""
-    out: dict[str, set[str]] = {}
-    for entries in _anc.load().values():
-        for e in entries:
-            k = _pr_key(str(e.get("url") or ""))
-            if k:
-                for g in e.get("items") or []:
-                    try:
-                        out.setdefault(_norm_id(g), set()).add(k)
-                    except ToolError:
-                        continue
-    return out
-
-
-def _git(*args: str, timeout: float = 30, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """git in this checkout, or in `cwd`: only a configured checkout ([released.repos]) is ever passed, never a path a client sent. Reads only."""
-    return subprocess.run(["git", "-C", str(cwd or _HERE), *args], capture_output=True, text=True, timeout=timeout)
-
-
-def _git_commit(ref: str, cwd: Path | None = None) -> str:
-    """`ref` as a full commit sha of this checkout (or of `cwd`), or "" when it is no sha or a commit that checkout does not know."""
-    if not re.fullmatch(r"[0-9a-f]{7,64}|HEAD", ref or ""):
-        return ""
-    try:
-        r = _git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=cwd)
-    except Exception:  # noqa: BLE001
-        return ""
-    return r.stdout.strip() if r.returncode == 0 else ""
-
-
-def _git_ancestor(a: str, b: str, cwd: Path | None = None) -> bool:
-    try:
-        return _git("merge-base", "--is-ancestor", a, b, cwd=cwd).returncode == 0
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _last_good() -> str:
-    """The last-good commit release.sh records once main's full run passed on it ($LOGDIR/last-good, LAST_GOOD in release.sh) as a full sha, or "" when none is recorded or readable."""
-    try:
-        return _git_commit(_cfg.state("releases", "last-good").read_text(encoding="utf-8").strip())
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _released_live_base() -> tuple[str, str]:
-    """(last-good, HEAD of the checkout read now), both full shas; raises ToolError when either cannot be read."""
-    good = _last_good()
-    if not good:
-        raise ToolError(f"Refused: no last-good commit is recorded ({_cfg.state('releases', 'last-good')}), so no merge can be read as passed and live; nothing written")
-    head = _git_commit("HEAD")
-    if not head:
-        raise ToolError("Refused: the checkout's HEAD cannot be read, so no merge can be read as live; nothing written")
-    return good, head
-
-
-def _released_is_live(sha: str, good: str, head: str) -> str:
-    """"" when merge commit `sha` is passed and live (an ancestor of last-good and of HEAD), else why not."""
-    if not _git_ancestor(sha, good):
-        return f"its merge {sha[:7]} is not in the last-good commit {good[:7]} yet (main's full run has not passed on it)"
-    if not _git_ancestor(sha, head):
-        return f"its merge {sha[:7]} is not in the live checkout {head[:7]} (rolled back)"
-    return ""
-
-
-def _released_foreign(repo: str) -> Path | None:
-    """The checkout [released.repos] names for another repository (through [github.moved]), None when it lists none for it."""
-    return _cfg.released_repos().get(_cfg.canon_repo(repo))
-
-
-def _released_foreign_why() -> str:
-    """The repositories [released.repos] lists, for the refusal of a pull request of an unlisted one."""
-    return ", ".join(sorted(_cfg.released_repos())) or "none is configured"
-
-
-def _foreign_live(repo: str, sha: str) -> str:
-    """"" when merge commit `sha` of a configured repository is live: an ancestor of its checkout's HEAD (read now, with a timeout); else why not."""
-    co = _released_foreign(repo)
-    head = _git_commit("HEAD", co) if co else ""
-    if not head:
-        return f"the checkout of {repo} cannot be read"
-    if not _git_ancestor(sha, head, co):
-        return f"its merge {sha[:7]} is not in the live checkout of {repo} ({head[:7]}) yet (not deployed, or rolled back)"
-    return ""
-
-
-def _foreign_prs(repo: str) -> tuple[str, dict[int, tuple[str, float]]]:
-    """(HEAD, {N: (merge sha, time)}) for a configured repository: the pull requests merged into its checkout's HEAD, kept by commit (_proof_git); ("", {}) when it is not listed or cannot be read.
-    A merge in HEAD's first-parent history is live by that fact."""
-    co = _released_foreign(repo)
-    head = _git_commit("HEAD", co) if co else ""
-    return (head, _proof_git(("fprs", str(co), head), lambda: _merged_prs(head, cwd=co))) if head else ("", {})
-
-
-def _merged_prs(head: str, limit: int = 3000, cwd: Path | None = None) -> dict[int, tuple[str, float]]:
-    """The pull requests merged into `head` (its first-parent merge commits "Merge pull request #N from …", the newest `limit`) → {N: (merge sha, commit time)}; {} when git cannot read it."""
-    if not re.fullmatch(r"[0-9a-f]{7,64}", head or ""):
-        return {}
-    try:
-        out = _git("log", "--first-parent", "--merges", f"-n{limit}", "--format=%H%x09%ct%x09%s", head, cwd=cwd).stdout
-    except Exception:  # noqa: BLE001
-        return {}
-    found: dict[int, tuple[str, float]] = {}
-    for ln in out.splitlines():
-        parts = ln.split("\t", 2)
-        m = _RELEASED_MERGE.match(parts[2]) if len(parts) == 3 else None
-        if m and int(m.group(1)) not in found:
-            found[int(m.group(1))] = (parts[0], float(parts[1] or 0))
-    return found
-
-
-def _released_skip(it: dict[str, Any], meta: dict[str, Any], mover: str) -> str:
-    """Why an item that names the release is left alone ("" when it is not): on hold, or its needs name a decision or a session other than its mover."""
-    if _is_held(it) or _hold_flag(it) or _date_parked(it):
-        return "on hold"
-    if _rmod.needs_kind(it) == "call":
-        return f"its needs name a decision: it waits on {OWNER}"
-    return _hv.skip_reason(meta, mover, lambda a, b: _same_sess(a, b) or _session_id(a) == _session_id(b), _session_label, OWNER)
-
-
-def _proof_ref(pr: str, own: str) -> str:
-    """The pull request a step's proof names, as written ("#4", "4", "owner/repo#4", a PR URL) → "owner/repo#n" (repo through [github.moved]); refused with the forms otherwise."""
-    s = str(pr or "").strip()
-    m = re.fullmatch(r"#?(\d+)", s)
-    if m:
-        if not own:
-            raise ToolError(f"Refused: step_proof {s!r} names no repository and this checkout has no GitHub origin remote: write <owner>/<repo>#<n> or the PR's URL")
-        return f"{own}#{int(m.group(1))}"
-    m = _PR_RX.match(s)
-    if not m or not m.group(1).strip(".") or not m.group(2).strip("."):
-        raise ToolError(f"Refused: step_proof {s!r} is not a pull request: write #<n> (this repository's), <owner>/<repo>#<n>, or the PR's URL")
-    return f"{_cfg.canon_repo(m.group(1) + '/' + m.group(2))}#{int(m.group(3))}"
-
-
-def _step_proof_set(meta: dict[str, Any], steps: list[dict[str, Any]], spec: Any) -> str:
-    """The `step_proof` parameter of create and update, written onto `meta` for the open steps of `steps` (the checklist as the call leaves it) → the reply lines. Each entry names an open step (its 1-based
-    position or the exact text of its first line) and its proof (step_proof.py); the proof is stored under the step's key and goes with the step. Refused, before anything is written: a step that is not
-    open or not found, his step (it is ticked by his answer), a proof that is not `pr_merged|pr_released <PR>`, a release of the PR of a repository that is neither this one nor in [released.repos]."""
-    try:
-        entries = _sp.parse_spec(spec)
-    except _sp.ProofError as e:
-        raise ToolError(f"Refused: {e}")
-    if entries is None:
-        return ""
-    own = _cfg.canon_repo(_own_repo())
-    cur = dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
-    if not entries:
-        meta.pop("step_proof", None)
-        return "\n(step_proof: cleared)" if cur else ""
-    note = ""
-    for ref, text in entries:
-        try:
-            ix = _steps.resolve(steps, [ref], "step_proof")
-            kind, pr = _sp.split_proof(text)
-        except (_steps.StepError, _sp.ProofError) as e:
-            raise ToolError(f"Refused: {e}")
-        for i in ix:
-            k = _steps.key(steps[i]["text"])
-            if kind == "none":
-                if cur.pop(k, None) is not None:
-                    note += f"\n(step {i + 1} proof: cleared)"
-                    _wait_end_sent_back(meta, (_we.PR, _we.DELIVERY))      # a proof the server set from the line's words, sent back
-                continue
-            if _steps.is_his(steps[i]["text"], unnamed_is_his=False):
-                raise ToolError(f"Refused: step {i + 1} is {OWNER}'s own step: it is ticked by his answer, never by an event, so it takes no proof")
-            key = _proof_ref(pr, own)
-            if kind == _sp.PR_RELEASED and key.rsplit("#", 1)[0] != own and _released_foreign(key.rsplit("#", 1)[0]) is None:
-                raise ToolError(f"Refused: step {i + 1}: pr_released is for this repository's pull requests ({own or 'no origin remote'}), which release.sh releases, and for a repository in [released.repos] ({_released_foreign_why()}); {key} is another repository's: use pr_merged")
-            cur[k] = _sp.stored(kind, key)
-            note += f"\n(step {i + 1} proof: {kind} {key}: the server ticks the step when it happens)"
-    if cur:
-        meta["step_proof"] = cur
-    else:
-        meta.pop("step_proof", None)
-    return note
-
-
-def _step_proof_prune(meta: dict[str, Any], steps: list[dict[str, Any]]) -> str:
-    """A proof goes with its step: the stored proofs of steps that are no longer open are dropped. → one reply line per proof dropped, saying why (its step is done, dropped, or no longer in the list: its text changed)."""
-    if not isinstance(meta.get("step_proof"), dict):
-        return ""
-    state = {_steps.key(s["text"]): s["status"] for s in steps}
-    kept = {k: v for k, v in meta["step_proof"].items() if state.get(k) == _steps.OPEN}
-    note = "".join(f"\n(step proof dropped: {_clip_line(str(k), 70)} ← {v}: " + ("its step text changed, so it is a different step now; give the new step its proof again if it still waits on that event" if k not in state else f"its step is {state[k]}") + ")"
-                   for k, v in meta["step_proof"].items() if k not in kept)
-    if kept:
-        meta["step_proof"] = kept
-    else:
-        meta.pop("step_proof", None)
-    return note
-
-
-def _step_proofs(meta: dict[str, Any]) -> dict[str, tuple[str, str]]:
-    """The explicit proofs stored on an item (`metadata.step_proof`) → {steps.key of the step: (kind, "owner/repo#n")}."""
-    raw = meta.get("step_proof")
-    return {str(k): _sp.read_stored(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
-
-
-def _proof_stamp(kind: str, key: str) -> str:
-    """What an item's `released_told` list holds for an event its mover was told of: the bare PR key for a release (as it always did), "merged <key>" for a merge."""
-    return key if kind == _sp.PR_RELEASED else f"merged {key}"
-
-
-def _proof_hits(cl: list[dict[str, Any]], opened: list[int], meta: dict[str, Any], kind: str, n: int, key: str, anchored: set[str], named: bool) -> dict[int, bool]:
-    """{index of an open step this event is the proof of: is the step a pure proof step (ticked on the event) or does it name more (the mover is told)?}
-    An explicit proof (`step_proof`) always counts and always ticks. A step's words count when the item is anchored to the PR or names its URL (a bare "#n" may be another
-    repository's), except a gate ("once #n is released ..."), which also counts on an item anchored to any pull request of that repository, since it says what the step waits on, not what it is."""
-    explicit = _step_proofs(meta)
-    repos = {k.rsplit("#", 1)[0] for k in anchored}
-    out: dict[int, bool] = {}
-    for i in opened:
-        if _steps.is_his(cl[i]["text"], unnamed_is_his=False):      # his own step is ticked by his answer, never by an event
-            continue
-        if explicit.get(_steps.key(cl[i]["text"])) == (kind, key):
-            out[i] = True
-            continue
-        h = _sp.hits(_sp.text_proofs(cl[i]["text"]), kind, n, key, _pr_key)
-        if not h or not (named or any(p.url for p in h) or (all(p.via == "gate" for p in h) and key.rsplit("#", 1)[0] in repos)):
-            continue
-        out[i] = all(p.pure for p in h)
-    return out
-
-
-def _proof_other(text: str, meta: dict[str, Any], kind: str, n: int, key: str) -> bool:
-    """Is this open step the pure proof step of some other pull request (explicit or in its words)? Then nothing is for the mover to do until that one's event."""
-    ek, ekey = _step_proofs(meta).get(_steps.key(text), ("", ""))
-    if ek and ekey != key:
-        return True
-    return _sp.other_pure(_sp.text_proofs(text), kind, n, key, _pr_key)
-
-
-def _pr_shown(key: str) -> str:
-    """A pull request as the notices name it: "PR #4" for this repository's, "PR owner/repo#4" for another's (a bare number would read as ours)."""
-    repo, _, n = str(key).rpartition("#")
-    return f"PR #{n}" if repo == _cfg.canon_repo(_own_repo()) or not repo else f"PR {key}"
-
-
-_PROOF_LOGGED: set[tuple[str, str, str]] = set()
-
-
-def _proof_log_once(gid: str, key: str, why: str, line: str = "") -> None:
-    """The pass's "left alone" line, once per item, pull request and reason (a held item would otherwise log it every two minutes)."""
-    if (gid, key, why) in _PROOF_LOGGED:
-        return
-    if len(_PROOF_LOGGED) > 4000:
-        _PROOF_LOGGED.clear()
-    _PROOF_LOGGED.add((gid, key, why))
-    print(line or f"released: {gid} left alone for {_pr_shown(key)}: {why}", file=sys.stderr, flush=True)
-
-
-_PROOF_TOLD_SID: dict[str, tuple[str, float]] = {}      # gid → (the session id a step notice went to, when): for one notice per session when an event wait ends on the same release (the release path and the catch-up read it)
-_PROOF_TOLD_FOR = 300.0                  # a step notice is "the same event's" for this long
-
-
-def _told_recent(now: float | None = None) -> dict[str, str]:
-    """{gid: session id} of the step notices sent in the last _PROOF_TOLD_FOR seconds (_proof_item); older ones are dropped."""
-    now = time.time() if now is None else now
-    for g in [g for g, (_sid, at) in _PROOF_TOLD_SID.items() if now - at > _PROOF_TOLD_FOR]:
-        _PROOF_TOLD_SID.pop(g, None)
-    return {g: sid for g, (sid, _at) in _PROOF_TOLD_SID.items()}
-
-
-def _handover_kind(name: str) -> str:
-    """What a step's opener is, for handover.decide: the owner, a front agent or a retired session or a page's keeper (never moved to by this rule), a session of the fleet (a page lists it, or the fleet knows the name), else no session."""
-    if _model.is_owner(name):
-        return _hv.OWNER
-    try:
-        roles = _anc.session_roles()
-        r = roles.get(_role_name(roles, name)) or {}
-        if r:
-            return _hv.FRONT if r.get("retired") or r.get("role") in ("front", _anc.NAME_ROLE) else _hv.SESSION
-        return _hv.SESSION if name in _session_roster() or _session_label(name) in _session_roster() else _hv.OTHER
-    except Exception:  # noqa: BLE001  — a role map that cannot be read names no session to move to
-        return _hv.OTHER
-
-
-def _handover_down(name: str) -> str:
-    """Why this session cannot take an item now ("" when it can): no pane, a retired one, no heartbeat, or a last turn that ended in an error."""
-    try:
-        return _handoff.handoff_pane(name) or _session_down(name, _anc.names(), _sessions_index())
-    except Exception as e:  # noqa: BLE001
-        return f"its pane could not be read ({e.__class__.__name__})"
-
-
-def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[str, Any] | None:
-    """A step of the item is done (ticked by its proof, or marked by hand) and the item is still open: when the next open step opens with another session, the item's mover becomes that session and it is told, with the step's text
-    (handover.py has the rules). That session down or unknown: the item stays with its mover, who is told the step and why. The owner, a front agent and a name that is no session: nothing moves. Idempotent by the record
-    `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. Takes the item lock itself. → the row {action: moved | fallback | left | none, to, step, why, told}, None when the item is closed."""
-    with _writes.ITEM_LOCK:
-        it = _load(gid)
-        if it.get("status") != "open":
-            return None
-        meta = dict(it.get("metadata") or {})
-        mover = _telling.holder(it)
-        row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "action": "none", "to": "", "step": "", "why": "", "told": ""}
-        if (why := _released_skip(it, meta, mover)):
-            return {**row, "action": "left", "why": why}
-        plan = _hv.decide(meta, str(meta.get("owner") or ""), mover, _handover_kind, _handover_down, _handoff.ho_same)
-        step = _clip_line(_steps.first_line(plan["step"]), 140)
-        row.update(to=plan["to"], step=step, why=plan["why"])
-        if plan["action"] == "none" or dry:
-            return {**row, "action": plan["action"] if dry else "none"}
-        to, h = plan["to"], plan["hash"]
-        frm, project, subject = mover, str(meta.get("project") or ""), str(it.get("subject") or "")
-        did = "; ".join(_clip_line(x, 80) for x in done) or "a step"
-        if plan["action"] == "fallback":
-            _hv.mark(meta, h, _hv.FALLBACK, to, now, plan["why"])
-            it["metadata"] = meta
-            _writes.save(gid, it, note=f"step hand-over: the next step is {_session_label(to)}'s but it cannot take the item now ({_clip_line(plan['why'], 100)}), so the item stays with {_session_label(frm) or 'its mover'}: {step}")
-            row.update(action="fallback")
-            if frm and not _model.is_owner(frm) and not _telling.front_keeper(frm, project)[0]:
-                _telling.tell_woken(gid, _session_id(frm), f"[stackshot] {_gh.shown(gid)}: the next step is {_session_label(to)}'s ({step}), but {_session_label(to)} cannot take the item now ({_clip_line(plan['why'], 100)}), "
-                            f"so it stays with you. Do the step yourself, hand the item to another session, or reword the step. {subject} ({project}) → {_telling.notice_link(gid)}", tag="handoff")
-                row["told"] = _session_label(frm)
-            return row
-        keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (_handoff.ho_same(x, frm) or _handoff.ho_same(x, to))]
-        _needs_store(meta, _canon_needs([to, *keep]))
-        if meta.get("mover"):
-            meta["mover"] = to
-        _hv.mark(meta, h, _hv.MOVED, to, now)
-        it["metadata"] = meta
-        _writes.save(gid, it, note=f"step hand-over: {did} is done and the next step is {_session_label(to)}'s, so the item moved from {_session_label(frm) or 'its mover'} to {_session_label(to)}: {step}")
-        text = (f"[stackshot] {_gh.shown(gid)} is yours: {did} is done, and the next step is yours: {step}. {subject} ({project}). Do your part and close it or hand it back"
-                + (f" (sender={_session_label(frm)!r})" if frm else "") + f"; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
-        _telling.tell_woken(gid, _session_id(to) or to, text, tag="handoff")
-        _PROOF_TOLD_SID[gid] = (_session_id(to), now)
-        row.update(action="moved", told=_session_label(to))
-        return row
-
-
-def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: bool, now: float, kind: str = _sp.PR_RELEASED, dead: str = "") -> dict[str, Any] | None:
-    """Settle one open item for the event `kind` (pr_released: the pull request `key` (#`n`) is live; pr_merged: it is merged); `live` says when and at which commit. → the row for the reply,
-    or None when the item is not one this event settles (closed, no open step that names the PR as its proof). The step is ticked by the server when it is the proof's pure step (or its explicit
-    proof); when no open step is left the item closes; otherwise the mover gets one notice naming the next open step. Under the item lock (the caller's)."""
-    it = _load(gid)
-    meta = dict(it.get("metadata") or {})
-    if it.get("status") != "open":
-        return None
-    keeper = str(meta.get("owner") or "")
-    cl = _steps.view(meta, keeper=keeper)
-    named = key in _proof_named(it, cl, anchored)     # not anchored to the PR: it counts only when the item names the PR's URL
-    opened = [i for i, s in enumerate(cl) if s["status"] == _steps.OPEN]
-    hits = _proof_hits(cl, opened, meta, kind, n, key, anchored, named)
-    if not hits:
-        return None
-    word = _sp.WORD[kind]
-    ref = _pr_shown(key)
-    tests = " and main's tests passed" if kind == _sp.PR_RELEASED and key.rsplit("#", 1)[0] == _cfg.canon_repo(_own_repo()) else ""      # only this repository's release is gated on main's full run
-    mover = _telling.holder(it)
-    row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "mover": _session_label(mover) if mover else "", "kind": kind, "ref": ref}
-    why = _released_skip(it, meta, mover)
-    if why:
-        _proof_log_once(gid, key, why)
-        return {**row, "action": "left", "why": why}
-    step = _steps.first_line(cl[min(hits)]["text"])[:120]
-    told_before = [str(x) for x in (meta.get(_RELEASED_TOLD) or [])]
-    if dead:      # the proof can never arrive (its pull request was closed unmerged): nothing is ticked; the mover is told once, to fix the step
-        dstamp = f"dead {key}"
-        if dstamp in told_before:
-            return {**row, "action": "left", "why": f"its mover was told already that {ref} was closed without a merge", "dead": dead}
-        row.update(action="told", dead=dead, step=step)
-        if dry:
-            return row
-        meta[_RELEASED_TOLD] = [*told_before, dstamp][-20:]
-        it["metadata"] = meta
-        it["updated"] = now
-        _writes.save(gid, it, note=f"{NAME}: {ref} was closed without being merged, so the step \"{step}\" cannot be ticked by it" + ("" if mover else " (no mover to tell)"), activity=_activity.EVENT)
-        if mover:
-            _telling.tell_woken(gid, _session_id(mover), f"[stackshot] {_gh.shown(gid)}: {ref} was closed without being merged, so its step \"{step}\" will never be ticked by it. "
-                        f"Reword or drop the step, or give it another proof. {it.get('subject') or ''} → {_telling.notice_link(gid)}", tag="release")
-            row["told"] = _session_label(mover)
-        else:
-            row["told"] = ""
-            print(f"released: {gid} has no mover to tell that {ref} was closed without a merge", file=sys.stderr, flush=True)
-        return row
-    pure = [i for i, p in hits.items() if p]
-    rest = [i for i in opened if i not in pure]
-    if not rest:      # its only open steps are this event's proof: the item is done
-        reason = _fit(f"{ref} is live ({live}){tests}" if kind == _sp.PR_RELEASED else f"{ref} is merged ({live})", _close_reason_max())
-        row.update(action="closed", reason=reason, step=step)
-        if dry:
-            return row
-        _telling.CLOSE_WAS.item = json.loads(json.dumps(it))
-        try:
-            _steps.close_meta(meta, "done", NAME, now)       # the proof's step (and only it) is marked done by the server
-            for k in ("next", "next_by", "owner_step", "ask", "needs", "options", "after", "hold", "hold_set", "wake", "recycle", "recycle_at", "idle", "check", "watch_reason", "waiting", "wait_failed", "wait_basis", "step_proof", *_states.DROP_ON_CLOSE, *_states.CLOSE_EXTRA, *_model.DROP_ON_CLOSE, *_watch.DROP_ON_CLOSE):
-                meta.pop(k, None)
-            meta["outcome"], meta["reason"] = "done", reason
-            it["status"] = "completed"; it["metadata"] = meta
-            it["updated"] = it["state_updated"] = it["confirmed"] = now
-            _writes.save(gid, it, note=(f"closed by {NAME}: {ref} is live{tests}, and its only open step was that release" if kind == _sp.PR_RELEASED
-                                 else f"closed by {NAME}: {ref} is merged, and its only open step was waiting on that merge"), activity=_activity.EVENT)   # the server's act: no session turn, no page owed; the anchor's event is activity
-        finally:
-            _telling.CLOSE_WAS.item = None
-        print(f"released: {gid} closed, {ref} is {word} — {it.get('subject')}", file=sys.stderr, flush=True)
-        try:
-            _wakes.release_after(gid, "done", "", "")
-        except Exception as e:  # noqa: BLE001
-            print(f"released: {gid} closed but its after releases failed: {e}", file=sys.stderr, flush=True)
-        return row
-    stamp = _proof_stamp(kind, key)
-    already = stamp in told_before
-    quiet = bool(pure) and all(_proof_other(cl[i]["text"], meta, kind, n, key) for i in rest)      # every other open step is itself the proof step of another PR: nothing for the mover to do yet
-    if already and not pure:
-        return {**row, "action": "left", "why": f"its mover was told already that {ref} is {word}"}
-    nxt = next((_steps.first_line(cl[i]["text"])[:140] for i in rest if i not in hits), "") or next((_steps.first_line(cl[i]["text"])[:140] for i in rest), "")
-    row.update(action="ticked" if pure else "told", quiet=quiet, step=step, ticked=[_steps.first_line(cl[i]["text"])[:120] for i in pure], next_step=nxt)
-    if dry:
-        return row
-    if pure:
-        for i in pure:
-            cl[i] = {**cl[i], "status": _steps.DONE, "by": NAME, "at": now}
-        _nl.prune(meta, [cl[i]["text"] for i in pure], keeper)
-        meta["steps"] = _steps.stored(cl)
-        _step_proof_prune(meta, cl)      # a proof whose step is no longer open goes
-    due = not already and not quiet      # a notice is owed; it is recorded as told even when the item has no holder to send it to, so a later pass does not owe it again
-    tell = bool(mover) and due
-    if due:
-        meta[_RELEASED_TOLD] = [*told_before, stamp][-20:]
-    if pure or due:
-        it["metadata"] = meta
-        it["updated"] = now
-        _writes.save(gid, it, note=(f"step done: {step} ({ref} is {word}{tests}; ticked by {NAME})" if pure
-                             else f"{NAME}: told its mover {ref} is {word}{tests}"), activity=_activity.EVENT)
-    note = (f"[stackshot] {_gh.shown(gid)}: {ref} is {word}; its step is " + ("ticked" if pure else "not ticked (it names a follow-up)") + "; the item's other open steps remain. "
-            + (f"Next step: {nxt}. " if nxt else "") + f"{it.get('subject') or ''} → {_telling.notice_link(gid)}")
-    if tell:
-        _telling.tell_woken(gid, _session_id(mover), note, tag="release")      # a real notice, not the log-only result: the mover's next step waits on it
-        row["told"] = _session_label(mover)
-        _PROOF_TOLD_SID[gid] = (_session_id(mover), now)
-    else:
-        row["told"] = ""
-        print(f"released: {gid} " + (f"ticked without telling its mover: every other open step waits on another PR" if quiet else f"mover was told already that {ref} is {word}" if already else f"has no mover to tell that {ref} is {word}"), file=sys.stderr, flush=True)
-    if pure and not quiet:      # the ticked step may leave another session's step next: that session is handed the item and told (handover.py)
-        try:
-            ho = _handover(gid, now, row["ticked"])
-        except Exception as e:  # noqa: BLE001  — the tick is saved: a hand-over that fails is a stderr line, and the audit finds the next session unreached
-            ho = None
-            print(f"released: {gid} hand-over not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        if ho and ho.get("action") in ("moved", "fallback"):
-            row["handover"] = {k: ho[k] for k in ("action", "to", "step", "why", "told")}
-    return row
-
-
-def _released_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: bool, now: float) -> dict[str, Any] | None:
-    """The release event of _proof_item (release.sh's call and the sweep): pull request `key` (#`n`) is live."""
-    return _proof_item(gid, n, key, live, anchored, dry, now, _sp.PR_RELEASED)
-
-
-def _released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
-    """`client.py released --pr <url> --sha <merge>`: release.sh saw main's full run pass on the merge of `pr` and recorded it as last-good. Refused, before
-    anything is written, unless `pr` is a pull request of this repository, `sha` is given and holds its merge, and that merge is in last-good and in HEAD
-    (read now). A pull request of a repository [released.repos] lists is live when its merge is an ancestor of that checkout's HEAD (`sha` optional: without it the merge is found in the
-    checkout's log). Then every open item built for it is settled (_released_item). → {"pr", "sha", "items": [rows]}."""
-    key = _pr_key(pr)
-    own = _cfg.canon_repo(_own_repo())
-    repo = key.rsplit("#", 1)[0] if key else ""
-    foreign = bool(key) and repo != own and _released_foreign(repo) is not None
-    if not key or (not foreign and (not own or repo != own)):
-        raise ToolError(f"Refused: --pr takes a pull request URL of this repository ({own or 'no origin remote'}) or of a repository in [released.repos] ({_released_foreign_why()}): https://github.com/<owner>/<repo>/pull/<n> — got {pr!r}")
-    n = int(key.rsplit("#", 1)[1])
-    shown = _pr_shown(key)
-    co = _released_foreign(repo) if foreign else None
-    if not str(sha or "").strip() and not foreign:
-        raise ToolError(f"Refused: PR #{n} has no merge commit given (--sha <merge commit>), so it cannot be read as merged and passed; nothing written")
-    if foreign:      # the merge is an ancestor of the checkout's HEAD; a sha the caller did not give is found in the checkout's own log
-        head = _git_commit("HEAD", co)
-        full = _git_commit(str(sha).strip(), co) if str(sha or "").strip() else head
-        if not full:
-            raise ToolError(f"Refused: " + (f"the merge commit {str(sha)[:40]!r} of {shown} is not a commit the checkout of {repo} knows" if str(sha or "").strip() else f"the checkout of {repo} cannot be read") + "; nothing written")
-    else:
-        full = _git_commit(str(sha).strip())
-        if not full:
-            raise ToolError(f"Refused: the merge commit {str(sha)[:40]!r} of PR #{n} is not a commit this checkout knows; nothing written")
-    merged = _merged_prs(full, limit=50 if str(sha or "").strip() else 3000, **({"cwd": co} if co else {}))
-    if n not in merged:
-        raise ToolError(f"Refused: {shown} is not merged: {full[:7]} holds no merge commit for it (\"Merge pull request #{n} from …\"); nothing written")
-    msha, mct = merged[n]
-    if foreign:
-        not_live = _foreign_live(repo, msha)
-        good = head
-    else:
-        good, head = _released_live_base()
-        not_live = _released_is_live(msha, good, head)
-    if not_live:
-        raise ToolError(f"Refused: {shown} is not {'passed and ' if not foreign else ''}live: {not_live}; nothing written")
-    now = time.time()
-    when = f"merged at {msha[:7]} on {_stallsvc.stall_when(mct)}, " + (f"in the checkout at {head[:7]}" if foreign else f"in the last-good commit {good[:7]}")
-    anchors = _released_anchors()
-    rows = []
-    with _writes.ITEM_LOCK:
-        for gid, _p in _item_files():
-            try:
-                r = _released_item(gid, n, key, when, anchors.get(gid, set()), dry, now)
-            except Exception as e:  # noqa: BLE001  — one item that cannot be read or written never stops the others
-                print(f"released: {gid} not settled for PR #{n}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-                continue
-            if r:
-                rows.append(r)
-    if not dry and any(r.get("action") in ("closed", "ticked", "told") for r in rows):
-        _publish()
-    if not dry:                    # an event wait on this release (or on its merge) is over: its mover hears it live (once: a session the step notice above told about the item is not told again)
-        recent = _told_recent()
-        told = {r["item"]: recent[r["item"]] for r in rows if r.get("told") and r.get("item") in recent}
-        _evwaits.evwait_hook(_ew.PR_RELEASED, repo, n, f"{shown} is live: {when}", told=told)
-        _evwaits.evwait_hook(_ew.PR_MERGED, repo, n, f"{shown} is merged and live: {when}", told=told)
-    return {"pr": pr, "sha": msha, "items": rows}
-
-
-def _sweep_released(dry: bool = False) -> dict[str, Any]:
-    """`client.py sweep-released [--dry-run]`: the same rule for every pull request whose merge is in the last-good commit and in HEAD (read now).
-    → {"head", "good", "items": [rows, each with "pr"]}; `dry` writes and tells nothing."""
-    own = _cfg.canon_repo(_own_repo())
-    if not own:
-        raise ToolError("Refused: this checkout has no GitHub origin remote, so no pull request can be read as live")
-    good, head = _released_live_base()
-    merged = {n: v for n, v in _merged_prs(good).items() if not _released_is_live(v[0], good, head)}
-    anchors = _released_anchors()
-    rx = re.compile(r"\brelease\s+(?:(?:PR|pull request)\s*)?#(\d+)(?!\d)|\brelease\s+(?:(?:PR|pull request)\s+)?(https?://github\.com/\S+)", re.I)
-    now = time.time()
-    rows = []
-    with _writes.ITEM_LOCK:
-        for gid, _p in _item_files():
-            try:
-                it = _load(gid)
-                if it.get("status") != "open":
-                    continue
-                meta = it.get("metadata") or {}
-                text = "\n".join(s["text"] for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN)
-                named = set()
-                for m in rx.finditer(text):
-                    if m.group(1):
-                        named.add(int(m.group(1)))
-                    elif (k := _pr_key(m.group(2))) and k.rsplit("#", 1)[0] == own:
-                        named.add(int(k.rsplit("#", 1)[1]))
-                for n in sorted(x for x in named if x in merged):
-                    sha, ct = merged[n]
-                    live = f"merged at {sha[:7]} on {_stallsvc.stall_when(ct)}, in the last-good commit {good[:7]}"
-                    r = _released_item(gid, n, f"{own}#{n}", live, anchors.get(gid, set()), dry, now)
-                    if r:
-                        rows.append({**r, "pr": n})
-                        if r.get("action") == "closed":
-                            break
-            except Exception as e:  # noqa: BLE001
-                print(f"sweep-released: {gid} not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if not dry and any(r.get("action") in ("closed", "ticked", "told") for r in rows):
-        _publish()
-    if not dry:                    # the catch-up of the event waits on a release: the same reading of the checkout
-        try:
-            _evwaits.evwait_poll()
-        except Exception as e:  # noqa: BLE001
-            print(f"sweep-released: event waits not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return {"head": head, "good": good, "items": rows}
-
-
-# ----------------------------------------------------------------------------- a step's proof arrives (the first step of the hand-over overhaul)
-# A step of next that names the event which completes it (step_proof.py) is ticked by the server when the event happens, not when a session remembers to: `pr_released` is a
-# release.sh call or the sweep below finding the merge in last-good and HEAD (the rule above), `pr_merged` is GitHub saying the pull request is merged (the done check's own
-# read, _pr_merged, plus git for this repository's merges the checkout already holds). The pass (_proof_tick, every [_PROOF_EVERY] seconds) and `client.py sweep-step-proof`
-# read the same facts and settle the same way (_proof_item): a pure proof step is ticked, the mover told once what the next open step is, the item closed when none is open.
-# A pull request closed without a merge never ticks anything. Reads (git, GitHub) come before the item lock, writes under it.
-_PROOF_EVERY = 120.0
-_PROOF_LAST = [0.0]
-_PROOF_GH_READS = 20            # new GitHub reads one pass makes at most; the rest wait for the next pass (a kept answer costs nothing)
-
-
-def _proof_state_path() -> Path:
-    return _cfg.state("step-proof.json")
-
-
-def _proof_state() -> dict[str, Any]:
-    try:
-        d = json.load(open(_proof_state_path(), encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        d = {}
-    return d if isinstance(d, dict) else {}
-
-
-def _proof_gh_load() -> dict[str, Any]:
-    d = _proof_state()
-    return d.get("github") if isinstance(d.get("github"), dict) else {}
-
-
-def _proof_state_save(**fields: Any) -> None:
-    """Merge `fields` into the pass's state file (the kept GitHub answers, the mark that the first dry pass was logged)."""
-    try:
-        p = _proof_state_path(); p.parent.mkdir(parents=True, exist_ok=True)
-        d = {**_proof_state(), **fields}
-        tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8"); os.replace(tmp, p)
-    except Exception as e:  # noqa: BLE001
-        print(f"step proof: state not saved: {e}", file=sys.stderr, flush=True)
-
-
-def _proof_gh_save(gh_st: dict[str, Any], seen: set[str]) -> None:
-    _proof_state_save(github={k: v for k, v in gh_st.items() if k in seen})
-
-
-def _proof_named(it: dict[str, Any], cl: list[dict[str, Any]], anchored: set[str]) -> set[str]:
-    """The pull requests an item names for a step's words to count: those anchored to it, and those whose URL its description or steps carry (a bare "#n" on any other item may be another repository's)."""
-    words = "\n".join([str(it.get("description") or ""), *(s["text"] for s in cl)])
-    return set(anchored) | {k for m in _PR_URL.finditer(words) if (k := _pr_key(m.group(0)))}
-
-
-def _proof_events(cl: list[dict[str, Any]], meta: dict[str, Any], own: str, named: set[str]) -> set[tuple[str, int, str]]:
-    """The events the open steps of an item wait on: {(kind, n, "owner/repo#n")}, from the explicit proofs and from the steps' words as `_proof_hits` will read them: a bare "#n" counts only for a pull
-    request the item names (`named`), a URL always, a gate also for a pull request of a repository the item is anchored to. His own steps wait on his answer, not on an event."""
-    out: set[tuple[str, int, str]] = set()
-    explicit = _step_proofs(meta)
-    repos = {k.rsplit("#", 1)[0] for k in named}
-    foreign = _cfg.released_repos()
-    for s in cl:
-        if s["status"] != _steps.OPEN or _steps.is_his(s["text"], unnamed_is_his=False):
-            continue
-        ek, ekey = explicit.get(_steps.key(s["text"]), ("", ""))
-        if ek and "#" in ekey:
-            out.add((ek, int(ekey.rsplit("#", 1)[1]), ekey))
-        for p in _sp.text_proofs(s["text"]):
-            ks = [f"{own}#{p.n}"] if p.n and own else [_pr_key(p.url)] if p.url else []
-            if p.n and p.kind == _sp.PR_RELEASED:      # a bare #n on an item anchored to that number in a [released.repos] repository is that repository's (as `released` reads it)
-                ks += [k for k in sorted(named) if k.endswith(f"#{p.n}") and k.rsplit("#", 1)[0] in foreign and k not in ks]
-            for k in ks:
-                if k and (p.url or k in named or (p.via == "gate" and k.rsplit("#", 1)[0] in repos)):
-                    out.add((p.kind, int(k.rsplit("#", 1)[1]), k))
-    return out
-
-
-_PROOF_GIT: dict[tuple, Any] = {}      # git answers by commit: {("prs", sha): the merges of that commit, ("live", good, head, merge sha): why not live}; a commit never changes, so a pass with the same commits costs no git call
-
-
-def _proof_git(key: tuple, make: Any) -> Any:
-    if key not in _PROOF_GIT:
-        if len(_PROOF_GIT) > 6000:
-            _PROOF_GIT.clear()
-        _PROOF_GIT[key] = make()
-    return _PROOF_GIT[key]
-
-
-def _proof_final(ref: str, *stores: dict[str, Any]) -> dict[str, Any]:
-    """A kept GitHub answer that can no longer change (merged, or closed without a merge), from the pass's own file or from the done checks' (checks.json): {} when there is none."""
-    for st in stores:
-        rec = st.get(ref) if isinstance(st.get(ref), dict) else {}
-        if rec.get("merged") or rec.get("dead"):
-            return rec
-    return {}
-
-
-def _sweep_proofs(dry: bool = False, only: set[str] | None = None, tick: bool = False, save: bool | None = None) -> dict[str, Any]:
-    """The pass and `client.py sweep-step-proof [--dry-run]`: every open item whose open step names an event that has already happened is settled (_proof_item). → {"head", "good", "items": [rows, each with
-    "pr" and "kind"]}. `dry` writes and tells nothing (it still reads git and GitHub; `save` says whether the GitHub answers are kept, by default when not `dry`). A pull request released is one whose merge is in
-    last-good and in HEAD (read now); one merged is in HEAD, or GitHub says so; one closed without a merge is told to the mover once and ticks nothing; one GitHub cannot read is left. The git facts are read
-    only for the pull requests some open step waits on, and kept by commit; the pass of the clock (`tick`) with nothing to wait on reads no git at all."""
-    own = _cfg.canon_repo(_own_repo())
-    anchors = _released_anchors()
-    todo: list[tuple[str, list[tuple[str, int, str]]]] = []
-    for gid, _p in _item_files():      # first what the open steps wait on: files only
-        if only is not None and gid not in only:
-            continue
-        try:
-            it = _load(gid)
-            if it.get("status") != "open":
-                continue
-            meta = it.get("metadata") or {}
-            cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))
-            ev = sorted(_proof_events(cl, meta, own, _proof_named(it, cl, anchors.get(gid, set()))))
-            if ev:
-                todo.append((gid, ev))
-        except Exception as e:  # noqa: BLE001
-            print(f"step proof: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if tick and not todo:
-        return {"head": "", "good": "", "items": []}
-    try:
-        good, head = _released_live_base()
-    except ToolError:
-        try:
-            good, head = "", _git_commit("HEAD")
-        except Exception:  # noqa: BLE001
-            good = head = ""
-    om = ""
-    if head and any(kind == _sp.PR_MERGED and key.rsplit("#", 1)[0] == own for _g, ev in todo for kind, _n, key in ev):
-        try:
-            om = _git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}").stdout.strip()      # merged: in the live checkout, or in origin/main as this checkout last fetched it
-        except Exception:  # noqa: BLE001
-            om = ""
-    gh_st = _proof_gh_load()
-    checks_gh = _checks_load()["github"]
-    now = time.time()
-    reads = [0]
-    seen: set[str] = set()
-    facts: dict[tuple[str, str], tuple[str, str]] = {}      # (kind, key) → ("yes", when) | ("dead", why) | ("no", "")
-
-    def prs(sha: str) -> dict[int, tuple[str, float]]:
-        return _proof_git(("prs", sha), lambda: _merged_prs(sha)) if sha else {}
-
-    def fact(kind: str, n: int, key: str) -> tuple[str, str]:
-        if (kind, key) in facts:
-            return facts[(kind, key)]
-        res = ("no", "")
-        repo = key.rsplit("#", 1)[0]
-        if kind == _sp.PR_RELEASED:
-            if repo == own and good and head and n in prs(good):
-                sha, ct = prs(good)[n]
-                if not _proof_git(("live", good, head, sha), lambda: _released_is_live(sha, good, head)):
-                    res = ("yes", f"merged at {sha[:7]} on {_stallsvc.stall_when(ct)}, in the last-good commit {good[:7]}")
-            elif repo != own and _released_foreign(repo) is not None:      # a [released.repos] repository: a merge in its checkout's HEAD is live
-                fhead, fprs = _foreign_prs(repo)
-                if n in fprs:
-                    res = ("yes", f"merged at {fprs[n][0][:7]} on {_stallsvc.stall_when(fprs[n][1])}, in the checkout at {fhead[:7]}")
-        elif repo == own and (n in prs(head) or (om and n in prs(om))):
-            sha, ct = prs(head).get(n) or prs(om)[n]
-            res = ("yes", f"merged at {sha[:7]} on {_stallsvc.stall_when(ct)}")
-        else:
-            ref = _check_ref(key)
-            seen.add(ref)
-            rec = _proof_final(ref, gh_st, checks_gh)
-            if rec:
-                res = ("yes", "merged on GitHub") if rec.get("merged") else ("dead", str(rec.get("dead") or "its pull request was closed without being merged"))
-            else:
-                fresh = _prs.fresh(ref, gh_st, now)       # a record of the pass's own file or the one shared with the done check and the event wait, still inside its pace
-                if fresh or reads[0] < _PROOF_GH_READS:
-                    reads[0] += 0 if fresh else 1
-                    try:
-                        with _gb.tag("step_proof"):
-                            ok, err = _pr_merged(key, now, gh_st)
-                    except Exception as e:  # noqa: BLE001
-                        ok, err = False, f"{type(e).__name__}: {e}"
-                    dead = _check_dead(f"pr_merged {key}", gh_st)
-                    res = ("yes", "merged on GitHub") if ok and not err else ("dead", dead) if dead else ("no", err)
-        facts[(kind, key)] = res
-        return res
-
-    for gid, ev in todo:      # the reads come first, outside the lock
-        for kind, n, key in ev:
-            fact(kind, n, key)
-    if save if save is not None else not dry:
-        _proof_gh_save(gh_st, seen)
-    rows: list[dict[str, Any]] = []
-    with _writes.ITEM_LOCK:
-        for gid, ev in todo:
-            for kind, n, key in ev:
-                state, why = facts.get((kind, key), ("no", ""))
-                if state == "no":
-                    continue
-                try:
-                    r = _proof_item(gid, n, key, why if state == "yes" else "", anchors.get(gid, set()), dry, now, kind, dead=why if state == "dead" else "")
-                except Exception as e:  # noqa: BLE001  — one item that cannot be read or written never stops the others
-                    print(f"step proof: {gid} not settled for PR #{n}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-                    continue
-                if r:
-                    rows.append({**r, "pr": n})
-                    if r.get("action") == "closed":
-                        break
-    if not dry and any(r.get("action") in ("closed", "ticked", "told") for r in rows):
-        _publish()
-    return {"head": head, "good": good, "items": rows}
-
-
-def _proof_live() -> bool:
-    """May the clock act? `[step_proof] live` says so outright (true or false); without it the pass acts once its first dry pass, which only logs what it would do, has been logged."""
-    sec = _cfg.get("step_proof")
-    if isinstance(sec, dict) and "live" in sec:
-        return bool(sec["live"])
-    return bool(_proof_state().get("dry_logged"))
-
-
-def _proof_tick(now: float | None = None) -> list[str]:
-    """The runner's clock for step proofs: at most every _PROOF_EVERY seconds, settle the items whose open step waits on an event that has happened. → the ids settled. Until it may act
-    (_proof_live) a pass is dry: it writes and tells nothing, and logs what it would do (once per item and event) and keeps it in `<state>/step-proof-dry.json`, so the first pass after a deploy
-    can be read before anything changes."""
-    now = time.time() if now is None else now
-    if now - _PROOF_LAST[0] < _PROOF_EVERY:
-        return []
-    _PROOF_LAST[0] = now
-    if _proof_live():
-        out = _sweep_proofs(tick=True)
-        return [r["item"] for r in out["items"] if r.get("action") in ("closed", "ticked", "told")]
-    out = _sweep_proofs(dry=True, tick=True, save=True)
-    for r in out["items"]:
-        what = f"would {r.get('action')} ({r.get('why') or r.get('reason') or r.get('step') or ''})"
-        _proof_log_once(r["item"], f"{r.get('kind')} {r.get('pr')}", what, f"step proof (dry pass): {r['item']} {r.get('ref') or ''}: {what}")
-    try:
-        p = _cfg.state("step-proof-dry.json"); p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"at": now, "head": out.get("head"), "good": out.get("good"), "items": out["items"]}, indent=1, default=str) + "\n", encoding="utf-8")
-    except Exception as e:  # noqa: BLE001
-        print(f"step proof: dry pass not kept: {e}", file=sys.stderr, flush=True)
-    sec = _cfg.get("step_proof")
-    if not (isinstance(sec, dict) and "live" in sec):
-        _proof_state_save(dry_logged=now)      # no switch set: this was the first dry pass, the next one acts
-    return []
-
-
 # ----------------------------------------------------------------------------- a merged pull request is progress for the item it is tied to
 # An item whose pull request merged has moved, whether or not the merge settles a step: a pull request that is one of several steps never wrote the "merged <ref>" entry of `released_told`
-# (that is the settle path's, `_proof_item`, and it also tells the mover), so the progress clock (model/progress.py) did not run for it and the item was handed up as not moving. The earliest
+# (that is the settle path's, `proofs.proof_item`, and it also tells the mover), so the progress clock (model/progress.py) did not run for it and the item was handed up as not moving. The earliest
 # reliable signal is the hub's merge log (anchors/merge_log.py): `Hub.emit` appends one line for every merge it sees, from the read it makes anyway, with the board ids the pull request's
 # body names; nothing here reads GitHub. A merge is tied to an item (model/merge_tie.py) by an anchor scoped to it (never a project-wide one), by its body naming the item, or by the item's own words
 # naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
@@ -8243,7 +7005,7 @@ class _TiedRows(list):
 def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, Any], str, dict[str, str]]]:
     """For each merge line the open items on the stall ladder it is tied to: [(line, "owner/repo#n", {item id: why})]. The items are read once for all lines; one that cannot be read is logged and left out.
     The anchors that cannot be read are logged and the other ties (the pull request's body, the item's own words) are still made; the answer's `problem` says so (`_TiedRows`)."""
-    scoped = _released_anchors()
+    scoped = _rlive.released_anchors()
     texts: dict[str, str] = {}
     projects: dict[str, str] = {}
     for gid, _p in _item_files():
@@ -8318,10 +7080,10 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
                     if key in seen:
                         continue
                     meta[_progress.SEEN] = [*seen, key][-_MERGE_PROG_KEEP:]
-                    what = f"{_pr_shown(key)} merged, and {_mtie.HOW[how]}: that is progress on the item"
+                    what = f"{_rlive.pr_shown(key)} merged, and {_mtie.HOW[how]}: that is progress on the item"
                     _stall.note(meta, now, what)      # the History line
                     it["metadata"] = meta
-                    it["updated"] = now      # as the event save of the settle path does (_proof_item)
+                    it["updated"] = now      # as the event save of the settle path does (proofs.proof_item)
                     _writes.save(gid, it, note=f"{NAME}: {what}", activity=_activity.EVENT)
                     if gid not in saved:
                         saved.append(gid)
@@ -9122,7 +7884,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             return 400, {"error": str(e)}
     if what == "released":      # release.sh: main's tests passed on a released merge, so the items built for that PR are settled (client.py released)
         try:
-            return 200, _released(str(body.get("pr") or ""), str(body.get("sha") or ""), bool(body.get("dry_run")))
+            return 200, _relsvc.released(str(body.get("pr") or ""), str(body.get("sha") or ""), bool(body.get("dry_run")))
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "event":         # a machine reports a fleet event an event wait may wait on: a recycle, a fleet op's end, a job's run (client.py event)
@@ -9134,12 +7896,12 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return 200, {"event": _ew.arrival(ev), "woken": [_gh.shown(g) for g in woken]}
     if what == "sweep-released":   # the same rule for the PRs the running server already holds (client.py sweep-released [--dry-run])
         try:
-            return 200, _sweep_released(bool(body.get("dry_run")))
+            return 200, _relsvc.sweep_released(bool(body.get("dry_run")))
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "sweep-step-proof":   # every open step whose proof (a PR merged or released) already happened is settled (client.py sweep-step-proof [--dry-run])
         try:
-            return 200, _sweep_proofs(bool(body.get("dry_run")))
+            return 200, _proofs.sweep_proofs(bool(body.get("dry_run")))
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "page-debt":      # the audit run's pages stage (audit_run.py): the page-debt pass for that run, made here because the debt ledger and the page writes are this process's

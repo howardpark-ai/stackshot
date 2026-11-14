@@ -3,9 +3,9 @@
 A step "release PR #4" is finished by one event: PR #4 going live. Before this, nothing tied the two, so the step sat open after the release and the item read
 "doing" while its only work was done. A proof is the tie. Two kinds, each an event the server can see for itself:
 
-    pr_merged <owner>/<repo>#<n>     the pull request is merged (GitHub says so; the done check's own read, `server._pr_merged`)
+    pr_merged <owner>/<repo>#<n>     the pull request is merged (GitHub says so; the done check's own read, `checks.pr_merged`)
     pr_released <owner>/<repo>#<n>   the pull request is merged AND live: its merge is in the last-good commit release.sh records and in the checkout's HEAD
-                                     (`server._released_is_live`); this repository's pull requests, and those of a repository [released.repos] lists (live when their merge is an ancestor of that
+                                     (`released_live.released_is_live`); this repository's pull requests, and those of a repository [released.repos] lists (live when their merge is an ancestor of that
                                      checkout's HEAD)
 
 Where a step's proof comes from, in the order the server looks:

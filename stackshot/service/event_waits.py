@@ -6,8 +6,8 @@ wait is a watched wait, so the stall pass does not run for it, and its backstop 
 of an item a machine anchor counts for when that machine checks in again, and turns nothing.
 
 The memory of the pull-request reads (`EVW_GH`, `EVW_SEEN`, `EVW_POLLED`, `EVW_LAST`) lives here and is read by the write gate that stays in server.py (it makes no GitHub call under the item lock, only reads what the
-early read stored). The phrases and what matches them are the domain's (waits/event_waits.py); the git and GitHub readers the poll shares with the release sweep and the done check are reached through `Hooks` in
-service/wake_hooks.py. Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
+early read stored). The phrases and what matches them are the domain's (waits/event_waits.py); the git and GitHub readers the poll shares with the release sweep and the done check are service/released_live.py and service/checks.py, and the record of what was told lately is service/proofs.py. What it still reaches in
+server.py comes through `Hooks` in service/wake_hooks.py. Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
 
 import datetime as dt
@@ -26,6 +26,9 @@ from stackshot.fleet import liveness as _lv
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model import steps as _steps
+from stackshot.service import checks as _checks
+from stackshot.service import proofs as _proofs
+from stackshot.service import released_live as _live
 from stackshot.service import stall as _stallsvc
 from stackshot.service import telling as _telling
 from stackshot.service import watching as _watching
@@ -43,19 +46,19 @@ from stackshot.waits import watchers as _watch
 _EVW_EVERY = 60.0                      # seconds between catch-up passes; the runner calls it every 60 s
 EVW_LAST = [0.0]
 EVW_SEEN: list[Any] = [None]          # ((last-good, HEAD), the PR numbers pr_released waits name) of the last catch-up pass that found nothing due
-EVW_GH: dict[str, Any] = {}           # _pr_merged's answers for the pull requests event waits name (in memory: a restart reads each once); the write gate's early read (a request thread) and the catch-up (the runner) both use it
+EVW_GH: dict[str, Any] = {}           # pr_merged's answers for the pull requests event waits name (in memory: a restart reads each once); the write gate's early read (a request thread) and the catch-up (the runner) both use it
 EVW_POLLED: set[str] = set()          # the keys the catch-up read on its last pass: only these are dropped when no wait names them any more (a key the early read just stored is not the catch-up's to drop)
 
 
 
 def evw_merge(good: str, n: int) -> tuple[str, float] | None:
-    """Pull request #n's merge commit in `good` (its first-parent merges, read once per commit: _proof_git) → (sha, commit time), None when `good` holds no merge of it."""
-    return _hooks().proof_git(("prs", good), lambda: _hooks().merged_prs(good)).get(n) if good else None
+    """Pull request #n's merge commit in `good` (its first-parent merges, read once per commit: proof_git) → (sha, commit time), None when `good` holds no merge of it."""
+    return _live.proof_git(("prs", good), lambda: _live.merged_prs(good)).get(n) if good else None
 
 
 def evw_live_why(sha: str, good: str, head: str) -> str:
-    """_released_is_live, kept by commit (_proof_git): "" when merge `sha` is passed and live."""
-    return _hooks().proof_git(("live", good, head, sha), lambda: _hooks().released_is_live(sha, good, head))
+    """released_is_live, kept by commit (proof_git): "" when merge `sha` is passed and live."""
+    return _live.proof_git(("live", good, head, sha), lambda: _live.released_is_live(sha, good, head))
 
 
 def evw_boxes() -> dict[str, tuple[str, dict[str, Any]]]:
@@ -83,7 +86,7 @@ def evwait_report(ev: dict[str, Any], now: float | None = None, told: dict[str, 
     """The server was told of (or read) an event: every open item whose stored wait is an event wait that this event ends turns to its post-wake mover, with what happened on it, and each recipient
     gets one message. A reported event (recycle, fleet op, job run) counts only when it is newer than the wait (the item's last move and `watch.set_at`: an older event is not its arrival); a pull
     request's merge or release is a state, so a wait set after it is refused at the write and one that was missed is caught up. Nothing while paused or switched off. `told` ({gid: session id}):
-    the items a release's step notice (_proof_item) already told about this event; the same session is not told again by the wake. → the gids turned."""
+    the items a release's step notice (proofs.proof_item) already told about this event; the same session is not told again by the wake. → the gids turned."""
     if not _watch.enabled() or _watch.paused():
         return []
     now = time.time() if now is None else now
@@ -180,7 +183,7 @@ def evwait_poll(now: float | None = None, told: dict[str, str] | None = None) ->
     if not _watch.enabled() or _watch.paused():
         return []
     now = time.time() if now is None else now
-    told = _hooks().told_recent() if told is None else told
+    told = _proofs.told_recent() if told is None else told
     turned: set[tuple[str, str]] = set()
     fired = evwait_box_poll(now, told, turned)
     machine_anchor_poll(now, turned)        # a notice only: no item turns, so nothing is added to the gids this returns
@@ -189,11 +192,11 @@ def evwait_poll(now: float | None = None, told: dict[str, str] | None = None) ->
 
 def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     """The catch-up for the pull-request events, which are states: an event wait on a PR's release or merge whose event happened while the server was down or was not told (the release hook is best
-    effort) turns now. pr_released reads the checkout (last-good and HEAD, as sweep-released does; a [released.repos] repository's checkout HEAD); pr_merged reads GitHub at the done check's pace (_pr_merged). → the gids turned."""
+    effort) turns now. pr_released reads the checkout (last-good and HEAD, as sweep-released does; a [released.repos] repository's checkout HEAD); pr_merged reads GitHub at the done check's pace (checks.pr_merged). → the gids turned."""
     if not _watch.enabled() or _watch.paused():
         return []
     now = time.time() if now is None else now
-    told = _hooks().told_recent() if told is None else told      # the sessions a step notice reached lately about an item: the wake does not tell them again
+    told = _proofs.told_recent() if told is None else told      # the sessions a step notice reached lately about an item: the wake does not tell them again
     waits: list[tuple[str, "_ew.Spec"]] = []
     for gid, _p in _item_files():
         try:
@@ -215,7 +218,7 @@ def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     named = frozenset(_ew.pr_number(sp) for _g, sp in waits if sp.kind == _ew.PR_RELEASED and sp.key.rpartition("#")[0] == own)
     if named:
         try:
-            rel = _hooks().released_live_base()
+            rel = _live.released_live_base()
         except ToolError:
             rel = None
     if rel is not None and (rel, named) == EVW_SEEN[0]:      # last-good, HEAD and the PRs waited for are as the last pass left them, and nothing was due then: the git answers are the same
@@ -228,26 +231,26 @@ def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
             n = _ew.pr_number(sp)
             repo = sp.key.rpartition("#")[0]
             if sp.kind == _ew.PR_RELEASED:
-                fhit = _hooks().foreign_prs(repo)[1].get(n) if repo != own and _hooks().released_foreign(repo) is not None else None      # a [released.repos] repository: a merge in its checkout's HEAD is live
+                fhit = _live.foreign_prs(repo)[1].get(n) if repo != own and _live.released_foreign(repo) is not None else None      # a [released.repos] repository: a merge in its checkout's HEAD is live
                 hit = fhit or (evw_merge(rel[0], n) if rel is not None and repo == own else None)
                 if fhit:
-                    fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, repo, n, f"{_hooks().pr_shown(sp.key)} is live: merged at {fhit[0][:7]} on {_stallsvc.stall_when(fhit[1])}, in the checkout"), now, told)
+                    fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, repo, n, f"{_live.pr_shown(sp.key)} is live: merged at {fhit[0][:7]} on {_stallsvc.stall_when(fhit[1])}, in the checkout"), now, told)
                 elif hit and not evw_live_why(hit[0], rel[0], rel[1]):
                     sha, ct = hit
                     EVW_SEEN[0] = None
                     fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, own, n, f"PR #{n} is live: merged at {sha[:7]} on {_stallsvc.stall_when(ct)} and passed main's full run"), now, told)
                 elif not hit:                      # not merged into last-good (yet): a pull request closed without a merge never will be
-                    seen.add(_hooks().check_ref(sp.key))
+                    seen.add(_checks.check_ref(sp.key))
                     with _gb.tag("event_wait"):
-                        _hooks().pr_merged(sp.key, now, EVW_GH)
-                    rec = EVW_GH.get(_hooks().check_ref(sp.key)) or {}
+                        _checks.pr_merged(sp.key, now, EVW_GH)
+                    rec = EVW_GH.get(_checks.check_ref(sp.key)) or {}
                     if rec.get("dead"):
                         fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, repo, n, f"{sp.key} {rec['dead']}, so it will never be released"), now, told)
                 continue
-            seen.add(_hooks().check_ref(sp.key))
+            seen.add(_checks.check_ref(sp.key))
             with _gb.tag("event_wait"):
-                merged, _err = _hooks().pr_merged(sp.key, now, EVW_GH)
-            rec = EVW_GH.get(_hooks().check_ref(sp.key)) or {}
+                merged, _err = _checks.pr_merged(sp.key, now, EVW_GH)
+            rec = EVW_GH.get(_checks.check_ref(sp.key)) or {}
             if merged:
                 fired += evwait_report(_evwait_pr_event(_ew.PR_MERGED, repo, n), now, told)
             elif rec.get("dead"):

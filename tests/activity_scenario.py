@@ -55,6 +55,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import create as create_svc
+from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import get as _wt_get
@@ -219,9 +220,9 @@ wakes_svc.release_after = lambda *a, **k: None
 for i in range(20, 36): item(i)
 t7 = time.time()
 # the done check's close and its "met, waits for the decision" save
-server._check_close("a20", server._load("a20"), "item_closed a2", t7)
+checks_svc.check_close("a20", server._load("a20"), "item_closed a2", t7)
 check("7 the done check's close moves the clock (an event the check waited for)", (act(20) or 0) >= t7 and rd(20)["status"] == "completed", act(20))
-server._check_wait("a21", server._load("a21"), "item_closed a2")
+checks_svc.check_wait("a21", server._load("a21"), "item_closed a2")
 check("7 the done check met while the item waits on a decision moves it", (act(21) or 0) >= t7, act(21))
 # the owner's comment on GitHub, stamped at the comment's own time
 def comment(i, ts, cid): return server._github_comment(f"a{i}", {"id": cid, "ts": ts, "text": "go ahead", "url": "https://example.test/c"})
