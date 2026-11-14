@@ -19,7 +19,7 @@ pass and was finally raised to the owner. An event wait is stored, watched by co
 import contextlib, datetime, io, json, os, re, sys, pathlib, time, logging
 BID_A = 9154
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _midnight
 tmp = _scratch.mkdtemp(prefix="eventwaittest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
@@ -35,6 +35,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "store/g", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 NAMES = ("home-owner", "home-stew", "team-back", "home-front", "home-other", "home-gone")
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1)}
+_midnight.wait_out("Asia/Dubai")      # a local midnight inside the run would move the "today" and "tomorrow" the checks read: start on the far side of one that is close
 now0 = time.time()
 DAY = 86400.0
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))

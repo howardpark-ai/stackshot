@@ -18,7 +18,7 @@ print no expected-by time and no `waiting:` line, and an old waiting.json is ign
     tests/run-suite waiting        → exit 0 / 1"""
 import asyncio, json, os, re, sys, pathlib, tempfile, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _midnight
 sys.path.insert(0, STACK)
 tmp = _scratch.mkdtemp(prefix="waitingtest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
@@ -34,6 +34,7 @@ toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); 
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(("home-owner", "home-stew", "team-back", "home-front", "home-other", "home-gone"), 1)}
+_midnight.wait_out("Asia/Dubai")      # a local midnight inside the run would move the "today" and "tomorrow" the checks read: start on the far side of one that is close
 now0 = time.time()
 DAY = 86400.0
 ZONE_OFFSET = 4 * 3600.0                             # the instance timezone (the config's `timezone` above): UTC+4, no DST
