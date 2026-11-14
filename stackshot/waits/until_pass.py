@@ -27,6 +27,7 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.model import ids as _ids
+from stackshot.model import migration as _mig
 from stackshot.waits import stall as _stall
 from stackshot.waits import until_write as _uw
 from stackshot.waits import waiting as _wt
@@ -265,7 +266,7 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
         return {**out, "action": "set", "why": "rewritten as until"}
     except Exception as e:  # noqa: BLE001  — one item that fails never stops the batch
         print(f"until pass: {gid} not rewritten: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return S._migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def _log_without(meta: dict[str, Any], history: str, dropped: list[dict[str, Any]]) -> Any:
@@ -288,25 +289,25 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
     """Put one item's wait keys back: `w` = {item, before, after} (the keys as they were, and as the pass left them; None = absent). Under the item lock, if the item holds `after` for every key it names it gets
     `before` (None drops the key) → `set`; if it already holds `before` → `same`; anything else (a later save changed a key) → `kept`, untouched. Running it again is a no-op."""
     if not isinstance(w, dict):
-        return S._migrate_refuse("?", "an entry is an object {item, before, after}")
+        return _mig.refuse("?", "an entry is an object {item, before, after}")
     try:
         gid = _ids._norm_id(str(w.get("item") or ""))
     except ToolError as e:
-        return S._migrate_refuse(str(w.get("item") or "?"), str(e))
+        return _mig.refuse(str(w.get("item") or "?"), str(e))
     shown = S._gh.shown(gid)
     extra = [k for k in w if k not in ENTRY_FIELDS]
     if extra:
-        return S._migrate_refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before, after, history and dropped only")
+        return _mig.refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before, after, history and dropped only")
     history, dropped = w.get("history") or "", w.get("dropped") or []
     if not isinstance(history, str) or not isinstance(dropped, list) or not all(isinstance(x, dict) for x in dropped):
-        return S._migrate_refuse(shown, "history is the line the pass added (text) and dropped a list of log lines")
+        return _mig.refuse(shown, "history is the line the pass added (text) and dropped a list of log lines")
     before, after = w.get("before"), w.get("after")
     for side in (before, after):
         why = entry_problem(side)
         if why:
-            return S._migrate_refuse(shown, why)
+            return _mig.refuse(shown, why)
     if set(before) != set(after):
-        return S._migrate_refuse(shown, "before and after name the same keys")
+        return _mig.refuse(shown, "before and after name the same keys")
     keys = list(before)
     try:
         with S._writes.ITEM_LOCK:
@@ -330,20 +331,20 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
         return {**out, "action": "set", "why": "the keys put back"}
     except Exception as e:  # noqa: BLE001
         print(f"until pass: {gid} not put back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return S._migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
-    """op until {items: [id, …], pass_id?, dry?} | ununtil {items: [{item, before, after}, …], pass_id?} (at most S._MIGRATE_BATCH): the until pass over the open items. No begin and no hold: each item is
+    """op until {items: [id, …], pass_id?, dry?} | ununtil {items: [{item, before, after}, …], pass_id?} (at most _mig.BATCH): the until pass over the open items. No begin and no hold: each item is
     worked out and written under its own lock (`one`). `dry` (until only) writes nothing and answers what each item would get. One publish at the end when anything was written. → {"op", "results": [...]}."""
     extra = [k for k in spec if k not in S._STAMP_BODY]
     if extra:
         raise ToolError(f"Refused: {op} takes op, sender, items, pass_id and dry only (got {', '.join(sorted(map(str, extra)))}): it rewrites the wait keys and nothing else")
     items = spec.get("items")
-    if not isinstance(items, list) or not items or len(items) > S._MIGRATE_BATCH:
-        raise ToolError(f"Refused: items is a list of 1 to {S._MIGRATE_BATCH} " + ("item ids" if op == "until" else "entries {item, before, after}"))
+    if not isinstance(items, list) or not items or len(items) > _mig.BATCH:
+        raise ToolError(f"Refused: items is a list of 1 to {_mig.BATCH} " + ("item ids" if op == "until" else "entries {item, before, after}"))
     pid = str(spec.get("pass_id") or "")
-    if pid and not S._PASS_ID_RX.fullmatch(pid):
+    if pid and not _mig.PASS_ID_RX.fullmatch(pid):
         raise ToolError("Refused: pass_id is <YYYYMMDD-HHMMSS>-<6 hex>")
     dry = bool(spec.get("dry"))
     if dry and op != "until":
@@ -356,7 +357,7 @@ def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         try:
             gid = _ids._norm_id(str(it or ""))
         except ToolError as e:
-            results.append(S._migrate_refuse(str(it or "?"), str(e)))
+            results.append(_mig.refuse(str(it or "?"), str(e)))
             continue
         results.append(one(S, gid, dry=dry))
     if any(r["action"] == "set" for r in results):

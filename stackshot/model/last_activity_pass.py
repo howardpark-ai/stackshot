@@ -35,6 +35,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.model import activity as _activity
 from stackshot.model import ids as _ids
+from stackshot.model import migration as _mig
 from stackshot.model import last_activity as _la
 
 KEY = _la.FIELD                       # the one key the pass writes
@@ -272,7 +273,7 @@ def one(S: Any, gid: str, dry: bool = False, tied: dict[str, list[dict[str, Any]
         return {**out, "action": "set", "why": "the record filled from the History"}
     except Exception as e:  # noqa: BLE001  — one item that fails never stops the batch
         print(f"last activity pass: {gid} not filled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return S._migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def entry_problem(side: Any) -> str:
@@ -287,22 +288,22 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
     """Put one item's record back: `w` = {item, before, after} (the value as it was, None = absent, and as the pass left it). Under the item lock, if the item holds `after` it gets `before` (None drops the key)
     → `set`; if it already holds `before` → `same`; anything else (the record moved on since: a later save or event wrote a newer one) → `kept`, untouched. A closed item is `kept`. Running it again is a no-op."""
     if not isinstance(w, dict):
-        return S._migrate_refuse("?", "an entry is an object {item, before, after}")
+        return _mig.refuse("?", "an entry is an object {item, before, after}")
     try:
         gid = _ids._norm_id(str(w.get("item") or ""))
     except ToolError as e:
-        return S._migrate_refuse(str(w.get("item") or "?"), str(e))
+        return _mig.refuse(str(w.get("item") or "?"), str(e))
     shown = S._gh.shown(gid)
     extra = [k for k in w if k not in ENTRY_FIELDS]
     if extra:
-        return S._migrate_refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before, after, history and dropped only")
+        return _mig.refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before, after, history and dropped only")
     before, after = w.get("before"), w.get("after")
     for side in (before, after):
         why = entry_problem(side)
         if why:
-            return S._migrate_refuse(shown, why)
+            return _mig.refuse(shown, why)
     if set(before) != set(after):
-        return S._migrate_refuse(shown, "before and after name the same keys")
+        return _mig.refuse(shown, "before and after name the same keys")
     try:
         with S._writes.ITEM_LOCK:
             p, data, raw, refusal = S._stamp_open(gid, shown, closed_ok=True)
@@ -322,20 +323,20 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
         return {**out, "action": "set", "why": "the record put back"}
     except Exception as e:  # noqa: BLE001
         print(f"last activity pass: {gid} not put back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return S._migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
+        return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
-    """op lastact {items: [id, …], pass_id?, dry?} | unlastact {items: [{item, before, after}, …], pass_id?} (at most S._MIGRATE_BATCH): the last-activity pass over the open items. No begin and no hold: each item
+    """op lastact {items: [id, …], pass_id?, dry?} | unlastact {items: [{item, before, after}, …], pass_id?} (at most _mig.BATCH): the last-activity pass over the open items. No begin and no hold: each item
     is worked out and written under its own lock (`one`). `dry` (lastact only) writes nothing and answers what each item would get. One publish at the end when anything was written. A real `lastact` is refused whole when the hub's logs cannot be read (`ties`); a dry one answers with `ties_problem` set. → {"op", "results": [...]}."""
     extra = [k for k in spec if k not in S._STAMP_BODY]
     if extra:
         raise ToolError(f"Refused: {op} takes op, sender, items, pass_id and dry only (got {', '.join(sorted(map(str, extra)))}): it writes metadata.last_activity and nothing else")
     items = spec.get("items")
-    if not isinstance(items, list) or not items or len(items) > S._MIGRATE_BATCH:
-        raise ToolError(f"Refused: items is a list of 1 to {S._MIGRATE_BATCH} " + ("item ids" if op == "lastact" else "entries {item, before, after}"))
+    if not isinstance(items, list) or not items or len(items) > _mig.BATCH:
+        raise ToolError(f"Refused: items is a list of 1 to {_mig.BATCH} " + ("item ids" if op == "lastact" else "entries {item, before, after}"))
     pid = str(spec.get("pass_id") or "")
-    if pid and not S._PASS_ID_RX.fullmatch(pid):
+    if pid and not _mig.PASS_ID_RX.fullmatch(pid):
         raise ToolError("Refused: pass_id is <YYYYMMDD-HHMMSS>-<6 hex>")
     dry = bool(spec.get("dry"))
     if dry and op != "lastact":
@@ -352,7 +353,7 @@ def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         try:
             gid = _ids._norm_id(str(it or ""))
         except ToolError as e:
-            results.append(S._migrate_refuse(str(it or "?"), str(e)))
+            results.append(_mig.refuse(str(it or "?"), str(e)))
             continue
         results.append(one(S, gid, dry=dry, tied=tied, now=now))
     if any(r["action"] == "set" for r in results):

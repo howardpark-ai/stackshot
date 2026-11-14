@@ -70,6 +70,7 @@ inbox.ack(ids)
 check("fixture: the three lines are gone once confirmed", inbox.waiting() == {}, inbox.waiting())
 
 from stackshot.fleet import client; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+from stackshot.service import fleet_events as fleetev
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 tok = open(client.mint("box-far")).read().strip()
 from starlette.testclient import TestClient
@@ -150,44 +151,44 @@ with TestClient(app) as c:
 
     # ---- the server's pass: who is told, when, and what
     sent = []
-    server._inbox_flag_send = lambda to, text: sent.append((to, text))
-    server._fleet_builder = lambda: "ops-keeper"
+    fleetev.inbox_flag_send = lambda to, text: sent.append((to, text))
+    fleetev.fleet_builder = lambda: "ops-keeper"
     cl.checkin("box-far", [S(NEW, NAME), S(SENDER, "site-main"), S(MAIN, "ops-keeper")], {}, now=TN + 2000)
     inbox.put(NAME, "the pass line one", "msg", now=TN + 1700, sender="site-main (00000004…)")
     inbox.put(NAME, "the pass line two", "msg", now=TN + 1705, sender="site-main (00000004…)")
-    server._INBOX_FLAG_LAST[0] = 0.0; server._INBOX_FLAG_START[0] = 0.0
-    check("flag pass: nothing is reported before the minutes", server._inbox_flag_tick(now=TN + 1900) == [] and sent == [], sent)
-    server._INBOX_FLAG_LAST[0] = 0.0; server._INBOX_FLAG_START[0] = TN + 1990
+    fleetev.INBOX_FLAG_LAST[0] = 0.0; fleetev.INBOX_FLAG_START[0] = 0.0
+    check("flag pass: nothing is reported before the minutes", fleetev.inbox_flag_tick(now=TN + 1900) == [] and sent == [], sent)
+    fleetev.INBOX_FLAG_LAST[0] = 0.0; fleetev.INBOX_FLAG_START[0] = TN + 1990
     check("flag pass: …nor in the first minute after the server's start (the pullers have not polled again yet), and the pass is not used up by it",
-          server._inbox_flag_tick(now=TN + 2010) == [] and sent == [] and server._INBOX_FLAG_LAST[0] == 0.0, (sent, server._INBOX_FLAG_LAST))
-    server._INBOX_FLAG_START[0] = TN + 1900
-    told = server._inbox_flag_tick(now=TN + 2010)
+          fleetev.inbox_flag_tick(now=TN + 2010) == [] and sent == [] and fleetev.INBOX_FLAG_LAST[0] == 0.0, (sent, fleetev.INBOX_FLAG_LAST))
+    fleetev.INBOX_FLAG_START[0] = TN + 1900
+    told = fleetev.inbox_flag_tick(now=TN + 2010)
     check("flag pass: the sender and the keeper are told, once each", sorted(told) == ["ops-keeper", "site-main"] and sorted(t for t, _x in sent) == ["ops-keeper", "site-main"], (told, sent))
     txt = dict(sent)
     check("flag pass: the sender's line names the session, the time with the instance timezone's abbreviation and why", "to site-builder" in txt["site-main"] and " +04" in txt["site-main"] and "no puller has asked for it" in txt["site-main"]
           and "ops-keeper has been told" in txt["site-main"], txt["site-main"])
     check("flag pass: the keeper's line says how many lines wait, from whom, since when, and the usual causes", "2 line(s) for site-builder" in txt["ops-keeper"] and "site-main (00000004…)" in txt["ops-keeper"]
           and "held on purpose" in txt["ops-keeper"] and "nothing is lost" in txt["ops-keeper"], txt["ops-keeper"])
-    sent.clear(); server._INBOX_FLAG_LAST[0] = 0.0
-    check("flag pass: a second pass tells nobody again", server._inbox_flag_tick(now=TN + 2100) == [] and sent == [], sent)
+    sent.clear(); fleetev.INBOX_FLAG_LAST[0] = 0.0
+    check("flag pass: a second pass tells nobody again", fleetev.inbox_flag_tick(now=TN + 2100) == [] and sent == [], sent)
     # a long list: the sender's flag names five lines and counts the rest
     for k in range(8):
         inbox.put(NAME, f"a long list {k}", "msg", now=TN + 2100 + k, sender="site-main (00000004…)")
     cl.checkin("box-far", [S(NEW, NAME), S(SENDER, "site-main"), S(MAIN, "ops-keeper")], {}, now=TN + 2500)
-    server._INBOX_FLAG_LAST[0] = 0.0
-    told = server._inbox_flag_tick(now=TN + 2500)
+    fleetev.INBOX_FLAG_LAST[0] = 0.0
+    told = fleetev.inbox_flag_tick(now=TN + 2500)
     txt = dict(sent)
     check("flag pass: eight waiting lines → the sender's flag counts 8, lists five and says '+3 more'", "8 of your message(s) are" in txt["site-main"] and txt["site-main"].count("to site-builder (") == 5
           and "+3 more" in txt["site-main"], txt["site-main"])
     check("flag pass: …and the keeper's line is one line for the session, not eight", txt["ops-keeper"].count("line(s) for site-builder") == 1 and "8 line(s) for site-builder" in txt["ops-keeper"], txt["ops-keeper"])
     sent.clear()
     inbox.put(NAME, "[stackshot] a flag line that the server itself sent to a stuck recipient", "msg", now=TN + 2110, sender=server.NAME)
-    server._INBOX_FLAG_LAST[0] = 0.0
-    check("flag pass: …and a flag line the server sent (from its own name) waiting for a stuck recipient is not flagged in its turn", server._inbox_flag_tick(now=TN + 9000) == [] and sent == [], sent)
+    fleetev.INBOX_FLAG_LAST[0] = 0.0
+    check("flag pass: …and a flag line the server sent (from its own name) waiting for a stuck recipient is not flagged in its turn", fleetev.inbox_flag_tick(now=TN + 9000) == [] and sent == [], sent)
     inbox.ack([i["id"] for i in inbox._items()])
-    server._INBOX_FLAG_LAST[0] = 0.0; server._cfg.CFG.setdefault("client", {})["inbox_flag_minutes"] = 0
+    fleetev.INBOX_FLAG_LAST[0] = 0.0; server._cfg.CFG.setdefault("client", {})["inbox_flag_minutes"] = 0
     inbox.put(NAME, "while it is off", "msg", now=TN, sender="site-main (00000004…)")
-    check("flag pass: [client] inbox_flag_minutes = 0 turns it off", server._inbox_flag_tick(now=TN + 2200) == [] and sent == [])
+    check("flag pass: [client] inbox_flag_minutes = 0 turns it off", fleetev.inbox_flag_tick(now=TN + 2200) == [] and sent == [])
     server._cfg.CFG["client"]["inbox_flag_minutes"] = 5
 
     # ============================================================= 3. what the message tool answers for a line that waits

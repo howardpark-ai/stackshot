@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.model import retire_fields as RF; from stackshot.tools import retire_fields_report as RR; from stackshot.tools import stamp_phase as SP
+from stackshot.service import migrations as migsvc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -221,7 +222,7 @@ check("7 supplies whose Needs bullet would break the 8-line or the 120-character
 for _i in (22, 23, 24, 25, 26): (T / f"store/g/{_i}.json").unlink(missing_ok=True)
 
 # ---- 8. undo
-uf = server._pass_load("20260101-000000-abcdef") if hasattr(server, "_pass_load") else {}
+uf = migsvc.pass_load("20260101-000000-abcdef")
 check("8 the pass kept its results on the server (every item, set or same)", len(uf.get("items") or []) == len(OPEN) and sum(1 for r in uf["items"] if r["action"] == "set") == 8, len(uf.get("items") or []))
 undo_entries = [{"item": r["item"], "before": r["before"], "after": r["after"]} for r in uf.get("items") or [] if r["action"] == "set"]
 st_, d_ = call(op="unretire", items=undo_entries)

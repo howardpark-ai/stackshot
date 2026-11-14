@@ -303,6 +303,7 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
 from stackshot.service import runner as runner_svc
@@ -335,9 +336,9 @@ check("3 board: the clocks that read items are marked to stand still while the m
       {t.name for t in ticks if not t.board} == {"wake_pass", "anchor_pass", "roles_sync_safe", "clients_tick", "fleet_publish"}, [(t.name, t.board) for t in ticks])
 
 TICK_FUNCS = {"wake_pass": "wake_pass", "anchor_pass": "anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "evwait_tick", "check_tick": "check_tick", "proof_tick": "proof_tick", "balance_tick": "_balance_tick", "handoff_tick": "handoff_tick",
-              "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick", "pilot_fallback_tick": "_pilot_fallback_tick",
+              "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "clients_tick", "pilot_fallback_tick": "_pilot_fallback_tick",
               "stall_tick": "stall_tick", "handback_tick": "handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return {"handoff_tick": handoff_svc, "handback_tick": telling, "fleet_stamp": runner_svc, "wake_pass": wakes_svc, "anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc}.get(fn, server)       # the owner of a function the spies set: the hand-back tick is the telling's, the fleet stamp is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the rest are the server's
+def own(fn): return {"clients_tick": fleetev, "handoff_tick": handoff_svc, "handback_tick": telling, "fleet_stamp": runner_svc, "wake_pass": wakes_svc, "anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc}.get(fn, server)       # the owner of a function the spies set: the hand-back tick is the telling's, the fleet stamp is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the rest are the server's
 counts: dict[str, int] = {}
 order_seen: list[str] = []
 saved = {}
@@ -641,8 +642,8 @@ rn6.run_round(event=True)
 check("6 stalled: a round that completes makes it current again at once", rn6.stalled() is False)
 
 sent6 = []
-real_flag, real_audit_cfg = server._inbox_flag_send, dict(_cfg.CFG.get("audit") or {})
-server._inbox_flag_send = lambda to, text: sent6.append((to, text))
+real_flag, real_audit_cfg = fleetev.inbox_flag_send, dict(_cfg.CFG.get("audit") or {})
+fleetev.inbox_flag_send = lambda to, text: sent6.append((to, text))
 _cfg.CFG["audit"] = {**real_audit_cfg, "builder": "builder-x"}
 runner_svc.RUNNER[:] = [rn6]; runner_svc.RUNNER_STALL[0] = False
 try:
@@ -725,7 +726,7 @@ try:
     import inspect
     check("6 publish loop: its source holds neither the wake pass nor the watchdog", "wake_pass(" not in inspect.getsource(runner_svc.publish_loop) and "watchdog(" not in inspect.getsource(runner_svc.publish_loop))
 finally:
-    server._inbox_flag_send = real_flag; _cfg.CFG["audit"] = real_audit_cfg; runner_svc.RUNNER[:] = []; runner_svc.RUNNER_STALL[0] = False
+    fleetev.inbox_flag_send = real_flag; _cfg.CFG["audit"] = real_audit_cfg; runner_svc.RUNNER[:] = []; runner_svc.RUNNER_STALL[0] = False
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)

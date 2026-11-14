@@ -1231,7 +1231,7 @@ check("15 repair: the start-time pass ends the stale records (here two or more),
 import inspect
 src_start = inspect.getsource(server._start_background)
 check("15 repair: the pass runs at start, after the mover migrations and before the wake pass and the threads",
-      src_start.index("_migrate_owner_mover()") < src_start.index("_mover_backfill_pass()") < src_start.index("_handoff.handoff_repair_pass()") < src_start.index("wake_pass()") < src_start.index("threading.Thread"), None)
+      src_start.index("_migrations.migrate_owner_mover()") < src_start.index("_mover_backfill_pass()") < src_start.index("_handoff.handoff_repair_pass()") < src_start.index("wake_pass()") < src_start.index("threading.Thread"), None)
 set_cfg(handoff=False); item(130, mover="team-back", handoff=rec("home-peer")); n_off = handoff_svc.handoff_repair_pass(); set_cfg()
 check("15 repair: …and not while [model] handoff is false", n_off == 0 and ho(130).get("to") == "home-peer", ho(130))
 handoff_svc.handoff_repair_pass()

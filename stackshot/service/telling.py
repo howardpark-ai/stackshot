@@ -1302,7 +1302,7 @@ def pilot_relay_many(keeper: str, rows: list[tuple[str, str, dict[str, Any], str
     """Several debts moved to one keeper in one tick (the turn rule's fourth build: each relay cost the
     keeper a turn): one message listing them, rows = [(project, gid, item, what, writer)]. Each debt still gets its own
     routing-log line, as pilot_relay writes it, the lines sharing one `batch` id so a count of the turns notices cost counts
-    the message once. `head` = another first line (the page-debt call's fallback to the -main agent, _page_debt_fallback)."""
+    the message once. `head` = another first line (the page-debt call's fallback to the -main agent, page_debt_fallback in service/page_debt.py)."""
     h = _hooks()
     batch = os.urandom(3).hex(); nids: list[str] = []
     held = [] if head else [r for r in rows if _router_live.holds(r[0], keeper, stand_in_too=True)]       # a live project: the router rules these, the keeper (or its stand-in) is not told; a caller that names its recipient (head: the page-debt fallback to the page's agent or -main) is delivered to

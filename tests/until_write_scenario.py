@@ -345,7 +345,7 @@ check("5.11 a missing [model] wait_alias_until is warned once, naming the defaul
 import inspect
 src11 = inspect.getsource(server._start_background)
 check("5.11 the server's start calls the check, after the config notes and before the first migration, so the warning is in the log of every start (the check fails when the call is removed)",
-      "_wait_alias_check()" in src11 and src11.index("_cfg.notes()") < src11.index("_wait_alias_check()") < src11.index("_migrate_holds()"), None)
+      "_wait_alias_check()" in src11 and src11.index("_cfg.notes()") < src11.index("_wait_alias_check()") < src11.index("_migrations.migrate_holds()"), None)
 check("5.11 ...a date there is silent, and a value that is not a date is warned too", buf11b.getvalue() == "" and "not a date (soon)" in buf11c.getvalue(), (buf11b.getvalue(), buf11c.getvalue()))
 
 # 5.12 the keeper's relay names a date-only wait as the park it replaces, and the minute loop is woken by it

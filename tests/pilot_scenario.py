@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import migrations as migsvc
 from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import runner as runner_svc
@@ -1381,7 +1382,7 @@ check("legacy: before the migration, the board draws it held, never on others", 
 check("legacy: before the migration, the brief tool lists it on hold", "a91 [open · on hold]" in _wt_brief.stackshot_brief().partition("\n\nOn hold (")[2])
 _err = io.StringIO()
 with contextlib.redirect_stderr(_err):
-    mig = server._migrate_holds()
+    mig = migsvc.migrate_holds()
 l91, l92 = rd("a91"), rd("a92")
 check("migration: every legacy item rewritten as open + hold, its wake kept, its other fields as they were", mig == ["a91", "a92"]
       and l91["status"] == l92["status"] == "open" and hd_(l91["metadata"]) is True and hd_(l92["metadata"]) is True
@@ -1390,7 +1391,7 @@ check("migration: neither clock moves", (l91["updated"], l91["state_updated"], l
 check("migration: one stderr line per item", _err.getvalue().count("migrate: ") == 2
       and f"migrate: a91 status on_hold → open + metadata.hold (wake {D(3)}), clocks unchanged — [home] legacy 91" in _err.getvalue()
       and "migrate: a92 status on_hold → open + metadata.hold (wake none), clocks unchanged" in _err.getvalue(), _err.getvalue())
-check("migration: a second run finds nothing", server._migrate_holds() == [])
+check("migration: a second run finds nothing", migsvc.migrate_holds() == [])
 
 # ---- 16b. a wake alone is no hold (items kept showing while their work was live). hold=true parks, as before; a wake without it leaves the item in its lane,
 # and at its moment the owner and the sessions in its needs are told once and the wake goes. An item that needs decision is never on hold.
@@ -2930,10 +2931,10 @@ check("legacy: a one-word needs and an agent read as the list, in memory", serve
 check("legacy: a closed item's needs reads as a list too; its agent is not carried into it", server._load("a91")["metadata"].get("needs") == ["external"] and "agent" not in server._load("a91")["metadata"], server._load("a91")["metadata"])
 check("legacy: render reads both shapes", render.needs_of({"metadata": {"needs": "external"}}) == ["external"] and render.needs_kind({"metadata": {"needs": "external"}}) == "relay"
       and render.needs_kind({"metadata": {"needs": ["home-beta-ops"]}}) == "" and render.needs_kind({"metadata": {"needs": ["home-beta-ops", "decision"]}}) == "call" and render.needs_sessions({"metadata": {"needs": ["decision", "home-beta-ops"]}}) == ["home-beta-ops"])
-mig = server._migrate_needs()
+mig = migsvc.migrate_needs()
 check("migration: the start step rewrites the open item, clocks untouched, and leaves the closed one as a record", "a90" in mig and "a91" not in mig and rd("a90")["metadata"].get("needs") == ["decision", "home-beta-ops"] and "agent" not in rd("a90")["metadata"] and rd("a90")["updated"] == 1.0
       and rd("a91")["metadata"].get("needs") == "external" and rd("a91")["metadata"].get("agent") == "home-beta-ops", (mig, rd("a90"), rd("a91")))
-check("migration: idempotent", server._migrate_needs() == [])
+check("migration: idempotent", migsvc.migrate_needs() == [])
 check("migration: get shows the migrated item's needs; the hub's name line not, since a session is named", "\nneeds: decision, home-beta-ops\n" in _wt_get.stackshot_get("a90") and "keeper:" not in _wt_get.stackshot_get("a90"), _wt_get.stackshot_get("a90"))
 for i in (90, 91): (T / f"store/a/{i}.json").unlink()
 (T / "store/projects.json").write_text(_reg_b)

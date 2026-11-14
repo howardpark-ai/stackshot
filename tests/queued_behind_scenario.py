@@ -61,6 +61,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server, home
+from stackshot.service import migrations as migsvc
+from stackshot.service import page_debt as pdebt_svc
+from stackshot.service import fleet_events as fleetev
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
@@ -83,15 +86,15 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = stall_svc.time = stalltick_svc.time = CLK
+CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = stall_svc.time = stalltick_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"; server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
 telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
-server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
+fleetev.inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 REAL = {(m, n): getattr(m, n) for m, n in ((handoff_svc, "handoff_status"), (server, "_sessions_index"), (handoff_svc, "_sessions_index"), (hcold_svc, "_sessions_index"))}      # the stall pass below reads the real ones
 handoff_svc.handoff_status = lambda who, idx=None: ("", 0.0)
-server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = lambda: {}
+server._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = stalltick_svc._sessions_index = ladder_svc._sessions_index = lambda: {}
 FRONT = {"home-front"}
 REAL_HOOK = Q.front_hook()                                         # what the server installed (`front_keeper`, strict), before the fixture's own answer replaces it
 Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `front_keeper` is replaced by the one front agent of the fixture

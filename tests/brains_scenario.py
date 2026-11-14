@@ -164,6 +164,7 @@ check("2 a healthy second brain reports no problem", brains.problem(brains.for_k
 
 # ---- 3. the second copy is missing: fail open everywhere
 from stackshot.web import server
+from stackshot.service import page_debt as pdebt_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.routes import client_api as _rt_client
@@ -216,7 +217,7 @@ check("3 pages owed report it once", err.getvalue().count("pages owed and the au
 _cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_shadow=True)
 server._owed_save({"projects/beta-one": {OWNER: {"ts": time.time() - 3 * 3600, "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": OWNER}]}}})
 page_debt.write_days({})
-r = server._page_debt_pass(runner=lambda msg: (_ for _ in ()).throw(AssertionError("no call for a skipped brain")))
+r = pdebt_svc.page_debt_pass(runner=lambda msg: (_ for _ in ()).throw(AssertionError("no call for a skipped brain")))
 check("3 the audit's page call skips the unreadable brain's page", r.get("pages") == 0 and "projects/beta-one" in server._owed_load(), r)
 shutil.move(str(T / "second-away"), str(T / "second"))
 brains._WARNED.clear()
@@ -224,12 +225,12 @@ class NoPage:
     def get(self, slug): return None, None
     def put(self, *a): raise AssertionError("no put")
 fell = []
-orig_fb = server._page_debt_fallback
-server._page_debt_fallback = lambda *a, **k: fell.append(a) or ""
+orig_fb = pdebt_svc.page_debt_fallback
+pdebt_svc.page_debt_fallback = lambda *a, **k: fell.append(a) or ""
 moved = {OWNER: {"ts": time.time(), "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": OWNER}]}}
 with stderr() as err:
-    res = server._page_debt_project("projects/beta-one", moved, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=NoPage())
-server._page_debt_fallback = orig_fb
+    res = pdebt_svc.page_debt_project("projects/beta-one", moved, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=NoPage())
+pdebt_svc.page_debt_fallback = orig_fb
 check("3 a failed gbrain read of a second-brain page skips it, no fallback", res == "skipped" and not fell, (res, fell))
 check("3 the failed read is reported naming the brain", "second brain 'second'" in err.getvalue(), err.getvalue())
 _cfg.CFG["router"]["page_debt"] = False
@@ -271,13 +272,13 @@ content, rev = store.get("projects/beta-one"); c = calls()
 check("6 a read returns no page and runs no gbrain command (not the default brain's page)", content is None and rev is None and c == [], (content, rev, c))
 rc_rd, out_rd = rename_page.gb(["call", "get_page", json.dumps({"slug": "projects/beta-one"})]); c = calls()
 check("6 a rename's read of its slug is refused naming the brain, nothing ran", rc_rd != 0 and "second" in out_rd and "no home" in out_rd and c == [], (rc_rd, out_rd, c))
-fell = []; orig_fb = server._page_debt_fallback
-server._page_debt_fallback = lambda *a, **k: fell.append(a) or ""
+fell = []; orig_fb = pdebt_svc.page_debt_fallback
+pdebt_svc.page_debt_fallback = lambda *a, **k: fell.append(a) or ""
 moved6 = {"bbbbbbbb-0000-4000-8000-000000000002": {"ts": time.time(), "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": "bbbbbbbb-0000-4000-8000-000000000002"}]}}
 brains._WARNED.clear()
 with stderr() as err:
-    res6 = [server._page_debt_project("projects/beta-one", moved6, time.time(), "live", runner=lambda m: {"status": "spawn"}) for _ in range(2)]
-server._page_debt_fallback = orig_fb; c = calls()
+    res6 = [pdebt_svc.page_debt_project("projects/beta-one", moved6, time.time(), "live", runner=lambda m: {"status": "spawn"}) for _ in range(2)]
+pdebt_svc.page_debt_fallback = orig_fb; c = calls()
 check("6 the audit's page call skips a no-home brain's page, no fallback, no gbrain command", res6 == ["skipped", "skipped"] and not fell and c == [], (res6, fell, c))
 check("6 and warns once for the outage, naming the brain", err.getvalue().count("second brain 'second'") == 1, err.getvalue())
 st_d, _n = store.put("projects/alpha", "a text", "r1"); c = calls()
@@ -393,23 +394,23 @@ class Flaky:
     def put(self, *a): raise AssertionError("no put")
 flaky = Flaky(); ran_calls = []
 runner = lambda m: ran_calls.append(1) or {"status": "spawn"}
-orig_fb = server._page_debt_fallback
-server._page_debt_fallback = lambda *a, **k: ""
+orig_fb = pdebt_svc.page_debt_fallback
+pdebt_svc.page_debt_fallback = lambda *a, **k: ""
 try:
     with stderr() as err:
-        r1 = server._page_debt_pass(runner=runner, io=flaky)
+        r1 = pdebt_svc.page_debt_pass(runner=runner, io=flaky)
         marks1 = page_debt.read_days()
-        r2 = server._page_debt_pass(runner=runner, io=flaky)
+        r2 = pdebt_svc.page_debt_pass(runner=runner, io=flaky)
     check("12 a failed CLI read skips the page and writes no mark for the day", r1.get("skipped") == 1 and "projects/beta-one" not in marks1 and not ran_calls, (r1, marks1, ran_calls))
     check("12 the next pass tries again (still failing: skipped again, still no mark), said once", r2.get("skipped") == 1 and "projects/beta-one" not in page_debt.read_days()
           and err.getvalue().count("second brain 'second'") == 1, (r2, err.getvalue()))
     flaky.up = True
-    r3 = server._page_debt_pass(runner=runner, io=flaky)
+    r3 = pdebt_svc.page_debt_pass(runner=runner, io=flaky)
     check("12 once the CLI reads again the page is called and the day mark is written", len(ran_calls) == 1 and "projects/beta-one" in page_debt.read_days() and r3.get("skipped") is None, (r3, ran_calls, page_debt.read_days()))
-    r4 = server._page_debt_pass(runner=runner, io=flaky)
+    r4 = pdebt_svc.page_debt_pass(runner=runner, io=flaky)
     check("12 and the page is not called again that day", len(ran_calls) == 1 and r4.get("pages") == 0, (r4, ran_calls))
 finally:
-    server._page_debt_fallback = orig_fb
+    pdebt_svc.page_debt_fallback = orig_fb
     _cfg.CFG["router"]["page_debt"] = False
 
 # ---- 13. a linked worktree as the copy: its sync stamps are found through the `.git` file
@@ -689,7 +690,7 @@ store16 = [Gone()]
 class Switch:
     def get(self, slug): return store16[0].get(slug)
 try:
-    one_outage("the audit's page call", lambda: server._page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Switch()),
+    one_outage("the audit's page call", lambda: pdebt_svc.page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Switch()),
                lambda: store16.__setitem__(0, Gone()), lambda: store16.__setitem__(0, Fine()))
 finally:
     page_debt.call = orig_call
@@ -727,25 +728,25 @@ set_brains(SECOND)
 _cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_shadow=False)
 page_debt.write_days({})
 with stderr() as err:
-    for _ in range(2): server._page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Gone())
+    for _ in range(2): pdebt_svc.page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Gone())
 check("17 an unreadable page warns once", err.getvalue().count("second brain 'second'") == 1, err.getvalue())
 server._owed_save({})       # its debts are settled while it is unreadable: the pass never visits it again
 with stderr() as err:
-    r16 = server._page_debt_pass(runner=lambda m: (_ for _ in ()).throw(AssertionError("no call without a debt")))
+    r16 = pdebt_svc.page_debt_pass(runner=lambda m: (_ for _ in ()).throw(AssertionError("no call without a debt")))
 check("17 the next pass says the brain is back once, though the page is never read again", err.getvalue().strip().splitlines() == ["brains: second brain 'second' is back"], (err.getvalue(), r16))
 with stderr() as err:
-    server._page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Gone())
+    pdebt_svc.page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Gone())
 check("17 a later outage is warned about again", err.getvalue().count("second brain 'second'") == 1 and "is back" not in err.getvalue(), err.getvalue())
 _cfg.CFG["router"]["page_debt"] = False
-with stderr() as err: server._page_debt_pass()
+with stderr() as err: pdebt_svc.page_debt_pass()
 check("17 with the audit's page call switched off its stuck read is dropped too", err.getvalue().strip().splitlines() == ["brains: second brain 'second' is back"], err.getvalue())
 # a page that still has debts keeps its channel (it is visited again)
 _cfg.CFG["router"]["page_debt"] = True
 server._owed_save({"projects/beta-one": {W16: {"ts": time.time() - 3 * 3600, "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": W16}]}}})
 brains._WARNED.clear(); page_debt.write_days({})
 with stderr() as err:
-    server._page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Gone())
-    server._page_debt_pass(io=Gone(), runner=lambda m: {"status": "spawn"})
+    pdebt_svc.page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Gone())
+    pdebt_svc.page_debt_pass(io=Gone(), runner=lambda m: {"status": "spawn"})
 check("17 a page with debts still owed keeps the outage open: no recovery line", err.getvalue().count("is back") == 0 and ("second", "the audit's page call skips its pages this run projects/beta-one") in brains._WARNED, (err.getvalue(), brains._WARNED))
 _cfg.CFG["router"]["page_debt"] = False
 server._owed_save({}); brains._WARNED.clear()
