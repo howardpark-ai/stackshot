@@ -1,7 +1,7 @@
 """bullet_text.py — the pure half of the board's bullet form: how long a line reads, whether a description keeps the form, and how a script's or a model's
 text is made into short `- ` bullets.
 
-Used by server.py's description and next gates, by the cold call's close (cold_call.validate), by the question route (server._question_text) and by the re-bullet pass
+Used by server.py's description and next gates, by the cold call's close (cold_call.validate), by the question route (service/question.py `_question_text`) and by the re-bullet pass
 (rebullet.verdict), so every one of them counts, judges and clips alike. Stdlib only; no state.
 
   visible_len   a line's length as it reads: a Markdown link counts as its words (its destination, in any common form, is cut out) and a naked URL not at all

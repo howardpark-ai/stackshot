@@ -67,7 +67,7 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids; from stackshot.service import terminal_prompt as terminal_prompt_svc
 from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.service import store as _service_store
@@ -100,7 +100,7 @@ def tp(action, session="home-sparrow-builder", question="May I run the migration
     b.update(kw)
     return server._client_post(machine or me, "terminal-prompt", {k: v for k, v in b.items() if v is not None})
 def nxt(name, question): return f"Oliver: open {SALA}{name} and answer: `{question}`"
-def open_for(session): return [g for g in server._terminal_open_items(session)]
+def open_for(session): return [g for g in terminal_prompt_svc._terminal_open_items(session)]
 n0 = len(items())
 
 # ---- 1. open: the item and its shape
@@ -157,8 +157,8 @@ check("another session has its own item, under the same project, owned by the sa
       and item(oo["item"])["metadata"]["terminal_prompt"] == "home-other", (st, oo))
 # the session found by an old name when it was renamed after the item was filed: the mark is the old name, the call uses the new one
 rn = _service_store._load(_model_ids._norm_id(oo["item"])); rn["metadata"]["terminal_prompt"] = "home-sparrow-eng"; writes.save(_model_ids._norm_id(oo["item"]), rn)
-check("a mark that holds an old name (a rename since) still matches the session by the registry", server._terminal_open_items("home-sparrow-builder") == [_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]
-      or server._terminal_open_items("home-sparrow-builder") == sorted([_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]), server._terminal_open_items("home-sparrow-builder"))
+check("a mark that holds an old name (a rename since) still matches the session by the registry", terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == [_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]
+      or terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == sorted([_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]), terminal_prompt_svc._terminal_open_items("home-sparrow-builder"))
 rn["metadata"]["terminal_prompt"] = "home-other"; writes.save(_model_ids._norm_id(oo["item"]), rn)
 st, c2 = tp("clear", "home-other", None)
 check("…and a clear of one session closes only its own item", c2["cleared"] == [oo["item"]] and item(oo["item"])["status"] == "completed" and item(out["item"])["status"] == "open", (c2, item(out["item"])["status"]))
@@ -213,7 +213,7 @@ refused("a session of more than 120 characters is refused", "session", session="
 refused("an action that is neither open nor clear is refused", "action = open | clear", action="reopen")
 refused("a clear with no sender is refused", "sender", action="clear", question=None, sender="")
 st, o = server._client_post(me, "terminal-prompt", {"action": "open", "session": "home-sparrow-builder", "sender": "s", "question": 5}); check("a question that is not a string is refused", st == 400, (st, o))
-check("…the refusals left no item and no part of one", server._terminal_open_items("home-sparrow-builder") == [], server._terminal_open_items("home-sparrow-builder"))
+check("…the refusals left no item and no part of one", terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == [], terminal_prompt_svc._terminal_open_items("home-sparrow-builder"))
 
 # ---- 7. what a pane writes: alarming words, a long line, characters
 ALARM = "Shall I kill the stuck run and rotate the credentials, or leave the quota alone?"
@@ -278,8 +278,8 @@ try:
     before = len(items()); st, of = tp("open", question="Will this half-made item be left?")
 finally: _update_svc._update = real_update
 check("a refused state write answers 400 with the refusal", st == 400 and "pretend refusal" in of.get("error", ""), (st, of))
-check("…and the item that was made for it is closed again, not left half made, so the next open files a clean one", len(items()) == before + 1 and server._terminal_open_items("home-sparrow-builder") == []
-      and _service_store._load("s" + str(int(items()[-1])))["metadata"]["outcome"] == "dropped", (items()[-3:], server._terminal_open_items("home-sparrow-builder")))
+check("…and the item that was made for it is closed again, not left half made, so the next open files a clean one", len(items()) == before + 1 and terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == []
+      and _service_store._load("s" + str(int(items()[-1])))["metadata"]["outcome"] == "dropped", (items()[-3:], terminal_prompt_svc._terminal_open_items("home-sparrow-builder")))
 st, og = tp("open", question="Will this one be whole?")
 check("…the next open is a clean item in your-step", st == 200 and og["repeat"] is False and item(og["item"])["metadata"]["state"] == "your-step", (st, og))
 tp("clear", "home-sparrow-builder", None)
@@ -295,24 +295,24 @@ try:
 finally: _update_svc._update = real_update
 last = _service_store._load("s" + str(int(items()[-1])))
 check("an OSError on the state write propagates and the half-made item is closed (dropped), not left open", raised is not None and last["status"] == "completed" and last["metadata"]["outcome"] == "dropped"
-      and server._terminal_open_items("home-sparrow-builder") == [], (raised, last["status"]))
+      and terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == [], (raised, last["status"]))
 st, og2 = tp("open", question="After the OSError")
 check("…and the next open files a clean item in your-step", st == 200 and og2["repeat"] is False and item(og2["item"])["metadata"]["state"] == "your-step", (st, og2))
 tp("clear", "home-sparrow-builder", None)
-real_state = server._terminal_state
+real_state = terminal_prompt_svc._terminal_state
 def crash_state(*a, **kw): raise KeyboardInterrupt()       # not an Exception: nothing between the two writes can close the item
-server._terminal_state = crash_state
+terminal_prompt_svc._terminal_state = crash_state
 try:
     try: tp("open", question="Crash between the writes")
     except KeyboardInterrupt: pass
-finally: server._terminal_state = real_state
-half = server._terminal_open_items("home-sparrow-builder")
+finally: terminal_prompt_svc._terminal_state = real_state
+half = terminal_prompt_svc._terminal_open_items("home-sparrow-builder")
 hm = item(half[0])["metadata"] if half else {}
 check("fixture: a crash between the create and the state write leaves an open item with the owner as mover and no state", len(half) == 1 and "state" not in hm and hm.get("mover") == "Oliver", (half, hm))
 st, og3 = tp("open", question="Crash between the writes")
 fm = item(og3["item"])["metadata"]
 check("the next open (same question) repairs it: the same item, repeat true, now your-step with its step, nothing new filed", st == 200 and og3["repeat"] is True and og3["item"] == _gh.shown(half[0]) and fm.get("state") == "your-step"
-      and fm.get("step") == "Answer home-sparrow-builder's question in its terminal" and server._terminal_open_items("home-sparrow-builder") == half, (st, og3, fm))
+      and fm.get("step") == "Answer home-sparrow-builder's question in its terminal" and terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == half, (st, og3, fm))
 tp("clear", "home-sparrow-builder", None)
 
 # ---- 9c. a question with no space in it overruns the next line: a hard cut with an ellipsis, never an empty question
@@ -338,7 +338,7 @@ check("eight threads opening for one session at once file one item and all get i
       and sum(1 for r in res if not r[1]["repeat"]) == 1, [r for r in res][:3])
 ths = [threading.Thread(target=lambda: res.append(tp("clear", question=None))) for _ in range(4)]
 [t.start() for t in ths]; [t.join() for t in ths]
-check("…and four clears at once close it once, the others find none", all(r[0] == 200 for r in res[8:]) and sum(len(r[1]["cleared"]) for r in res[8:]) == 1 and server._terminal_open_items("home-sparrow-builder") == [], res[8:])
+check("…and four clears at once close it once, the others find none", all(r[0] == 200 for r in res[8:]) and sum(len(r[1]["cleared"]) for r in res[8:]) == 1 and terminal_prompt_svc._terminal_open_items("home-sparrow-builder") == [], res[8:])
 
 # ---- 11. over HTTP and through client.py
 app = server.mcp.http_app()
@@ -417,20 +417,20 @@ readme = _docs.page("client-contract")
 check("the docs document the post kind: both verbs, the route, the item's shape, the idempotency and the page-debt rule", "POST /client/terminal-prompt" in readme and "post terminal-prompt open" in readme
       and "post terminal-prompt clear" in readme and "metadata.terminal_prompt" in readme and "the pane stopped waiting" in readme)
 check("the 404 list of the client API names the new write", "terminal-prompt" in server._client_post(me, "nope", {})[1]["error"])
-check("the server's docstring and the client's usage line carry the shape", "terminal-prompt" in client.TERMINAL_PROMPT_USAGE and "Answer <session>'s question in its terminal" in " ".join(server._terminal_prompt.__doc__.split()))
+check("the server's docstring and the client's usage line carry the shape", "terminal-prompt" in client.TERMINAL_PROMPT_USAGE and "Answer <session>'s question in its terminal" in " ".join(terminal_prompt_svc._terminal_prompt.__doc__.split()))
 
 # [subject] fallback_prefix: the prefix of an item no session wrote when the project's scope has none of its own
 _cfgsub = _cfg.CFG["subject"]; _was = dict(_cfgsub)
 try:
     _cfgsub["prefixes"] = ["[work] ", "[home] "]
     _cfgsub.pop("fallback_prefix", None)
-    check("no fallback_prefix set: the scope's prefix when the instance has it, else the first prefix", server._terminal_subject_prefix("home") == "[home] " and server._terminal_subject_prefix("zzz") == "[work] ", server._terminal_subject_prefix("zzz"))
+    check("no fallback_prefix set: the scope's prefix when the instance has it, else the first prefix", terminal_prompt_svc._terminal_subject_prefix("home") == "[home] " and terminal_prompt_svc._terminal_subject_prefix("zzz") == "[work] ", terminal_prompt_svc._terminal_subject_prefix("zzz"))
     _cfgsub["fallback_prefix"] = "[home] "
-    check("fallback_prefix set: a scope with no prefix of its own gets it, a scope with one keeps its own", server._terminal_subject_prefix("zzz") == "[home] " and server._terminal_subject_prefix("work") == "[work] ", server._terminal_subject_prefix("zzz"))
+    check("fallback_prefix set: a scope with no prefix of its own gets it, a scope with one keeps its own", terminal_prompt_svc._terminal_subject_prefix("zzz") == "[home] " and terminal_prompt_svc._terminal_subject_prefix("work") == "[work] ", terminal_prompt_svc._terminal_subject_prefix("zzz"))
     _cfgsub["fallback_prefix"] = "[away] "
-    check("a fallback_prefix that is not one of the prefixes is ignored: the first prefix", server._terminal_subject_prefix("zzz") == "[work] ", server._terminal_subject_prefix("zzz"))
+    check("a fallback_prefix that is not one of the prefixes is ignored: the first prefix", terminal_prompt_svc._terminal_subject_prefix("zzz") == "[work] ", terminal_prompt_svc._terminal_subject_prefix("zzz"))
     _cfgsub["fallback_prefix"] = ""
-    check("an empty fallback_prefix is none", server._terminal_subject_prefix("zzz") == "[work] ")
+    check("an empty fallback_prefix is none", terminal_prompt_svc._terminal_subject_prefix("zzz") == "[work] ")
 finally:
     _cfgsub.clear(); _cfgsub.update(_was)
 

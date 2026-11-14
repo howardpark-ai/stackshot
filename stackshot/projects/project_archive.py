@@ -2,7 +2,7 @@
 
 Two moments, one rule (the state: the project's page lists no agent, none is pending in the project record, and no open item is the project's):
 
-1. The retire. Sala retires a session and tells stackshot through `post project-agent-retire` (server._project_agent_retire), which takes the agent off the
+1. The retire. Sala retires a session and tells stackshot through `post project-agent-retire` (service/projects.py `_project_agent_retire`), which takes the agent off the
    project's agents map in the record (project_verbs.agent_retire; the page's block follows as a mirror). `after_retire` then looks at the project: no agent
    left and no open item → the project is archived by the verb (project_verbs.archive: the record's status first, then the page's `status:` line). No agent
    left but open items → the project is put on the wait list (`<state>/archive-wait.json`, key → {since, by}; the key is the project's id when it has no

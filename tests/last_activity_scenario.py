@@ -1,5 +1,5 @@
 """Scenario test for the item's last-activity record, `metadata.last_activity = {"at", "kind", "what"}` (model/last_activity.py, anchors/event_log.py, `service/writes.py`'s `_stamp_last_activity`,
-`server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It records; the On agent rows and the item page show it (tests/on_agent_row_scenario.py), and nothing else reads it, so every other clock must be
+`event_activity_svc._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It records; the On agent rows and the item page show it (tests/on_agent_row_scenario.py), and nothing else reads it, so every other clock must be
 exactly as it was. Fixture items, a fake clock (the passes are given their `now`, the saves are stamped from a fake `time`), no live store, no network, no model call.
 
   1  pure: the words for each signal (a step done or dropped, a state change, a merge, created, a status line's new text: `update_signals`), and what is no activity (a status line that repeats its text, a reply, a note, a confirm, a new or reworded step, a description edit,
@@ -80,6 +80,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import event_activity as event_activity_svc
 from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.web.tools import get as _get_tool
@@ -117,7 +118,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK; writes.time = CLK
+CLK = _Clock(); server.time = event_activity_svc.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first."""
     d_ = _service_store._load(f"a{i}"); mutate(d_); CLK.t = ts
@@ -299,7 +300,7 @@ d_ = rd(410); d_["description"] = f"- Waits on {W_}/pull/50\n- Done when it land
 shown = lambda i: f"board#{i}"
 def ev_pass(now, **kw):
     gh_ = _cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
-    try: return server._event_activity_tick(now)
+    try: return event_activity_svc._event_activity_tick(now)
     finally:
         CLK.t = None
         if had is None: gh_.pop("issues_letter", None)
@@ -398,7 +399,7 @@ emit(60, "review", "bob", 62 * MIN)
 real_read = EL.read
 EL.read = lambda off=0: (_ for _ in ()).throw(OSError("log gone"))
 try:
-    with _Err() as e_: out = server._event_activity_tick(now0 + 63 * MIN)
+    with _Err() as e_: out = event_activity_svc._event_activity_tick(now0 + 63 * MIN)
 finally: EL.read = real_read
 check("5 a failure of the read is logged and the pass returns, raising nothing", out == [] and "pass failed" in e_.text, e_.text[:200])
 real_tied = mprog_svc._merge_tied
