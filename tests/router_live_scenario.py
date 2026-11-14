@@ -103,6 +103,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web import wiring    # `_router_live_after` is web/wiring.py's
 from stackshot.service import messaging as _messaging
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
@@ -293,9 +294,9 @@ check("the second hold's notice (passed by the rule in code) released its item t
 
 item(6, "projects/alpha", A, hold=True)          # held again, waiting on the Gmail anchor
 note_ = {"id": "feed01", "kind": "anchor", "anchor": "gmail:6666666666666666", "live": True, "to": "", "ts": time.time(), "ruled_at": time.time()}
-server._router_live_after("projects/alpha", {**note_, "ruling": "dropped"}); held_d = bool(_service_store._load("a6")["metadata"].get("hold"))
-server._router_live_after("projects/alpha", {**note_, "ruling": "held"}); held_h = bool(_service_store._load("a6")["metadata"].get("hold"))
-server._router_live_after("projects/alpha", {**note_, "ruling": "merged"}); held_m = bool(_service_store._load("a6")["metadata"].get("hold"))
+wiring._router_live_after("projects/alpha", {**note_, "ruling": "dropped"}); held_d = bool(_service_store._load("a6")["metadata"].get("hold"))
+wiring._router_live_after("projects/alpha", {**note_, "ruling": "held"}); held_h = bool(_service_store._load("a6")["metadata"].get("hold"))
+wiring._router_live_after("projects/alpha", {**note_, "ruling": "merged"}); held_m = bool(_service_store._load("a6")["metadata"].get("hold"))
 check("a hold waiting on an anchor: the router's dropped or held ruling leaves it held (as a keeper's does), a merged one releases it", (held_d, held_h, held_m) == (True, True, False), (held_d, held_h, held_m))
 
 # ---- 6. a notice the router cannot judge goes to -main with the mark; the keeper gets nothing

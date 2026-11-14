@@ -10,7 +10,7 @@ items as the hourly audit reads it). Unknown is never a refusal.
   2  passes      a subagent tied to ANOTHER item of the mover, none running, a read that is Unreadable or raises, a subagent whose files cannot be read, a running subagent that names no item, a sender that
                  is not the mover, the owner, the guard off, a closing write, done=, a clear_* of the park, a named blocker (wait_kind, after, needs, ask_by), a hand-off to another session, an item that is
                  not open, an item with no mover, no live callable at all
-  3  tool        through the real update tool and the server's own wiring (`server._busy_live`, `audit_ticks._mover_subagents` replaced by a fake): the refused hold stores nothing; the same write passes once the
+  3  tool        through the real update tool and the server's own wiring (web/wiring.py: `wiring._busy_live`, `audit_ticks._mover_subagents` replaced by a fake): the refused hold stores nothing; the same write passes once the
                  subagent has ended, and a status with work= passes while it runs; the anchors the server reads are the ones that tie
   4  shape       the gate is called from the update tool before the item lock and after gate_self_wait, takes its proof as a callable, gates.py imports no audit/ module, the config switch reads live
   5  text        the update tool's text no longer calls the mover's own release or run a wait to park
@@ -52,6 +52,7 @@ from fastmcp.exceptions import ToolError
 from stackshot.audit import busy_hold, subagent_tie
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.web import wiring    # `_busy_live` is web/wiring.py's
 from stackshot.web import publish as _web_publish
 from stackshot.service import audit_ticks as audit_ticks_svc, gates, telling, update as update_svc
 from stackshot.tools import next_report as _nr
@@ -190,7 +191,7 @@ def update(i, **kw):
     with patched(_web_publish, _publish=lambda *a, **k: None), patched(telling, tell_woken=lambda *a, **k: None):
         return outcome(lambda: _wt_update.stackshot_update(f"a{i}", **kw))
 HOLD = dict(next=f"{BACK}: do it", wake=FUT, hold=True, wait_basis=f"the soak window ends {FUT}")
-check("3 the server hands the update tool its proof (server._busy_live): the tool holds it, and it answers a string", callable(_wt_update._busy_live) and isinstance(_wt_update._busy_live("a1", BACK), str))
+check("3 the server hands the update tool its proof (wiring._busy_live): the tool holds it, and it answers a string", callable(_wt_update._busy_live) and isinstance(_wt_update._busy_live("a1", BACK), str))
 with patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
     SUBS[:] = [sub("Build @1: the export fix")]
     before = json.dumps(read(1), sort_keys=True)
@@ -236,7 +237,7 @@ with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: (
     got = update(1, **HOLD)
     check("3 a mover whose subagents cannot be read (Unreadable) passes through the tool", got[0] == "ok", got)
 put(1, mover=BACK)
-check("3 the real proof (nothing replaced): a mover that no session index row names reads as unknown or idle, never a refusal", server._busy_live("a1", "nobody-here") == "")
+check("3 the real proof (nothing replaced): a mover that no session index row names reads as unknown or idle, never a refusal", wiring._busy_live("a1", "nobody-here") == "")
 
 # ---------------------------------------------------------------- 3b. the reply note
 # A doing item whose next reads as a wait gets a reply note that says to park it (service/update.py `_doing_wait_note`). While a running subagent of the mover is tied to the item the wait wording is about the mover's own

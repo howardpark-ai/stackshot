@@ -470,7 +470,7 @@ rebound = [a.asname or a.name for n in ast.walk(stree) if isinstance(n, ast.Impo
 check("5 …and re-exports none of them under an old name (no `from stackshot.service.gates import`, no alias assigned)", not rebound and not [n for n in old_names if re.search(rf"^{re.escape(n)}\s*=\s*_?gates\.", SERVER_SRC, re.M)], rebound)
 check("5 …and each GATES name exists in gates.py as a function", all(isinstance(getattr(gates, n), type(check)) for n in GATES) and set(GATES) <= moved_defs, sorted(set(GATES) - moved_defs))
 called = set()
-for f in ("stackshot/service/update.py", "stackshot/service/create.py", "stackshot/web/server.py", "stackshot/web/tools/create.py", "stackshot/web/tools/update.py"):
+for f in ("stackshot/service/update.py", "stackshot/service/create.py", "stackshot/web/server.py", "stackshot/web/wiring.py", "stackshot/web/tools/create.py", "stackshot/web/tools/update.py"):
     for node in ast.walk(ast.parse(pathlib.Path(STACK, f).read_text(encoding="utf-8"))):
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "_gates": called.add(node.attr)
 missing = sorted(n for n in called if not hasattr(gates, n))

@@ -5,9 +5,9 @@ to reach the notices through hooks. This suite holds what is true now:
 
   1  flags       no thread-local is made in web/ (a `threading.local` call or reference), the five per-write flags the gates and the services read are on service/writes.py, the telling's four
                  are on service/telling.py, and no other service module makes one
-  2  tables      the fourteen hook tables the server installs (the item readers', the For you rows', the save steps' and the owner's words', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, at the top of the module (not inside a function), once each
+  2  tables      the fourteen hook tables the server installs (the item readers', the For you rows', the save steps' and the owner's words', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, once each, by the two install steps of web/wiring.py (`install_early`, `install_late`), which web/server.py calls once each at the top of its module (never inside a function)
   3  values      what a table takes as a plain value (not a function, not a late lookup) is a constant of the module that cannot change after the install, so a copy taken at the install cannot go stale; a late
-                 lookup (`_late("name")`, a call) is a lookup by name made when the hook runs, so it captures nothing, and each one must name a function or value the server module defines; a late lookup on an
+                 lookup (`_late("name")`, a call in web/wiring.py) is a lookup by name made on the server module when the hook runs, so it captures nothing, and each one must name a function or value the server module defines; a late lookup on an
                  owner module (`_late_in(module, "name")`) is the same lookup on that module, and must name a function or value that module defines
   4  telling     no table of a service module holds a field that the telling answers: create, gates and update call service/telling.py on the module
 
@@ -37,13 +37,16 @@ check("1 no other service module keeps one", not any(others.values()), {k: v for
 
 # ---------------------------------------------------------------- 2. tables
 SERVER = parse("web/server.py")
+WIRING = parse("web/wiring.py")        # the tables are installed here (the server hands the module itself to `install_early`, which is what `_late` looks a name up on)
 TABLES = ("_writes", "_telling", "_create_svc", "_gates", "_update_svc", "_runner", "_wake_hooks", "_handoff_hooks", "_stall_hooks", "_checks_hooks", "_passes_hooks", "_foryou_hooks", "_save_hooks", "_item_read")
-installs = [(n, n.value.func.value.id) for n in SERVER.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "install"
-            and isinstance(n.value.func.value, ast.Name)]
-check("2 the server installs the fourteen tables, each once, at the top of the module", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
-inside = [n.lineno for fn in ast.walk(SERVER) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.walk(fn)
+STEPS = ("install_early", "install_late")
+is_install = lambda n: isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "install" and isinstance(n.value.func.value, ast.Name)
+installs = [(n, n.value.func.value.id) for fn in WIRING.body if isinstance(fn, ast.FunctionDef) and fn.name in STEPS for n in fn.body if is_install(n)]
+check("2 the wiring installs the fourteen tables, each once, in its two install steps", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
+steps_called = [n.value.func.attr for n in SERVER.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and isinstance(n.value.func.value, ast.Name) and n.value.func.value.id == "_wiring" and n.value.func.attr in STEPS]
+inside = [n.lineno for tree in (SERVER, WIRING) for fn in ast.walk(tree) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and not (tree is WIRING and fn.name in STEPS) for n in ast.walk(fn)
           if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "install" and isinstance(n.func.value, ast.Name) and n.func.value.id in TABLES]
-check("2 …and no function of the server installs one (a table is never replaced while the server runs)", not inside, inside)
+check("2 …the server calls the two steps once each at the top of its module, and no other function of the server or the wiring installs one (a table is never replaced while the server runs)", not inside and sorted(steps_called) == sorted(STEPS), (inside, steps_called))
 
 # ---------------------------------------------------------------- 3. values
 def plain_entries(call):
@@ -54,22 +57,26 @@ for node, tab in installs:
     args = node.value.args
     if args and isinstance(args[0], ast.Call):
         for field, name in plain_entries(args[0]): captured.setdefault(name, []).append(f"{tab}.{field}")
-module_values = {}
-for n in SERVER.body:
-    if isinstance(n, ast.Assign):
-        for t in n.targets:
-            if isinstance(t, ast.Name): module_values[t.id] = n.value
-    elif isinstance(n, ast.ImportFrom):
-        for a in n.names: module_values[a.asname or a.name] = None
+def values_of(tree):
+    out = {}
+    for n in tree.body:
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name): out[t.id] = n.value
+        elif isinstance(n, ast.ImportFrom):
+            for a in n.names: out[a.asname or a.name] = None
+    return out
+module_values = values_of(SERVER)             # what a late lookup of the server's can name
+wiring_values = values_of(WIRING)             # what a table takes as a plain value (imported into the wiring from its owner)
 IMMUTABLE = (ast.Constant, ast.Tuple, ast.JoinedStr, ast.BinOp)
-unsafe = {name: ast.dump(module_values[name])[:60] for name in captured if name in module_values and module_values[name] is not None and not isinstance(module_values[name], IMMUTABLE)}
-missing = sorted(name for name in captured if name not in module_values)
-check("3 every value a table captures is defined on the server module", not missing, missing)
+unsafe = {name: ast.dump(wiring_values[name])[:60] for name in captured if name in wiring_values and wiring_values[name] is not None and not isinstance(wiring_values[name], IMMUTABLE)}
+missing = sorted(name for name in captured if name not in wiring_values)
+check("3 every value a table captures is defined on the wiring module", not missing, missing)
 check("3 every value a table captures at the install is a string, a tuple or a number (a name defined by an import is its own module's constant), so it cannot change after it", not unsafe, unsafe)
 # A late lookup is a call, not a bare name, so `plain_entries` leaves it out: it takes no copy at the install. What it can still get wrong is a name the server no longer defines (the hook would then fail when it runs):
 # every `_late("name")` of every table, the minute set's and the wake passes' included, must name a def, a value or an import of the server module, and every `_late_in(module, "name")` a def or value of the owner module.
 server_defs = {n.name for n in SERVER.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | set(module_values)
-owner_files = {(a.asname or a.name): "/".join(n.module.split(".")[1:] + [a.name]) + ".py" for n in SERVER.body if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("stackshot.") for a in n.names}
+owner_files = {(a.asname or a.name): "/".join(n.module.split(".")[1:] + [a.name]) + ".py" for n in WIRING.body if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("stackshot.") for a in n.names}
 def late_call(v):
     """(owner alias or None, name) of a late lookup, else None."""
     if isinstance(v, ast.Call) and isinstance(v.func, ast.Name):
@@ -89,7 +96,7 @@ def owner_defs(alias):
     tree = parse(rel)
     return {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | {t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)}
 owner_missing = sorted(f"{a}.{n}" for (a, n) in late_owned if (owner_defs(a) is None or n not in owner_defs(a)))
-check("3 every late lookup on an owner module (`_late_in`) names a module the server imports and something that module defines", bool(late_owned) and not owner_missing, owner_missing)
+check("3 every late lookup on an owner module (`_late_in`) names a module the wiring imports and something that module defines", bool(late_owned) and not owner_missing, owner_missing)
 check("3 the publish functions, the page rule's refusal and its owed-writer test are looked up on their owner modules (a suite that replaces one there reaches every table), never on the server",
       {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_refuse_if_owing", "_writer_owes"}
       and not {"_publish", "_publish_now", "_publish_every", "_refuse_if_owing", "_writer_owes"} & set(late_names), (sorted(late_owned), sorted(late_names)))

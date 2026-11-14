@@ -399,7 +399,7 @@ from stackshot.model import model as _model
 from stackshot.web.tools import text as _wt_text
 tbl = update._hooks()
 check("10 no write gate is a hook of the update: the update calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(update.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))
-srv_tree = ast.parse(pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
+srv_tree = ast.parse(pathlib.Path(STACK, "stackshot/web/wiring.py").read_text(encoding="utf-8"))      # the tables are web/wiring.py's; their late lookups are made on the server module
 LATE = {}                                                    # the names the server's two tables look up late: table -> [name, ...]
 for node in ast.walk(srv_tree):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "Hooks" and isinstance(node.func.value, ast.Name) and node.func.value.id in ("_create_svc", "_update_svc"):
