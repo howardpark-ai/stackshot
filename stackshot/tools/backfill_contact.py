@@ -64,10 +64,11 @@ def run(a: argparse.Namespace) -> dict:
         os.environ.pop("STACKSHOT_URL", None)
         import logging
         logging.disable(logging.INFO)
-        from stackshot.web import server  # noqa: PLC0415
+        from stackshot.web import server  # noqa: F401, PLC0415  — imported for the instance it builds: the hook tables are filled at its import
+        from stackshot.service import contacts as _contacts  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
         _web_publish._publish = lambda: None
-        return server._contacts._contact_backfill(dry=True)
+        return _contacts._contact_backfill(dry=True)
 
 
 def main(argv: list[str] | None = None) -> int:

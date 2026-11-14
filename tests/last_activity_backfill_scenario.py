@@ -70,12 +70,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server, wiring; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
 from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import merge_progress as mprog_svc
 from stackshot.service import stamp as stamp_svc
 from stackshot.service import retire_passes as retire_svc
-HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc, mprog_svc)   # the `S` of last_activity_pass: the server module, then the stamp and retire modules that own the names it reads
+HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc, mprog_svc, wiring.PASS_NAMES)   # the `S` of last_activity_pass: the server module, then the stamp and retire modules that own the names it reads
 from stackshot.anchors import anchors as _anc
 from stackshot.model import merge_tie as _mtie
 from stackshot.core import config as _cfg

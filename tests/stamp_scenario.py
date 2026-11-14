@@ -72,7 +72,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server, wiring; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
 from stackshot.service import stamp as stamp_svc
 from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import update as _update_svc
@@ -594,7 +594,7 @@ else:
 # ---- the names the three passes written against the server module read off `S` all resolve on the host the server hands them (stamp.PassHost), and the project-id pass's own `S` (the stamp module) holds its own
 from stackshot.service import retire_passes as retire_svc
 from stackshot.service import merge_progress as mprog_svc
-_HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc, mprog_svc)
+_HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc, mprog_svc, wiring.PASS_NAMES)
 def _reads(rel): return sorted(set(re.findall(r"\bS\.([A-Za-z_][A-Za-z_0-9]*)", open(f"{STACK}/stackshot/{rel}", encoding="utf-8").read())))
 for _rel in ("waits/until_pass.py", "model/last_activity_pass.py"):
     _gone = [n for n in _reads(_rel) if not hasattr(_HOST, n)]

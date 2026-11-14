@@ -6,7 +6,7 @@ holds). This module holds the write side of a step's explicit proof (`step_proof
 open step is, the item closed when none is open), the hand-over to the session the next step names (`handover`), and the pass that finds the events that have happened (`sweep_proofs`, the clock `proof_tick`, and the
 `client.py sweep-step-proof` call). A pull request closed without a merge never ticks anything. Reads (git, GitHub) come before the item lock, writes under it.
 
-What it still reaches in server.py comes through `Hooks` in service/checks_hooks.py, looked up when it runs, so a suite that replaces one on server.py is the one called. A suite that replaces a function or a
+What it still reaches in server.py comes through `Hooks` in service/checks_hooks.py, looked up when it runs, so a suite that replaces one on its owner module is the one called. A suite that replaces a function or a
 clock of this module sets it here (and `time` here, since this module reads its own).
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

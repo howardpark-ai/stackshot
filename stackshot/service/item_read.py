@@ -3,7 +3,7 @@
 item's project (`_hub_sessions`) and the two switches of the item model (`_model_guards_on`, `_switchover_on`, `_old_wait_off`).
 
 A service module: it reads the store (the items an `after` names, one item by id), the registry and the config, and writes nothing. The pure rules of a hold (the stored flag, what is on hold) are model/holders.py's.
-Two rules are the board renderer's (web/render.py: what is parked, and the lane the needs give), and a service module cannot import the surface: `Hooks` carries them, and server.py fills it once with `install`. A hook
+Two rules are the board renderer's (web/render.py: what is parked, and the lane the needs give), and a service module cannot import the surface: `Hooks` carries them, and web/wiring.py fills it once with `install` (web/server.py calls it at its import). A hook
 leaves this table when the renderer's rule moves under model/."""
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from stackshot.waits import waiting as _wt
 
 @dataclass(frozen=True)
 class Hooks:
-    """What the item readers still reach outside service/: the renderer's two rules, by the names they have in web/render.py (`is_held`, `needs_kind`). server.py builds one and gives it to `install`; a hook is looked up
+    """What the item readers still reach outside service/: the renderer's two rules, by the names they have in web/render.py (`is_held`, `needs_kind`). web/wiring.py builds one and gives it to `install`; a hook is looked up
     on web/render.py when it runs, so a suite that replaces one there reaches the readers."""
     is_held: Callable[..., Any]  # web.render.is_held: what the board draws as parked
     needs_kind: Callable[..., Any]  # web.render.needs_kind: the lane the needs give ("call", "relay" or "")
@@ -42,7 +42,7 @@ def install(hooks: Hooks) -> None:
 
 def _hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the item readers have no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the item readers have no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
 
 

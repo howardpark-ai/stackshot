@@ -1,6 +1,6 @@
 """app.py: the MCP application. `build` makes the FastMCP instance, adds the middleware in the order the server has always run them, installs the standby copy's route wrapper, and registers the board's own sign-in, the tools (web/tools/) and the routes (web/routes/), in that order.
 
-server.py calls `build` once, at import, and keeps the result as `mcp`. What the tools and the routes need from the rest of server.py (the passes, the stores, the helpers that stay there) arrives as keyword arguments, late-bound: a callable looked up when it is called, so a suite that replaces the server's own still reaches it. This module imports nothing of server.py (web/ is one layer; CONTRIBUTING.md, Layout)."""
+server.py calls `build` once, at import, and keeps the result as `mcp`. What the tools and the routes need from the rest of the server (the passes, the stores, the helpers of the service areas) arrives as keyword arguments from web/wiring.py, late-bound: a callable looked up when it is called, so a suite that replaces the server's own still reaches it. This module imports nothing of server.py (web/ is one layer; CONTRIBUTING.md, Layout)."""
 from __future__ import annotations
 
 import sys

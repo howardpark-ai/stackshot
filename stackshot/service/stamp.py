@@ -6,7 +6,7 @@ the clock moves (the minute set's `phase_sweep` tick and a config reload). The p
 model/item_project_pass.py, which reads the file helpers of this module (`_stamp_open`, `_stamp_sha`, `_stamp_write`, `_stamp_pass_keep`) off the `S` it is given.
 
 `PassHost` is that `S` for the three passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py): a name they read is looked up when it is read, on the owners
-the host is given (this module, service/retire_passes.py, web/server.py), so a suite that replaces one on its owner reaches the passes.
+the host is given (this module, service/retire_passes.py, service/merge_progress.py, web/wiring.py's `PASS_NAMES`, web/server.py), so a suite that replaces one on its owner reaches the passes.
 
 The publish is the surface's, reached through `Hooks` in service/passes_hooks.py, looked up when it runs. A suite that replaces a function or the clock of the pass sets it here (and `time` here, since this module
 reads its own).

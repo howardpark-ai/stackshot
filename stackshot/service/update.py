@@ -7,8 +7,8 @@ write names the mover itself, QUIET when it only files or re-bullets), charges t
 is kept as it was in server.py. `confirm_item` only sets the `confirmed` clock (a QUIET save).
 
 The write gates an update runs are service/gates.py's (`_gates.gate_*`, called in the order they ran in server.py), the field and decision rules model/'s (`field_gates.py`, `decision_gates.py`), each called on its module. The notices an update runs
-and the helpers of the areas that still sit in server.py are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves `Hooks` when its area moves
-under service/ (the telling next). A hook is looked up on server.py when an update runs, so a suite that replaces one there still reaches the update; a suite that replaces a gate or a rule patches it on its owner. The per-write flags of server.py that an update reads or sets stay thread-locals there until the areas that share them move, and are reached through `Hooks` too: `session_next` (the create or update tool's
+and the helpers of the areas that still sit in server.py are reached through `Hooks`, which web/wiring.py fills once with `install` (web/server.py calls it at its import) (this module cannot import server.py: the surface sits above it), and each of them leaves `Hooks` when its area moves
+under service/ (the telling next). A hook is looked up on its owner module (by web/wiring.py) when an update runs, so a suite that replaces one there still reaches the update; a suite that replaces a gate or a rule patches it on its owner. The per-write flags of server.py that an update reads or sets stay thread-locals there until the areas that share them move, and are reached through `Hooks` too: `session_next` (the create or update tool's
 own call), `reformat` (the re-bullet route), `terminal_row` (the terminal prompt's and the job-gap routes' row), `close_was_set` (the item as it stood before the close, for the telling) and `wake_event_set` (the minute loop).
 
 Imports point down only: this module imports the domain and core and the store's readers beside it (service/store.py), never web/."""
@@ -79,7 +79,7 @@ _FILING_ONLY = frozenset({"project", "subject", "priority", "owner_name", "obser
 @dataclass(frozen=True)
 class Hooks:
     """What an update still reaches in server.py (the notices and helpers it shares with the create tool, the close and the telling, the per-write flags and a few constants), in the names they have there without the leading underscore;
-    server.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads (or, `close_was_set`, writes) the thread-local."""
+    web/wiring.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads (or, `close_was_set`, writes) the thread-local."""
     after_open: Callable[..., Any]
     anchor_wait_gate: Callable[..., Any]
     ask_none: tuple[str, ...]      # the words that mean no ask, no observers, no check (server._ASK_NONE)
@@ -160,7 +160,7 @@ def install(hooks: Hooks) -> None:
 
 def _hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the update has no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the update has no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
 
 

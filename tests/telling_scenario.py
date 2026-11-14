@@ -9,7 +9,7 @@ the same reply lines. The expected values of the cases below were taken from mai
   2  notices        every notice a write sends, with each delivery replaced by a recorder (what was sent to whom, in what order) and the reply line the writer gets
   3  hold           the hand-back line held for a few minutes, sent by the minute tick, dropped by a close; a notice held for a background agent's next turn; the failed-delivery record
   4  flags          the per-write flags the telling reads on service/writes.py (a script's terminal-prompt row tells nobody) and the thread-locals the telling keeps itself
-  5  hooks          a notice with no hooks installed is refused; the server's table holds every hook, and a hook that is a function is looked up on the server when the notice is told
+  5  hooks          a notice with no hooks installed is refused; the server's table holds every hook, and a hook that is a function is looked up on its owner when the notice is told
   6  shape          telling.py imports no web/ or audit/ module and has no late import; server.py defines none of the moved names and re-exports none; the services call the telling on its module;
                     no thread-local is left in web/
 
@@ -98,11 +98,12 @@ def patched(owner, **kv):
         for k, v in old.items(): setattr(mod, name(k), v)
 from stackshot.service import item_read as _item_read
 from stackshot.model import holders as _holders
-_SRV_MOVED = {"_model_of": _item_read}                    # the hook names that left the server: their owner modules
+from stackshot.web import page_debts as _page_debts_mod
+_SRV_MOVED = {"_model_of": _item_read, "_session_id": _page_debts_mod}                    # the hook names that left the server: their owner modules
 @contextlib.contextmanager
 def srv(**kv):                    # what the hooks look up on the server (or on the owner of a moved name) when a notice is told
     with contextlib.ExitStack() as st:
-        for k, v in kv.items(): st.enter_context(patched(_SRV_MOVED.get(k, server), **{k: v}))
+        for k, v in kv.items(): st.enter_context(patched(_SRV_MOVED[k], **{k: v}))
         yield
 FLAGMOD = server if MAIN else writes           # where the per-write flags live: the server on main (`_TERMINAL_ROW`), service/writes.py here (`TERMINAL_ROW`)
 def flagname(n): return ("_" + n) if MAIN else n
@@ -390,7 +391,7 @@ finally: telling.install(_first)
 check("5 install replaces the table (the last one installed is the one the telling reads), and the first can be put back", replaced and telling._hooks_ is _first, replaced)
 with srv(_session_id=lambda who: "id-of-" + str(who)):
     sent = told(lambda: telling.tell_needed("a1", it_back, [OTHER], BACK))
-check("5 a hook that is a function is looked up on the server when the notice is told: a patched _session_id reaches tell_needed", sent[0] == "ok" and sent[2] and sent[2][0][2] == "id-of-" + OTHER, sent)
+check("5 a hook that is a function is looked up on its owner when the notice is told: a patched _session_id (on its owner, page_debts) reaches tell_needed", sent[0] == "ok" and sent[2] and sent[2][0][2] == "id-of-" + OTHER, sent)
 with srv(_model_of=lambda it: type("M", (), {"state": "none", "wait": None, "mover": "", "then": ""})()):
     held = plain(lambda: telling.held_by(item("1", mover=BACK)))
 check("5 …and _model_of reaches held_by through model_of (the model is the server's to read)", held[0] == "ok" and held[1][0] == BACK, held)

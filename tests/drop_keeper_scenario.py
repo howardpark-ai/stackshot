@@ -164,7 +164,7 @@ res = answer_svc._answer("a16", "Not needed", "", "")
 check("Not needed: an ordinary answer to the mover, nothing is poked", res == "decision" and not [x for x in told if x[0] == "idle" and x[1] == "a16"], told)
 
 # ---- 8. nothing left says 'keeper of record'
-src = "".join(pathlib.Path(STACK, f).read_text(encoding="utf-8") for f in ("stackshot/web/server.py", "stackshot/web/wiring.py", "stackshot/web/render.py", "stackshot/web/ui/render.py", "stackshot/model/model.py", "stackshot/waits/waiting.py", "stackshot/router/router.py", "stackshot/router/router_live.py", "stackshot/anchors/anchors.py", "stackshot/github/ghsync.py", "stackshot/projects/pages.py", "stackshot/fleet/client.py", "stackshot/web/itempage.py", "stackshot/model/nextlines.py", "stackshot/model/steps.py"))
+src = "".join(pathlib.Path(STACK, f).read_text(encoding="utf-8") for f in ("stackshot/web/server.py", "stackshot/web/wiring.py", "stackshot/web/tools/notes.py", "stackshot/web/tools/get.py", "stackshot/service/wait_fixes.py", "stackshot/web/render.py", "stackshot/web/ui/render.py", "stackshot/model/model.py", "stackshot/waits/waiting.py", "stackshot/router/router.py", "stackshot/router/router_live.py", "stackshot/anchors/anchors.py", "stackshot/github/ghsync.py", "stackshot/projects/pages.py", "stackshot/fleet/client.py", "stackshot/web/itempage.py", "stackshot/model/nextlines.py", "stackshot/model/steps.py"))
 check("no code or tool text says 'keeper of record' (the retired term lives in tests/retired_terms.toml and the history SEED of whatschanged.py only)", "keeper of record" not in src.lower(), None)
 
 print(f"{'ok' if not fails else 'FAILED'}: drop_keeper scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))

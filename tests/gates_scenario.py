@@ -84,7 +84,7 @@ _SRV_MOVED = {"_model_guards_on": _item_read, "_role_of": _holders, "_eff_state"
 @contextlib.contextmanager
 def srv(**kv):                    # what the hooks look up on the server (or on the owner of a moved name) when a gate runs
     with contextlib.ExitStack() as st:
-        for k, v in kv.items(): st.enter_context(patched(_SRV_MOVED.get(k, server), **{k: v}))
+        for k, v in kv.items(): st.enter_context(patched(_SRV_MOVED[k], **{k: v}))
         yield
 FLAGMOD = server if MAIN else writes           # where the per-write flags live: the server on main (`_QUESTION`), service/writes.py here (`QUESTION`)
 def flagname(n): return ("_" + n) if MAIN else n

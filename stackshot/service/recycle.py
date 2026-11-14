@@ -6,7 +6,7 @@ the recycle alone, tells the movers and the event waits); `_recycle_due` is the 
 test of whether a session runs on a machine and the machine's recorded last recycle (the state file `recycles.json`).
 
 A service module: it reads the store and writes an item only through `writes.save` and the update, under the locks the caller holds. The renderer's tests of a recycle wait, its words for a time, the board's ids as
-shown, the debounced publish and the time zone come through `Hooks` in service/passes_hooks.py, which server.py fills at its import. A suite that replaces one of these functions sets it on this module (and `time`
+shown, the debounced publish and the time zone come through `Hooks` in service/passes_hooks.py, which web/wiring.py fills (web/server.py calls it at its import). A suite that replaces one of these functions sets it on this module (and `time`
 here, since this module reads its own clock).
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

@@ -162,13 +162,14 @@ def dry_run(a: argparse.Namespace) -> int:
         from stackshot.waits import until_pass as UP  # noqa: PLC0415
         from stackshot.service import retire_passes as _retire_passes  # noqa: PLC0415
         from stackshot.service import stamp as _stamp  # noqa: PLC0415
+        from stackshot.web import wiring as _wiring  # noqa: PLC0415
         if not Path(_service_store._path("g1")).resolve().is_relative_to(root.resolve()):
             raise SystemExit("until_migrate: the server does not resolve items inside the scratch copy; refusing to run the pass")
         _web_publish._publish = lambda: None
         d = root / "repo/board-data"
         items = SP.load_dir(d)
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
-        host = _stamp.PassHost(server, _stamp, _retire_passes)
+        host = _stamp.PassHost(server, _stamp, _retire_passes, _wiring.PASS_NAMES)
         planned = {g: UP.one(host, g, dry=True) for g in opens}
         wrote = {g: UP.one(host, g) for g in opens}
         again = {g: UP.one(host, g) for g in opens}

@@ -6,7 +6,7 @@ surface that serves it); `_client_items` and `_client_item_facts` read the store
 `_item_list` are the readers of an item's mover, its `then`, its wait and its list that those two (and the wake passes, the update's hand-over and the tools that probe an item) share.
 
 A service module: it reads the store and writes nothing. What it still reaches in the surface (the rulebook text, the renderer's brief and words, the notice's ruling, the report of holds, the page's time, the board's
-ids as shown, the home page's list rule, the queue map and the time zone) comes through `Hooks` in service/passes_hooks.py, which server.py fills at its import. A suite that replaces one of these functions sets it on this
+ids as shown, the home page's list rule, the queue map and the time zone) comes through `Hooks` in service/passes_hooks.py, which web/wiring.py fills (web/server.py calls it at its import). A suite that replaces one of these functions sets it on this
 module (and `time` here, since this module reads its own clock).
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

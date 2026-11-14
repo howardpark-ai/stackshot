@@ -12,7 +12,7 @@ This module holds, in the order of the file: the switches and the readers of a s
 session); and the display (`handoff_lines` for get, `handoff_brief` for the brief).
 
 The record is written through service/writes.py and the notices go through service/telling.py: the domain (waits/handoff.py) decides, the service writes. What the pass still reaches in server.py comes through `Hooks` in
-service/handoff_hooks.py, looked up when it runs, so a suite that replaces one on server.py is the one called. A suite that replaces a function of this module sets it here, the cold call's names on
+service/handoff_hooks.py, looked up when it runs, so a suite that replaces one on its owner module is the one called. A suite that replaces a function of this module sets it here, the cold call's names on
 service/handoff_cold.py.
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

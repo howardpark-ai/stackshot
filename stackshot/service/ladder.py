@@ -9,7 +9,7 @@ This module holds the switches and the settings of the ladder, the entry the dat
 ask, the look, and the hand-up of a silent live background mover's item to the project's -main agent), and `ladder_do`, which takes one rung (the steps it shares with the stall pass are in service/stall.py).
 The pass that walks the items is service/stall_tick.py.
 
-What it still reaches in server.py comes through `Hooks` in service/stall_hooks.py, looked up when it runs, so a suite that replaces one on server.py is the one called. A suite that replaces a function of this
+What it still reaches in server.py comes through `Hooks` in service/stall_hooks.py, looked up when it runs, so a suite that replaces one on its owner module is the one called. A suite that replaces a function of this
 module sets it here.
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""

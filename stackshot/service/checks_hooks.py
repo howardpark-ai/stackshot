@@ -3,7 +3,7 @@
 The done check and its pass live in service/checks.py, the readers of what is live in service/released_live.py, the release settle in service/released.py and the step proofs, with the hand-over they trigger, in
 service/proofs.py. A few things they use are still the surface's, because other code on the surface shares them: this checkout's repository and the pull-request key (the readers of an anchor and a write's gates also
 use them), the hold readers of the item model, the page publish, the session ids and rosters, the renderer's answer for whose move an item waits on, and the mark of a wait the
-server set back. They are reached through `Hooks`, which server.py fills once with `install` (these modules cannot import server.py: the surface sits above them). A hook is looked up on server.py when it runs, so a
+server set back. They are reached through `Hooks`, which web/wiring.py fills once with `install` (web/server.py calls it at its import) (these modules cannot import server.py: the surface sits above them). A hook is looked up on its owner module (by web/wiring.py) when it runs, so a
 suite that replaces one there reaches the passes; a suite that replaces a function of the passes sets it on the module that owns it. A hook leaves this table when the area that holds it moves under service/.
 
 Imports point down only: this module imports nothing of the package."""
@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 @dataclass(frozen=True)
 class Hooks:
-    """What the done check, the release settle and the step proofs still reach outside service/, by the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
+    """What the done check, the release settle and the step proofs still reach outside service/, by the names they have there without the leading underscore. web/wiring.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     date_parked: Callable[..., Any]  # item_read._date_parked
     hold_flag: Callable[..., Any]  # holders._hold_flag
     is_held: Callable[..., Any]  # holders._is_held
@@ -43,5 +43,5 @@ def install(hooks: Hooks) -> None:
 
 def hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the done check, the release settle and the step proofs have no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the done check, the release settle and the step proofs have no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_

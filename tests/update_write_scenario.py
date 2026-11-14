@@ -423,7 +423,7 @@ _ROSTER_OWNERS = {"_session_roster": _agents, "_main_agent": _agents, "_contact_
 @contextlib.contextmanager
 def patched(**kv):
     """The server's own names (and the owner modules' of the roster and contact readers) replaced for a case (the service looks each one up when it is called), put back after."""
-    owner = lambda k: _ROSTER_OWNERS.get(k, server)
+    owner = lambda k: _ROSTER_OWNERS[k]
     old = {k: getattr(owner(k), k) for k in kv}
     for k, v in kv.items(): setattr(owner(k), k, v)
     try: yield

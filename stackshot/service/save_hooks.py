@@ -5,7 +5,7 @@ background agent (service/agent_names.py), the message relay (service/messaging.
 after an answer (service/answer_handover.py), the answer itself (service/answer.py) and the audit ticks (service/audit_ticks.py) run from service/. A few things they use are still the surface's or the audit's: the debounced publish of the board, the session id of a name, the audit's broad wait words and
 its modules, the reader of every item that tools/ holds, the board's words for a time and its time zone, the message length cap, the page's parser of an ask line and its option limits, the words the tools state, the answer form's note words and its module (lock, limits, pending file), and the
 shown form of an id turned back to the stored one. They are reached through `Hooks`, which
-server.py fills once with `install` (these modules cannot import server.py: the surface sits above them). A hook is looked up on its owner when it runs, so a suite that replaces one there reaches the steps; a suite that replaces a
+web/wiring.py fills once with `install` (web/server.py calls it at its import; these modules cannot import server.py: the surface sits above them). A hook is looked up on its owner when it runs, so a suite that replaces one there reaches the steps; a suite that replaces a
 function of the steps sets it on the module that owns it. A hook leaves this table when the area that holds it moves under service/.
 
 Imports point down only: this module imports nothing of the package."""
@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 @dataclass(frozen=True)
 class Hooks:
-    """What these service modules still reach outside service/, by the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
+    """What these service modules still reach outside service/, by the names they have there without the leading underscore. web/wiring.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     anchor_shapes: Callable[[], Any]  # web.tools.text._ANCHOR_SHAPES
     answer_deliver: Callable[..., Any]  # service.answer._answer_deliver
     answer_note: Callable[..., Any]  # web.answers._answer_note
@@ -56,5 +56,5 @@ def install(hooks: Hooks) -> None:
 
 def hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the save steps and the owner's words have no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the save steps and the owner's words have no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_

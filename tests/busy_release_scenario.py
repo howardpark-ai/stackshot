@@ -52,6 +52,7 @@ from stackshot.audit import busy_hold, subagent_tie
 from stackshot.core import config as _cfg
 from stackshot.web import server
 from stackshot.web import wiring    # `_busy_live` is web/wiring.py's
+from stackshot.service import released_live as _rlive, store as _svcstore, handoff as _handoff_svc
 from stackshot.web import publish as _web_publish
 from stackshot.service import audit_ticks as audit_ticks_svc, gates, telling, update as update_svc
 from stackshot.tools import next_report as _nr
@@ -108,7 +109,7 @@ def live_for(subs=None, raises=None, anch=None, items=None):
     """The gate's `live` callable as the server builds it (audit/busy_hold.py), over the scratch store and a fake `subagents`."""
     def live(gid, mover):
         return busy_hold.live_work(gid, mover, subagents=(lambda who: (_ for _ in ()).throw(raises)) if raises is not None else (lambda who: subs if who == BACK else []),
-                                   items=items or (lambda: _nr.load_all(None)), anchored=lambda: anch or {}, same=server._handoff.ho_same, shown=_nr.shown)
+                                   items=items or (lambda: _nr.load_all(None)), anchored=lambda: anch or {}, same=_handoff_svc.ho_same, shown=_nr.shown)
     return live
 def gate(live, sender=BACK, gid="a1", **kw):
     kw.setdefault("hold", True)
@@ -142,7 +143,7 @@ def rel_live(units=(77,), anch=None, own=OWN, logs=None, raises=None, now=None, 
         if isinstance(v, Exception): raise v
         return v
     def live(gid, mover):
-        return busy_hold.live_release(gid, units=U, anchored=lambda: anch or {}, item=item or (lambda g: count("item") or server._svcstore._load(g)), own_repo=lambda: own, canon=_cfg.canon_repo,
+        return busy_hold.live_release(gid, units=U, anchored=lambda: anch or {}, item=item or (lambda g: count("item") or _svcstore._load(g)), own_repo=lambda: own, canon=_cfg.canon_repo,
                                       step_prs=step_prs or _rel.step_prs, log=L, now=lambda: NOW if now is None else now)
     return live
 def both_for(subs=None, **kw):
@@ -308,7 +309,7 @@ check("3 …a log dated ahead of the clock (a skew, however far) is fresh, not a
 check("3 a unit with no log passes (unknown)", ok(gate(rel_live(anch=A77, logs={}))) and ok(gate(rel_live(anch=A77, logs={77: None}))))
 check("3 a log that cannot be read passes", ok(gate(rel_live(anch=A77, logs={77: OSError("denied")}))), gate(rel_live(anch=A77, logs={77: OSError("denied")})))
 check("3 a repository this checkout cannot name passes", ok(gate(rel_live(anch=A77, own=""))), gate(rel_live(anch=A77, own="")))
-check("3 anchors that cannot be read pass", ok(outcome(lambda: gates.gate_busy_hold("a1", BACK, hold=True, live=lambda g, w: busy_hold.live_release(g, units=lambda: {77}, anchored=lambda: 1 / 0, item=server._svcstore._load, own_repo=lambda: OWN,
+check("3 anchors that cannot be read pass", ok(outcome(lambda: gates.gate_busy_hold("a1", BACK, hold=True, live=lambda g, w: busy_hold.live_release(g, units=lambda: {77}, anchored=lambda: 1 / 0, item=_svcstore._load, own_repo=lambda: OWN,
       canon=_cfg.canon_repo, step_prs=_rel.step_prs, log=lambda n: (NOW - 60.0, QUEUED), now=lambda: NOW)))))
 check("3 an item that cannot be read passes", ok(gate(rel_live(anch=A77, item=lambda g: 1 / 0))), gate(rel_live(anch=A77, item=lambda g: 1 / 0)))
 check("3 an unreadable step reader passes", ok(gate(rel_live(anch=A77, step_prs=lambda m: 1 / 0))))
@@ -318,7 +319,7 @@ check("3 a `live` that raises passes the write, and no `live` at all passes", ok
 direct = lambda **kw: rel_live(**kw)("a1", BACK)
 check("3 the proof answers \"\" itself, never raising, when the unit list raises, the anchors raise, the item raises, the log raises or the repository cannot be named",
       direct(anch=A77, raises=OSError("x")) == "" and direct(anch=A77, logs={77: OSError("denied")}) == "" and direct(anch=A77, item=lambda g: 1 / 0) == "" and direct(anch=A77, own="") == ""
-      and busy_hold.live_release("a1", units=lambda: {77}, anchored=lambda: 1 / 0, item=server._svcstore._load, own_repo=lambda: OWN, canon=_cfg.canon_repo, step_prs=_rel.step_prs, log=lambda n: (NOW, QUEUED), now=lambda: NOW) == "")
+      and busy_hold.live_release("a1", units=lambda: {77}, anchored=lambda: 1 / 0, item=_svcstore._load, own_repo=lambda: OWN, canon=_cfg.canon_repo, step_prs=_rel.step_prs, log=lambda n: (NOW, QUEUED), now=lambda: NOW) == "")
 check("3 …and its words, when it can tell, are the refusal's start", direct(anch=A77).startswith("a release of PR #77 tied to this item is running (unit stackshot-release-77.service"), direct(anch=A77))
 check("3 an anchored pull request that is not running is not counted although its log is fresh (only a unit proves it)", ok(gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))), gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)})))
 check("3 a step's pull request that is not running is not counted although its log is fresh", ok(gate(rel_live(units=(99,), step_prs=lambda m: {78}, logs={78: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))))
@@ -354,7 +355,7 @@ check("4 a subagent live and no release: the subagent is named", 'your subagent 
 check("4 neither passes", ok(gate(both_for([], anch=A77, units=()))))
 check("4 a subagent tied to another item of the mover and a release tied to this one: the release refuses", RELWORDS(gate(both_for([sub("Build @2: the other fix")], anch=A77))), gate(both_for([sub("Build @2: the other fix")], anch=A77)))
 def broken_subs(gid, mover):
-    return busy_hold.live_work(gid, mover, subagents=lambda who: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript")), items=lambda: _nr.load_all(None), anchored=lambda: {}, same=server._handoff.ho_same, shown=_nr.shown)
+    return busy_hold.live_work(gid, mover, subagents=lambda who: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript")), items=lambda: _nr.load_all(None), anchored=lambda: {}, same=_handoff_svc.ho_same, shown=_nr.shown)
 check("4 a mover whose subagents cannot be read (unknown) still lets a live release speak", RELWORDS(gate(lambda g, w: broken_subs(g, w) or rel_live(anch=A77)(g, w))))
 check("4 …and when neither can be told it passes", ok(gate(lambda g, w: broken_subs(g, w) or rel_live(anch=A77, raises=OSError("x"))(g, w))))
 
@@ -369,7 +370,7 @@ def update(i, **kw):
         return outcome(lambda: _wt_update.stackshot_update(f"a{i}", **kw))
 HOLD = dict(next=f"{BACK}: do it", wake=FUT, hold=True, wait_basis=f"the soak window ends {FUT}")
 check("5 the real unit list is parsed from systemctl's own line shape: release_units reads the numbers of active release units", (UNITS_OUT.update(v=units_text(77, 225)), _rel.release_units())[1] == {77, 225} and (UNITS_OUT.update(v=""), _rel.release_units())[1] == set())
-with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
+with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(_rlive, released_anchors=lambda: dict(A77)):
     SUBS[:] = []
     UNITS_OUT["v"] = units_text(77); logfile(77, QUEUED, age=120.0)
     before = json.dumps(read(1), sort_keys=True)
@@ -415,12 +416,12 @@ with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server
         got = update(1, **HOLD)
     check("5 a box where the unit list cannot be had (no systemctl) passes the hold", got[0] == "ok", got)
     reset()
-with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))), patched(server._rlive, released_anchors=lambda: dict(A77)):
+with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))), patched(_rlive, released_anchors=lambda: dict(A77)):
     UNITS_OUT["v"] = units_text(77); logfile(77, QUEUED, age=60.0)
     got = update(1, **HOLD)
     check("5 a mover whose subagents cannot be read (unknown) does not hide a live release through the tool", RELWORDS(got), got)
     reset()
-with patched(server._rlive, released_anchors=lambda: 1 / 0), patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
+with patched(_rlive, released_anchors=lambda: 1 / 0), patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
     got = update(1, **HOLD)
     check("5 anchors the server cannot read are unknown: the write passes", got[0] == "ok", got)
     reset()
@@ -430,7 +431,7 @@ logfile(77, QUEUED, age=30.0)
 check("5 a stale log with no unit (the failover box's stale copies) is never read as a release", wiring._busy_live("a1", BACK) == "")
 # the real proof, nothing but the unit list replaced
 UNITS_OUT["v"] = units_text(77)
-with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(server._rlive, released_anchors=lambda: dict(A77)):
+with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(_rlive, released_anchors=lambda: dict(A77)):
     check("5 wiring._busy_live answers the words of the release for an item whose anchored pull request is released now", wiring._busy_live("a1", BACK).startswith("a release of PR #77 tied to this item is running (unit stackshot-release-77.service"), wiring._busy_live("a1", BACK))
     check("5 …and \"\" for another item of the mover", wiring._busy_live("a2", BACK) == "")
 UNITS_OUT["v"] = ""
@@ -448,7 +449,7 @@ logfile(90, tail("deploying b1"), age=60.0)
 doing(8); base = update(8, next=WAITING_NEXT)
 check("5 with no release running the doing item's wait wording draws the note, as before", base[0] == "ok" and base[1].count(NOTE) == 1, base)
 UNITS_OUT["v"] = units_text(90)
-with patched(server._rlive, released_anchors=lambda: dict(A90)):
+with patched(_rlive, released_anchors=lambda: dict(A90)):
     got = note_of(8)
     check("5 …no note while a release of a pull request tied to the item runs (its wait wording is about the mover's own release); the write itself goes through", got[0] == "ok" and NOTE not in got[1] and "overnight" in read(8)["metadata"]["next"], got)
     logfile(90, tail("deploying b1"), age=20 * 60.0)
@@ -458,10 +459,10 @@ with patched(server._rlive, released_anchors=lambda: dict(A90)):
     with cfg_model(busy_hold_guard=False):
         got = note_of(8)
     check("5 …and with the switch off", got[0] == "ok" and got[1].count(NOTE) == 1, got)
-with patched(server._rlive, released_anchors=lambda: {"a2": {f"{OWN}#90"}}):
+with patched(_rlive, released_anchors=lambda: {"a2": {f"{OWN}#90"}}):
     got = note_of(8)
     check("5 …and the note stays when the running release is tied to another item", got[0] == "ok" and got[1].count(NOTE) == 1, got)
-with patched(server._rlive, released_anchors=lambda: dict(A90)), patched(_rel, _run=lambda argv: (_ for _ in ()).throw(OSError("no bus"))):
+with patched(_rlive, released_anchors=lambda: dict(A90)), patched(_rel, _run=lambda argv: (_ for _ in ()).throw(OSError("no bus"))):
     got = note_of(8)
     check("5 …and when the unit list cannot be read", got[0] == "ok" and got[1].count(NOTE) == 1, got)
 UNITS_OUT["v"] = ""

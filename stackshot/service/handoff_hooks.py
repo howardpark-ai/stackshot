@@ -2,7 +2,7 @@
 
 The hand-off record, its delivery, the minute pass, the cold call and the display live in service/handoff.py and service/handoff_cold.py. A few things they use are still the surface's, because other code on the
 surface shares them: the item model's reader and its switch, the stall pass's state and the one ladder's rungs (service/stall.py and service/ladder.py import this module's passes, so they are looked up when the hook runs), the recovery request, the page store, the
-publish and the session ids. They are reached through `Hooks`, which server.py fills once with `install` (these modules cannot import server.py: the surface sits above them). A hook is looked up on server.py
+publish and the session ids. They are reached through `Hooks`, which web/wiring.py fills once with `install` (web/server.py calls it at its import) (these modules cannot import server.py: the surface sits above them). A hook is looked up on server.py
 when it runs, so a suite that replaces one there reaches the passes; a suite that replaces a function of the passes sets it on the module that owns it. A hook leaves this table when the area that holds it
 moves under service/.
 
@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 @dataclass(frozen=True)
 class Hooks:
-    """What the hand-off passes still reach in server.py, in the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
+    """What the hand-off passes still reach in server.py, in the names they have there without the leading underscore. web/wiring.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     after_open: Callable[..., Any]  # item_read._after_open
     front_pair_ok: Callable[..., Any]  # holders._front_pair_ok
     item_refs: Callable[..., Any]  # service/agent_names.py _item_refs
@@ -55,5 +55,5 @@ def install(hooks: Hooks) -> None:
 
 def hooks() -> Hooks:
     if _hooks_ is None:
-        raise RuntimeError("the hand-off passes have no hooks installed (server.py installs them at its import)")
+        raise RuntimeError("the hand-off passes have no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
