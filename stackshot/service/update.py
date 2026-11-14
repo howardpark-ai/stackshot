@@ -119,6 +119,7 @@ class Hooks:
     owner_quote_on: Callable[..., Any]
     owner_state_mover: Callable[..., Any]
     owner_then_default: Callable[..., Any]
+    then_stands: Callable[..., Any]
     owner_want: Callable[..., Any]
     parse_wake: Callable[..., Any]
     publish: Callable[..., Any]
@@ -1120,6 +1121,8 @@ def update_unlocked(
                 and not _model.stood_his(item_now, lambda i_: h.after_open(i_.get("metadata") or {})):      # N6: a session's write that takes the last open step off an item that stays open (his server-made step counts; a close is exempt)
             raise ToolError(f"Refused: this write leaves {_gh.shown(gid)} open with no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
         mover_note = h.owner_state_mover(item_now, meta, mover_named, item_was)      # a bookkeeping write (rename, priority, re-bullet) flips nothing; his state makes him the mover: before the guards read the item
+        if "then" in model_set or not (filing_only or _writes.reformat()):
+            mover_note += h.then_stands({**item, "metadata": meta}, meta)      # a `then` beside an agent is dropped with a note, also when the write names the mover itself (the mover step above leaves that write alone) and when the write only sets the `then` (a model field, so a filing write)
         if not (filing_only or _writes.reformat()):
             mover_note += h.owner_then_default(item_was, meta, str(item.get("status") or ""), sender.strip(), "then" in model_set or "then" in model_drop, mover.strip())      # D9: then defaults to the agent doing the work, not to the front agent that relayed the ask
         wake_changed = bool(wake) and meta.get("wake") != (item_was.get("metadata") or {}).get("wake")      # re-sending the wake the item carries sets nothing

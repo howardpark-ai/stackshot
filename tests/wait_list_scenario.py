@@ -11,8 +11,7 @@ day at the latest. This part of the feature is storage, the model and the ending
     path); mixed kinds; two lines on one item or anchor; `all` ends on the last arrival and `any` on the first; a repeated delivery changes nothing; an item already turned is not turned again
   * the backstop day, with and without an open relay line (the owner is asked then, and "not yet" puts the list back with what had arrived)
   * the end drops the wait's fields (waits and wait_mode with the rest), and the mover is told what arrived and what did not
-  * with the watchers off, a legacy path marks no line of a list (the `after` release and the held-anchor release never take one) but the legacy wake pass still ends a list at its backstop day, by the
-    watchers' own path and in their words; a single wait is not touched (the existing suites are the proof)
+  * the old wake pass never marks or ends a list before its backstop day; the watchers end it there, in their words; a single wait is not touched (the existing suites are the proof)
 
     tests/run-suite wait_list        → exit 0 / 1"""
 import datetime, json, os, re, sys, pathlib, time, logging
@@ -99,7 +98,7 @@ def reset(): SENT.clear(); NOTES.clear()
 def notes_of(g): return [n for gid, n in NOTES if gid == g]
 def cfg(**kw):
     for k, v in kw.items(): CFG[k] = v
-cfg(guards=False, watchers=True, pause=False)       # the write guards have their own suite; here they are off
+cfg(guards=False, pause=False)       # the write guards have their own suite; here they are off
 AURL = "https://github.com/o/r/pull/5"
 AURL2 = "https://github.com/o/r/pull/6"
 def notice(text, ts=None, anchor="github:o/r#5", ruling="passed", to=None, **kw):
@@ -523,42 +522,15 @@ lst(192, [Tm(day(5))], mode="all", until=day(-1))
 woke = wakes_svc.wake_pass(); m = mt(192)
 check("malformed: an item that stores wait_kind=list with a list that does not hold ends as the date alone: its backstop day comes, the mover has it, the stray fields go with the wait", "a192" in woke and m.get("mover") == BACK
       and "its until" in m["woke"]["what"] and all(k not in m for k in GONE), m)
-# the legacy paths: with the watchers off nothing marks a line, and only the backstop day ends a list
+# the backstop day ends a list (the watchers' pass; the old wake pass never touches a list)
 reset()
 lst(193, [Tm(day(9)), It("a194")], mode="all", until=day(9)); item(194)
-cfg(watchers=False)
-b193 = raw(193); woke = wakes_svc.wake_pass(); wakes_svc.release_after("a194", "done", "", "home-front"); wakes_svc.anchor_release("projects/alpha", notice("a notice"), by="home-stew")
-check("legacy: with the watchers off nothing marks a line or ends a list before its backstop day (the wake pass, the `after` release and the held-anchor release leave it as it is)", raw(193) == b193 and "a193" not in woke, (woke, mt(193)))
-check("legacy: …the scheduler looks at its backstop day alone (one moment, the day's start)", [at for g, *_, at in wakes_svc.wake_rows() if g == "a193"] == [wakes_svc.wake_at(day(9))], [(g, at) for g, *_, at in wakes_svc.wake_rows()])
-# (d) the backstop day ends a list with the watchers off
-reset()
-lst(205, [Tm(day(9)), It("a206"), Ev("job_run weekly")], mode="all", until=day(-1)); item(206, subject="[home] the blocker of a list with the watchers off")
-woke = wakes_svc.wake_pass(); m = mt(205)
-check("legacy (watchers off): a list whose backstop day has passed ends: the post-wake mover has it, alive, with the watchers' words (nothing arrived, every line still open)", "a205" in woke and m.get("mover") == BACK and m.get("needs") == [BACK]
-      and m["woke"]["what"] == f"backstop day {day(-1)}: nothing had arrived; still open: the date {day(9)}; the close of {_gh.shown('a206')}; a fleet event (job_run weekly)", m)
-check("legacy (watchers off): …through end_wait: the whole wait group goes (the list, its mode, the kind, the backstop, the post-wake mover) and the hold", all(k not in m for k in GONE) and all(k not in m for k in model.WAIT_GROUP) and "hold" not in m and "ask" not in m, m)
-check("legacy (watchers off): …the mover is told in one line and the History says the item woke", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "backstop day" in sent("watch")[0][2] and any(n.startswith("woke: backstop day ") for n in notes_of("a205")), (sent(), notes_of("a205")))
-reset(); wakes_svc.wake_pass()
-check("legacy (watchers off): …a later pass tells nobody again", not sent() and not notes_of("a205"), sent())
-reset()
-lst(207, [Re("the lease"), Tm(day(9))], mode="all", until=day(-1), then="home-other"); wakes_svc.wake_pass(); m = mt(207)
-check("legacy (watchers off): with a relay line still open the owner is asked, as the watchers ask (the same question, three options, the post-wake mover as `then`), nobody is messaged", m.get("needs") == ["decision"] and m.get("ask") == "Decide: has the lease arrived? · Options: arrived / not yet, ask again on <date> / drop"
-      and m.get("then") == BACK and "mover" not in m and m["woke"]["what"].startswith(f"backstop day {day(-1)}: nothing had arrived; still open: news of the lease; ") and all(k not in m for k in GONE) and not sent("watch"), m)
-lst(209, [Re("x"), Tm(day(9))], mode="any", until=day(-1)); d = rd(209); d["metadata"]["waits"][1]["arrived"] = {"at": now0 - 100, "what": "the date came"}; put(209, d)
-reset(); wakes_svc.wake_pass()
-check("legacy (watchers off): a list that is already over by what has arrived (edited by hand) ends with the words of the arrival, not the backstop's", mt(209).get("mover") == BACK and mt(209)["woke"]["what"] == "any of 2 arrived: the date came; not needed: news of x", mt(209))
-item(213, wait_kind="time", hold=True, wake=day(-1), needs=[], post_wake_mover=BACK, subject="[home] a single wait with the watchers off")
 reset(); woke = wakes_svc.wake_pass()
-check("legacy (watchers off): a single wait is released by the old pass as it always was (wake, no list words)", "a213" in woke and "hold" not in mt(213) and "woke" not in mt(213) and any(n.startswith("woke (wake ") for n in notes_of("a213")), (mt(213), notes_of("a213")))
-lst(214, [Tm(day(9)), It("a206")], mode="all", until=day(-1)); d = rd(214); d["metadata"]["waits"] = d["metadata"]["waits"][:1]; put(214, d)
-reset(); woke = wakes_svc.wake_pass()
-check("legacy (watchers off): a stored list that does not hold ends as the date alone, as it did (the old pass's own words, no list words)", "a214" in woke and "woke" not in mt(214) and any(n.startswith("woke (wake ") for n in notes_of("a214"))
-      and not any("backstop day" in n for n in notes_of("a214")) and "until" not in mt(214), (mt(214), notes_of("a214")))
-cfg(watchers=True)
-reset(); woke = wakes_svc.wake_pass()
-check("legacy: …and with the watchers on they end a list the same way (the backstop day)", "a193" not in woke and mt(193).get("wait_kind") == "list", (woke, mt(193)))
+check("watchers: the wake pass leaves a list before its backstop day alone", "a193" not in woke and mt(193).get("wait_kind") == "list", (woke, mt(193)))
+item(206, subject="[home] the blocker of a list that is still open")
 lst(215, [Tm(day(9)), It("a206"), Ev("job_run weekly")], mode="all", until=day(-1)); reset(); woke = wakes_svc.wake_pass()
-check("legacy: …(watchers on: the same words as with them off)", "a215" in woke and mt(215)["woke"]["what"] == mt(205)["woke"]["what"], (mt(215).get("woke"), mt(205).get("woke")))
+check("watchers: a list whose backstop day has passed ends with the watchers' words (nothing arrived, every line still open)", "a215" in woke and mt(215).get("mover") == BACK
+      and mt(215)["woke"]["what"] == f"backstop day {day(-1)}: nothing had arrived; still open: the date {day(9)}; the close of {_gh.shown('a206')}; a fleet event (job_run weekly)", (mt(215).get("woke"),))
 # pause
 reset()
 lst(195, [Tm(day(-1)), Re("x")], mode="any", until=day(-1)); lst(196, [It("a197"), Re("x")], mode="any"); item(197)
@@ -641,74 +613,38 @@ check("kind_of: a stored list that does not hold is the date alone to waiting.ki
 check("kind_of: …whatever is wrong with the list (not a list of lines, a mode that is neither, no backstop day)", all(not UW.kind_of({**BADL, **bad}) and _WT.kind_of({**BADL, **bad}) in ("time", "") for bad in ({"waits": "x"}, {"wait_mode": "some", "waits": GOOD["waits"]}, {"until": "", "waits": GOOD["waits"]})), None)
 
 # ================================================================ the lows of the display follow-up
-# one list whose end fails never stops the lists after it, with the watchers off (the legacy wake pass, as the watchers' pass does it)
+# one list whose end failed is moved off by its back-off, as the watchers' branch gives it
 reset()
-for i_ in (230, 231, 232, 233): lst(i_, [Tm(day(9)), It("a206")], mode="all", until=day(-1))
-cfg(watchers=False)
-calls_ = []
-def flaky(gid, *a, **k):
-    calls_.append(gid)
-    if gid == "a231": raise RuntimeError("disk")
-    return orig_fire(gid, *a, **k)
-watching_svc.watch_fire = flaky
-try:
-    woke = wakes_svc.wake_pass()
-    first_calls = list(calls_); calls_.clear()
-    woke2 = wakes_svc.wake_pass()
-    next_231 = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
-finally:
-    watching_svc.watch_fire = orig_fire; watching_svc.WATCH_BACKOFF.pop("a231", None)
-check("legacy (watchers off): a list whose end raises is skipped and noted, and the lists after it (and before it) are still ended", "a231" not in woke and all(g in woke for g in ("a230", "a232", "a233"))
-      and all(mt(i_).get("mover") == BACK and "wait_kind" not in mt(i_) for i_ in (230, 232, 233)) and mt(231).get("wait_kind") == "list", (woke, first_calls))
-check("legacy (watchers off): …the failed one is backed off (noted on the item, as the watchers' pass notes it) and is not tried again by the next pass", mt(231).get("watch", {}).get("failed_at", 0) > 0 and "a231" in first_calls and "a231" not in calls_ and woke2 == [], (first_calls, calls_, mt(231).get("watch")))
-check("legacy (watchers off): …and the scheduler looks at it again after the back-off, not at once (so the runner does not spin on it)", len(next_231) == 1 and next_231[0].timestamp() >= time.time() + wk.BACKOFF - 60, next_231)
-# a restart within the back-off: the in-memory back-off is gone (popped above), the note on the item stands, and the moment is still after it, as the watchers' branch reads it (the runner works at its floor, re-reading the store each round, otherwise)
-watching_svc.WATCH_BACKOFF.pop("a231", None)
-fa_ = mt(231)["watch"]["failed_at"]
-restart_ = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
-check("legacy (watchers off): …after a restart (no in-memory back-off, the failure noted on the item within the back-off) the moment is still after the back-off, never in the past (no spin at the runner's floor)",
-      len(restart_) == 1 and restart_[0].timestamp() >= fa_ + wk.BACKOFF - 1 and restart_[0].timestamp() > time.time(), (restart_, fa_))
-d_ = rd(231); d_["metadata"]["watch"]["failed_at"] = time.time() - 2 * wk.BACKOFF; put(231, d_)
-aged_ = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
-check("legacy (watchers off): …a failure older than the back-off no longer holds it (the moment is past: due now)", len(aged_) == 1 and aged_[0].timestamp() <= time.time(), (aged_, time.time()))
-d_ = rd(231); d_["metadata"]["watch"]["failed_at"] = time.time() - 60; put(231, d_)
-watched_ = wk.next_moment(mt(231))
-check("legacy (watchers off): …and the moment is the one the watchers' branch gives for the same failure (the same rule)", [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"][0].timestamp() >= (watched_ or 0) - 1, watched_)
-# the moment is pinned, not only "later than before": a failure 100 s ago puts it at the failure plus the back-off, exactly
-d_ = rd(231); d_["metadata"]["watch"]["failed_at"] = fa100_ = time.time() - 100; put(231, d_)
-pin_ = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
-check("legacy (watchers off): a failure 100 s ago puts the moment at failed_at + BACKOFF, to the microsecond", len(pin_) == 1 and abs(pin_[0].timestamp() - (fa100_ + wk.BACKOFF)) < 0.001, (pin_, fa100_ + wk.BACKOFF))
-cfg(watchers=True)
+lst(231, [Tm(day(9)), It("a206")], mode="all", until=day(-1))
+d_ = rd(231); d_["metadata"]["watch"] = {"failed_at": time.time() - 100}; put(231, d_)
+fa100_ = d_["metadata"]["watch"]["failed_at"]
 pin_w_ = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
-check("watchers on: …and the watchers' branch gives the same moment for the same failure", len(pin_w_) == 1 and abs(pin_w_[0].timestamp() - (fa100_ + wk.BACKOFF)) < 0.001 and abs(wk.next_moment(mt(231)) - (fa100_ + wk.BACKOFF)) < 0.001, (pin_w_, wk.next_moment(mt(231))))
+check("watchers: a failure 100 s ago puts the moment at failed_at + BACKOFF, to the microsecond, and the watchers' own next_moment gives the same", len(pin_w_) == 1 and abs(pin_w_[0].timestamp() - (fa100_ + wk.BACKOFF)) < 0.001 and abs(wk.next_moment(mt(231)) - (fa100_ + wk.BACKOFF)) < 0.001, (pin_w_, wk.next_moment(mt(231))))
 lst(235, [Tm(day(9)), It("a206")], mode="all", until=day(5)); lst(236, [Tm(day(9)), It("a206")], mode="all", until=day(6))      # two lists the torn note on a231 must not stop
 # a torn failure note (no number, a bool, a negative, a non-finite, a moment no date can show) is no failure: it never stops the rows of the other items, and the moment is the one with no note
 d_ = rd(231); d_["metadata"]["watch"].pop("failed_at", None); put(231, d_)
 base_ = {k_: [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"] for k_ in (False, True)}
-for mode_ in (False, True):
-    cfg(watchers=mode_)
+for mode_ in (True,):
     for v_ in (1e18, 1e300, float("inf"), float("-inf"), float("nan"), "x", "Infinity", "1e999", -5, 0, True, None, [1], {"at": 1}, 10 ** 400):
         d_ = rd(231); d_["metadata"]["watch"]["failed_at"] = v_; put(231, d_)
         try: rows_ = wakes_svc.wake_rows(); nxt_ = wakes_svc.next_wake(); why_ = ""
         except Exception as e_: rows_, nxt_, why_ = [], None, f"{e_.__class__.__name__}: {e_}"
         ids_ = [g for g, *_ in rows_]
         mine_ = [at for g, *_, at in rows_ if g == "a231"]
-        check(f"hostile failed_at {v_!r} ({'watchers on' if mode_ else 'watchers off'}): wake_rows and next_wake never raise, every other list keeps its row, and the item's moment is the one with no note",
+        check(f"hostile failed_at {v_!r} (watchers): wake_rows and next_wake never raise, every other list keeps its row, and the item's moment is the one with no note",
               not why_ and all(g in ids_ for g in ("a235", "a236")) and nxt_ is not None and mine_ == base_[mode_], (why_, ids_, mine_, base_[mode_]))
-        check(f"hostile failed_at {v_!r} ({'watchers on' if mode_ else 'watchers off'}): …and failed_at itself reads it as no failure (0.0)", wk.failed_at({"watch": {"failed_at": v_}}) == 0.0, wk.failed_at({"watch": {"failed_at": v_}}))
+        check(f"hostile failed_at {v_!r} (watchers): …and failed_at itself reads it as no failure (0.0)", wk.failed_at({"watch": {"failed_at": v_}}) == 0.0, wk.failed_at({"watch": {"failed_at": v_}}))
         try: nm_ = wk.next_moment(mt(231)); ok_ = nm_ is None or isinstance(nm_, float)
         except Exception as e_: ok_, nm_ = False, f"{e_.__class__.__name__}: {e_}"
-        check(f"hostile failed_at {v_!r} ({'watchers on' if mode_ else 'watchers off'}): …and next_moment reads it as no failure too", ok_, nm_)
+        check(f"hostile failed_at {v_!r} (watchers): …and next_moment reads it as no failure too", ok_, nm_)
 d_ = rd(231); d_["metadata"]["watch"].pop("failed_at", None); put(231, d_)
 check("failed_at reads a real failure as it is stored (a float, an int, a number as text) and a missing or torn note as none", wk.failed_at({"watch": {"failed_at": 1.5e9}}) == 1.5e9 and wk.failed_at({"watch": {"failed_at": 1500000000}}) == 1.5e9 and wk.failed_at({"watch": {"failed_at": "1500000000"}}) == 1.5e9 and wk.failed_at({}) == 0.0 and wk.failed_at({"watch": "x"}) == 0.0, None)
-cfg(watchers=True)
-# `_watch_fire(legacy=True)` ends a list that is open and nothing else: a closed item that still stores a list is left alone
+# `watch_fire` ends a list that is open and nothing else: a closed item that still stores a list is left alone
 lst(234, [Tm(day(9)), It("a206")], mode="all", until=day(-1)); d_ = rd(234); d_["status"] = "completed"; put(234, d_)
-cfg(watchers=False); b234 = raw(234); out_ = {}
-try: got_ = watching_svc.watch_fire("a234", "backstop", time.time(), out_, legacy=True); why_ = ""
+b234 = raw(234); out_ = {}
+try: got_ = watching_svc.watch_fire("a234", "backstop", time.time(), out_); why_ = ""
 except Exception as e_: got_, why_ = None, f"{e_.__class__.__name__}: {e_}"
-cfg(watchers=True)
-check("legacy: _watch_fire(legacy=True) on a closed item that stores a list does nothing (False, no message, no save, the item as it was)", got_ is False and not out_ and raw(234) == b234, (got_, why_, out_))
+check("watch_fire on a closed item that stores a list does nothing (False, no message, no save, the item as it was)", got_ is False and not out_ and raw(234) == b234, (got_, why_, out_))
 # hostile data: a megabyte in every field of every line is clipped before it is normalised, and what is kept is what normalising the whole would keep
 HUGE = ("ab cd " * 170000)[:1_000_000]
 big_ = {"wait_kind": "list", "wait_mode": "all", "until": "2026-12-01", "waits": [{**An(HUGE, HUGE), "arrived": {"at": 5.0, "what": HUGE}}, {**Ev(HUGE), "arrived": {"at": 6.0, "what": HUGE}}, Re(HUGE), It(HUGE)] * 2}

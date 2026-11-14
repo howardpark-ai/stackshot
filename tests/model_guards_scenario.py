@@ -549,12 +549,24 @@ check("6c migration: the clocks stay (updated and confirmed unchanged)", all(rd(
 check("6c migration: it is idempotent: a second pass rewrites nothing", migsvc.migrate_owner_mover() == [], None)
 AN = lambda ts: [{"ts": ts, "kind": "decision", "choice": "Yes", "via": "board"}]
 item(51, su=now0 - 3600, needs=[BACK], mover=OWN, then=BACK, answers=AN(now0 - 3600.5))   # no record: his answer within a second of the item's last write counts as letting go
-item(38, needs=[BACK], mover=OWN, then=OWN, handoff=dict(HO), answers=AN(now0 - 3600))    # alive, then holds he: the mover drops to the default, then stays as stored
+item(38, needs=[BACK], mover=OWN, then=OWN, handoff=dict(HO), answers=AN(now0 - 3600))    # alive, then holds he: the mover drops to the default, and the then with it
 item(39, needs=[BACK], mover=OWN, handoff=dict(HO), answers=AN(now0 - 3600))              # alive, no then: the mover just drops
 done2 = migsvc.migrate_owner_mover()
 check("6c migration: with no record, an answer within a second of the last write moves the mover back (and then goes, as Done does)", "a51" in done2 and mt(51)["mover"] == BACK and "then" not in mt(51), mt(51))
-check("6c migration: an alive hand-back where then holds he: the mover drops to the default and then stays as stored", "a38" in done2 and "mover" not in mt(38) and mt(38)["then"] == OWN, mt(38))
+check("6c migration: an alive hand-back where then holds he: the mover drops to the default and the then goes with it (it stands beside an agent now)", "a38" in done2 and "mover" not in mt(38) and "then" not in mt(38), mt(38))
 check("6c migration: …and with no then at all the mover just drops", "a39" in done2 and "mover" not in mt(39) and "then" not in mt(39), mt(39))
+item(160, needs=[BACK], mover=BACK, then=OTHER, handoff=dict(HO))                        # alive, a session mover with a stray then and a hand-off record nobody took
+_mig_err = io.StringIO()
+with contextlib.redirect_stderr(_mig_err):
+    done3 = migsvc.migrate_owner_mover()
+check("6c migration: a session mover with a stray then: the then is dropped (the mover stays), the stale hand-off record ends, and no error line is printed",
+      "a160" in done3 and mt(160)["mover"] == BACK and "then" not in mt(160) and isinstance(mt(160)["handoff"]["taken_at"], float) and "not settled" not in _mig_err.getvalue(), (done3, mt(160), _mig_err.getvalue()))
+item(161, needs=[BACK], mover=BACK, then=OTHER)                                           # the same with no hand-off record at all: the then alone is what the pass rewrites
+_mig_err = io.StringIO()
+with contextlib.redirect_stderr(_mig_err):
+    done4 = migsvc.migrate_owner_mover()
+check("6c migration: a session mover with a stray then and no hand-off record: the pass still drops the then and reports the item, with no error line",
+      "a161" in done4 and mt(161)["mover"] == BACK and "then" not in mt(161) and "not settled" not in _mig_err.getvalue(), (done4, mt(161), _mig_err.getvalue()))
 # a live save where a wait replaces his state: then survives, not only the mover
 item(40, needs=[BACK], mover=BACK)
 it_d = _service_store._load("a40"); it_d["metadata"]["needs"] = ["decision", BACK]; it_d["metadata"]["ask"] = ASK

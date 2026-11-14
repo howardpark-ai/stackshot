@@ -85,9 +85,9 @@ def evw_boxes() -> dict[str, tuple[str, dict[str, Any]]]:
 def evwait_report(ev: dict[str, Any], now: float | None = None, told: dict[str, str] | None = None) -> list[str]:
     """The server was told of (or read) an event: every open item whose stored wait is an event wait that this event ends turns to its post-wake mover, with what happened on it, and each recipient
     gets one message. A reported event (recycle, fleet op, job run) counts only when it is newer than the wait (the item's last move and `watch.set_at`: an older event is not its arrival); a pull
-    request's merge or release is a state, so a wait set after it is refused at the write and one that was missed is caught up. Nothing while paused or switched off. `told` ({gid: session id}):
+    request's merge or release is a state, so a wait set after it is refused at the write and one that was missed is caught up. Nothing while paused. `told` ({gid: session id}):
     the items a release's step notice (proofs.proof_item) already told about this event; the same session is not told again by the wake. → the gids turned."""
-    if not _watch.enabled() or _watch.paused():
+    if _watch.paused():
         return []
     now = time.time() if now is None else now
     out: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
@@ -180,7 +180,7 @@ def evwait_box_poll(now: float, told: dict[str, str], turned: set[tuple[str, str
 
 def evwait_poll(now: float | None = None, told: dict[str, str] | None = None) -> list[str]:
     """The catch-up pass of the event waits that are states: a machine coming online (evwait_box_poll) and the pull-request events (_evwait_poll_prs). → the gids turned."""
-    if not _watch.enabled() or _watch.paused():
+    if _watch.paused():
         return []
     now = time.time() if now is None else now
     told = _proofs.told_recent() if told is None else told
@@ -193,7 +193,7 @@ def evwait_poll(now: float | None = None, told: dict[str, str] | None = None) ->
 def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     """The catch-up for the pull-request events, which are states: an event wait on a PR's release or merge whose event happened while the server was down or was not told (the release hook is best
     effort) turns now. pr_released reads the checkout (last-good and HEAD, as sweep-released does; a [released.repos] repository's checkout HEAD); pr_merged reads GitHub at the done check's pace (checks.pr_merged). → the gids turned."""
-    if not _watch.enabled() or _watch.paused():
+    if _watch.paused():
         return []
     now = time.time() if now is None else now
     told = _proofs.told_recent() if told is None else told      # the sessions a step notice reached lately about an item: the wake does not tell them again

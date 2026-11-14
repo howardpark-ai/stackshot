@@ -77,7 +77,7 @@ MOVED = {      # the telling's name here -> the name it had on server.py (a func
     "tell_handback": "_tell_handback", "tell_kind": "_tell_kind", "tell_needed": "_tell_needed", "tell_observers": "_tell_observers", "tell_or_hold": "_tell_or_hold",
     "tell_owner": "_tell_owner", "tell_owner_change": "_tell_owner_change", "tell_owner_check_closed": "_tell_owner_check_closed",
     "tell_owner_close": "_tell_owner_close", "tell_owner_on": "_tell_owner_on", "tell_wait_failed": "_tell_wait_failed", "tell_woken": "_tell_woken",
-    "then_label": "_then_label", "then_part": "_then_part", "touched": "_touched", "writer_charge": "_writer_charge", "writers_since": "_writers_since",
+    "then_label": "_then_label", "then_part": "_then_part", "_then_who": "_then_who", "touched": "_touched", "writer_charge": "_writer_charge", "writers_since": "_writers_since",
 }
 
 def _own(name): return MOVED.get(name, name) if MAIN else name

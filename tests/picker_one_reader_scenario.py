@@ -230,10 +230,10 @@ check("2 _ends_on_the_date: a wait with a kind never ends on the date; a missing
 WAITING_HIS = lambda **m: its(mover=OWN, until=FUT, **m)
 check("3 settle: the waiting branch is off by default: a waiting item that stood his keeps its stored mover=he (mover only)", model.settle(WAITING_HIS(needs=[BACK]), True) is None, None)
 check("3 settle: …also with an agent in then", model.settle(WAITING_HIS(needs=[BACK], then=BACK), True) is None, None)
-check("3 settle: …and with a legacy key stored", model.settle(WAITING_HIS(needs=[BACK], then=BACK, post_wake_mover=HELP), True) is None, None)
+check("3 settle: …and with a legacy key stored the mover is left, and only the then goes (an agent is the picker: the then stands beside no one)", model.settle(WAITING_HIS(needs=[BACK], then=BACK, post_wake_mover=HELP), True) == {"then": ""}, None)
 check("3 settle: waiting=True, an agent in then: it picks the item up, then goes", model.settle(WAITING_HIS(needs=[BACK], then=BACK), True, waiting=True) == {"mover": BACK, "then": ""}, None)
 check("3 settle: waiting=True, no agent in then: only the mover goes", model.settle(WAITING_HIS(needs=[BACK]), True, waiting=True) == {"mover": ""}, None)
-check("3 settle: waiting=True, a legacy key stored: only the mover goes", model.settle(WAITING_HIS(needs=[BACK], then=BACK, post_wake_mover=HELP), True, waiting=True) == {"mover": ""}, None)
+check("3 settle: waiting=True, a legacy key stored: the mover goes, and the then with it", model.settle(WAITING_HIS(needs=[BACK], then=BACK, post_wake_mover=HELP), True, waiting=True) == {"mover": "", "then": ""}, None)
 check("3 settle: waiting=True still needs the proof that it stood his, and leaves an agent's stored mover alone", model.settle(WAITING_HIS(needs=[BACK], then=BACK), False, waiting=True) is None
       and model.settle(its(mover=HELP, needs=[BACK], until=FUT), True, waiting=True) is None, None)
 # the alive branches are as they were, with the parameter either way
@@ -284,7 +284,7 @@ try:
           and model.derive({**now_, "metadata": meta_}).wait.mover == BACK, (meta_, note))
     meta_ = {**now_["metadata"], "post_wake_mover": HELP}
     _mover_steps._owner_state_mover({**now_, "metadata": meta_}, meta_, False, was_)
-    check("4 update path: …with the legacy key stored, only the mover goes", "mover" not in meta_ and meta_.get("post_wake_mover") == HELP and meta_.get("then") == BACK, meta_)
+    check("4 update path: …with the legacy key stored, the mover goes and the then with it (an agent is the picker)", "mover" not in meta_ and meta_.get("post_wake_mover") == HELP and "then" not in meta_, meta_)
     meta_ = dict(now_["metadata"])
     note = _mover_steps._owner_state_mover({**now_, "metadata": meta_}, meta_, True, was_)
     check("4 update path: a write that names a mover itself is left alone (named)", note == "" and meta_["mover"] == OWN and meta_["then"] == BACK, (meta_, note))

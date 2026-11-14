@@ -25,7 +25,7 @@ Read one item by id as shown (board#N, or the older letter-and-number form for a
 (whose move it is: decision, external and the sessions named), `after:` (the items that must close first, each with
 its state), `observers:` and `contact:` (the front agent the person talks to about the item). `project:` is the item's
 top-level project; `(filed on <page>)` is the page it is filed on, the one update(project=) takes. It leads with
-`mover:` (who moves the item now) and `then:` (who takes it after the answer or the wait); History says who created
+`mover:` (who moves the item now) and `then:` (who takes it after his answer or step; shown only while he moves the item or picks it up); History says who created
 it. A `state:` line (with the fields that state carries) shows only for an item that stores a state; an item that
 stores none shows no state line and no derived one, and its `model:` line says alive or waiting and who moves it.
 `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer

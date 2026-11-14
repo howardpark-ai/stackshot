@@ -133,19 +133,6 @@ def wake_rows() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
             if ep is not None:
                 out.append((gid, p, it, dt.datetime.fromtimestamp(ep, _pages.zone_now().tzinfo)))
             continue
-        if _wl.valid(meta):                  # a list is the watchers' alone, so with them off only its backstop day is looked at (the wake pass ends it there: _watching.watch_fire(legacy=True)); the date as a time wait's wake would drop half the list
-            try:
-                at = wake_at(_wl.backstop(meta))
-            except ValueError:
-                continue
-            until = _watching.WATCH_BACKOFF.get(gid, 0.0)           # a list whose end failed is not due again before its back-off ends (as the watched branch above), so the runner does not spin on it
-            if until > time.time():
-                at = max(at, dt.datetime.fromtimestamp(until, _pages.zone_now().tzinfo))
-            fa = _watch.failed_at(meta)                             # …and by the note on the item, which outlives a restart (the watched branch above reads it through next_moment): a failure within the back-off puts the moment after it
-            if fa and at.timestamp() <= fa + _watch.BACKOFF:
-                at = dt.datetime.fromtimestamp(fa + _watch.BACKOFF, _pages.zone_now().tzinfo)
-            out.append((gid, p, it, at))
-            continue
         if not _wt.wake_value(meta):
             continue
         try:
@@ -195,16 +182,6 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
             if _watch.watches(it) or not due(at) or _hooks().old_wait_off():       # a watched wait is the watchers', above; after the switchover (fallback off) the old pass stands down
                 continue
             meta = it.get("metadata") or {}
-            if _wl.valid(meta):                # a list with the watchers off: its backstop day has come, so it ends as the watchers would end it there (the same words, an open relay line asks the owner)
-                try:                           # a list whose turn failed is not due again before its back-off ends (wake_rows moves its moment, as it does for a watched wait)
-                    cause = _watch.due(it, epoch)       # the backstop day, or (a list edited by hand so that every line has arrived) the kind of the line that completed the group
-                    if cause and _watching.watch_fire(gid, cause, epoch, wout, recheck=True, legacy=True):
-                        woke.append(gid)
-                        _watching.WATCH_BACKOFF.pop(gid, None)
-                except Exception as e:  # noqa: BLE001  — as _watching.watch_pass: one bad item never stops the pass, so the lists after it are still ended
-                    print(f"watch: {gid} skipped this pass: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-                    _watching.watch_failed(gid, epoch)
-                continue
             wake = _wt.wake_value(meta)
             had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a backstop: its end releases the item like a hold's
             if had_u:
@@ -223,7 +200,6 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 wake_notify(gid, it, what, out=out, reminder=True)
                 continue
             meta.pop("hold", None); meta.pop("hold_set", None)
-            _hooks().hand_stored_then(gid, it, meta)       # a stored `then` takes the item when nothing else holds it (the notice below reaches it through needs)
             if "confirmed" not in it:      # `confirmed` never moves here, so the item reads stale until its mover refreshes it; one
                 it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)   # without it is pinned at the clock it read as, before the clocks below move
             it["status"] = "open"; it["metadata"] = meta
@@ -302,7 +278,7 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
         project, owner = str(meta.get("project") or ""), _telling.holder(it)
         if not _router_live.holds(project, sid):      # the recipient is the item's mover, so there is no "its own item" to tell directly
             keep.append(row); continue
-        thn, subject = _telling.then_part(it), str(it.get("subject") or "")
+        thn, subject = _telling.then_part(it, to=sid), str(it.get("subject") or "")
         try:
             nid = _routing.record(project, kind="board", to="", label=f"wake {_gh.shown(gid)}", who="stackshot", text=f"{what}{thn}: {subject}",
                                   url=_telling.notice_link(gid), target="for " + _session_label(sid), pilot=True, live=True)
@@ -321,7 +297,7 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
         meta = it.get("metadata") or {}
         project, owner = str(meta.get("project") or ""), _telling.holder(it)
         back = f"still active ({_hooks().rmod_whose()[_hooks().rmod_needs_kind({'metadata': meta})]}), check where it stands" if rem else back_words(meta, _gh.shown)
-        subject, thn, oid = str(it.get("subject") or ""), _telling.then_part(it), (_hooks().session_id(owner) if owner else "")
+        subject, thn, oid = str(it.get("subject") or ""), _telling.then_part(it, to=sid), (_hooks().session_id(owner) if owner else "")
         if sid == oid:
             mine = True
             lines.append(f"{_gh.shown(gid)} {what}: {back}")
@@ -406,7 +382,6 @@ def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reaso
             meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
         _hooks().state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
         meta.pop("wait_failed", None); meta.pop("waiting", None)   # released: nothing is waited on, so no failed wait stays, and a `waiting` record an earlier version wrote goes too (the wake notice below is the one the keeper gets)
-        _hooks().hand_stored_then(g, it, meta)           # a `then` stored while the item waited (a decision answered on a held item) takes it now; the wake notice below reaches it through needs
         if "confirmed" not in it:
             it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)
         it["metadata"] = meta; it["updated"] = time.time(); it["state_updated"] = it["updated"]

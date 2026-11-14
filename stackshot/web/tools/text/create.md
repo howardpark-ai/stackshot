@@ -68,7 +68,7 @@ reply says so). project must exist (create the page first; a page in a second br
 copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your
 own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID); the server records it as the
 item's creator (a background agent may create items too). mover: who moves the item now (and then= after his answer or
-step); a front agent gets no hand-off notice, so a create from another session that sets mover or then (or
+step, kept only while he is the mover: on an item a session moves it is dropped, with a note in the reply); a front agent gets no hand-off notice, so a create from another session that sets mover or then (or
 post_wake_mover, the old name of mover) to a front agent gets the project's builder instead (the reply and History say so; send the same value
 again to keep it as sent; with no builder it is refused, except a mover set by a front agent of the item's project to
 another of its front agents; message the front agent for a check or answer only it can give). With no mover= an alive

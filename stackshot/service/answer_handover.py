@@ -1,8 +1,7 @@
 """answer_handover.py: where an item goes after the owner's answer, a Done or the end of a wait.
 
 The helpers the answer path and the wait passes share: `_hand_to_mover` is the one place an answer or a Done gives an item to its then-mover (mover = the session, `then` cleared, the session named first in needs);
-`_then_live` is the test every hand-over to a stored `then` makes (a background agent of the item's project, or a session live or in the cloud); `_hand_stored_then` hands an item whose wait just ended to its stored
-`then`; `_decision_hand_over` takes the item out of his hands once his decision is in (the stored `then`, a time wait for a parked item, the default mover); `_check_his_step` ticks the lines of his own that his Done
+`_then_live` is the test every hand-over to a stored `then` makes (a background agent of the item's project, or a session live or in the cloud); `_decision_hand_over` takes the item out of his hands once his decision is in (the stored `then`, a time wait for a parked item, the default mover); `_check_his_step` ticks the lines of his own that his Done
 finishes; `_keep_note` keeps an answer note that has no decision to go with it as his comment and tells the mover; `_answer_line` and `_client_answer` are the line `client.py get answer` prints.
 
 A service module: it reads the store and writes an item only through `writes.save`, under the locks the caller holds. The delivery of the answer, the form's note words and the renderer's reader of the answers are the
@@ -24,14 +23,13 @@ from stackshot.model import model_guards as _mg
 from stackshot.model import nextlines as _nl
 from stackshot.model import steps as _steps
 from stackshot.model.ids import _norm_id
-from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store
+from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_of, _needs_store
 from stackshot.service import item_read as _item_read
 from stackshot.service import store as _svcstore
 from stackshot.service import writes as _writes
 from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.waits import until_write as _uw
 from stackshot.waits import waiting as _wt
-from stackshot.waits import watchers as _watch
 
 
 def _answer_line(item: dict[str, Any]) -> str:
@@ -83,45 +81,16 @@ def _then_live(then: str, meta: dict[str, Any]) -> bool:
     return bool(ctx.background_of(then, str(meta.get("project") or "")) or ctx.session_state(then) in ("live", "cloud"))
 
 
-def _hand_stored_then(gid: str, item: dict[str, Any], meta: dict[str, Any]) -> bool:
-    """A wait just ended on `meta` (the old wake pass, the release of an `after` link). A `then` stored on the item was waiting for the owner's move, so it takes the item only when that is what
-    the item was: the stored mover is he or absent, no session is named in needs, and with a stored mover he dropped the item reads alive and not his (no decision in needs, no your-call or
-    your-step, no other wait). An item whose stored mover or needs already name an agent is left alone (an agent-set `then` must not take an item from the agent working it), and so is a `then`
-    that is not a live session (_then_live: free text, a retired or unknown name). A `then` left over when this declines is dropped where it follows nobody (the model reads a `then` only while the owner is the mover, so it
-    would only sit unread): when it already is the stored mover or is named in needs, or is not a live session; in any other case (the item still reads as waiting or his) it stays.
-    Then: the stored mover he goes, mover = `then` named first in needs (_hand_to_mover), and the notice the release sends (notice_to reads needs) reaches it. → True when handed."""
-    then = _model.norm_who(meta.get("then"))
-    if not then or _model.is_owner(then):
-        return False
-    if not _then_live(then, meta):
-        meta.pop("then", None)
-        return False
-    mover_s = _model.norm_who(meta.get("mover"))
-    if (mover_s and not _model.is_owner(mover_s)) or _needs_sessions(meta):
-        sid = _hooks().session_id(then)
-        if (mover_s and _hooks().session_id(mover_s) == sid) or any(_hooks().session_id(x) == sid for x in _needs_sessions(meta)):
-            meta.pop("then", None)      # the `then` already is the mover or is named in needs: it follows nobody
-        return False
-    probe = {k: v for k, v in meta.items() if k != "mover"}
-    mod = _item_read._model_of({**item, "gid": gid, "metadata": probe})
-    if mod.state != _model.ALIVE or _model.is_owner(mod.mover):
-        return False
-    meta.pop("mover", None)
-    _hand_to_mover(meta, then)
-    return True
-
-
 def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parked: bool = False, waiting: bool = False, now: float = 0.0) -> str:
     """His decision is in (decision already out of needs, your-call ended): the item leaves his hands, as a Done does on a step. With a stored `then` (a session, not he) the
     item goes to it at once (_hand_to_mover: mover = then, `then` cleared, named first in needs).
     A `then` that is no live session (_then_live: free text, retired, unknown) is dropped first, and the item takes the no-`then` path below.
     With no `then`, a stored mover that is he is dropped, so the item reads as it does when nothing is stored: the first session in needs, else the project's builder or -main agent (the model's default `then`).
     An item that still reads as waiting after the answer (`waiting`; a park, a pick carrying a wake, is one) has no mover: a stored mover that is he goes, and a stored `then` is kept for
-    whoever ends the wait only where the code that ends that wait hands it over. By what the wait is:
-      an open `after` link: `then` stays; _wakes.release_after hands the item to it when the last prerequisite closes (_hand_stored_then), with its usual notice;
+    whoever ends the wait, as the wait's picker. By what the wait is:
+      an open `after` link: mover=`then`, the one who picks it up when the last prerequisite closes (_wakes.release_after), `then` cleared;
       a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and mover=`then`, the one who picks it up when the wait ends (watch.set_at stamped, as an update does), `then` cleared,
-        so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold. With `[model] watchers = false` no time wait is stored: the park stays as it was, `then`
-        with it, and the old wake pass hands the item to it when the hold ends (_hand_stored_then);
+        so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold;
       `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would sit on the item unread); the wait's own
         mover (the first session in needs, else the project's builder or -main agent) takes it when it ends. A wait already stored as a watcher's keeps its own picker.
     Without this a stored mover=the owner stayed on an item whose state had become doing: "model conflict: mover=the owner on an item whose state is doing", and needs read as the keeper. → who the item was handed to now ("" when to nobody): it is told it is the mover."""
@@ -137,19 +106,16 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
         elif then and not _uw.kind_of(meta):               # no wait stored as a kind (an until alone is a wait on the date, with no kind)
             if "external" in _needs_kinds(meta):
                 meta.pop("then", None)
-            elif _item_read._after_open(meta):
-                pass
-            elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
-                if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
-                    # The picker of the wait is stored as `mover` (who picks the item up when the wait ends), never the old key; a stored old key is dropped, since `mover` wins it. A later `clear_hold`,
-                    # `clear_wait` or `clear_wake` ends the wait and leaves this agent as the live mover: a wait never changes who moves the item.
-                    meta.pop(_model.LEGACY_PICKER_KEY, None)
-                    meta["mover"] = then
+            elif _item_read._after_open(meta) or (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
+                # The picker of the wait is stored as `mover` (who picks the item up when the wait ends), never the old key; a stored old key is dropped, since `mover` wins it. A later `clear_hold`,
+                # `clear_wait` or `clear_wake` ends the wait and leaves this agent as the live mover: a wait never changes who moves the item.
+                meta.pop(_model.LEGACY_PICKER_KEY, None)
+                meta["mover"] = then
+                if not _item_read._after_open(meta):      # a time wait is the watcher's: stamp it as an update does (an `after` link is released by the last prerequisite's close)
                     if not _wt.stored_until(meta):
                         meta["wait_kind"] = "time"       # a wait on the date alone stores no kind (until is the whole of it)
                     meta["watch"] = {**(meta["watch"] if isinstance(meta.get("watch"), dict) else {}), "set_at": now or time.time()}
-                    meta.pop("then", None)
-                # [model] watchers = false: no watcher would wake it, so no time wait is stored. The old park stays with `then` on it, and the old wake pass hands the item over when the hold ends (_hand_stored_then)
+                meta.pop("then", None)
             else:
                 meta.pop("then", None)
         return ""

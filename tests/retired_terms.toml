@@ -282,3 +282,20 @@ allow = [
     # the one sentence of docs/stall-and-ladder.md that says a config file still carrying the retired lines loads as it is (the same text names `silence`, the ladder's other retired switch)
     "a `[ladder]` `main_hours` or `silence` line",
 ]
+
+# ---- the waits' watchers switch: `[model] watchers = false` gave the items back to the old wake pass, the `after` release and the held-anchor release. Retired: the watchers always run,
+# a wait with a stored kind is ended by them and never by the old pass, and a config file that still carries the key loads and nothing reads it (the start note in `core/config.py` says so).
+[[term]]
+retired = "watchers = false"
+use = "nothing: the waits' watchers always run; `[model] watchers` is retired and read by nothing"
+allow = []
+
+# ---- a notice's `then`: `, then <agent>` names a `then` that stands beside the user as the mover. The agent that picks a waiting item up is the item's `mover`, and a notice words it `, mover <agent>`
+# (or leaves it out where the notice already goes to that agent).
+[[term]]
+retired = ", then <agent>"
+use = "`, mover <agent>` for the agent that picks a waiting item up; `, then <agent>` only names a `then` that stands beside the user"
+allow = [
+    # the one sentence of docs/item-model.md that tells the two wordings apart
+    "a `then` as `, then <agent>`",
+]

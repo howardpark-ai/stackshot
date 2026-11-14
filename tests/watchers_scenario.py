@@ -12,7 +12,7 @@ An item that stores a wait_kind (time | item | anchor | relay | event) is watche
     until a date), and a wait with fewer comes back as before.
   * pause: [model] pause holds the watchers and the wake pass alike; when it is false again the due ones fire in one pass, one message per recipient; in normal running several items for one
     recipient in one pass are one message too.
-  * the gate: the wake pass and the `after` release skip an item with a stored wait_kind and still run for the others; [model] watchers = false gives the item back to them.
+  * the gate: the wake pass and the `after` release skip an item with a stored wait_kind and still run for the others.
   * get shows `chases: n` and `woke: <what> → <mover>` (until a session writes), the brief lists the relay waits as "waiting on the world".
 
     tests/run-suite watchers        → exit 0 / 1"""
@@ -106,7 +106,7 @@ def sent(tag=None): return [x for x in SENT if tag is None or x[3] == tag]
 def reset(): SENT.clear()
 def cfg(**kw):
     for k, v in kw.items(): CFG[k] = v
-cfg(guards=False, watchers=True, pause=False)       # the write guards have their own suite; here they are off except where a test turns them on
+cfg(guards=False, pause=False)       # the write guards have their own suite; here they are off except where a test turns them on
 AURL = "https://github.com/o/r/pull/5"
 def notice(text, ts=None, anchor="github:o/r#5", ruling="passed", to=None, **kw):
     n = {"id": "n" + str(len(SENT)) + str(int(time.time() * 1000) % 100000), "ts": now0 if ts is None else ts, "kind": "anchor", "anchor": anchor, "to": to or U["home-stew"], "text": text,
@@ -116,9 +116,8 @@ def notice(text, ts=None, anchor="github:o/r#5", ruling="passed", to=None, **kw)
 # ================================================================ the pure half
 check("kinds: a stored kind is read, anything else is none", wk.stored_kind({"wait_kind": " Relay "}) == "relay" and wk.stored_kind({"wait_kind": "soon"}) == "" and wk.stored_kind({}) == "", None)
 TW = {"wait_kind": "time", "wake": "2026-12-01"}
-check("watches: open, a stored kind and an end a watcher can see, only while [model] watchers is on", wk.watches({"status": "open", "metadata": TW}) and not wk.watches({"status": "completed", "metadata": TW})
+check("watches: open, a stored kind and an end a watcher can see", wk.watches({"status": "open", "metadata": TW}) and not wk.watches({"status": "completed", "metadata": TW})
       and not wk.watches({"status": "open", "metadata": {}}), None)
-cfg(watchers=False); check("watches: …false turns it off", not wk.watches({"status": "open", "metadata": TW}), None); cfg(watchers=True)
 check("watches: a wait no watcher can end is not watched (review finding 6): a time wait with no wake or end, an end date on an item that is not verifying, an anchor wait with no anchor, a relay with no ask-by, an item wait with no after and no date",
       not wk.watches({"status": "open", "metadata": {"wait_kind": "time"}}) and not wk.watches({"status": "open", "metadata": {"wait_kind": "time", "end": "2026-12-01"}})
       and not wk.watches({"status": "open", "metadata": {"wait_kind": "anchor", "ask_by": "2026-12-01"}}) and not wk.watches({"status": "open", "metadata": {"wait_kind": "relay"}})
@@ -459,19 +458,6 @@ check("pause off: nothing is told twice", len(SENT) == SENT_COUNT, sent())
 now = time.time()
 item(80, hold=True, wake=day(-20), su=now0 - 40 * DAY, needs=[BACK], subject="[home] overdue hold, today's wake pass")
 item(81, wait_kind="time", hold=True, wake=day(-20), su=now0 - 40 * DAY, needs=[BACK], post_wake_mover=BACK, subject="[home] overdue, watched")
-cfg(watchers=False)
-reset(); woke = wakes_svc.wake_pass()
-check("gate: …the wake pass too: today's release (the hold and the wake go), no watcher message", "a81" in woke and "hold" not in mt(81) and "wake" not in mt(81) and not sent("watch") and mt(81).get("wait_kind") == "time" and "mover" not in mt(81), mt(81))
-item(82, wait_kind="relay", wait_event="the form", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay, switch off")
-reset(); woke = wakes_svc.wake_pass()
-check("switch off: a relay's ask-by day does nothing", "a82" not in woke and mt(82).get("wait_kind") == "relay" and "ask" not in mt(82), mt(82))
-item(83, wait_kind="item", after=["a84"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] item wait, switch off")
-item(84, subject="[home] its blocker")
-close(84)
-check("switch off: an `after` close releases the item as today (the after goes, no watcher mover)", "after" not in mt(83) and "mover" not in mt(83) and not sent("watch"), mt(83))
-rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged", ts=now0 + 2))
-check("switch off: an anchor notice leaves the anchor wait alone", mt(47).get("wait_kind") == "anchor" and rel == [], mt(47))
-cfg(watchers=True)
 item(85, wait_kind="item", after=["a86"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] item wait, switch on")
 item(86, subject="[home] its blocker")
 item(87, hold=True, after=["a86"], needs=[BACK], subject="[home] a plain after item")
@@ -517,11 +503,6 @@ check("review 1: a held, anchor-scoped item with a stored anchor wait is turned 
       m.get("mover") == BACK and "wait_kind" not in m and "hold" not in m and "PR #65 merged" in m["woke"]["what"] and "stayed silent" not in m["woke"]["what"], m)
 check("review 1: …told once, in the watchers' line", len([x for x in sent() if x[1] == UB and "a56" in x[0]]) == 1 and any("is yours now" in x[2] for x in sent() if "a56" in x[0]), sent())
 check("review 1: …and the held item with no stored wait is released from hold as before, in the same call", "a13" in rel and "hold" not in mt(13) and "wait_kind" not in mt(13) and "mover" not in mt(13), (rel, mt(13)))
-cfg(watchers=False)
-item(14, hold=True, wake=day(9), wait_kind="anchor", wait_anchor=A3, wait_event="PR merged", ask_by=day(9), post_wake_mover=BACK, needs=[BACK], subject="[home] held, anchor kind, switch off")
-rel = wakes_svc.anchor_release("projects/alpha", notice("PR #65 merged again", anchor="github:o/r#65"), by="home-stew")
-check("review 1: with [model] watchers = false the same item is a plain held item again: released from hold, no mover", "a14" in rel and "hold" not in mt(14) and "mover" not in mt(14) and mt(14).get("wait_kind") == "anchor", (rel, mt(14)))
-cfg(watchers=True)
 
 _anc.save({"projects/alpha": [{"url": A2, "items": ["a57", "a15"], "added": now0, "by": "x"}]})
 item(57, wait_kind="anchor", wait_anchor=A2, wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] replay, watched", watch=WATCHED())
@@ -723,7 +704,7 @@ _anc.save({"projects/alpha": [{"url": AURL, "items": None, "added": now0, "by": 
 
 # ================================================================ the example config documents the switches
 ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
-check("config: the example documents [model] watchers and pause", re.search(r"(?m)^watchers = true", ex) and re.search(r"(?m)^pause = false", ex), None)
+check("config: the example documents pause and no longer carries the retired watchers switch", re.search(r"(?m)^pause = false", ex) and not re.search(r"(?m)^watchers *=", ex), None)
 
 print(f"\n{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

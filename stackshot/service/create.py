@@ -128,6 +128,7 @@ class Hooks:
     next_put: Callable[..., Any]
     owed_mark: Callable[..., Any]
     owner_then_default: Callable[..., Any]
+    then_stands: Callable[..., Any]
     parse_wake: Callable[..., Any]
     publish: Callable[..., Any]
     record_fixes: Callable[..., Any]
@@ -290,7 +291,8 @@ def create_item(
     if _wt.stored_until(meta) and not _uw.kind_of(meta) and _wt.after_of(meta):
         meta["wait_kind"] = "item"         # a date beside an after link is that wait's backstop (as ask_by was): the wait stays on the item
     evw_note = h.evwait_gate({}, meta, creating=True)            # an event wait: its phrase in the canonical form, and refused when the event already happened
-    then_note = h.owner_then_default(None, meta, "open", _session_label(owner) or owner, "then" in model_set, mover.strip())      # D9: an item created for his call has the agent doing the work as its then (a builder that files its own decision item is its own then), not the front agent that relayed it
+    then_note = h.then_stands({"status": "open", "metadata": meta}, meta)      # `then` stands only while the user moves the item: one stored beside an agent is dropped with a note
+    then_note += h.owner_then_default(None, meta, "open", _session_label(owner) or owner, "then" in model_set, mover.strip())      # D9: an item created for his call has the agent doing the work as its then (a builder that files its own decision item is its own then), not the front agent that relayed it
     draft_txt, _ = _gates.gate_draft_args(draft, False)             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
     if draft_txt:
         meta["draft"] = draft_txt

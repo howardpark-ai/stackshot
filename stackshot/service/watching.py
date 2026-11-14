@@ -6,7 +6,7 @@ twice, it turns to the owner with a ready question. `watch_fire` is the one plac
 half, `watch_mark` and `watch_anchor_notice` the half an arrival (a line of a list, a notice) takes. The ids an anchor is compared by (`anchor_key`, `same_anchor`) and the test of a routine line (`auto_line`) live here
 because the anchor wait and the anchor release both read them; `event_spec` is the event phrase as a wait stores it, which `watch_fire` matches an event against and the event waits read.
 
-A switch in the model settings turns the watchers off (the items fall back to the wake pass and the close's release), and a pause setting holds them and the wake pass until it is lifted. Imports point down only:
+A pause setting holds them and the wake pass until it is lifted. Imports point down only:
 this module imports the domain, core and the services beside it, never web/ and never audit/. What it still reaches in server.py comes through `Hooks` in service/wake_hooks.py."""
 from __future__ import annotations
 
@@ -63,8 +63,8 @@ def auto_line(n: dict[str, Any]) -> bool:
 # ----------------------------------------------------------------------------- the waits' watchers (watchers.py)
 # A waiting item that stores a wait_kind (time | item | anchor | relay | event) is watched here, and by nothing else: today's wake pass and `after` release skip it
 # (watchers.watches), so no item is moved by two mechanisms. When its wait ends it turns alive with its post-wake mover (the hold, the wake, `after` and the wait's fields go, the mover
-# is told in one line), or, for a relay wait's ask-by day and for a wait chased twice, it turns to the owner with a ready question. [model] watchers = false turns all of this off
-# (the items fall back to today's machinery), [model] pause = true holds it (the wake pass too) until it is false again.
+# is told in one line), or, for a relay wait's ask-by day and for a wait chased twice, it turns to the owner with a ready question. [model] pause = true holds it
+# (the wake pass too) until it is false again.
 
 def watch_label(who: str) -> str:
     return OWNER if _model.is_owner(who) else (_session_label(who) or who)
@@ -120,17 +120,15 @@ def _ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
     return not mod.wait.mover_explicit
 
 
-def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]], detail: dict[str, str] | None = None, recheck: bool = False, ev: dict[str, Any] | None = None,
-                legacy: bool = False) -> bool:
+def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]], detail: dict[str, str] | None = None, recheck: bool = False, ev: dict[str, Any] | None = None) -> bool:
     """The wait of `gid` is over (`cause`: time | item | backstop | relay | anchor | event): turn the item, save it, and collect the message its new mover is owed in `out` (recipient
     session id → [(gid, item, what arrived)]; the caller sends one message per recipient). Under the item lock, re-read: an item that is no longer watched, or no longer waits on this,
     is left alone. `recheck` (the clock's pass): the cause is read again under the lock and the item turns only if it is still due. → True when it turned; _WatchStuck when the wait is due and cannot turn.
-    `detail["what"]` replaces the words of the arrival (the caller knows what closed or arrived). `legacy` (the wake pass, with the watchers off): a wait on a list that holds is ended at its
-    backstop day all the same, by this one path, so its words, its mover and the question for an open relay line are the watchers' (nothing else of the watchers runs: no line is marked)."""
+    `detail["what"]` replaces the words of the arrival (the caller knows what closed or arrived)."""
     detail = detail or {}
     with _writes.ITEM_LOCK:
         it = _load(gid)
-        if not (_watch.watches(it) or (legacy and it.get("status") == "open" and _wl.valid(it.get("metadata") or {}))):
+        if not _watch.watches(it):
             return False
         if recheck and _watch.due(it, now, _hooks().after_open(it.get("metadata") or {})) != cause:
             return False
@@ -223,10 +221,10 @@ def watch_tell(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> None:
 
 def watch_pass(now: float | None = None, wout: dict[str, list[tuple[str, dict[str, Any], str]]] | None = None) -> list[str]:
     """The scheduler's half of the watchers: every watched wait the clock has ended (a time wait's wake, a relay's ask-by day, an item or anchor wait's backstop, and an item wait whose
-    `after` items all closed while nobody saw the close) turns, one message per recipient. Nothing while paused or switched off. Run by the wake pass (so by the runner's watchers' tick and its ten-minute catch-up, at start
+    `after` items all closed while nobody saw the close) turns, one message per recipient. Nothing while paused. Run by the wake pass (so by the runner's watchers' tick and its ten-minute catch-up, at start
     and at the end of a migration pass). `wout` = where the messages are collected for the caller to send (the wake pass merges them with its own, one message per recipient); without it they go out here.
     An item whose turn fails is noted and left alone for a while (watch_failed), so a wait that cannot turn never keeps the loop busy. → the gids that turned."""
-    if not _watch.enabled() or _watch.paused():
+    if _watch.paused():
         return []
     now = time.time() if now is None else now
     out: dict[str, list[tuple[str, dict[str, Any], str]]] = {} if wout is None else wout
@@ -277,7 +275,7 @@ def watch_item_closed(g: str, it: dict[str, Any], closed: str, outcome: str, rep
         if left:
             print(f"after: {g} (watched) still waits on {', '.join(left)} ({closed} closed as {outcome})", file=sys.stderr, flush=True)
             return False
-        if _watch.paused() or not _watch.enabled():
+        if _watch.paused():
             return False
         how = ("was dropped" if outcome == "dropped" else f"was superseded by {_gh.shown(rep or superseded_by)}, which is closed too" if outcome == "superseded" else "closed (done)") + (f" by {_session_label(writer)}" if writer else "")
         try:
@@ -314,8 +312,8 @@ def watch_mark(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
     """A line of the wait on a list that `gid` stands in arrived (`cause`: the kind of that line: time | item | anchor | relay | event): mark the lines `pick` finds in the list as it stands UNDER THE ITEM LOCK
     (so an arrival delivered twice, or one another path has just recorded, marks nothing and changes nothing) and save the item; when the group is then over (`any`: this arrival; `all`: every line has arrived)
     turn the item (watch_fire, which reads the item again under the same lock), else it stays waiting and nothing is sent. `ev`: a reported event (recycle, fleet op, job run) counts only when it is newer
-    than the wait, as for a single event wait. Nothing while paused or switched off: the clock's pass finds the arrival then. → True when the item turned."""
-    if not _watch.enabled() or _watch.paused():
+    than the wait, as for a single event wait. Nothing while paused: the clock's pass finds the arrival then. → True when the item turned."""
+    if _watch.paused():
         return False
     with _writes.ITEM_LOCK:
         it = _load(gid)
@@ -408,7 +406,7 @@ def watch_anchor_notice(project: str, url: str, n: dict[str, Any], at: float, ho
     """A notice for `url` reached the server (_wakes.anchor_release: the keeper passed or merged it, or nobody rules the project, or it is the fleet's own routine line): every open item of the project
     whose stored wait is an anchor event on that anchor turns, with the notice's gist on it. Only a notice newer than the item's last move and than its wait counts; the router keeps ruling
     the notice as before, and the post-wake mover judges a false hit. A routine line of the fleet's own PR (a push, CI passing) does not end a wait for a merge or a close. → the gids turned."""
-    if not _watch.enabled() or _watch.paused():
+    if _watch.paused():
         return []
     out: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
     fired: list[str] = []

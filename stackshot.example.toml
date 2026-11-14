@@ -641,14 +641,12 @@ rebullet_machines = []                              # the machines whose token m
                                                     # rewritten as bullets, as the author `rebullet`, with nothing lost; the state clock and confirm stay). The server box only. Live
                                                     #
                                                     # The waits' watchers (stackshot/waits/watchers.py). They act ONLY on an item that stores a wait_kind (time | item | anchor | relay | event);
-                                                    # every other item keeps today's wake pass and `after` release until the step 4 migration. When the wait ends
+                                                    # every other item keeps today's wake pass and `after` release until the step 4 migration. They always run (the switch `[model] watchers` is retired). When the wait ends
                                                     # the item turns alive with its post-wake mover, who is told in one line (several items for one recipient in one pass are one message):
                                                     # a time wait at its wake; an item wait when the last `after` item closes; an anchor wait when anchor-hub's notice for the anchor reaches
                                                     # the server (a date beside an item or anchor wait is its backstop: the item comes back anyway, with the note that the item is still
                                                     # open or the anchor stayed silent); a relay wait on its ask-by day, when it comes to the owner as a question (arrived / not yet, ask
                                                     # again on a date / drop). A relay or anchor wait that an older write logged two chases on comes to him at its next end as "drop it?"
-watchers = true                                     # false: none of these transitions fires, and an item with a stored wait_kind falls back to today's machinery (the wake pass,
-                                                    # the `after` release). Live
 pause = false                                       # true: the board-wide pause (after an outage or a limit stop): no wait ends and no wake fires (today's wake pass included); set it back
                                                     # to false and every one that came due fires in one pass, one message per recipient. Live
 # The hand-off (stackshot/waits/handoff.py): an alive item whose mover changes to another session is handed over, and the hand-over is recorded on the item
