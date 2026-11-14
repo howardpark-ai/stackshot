@@ -76,7 +76,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.service import gates; from stackshot.web import server; from stackshot.service import owner_words as _owner_words; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.github import ghsync as _gh
@@ -440,7 +440,7 @@ upd(187, priority="p2"); upd(187, subject="[home] item 187 renamed"); upd(187, p
 check("6d owner mover: …a rename, a priority and a project write still pass", mt(187).get("priority") == "p2" and rd(187)["subject"].endswith("renamed"), mt(187))
 item(42, needs=[BACK], state="doing", mover=OWN, expected_by=day(2), next=f"{BACK}: keep going", desc="- The thing is a long one with a long first line and another thing after it\n- It lives here and a lot more of it\n- Done when it is done")
 d_rb = rd(42)["description"]
-r_rb = server._rebullet_write({"item": "a42", "sender": "rebullet-pass", "old": d_rb, "description": "- The thing is a long one\n- It has a long first line and another thing after it\n- It lives here and a lot more of it\n- Done when it is done"}, "box-a")
+r_rb = _owner_words._rebullet_write({"item": "a42", "sender": "rebullet-pass", "old": d_rb, "description": "- The thing is a long one\n- It has a long first line and another thing after it\n- It lives here and a lot more of it\n- Done when it is done"}, "box-a")
 check("6d owner mover: …and the re-bullet route (it sets no state)", r_rb["action"] == "set" and rd(42)["description"] != d_rb and mt(42)["mover"] == OWN, (r_rb, rd(42)["description"]))
 upd(187, step=STEP)
 check("6d owner mover: …and with the switchover on the fix still goes through", mt(187)["state"] == "your-step", mt(187))

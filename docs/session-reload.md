@@ -38,7 +38,7 @@ Everything a running agent session reads from this repository falls in one of fo
    `stackshot/fleet/client.py drain` and `seen`). A change to those files is in force at the next event of every running session: **nothing** to reload.
 3. **The connector.** The MCP connector is the server's HTTP endpoint (`[server] path`, `/mcp` by default), reached through claude.ai; this repository
    has no stdio MCP server and no process a session starts and keeps. A session learns the connector's instructions and tool list when its client
-   connects, and claude.ai keeps its own cached copy and refreshes it within about a day (a comment above `_RELAUNCH` in `stackshot/web/server.py` says so), so a
+   connects, and claude.ai keeps its own cached copy and refreshes it within about a day (a comment above `_RELAUNCH` in `stackshot/service/owner_words.py` says so), so a
    recycle does not deliver a change to them. `tests/tool_text.snapshot.json` holds that text (`instructions`, `resources`, `tools`) and CI makes every
    change to it change the file: a **notice**. Rules the server enforces at each write are the same kind (the server reads them fresh at each call).
 4. **The server's own state.** The services restart in `deploy.sh`, and sessions reach them through the connector or the client API at each call: **nothing**.

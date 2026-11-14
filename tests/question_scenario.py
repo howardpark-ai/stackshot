@@ -52,7 +52,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.service import mover_steps as _mover_steps; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
 from stackshot.github import ghsync as G
 from stackshot.web import page_debts as _pdebts
 from stackshot.service import store as _service_store
@@ -97,7 +97,7 @@ check("…the sender is recorded as the creator, a script on this machine", it["
 check("…the item is in the board's brief as waiting on the owner's decision", out["item"] in _wt_get.stackshot_get(out["item"]) and "needs: decision" in _wt_get.stackshot_get(out["item"]), _wt_get.stackshot_get(out["item"])[:300])
 st, out2 = q(project="projects/alpha", subject="[work] Decide the nightly retry", options=None, ask="Decide: whether to cut the retry to three · Recommend: yes · Stakes: an hour either way · By: no date")
 check("a given subject is the subject; no options is fine for a yes/no ask; the project by key", st == 200 and item(out2["item"])["subject"] == "[work] Decide the nightly retry" and "options" not in item(out2["item"])["metadata"], (st, out2))
-A_ID = server.project_ref("alpha")["id"]
+A_ID = _mover_steps.project_ref("alpha")["id"]
 st, out3 = q(project=A_ID); check("the project by its id", st == 200 and out3["project"] == "projects/alpha", (st, out3))
 st, out4 = q(project="projects/alpha/sub"); check("a sub-page is filed under itself and owned by its hub's -main agent", st == 200 and out4["project"] == "projects/alpha/sub" and out4["owner"] == "home-sparrow-main", (st, out4))
 st, out5 = q(project="delta"); check("a project whose front agent is not -main: that agent owns it", st == 200 and out5["owner"] == "home-delta-docs", (st, out5))

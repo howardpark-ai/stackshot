@@ -46,6 +46,7 @@ def rd(g):
     return json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import agents as _agents
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
@@ -119,8 +120,8 @@ r = _wt_create.stackshot_create(subject="[home] named first builder", descriptio
 check("…even when it names the project's first builder", r.startswith("created") and telling.holder(rd(r.split()[1])) == CORE, r)
 
 # ---- the same default serves the `then` of an item that waits on a call
-check("an item that waits on a call takes the mapped agent as its then when next names it", server._owner_then("projects/delta/ui", "", CORE, f"{SCREEN}: build it", []) == SCREEN)
-check("…and the first builder on an unmapped page", server._owner_then("projects/delta/core", "", MAIN, f"{CORE}: build it", []) == CORE)
+check("an item that waits on a call takes the mapped agent as its then when next names it", _mover_steps._owner_then("projects/delta/ui", "", CORE, f"{SCREEN}: build it", []) == SCREEN)
+check("…and the first builder on an unmapped page", _mover_steps._owner_then("projects/delta/core", "", MAIN, f"{CORE}: build it", []) == CORE)
 
 # ---- the shipped texts
 ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")

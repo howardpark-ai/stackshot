@@ -4,7 +4,7 @@ no live store, no network, no server socket.
 The 7-day cap (waiting.py: a wait runs at most [waiting] cap_days after the item's last move unless his words are recorded for that wake)
 wrongly capped two groups of parked items. This covers the two ways out:
 
-A. His own words already in the store. server._record_cap_words records, as metadata.cap_ok for the item's current wake, a sentence the store
+A. His own words already in the store. _owner_words._record_cap_words records, as metadata.cap_ok for the item's current wake, a sentence the store
    attributes to him (an entry of metadata.answers: a board answer, or his hand-written GitHub comment with its id and url) that reads as a park:
    the quote, where it came from (the answer or comment, its time, the store commit) and the date it covers. It counts as cap_ok (the wake stands
    uncapped, no clock moves), shows in get and on the item page, has a History line, is idempotent, and goes with the wake. It refuses anything
@@ -73,7 +73,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.web import server; from stackshot.service import owner_words as _owner_words; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from stackshot.service import store as _service_store
@@ -106,7 +106,7 @@ park = {"ts": TS, "kind": "decision", "text": "park this until Jun 4th", "via": 
 item(13, hold=True, wake=day(30), answers=[{"ts": now0 - 12 * DAY, "kind": "decision", "choice": "Approve", "text": "sent", "via": "board"}, park])
 check("A: before: a wake a month out has no words recorded behind it", not W.words_of(rd(13)["metadata"]), rd(13)["metadata"])
 before = rd(13)
-out = server._record_cap_words({"sender": "home-test", "item": "a13", "ts": TS, "quote": "park this until Jun 4th", "commit": "010AC0DZZ"}, "testbox")
+out = _owner_words._record_cap_words({"sender": "home-test", "item": "a13", "ts": TS, "quote": "park this until Jun 4th", "commit": "010AC0DZZ"}, "testbox")
 m = rd(13)["metadata"]; co = m.get("cap_ok") or {}
 check("A: recorded: the reply names the item, the wake, the quote and the source", out["action"] == "set" and wk_(out) == day(30) and out["quote"] == park["text"] and "board" in out["source"], out)
 check("A: cap_ok holds the wake it covers, who vouches, the quote and where it came from (the answer and the commit, hex only)",
@@ -114,7 +114,7 @@ check("A: cap_ok holds the wake it covers, who vouches, the quote and where it c
 check("A: it counts as cap_ok: his words are on record for that very wake", W.words_of(rd(13)["metadata"]).get("quote") == park["text"], rd(13)["metadata"])
 check("A: a filing edit: the state clock and the confirm did not move", rd(13)["state_updated"] == before["state_updated"] and rd(13)["confirmed"] == before["confirmed"], rd(13))
 check("A: the answers on the item are as they were", rd(13)["metadata"]["answers"] == before["metadata"]["answers"], rd(13)["metadata"]["answers"])
-out2 = server._record_cap_words({"sender": "home-test", "item": "a13", "ts": TS}, "testbox")
+out2 = _owner_words._record_cap_words({"sender": "home-test", "item": "a13", "ts": TS}, "testbox")
 check("A: again with the same entry: already, nothing changes", out2["action"] == "already" and rd(13)["metadata"] == m, out2)
 g = _wt_get.stackshot_get("a13")
 check("A: get shows his words behind the wake, with the quote and its source", f"{OWNER}'s words behind the wake {day(30)}: “park this until Jun 4th”" in g and "answer on the board" in g, g)
@@ -129,16 +129,16 @@ check("A: words recorded for another wake do not cover this one", not W.words_of
 
 # a GitHub comment of his, by its id
 item(17, hold=True, wake=day(30), answers=[{"ts": TS + 1, "kind": "comment", "text": "Postpone this one, nothing urgent", "via": "github", "url": "https://github.com/x/y/issues/1#issuecomment-5", "comment_id": 5}])
-out = server._record_cap_words({"sender": "home-test", "item": "a17", "comment_id": 5}, "testbox")
+out = _owner_words._record_cap_words({"sender": "home-test", "item": "a17", "comment_id": 5}, "testbox")
 check("A: his hand-written GitHub comment is taken by its comment id", out["action"] == "set" and "comment on GitHub" in out["source"] and "(comment 5, " in out["source"] and rd(17)["metadata"]["cap_ok"]["quote"] == "Postpone this one, nothing urgent", out)
 check("A: ...and cap_ok.source names the comment's url, not only its id", "https://github.com/x/y/issues/1#issuecomment-5" in rd(17)["metadata"]["cap_ok"]["source"], rd(17)["metadata"]["cap_ok"])
 
 # an answer older than the item's current wake or hold is no words behind it (the state clock, as _owner_words_on)
 item(62, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[{"ts": now0 - 8 * DAY, "kind": "decision", "text": "park this until Jun 4th", "via": "board"},
                                                                 {"ts": now0 - 4 * DAY, "kind": "decision", "text": "park it a bit longer", "via": "board"}])
-refused("A: with no history, an answer more than 24 hours before the move that set the current wake is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a62", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours")
+refused("A: with no history, an answer more than 24 hours before the move that set the current wake is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a62", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours")
 check("A: ...and nothing was recorded", "cap_ok" not in rd(62)["metadata"], rd(62)["metadata"])
-out = server._record_cap_words({"sender": "home-test", "item": "a62", "ts": now0 - 4 * DAY}, "testbox")
+out = _owner_words._record_cap_words({"sender": "home-test", "item": "a62", "ts": now0 - 4 * DAY}, "testbox")
 check("A: an answer given after that move is taken (pairing: since the move)", out["action"] == "set" and rd(62)["metadata"]["cap_ok"]["quote"] == "park it a bit longer", out)
 check("A: W.entry_current: at or after the state clock, with half a second of slack, not before it", W.entry_current({"state_updated": 1000.0}, 1000.0, now0) and W.entry_current({"state_updated": 1000.0}, 999.6, now0)
       and not W.entry_current({"state_updated": 1000.0}, 990.0, now0) and not W.entry_current({"state_updated": 1000.0}, "x", now0), None)
@@ -148,12 +148,12 @@ check("A: entry_pairs: earlier, with the previous state change before the answer
 check("A: entry_pairs: earlier, with a state change between the answer and the move, is refused", not W.entry_pairs(it0, 99000.0, now0, prior=99500.0)[0] and "came after it" in W.entry_pairs(it0, 99000.0, now0, prior=99500.0)[1], W.entry_pairs(it0, 99000.0, now0, prior=99500.0))
 check("A: entry_pairs: with no history, 24 hours before pairs and more does not", W.entry_pairs(it0, 100000.0 - 86000, now0)[0] and not W.entry_pairs(it0, 100000.0 - 87000, now0)[0], None)
 # the sender is required, and an @ in his words never pings through the mirror's comment
-refused("A: a call without a sender is refused", lambda: server._record_cap_words({"item": "a18", "ts": TS}, "testbox"), "sender is required")
+refused("A: a call without a sender is refused", lambda: _owner_words._record_cap_words({"item": "a18", "ts": TS}, "testbox"), "sender is required")
 notes = []
 _save0 = writes.save
 writes.save = lambda gid, it, *a, **k: (notes.append(k.get("note") or (a[2] if len(a) > 2 else "")), _save0(gid, it, *a, **k))[1]
 item(63, hold=True, wake=day(30), answers=[{"ts": TB + 1, "kind": "decision", "text": "park this until Jun 4th, ask @someone-else", "via": "board"}])
-server._record_cap_words({"sender": "home-test @x", "item": "a63", "ts": TB + 1}, "testbox")
+_owner_words._record_cap_words({"sender": "home-test @x", "item": "a63", "ts": TB + 1}, "testbox")
 writes.save = _save0
 check("A: the mirror's note for the record breaks every @ (no one is pinged by his words or the sender)", notes and all(re.search("@(?!\u200b)", n) is None for n in notes) and "@\u200bsomeone-else" in notes[0], notes)
 
@@ -165,25 +165,25 @@ item(58, hold=True, wake=day(30), answers=[
     {"ts": TB+4, "kind": "note", "text": "park it until the 4th", "via": "board"},                                           # not a decision or a comment
     {"ts": TB+5, "kind": "decision", "text": "", "choice": "Approve", "via": "board"},                                        # no text
 ], said=[{"tag": "Acked-by", "quote": "park it until the 4th", "msg": "11111111-1111-4111-8111-000000000001", "session": U["home-owner"], "checked": True, "ts": now0}])
-refused("A: an entry that is not via the board or the GitHub reader (an agent-written comment) is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+1}, "testbox"), "own words")
-refused("A: a GitHub entry with no comment id and url is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+2}, "testbox"), "comment id and url")
-refused("A: his words that do not park (\"sent\") are refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+3}, "testbox"), "do not park")
-refused("A: an entry of another kind is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+4}, "testbox"), "own words")
-refused("A: an entry with no text is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+5}, "testbox"), "own words")
+refused("A: an entry that is not via the board or the GitHub reader (an agent-written comment) is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+1}, "testbox"), "own words")
+refused("A: a GitHub entry with no comment id and url is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+2}, "testbox"), "comment id and url")
+refused("A: his words that do not park (\"sent\") are refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+3}, "testbox"), "do not park")
+refused("A: an entry of another kind is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+4}, "testbox"), "own words")
+refused("A: an entry with no text is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a58", "ts": TB+5}, "testbox"), "own words")
 refused("A: an entry that is not in the item's answers is refused, whatever the caller says it said",
-        lambda: server._record_cap_words({"sender": "home-test", "item": "a58", "ts": 999.0, "quote": "park it until the 4th"}, "testbox"), "holds no answer or comment")
+        lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a58", "ts": 999.0, "quote": "park it until the 4th"}, "testbox"), "holds no answer or comment")
 refused("A: a quote with no entry named is refused (the server takes no text from the caller)",
-        lambda: server._record_cap_words({"sender": "home-test", "item": "a58", "quote": "park it until the 4th"}, "testbox"), "holds no answer or comment")
+        lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a58", "quote": "park it until the 4th"}, "testbox"), "holds no answer or comment")
 item(18, hold=True, wake=day(30), answers=[park])
-refused("A: a quote the entry does not say is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a18", "ts": TS, "quote": "park it forever"}, "testbox"), "not what the entry says")
+refused("A: a quote the entry does not say is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a18", "ts": TS, "quote": "park it forever"}, "testbox"), "not what the entry says")
 check("A: …and nothing was recorded by the refusals", all("cap_ok" not in rd(i)["metadata"] for i in (58, 18)), (rd(58)["metadata"], rd(18)["metadata"]))
 item(19, hold=True, wake=day(30), said=[{"tag": "Acked-by", "quote": "park it until the 4th", "msg": "11111111-1111-4111-8111-000000000001", "session": U["home-owner"], "checked": True, "ts": now0}])
-refused("A: a said entry (an agent's quote of him) is not a source: only his answers on the item are", lambda: server._record_cap_words({"sender": "home-test", "item": "a19", "ts": now0}, "testbox"), "holds no answer or comment")
+refused("A: a said entry (an agent's quote of him) is not a source: only his answers on the item are", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a19", "ts": now0}, "testbox"), "holds no answer or comment")
 item(21, status="completed", answers=[park], outcome="done")
-refused("A: a closed item is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a21", "ts": TS}, "testbox"), "not open")
+refused("A: a closed item is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a21", "ts": TS}, "testbox"), "not open")
 item(59, answers=[park])
-refused("A: an item with no wake date has nothing for his words to cover", lambda: server._record_cap_words({"sender": "home-test", "item": "a59", "ts": TS}, "testbox"), "no wake date")
-refused("A: an item that is not there is refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a70", "ts": TS}, "testbox"))
+refused("A: an item with no wake date has nothing for his words to cover", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a59", "ts": TS}, "testbox"), "no wake date")
+refused("A: an item that is not there is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a70", "ts": TS}, "testbox"))
 check("A: the owner's GitHub comment (no [author: …] header) is his; one with a session's header is not (ghsync.is_owner_comment)",
       ghsync.is_owner_comment({"user": {"login": "example-owner"}, "body": "park this"}, "example-owner")
       and not ghsync.is_owner_comment({"user": {"login": "example-owner"}, "body": "[author: home-owner · 00000000-0000-4000-8000-000000000001]\nwake set to 2099-06-04"}, "example-owner"), None)
@@ -463,27 +463,27 @@ item(45, hold=True, su=now0 - 20 * DAY); commit(45, "created")
 d = rd(45); d["metadata"]["answers"] = [ans(now0 - 6 * DAY)]; (T / "store/a/45.json").write_text(json.dumps(d)); commit(45, "his answer")
 d = rd(45); d["metadata"]["wake"] = day(30); d["state_updated"] = now0 - 4 * DAY; (T / "store/a/45.json").write_text(json.dumps(d)); commit(45, "wake set from his answer")
 check("history: prior_state_ts reads the state change before the move that set the wake (passing over the version that only added an answer)", abs((W.prior_state_ts("a45", day(30)) or 0) - (now0 - 20 * DAY)) < 1e-3, W.prior_state_ts("a45", day(30)))
-out = server._record_cap_words({"sender": "home-test", "item": "a45", "ts": now0 - 6 * DAY}, "testbox")
+out = _owner_words._record_cap_words({"sender": "home-test", "item": "a45", "ts": now0 - 6 * DAY}, "testbox")
 check("history: his answer, then the wake set from it: pairs although it is 2 days before the state clock", out["action"] == "set" and rd(45)["metadata"]["cap_ok"]["quote"] == "park this until Jun 4th", out)
 # 46: his park answer, then a wake set, then another wake change, then the current one -> stale
 item(46, hold=True, wake=day(30), su=now0 - 20 * DAY, answers=[ans(now0 - 6 * DAY)]); commit(46, "created with his answer")
 for k, t in enumerate((now0 - 5 * DAY, now0 - 4 * DAY, now0 - 3 * DAY)):
     d = rd(46); d["state_updated"] = t; d["metadata"]["wake"] = day(10 + k * 10); (T / "store/a/46.json").write_text(json.dumps(d)); commit(46, f"wake change {k}")
-refused("history: his park answer, then a wake set, then another wake change, then the current one: refused", lambda: server._record_cap_words({"sender": "home-test", "item": "a46", "ts": now0 - 6 * DAY}, "testbox"), "came after it")
+refused("history: his park answer, then a wake set, then another wake change, then the current one: refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a46", "ts": now0 - 6 * DAY}, "testbox"), "came after it")
 check("history: ...and nothing was recorded", "cap_ok" not in rd(46)["metadata"], rd(46)["metadata"])
 # 48: the wake is set from his answer, and the state clock moves again later (a hold flag, needs) with the same wake: still pairs
 item(48, su=now0 - 20 * DAY); commit(48, "created")
 d = rd(48); d["metadata"]["answers"] = [ans(now0 - 6 * DAY)]; (T / "store/a/48.json").write_text(json.dumps(d)); commit(48, "his answer")
 d = rd(48); d["metadata"]["wake"] = day(30); d["state_updated"] = now0 - 5 * DAY; (T / "store/a/48.json").write_text(json.dumps(d)); commit(48, "wake set")
 d = rd(48); d["metadata"]["hold"] = True; d["state_updated"] = now0 - 2 * DAY; (T / "store/a/48.json").write_text(json.dumps(d)); commit(48, "hold flag set later")
-out = server._record_cap_words({"sender": "home-test", "item": "a48", "ts": now0 - 6 * DAY}, "testbox")
+out = _owner_words._record_cap_words({"sender": "home-test", "item": "a48", "ts": now0 - 6 * DAY}, "testbox")
 check("history: a hold flag set after the wake does not stand between his answer and the wake: pairs", out["action"] == "set", out)
 # 47: a file never committed: the 24-hour lead
 item(47, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[ans(now0 - 5 * DAY - 3600), ans(now0 - 8 * DAY, "park it for a while")])
 check("history: a file with no history gives no prior", W.prior_state_ts("a47", day(30)) is None, W.prior_state_ts("a47", day(30)))
-out = server._record_cap_words({"sender": "home-test", "item": "a47", "ts": now0 - 5 * DAY - 3600}, "testbox")
+out = _owner_words._record_cap_words({"sender": "home-test", "item": "a47", "ts": now0 - 5 * DAY - 3600}, "testbox")
 check("history: with no history an answer an hour before the move pairs (24-hour lead)", out["action"] == "set", out)
-refused("history: ...and one three days before does not", lambda: server._record_cap_words({"sender": "home-test", "item": "a47", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours")
+refused("history: ...and one three days before does not", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a47", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours")
 
 # ================================================================ the history unreadable is not "no history" (follow-up (b) of the review of quick fix 1a)
 # 49: a committed file whose current wake was set from his answer an hour earlier: with a readable history the answer pairs; with an unreadable one it is refused
@@ -505,7 +505,7 @@ for label, fake in (("git missing", gitless), ("a timeout", slow)):
     check(f"unreadable: {label} is UNREADABLE, not None", got is W.UNREADABLE, got)
 subprocess.run = gitless
 try:
-    refused("unreadable: with git missing the server refuses an earlier answer and says why", lambda: server._record_cap_words({"sender": "home-test", "item": "a49", "ts": now0 - 6 * DAY}, "testbox"), "history unreadable: ask Oliver to answer again on the item")
+    refused("unreadable: with git missing the server refuses an earlier answer and says why", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a49", "ts": now0 - 6 * DAY}, "testbox"), "history unreadable: ask Oliver to answer again on the item")
 finally: subprocess.run = real_run
 check("unreadable: ...and records nothing", "cap_ok" not in rd(49)["metadata"], rd(49)["metadata"])
 # a version that does not parse
@@ -515,7 +515,7 @@ d = {"id": "50", "subject": "[home] item 50", "description": DESC, "status": "op
      "metadata": {"owner": U["home-owner"], "project": "projects/alpha", "next": "do the thing", "hold": True, "wake": day(30), "answers": [ans(now0 - 6 * DAY)]}}
 (T / "store/a/50.json").write_text(json.dumps(d)); commit(50, "wake set")
 check("unreadable: a version of the file that does not parse is UNREADABLE", W.prior_state_ts("a50", day(30)) is W.UNREADABLE, W.prior_state_ts("a50", day(30)))
-refused("unreadable: ...and the server refuses an earlier answer", lambda: server._record_cap_words({"sender": "home-test", "item": "a50", "ts": now0 - 6 * DAY}, "testbox"), "history unreadable")
+refused("unreadable: ...and the server refuses an earlier answer", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a50", "ts": now0 - 6 * DAY}, "testbox"), "history unreadable")
 # the look-back runs out: more versions than `limit`, all carrying the wake
 item(51, hold=True, wake=day(30), su=now0 - 20 * DAY, answers=[ans(now0 - 6 * DAY)]); commit(51, "created with the wake")
 for k in range(4):
@@ -541,14 +541,14 @@ def spy(gid, wake, limit=200):
 W.prior_state_ts = spy
 try:
     item(69, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[ans(now0 - 8 * DAY, "sent")])
-    refused("order: words that do not park are refused before the history is read", lambda: server._record_cap_words({"sender": "home-test", "item": "a69", "ts": now0 - 8 * DAY}, "testbox"), "do not park")
+    refused("order: words that do not park are refused before the history is read", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a69", "ts": now0 - 8 * DAY}, "testbox"), "do not park")
     check("order: ...the history was not read at all", calls == [], calls)
     item(52, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[ans(now0 - 8 * DAY)])
-    refused("order: an earlier park answer on an item with no history is stale (24-hour lead) and the history was read", lambda: server._record_cap_words({"sender": "home-test", "item": "a52", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours")
+    refused("order: an earlier park answer on an item with no history is stale (24-hour lead) and the history was read", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a52", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours")
     check("order: ...once, and before the item lock was taken", len(calls) == 1 and calls[0][0] == "a52" and calls[0][2] is False, calls)
     calls.clear()
     item(53, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[ans(now0 - 4 * DAY)])
-    out = server._record_cap_words({"sender": "home-test", "item": "a53", "ts": now0 - 4 * DAY}, "testbox")
+    out = _owner_words._record_cap_words({"sender": "home-test", "item": "a53", "ts": now0 - 4 * DAY}, "testbox")
     check("order: an answer given since the move that set the wake pairs without reading the history", out["action"] == "set" and calls == [], (out, calls))
     # the result is still checked under the lock: the item moves while the history is read
     calls.clear()
@@ -558,7 +558,7 @@ try:
         d = rd(54); d["metadata"]["wake"] = day(31); (T / "store/a/54.json").write_text(json.dumps(d))     # another session sets a new wake meanwhile
         return got
     W.prior_state_ts = spy_moves
-    refused("lock: a wake that changed while the history was read is refused, to be run again", lambda: server._record_cap_words({"sender": "home-test", "item": "a54", "ts": now0 - 5 * DAY - 3600}, "testbox"), "moved while its history was being read")
+    refused("lock: a wake that changed while the history was read is refused, to be run again", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a54", "ts": now0 - 5 * DAY - 3600}, "testbox"), "moved while its history was being read")
     check("lock: ...and nothing was recorded", "cap_ok" not in rd(54)["metadata"], rd(54)["metadata"])
     # the answer is current at the first read (so no history is read for it); the state clock then moves before the lock is taken
     item(55, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[ans(now0 - 4 * DAY)])
@@ -573,7 +573,7 @@ try:
         return orig_load(g)
     _service_store._load = load_moving
     try:
-        refused("lock: a state clock that moved after a current answer was read without history is refused, to be run again", lambda: server._record_cap_words({"sender": "home-test", "item": "a55", "ts": now0 - 4 * DAY}, "testbox"), "moved while its history was being read")
+        refused("lock: a state clock that moved after a current answer was read without history is refused, to be run again", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a55", "ts": now0 - 4 * DAY}, "testbox"), "moved while its history was being read")
     finally:
         _service_store._load = orig_load
     check("lock: ...and the history was never read for it, nothing recorded", calls == [] and "cap_ok" not in rd(55)["metadata"], (calls, rd(55)["metadata"]))
@@ -584,7 +584,7 @@ try:
         dd = rd(56); dd["state_updated"] = now0 - 2 * DAY; (T / "store/a/56.json").write_text(json.dumps(dd))     # the same wake, another move of the item meanwhile
         return got
     W.prior_state_ts = spy_state
-    refused("lock: a state move with the same wake while the history was read is refused too, to be run again", lambda: server._record_cap_words({"sender": "home-test", "item": "a56", "ts": now0 - 5 * DAY - 3600}, "testbox"), "moved while its history was being read")
+    refused("lock: a state move with the same wake while the history was read is refused too, to be run again", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a56", "ts": now0 - 5 * DAY - 3600}, "testbox"), "moved while its history was being read")
     check("lock: ...and nothing was recorded", "cap_ok" not in rd(56)["metadata"] and wk_(rd(56)["metadata"]) == day(30), rd(56)["metadata"])
 finally:
     W.prior_state_ts = real_prior
@@ -603,9 +603,9 @@ p_a = W.prior_state_ts("a57", day(30))
 check("again: prior_state_ts of a wake set, cleared and set again to the same value is the clear (the newest run's start), not the first set or the creation",
       p_a is not None and p_a is not W.UNREADABLE and abs(p_a - (now0 - 7 * DAY)) < 1e-3, p_a)
 check("again: …the same wake read before the clear and after would differ: the first run is not counted", abs(p_a - (now0 - 20 * DAY)) > 1.0 and abs(p_a - (now0 - 8 * DAY)) > 1.0, p_a)
-refused("again: his answer from before the clear is stale: a state move (the clear) lies between it and the current set", lambda: server._record_cap_words({"sender": "home-test", "item": "a57", "ts": A1}, "testbox"), "came after it")
+refused("again: his answer from before the clear is stale: a state move (the clear) lies between it and the current set", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a57", "ts": A1}, "testbox"), "came after it")
 check("again: …nothing was recorded", "cap_ok" not in rd(57)["metadata"], rd(57)["metadata"])
-out = server._record_cap_words({"sender": "home-test", "item": "a57", "ts": A2}, "testbox")
+out = _owner_words._record_cap_words({"sender": "home-test", "item": "a57", "ts": A2}, "testbox")
 check("again: his answer given after the clear, the last thing before the current set, pairs", out["action"] == "set" and rd(57)["metadata"]["cap_ok"]["quote"] == "postpone it, same date", out)
 
 # ================================================================ C. a verifying item (not held) moves its wake closer

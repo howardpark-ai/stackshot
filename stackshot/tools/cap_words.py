@@ -65,7 +65,7 @@ def local_time(ts: float) -> str:
 
 
 def attributed(a: Any) -> bool:
-    """An entry the store attributes to the owner, by the same test the server applies when it records it (server._record_cap_words): written by the
+    """An entry the store attributes to the owner, by the same test the server applies when it records it (owner_words._record_cap_words): written by the
     board's answer form (via board) or by the reader of his hand-written GitHub comments (via github, with the comment's id and url), kind decision or
     comment, with text. No session's tool writes metadata.answers."""
     if not isinstance(a, dict) or a.get("kind") not in ("decision", "comment") or a.get("via") not in ("board", "github"):

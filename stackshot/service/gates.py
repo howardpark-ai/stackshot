@@ -93,11 +93,11 @@ class Hooks:
     model_guards_on: Callable[..., Any]
     model_page: Any            # the gbrain page of the item model (server._MODEL_PAGE)
     open_item_named: Callable[..., Any]
-    outcomes: Any            # how an item may end (server.OUTCOMES)
+    outcomes: Any            # how an item may end (owner_words.OUTCOMES)
     own_repo: Callable[..., Any]
     owner_words_on: Callable[..., Any]
     parse_wake: Callable[..., Any]
-    relaunch: Any            # the sentence a refused close ends with (server._RELAUNCH)
+    relaunch: Any            # the sentence a refused close ends with (owner_words._RELAUNCH)
     role_of: Callable[..., Any]
     same_sess: Callable[..., Any]            # fleet/sessions_registry._same_sess
     scoped_anchors: Callable[..., Any]

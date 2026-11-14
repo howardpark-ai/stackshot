@@ -87,7 +87,7 @@ stripped = json.loads((T / "store/projects.json").read_text())
 for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
-from stackshot.web import server; from stackshot.service import projects as _psvc; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.service import mover_steps as _mover_steps; from stackshot.service import projects as _psvc; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
 from stackshot.anchors import anchors as _A
 from stackshot.service import store as _service_store
 from fastmcp.exceptions import ToolError
@@ -109,7 +109,7 @@ rec = prj.ref(A_ID)
 check("ref(id) → the record {id, key, keeper, agents} plus the scope and listing fields", rec and set(rec) == RECORD_FIELDS and rec["key"] == "projects/alpha" and rec["id"] == A_ID and rec["keeper"] == "home-sparrow", rec)
 check("ref(full key) → the same record", prj.ref("projects/alpha") == rec)
 check("ref(bare slug) → the same record (a bare slug names a page in the first dir)", prj.ref("alpha") == rec)
-check("project_ref is the name the design gives the lookup, in the module and in the server", prj.project_ref(A_ID) == rec and server.project_ref("alpha") == rec and server.project_ref(A_ID) == rec and server.project_ref("nope") is None)
+check("project_ref is the name the design gives the lookup, in the module and in the save steps' module", prj.project_ref(A_ID) == rec and _mover_steps.project_ref("alpha") == rec and _mover_steps.project_ref(A_ID) == rec and _mover_steps.project_ref("nope") is None)
 check("ref: a trailing .md or slash is read away", prj.ref("projects/alpha.md") == rec and prj.ref("projects/alpha/") == rec)
 check("ref: an ops page by its full key and by its bare slug", prj.ref("ops/alpha-tool")["id"] == TOOL_ID and prj.ref("alpha-tool")["key"] == "ops/alpha-tool")
 check("ref: a sub-page has its own record and id", prj.ref("projects/alpha/sub")["id"] == SUB_ID and prj.ref(SUB_ID)["key"] == "projects/alpha/sub")

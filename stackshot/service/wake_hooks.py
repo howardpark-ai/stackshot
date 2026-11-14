@@ -19,7 +19,7 @@ class Hooks:
     """What the wake passes still reach in server.py, in the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     after_open: Callable[..., Any]  # item_read._after_open
     event_activity_tick: Callable[..., Any]  # server._event_activity_tick
-    follow_superseded: Callable[..., Any]  # server._follow_superseded
+    follow_superseded: Callable[..., Any]  # mover_steps._follow_superseded
     hand_stored_then: Callable[..., Any]  # server._hand_stored_then
     hold_flag: Callable[..., Any]  # holders._hold_flag
     is_held: Callable[..., Any]  # holders._is_held
