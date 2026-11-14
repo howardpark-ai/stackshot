@@ -1,4 +1,4 @@
-"""Scenario test for a step that names the event which finishes it (step_proof.py, server._proof_item / _sweep_proofs / _proof_tick, the step_proof parameter, client.py
+"""Scenario test for a step that names the event which finishes it (step_proof.py, proofs_svc.proof_item / sweep_proofs / proof_tick, the step_proof parameter, client.py
 sweep-step-proof, tools/backfill_step_proof.py) — fixture data, no live store, no network (GitHub's answers are a table).
 
 Covers: the patterns for a step's words (release / merge phrases, pure or with a follow-up, negations, gates, mentions that never match); the explicit form (update and create take
@@ -109,6 +109,7 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc, released_live as rlive_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -171,16 +172,16 @@ def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]
-server._HERE = T / "repo"
+server._HERE = rlive_svc.HERE = T / "repo"
 GH = {key(39): ("merged", ""), key(40): ("dead", ""), key(41): ("err", "GitHub refused the read (404)"), key(7, OTHER): ("merged", "")}
 GH_CALLS = []; GH_TAGS = []
 from stackshot.core import ghbudget as _gbud
 def fake_pr_merged(ref, now_, gh_st):
-    ref = server._check_ref(ref); st, err = GH.get(ref, ("open", "")); GH_CALLS.append(ref); GH_TAGS.append(_gbud.current())     # the ledger tag in force while the PR is read
+    ref = checks_svc.check_ref(ref); st, err = GH.get(ref, ("open", "")); GH_CALLS.append(ref); GH_TAGS.append(_gbud.current())     # the ledger tag in force while the PR is read
     gh_st[ref] = {"next": now_ + 300, "back": 0.0, "err": err, "merged": st == "merged", **({"dead": "its pull request was closed without being merged"} if st == "dead" else {})}
     return st == "merged", err
-REAL_PR_MERGED = server._pr_merged
-server._pr_merged = fake_pr_merged
+REAL_PR_MERGED = checks_svc.pr_merged
+checks_svc.pr_merged = fake_pr_merged
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
@@ -200,7 +201,7 @@ check("his own step reads as his, a session's does not", server._steps.is_his(f"
 
 # ---- 3. the dry run first: lists what it would do, writes nothing, tells nobody
 s0 = snap(); p0 = len(pushes())
-d = server._sweep_proofs(dry=True)
+d = proofs_svc.sweep_proofs(dry=True)
 acts = {}
 for x in d["items"]: acts.setdefault(x["item"], []).append((x["pr"], x["kind"], x["action"]))
 check("the dry run lists, per item, what the server would do",
@@ -214,7 +215,7 @@ check("…the answers are not kept on a dry run", not (T / "state/step-proof.jso
 
 # ---- 4. the real pass: ticks, closes, tells
 GH_CALLS.clear()
-d = server._sweep_proofs()
+d = proofs_svc.sweep_proofs()
 rows = {}
 for x in d["items"]: rows.setdefault(x["item"], []).append(x)
 a1 = rd(1)
@@ -291,20 +292,20 @@ check("activity: an item the pass left alone has no clock written", "activity" n
 
 # ---- 5. an event seen twice ticks once, tells once
 p1 = len(pushes()); s1 = snap()
-d = server._sweep_proofs()
+d = proofs_svc.sweep_proofs()
 check("a second pass: nothing ticked or closed, no second notice, the told items left with why",
       not [x for x in d["items"] if x["action"] in ("closed", "ticked")] and len(pushes()) == p1
       and {x["item"]: x["why"] for x in d["items"] if x["action"] == "left"}.get("a3") == "its mover was told already that PR #39 is merged", d["items"])
 check("…and nothing is changed on disk", not same(s1), same(s1))
 LAST_GOOD.write_text(MS[43] + "\n")
-d = server._sweep_proofs()
+d = proofs_svc.sweep_proofs()
 check("last-good moves to #43's merge: the release steps settle (the item whose only step is the release closes; the explicit one ticks)",
       rd(24)["status"] == "completed" and rd(26)["metadata"].get("next") == "home-builder: check the pages" and [s["status"] for s in rd(26)["metadata"]["steps"]] == ["done", "open"], (rd(24)["status"], rd(26)["metadata"]))
 LAST_GOOD.write_text(MS[45] + "\n")
 
 # ---- 6. release.sh's call settles the same steps, explicit ones included
 fixtures(); p0 = len(pushes())
-r = server._released(url(42), sha=MS[42])
+r = released_svc.released(url(42), sha=MS[42])
 rr = {x["item"]: x for x in r["items"]}
 check("released: the explicit proof ticks and the plain 'release PR #n' steps close, as before; merge steps and other PRs' are not touched",
       rr.get("a9", {}).get("action") == "ticked" and rr.get("a12", {}).get("action") == "closed" and rr.get("a14", {}).get("action") == "ticked" and "a1" not in rr and "a13" not in rr
@@ -312,25 +313,25 @@ check("released: the explicit proof ticks and the plain 'release PR #n' steps cl
 check("…its rows say which event", all(x.get("kind") == R for x in r["items"]), r["items"])
 fixtures()
 
-# ---- 7. the pass: _proof_tick is throttled and settles
-server._PROOF_LAST[0] = 0.0
+# ---- 7. the pass: proof_tick is throttled and settles
+proofs_svc.PROOF_LAST[0] = 0.0
 s_t = snap(); p_t = len(pushes())
-done = server._proof_tick(now + 1)
+done = proofs_svc.proof_tick(now + 1)
 check("the first pass of the clock only logs: it writes and tells nothing, keeps what it would do, and marks itself done",
-      done == [] and not same(s_t) and len(pushes()) == p_t and (T / "state/step-proof-dry.json").exists() and server._proof_state().get("dry_logged")
+      done == [] and not same(s_t) and len(pushes()) == p_t and (T / "state/step-proof-dry.json").exists() and proofs_svc.proof_state().get("dry_logged")
       and {x["item"] for x in json.loads((T / "state/step-proof-dry.json").read_text())["items"]} >= {"a1", "a2", "a9"}, (done, same(s_t)))
-check("…the pass after it acts: it settles what the sweep would (the ids of the closed, ticked and told)", server._proof_tick(now + 2) == [] and not same(s_t))
-done = server._proof_tick(now + 1 + server._PROOF_EVERY + 1)
+check("…the pass after it acts: it settles what the sweep would (the ids of the closed, ticked and told)", proofs_svc.proof_tick(now + 2) == [] and not same(s_t))
+done = proofs_svc.proof_tick(now + 1 + proofs_svc.PROOF_EVERY + 1)
 check("…once its interval has passed", "a1" in done and "a2" in done and "a3" in done and rd(1)["status"] == "completed", done)
 _cfg_get = server._cfg.get
 def with_switch(v):
     server._cfg.get = lambda *k, **kw: ({} if v is None else {"live": v}) if k == ("step_proof",) else _cfg_get(*k, **kw)
 fixtures(); (T / "state/step-proof.json").unlink(); s_t = snap()
-with_switch(False); server._PROOF_LAST[0] = 0.0
-server._proof_tick(now + 1); server._PROOF_LAST[0] = 0.0; server._proof_tick(now + 2)
-check("[step_proof] live = false: the clock never acts, however many passes, and never marks its first pass as done", not same(s_t) and not server._proof_state().get("dry_logged") and not server._proof_live())
-with_switch(True); server._PROOF_LAST[0] = 0.0
-done = server._proof_tick(now + 3)
+with_switch(False); proofs_svc.PROOF_LAST[0] = 0.0
+proofs_svc.proof_tick(now + 1); proofs_svc.PROOF_LAST[0] = 0.0; proofs_svc.proof_tick(now + 2)
+check("[step_proof] live = false: the clock never acts, however many passes, and never marks its first pass as done", not same(s_t) and not proofs_svc.proof_state().get("dry_logged") and not proofs_svc.proof_live())
+with_switch(True); proofs_svc.PROOF_LAST[0] = 0.0
+done = proofs_svc.proof_tick(now + 3)
 check("[step_proof] live = true: the very first pass acts", "a1" in done and rd(1)["status"] == "completed", done)
 with_switch(None); fixtures()
 check("…the tick is one of the runner's clocks, in its settle group", [t.group for t in runner_svc.ticks() if t.name == "proof_tick"] == ["settle"])
@@ -394,9 +395,9 @@ item(28, "home-builder: merge PR #39\nhome-builder: check the pages", owner=OWNE
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": url(39), "items": ["a28", "a3", "a16"], "added": 1, "by": "t"}]}))
 _holder0 = telling.holder
 telling.holder = lambda it, was=None: "" if str(it.get("id")) == "28" else _holder0(it, was)      # an item whose holder cannot be named
-GH_CALLS.clear(); server._PROOF_LOGGED.clear()
+GH_CALLS.clear(); proofs_svc.PROOF_LOGGED.clear()
 try:
-    d = server._sweep_proofs()
+    d = proofs_svc.sweep_proofs()
 finally:
     telling.holder = _holder0
 check("a bare pull request number that no step of its item can match makes no event and no GitHub read", key(46) not in GH_CALLS and "a27" not in {x["item"] for x in d["items"]} and raw(27) == json.dumps(json.loads(raw(27))), GH_CALLS)
@@ -404,41 +405,41 @@ a28 = rd(28)
 check("an item with no holder: its step is ticked, the told mark is recorded all the same, nobody is told",
       a28["metadata"].get("released_told") == [f"merged {key(39)}"] and [x["status"] for x in a28["metadata"]["steps"]] == ["done", "open"] and not pushes_for("a28"), a28["metadata"])
 GH_CALLS.clear(); s_n = snap(); p_n = len(pushes())
-d = server._sweep_proofs()
+d = proofs_svc.sweep_proofs()
 check("the second pass changes nothing, tells nothing, and rereads no GitHub answer that can no longer change (merged, closed unmerged)",
       not same(s_n) and len(pushes()) == p_n and not [k for k in GH_CALLS if k in (key(39), key(40), key(7, OTHER))], (same(s_n), GH_CALLS))
 check("…its rows for the dead PR and the told follow-up say so",
       {x["item"]: x["why"] for x in d["items"] if x["action"] == "left"}.get("a21") == f"its mover was told already that PR #40 was closed without a merge", d["items"])
 # the log: one "left alone" line per item and reason
 import contextlib, io as _io
-err = _io.StringIO(); server._PROOF_LOGGED.clear()
+err = _io.StringIO(); proofs_svc.PROOF_LOGGED.clear()
 with contextlib.redirect_stderr(err):
-    server._sweep_proofs(); server._sweep_proofs(); server._sweep_proofs()
+    proofs_svc.sweep_proofs(); proofs_svc.sweep_proofs(); proofs_svc.sweep_proofs()
 check("a held item is logged as left alone once, not every pass", err.getvalue().count("released: a16 left alone for PR #39: on hold") == 1, err.getvalue()[-600:])
 # the cost: git is read only for the pull requests some open step waits on, and kept by commit
 calls = {"prs": 0, "live": 0, "base": 0}
-_mp, _live, _base = server._merged_prs, server._released_is_live, server._released_live_base
-server._merged_prs = lambda *a, **k: (calls.__setitem__("prs", calls["prs"] + 1), _mp(*a, **k))[1]
-server._released_is_live = lambda *a, **k: (calls.__setitem__("live", calls["live"] + 1), _live(*a, **k))[1]
-server._released_live_base = lambda *a, **k: (calls.__setitem__("base", calls["base"] + 1), _base(*a, **k))[1]
+_mp, _live, _base = rlive_svc.merged_prs, rlive_svc.released_is_live, rlive_svc.released_live_base
+rlive_svc.merged_prs = lambda *a, **k: (calls.__setitem__("prs", calls["prs"] + 1), _mp(*a, **k))[1]
+rlive_svc.released_is_live = lambda *a, **k: (calls.__setitem__("live", calls["live"] + 1), _live(*a, **k))[1]
+rlive_svc.released_live_base = lambda *a, **k: (calls.__setitem__("base", calls["base"] + 1), _base(*a, **k))[1]
 try:
-    fixtures(); server._PROOF_GIT.clear()
-    server._sweep_proofs(dry=True)
+    fixtures(); rlive_svc.PROOF_GIT.clear()
+    proofs_svc.sweep_proofs(dry=True)
     c1 = dict(calls)
     check("a pass reads the merges of last-good and HEAD once, and asks 'is it live' only for the pull requests an open step releases (#42 and #43), not for every merge",
           c1["prs"] <= 3 and c1["live"] <= 2, c1)
-    server._sweep_proofs(dry=True); server._sweep_proofs(dry=True)
+    proofs_svc.sweep_proofs(dry=True); proofs_svc.sweep_proofs(dry=True)
     check("…and the same commits cost no git log or merge-base on the passes after", calls["prs"] == c1["prs"] and calls["live"] == c1["live"], (c1, calls))
     for f in (T / "store/a").glob("*.json"): f.unlink()
-    item(1, "home-builder: release PR #29 (no step waits on a merge in this repository)"); calls.update(prs=0, live=0, base=0); server._PROOF_GIT.clear()
+    item(1, "home-builder: release PR #29 (no step waits on a merge in this repository)"); calls.update(prs=0, live=0, base=0); rlive_svc.PROOF_GIT.clear()
     item(2, f"home-builder: merge {url(7, OTHER)}"); (T / "store/anchors.json").write_text("{}")
-    GH_CALLS.clear(); server._sweep_proofs(dry=True)
+    GH_CALLS.clear(); proofs_svc.sweep_proofs(dry=True)
     check("only another repository's merge to wait for: no git log, no merge-base", calls["prs"] == 0 and calls["live"] == 0, calls)
     for f in (T / "store/a").glob("*.json"): f.unlink()
     calls.update(prs=0, live=0, base=0)
-    check("the clock with no step waiting on an event reads no git at all (not even the base)", server._sweep_proofs(tick=True)["items"] == [] and calls == {"prs": 0, "live": 0, "base": 0}, calls)
+    check("the clock with no step waiting on an event reads no git at all (not even the base)", proofs_svc.sweep_proofs(tick=True)["items"] == [] and calls == {"prs": 0, "live": 0, "base": 0}, calls)
 finally:
-    server._merged_prs, server._released_is_live, server._released_live_base = _mp, _live, _base
+    rlive_svc.merged_prs, rlive_svc.released_is_live, rlive_svc.released_live_base = _mp, _live, _base
 fixtures()
 
 # the explicit form: a proof dropped with its step says so; a close takes no proof
@@ -519,7 +520,7 @@ check("--apply is refused together with the options that point a dry run at a co
 check("every PR the step-proof sweep read on GitHub was read under the 'step_proof' ledger tag (and the tag is gone afterwards)", GH_TAGS and set(GH_TAGS) == {"step_proof"} and _gbud.current() == "", (GH_TAGS, _gbud.current()))
 check("the tool left no folder of its own behind (its temporary folder is made under the suite's own scratch folder)", not list(pathlib.Path(tmp).glob("stepproof-*")))
 
-# ---- 9. the real reader behind _pr_merged is shared with the done check and the event wait (pr_state.py): a read one of them made inside the pace is not made again by the sweep
+# ---- 9. the real reader behind checks.pr_merged is shared with the done check and the event wait (pr_state.py): a read one of them made inside the pace is not made again by the sweep
 from stackshot.github import pr_state as _prs
 class _Cl:
     repo_id = 0
@@ -529,13 +530,13 @@ class _Cl:
         self.calls.append((path, kw.get("etag"), _gbud.current()))
         on = path.endswith("/pulls/39")
         return {"state": "closed" if on else "open", "merged": on, "merged_at": "2026-11-03T00:00:00Z" if on else None}
-CL9 = _Cl(); _cg9 = server._check_gh; server._check_gh = lambda repo: CL9
+CL9 = _Cl(); _cg9 = checks_svc.check_gh; checks_svc.check_gh = lambda repo: CL9
 try:
-    server._pr_merged = REAL_PR_MERGED; _prs.reset(); fixtures()
+    checks_svc.pr_merged = REAL_PR_MERGED; _prs.reset(); fixtures()
     (T / "state/step-proof.json").unlink(missing_ok=True)
     t9 = time.time()
-    with _gbud.tag("done_check"): ok9 = server._pr_merged(key(39), t9, {})          # the done check's pass reads #39 first
-    d9 = server._sweep_proofs(dry=True, save=True)
+    with _gbud.tag("done_check"): ok9 = checks_svc.pr_merged(key(39), t9, {})          # the done check's pass reads #39 first
+    d9 = proofs_svc.sweep_proofs(dry=True, save=True)
     c50 = [c for c in CL9.calls if c[0].endswith("/pulls/39")]
     check("9: the done check read #39 once and the sweep, asking for the same PR inside the pace, made no second read (its other pull requests were read, as before)",
           ok9 == (True, "") and len(c50) == 1 and c50[0][1] is True and c50[0][2] == "done_check" and any(c[0].endswith("/pulls/40") for c in CL9.calls) and any(x["item"] == "a1" and x["action"] == "closed" for x in d9["items"]), (CL9.calls, d9["items"][:3]))
@@ -543,7 +544,7 @@ try:
     check("9: …the sweep's own file keeps the answer the done check read (it is where a later pass looks first)", kept.get(key(39), {}).get("merged") is True and kept.get(key(40), {}).get("merged") is False, kept)
     check("9: …the PRs the sweep read itself were read under its own ledger tag", all(c[2] == "step_proof" for c in CL9.calls if not c[0].endswith("/pulls/39")) and any(c[2] == "step_proof" for c in CL9.calls), CL9.calls)
 finally:
-    server._check_gh = _cg9; server._pr_merged = fake_pr_merged; _prs.reset()
+    checks_svc.check_gh = _cg9; checks_svc.pr_merged = fake_pr_merged; _prs.reset()
 
 print(f"{len(ran) - len(fails)}/{len(ran)} passed" + (f" — FAILED: {', '.join(fails)}" if fails else ""))
 sys.exit(1 if fails else 0)

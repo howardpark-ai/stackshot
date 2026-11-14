@@ -58,6 +58,7 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
 from stackshot.web.ui import render as ui_render
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -212,11 +213,11 @@ class _Clock:                    # the server's clock stopped at the wake itself
     def time(self): return self.at
     def __getattr__(self, k): return getattr(time, k)
 real_time = server.time
-server.time = handoff_svc.time = hcold_svc.time = _Clock(W.wake_epoch(WD))
+server.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = _Clock(W.wake_epoch(WD))
 try:
     at_wake = (server._wake_alone_on_agent(m_basis), "alone is a wait until that date" in server._wake_window_note(m_basis))
 finally:
-    server.time = handoff_svc.time = hcold_svc.time = real_time
+    server.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = real_time
 check("11 …a wake exactly now is not waiting any more: the basis no longer exempts it, so the note rules apply again (alone, and the window note fires)", at_wake == (True, True), at_wake)
 bw = dict(it_of(1), metadata=dict(mt(1, "g")))
 ep = W.wake_epoch(W1)

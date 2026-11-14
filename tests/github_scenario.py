@@ -244,6 +244,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.service import checks as checks_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.web import middleware as _wmw
 from stackshot.web.tools import complete as _wt_complete
@@ -1571,11 +1572,11 @@ class _PrClient:      # the PR reader's client, as the ledger sees it: one count
     repo_id = 0
     def repo_path(self, rest=""): return "/repos/o/r" + rest
     def request(self, method, path, **kw): _gb.note("r"); return {"merged": True, "state": "closed", "merged_at": "2026-11-03T00:00:00Z"}
-_cg_ = server._check_gh; server._check_gh = lambda repo: _PrClient()
+_cg_ = checks_svc.check_gh; checks_svc.check_gh = lambda repo: _PrClient()
 try:
-    d_a = _cal(); ok_, err_ = server._check_eval("pr_merged o/r#5", time.time(), {}); d_b = _cal()
+    d_a = _cal(); ok_, err_ = checks_svc.check_eval("pr_merged o/r#5", time.time(), {}); d_b = _cal()
 finally:
-    server._check_gh = _cg_
+    checks_svc.check_gh = _cg_
 check("the done check's merged-PR read is kept under 'done_check' in the ledger (and the tag is gone afterwards)", ok_ is True and err_ == "" and _dc(d_a, d_b, "reads", "done_check") == 1 and _dc(d_a, d_b, "reads", "other") == 0 and _gb.current() == "", (d_a, d_b))
 sub2 = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); import ghbudget as g; g.note('r', caller='receivers'); g.note('r', caller='receivers'); g.note('r'); print(g.by_caller()['reads'].get('receivers', 0))"],
                       capture_output=True, text=True)

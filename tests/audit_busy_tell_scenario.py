@@ -67,6 +67,7 @@ sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); log
 from stackshot.web import server
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
 from stackshot.service import telling
 from stackshot.audit import hourly as HR, hand_idle as HI, silence as SL, busy_tell as BT
 from stackshot.waits import stall as ST, handoff as HO
@@ -81,7 +82,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -96,7 +97,7 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda: {}
+server._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
 sent_at = []                                                       # when (the fake clock) each notice was sent, in step with `sent`
 def fake_tell2(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); sent_at.append(CLK.t); return None

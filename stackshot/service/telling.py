@@ -57,8 +57,8 @@ class Hooks:
     there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     back_agent: Callable[..., Any]  # server._back_agent
     builder_for: Callable[..., Any]  # server._builder_for
-    check_changed: Callable[..., Any]  # server._check_changed
-    check_lane_shown: Callable[..., Any]  # server._check_lane_shown
+    check_changed: Callable[..., Any]  # server lambda to checks.check_changed
+    check_lane_shown: Callable[..., Any]  # server lambda to checks.check_lane_shown
     debt_mover: Callable[..., Any]  # server._debt_mover
     foryou_failed: Callable[[], Any]  # server._FORYOU_FAILED
     foryou_key: Callable[..., Any]  # server._foryou_key

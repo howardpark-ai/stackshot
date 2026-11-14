@@ -3,9 +3,9 @@
 Three parts of the server ask GitHub whether a pull request is merged: the done check (`pr_merged <ref>`), the step proof (a step that
 waits on a merge) and the event wait (`pr_merged` / `pr_released` waits). Each kept its own record of the answer (checks.json, step-proof.json,
 and a dict in memory), so a pull request that all three named was read three times in one window. `merged()` is the one reader behind
-`server._pr_merged`: every call, whichever part makes it, looks first in ONE process-wide record store and reads GitHub only when the answer
+`checks.pr_merged` (service/checks.py): every call, whichever part makes it, looks first in ONE process-wide record store and reads GitHub only when the answer
 there is older than the pace ([check] github_minutes). The caller's own dict (`gh_st`) is still filled with the record, because that dict is what
-the caller persists (checks.json, step-proof.json) and what `server._check_dead` reads; it is a view of the shared record, never a second read.
+the caller persists (checks.json, step-proof.json) and what `checks.check_dead` reads; it is a view of the shared record, never a second read.
 
 What stays as it was, for every caller: the return value `(merged, error)`; the record's fields (`next`, `back`, `err`, `merged`, `seen`, `dead`);
 the pace (one GET per PR every github_minutes); the backoff (doubling from the pace, at most `backoff_max`, or what GitHub asked for) when GitHub is
@@ -92,7 +92,7 @@ def merged(ref: str, now: float, gh_st: dict[str, Any], client_for: Callable[[st
     """→ (the PR `ref` ("owner/repo#n", already in its current name) is merged, the error). One GET per PR every `every` seconds across all callers: the answer
     is kept in the shared store and in `gh_st` (the caller's own dict). GitHub down or rate-limited backs off (doubling, at most `backoff_max`, or what GitHub
     asked for); a refusal is an error tried again at the normal pace. `client_for(repo)` is the ghsync client that reads that repo's pull requests. A closed PR
-    that was not merged carries `dead` in its record, which `server._check_dead` and the event wait read."""
+    that was not merged carries `dead` in its record, which `checks.check_dead` and the event wait read."""
     with _lock(ref):
         rec = _best(ref, gh_st)
         if rec and _nxt(rec) > now:

@@ -136,11 +136,15 @@ BACKOFF = 600.0        # an item whose turn failed is left alone this long (meta
 
 
 def failed_at(meta: dict[str, Any]) -> float:
+    """When the item's last turn failed (epoch seconds), 0.0 for none. A torn note (no number, a bool, a negative, a non-finite or a moment no date can show: the bound an arrival time has) is no failure: the
+    back-off moments that read it (`next_moment`, the wake pass) draw dates from it, and one bad value must not stop them for every other item."""
     w = (meta or {}).get("watch")
     try:
-        return float(w.get("failed_at") or 0) if isinstance(w, dict) else 0.0
-    except (TypeError, ValueError):
+        v = w.get("failed_at") if isinstance(w, dict) else None
+        at = 0.0 if v is None or isinstance(v, bool) else float(v)
+    except (TypeError, ValueError, OverflowError):
         return 0.0
+    return at if 0 < at <= _wl.ARRIVED_AT_MAX else 0.0      # (nan, inf and -inf fail the comparison)
 
 
 def day_epoch(value: Any) -> float | None:

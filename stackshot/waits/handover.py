@@ -2,7 +2,7 @@
 
 A step is done (ticked by its proof, or marked by hand) and the next open step opens with another session: the item's mover becomes that session and it is told, with the step's text. The notice of
 a ticked step goes to the item's mover; the session named on the next step is told by this module. This module decides; the item is written and the session told by the server
-(`server._handover`, called by `_proof_item` and by `update` when it marks a step done), and the audit reads the record it leaves (`audit_checks.check_step_handover`).
+(`proofs.handover` (service/proofs.py), called by `proofs.proof_item` and by `update` when it marks a step done), and the audit reads the record it leaves (`audit_checks.check_step_handover`).
 
   next_open(meta, keeper)                      (text, opener) of the first open step that is not a bare sub-step: the step whose session is next
   decide(meta, keeper, mover, kind_of, down_of, same)   {"action": move | fallback | none, "to", "step", "hash", "why"}

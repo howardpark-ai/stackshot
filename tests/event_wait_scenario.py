@@ -7,7 +7,7 @@ pass and was finally raised to the owner. An event wait is stored, watched by co
     the words, the report a machine posts (event_from_report), the watchers' reading of it (can_end, watches, due at its backstop).
   * the write: a canonical phrase is stored and the reply says what is watched; a phrase that is no event, a pr_released for another repository, a PR already live and a PR already merged are refused;
     a backstop is required (the write guard); a create takes it too.
-  * the wake: a release (`_released`, as release.sh posts it) turns the item that waits for it to its post-wake mover, told in one line what happened, and leaves another PR's wait alone; a recycle
+  * the wake: a release (`released.released`, as release.sh posts it) turns the item that waits for it to its post-wake mover, told in one line what happened, and leaves another PR's wait alone; a recycle
     (`_recycled`) turns a recycle wait (its machine, or any) and a fleet op wait for its verb; POST /client/event turns a fleet op wait for `many` only when the report covers more than one session, a job wait by
     its name, refuses a report that names no op; a reported event older than the wait is not its arrival; the catch-up poll finds a merge or a release nobody was told of, and a PR closed unmerged;
     the backstop day brings the item back with "the event did not come".
@@ -64,11 +64,12 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc, released_live as rlive_svc
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import watching as watching_svc, event_waits as evwaits_svc
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-REAL_MERGED_PRS, REAL_GIT_COMMIT = server._merged_prs, server._git_commit      # before the checks below swap them for tables
+REAL_MERGED_PRS, REAL_GIT_COMMIT = rlive_svc.merged_prs, rlive_svc.git_commit      # before the checks below swap them for tables
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
@@ -147,21 +148,21 @@ check("write: …the wait is stamped (watch.set_at), so an older reported event 
 refused("write: a phrase that is no event is refused with the forms", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="when it is done", ask_by=day(5), post_wake_mover=BACK), "not an event the server watches", "pr_released")
 refused("write: pr_released for another repository is refused (release.sh releases this one only); pr_merged is the event", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released other/repo#3", ask_by=day(5), post_wake_mover=BACK),
         "pr_released is release.sh's event", "pr_merged other/repo#3")
-server._released_live_base = lambda: ("goodsha", "headsha")
-server._merged_prs = lambda head, limit=3000: {9: ("sha9", now0 - 3600)}
-server._released_is_live = lambda sha, good, head: ""
+rlive_svc.released_live_base = lambda: ("goodsha", "headsha")
+rlive_svc.merged_prs = lambda head, limit=3000: {9: ("sha9", now0 - 3600)}
+rlive_svc.released_is_live = lambda sha, good, head: ""
 refused("write: a PR already merged and live is refused (nothing would ever report it)", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 9", ask_by=day(5), post_wake_mover=BACK), "already merged and live")
 MERGED, DEAD = {PR(9) if False else "o/r#9": True}, {"o/r#4": "its pull request was closed without being merged"}
 from stackshot.core import ghbudget as _gbud
 GH_TAGS = []
 def fake_pr_merged(ref, now, gh_st):
-    ref = server._check_ref(ref); GH_TAGS.append(_gbud.current())      # the ledger tag in force while the PR is read
+    ref = checks_svc.check_ref(ref); GH_TAGS.append(_gbud.current())      # the ledger tag in force while the PR is read
     rec = {"merged": MERGED.get(ref, False), "err": "", "next": now + 300}
     if ref in DEAD: rec["dead"] = DEAD[ref]
     gh_st[ref] = rec
     return rec["merged"], ""
-REAL_PR_MERGED = server._pr_merged
-server._pr_merged = fake_pr_merged
+REAL_PR_MERGED = checks_svc.pr_merged
+checks_svc.pr_merged = fake_pr_merged
 refused("write: a PR already merged is refused for pr_merged", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK), "already merged")
 refused("write: a PR closed without merging is refused", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), post_wake_mover=BACK), "closed without being merged")
 before = rd(10)
@@ -182,7 +183,7 @@ except Exception as e:
 check("create: an item can be filed already waiting on an event, its phrase canonical and the reply saying what is watched", g and server._load(g)["metadata"].get("wait_kind") == "event" and server._load(g)["metadata"].get("wait_event") == "recycle testbox" and "event wait:" in out, out[-400:])
 refused("create: …and a create for an event that already happened is refused", lambda: create_svc.create_item(subject="[home] filed waiting on a live PR", description=DESC, project="projects/alpha", owner=U["home-front"],
         next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event="pr_released 9", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-2"), "already merged and live")
-server._merged_prs = lambda head, limit=3000: {}
+rlive_svc.merged_prs = lambda head, limit=3000: {}
 
 # ================================================================ the wake: a release
 for i in (20, 21, 22):
@@ -191,11 +192,11 @@ item(20, wait_kind="event", wait_event=f"pr_released {PR(13)}", ask_by=day(5), p
 item(21, wait_kind="event", wait_event=f"pr_released {PR(14)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 14")
 item(22, wait_kind="event", wait_event=f"pr_merged {PR(13)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 13's merge")
 reset()
-server._git_commit = lambda ref: "f" * 40 if ref else ""
-server._merged_prs = lambda head, limit=3000: {13: ("a" * 40, now0 - 600)}
-server._released_live_base = lambda: ("b" * 40, "c" * 40)
-server._released_is_live = lambda sha, good, head: ""
-r = server._released(f"https://github.com/{REPO}/pull/13", sha="f" * 40)
+rlive_svc.git_commit = lambda ref: "f" * 40 if ref else ""
+rlive_svc.merged_prs = lambda head, limit=3000: {13: ("a" * 40, now0 - 600)}
+rlive_svc.released_live_base = lambda: ("b" * 40, "c" * 40)
+rlive_svc.released_is_live = lambda sha, good, head: ""
+r = released_svc.released(f"https://github.com/{REPO}/pull/13", sha="f" * 40)
 check("release: the item that waits for the PR's release turns alive with its post-wake mover, with what happened", mt(20).get("mover") == BACK and "wait_kind" not in mt(20) and "PR #13 is live" in mt(20)["woke"]["what"], mt(20))
 check("release: …told in one line", len([x for x in sent("watch") if x[0] == "a20"]) == 1 and sent("watch")[0][1] == UB and "PR #13 is live" in sent("watch")[0][2], sent())
 check("release: …a wait for the merge of the same PR is over too (a release is a merge), another PR's wait is not", mt(22).get("mover") == BACK and mt(21).get("wait_kind") == "event" and "a21" not in [x[0] for x in sent("watch")], (mt(22), mt(21)))
@@ -206,7 +207,7 @@ check("release: …and the event wake records the hand-off to the post-wake move
 
 # ================================================================ the wake: the catch-up poll
 reset()
-server._merged_prs = lambda head, limit=3000: {15: ("d" * 40, now0 - 300)}
+rlive_svc.merged_prs = lambda head, limit=3000: {15: ("d" * 40, now0 - 300)}
 item(23, wait_kind="event", wait_event=f"pr_released {PR(15)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] missed release")
 item(24, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] merge on GitHub")
 item(25, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] PR closed unmerged")
@@ -300,9 +301,9 @@ def counting_merged(head, limit=3000):
 def counting_live(sha, good, head):
     LIVE_CALLS.append(sha); return "" if sha in LIVE_NOW else f"its merge {sha[:7]} is not in the last-good commit {good[:7]} yet"
 LIVE_NOW: set[str] = set()
-server._merged_prs = counting_merged; server._released_is_live = counting_live
-server._released_live_base = lambda: ("b" * 40, "c" * 40)
-server._PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
+rlive_svc.merged_prs = counting_merged; rlive_svc.released_is_live = counting_live
+rlive_svc.released_live_base = lambda: ("b" * 40, "c" * 40)
+rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
 item(60, wait_kind="event", wait_event=f"pr_released {PR(16)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 16")
 item(61, wait_kind="event", wait_event=f"pr_released {PR(17)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 17 (not merged)")
 reset()
@@ -310,20 +311,20 @@ check("poll: a pass with a thousand merges in last-good looks up only the PRs th
 n_logs, n_live = len(GIT_LOGS), len(LIVE_CALLS)
 evwaits_svc.evwait_poll(now0 + 60); evwaits_svc.evwait_poll(now0 + 120)
 check("poll: …a pass with last-good, HEAD and the waits as they were reads no git at all", len(GIT_LOGS) == n_logs and len(LIVE_CALLS) == n_live, (len(GIT_LOGS), LIVE_CALLS))
-server._released_live_base = lambda: ("d" * 40, "c" * 40)
+rlive_svc.released_live_base = lambda: ("d" * 40, "c" * 40)
 LIVE_NOW.add(MERGES[16][0])
 check("poll: …last-good moving makes it look again, and the PR that is now live turns its item (the other PR's wait stays)", evwaits_svc.evwait_poll(now0 + 180) == ["a60"] and mt(60).get("mover") == BACK and mt(61).get("wait_kind") == "event"
       and len(GIT_LOGS) == n_logs + 1, (GIT_LOGS, mt(60)))
-server._released_live_base = lambda: ("d" * 40, "c" * 40)
+rlive_svc.released_live_base = lambda: ("d" * 40, "c" * 40)
 GIT_LOGS.clear(); evwaits_svc.EVW_SEEN[0] = None
 item(62, wait_kind="event", wait_event=f"pr_released {PR(18)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 18 (closed unmerged)")
-DEAD[server._check_ref(PR(18))] = "its pull request was closed without being merged"
+DEAD[checks_svc.check_ref(PR(18))] = "its pull request was closed without being merged"
 reset()
 fired = evwaits_svc.evwait_poll(now0 + 240)
 check("poll: a pr_released wait on a PR closed without a merge ends with the dead answer, as pr_merged does", "a62" in fired and "never be released" in mt(62)["woke"]["what"] and mt(61).get("wait_kind") == "event", (fired, mt(62)))
-server._merged_prs = lambda head, limit=3000: {}
-server._released_is_live = lambda sha, good, head: ""
-server._PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
+rlive_svc.merged_prs = lambda head, limit=3000: {}
+rlive_svc.released_is_live = lambda sha, good, head: ""
+rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
 
 # ================================================================ review fixes: the catch-up and the early read share _EVW_GH
 item(70, wait_kind="event", wait_event="pr_merged o/r#20", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] merge not yet")
@@ -333,12 +334,12 @@ def pr_merged_with_a_racing_write(ref, now, gh_st):
     out = inner(ref, now, gh_st)
     gh_st["o/r#98"] = {"merged": False, "err": "", "next": now + 300}      # the request thread's early read stores a key while the pass runs
     return out
-server._pr_merged = pr_merged_with_a_racing_write
+checks_svc.pr_merged = pr_merged_with_a_racing_write
 try:
     evwaits_svc.evwait_poll(now0 + 300)
     evwaits_svc.evwait_poll(now0 + 600)
 finally:
-    server._pr_merged = inner
+    checks_svc.pr_merged = inner
 check("race: a key the early read stored while the catch-up ran is not dropped by the catch-up, and nothing raises", "o/r#98" in evwaits_svc.EVW_GH and "o/r#20" in evwaits_svc.EVW_GH and "o/r#20" in evwaits_svc.EVW_POLLED and "o/r#98" not in evwaits_svc.EVW_POLLED, (dict(evwaits_svc.EVW_GH), evwaits_svc.EVW_POLLED))
 (T / "store/a/70.json").unlink()
 evwaits_svc.evwait_poll(now0 + 900)
@@ -346,27 +347,27 @@ check("race: …a key the catch-up read itself is dropped once no wait names it"
 evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear()
 
 # ================================================================ review fixes: the catch-up tells the sessions a step notice reached already
-server._merged_prs = lambda head, limit=3000: {90: ("9" * 40, now0 - 60)}
-server._released_is_live = lambda sha, good, head: ""
-server._released_live_base = lambda: ("e" * 40, "c" * 40)
-server._PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
+rlive_svc.merged_prs = lambda head, limit=3000: {90: ("9" * 40, now0 - 60)}
+rlive_svc.released_is_live = lambda sha, good, head: ""
+rlive_svc.released_live_base = lambda: ("e" * 40, "c" * 40)
+rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
 item(71, wait_kind="event", wait_event=f"pr_released {PR(90)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] told by a step notice just now")
 item(72, wait_kind="event", wait_event=f"pr_released {PR(90)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] told by a step notice long ago")
-server._PROOF_TOLD_SID.clear()
-server._PROOF_TOLD_SID["a71"] = (UB, time.time())
-server._PROOF_TOLD_SID["a72"] = (UB, time.time() - 1000.0)
+proofs_svc.PROOF_TOLD_SID.clear()
+proofs_svc.PROOF_TOLD_SID["a71"] = (UB, time.time())
+proofs_svc.PROOF_TOLD_SID["a72"] = (UB, time.time() - 1000.0)
 reset()
 fired = evwaits_svc.evwait_poll(now0 + 10)
 check("catch-up: an item a step notice told its session about a moment ago turns without a second message; one told long ago is told again", set(fired) == {"a71", "a72"}
-      and [g for x in sent("watch") for g in x[0].split(",")] == ["a72"] and "a72" not in server._PROOF_TOLD_SID, (fired, sent(), dict(server._PROOF_TOLD_SID)))
-server._PROOF_TOLD_SID.clear()
-server._merged_prs = lambda head, limit=3000: {}
+      and [g for x in sent("watch") for g in x[0].split(",")] == ["a72"] and "a72" not in proofs_svc.PROOF_TOLD_SID, (fired, sent(), dict(proofs_svc.PROOF_TOLD_SID)))
+proofs_svc.PROOF_TOLD_SID.clear()
+rlive_svc.merged_prs = lambda head, limit=3000: {}
 
 # ================================================================ review fixes: the write gate reads before the lock and not on GitHub under it
 LOCKED_CALLS = []
 def spy_pr_merged(ref, now, gh_st):
     LOCKED_CALLS.append(writes.ITEM_LOCK._is_owned()); return fake_pr_merged(ref, now, gh_st)
-server._pr_merged = spy_pr_merged
+checks_svc.pr_merged = spy_pr_merged
 item(63, mover=BACK, subject="[home] will wait for a merge")
 evwaits_svc.EVW_GH.clear()
 out = server._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#11", ask_by=day(5), post_wake_mover=BACK, mover="none")
@@ -382,7 +383,7 @@ try:
 except Exception as e:
     g2 = None
 check("gate: a create takes the same path (the early read is the tool's, ahead of its lock; create_item (service/create.py) itself reads the cache only)", g2 is not None and all(c is False for c in LOCKED_CALLS), (g2, LOCKED_CALLS))
-server._pr_merged = fake_pr_merged
+checks_svc.pr_merged = fake_pr_merged
 
 # ================================================================ review fixes: a backstop must be after now; which events are live
 item(64, mover=BACK, subject="[home] will wait with a past backstop")
@@ -442,7 +443,7 @@ err = io.StringIO()
 with contextlib.redirect_stderr(err): rc = client.main(["client.py", "event"])
 check("client.py event with no kind: usage on stderr, exit 1", rc == 1 and "usage: client.py event --kind" in err.getvalue(), err.getvalue())
 check("client.py's help names the verb and says how to wait for it", "client.py event --kind recycle|fleet_op|job_run" in client.__doc__ and 'wait_kind="event"' in client.__doc__, None)
-# ================================================================ the real reader behind _pr_merged is shared with the done check (pr_state.py)
+# ================================================================ the real reader behind checks.pr_merged is shared with the done check (pr_state.py)
 from stackshot.github import pr_state as _prs
 class _Cl:
     repo_id = 0
@@ -450,13 +451,13 @@ class _Cl:
     def repo_path(self, rest=""): return "/repos/o/r" + rest
     def request(self, method, path, **kw):
         self.calls.append((path, kw.get("etag"), _gbud.current())); return {"state": "open", "merged": False, "merged_at": None}
-CL9 = _Cl(); _cg9 = server._check_gh; server._check_gh = lambda repo: CL9
+CL9 = _Cl(); _cg9 = checks_svc.check_gh; checks_svc.check_gh = lambda repo: CL9
 try:
-    server._pr_merged = REAL_PR_MERGED; _prs.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear(); reset()
+    checks_svc.pr_merged = REAL_PR_MERGED; _prs.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear(); reset()
     item(80, wait_kind="event", wait_event="pr_merged o/r#19", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for a merge")
     server._evwait_preread("event", "pr_merged o/r#19")                                  # the write gate's early read (a request thread)
     t9 = time.time()
-    with _gbud.tag("done_check"): ok9 = server._check_eval("pr_merged o/r#19", t9, {})   # the done check asks for the same PR inside the pace
+    with _gbud.tag("done_check"): ok9 = checks_svc.check_eval("pr_merged o/r#19", t9, {})   # the done check asks for the same PR inside the pace
     fired9 = evwaits_svc.evwait_poll(t9 + 1)                                                  # and so does the catch-up (it reads the other waits of the store too: only PR 19 is counted)
     C31 = lambda: [c for c in CL9.calls if c[0].endswith("/pulls/19")]
     check("shared: the early read, a done check and the catch-up on one PR make one read, tagged for the event wait that made it, ETag asked for",
@@ -465,7 +466,7 @@ try:
     fired9 = evwaits_svc.evwait_poll(t9 + 301)
     check("shared: past the pace the catch-up reads again, once", len(C31()) == 2 and C31()[1][2] == "event_wait" and fired9 == [], CL9.calls)
 finally:
-    server._check_gh = _cg9; server._pr_merged = fake_pr_merged; _prs.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear()
+    checks_svc.check_gh = _cg9; checks_svc.pr_merged = fake_pr_merged; _prs.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear()
     (T / "store/a/80.json").unlink(missing_ok=True)
 
 check("every PR an event wait read on GitHub (the write gate's early read and the catch-up pass) was read under the 'event_wait' ledger tag, and the tag is gone afterwards",
@@ -482,7 +483,7 @@ for n, br in ((7, "main"), (8, "pending")):      # #7 is merged into main (deplo
     sg("checkout", "-qb", f"topic{n}"); (SC / "f").write_text(str(n)); sg("commit", "-qam", f"change {n}")
     sg("checkout", "-q", br); sg("merge", "-q", "--no-ff", "-m", f"Merge pull request #{n} from example-owner/topic{n}", f"topic{n}")
 sg("checkout", "-q", "main")
-server._merged_prs, server._git_commit = REAL_MERGED_PRS, REAL_GIT_COMMIT; server._PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
+rlive_svc.merged_prs, rlive_svc.git_commit = REAL_MERGED_PRS, REAL_GIT_COMMIT; rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
 def wgate(phrase): return server._evwait_gate({}, {"wait_kind": "event", "wait_event": phrase, "ask_by": day(5)}, creating=True)
 refused("foreign: with no [released.repos] a pr_released for a sibling repository is refused as before, and the refusal says none is configured",
         lambda: wgate(f"pr_released {SIB}#8"), "pr_released is release.sh's event", "none is configured", f"pr_merged {SIB}#8")
@@ -493,7 +494,7 @@ try:
     refused("foreign: …a repository the table does not list is refused, naming the listed one", lambda: wgate("pr_released other-owner/else#3"), "pr_released is release.sh's event", SIB)
     item(90, wait_kind="event", wait_event=f"pr_released {SIB}#8", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for a sibling PR")
     item(91, wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for a sibling PR already live")
-    DEAD.pop(server._check_ref(f"{SIB}#8"), None); reset()
+    DEAD.pop(checks_svc.check_ref(f"{SIB}#8"), None); reset()
     fired = evwaits_svc.evwait_poll(now0 + 400)
     check("foreign poll: the PR merged into HEAD turns its wait, the PR whose merge is on another branch does not", "a91" in fired and "a90" not in fired and mt(90).get("wait_kind") == "event" and mt(91).get("mover") == BACK, (fired, mt(91)))
     check("…and the arrival words name the checkout, not main's tests", "in the checkout" in mt(91)["woke"]["what"] and "main's" not in mt(91)["woke"]["what"], mt(91).get("woke"))
@@ -507,7 +508,7 @@ try:
     check("foreign: names are lower-cased and ~ is expanded", server._cfg.released_repos() == {SIB: pathlib.Path(os.path.expanduser("~/sib-checkout"))} and server._cfg.released_notes() == [], server._cfg.released_repos())
 finally:
     server._cfg.CFG.pop("released", None)
-    server._merged_prs, server._git_commit = (lambda head, limit=3000: {}), (lambda ref: "f" * 40 if ref else "")
+    rlive_svc.merged_prs, rlive_svc.git_commit = (lambda head, limit=3000: {}), (lambda ref: "f" * 40 if ref else "")
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

@@ -69,6 +69,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.router import routing; from stackshot.waits import held; from stackshot.waits import quiet as Q
+from stackshot.service import checks as checks_svc
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import telling
@@ -320,7 +321,7 @@ telling.project_keeper = lambda project, owner="": "home-beta-front"       # a p
 def stuck_case(i, writer):
     item(i, project="projects/beta", mover="home-peer", writer=writer, check=f"item_closed a{i + 75}")
     it = server._load(f"a{i}"); t0 = len(pushes_to("home-beta-front", f"a{i}"))
-    server._check_fail(f"a{i}", it, f"item_closed a{i + 75}", "the item it waits for was dropped", time.time()); drain()
+    checks_svc.check_fail(f"a{i}", it, f"item_closed a{i + 75}", "the item it waits for was dropped", time.time()); drain()
     return len(pushes_to("home-beta-front", f"a{i}")) - t0
 try:
     stamp("home-beta-front", 60)

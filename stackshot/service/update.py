@@ -44,8 +44,10 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
+from stackshot.service import checks as _checks
 from stackshot.service import gates as _gates
 from stackshot.service import handoff as _handoff
+from stackshot.service import proofs as _proofs
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _shown_ids
@@ -84,7 +86,6 @@ class Hooks:
     basis_words: str                  # how the wait_basis gate names what a park waits on (server._BASIS_WORDS)
     cap_ok_drop: Callable[..., Any]
     cap_ok_put: Callable[..., Any]
-    check_how: str                    # the forms of a done check (server._CHECK_HOW)
     contact_alive: Callable[..., Any]
     contact_fronts: Callable[..., Any]
     contact_same: Callable[..., Any]
@@ -112,7 +113,6 @@ class Hooks:
     gate_recommend_stance: Callable[..., Any]
     gate_subject: Callable[..., Any]
     handoffs_in: Callable[..., Any]
-    handover: Callable[..., Any]
     hold_held_by: Callable[..., Any]
     hold_set: Callable[..., Any]
     is_held: Callable[..., Any]
@@ -133,7 +133,6 @@ class Hooks:
     owner_state_mover: Callable[..., Any]
     owner_then_default: Callable[..., Any]
     owner_want: Callable[..., Any]
-    parse_check: Callable[..., Any]
     parse_wake: Callable[..., Any]
     publish: Callable[..., Any]
     record_fixes: Callable[..., Any]
@@ -150,8 +149,6 @@ class Hooks:
     session_roster: Callable[..., Any]
     state_apply: Callable[..., Any]
     state_end: Callable[..., Any]
-    step_proof_prune: Callable[..., Any]
-    step_proof_set: Callable[..., Any]
     store_ref: Callable[..., Any]
     switchover_on: Callable[..., Any]
     update: Callable[..., Any]
@@ -230,6 +227,18 @@ def _wait_refs(meta: dict[str, Any], names: tuple[str, ...]) -> set[str]:
             except Exception:  # noqa: BLE001
                 continue
     return out
+
+
+def _list_end_words(waits: Any, wake: str, clear_wake: bool, meta: dict[str, Any]) -> str:
+    """The words of the clock-renewal refusal for `waits=[]` beside a later `until` on a stored list ("" when the write is no such one). It only names the case and judges nothing: whether the write moves
+    the day out and carries progress is gates.gate_clock_renewal's own test, which takes these words as its refusal in place of its general ones (a write with progress goes through, as it does on a list-free item)."""
+    if not (_wlw.clearing(waits) and wake.strip() and not clear_wake and _wl.valid(meta)):
+        return ""
+    old_, new_ = _uw.date_of(meta), str(_hooks().parse_wake(wake))
+    if not old_:
+        return ""
+    return (f"Refused: waits=[] ends the list, and until={new_} beside it would be a later day than the list's backstop day {old_}: moving a date out is not progress. Send waits=[] alone to end the wait "
+            f"(or until={old_} or earlier to wait on that date alone)")
 
 
 def _list_plan(waits: Any, wait_mode: str, *, gid: str, meta: dict[str, Any], proj_for: str, wake: str, clear_wake: bool, status: str, others: dict[str, Any]) -> "_gates.WaitsPlan | None":
@@ -548,6 +557,7 @@ def update_unlocked(
             _needs_store(meta, _canon_needs([*kinds, _gates.gate_needs_session(agent, proj_for, own_for, _model.norm_who(meta.get("then")))], _anc.names()))
     state_st, state_given, step_withdrawn = _gates.gate_state_args({"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies})   # a bad value is refused before anything is written
     draft_set, clear_draft = _gates.gate_draft_args(draft, clear_draft)   # a bad draft is refused before anything is written
+    list_end_words = _list_end_words(waits, wake, clear_wake, meta)      # read on the item as it stands, before the write changes it
     list_plan = _list_plan(waits, wait_mode, gid=gid, meta=meta, proj_for=project or str(meta.get("project") or ""), wake=wake, clear_wake=clear_wake, status=status or str(item.get("status") or ""),
                            others={"wait_kind": wait_kind.strip(), "wait_anchor": wait_anchor.strip(), "wait_event": wait_event.strip(), "after": after if after is not None and after != [] and str(after).strip() else "",
                                    "ask_by": ask_by.strip(), "hold": hold, "wait_basis": str(wait_basis or "").strip(), "clear_hold": clear_hold, "clear_after": clear_after,
@@ -569,6 +579,7 @@ def update_unlocked(
             else:
                 list_drop.add("wait_kind")
                 wake, until_wait = date_, True
+                list_plan.lines = [{**list_plan.lines[0], "until": date_}]      # the reply says the day the item waits until (the backstop when the line's own date is later), not the line's
         elif wait_kind in ("relay", "event"):   # a relay or event wait takes its ask-by day alone
             wake = wake.strip()[:10]
             if meta.get("wake") and len(str(meta["wake"])) > 10:
@@ -883,7 +894,7 @@ def update_unlocked(
     chk_new = bool(chk) and chk.lower() not in h.ask_none
     clear_check = clear_check or chk.lower() in h.ask_none      # check="none" or clear_check=true removes it, like needs, due and wake (an older tool list may lack clear_check); check="" is "not passed", as needs="" is
     if chk_new:                                                # a new check beside clear_check replaces the old one, as a new needs beside clear_needs does
-        meta["check"] = h.parse_check(chk, gid)
+        meta["check"] = _checks.parse_check(chk, gid)
     elif clear_check:
         meta.pop("check", None)
     handed: list[str] = []
@@ -891,7 +902,7 @@ def update_unlocked(
         handed = _handoff_to(item.get("metadata") or {}, meta, next, sender.strip() or own_for)
         if handed and not meta.get("check") and not meta.get("wake") and not _telling.front_sender(sender):     # a front agent's hand-off asks for neither: the mover's close lands the result, and its own wake or check is refused below
             raise ToolError(f"Refused: this update hands {_gh.shown(gid)} to {', '.join(handed)} (a line of next in the form `<session>: <action>`) and nothing "
-                            f"would close the item once that work is done. Add check=<what closes it> ({h.check_how}): the server then closes it when the check passes, no session turn spent. "
+                            f"would close the item once that work is done. Add check=<what closes it> ({_checks.CHECK_HOW}): the server then closes it when the check passes, no session turn spent. "
                             f"Only when no check fits, add a date, wake=YYYY-MM-DD (or until=, YYYY-MM-DDTHH:MM, {_cfg.tz_abbr()}), as the backstop of this hand-off: because the write hands the item on, the date is no wait, the item stays active in the new mover's lane and the hand-off is recorded (the same date with no hand-off is a wait, and the item waits until then). "
                             "(A front agent's hand-off is not asked for either: its mover's close or hand-back lands the result through stackshot.) "
                             "Pass the same update again with the check, or with the date alone if none fits. "
@@ -1044,9 +1055,9 @@ def update_unlocked(
         meta.pop("step_proof", None)
     elif steps_on:                                              # the proofs of this checklist's open steps: a call's step_proof sets them, a step that left the list takes its proof along
         if step_proof is not None:
-            steps_note += h.step_proof_set(meta, steps_new if steps_new is not None else steps_old, step_proof)
+            steps_note += _proofs.step_proof_set(meta, steps_new if steps_new is not None else steps_old, step_proof)
         elif steps_new is not None:
-            steps_note += h.step_proof_prune(meta, steps_new)
+            steps_note += _proofs.step_proof_prune(meta, steps_new)
         if steps_new is not None:
             _gates.gate_step_gap(meta, steps_new, steps_old)         # a step that delivers a pull request, followed by another session's step, needs its proof
     elif step_proof is not None:
@@ -1097,7 +1108,7 @@ def update_unlocked(
             meta.pop("watch_reason", None)      # a reason belongs to the wake it was given for: another wake without one, or no wake, drops it
         _gates.gate_decision_again(item_was, meta, was_needs, ask_was, gid)
         if _writes.session_next() and h.model_guards_on() and not (reopening or _writes.reformat()) and item_was.get("status") == "open":
-            _gates.gate_clock_renewal(item_was, meta, gid, steps_old, steps_new, description, said_l, sender)      # no clock renewal without progress: a session's write only
+            _gates.gate_clock_renewal(item_was, meta, gid, steps_old, steps_new, description, said_l, sender, list_end_words)      # no clock renewal without progress: a session's write only
         _gates.gate_repark(item_was, item_now, meta, gid, said_l)
         _mark_next_stale(item_was, item_now, meta, debtor, naming_added, next_touch)
         touched_m = {k for k, v in (("next", next_touch), ("ask", ask), ("subject", subject), ("description", description.strip()),("needs", needs_set or clear_needs or agent.strip()), ("hold", hold or clear_hold),
@@ -1152,6 +1163,8 @@ def update_unlocked(
             if str(meta.get("wait_kind") or "").strip().lower() == _wl.LIST and not _wl.valid(meta) and (list_set or _wl.valid(item_was.get("metadata") or {})):
                 raise ToolError(f"Refused: this write would leave {_gh.shown(gid)} with a wait on a list that does not hold ({_wl.problem(meta) or 'no backstop day'}). A list needs its backstop day: "
                                 "pass until=<date>, or clear_wait=true to end the wait")
+            if _wl.valid(meta) and str(meta.get("until") or "") != _uw.date_of(item_was.get("metadata") or {}):      # the backstop day this write leaves a list (whichever parameter gave it: until, ask_by, a clear that let it through) is judged as until alone is: no open time line later than it
+                _gates.gate_time_lines([(i, ln["until"]) for i, ln in enumerate(_wl.lines(meta), 1) if ln["kind"] == "time" and not _wl.arrived(ln)], str(meta["until"]))
         if keep_hold:
             meta["hold"] = True
             if kept_hold_set:
@@ -1286,10 +1299,10 @@ def _completion_anchor_prompt(gid: str, item: dict[str, Any]) -> str:
 
 
 def _handover_by_hand(gid: str, done: list[str]) -> str:
-    """The reply line of an update that marked steps done: _handover for the item, a failure a stderr line and no line. A write that names the mover or needs itself makes its own hand-off and never reaches this."""
+    """The reply line of an update that marked steps done: proofs.handover for the item, a failure a stderr line and no line. A write that names the mover or needs itself makes its own hand-off and never reaches this."""
     h = _hooks()
     try:
-        ho = h.handover(gid, time.time(), done)
+        ho = _proofs.handover(gid, time.time(), done)
     except Exception as e:  # noqa: BLE001  — the write is saved: a hand-over that fails is a stderr line, and the audit finds the next session unreached
         print(f"handover: {gid} not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
