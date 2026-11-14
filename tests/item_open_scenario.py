@@ -59,7 +59,7 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids; from stackshot.service import item_open as item_open_svc
 from stackshot.service import update as _update_svc
 import subprocess
 from stackshot.service import store as _service_store
@@ -90,7 +90,7 @@ def io_(marker="test_trim:alpha", **kw):
          "description": ["- Repo alpha tripped max_suites: 120 > 100", "- A deep scan for duplicate or obsolete suites is the first step"], "sender": "test-trim-job"}
     b.update(kw)
     return server._client_post(me, "item-open", {k: v for k, v in b.items() if v is not None})
-def open_for(marker, project="projects/alpha"): return [g for g, m_ in server._itemopen_open_items(project) if m_ == marker]
+def open_for(marker, project="projects/alpha"): return [g for g, m_ in item_open_svc._itemopen_open_items(project) if m_ == marker]
 def close(shown):
     _update_svc._update(_model_ids._norm_id(shown), outcome_text="- done", status="completed", outcome="done", reason="the deep scan is done", sender="home-sparrow-builder")
 n0 = len(items())
@@ -240,20 +240,20 @@ check("the same marker on a second project files that project's own item (not th
       and b["mover"] == "home-beta-builder" and b["owner"] == "home-beta-main" and len(items()) == nb0 + 2 and item(b["item"])["metadata"]["project"] == "projects/beta", (st, a, st2, b))
 st3, a2 = io_(marker="size:report"); st4, b2 = io_(marker="size:report", project="projects/beta", mover="home-beta-builder", step="home-beta-builder: deep-scan", subject="x")
 check("…a repeat on each project dedupes on its own: each answers its own open item and nothing is filed", st3 == 200 and st4 == 200 and a2["item"] == a["item"] and a2["repeat"] and b2["item"] == b["item"] and b2["repeat"] and b2["project"] == "projects/beta" and len(items()) == nb0 + 2, (a2, b2))
-check("…the store lookup is per project", [m_ for _g, m_ in server._itemopen_open_items("projects/beta")] == ["size:report"] and [m_ for _g, m_ in server._itemopen_open_items("projects/nobuild")] == [], server._itemopen_open_items("projects/beta"))
+check("…the store lookup is per project", [m_ for _g, m_ in item_open_svc._itemopen_open_items("projects/beta")] == ["size:report"] and [m_ for _g, m_ in item_open_svc._itemopen_open_items("projects/nobuild")] == [], item_open_svc._itemopen_open_items("projects/beta"))
 close(a["item"]); st5, a3 = io_(marker="size:report")
 check("…closing one project's item leaves the other's open: the first project files a new item, the second still answers its own", st5 == 200 and a3["item"] != a["item"] and a3["repeat"] is False and item(b["item"])["status"] == "open"
       and io_(marker="size:report", project="projects/beta", mover="home-beta-builder", step="home-beta-builder: deep-scan", subject="x")[1]["item"] == b["item"], (st5, a3))
 close(a3["item"]); close(b["item"])
 
 # ---- 7c. a cap of 10 open items per project
-CAP = server._ITEMOPEN_OPEN_MAX
+CAP = item_open_svc._ITEMOPEN_OPEN_MAX
 cp = dict(project="projects/capped", mover="home-capped-builder", step="home-capped-builder: deep-scan", subject="Deep-scan")
 check("the cap is 10", CAP == 10, CAP)
 ids = []
 for i in range(CAP):
     st, o = io_(marker=f"size:run{i}", **cp); ids.append(o.get("item") if st == 200 else None)
-check("ten different markers file ten open items on one project", all(ids) and len({*ids}) == CAP and len(server._itemopen_open_items("projects/capped")) == CAP, ids)
+check("ten different markers file ten open items on one project", all(ids) and len({*ids}) == CAP and len(item_open_svc._itemopen_open_items("projects/capped")) == CAP, ids)
 nc = len(items()); pushed.clear()
 st, e = io_(marker="size:run-new", **cp)
 check("an eleventh marker is refused: 400 that names the cap and says an open item must close first; nothing filed, no one told", st == 400 and "cap is 10" in e["error"] and "must close" in e["error"] and len(items()) == nc, (st, e)); settle()
@@ -263,11 +263,11 @@ check("…a repeat of an open marker at the cap is still answered (never counted
 st, o = io_(marker="size:report", project="projects/beta", mover="home-beta-builder", step="home-beta-builder: deep-scan", subject="x")
 check("…the cap is per project: another project still files", st == 200 and o["repeat"] is False, (st, o)); close(o["item"]) if st == 200 else None
 close(ids[0])
-check("…closed items do not count", len(server._itemopen_open_items("projects/capped")) == CAP - 1, len(server._itemopen_open_items("projects/capped")))
+check("…closed items do not count", len(item_open_svc._itemopen_open_items("projects/capped")) == CAP - 1, len(item_open_svc._itemopen_open_items("projects/capped")))
 st, o = io_(marker="size:run-new", **cp)
 check("…after one item closes, a new marker files again, and the cap holds again", st == 200 and o["repeat"] is False and io_(marker="size:run-next", **cp)[0] == 400, (st, o))
 for g in ids[1:] + ([o["item"]] if st == 200 else []): close(g)
-check("…everything closed, the project is empty again", server._itemopen_open_items("projects/capped") == [], server._itemopen_open_items("projects/capped"))
+check("…everything closed, the project is empty again", item_open_svc._itemopen_open_items("projects/capped") == [], item_open_svc._itemopen_open_items("projects/capped"))
 
 # ---- 8. concurrency: one marker, many calls, one item
 n7 = len(items()); res = []

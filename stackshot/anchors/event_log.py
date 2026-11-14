@@ -1,4 +1,4 @@
-"""event_log.py: the hub's record of the events on pull requests it saw, read by the server's last-activity pass (`server._event_activity_tick`).
+"""event_log.py: the hub's record of the events on pull requests it saw, read by the last-activity pass (`service/event_activity.py` `_event_activity_tick`).
 
 The same idea as merge_log.py (a file of the hub's own, one small line per event, nothing for a session to receive, no read of GitHub of its own), for the other events that are visible activity
 on a pull request: a CI result (a failure, or a new head that passes, after a failure or after a green head: what the hub already reports), a comment by a person, a review (a review or a review comment), a merge, and a commit (a new head commit of the pull request). `Hub.emit`, the
@@ -13,7 +13,7 @@ Only a merge ties through the pull request's body (the rule the merge log has al
 words: in a public repository anyone can open a pull request whose body names an item and comment on it, and that must not stamp the item. So `refs` of any other kind is never written and is
 dropped when a line is read.
 
-Size: small rows (about 100 bytes), read from a saved offset, so the cost of a pass is the new lines only; the file only grows and is not pruned. If the offset is lost or the file is replaced, the pass reads it from its start and takes nothing older than 24 hours (`server._EVENT_ACT_FLOOR_H`).
+Size: small rows (about 100 bytes), read from a saved offset, so the cost of a pass is the new lines only; the file only grows and is not pruned. If the offset is lost or the file is replaced, the pass reads it from its start and takes nothing older than 24 hours (`service/event_activity.py` `_EVENT_ACT_FLOOR_H`).
 
 Who counts (the one filter, in `lines_for`): an event that is not a merge is activity only when the source vouches for it. A comment or a review counts when its author's `author_association` (the field the
 payload already holds, no read of its own) is OWNER, MEMBER or COLLABORATOR; CONTRIBUTOR, NONE, FIRST_TIMER, FIRST_TIME_CONTRIBUTOR, MANNEQUIN, any other value and a missing one do not. A CI result counts

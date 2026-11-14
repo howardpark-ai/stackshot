@@ -5,8 +5,8 @@ the one lock the writes share (`_PROJECT_LOCK`, with `_RENAMING`, the page keys 
 
 The rules are not here: the shape of each body, who may ask, the name rules and the words of every refusal and answer are in projects/project_verbs.py (the section "the New session form's checks"), which reads
 nothing. This module reads the project record, the registry, the fleet's session names, the config and the clock, hands them to those rules, and writes: the record and the page's mirror through the verbs of
-projects/project_verbs.py, the project files (projects.json) after each write. What stays in web/server.py of the area is the wrapper of the rename and of the retire (`_project_agent_rename`,
-`_project_agent_retire`), because each ends in `_contact_after_agent`, which moves the items' contacts and is the server's still; it takes `_PROJECT_LOCK` and `_RENAMING` from here. `_PROJECT_LOCK` and
+projects/project_verbs.py, the project files (projects.json) after each write. The wrappers of the rename and of the retire (`_project_agent_rename`, `_project_agent_retire`) are here too: each takes
+`_PROJECT_LOCK` and `_RENAMING`, runs the checks, then the write outside the lock and ends in `_contact_after_agent` (service/contacts.py), which moves the items' contacts. `_PROJECT_LOCK` and
 `_RENAMING` are mutated in place, never rebound. `PAGE_IO` is the one name a suite sets that `_page_io` reads: it is read and set on this module (`projects_svc.PAGE_IO = ...`), and the server's own reads of
 the page store go through `_page_io`."""
 from __future__ import annotations
@@ -23,8 +23,9 @@ from stackshot.projects import project_archive as _archive
 from stackshot.projects import project_registry as _pr
 from stackshot.projects import project_verbs as _verbs
 from stackshot.projects import projects as _prj
-from stackshot.router import page_debt as _page_debt
 from stackshot.projects.project_registry import _projects_sync_safe, _registry
+from stackshot.router import page_debt as _page_debt
+from stackshot.service import contacts as _contacts
 
 
 _FORM_SENDERS: list[str] = []     # the defaults of [project_agent] (stackshot.example.toml): no sender label, so no form call, until the instance names the New session form's label
@@ -387,3 +388,54 @@ def _project_list(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, An
     rec, bad = _one_project(rec["id"])
     if bad: return bad
     return _verbs.list_answer(rec, changed)
+
+
+def _project_agent_rename(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """`post project-agent-rename`, in the shape of `post project`: _PROJECT_LOCK is held only for the quick checks (the gate, the names, the project, the
+    name clash with other projects) and to put the page key in _RENAMING; the gbrain read, the edit, the put and the read back run outside it, so a slow
+    gbrain never stalls `post project-agent` or `post project-list` (whose clients give up at 30 s). A second rename of the same page while one is in
+    flight is a 409 "in progress", which changes nothing. The key leaves _RENAMING in a finally. A writer outside stackshot is caught by the put's
+    expected revision."""
+    with _PROJECT_LOCK:
+        pre = _project_agent_rename_checks(machine, body)
+        if isinstance(pre[0], int):
+            return pre
+        busy = pre[0]["key"] or pre[0]["id"]
+        if busy in _RENAMING:
+            return 409, {"error": f"a rename of {busy} is in progress; try again"}
+        _RENAMING.add(busy)
+    try:
+        return _contacts._contact_after_agent(_project_agent_rename_write(*pre), "rename", pre[1], pre[2])
+    finally:
+        with _PROJECT_LOCK:
+            _RENAMING.discard(busy)
+
+
+def _project_agent_retire(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """`client.py post project-agent-retire <project> <name> [--sender <label>]`: sala retired a session, so stackshot takes the agent off its project:
+    its line is removed from the project's agents map in the record (a pending entry of the name goes with it), and the page's `agents:` block follows from the record, with a timeline line on the page.
+    Who: the New session form's caller only, as `post project-agent-rename` (_form_call: `sender` in [project_agent] form_senders AND the token's
+    machine in form_machines), else 403. Like the rename, the record is changed first and the page's block is written from it (put at the revision it was read at, never forced, read
+    back); then the timeline line is added (page_debt's page store: gbrain's `add_timeline_entry`, dated today in the instance timezone, source "stackshot").
+    A refused put (a revision that moved on) is read again and tried again; a page that still cannot be written is told in the answer, the record being right. The quick checks and the key in _RENAMING are under _PROJECT_LOCK; the gbrain calls run
+    outside it, so a slow gbrain stalls nobody else, and a second retire or rename of the same page meanwhile is a 409 "in progress".
+    Answers: 200 {result: "line removed"} the agent was on the page's `agents:` map (front or `background:`) and its line is gone (a pending entry for
+    the same name is dropped with it) · 200 {result: "dropped"} the agent was only pending here (its page line still owed): the pending entry is removed,
+    no page is written · 200 {result: "not listed"} it is on no page of the project and not pending: nothing to do (a repeat after a lost reply, or a
+    session that never had a line), with the reason · 404 unknown project · 400 a bad body, name or sender, an ambiguous slug, a page that is not a hub
+    · 403 not the form · 409 a rename or retire of the page is in progress; try again · 422 the agents block is in a shape that cannot be edited in place
+    · 502 gbrain did not give the page, refused the write twice or the read back does not show the removal, or the line is removed but the timeline line
+    could not be written (the error says which; the page holds the removal)."""
+    with _PROJECT_LOCK:
+        pre = _project_agent_retire_checks(machine, body)
+        if isinstance(pre[0], int):
+            return pre
+        busy = pre[0]["key"] or pre[0]["id"]
+        if busy in _RENAMING:
+            return 409, {"error": f"a rename or retire of {busy} is in progress; try again"}
+        _RENAMING.add(busy)
+    try:
+        return _contacts._contact_after_agent(_project_agent_retire_write(*pre), "retire", pre[1])
+    finally:
+        with _PROJECT_LOCK:
+            _RENAMING.discard(busy)
