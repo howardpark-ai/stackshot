@@ -67,11 +67,11 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import stall as S; from stackshot.audit import audit_run as AR
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc, released as released_svc
-from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
+from stackshot.service import stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -123,7 +123,7 @@ def clear_records():
 def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
 def entry(i): return stall_svc.stall_load().get(f"a{i}")
 
-from stackshot.model import progress as PG; from stackshot.model import activity as ACT
+from stackshot.model import progress as PG
 class _Clock:
     """The server's `time` module for the saves below: the item's `updated` is stamped from the server's own clock, which a scenario with a fake `now` must be able to set."""
     t = None
@@ -536,7 +536,7 @@ ML.path().unlink(missing_ok=True)
 ML.append(line(90, at=-120))
 with open(ML.path(), "ab") as f_:
     f_.write(f'{{"ts": {int(now0)}, "repo": "acme/widgets", "n": 95, "refs": '.encode() + b"[" * depth + b"]" * depth + b"}\n")                  # nested refs
-    f_.write(f'{{"ts": {int(now0)}, "repo": '.encode() + b"[" * depth + b"]" * depth + f', "n": 96, "refs": []}}\n'.encode())                     # a nested repo
+    f_.write(f'{{"ts": {int(now0)}, "repo": '.encode() + b"[" * depth + b"]" * depth + ', "n": 96, "refs": []}\n'.encode())                     # a nested repo
 ML.append(line(91, at=-60)); ML.append(line(92, at=-30))
 errs = _io.StringIO()
 with _cl.redirect_stderr(errs): saved = attempt(lambda: merge_pass(now0))
