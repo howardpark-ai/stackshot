@@ -104,7 +104,7 @@ def refused_nw(name, i, f, *want):
     check(name + " (nothing written)", raw(i) == was, None)
 def doing(i, **kw):
     item(i, needs=[BACK], next="team-back: do the first thing\nteam-back: do the second thing", state="doing", wake=day(2), **kw)
-FORMS = ("hold=true", "wait_basis", 'wait_kind="event"', "wait_event", "ask_by", "post_wake_mover")
+FORMS = ("hold=true", "wait_basis", 'wait_kind="event"', "wait_event", "ask_by", "mover=<who takes it when it happens>")
 
 # ================================================================ the retired expected_by and expected_reason: no clock to renew
 doing(1)
@@ -234,7 +234,8 @@ item(22, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover
 upd(22, wait_event="fleet_op any", ask_by=day(6))
 check("wait structure: a changed wait_event with a later ask_by is accepted", ab_(mt(22)) == day(6) and mt(22)["wait_event"] == "fleet_op any", mt(22))
 item(23, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
-refused_nw("wait structure: a changed post_wake_mover with a later ask_by is refused (who takes it after is not what the wait stands on)", 23, lambda: upd(23, post_wake_mover="home-other", ask_by=day(6)), "clock pushed out")
+upd(23, post_wake_mover="home-other", ask_by=day(6))
+check("wait structure: post_wake_mover is the old name of mover, so a changed one with a later ask_by is a hand-over like mover=, and passes as one", ab_(mt(23)) == day(6) and mt(23).get("mover") == "home-other" and "post_wake_mover" not in mt(23), mt(23))
 refused_nw("wait structure: …the wait_event flipped back to the first one (A, B, A) with a later ask_by is refused", 22, lambda: upd(22, wait_event="recycle", ask_by=day(8)), "clock pushed out")
 check("wait structure: …the item still holds B, and the record keeps both shapes", mt(22)["wait_event"] == "fleet_op any" and len(mt(22).get("clock_struct") or []) == 2, mt(22))
 item(26, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))

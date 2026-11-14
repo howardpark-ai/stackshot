@@ -39,7 +39,7 @@ SETTINGS = {
     "runners.ssh_hosts": {"box-b": '"box-b"', "box-c": '"box-c"'},
     "project_scopes": {"order": '["work", "home", "ops"]', "default": '"home"', "orgs": '["work", "home"]'},
     "project_agent": {"form_machines": '["box-a"]'},
-    "model": {"rebullet_machines": '["box-a"]', "migration_machines": '["box-a"]', "wait_alias_until": '"2099-12-31"',      # the alias window of the old wait parameters held open: the example's own date (2026-11-25) must not fail a suite after it
+    "model": {"rebullet_machines": '["box-a"]', "migration_machines": '["box-a"]', "wait_alias_until": '"2099-12-31"', "post_wake_alias_until": '"2099-12-31"',      # the alias windows of the old wait parameters and of post_wake_mover held open: the example's own dates (2026-11-25, 2026-11-29) must not fail a suite after them
               "migration_senders": '["falcon-redesign-engineer", "falcon-engineer"]'},
     "said": {"injected_prefixes": '["[auto-note]", "Relay note:"]',
              "injected_phrases": '["pasted by the relay tool"]'},

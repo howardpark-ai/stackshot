@@ -237,7 +237,7 @@ def _evwait_gate(old: dict[str, Any], meta: dict[str, Any], creating: bool = Fal
             raise ToolError(f"Refused: {sp.key} {rec['dead']}, so it will never merge")
     who = "the server reads it" if sp.kind in _ew.PR_KINDS else "the server reads the machine's puller check-ins" if sp.kind == _ew.BOX_ONLINE else "the fleet tool reports it at the end of a recycle (client.py recycled)" if sp.kind == _ew.RECYCLE else "the fleet tool reports the end of each op with client.py event" if sp.kind == _ew.FLEET_OP else "it is reported with client.py event"
     quiet = "" if _ew.live(sp) else (f" Nothing tells the server of this event yet (nothing posts `client.py event` for it); only the PR kinds, box_online, recycle and fleet_op are live today, so this wait turns on its backstop {meta.get('ask_by') or meta.get('wake')}, not on the event.")
-    return f"\n(event wait: the server watches for {_ew.words(_ew.text(sp))}; {who}. The stall pass does not run for it while it is open; the item comes back to its post-wake mover when the event arrives, or on its backstop date if it never does.{quiet})"
+    return f"\n(event wait: the server watches for {_ew.words(_ew.text(sp))}; {who}. The stall pass does not run for it while it is open; the item comes back to the mover who takes it when the event arrives, or on its backstop date if it never does.{quiet})"
 
 
 def _machine_note(gid: str, item: dict[str, Any], keeper: str = "") -> str:
@@ -320,6 +320,8 @@ def _old_key_changed(old: dict[str, Any], meta: dict[str, Any], model_set: dict[
     k = _model.LEGACY_PICKER_KEY
     if meta.get(k) == old.get(k):
         return False
+    if _model.stored_picker(old) == _model.stored_picker(meta):
+        return False        # the old name restated (the alias stores it as `mover`): the same picker, nothing moved
     return k in model_set or k in model_drop      # named by the write (set or cleared): on purpose; gone without being named: the save rule dropped it
 
 

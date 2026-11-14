@@ -839,7 +839,7 @@ def _owner_display() -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the judgement
-WAIT_DROP_HINT = " If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event, ask_by and post_wake_mover go together)."
+WAIT_DROP_HINT = " If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event and ask_by go together)."
 
 
 def counted_movers(needs: list[str], project: str, ctx: Ctx) -> list[str]:
@@ -943,7 +943,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                                        f"or, when the other item carries the question, move the ask there. Put file names, commands and code in backticks.")
                 else:
                     add("next_defers", head + f"Set the wait: after=[{quoted}] with ask_by=YYYY-MM-DD, the day it comes back to someone if {'they are' if many else 'it is'} still open "
-                                       f"(the item then waits for it and its post-wake mover, post_wake_mover=<session> or else the mover, is told when the last one closes"
+                                       f"(the item then waits for it and its mover, mover=<session> or else the one it has, is told when the last one closes"
                                        + ("" if creating else f"; add supplies=<one line: what {'their' if many else 'its'} output gives this item> to say what it takes from {it_}") + "). "
                                        f"When it only needs a look on a day and not another item's close, until=YYYY-MM-DD makes the item wait until then (outside a hand-off the date parks the item, and the board lists it as waiting). " + plain_)
         if mod is not None and mod.state == _model.ALIVE:
@@ -967,8 +967,8 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         add("second_mover", f"needs names more than one mover ({'decision plus ' if 'decision' in kinds else ''}{who}): an item has one mover, and a second one in needs is a second mover. "
                             f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.")
     if "decision" in kinds and held:
-        add("decision_hold", f"needs holds decision together with a hold: an ask for later is a time wait whose post-wake mover is {H}. Release the hold (clear_hold=true) and keep the ask, "
-                             f"or drop decision from needs and wait with hold=true, until=YYYY-MM-DD, post_wake_mover={H} and the wait's reason.")
+        add("decision_hold", f"needs holds decision together with a hold: an ask for later is a time wait that {H} picks up when it ends. Release the hold (clear_hold=true) and keep the ask, "
+                             f"or drop decision from needs and wait with hold=true, until=YYYY-MM-DD, mover={H} and the wait's reason.")
     if mod.state == _model.ALIVE:
         clash = next((c for c in mod.conflicts if c.startswith("mover=")), "")
         if clash and mod.mover_explicit and not _model.is_owner(mod.mover) and _model.owner_state(m, mod.today):
@@ -1019,8 +1019,8 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             add("wait_input", f"{what} waits on {_wait_text(w)} but its input is missing: " + " ".join(miss) + "." + drop_hint)
         why = ctx.mover_problem(w.mover, project)
         if why:
-            who = f"its post-wake mover, {ctx.label(w.mover)}, {why}" if w.mover else "it names no post-wake mover (no session in needs, and no project builder or -main agent)"
-            add("post_wake", f"{what}'s wait: {who}. Set post_wake_mover=<{H}, a live session or the project's background agent> "
+            who = f"the mover who takes it then, {ctx.label(w.mover)}, {why}" if w.mover else "it names no mover to take it then (no session in needs, and no project builder or -main agent)"
+            add("post_wake", f"{what}'s wait: {who}. Set mover=<{H}, a live session or the project's background agent> "
                              f"(when it is unset, the first session in needs, else the project's builder or -main agent, takes it)." + drop_hint)
         on_until = until_wait or bool(_wt.stored_until(m))
         stated_time = clean(m.get("wait_kind")).lower() == "time" or hold_given

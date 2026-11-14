@@ -219,15 +219,15 @@ snap_s = json.dumps(snap)
 check("tool text: the mover and then parameters of create and update carry the fix (snapshot)", snap_s.count("from another session that sets mover=<front agent> gets the project's builder instead") >= 2
       and snap_s.count("from another session that sets then=<front agent> gets the project's builder instead") >= 2, snap_s[:300])
 
-check("tool text: post_wake_mover says a front agent only by itself", "post_wake_mover=<who moves it when the wait ends; a front agent only by itself" in form, form[:200])
-check("tool text: update's own hand-over sentence says a front agent is not told and the builder is used", "an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
+check("tool text: post_wake_mover is named as the old name of mover, and mover carries the front-agent rule", "post_wake_mover, the old name of mover, is still read as mover" in form and "a front agent (a session" in form, form[:200])
+check("tool text: update's own hand-over sentence says a front agent is not told and the builder is used", "an update from another session that sets mover or then (or post_wake_mover, the old name of mover) to a front agent gets the project's builder instead" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
 
 check("tool text: the post_wake_mover parameter of create and update carries the fix (snapshot)",
       json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))).count("sets post_wake_mover=<front agent> gets the project's builder instead") >= 2)
 
 _cdecl = _wt_create._CREATE_DESC
 check("tool text: create's own description says another session's front-agent mover, then or post_wake_mover gets the builder",
-      "a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
+      "a create from another session that sets mover or then (or post_wake_mover, the old name of mover) to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

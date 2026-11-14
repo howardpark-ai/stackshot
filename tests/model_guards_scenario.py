@@ -209,10 +209,10 @@ item(166, needs=[BACK])
 out = upd(166, wait_kind="time")
 check("2 wait: a time wait with no date is not refused: until is taken (tomorrow when nothing gives one) and the reply says so", W.stored_until(mt(166)) and "wait_kind=time came with no date" in out and "set to tomorrow" in out, (out[-300:], mt(166)))
 refused_nw("2 post-wake mover: a post-wake mover that is no one is refused, with the fix", 66, lambda: upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, post_wake_mover="home-nobody"),
-           "post-wake mover, home-nobody", "no session the registry or the fleet knows", "post_wake_mover=<")
+           "the mover who takes it then, home-nobody", "no session the registry or the fleet knows", "Set mover=<")
 refused_nw("2 post-wake mover: …one whose pane is gone is refused too", 66, lambda: upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, post_wake_mover="home-lost"), "home-lost", "pane is gone")
 upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, post_wake_mover="home-peer")
-check("2 post-wake mover: …a live session passes", mt(66)["post_wake_mover"] == "home-peer", mt(66))
+check("2 post-wake mover: …a live session passes", mt(66)["mover"] == "home-peer", mt(66))
 item(67, owner=U["home-lost"], needs=[])
 upd(67, wait_kind="item", after=["a63"], ask_by=FUT)
 check("2 post-wake mover: an unnamed one defaults like a mover, to the project's builder, which passes", mt(67)["wait_kind"] == "item" and "post_wake_mover" not in mt(67), mt(67))
@@ -279,7 +279,7 @@ check("5 end: a legacy outside item's chase day is its ask-by (a write that touc
 # ================================================================ 6. decision with a hold
 item(80, needs=[BACK])
 refused_nw("6 decision + hold: needs decision with a hold is refused, saying an ask for later is a time wait", 80, lambda: upd(80, needs=["decision"], ask=ASK, hold=True, wake=day(3), wait_basis=f"visit on {day(4)}"),
-           "needs holds decision together with a hold", "an ask for later is a time wait whose post-wake mover is", "clear_hold=true", "post_wake_mover=")
+           "needs holds decision together with a hold", "an ask for later is a time wait that", "clear_hold=true", "mover=")
 upd(80, needs=["decision"], ask=ASK)
 check("6 decision + hold: …a decision without the hold passes", "decision" in mt(80)["needs"], mt(80))
 item(81, needs=["decision"], ask=ASK, hold=True, wake=day(3))

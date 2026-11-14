@@ -129,7 +129,7 @@ check("then: …a relay (he is the default picker) reads its then", m_.wait.move
 # ================================================================ words
 check("words: a waiting item says who picks it up as its mover", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", mover=HELP)) == f"model: waiting on a time (wake {FUT}) · mover zed-helper", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", mover=HELP)))
 check("words: …he picks it up, with the then beside him", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", mover=OWN, then=BACK)) == f"model: waiting on a time (wake {FUT}) · mover {OWN} (then zed-back)", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", mover=OWN, then=BACK)))
-check("words: …a mover the item does not store is named in the derived tail", W_(D(needs=[BACK], hold=True, wake=FUT)).endswith("· derived: wait_kind, post_wake_mover") and "derived" not in W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", mover=BACK)), W_(D(needs=[BACK], hold=True, wake=FUT)))
+check("words: …a mover the item does not store is named in the derived tail", W_(D(needs=[BACK], hold=True, wake=FUT)).endswith("· derived: wait_kind, mover") and "derived" not in W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", mover=BACK)), W_(D(needs=[BACK], hold=True, wake=FUT)))
 check("words: an alive item an agent moves shows no then", W_(D(needs=[BACK], mover=HELP, then=BACK)) == "model: alive · mover zed-helper", W_(D(needs=[BACK], mover=HELP, then=BACK)))
 
 # ================================================================ settle

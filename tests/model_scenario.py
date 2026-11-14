@@ -193,7 +193,7 @@ check("words: alive, the owner the mover, with then", W_(D(state="your-call", ne
 check("words: …defaulted fields are named at the end", W_(D(state="your-call", needs=["decision", BACK], ask=ASK)) == f"model: alive · mover {OWN} (then ops-back) · derived: mover, then", W_(D(state="your-call", needs=["decision", BACK], ask=ASK)))
 check("words: alive with an agent mover and a backstop wake", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)) == f"model: alive · mover ops-back · backstop {FUT}", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)))
 check("words: waiting on a time", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)) == f"model: waiting on a time (wake {FUT}) · mover ops-back", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)))
-check("words: …derived kind and post-wake mover named", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")) == "model: waiting on the close of board#18 · mover ops-back · derived: wait_kind, post_wake_mover", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")))
+check("words: …derived kind and post-wake mover named", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")) == "model: waiting on the close of board#18 · mover ops-back · derived: wait_kind, mover", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")))
 check("words: an anchor wait, a relay wait, a closed item",
       W_(D(wait_kind="anchor", wait_anchor="https://x/pull/1", wait_event="PR merged", wake=FUT, post_wake_mover=BACK, needs=[BACK])) == f"model: waiting on an anchor (https://x/pull/1: PR merged; backstop wake {FUT}) · mover ops-back"
       and W_(D(wait_kind="relay", wait_event="Robin's reply", ask_by=FUT, post_wake_mover=OWN, needs=[BACK])) == f"model: waiting on news only {OWN} relays (Robin's reply; ask by {FUT}) · mover {OWN}"
@@ -230,9 +230,9 @@ check("update: …a goal alone names no session in needs (it is filing)", mt(1)[
 item(2, needs=[BACK], subject="[home] goal only")
 upd(2, goal=NEW_GOAL)
 check("update: a goal alone is stored and leaves needs as it was", mt(2)["goal"] == NEW_GOAL and mt(2)["needs"] == [BACK], mt(2))
-out = upd(1, wait_kind="relay", wait_event="Robin's reply on the contract", ask_by=FUT, post_wake_mover="home-front", mover="none")
+out = upd(1, wait_kind="relay", wait_event="Robin's reply on the contract", ask_by=FUT, post_wake_mover="home-front")
 m = mt(1)
-check("update: a relay wait is stored (kind, event, ask-by day, post-wake mover), and mover=none drops the mover", m["wait_kind"] == "relay" and m["wait_event"] == "Robin's reply on the contract" and ab_(m) == FUT and m["post_wake_mover"] == "home-front" and "mover" not in m, m)
+check("update: a relay wait is stored (kind, event, ask-by day), and post_wake_mover, the old name of mover, is stored as mover", m["wait_kind"] == "relay" and m["wait_event"] == "Robin's reply on the contract" and ab_(m) == FUT and m["mover"] == "home-front" and "post_wake_mover" not in m, m)
 check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; until {FUT}) · mover home-front" in _wt_get.stackshot_get("a1"), _wt_get.stackshot_get("a1"))
 check("update: …the brief carries the model line of the item too", "model: waiting on news only" in _wt_brief.stackshot_brief() and "model: alive · mover team-back" in _wt_brief.stackshot_brief(), None)
 _anc.save({"projects/alpha": [{"url": "https://example.org/pull/7", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
@@ -246,7 +246,7 @@ refused_nw("update: clear_wait does not go with a new wait field", 1, lambda: up
 import inspect as _inspect
 _params, _doc = _inspect.signature(_wt_update.stackshot_update).parameters, _wt_text._MODEL_FORM
 check("update: wait_anchor and wait_event are real parameters of the tool and each is listed in its description with its own line, as ask_by and post_wake_mover are",
-      all(f in _params for f in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover")) and "; wait_anchor=<" in _doc and "; wait_event=<" in _doc and "; ask_by=YYYY-MM-DD" in _doc and "; post_wake_mover=<" in _doc, _doc[:900])
+      all(f in _params for f in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover")) and "; wait_anchor=<" in _doc and "; wait_event=<" in _doc and "; ask_by=YYYY-MM-DD" in _doc and "; post_wake_mover, the old name of mover," in _doc, _doc[:900])
 refused_nw("update: …clear_goal does not go with a new goal", 1, lambda: upd(1, clear_goal=True, goal="x"), "clear_goal drops goal")
 refused_nw("update: a wait_kind that is no kind is refused", 1, lambda: upd(1, wait_kind="eventually"), "wait_kind is one of")
 refused_nw("update: an ask_by that is no date is refused", 1, lambda: upd(1, wait_kind="relay", ask_by="soon"), "ask_by is YYYY-MM-DD")

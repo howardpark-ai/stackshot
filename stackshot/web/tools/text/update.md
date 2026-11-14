@@ -40,7 +40,7 @@ what he runs goes in a next line that starts `{{OWNER}}:`> (the board ticks it w
 "have you done it?" as a decision); a wait on another item is after=["board#N"] (supplies=<one line: what that item's
 output gives this one> says what it takes from it); a park is hold=true with a wake and either his recorded words for
 it (cap_ok) or a wait_basis (the end of a window the work itself needs, or a wake past the cap); a wait on someone
-outside is wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, post_wake_mover and needs=["external"].
+outside is wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, mover=<who takes it then> and needs=["external"].
 Work in hand needs next and its mover, carries no expected time (the item shows how long it has run), and expected_by
 and expected_reason, which older calls pass, are accepted and not kept (the reply says so). Work in hand is not a
 wait: a wait (a date, a timer, someone else's step or release) is parked in the turn it starts, with update(hold=true,
@@ -54,7 +54,7 @@ stored); in the same write mark a step done or dropped, write the next step or s
 wait_event, wait_anchor, after: a flip back to an earlier one does not count; such a shape change alone lets a clock
 push through twice in a row and the third is refused, until a step, the reason, his new words or a hand-off resets the
 count); or, if the item now waits, park it (hold=true, wake, wait_basis) or use the event-wait form
-(wait_kind="event", wait_event, ask_by, post_wake_mover). Setting a clock for the first time, pulling one in, clearing
+(wait_kind="event", wait_event, ask_by, mover). Setting a clock for the first time, pulling one in, clearing
 it and handing the item to another session are not renewals. On a parked item give a new wait_basis; an item on his
 decision cannot be held. Take a wake from the real schedule of the wait (a timer, a watch tick, a catch-up run), or
 check it live; never a guessed round time. step=<one line> sets the item in his step and makes him the mover (then, or
@@ -281,8 +281,8 @@ it arrives), and tells the sessions in its needs (else the project's builder, el
 releases it now (its date goes with it); until="none" (or clear_wake=true) drops the date: an item that waits on
 nothing else is active again, and a hold stays only when an after, an anchor or a recycle still holds it. mover hands
 the item over: set mover=<session> (then=<who takes it after {{OWNER}}'s answer or step>) and the new mover is told; a
-front agent gets no hand-off notice, so an update from another session that sets mover, then or post_wake_mover to a
-front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as
+front agent gets no hand-off notice, so an update from another session that sets mover or then (or post_wake_mover, the old
+name of mover) to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as
 sent; with no builder it is refused, except a mover set by a front agent of the item's project to another of its front
 agents; message the front agent for a check or answer only it can give); take over another session's item only when
 asked; a session about to be retired first hands over or completes its open items. mover={{OWNER}} alone is refused on

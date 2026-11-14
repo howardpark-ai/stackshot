@@ -272,10 +272,15 @@ def create_item(
         h.next_put(meta, next, owner, owner)     # the writer of a create's lines is its creator (a script's filing included: its label is no session)
     proof_note = _proofs.step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
     _gates.gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
+    alias_note = ""
+    if _model.clean(post_wake_mover):      # post_wake_mover is the old name of mover (model.fold_picker_alias): the picker of a wait the item is created with, else dropped with a note
+        trial = {**meta, **{k: v for k, v in model_set.items() if k != _model.LEGACY_PICKER_KEY}}
+        alias_note = _model.fold_picker_alias(model_set, set(), "none" if _model.clean(post_wake_mover).lower() in h.ask_none else _model.norm_who(_model.clean(post_wake_mover)),
+                                              _model.waits_stored(trial) or list_plan is not None, _gates.post_wake_alias_until())
     meta.update(model_set)
     if list_plan is not None:
         meta["waits"] = [dict(ln) for ln in list_plan.lines]
-    wait_note = _uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else ""
+    wait_note = alias_note + (_uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else "")
     if list_plan is not None:
         wait_note += list_plan.note + "\n(wait list: " + _wl.summary(meta, _gh.shown) + ")"
     if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow

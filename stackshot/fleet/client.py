@@ -156,7 +156,7 @@ runs on every box.
                                 {"ok", "item": "board#N", "state", "flags": {the whole map, as get for-you}} (404 an unknown item, 400 a bad
                                 state). Exit 1 and the reason on stderr when refused or not reached.
   client.py post state ...      retired: an item stores alive or waiting directly now, so no call sets or clears a state. It prints the refusal (exit 1) that names what to pass through update instead:
-                                mover=<who moves it>, hold=true with wake and wait_basis for a park, after=["board#N"] for another item, wait_kind with wait_event, ask_by and post_wake_mover for a wait on something
+                                mover=<who moves it>, hold=true with wake and wait_basis for a park, after=["board#N"] for another item, wait_kind with wait_event, ask_by and mover (who takes it then) for a wait on something
                                 outside, needs=["decision"] with ask for {OWNER}'s call, step=<one line, no command> for his own step. `get items` carries each item's `state` and `state_fields` {carry field: text} when
                                 an older item still stores a state, and neither when it stores none (the word an item reads as is not sent: its `list` and `get`'s model line say where it stands). It carries each item's `list` too: the home page's list the item is in, "your-move", "agents" or "waiting", so the items sheet groups as the page does.
   client.py post question --project <key|id|slug> --ask "<ask line>" --subject "<subject>" --request-id <token>

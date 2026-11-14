@@ -294,7 +294,7 @@ except Exception as e:  # noqa: BLE001
     check("5 clear_wait with the old parameter in the same call is refused as before", "does not go with" in str(e), str(e))
 item(125, subject="[zed] the old parameter", needs=[BACK])
 upd(125, wait_kind="time", hold=True, wake=FUT, post_wake_mover=HELP)
-check("5 the old parameter is untouched here: it still stores the old key (the alias is a later change)", mt(125).get(LEG) == HELP and "mover" not in mt(125), mt(125))
+check("5 the old parameter is read as mover: the picker is stored as mover and the old key is not stored", mt(125).get("mover") == HELP and LEG not in mt(125), mt(125))
 # the rule on the write's own sets and drops (model.settle_picker_keys, which the update path calls after it applies a write's fields)
 def applied(meta, setv=None, drop=()):
     m_ = dict(meta); _holders._model_apply(m_, "open", dict(setv or {}), set(drop)); model.settle_picker_keys(m_, dict(setv or {}), set(drop), model.waits_stored(meta)); return m_
@@ -413,7 +413,7 @@ try:
 except Exception as e:  # noqa: BLE001
     err = str(e)[:200]
 m_ = mt(n7)
-check(f"7 relay wait, the old key cleared on purpose beside a mover (post_wake_mover=none): the wait is new, so its clock is stamped and its chases start over (as on main){(' (refused: ' + err + ')') if err else ''}", not err and LEG not in m_ and "chases" not in m_ and (m_.get("watch") or {}).get("set_at", 0) > SET_AT, (m_, err))
+check(f"7 relay wait, the old key cleared (post_wake_mover=none) beside a differing mover: refused, naming mover, and the wait is untouched{(' (' + err + ')') if err else ''}", "mover" in err and m_.get(LEG) == HELP and (m_.get("watch") or {}).get("set_at") == SET_AT, (m_, err))
 
 # ================================================================ 8. a mover that restates the old key changes nothing
 def after_wake(n, meta):
