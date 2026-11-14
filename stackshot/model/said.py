@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from stackshot.core.instance import OWNER
+from stackshot.core.lines import newline_lines
 
 TAGS = ("Acked-by", "Suggested-by", "Reported-by")      # his words: the only tags any check of his words or decision reads
 ACTED = "acted"                     # the kind of an entry that proves he did his steps (a queued message of his, origin human), never his words
@@ -197,7 +198,7 @@ def transcript_error(path: Any, tail: int = TAIL, clip: int = 160) -> str:
         with open(path, "rb") as f:
             f.seek(0, os.SEEK_END); size = f.tell()
             f.seek(max(0, size - tail))
-            lines = f.read().decode("utf-8", "replace").splitlines()
+            lines = newline_lines(f.read().decode("utf-8", "replace"))
     except OSError:
         return ""
     if size > tail:

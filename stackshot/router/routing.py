@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.core.lines import newline_lines
 
 DIR: Path = _cfg.state("routing")
 RULINGS = ("passed", "merged", "held", "dropped")
@@ -122,7 +123,7 @@ def read(project: str, since: float = 0.0) -> list[dict[str, Any]]:
     (stage → when the latest went out) and `reminder_counts` (stage → how many went out)."""
     since = max(float(since), time.time() - KEEP_DAYS * 86400)
     try:
-        lines = open(_file(project), encoding="utf-8").read().splitlines()
+        lines = newline_lines(open(_file(project), encoding="utf-8").read())
     except OSError:
         return []
     return [n for n in _fold(lines).values() if float(n.get("ts", 0)) >= since]
