@@ -150,6 +150,10 @@ def both_for(subs=None, **kw):
     return lambda g, w: a(g, w) or b(g, w)
 ok = lambda got: got == ("ok", None)
 A77 = {"a1": {f"{OWN}#77"}}
+def gtext(live, **kw):
+    """The words of the refusal a gate answers with, \"\" when it did not refuse."""
+    got = gate(live, **kw)
+    return got[1] if got[0] == "refused" else ""
 RELWORDS = lambda got: got[0] == "refused" and got[1].startswith("Refused: this item is being moved now: your release of PR #")
 def reset(): put(1, mover=BACK)
 def setdesc(i, text):
@@ -221,10 +225,10 @@ check("1 …a stage five timed lines back is not quoted (it may be long past)", 
 check("1 …the newer stage wins over an older one", stage_in(tail("merged by the merge queue as b187281", "deploying b187281 at once")) == "deploying")
 check("1 a log that is only a torn line, or not text, names no stage and still refuses", RELWORDS(gate(rel_live(anch=A77, logs={77: (NOW - 120.0, "��\x00\x01")}))))
 check("1 the stage function on its own: a line is read after its words are collapsed to one line", busy_hold.stage_of("in   the merge queue\t(QUEUED position 3)") == "in the merge queue (QUEUED position 3)" and busy_hold.stage_of(None) == "" and busy_hold.stage_of("") == "")
-check("1 the age is told in minutes, and under a minute as such", "log written under a minute ago" in gate(rel_live(anch=A77, logs={77: (NOW - 20.0, QUEUED)}))[1] and "log written 1 min ago" in gate(rel_live(anch=A77, logs={77: (NOW - 90.0, QUEUED)}))[1] and "log written 14 min ago" in gate(rel_live(anch=A77, logs={77: (NOW - 14 * 60.0 - 30.0, QUEUED)}))[1])
+check("1 the age is told in minutes, and under a minute as such", "log written under a minute ago" in gtext(rel_live(anch=A77, logs={77: (NOW - 20.0, QUEUED)})) and "log written 1 min ago" in gtext(rel_live(anch=A77, logs={77: (NOW - 90.0, QUEUED)})) and "log written 14 min ago" in gtext(rel_live(anch=A77, logs={77: (NOW - 14 * 60.0 - 30.0, QUEUED)})))
 two = gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: (NOW - 600.0, QUEUED), 91: (NOW - 60.0, tail("deploying b1"))}))
 check("1 with two releases tied and running, the one written to most recently is named", RELWORDS(two) and "PR #91 is running on it" in two[1] and "deploying" in two[1], two)
-check("1 …a tied release with a stuck log beside a fresh one: the fresh one is named", "PR #77 is running" in gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 5000.0, QUEUED)}))[1])
+check("1 …a tied release with a stuck log beside a fresh one: the fresh one is named", "PR #77 is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: (NOW - 60.0, QUEUED), 91: (NOW - 5000.0, QUEUED)})))
 
 # ---------------------------------------------------------------- 2. what does not tie
 reset()
@@ -275,8 +279,8 @@ check("3 the proof answers \"\" itself, never raising, when the unit list raises
 check("3 …and its words, when it can tell, are the refusal's start", direct(anch=A77).startswith("your release of PR #77 is running on it (unit stackshot-release-77.service"), direct(anch=A77))
 check("3 an anchored pull request that is not running is not counted although its log is fresh (only a unit proves it)", ok(gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))), gate(rel_live(units=(99,), anch=A77, logs={77: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)})))
 check("3 a step's pull request that is not running is not counted although its log is fresh", ok(gate(rel_live(units=(99,), step_prs=lambda m: {78}, logs={78: (NOW - 60.0, QUEUED), 99: (NOW - 60.0, QUEUED)}))))
-check("3 two tied releases, one with no log and one fresh: the fresh one refuses (a missing log is skipped, not fatal)", "PR #91 is running" in gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)}))[1], gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})))
-check("3 …and with the log of one unreadable the other still speaks", "PR #91 is running" in gate(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: OSError("x"), 91: (NOW - 60.0, QUEUED)}))[1])
+check("3 two tied releases, one with no log and one fresh: the fresh one refuses (a missing log is skipped, not fatal)", "PR #91 is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})), gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={91: (NOW - 60.0, QUEUED)})))
+check("3 …and with the log of one unreadable the other still speaks", "PR #91 is running" in gtext(rel_live(units=(77, 91), anch={"a1": {f"{OWN}#77", f"{OWN}#91"}}, logs={77: OSError("x"), 91: (NOW - 60.0, QUEUED)})))
 # the early exits are the subagent proof's own
 L77 = rel_live(anch=A77)
 check("3 (the live proof refuses before the exits below)", RELWORDS(gate(L77)))
@@ -303,7 +307,7 @@ SUB1 = [sub("Build @1: the export fix")]
 got = gate(both_for(SUB1, anch=A77))
 check("4 a subagent live and a release live: the subagent is named (its proof comes first), with its own refusal", refused(got) and 'your subagent "' in got[1] and "your release" not in got[1] and "pr_released" not in got[1], got)
 check("4 a release live and no subagent: the release is named, with its own refusal", RELWORDS(gate(both_for([], anch=A77))))
-check("4 a subagent live and no release: the subagent is named", 'your subagent "' in gate(both_for(SUB1, anch=A77, units=()))[1])
+check("4 a subagent live and no release: the subagent is named", 'your subagent "' in gtext(both_for(SUB1, anch=A77, units=())))
 check("4 neither passes", ok(gate(both_for([], anch=A77, units=()))))
 check("4 a subagent tied to another item of the mover and a release tied to this one: the release refuses", RELWORDS(gate(both_for([sub("Build @2: the other fix")], anch=A77))), gate(both_for([sub("Build @2: the other fix")], anch=A77)))
 def broken_subs(gid, mover):
@@ -432,7 +436,7 @@ calls.clear()
 check("6 an own-repository that cannot be named reads no item and no log", ok(gate(rel_live(anch=A77, own="", calls=calls))) and calls == ["units"], calls)
 gsrc = pathlib.Path(STACK, "stackshot/service/gates.py").read_text(encoding="utf-8")
 check("6 gates.py names no audit/ module (the proof is handed in as a callable)", "stackshot.audit" not in gsrc and "from stackshot import audit" not in gsrc)
-check("6 the gate chooses the release refusal by the words' own prefix, and that prefix is what live_release writes", gates.BUSY_RELEASE_PREFIX == busy_hold.RELEASE_WORDS == "your release of PR #" and gate(rel_live(anch=A77))[1].count(gates.BUSY_RELEASE_PREFIX + "77 is running on it") == 1)
+check("6 the gate chooses the release refusal by the words' own prefix, and that prefix is what live_release writes", gates.BUSY_RELEASE_PREFIX == busy_hold.RELEASE_WORDS == "your release of PR #" and gtext(rel_live(anch=A77)).count(gates.BUSY_RELEASE_PREFIX + "77 is running on it") == 1)
 check("6 the units are the release script's own (stackshot-release-<n>.service), listed by the board's own reader", "stackshot-release-" in pathlib.Path(STACK, "stackshot/web/ui/releasing.py").read_text(encoding="utf-8") and busy_hold.RELEASE_FRESH_S == 15 * 60.0)
 check("6 the refusal names wait_event kinds that exist: pr_released and pr_merged are in the tools' shared text", all(k in " ".join(pathlib.Path(STACK, "stackshot/web/tools/text/shared.md").read_text(encoding="utf-8").split()) for k in ("pr_released", "pr_merged")))
 check("6 the log's end is read through a bounded tail, a unit's number through int", busy_hold.LOG_TAIL_BYTES <= 64 * 1024 and busy_hold.STAGE_LINES == 4)
