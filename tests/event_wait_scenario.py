@@ -65,6 +65,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
@@ -95,7 +96,7 @@ cfg(guards=False, watchers=True, pause=False)
 def sent(tag=None): return [x for x in SENT if tag is None or x[3] == tag]
 def reset(): SENT.clear()
 REPO = "example-owner/stackshot"
-server._OWN_REPO[:] = [REPO]
+released_svc._OWN_REPO[:] = [REPO]
 PR = lambda n: f"{REPO}#{n}"
 
 # ================================================================ the pure half
@@ -463,7 +464,7 @@ CL9 = _Cl(); _cg9 = checks_svc.check_gh; checks_svc.check_gh = lambda repo: CL9
 try:
     checks_svc.pr_merged = REAL_PR_MERGED; _prs.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear(); reset()
     item(80, wait_kind="event", wait_event="pr_merged o/r#19", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for a merge")
-    server._evwait_preread("event", "pr_merged o/r#19")                                  # the write gate's early read (a request thread)
+    wait_gates_svc._evwait_preread("event", "pr_merged o/r#19")                                  # the write gate's early read (a request thread)
     t9 = time.time()
     with _gbud.tag("done_check"): ok9 = checks_svc.check_eval("pr_merged o/r#19", t9, {})   # the done check asks for the same PR inside the pace
     fired9 = evwaits_svc.evwait_poll(t9 + 1)                                                  # and so does the catch-up (it reads the other waits of the store too: only PR 19 is counted)
@@ -492,7 +493,7 @@ for n, br in ((7, "main"), (8, "pending")):      # #7 is merged into main (deplo
     sg("checkout", "-q", br); sg("merge", "-q", "--no-ff", "-m", f"Merge pull request #{n} from example-owner/topic{n}", f"topic{n}")
 sg("checkout", "-q", "main")
 rlive_svc.merged_prs, rlive_svc.git_commit = REAL_MERGED_PRS, REAL_GIT_COMMIT; rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
-def wgate(phrase): return server._evwait_gate({}, {"wait_kind": "event", "wait_event": phrase, "ask_by": day(5)}, creating=True)
+def wgate(phrase): return wait_gates_svc._evwait_gate({}, {"wait_kind": "event", "wait_event": phrase, "ask_by": day(5)}, creating=True)
 refused("foreign: with no [released.repos] a pr_released for a sibling repository is refused as before, and the refusal says none is configured",
         lambda: wgate(f"pr_released {SIB}#8"), "pr_released is release.sh's event", "none is configured", f"pr_merged {SIB}#8")
 _cfg.CFG["released"] = {"repos": {SIB: {"checkout": str(SC)}}}

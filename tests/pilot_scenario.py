@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import released as released_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import page_debt as _page_debt_svc
@@ -3243,8 +3244,8 @@ time.sleep(0.4); (T / "store/projects.json").write_text(_reg46)
 # logged with no recipient and marked log_only, ruled merged by `stackshot (auto)`, a comment on the open items anchored to the
 # PR, no page owed; the item waiting on the PR still closes on its pr_merged check and releases the item after it; the keeper
 # stays on the routing page (the keeper's daily digest of automatic rulings is gone); a red result is held for the router like any message
-check("release: this checkout's own repository is read from its origin remote", server._own_repo() != "", server._own_repo())
-server._OWN_REPO[:] = ["example-owner/stackshot"]      # the fixture's repo, whatever remote the checkout running the test has
+check("release: this checkout's own repository is read from its origin remote", released_svc._own_repo() != "", released_svc._own_repo())
+released_svc._OWN_REPO[:] = ["example-owner/stackshot"]      # the fixture's repo, whatever remote the checkout running the test has
 PRU = "https://github.com/example-owner/stackshot/pull/113"
 def item47(i, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "A thing. It lives here. Done when done.",
@@ -3299,9 +3300,9 @@ st, body = server._client_post("testbox", "message", {"to": "projects/beta", "te
 check("green release to a project with one session (beta, no longer outside any list: the router rules every page): logged, not delivered, like alpha's", body["result"].startswith("logged, not delivered") and len(wait_push(0)) == n0, body)
 for n in routing.read("projects/beta"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="done with the release checks", by="work-osprey")
-_rg = server._release_green; server._release_green = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full"))
+_rg = released_svc._release_green; released_svc._release_green = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full"))
 st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
-server._release_green = _rg
+released_svc._release_green = _rg
 check("a log-only path that fails hands the result to the router instead, never loses it", held47(body, n0) != "" and "PR #113 merged" in (router_live.stashed(held47(body, n0)) or ""), body)
 # only release.sh's own report of a PR of this repo goes log-only: anything else is held for the router
 for why, extra in (("another sender", {"sender": "size-watch"}), ("a sender that only contains release", {"sender": "release-bot"}),
@@ -3312,9 +3313,9 @@ for why, extra in (("another sender", {"sender": "size-watch"}), ("a sender that
     nx = held47(body, k0)
     check(f"green with {why}: not log-only, held for the router, waiting for a ruling",
           st == 200 and nx and not next(n for n in routing.read("projects/alpha") if n["id"] == nx).get("ruling") and not next(n for n in routing.read("projects/alpha") if n["id"] == nx).get("log_only"), body)
-k0 = len(wait_push(0)); _or = server._OWN_REPO[:]; server._OWN_REPO[:] = [""]
+k0 = len(wait_push(0)); _or = released_svc._OWN_REPO[:]; released_svc._OWN_REPO[:] = [""]
 st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
-server._OWN_REPO[:] = _or
+released_svc._OWN_REPO[:] = _or
 check("a checkout whose own repository cannot be read sends nothing log-only: held for the router", held47(body, k0) != "", body)
 for n in routing.read("projects/alpha"):
     if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="done with the release checks", by="work-osprey")
@@ -3641,8 +3642,8 @@ try:
     # _pr_items and recycle-due: an old-name anchor and a new-name PR URL (and the reverse)
     item(71, "projects/alpha", A); item(73, "projects/alpha", A)
     put_anchors49(oldpr49(300), ["a71"])
-    check("_pr_items: an old-name anchor is found by the new-name PR URL, keyed by the stored URL", server._pr_items([newpr49(300)]) == {oldpr49(300): ["a71"]}, server._pr_items([newpr49(300)]))
-    check("_pr_items: …and by the old-name URL, with /files after it; another PR finds nothing", server._pr_items([oldpr49(300) + "/files"]) == {oldpr49(300): ["a71"]} and server._pr_items([newpr49(301)]) == {})
+    check("_pr_items: an old-name anchor is found by the new-name PR URL, keyed by the stored URL", released_svc._pr_items([newpr49(300)]) == {oldpr49(300): ["a71"]}, released_svc._pr_items([newpr49(300)]))
+    check("_pr_items: …and by the old-name URL, with /files after it; another PR finds nothing", released_svc._pr_items([oldpr49(300) + "/files"]) == {oldpr49(300): ["a71"]} and released_svc._pr_items([newpr49(301)]) == {})
     r_due = server._recycle_due("testbox", pr=newpr49(300))
     check("recycle_due --pr: the new-name URL finds the item anchored under the old name", [(x["item"], x["action"]) for x in r_due["items"]] == [("a71", "set")], r_due)
     put_anchors49(newpr49(310), ["a73"])
@@ -3653,7 +3654,7 @@ try:
     try: server._recycle_due("testbox", pr=newpr49(300))
     except ToolError as e: refused49 = str(e)
     check("recycle_due --pr, no table: the new-name URL finds no item anchored under the old name (refused as before)", "no open item is anchored" in refused49, refused49)
-    check("_pr_items, no table: nothing crosses names", server._pr_items([newpr49(300)]) == {} and server._pr_items([oldpr49(300)]) == {oldpr49(300): ["a71"]})
+    check("_pr_items, no table: nothing crosses names", released_svc._pr_items([newpr49(300)]) == {} and released_svc._pr_items([oldpr49(300)]) == {oldpr49(300): ["a71"]})
     (T / "store/anchors.json").write_text(_anc49)
 
     # pr_merged checks: one read and one kept answer for the old and the new name of one PR
@@ -3674,22 +3675,22 @@ try:
     check("pr_merged, no table: the ref is kept exactly as written", checks_svc.check_ref(f"{OLD49}#8") == f"{OLD49}#8" and checks_svc.check_dead(f"pr_merged {OLD49}#8", {f"{NEW49}#8": {"dead": "x"}}) == "")
 
     # release-green, log-only: origin old and PR new, and the reverse
-    moved49(TBL49); server._OWN_REPO[:] = [OLD49]
-    check("release green ok: origin old, PR new", server._release_green_ok("release", newpr49(113)) and server._release_green_ok("release", oldpr49(113)))
-    server._OWN_REPO[:] = [NEW49]
-    check("release green ok: origin new, PR old (and new)", server._release_green_ok("release", oldpr49(113)) and server._release_green_ok("release", newpr49(113)))
-    check("release green ok: still only release's own report of a PR of this repo", not server._release_green_ok("size-watch", newpr49(113)) and not server._release_green_ok("release", "https://github.com/someone/else/pull/113")
-          and not server._release_green_ok("release", "") and not server._release_green_ok("release", f"https://github.com/{NEW49}/issues/113"))
+    moved49(TBL49); released_svc._OWN_REPO[:] = [OLD49]
+    check("release green ok: origin old, PR new", released_svc._release_green_ok("release", newpr49(113)) and released_svc._release_green_ok("release", oldpr49(113)))
+    released_svc._OWN_REPO[:] = [NEW49]
+    check("release green ok: origin new, PR old (and new)", released_svc._release_green_ok("release", oldpr49(113)) and released_svc._release_green_ok("release", newpr49(113)))
+    check("release green ok: still only release's own report of a PR of this repo", not released_svc._release_green_ok("size-watch", newpr49(113)) and not released_svc._release_green_ok("release", "https://github.com/someone/else/pull/113")
+          and not released_svc._release_green_ok("release", "") and not released_svc._release_green_ok("release", f"https://github.com/{NEW49}/issues/113"))
     GREEN49 = "[release] PR #113 merged and deployed — a change — main at 0606060, restarted: stackshot.service, healthz ok · log /x/pr-113.log"
     for origin49, pr49, what49 in ((OLD49, newpr49(113), "origin old, PR new"), (NEW49, oldpr49(113), "origin new, PR old")):
-        server._OWN_REPO[:] = [origin49]; n0 = len(wait_push(0))
+        released_svc._OWN_REPO[:] = [origin49]; n0 = len(wait_push(0))
         st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN49, "sender": "release", "release": "green", "pr": pr49})
         check(f"green release, {what49}: logged, not delivered, ruled merged by stackshot (auto)", st == 200 and str(body.get("result")).startswith("logged, not delivered") and "ruled merged by stackshot (auto)" in body["result"]
               and len(wait_push(0)) == n0, (st, body))
-    moved49(None); server._OWN_REPO[:] = [OLD49]; n0 = len(wait_push(0))
+    moved49(None); released_svc._OWN_REPO[:] = [OLD49]; n0 = len(wait_push(0))
     st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN49, "sender": "release", "release": "green", "pr": newpr49(113)})
     check("green release, no table: origin old, PR new is not this repo's PR, held for the router as before", not str(body.get("result")).startswith("logged, not delivered"), body)
-    server._OWN_REPO[:] = ["example-owner/stackshot"]
+    released_svc._OWN_REPO[:] = ["example-owner/stackshot"]
     for n in routing.read("projects/alpha"):
         if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="done with the [github.moved] checks", by="work-osprey")
     wait_push(0)
@@ -3774,7 +3775,7 @@ try:
               [(e.anchor, e.etype) for e in evs49])
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _gsub, _gthr, _gtime
-    moved49(None); server._OWN_REPO[:] = ["example-owner/stackshot"]; _cfg.CFG["pilot"]["own_repos"] = []; _cfg.CFG.get("anchor_hub", {}).pop("direct", None)
+    moved49(None); released_svc._OWN_REPO[:] = ["example-owner/stackshot"]; _cfg.CFG["pilot"]["own_repos"] = []; _cfg.CFG.get("anchor_hub", {}).pop("direct", None)
     (T / "store/anchors.json").write_text(_anc49)
 
 # ---- the owner hears what another session changed ([board] tell_owner; a builder's `next` on another

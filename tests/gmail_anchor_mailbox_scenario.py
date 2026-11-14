@@ -189,6 +189,7 @@ check("title: no names, a pure call: unscoped is the query, scoped by an address
 
 # ---- the anchors tool
 from stackshot.web import server
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import route as _wt_route
@@ -315,7 +316,7 @@ check("tool grammar: a stored query the grammar refuses is listed", "subject:qua
 anchors(remove=[STOREDBAD])
 check("tool grammar: …and removed", stored() == [], stored())
 # the wait gate
-gate = lambda url: server._anchor_wait_gate({}, {"wait_kind": "anchor", "wait_anchor": url, "project": "projects/alpha"}, creating=True)
+gate = lambda url: wait_gates_svc._anchor_wait_gate({}, {"wait_kind": "anchor", "wait_anchor": url, "project": "projects/alpha"}, creating=True)
 refuse("wait gate: a query the matcher cannot evaluate is refused with the reason", lambda: gate("gmail:q:from:pat AND"), "cannot evaluate", "AND has nothing after it", "can never be on the list")
 refuse("wait gate: a good query that is not on the list still gets the add-first refusal", lambda: gate("gmail:q:from:pat OR from:amy"), "is not on projects/alpha's anchors list")
 check("tool text: the description teaches the grammar and the refusal", all(s in _wt_anchors._ANCHORS_DESC for s in ("AND", "OR", "key:(a OR b)", "in capitals", "no negation", "is refused when added")), _wt_anchors._ANCHORS_DESC[:200])

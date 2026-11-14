@@ -284,11 +284,11 @@ session_need() {
             printf 'recycle\tthe SessionStart hook: what it prints enters a session once, at its start' ;;
         tests/tool_text.snapshot.json)
             printf 'notice\tthe tools'"'"' text: a session learned the tools when it connected, and a recycle does not deliver a change (claude.ai refreshes its tool list within about a day)' ;;
-        stackshot/model/next_rules.py|stackshot/model/model_guards.py|stackshot/model/owner_steps.py|stackshot/model/bullet_text.py|next_rules.py|model_guards.py|owner_steps.py|bullet_text.py)
+        stackshot/model/next_rules.py|stackshot/model/model_guards.py|stackshot/model/owner_steps.py|stackshot/model/bullet_text.py)
             printf 'notice\ta write rule the server enforces on a session'"'"'s writes, read fresh at each write' ;;
         audit_rubric.txt)
             printf 'notice\tthe rubric the daily audit judges a session'"'"'s items by, read at each audit' ;;
-        client/hooks/*|stackshot/fleet/client.py|stackshot/projects/pages.py|stackshot/cli.py|bin/stackshot|client.py|pages.py|reboot-hooks/*)
+        client/hooks/*|stackshot/fleet/client.py|stackshot/projects/pages.py|stackshot/cli.py|bin/stackshot|reboot-hooks/*)
             printf 'nothing\ta script or CLI run fresh at each call' ;;
         stackshot/web/tools/text/*.md)
             printf 'nothing\tthe tools'"'"' text files, server-side (a changed sentence changes the snapshot too, which carries the notice; deploy.sh restarts the server)' ;;

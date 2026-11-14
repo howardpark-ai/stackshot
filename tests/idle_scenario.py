@@ -64,6 +64,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.service import update as _update_svc
 from stackshot.waits import waiting as _wt
@@ -128,8 +129,8 @@ check("a day in the past in the box falls back to the option's day, and an optio
       and _pane_recovery._idle_park_at(park, f"after {later} 14:30 then") == f"{later}T14:30",
       (_pane_recovery._idle_park_at(park, "2020-01-01 was too early"), _pane_recovery._idle_park_at("2020-01-02", ""), _pane_recovery._idle_park_at(park, f"after {later} 14:30 then")))
 check("a session's write cannot carry a wake on an option: the gate drops the key, so no write of a session parks through an option",
-      "wake" not in server._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}])[0],
-      server._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}]))
+      "wake" not in wait_gates_svc._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}])[0],
+      wait_gates_svc._gate_options([{"label": "Park until x", "line": "y", "recommended": True, "wake": "2099-01-01"}, {"label": "Not needed", "line": "z", "recommended": False}]))
 told.clear()
 r = server._answer("a7", "Not needed", "", "")
 check("Not needed: decision leaves needs, no hold, the owner is told with the choice", r == "decision" and "hold" not in rd(7)["metadata"] and rd(7)["metadata"].get("needs") == [U["home-owner"]]

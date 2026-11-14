@@ -43,6 +43,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
+from stackshot.service import asks as asks_svc
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.waits import handoff as _ho
@@ -247,24 +248,24 @@ ASK = "Decide: a thing · Recommend: yes · Stakes: none · By: no date"
 mk = {"owner": "K", "needs": ["decision"]}
 NL.write(mk, ASK, "w1", "K", eq)
 NL.write(mk, "w2: do it", "w2", "K", eq)
-server._lift_ask(mk, refresh=True)
+asks_svc._lift_ask(mk, refresh=True)
 check("_lift_ask (no writer): the ask line leaves next, the line after it stays with its writer", mk.get("ask", "").startswith("Decide:") and mk["next"] == "w2: do it" and NL.writers_of(mk, "K") == ["w2"] and len(mk["next_by"]) == 1, mk)
 mk = {"owner": "K", "needs": ["decision"]}
 NL.write(mk, ASK, "K", "K", eq)
 NL.write(mk, "w2: do it", "w2", "K", eq)
-out = server._lift_ask(mk, refresh=True, writer="w2", keeper="K")
+out = asks_svc._lift_ask(mk, refresh=True, writer="w2", keeper="K")
 check("_lift_ask: another writer's ask-shaped head is not the sender's line: nothing is lifted", out == "" and "ask" not in mk and mk["next"] == f"{ASK}\nw2: do it", (out, mk))
 mk = {"owner": "K", "needs": ["decision"]}
 NL.write(mk, "K: first", "K", "K", eq)
 NL.write(mk, f"{ASK}\n  and a detail under it\nw2: do it", "w2", "K", eq)
 NL.write(mk, "w3: last", "w3", "K", eq)
-out = server._lift_ask(mk, refresh=True, writer="w2", keeper="K")
+out = asks_svc._lift_ask(mk, refresh=True, writer="w2", keeper="K")
 check("_lift_ask: the sender's own ask line is lifted from the middle of next, its indented line with it", mk.get("ask") == ASK and "and a detail" not in mk["next"], (out, mk))
 check("…the sender's next line stays, and the others' writers are right", mk["next"] == "K: first\nw2: do it\nw3: last" and NL.writers_of(mk, "K") == ["K", "w2", "w3"], mk)
 mk = {"owner": "K", "needs": ["decision"]}
 NL.write(mk, ASK, "w1", "K", eq)
 NL.write(mk, ASK, "w2", "K", eq)
-server._lift_ask(mk, refresh=True, writer="w2", keeper="K")
+asks_svc._lift_ask(mk, refresh=True, writer="w2", keeper="K")
 check("_lift_ask: two identical lines of two writers: the pair of the line taken out goes, the other's stays", mk.get("next") == ASK and NL.writers_of(mk, "K") == ["w1"], mk)
 
 # a first line that would glue onto another writer's entry is refused, and nothing is stored

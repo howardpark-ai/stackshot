@@ -19,9 +19,9 @@ class Hooks:
     date_parked: Callable[..., Any]  # item_read._date_parked
     hold_flag: Callable[..., Any]  # holders._hold_flag
     is_held: Callable[..., Any]  # holders._is_held
-    own_repo: Callable[..., Any]  # server._own_repo
-    pr_key: Callable[..., Any]  # server._pr_key
-    pr_url: Callable[[], Any]  # server._PR_URL
+    own_repo: Callable[..., Any]  # service.released._own_repo
+    pr_key: Callable[..., Any]  # service.released._pr_key
+    pr_url: Callable[[], Any]  # service.released._PR_URL
     publish: Callable[..., Any]  # web.publish._publish
     rmod_needs_kind: Callable[..., Any]  # server._rmod.needs_kind
     role_name: Callable[..., Any]  # sessions_registry._role_name

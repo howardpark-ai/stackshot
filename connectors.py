@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Forwarder: this program moved to stackshot/fleet/connectors.py (module stackshot.fleet.connectors). The old path stays so that units, hooks, allow rules and scripts
-that name it keep working until 2026-11-22; callers move to `stackshot connectors`. No code lives here."""
+"""Forwarder: this program moved to stackshot/fleet/connectors.py (module stackshot.fleet.connectors). The old path stays while installed copies of the stackshot plugin older than 0.1.7
+still name this path; it goes in a follow-up once none does. Callers move to `stackshot connectors`. No code lives here."""
 import importlib
 import os
 import sys

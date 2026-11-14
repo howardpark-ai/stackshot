@@ -63,6 +63,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes, gates; from stackshot.waits import waiting as _WT, until_write as UW, wait_list as WL, watchers as wk, event_waits as EW; from stackshot.model import model, model_guards, migration
+from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.router import routing as _routing
@@ -372,7 +373,7 @@ lst(141, [An(AURL, "PR merged"), Tm(day(7))], mode="any", project="projects/beta
 lst(142, [An(AURL, "a reply"), An("github:o/r#5", "a review"), Re("x")], mode="all")
 wakes_svc.anchor_release("projects/alpha", notice("old comment", ts=now0 - 20 * DAY))
 check("anchor: a notice older than the wait does not count", arrived_of(140) == [False, False] and arrived_of(142) == [False, False, False], mt(140))
-wakes_svc.anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
+wakes_svc.anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=released_svc.AUTO_RULER, ruling="merged", to=""))
 check("anchor: a routine line of the fleet's own PR does not end a line that waits for a merge (as for a single wait); a line waiting for a reply counts it", arrived_of(140) == [False, False] and arrived_of(142) == [True, True, False], (arrived_of(140), arrived_of(142)))
 reset()
 wakes_svc.anchor_release("projects/alpha", notice("dropped by the keeper", ruling="dropped"))
@@ -605,7 +606,7 @@ check("lines_for_item: …an arrived line is found with open_only False and not 
 telling.tell_close_mentions = _tcm
 # (c) a changed list is a new wait: its stamp is reset
 old_meta = json.loads(json.dumps(mt(100)))
-def on_write(new): return server._watch_on_write("a100", {"metadata": old_meta}, new, {}, set(), FRONT, False)
+def on_write(new): return wait_gates_svc._watch_on_write("a100", {"metadata": old_meta}, new, {}, set(), FRONT, False)
 for what_, edit in (("a line changed", lambda n_: n_["waits"].__setitem__(0, Tm(day(5)))), ("a line added", lambda n_: n_["waits"].append(Tm(day(6)))), ("the mode changed", lambda n_: n_.__setitem__("wait_mode", "any"))):
     nm_ = json.loads(json.dumps(old_meta)); nm_["watch"] = {"set_at": 5.0, "chases_seen": 1}; edit(nm_); on_write(nm_)
     check(f"stamp: {what_}: watch.set_at is reset to now (a notice older than the new list is not its arrival), the rest of watch stays", nm_["watch"]["set_at"] >= now0 and nm_["watch"].get("chases_seen") == 1, nm_["watch"])

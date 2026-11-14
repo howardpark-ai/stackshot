@@ -1,5 +1,5 @@
-"""Forwarder: this program moved to stackshot/core/config.py (module stackshot.core.config). The old path stays so that units, hooks, allow rules and scripts
-that name it keep working until 2026-11-22; callers move to `stackshot config`. No code lives here."""
+"""Forwarder: this program moved to stackshot/core/config.py (module stackshot.core.config). The old path stays while installed copies of the stackshot plugin older than 0.1.7
+still name this path; it goes in a follow-up once none does. Callers move to `stackshot config`. No code lives here."""
 import importlib
 import os
 import sys

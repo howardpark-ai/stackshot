@@ -20,7 +20,7 @@ class Hooks:
     after_open: Callable[..., Any]  # item_read._after_open
     event_activity_tick: Callable[..., Any]  # server._event_activity_tick
     follow_superseded: Callable[..., Any]  # mover_steps._follow_superseded
-    hand_stored_then: Callable[..., Any]  # server._hand_stored_then
+    hand_stored_then: Callable[..., Any]  # service.answer_handover._hand_stored_then
     hold_flag: Callable[..., Any]  # holders._hold_flag
     is_held: Callable[..., Any]  # holders._is_held
     item_mover_model: Callable[..., Any]  # server._item_mover_model
@@ -28,7 +28,7 @@ class Hooks:
     merge_progress_tick: Callable[..., Any]  # server._merge_progress_tick
     model_of: Callable[..., Any]  # item_read._model_of
     old_wait_off: Callable[..., Any]  # item_read._old_wait_off
-    own_repo: Callable[..., Any]  # server._own_repo
+    own_repo: Callable[..., Any]  # service.released._own_repo
     publish: Callable[..., Any]  # web.publish._publish
     rmod_confirmed_at: Callable[..., Any]  # server._rmod.confirmed_at
     rmod_needs_kind: Callable[..., Any]  # server._rmod.needs_kind

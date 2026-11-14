@@ -15,24 +15,37 @@ session other than the mover, and closed ones are left alone.
 
 The settle of one item is `proofs.proof_item` (service/proofs.py), the readers of git are service/released_live.py. What it still reaches in server.py comes through `Hooks` in service/checks_hooks.py.
 
+This module also holds what release.sh's report is read with: the pull-request key of a URL (`_pr_key`, `_pr_items`, `_PR_URL`), this checkout's own repository (`_own_repo`, the list `_OWN_REPO` a suite seeds), and the
+green report that goes log-only (`_release_green`, `_release_green_ok`, `AUTO_RULER`, `_RELEASE_SENDER`).
+
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
 
+import datetime as dt
+import json
 import re
+import subprocess
 import sys
 import time
 from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core.store import _item_files
+from stackshot.github import ghsync as _gh
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
+from stackshot.model.bullet_text import _clip_line
+from stackshot.model.ids import _norm_id
+from stackshot.router import routing as _routing
 from stackshot.service import event_waits as _evwaits
+from stackshot.service import messaging as _messaging
 from stackshot.service import proofs as _proofs
 from stackshot.service import released_live as _live
 from stackshot.service import stall as _stallsvc
+from stackshot.service import store as _svcstore
 from stackshot.service import writes as _writes
 from stackshot.service.checks_hooks import hooks as _hooks
 from stackshot.service.store import _load
@@ -148,3 +161,112 @@ def sweep_released(dry: bool = False) -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             print(f"sweep-released: event waits not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return {"head": head, "good": good, "items": rows}
+
+
+# ----------------------------------------------------------------------------- pull-request keys
+_PR_URL = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)", re.I)
+
+
+def _pr_key(url: str) -> str:
+    """A GitHub pull request URL → "owner/repo#n" (lower-cased; /files, a query or a fragment after it ignored), or "". The repo goes through
+    [github.moved] (config.canon_repo), so an old-owner URL and a new-owner URL of one pull request give the same key."""
+    m = _PR_URL.search(url or "")
+    return f"{_cfg.canon_repo(m.group(1))}#{m.group(2)}" if m else ""
+
+
+def _pr_items(refs: list[str]) -> dict[str, list[str]]:
+    """The open items an anchor is scoped to, for each PR URL in `refs` → {the anchor's URL: [item ids]}. A project-wide
+    anchor names no item and does not count."""
+    keys = {_pr_key(r) for r in refs if _pr_key(r)}
+    out: dict[str, list[str]] = {}
+    for entries in _anc.load().values():
+        for e in entries:
+            k = _pr_key(str(e.get("url") or ""))
+            if not k or not e.get("items") or k not in keys:
+                continue
+            for g in e["items"]:
+                try:
+                    gid = _norm_id(g)
+                    if _svcstore._load(gid).get("status") == "open" and gid not in out.setdefault(e["url"], []):
+                        out[e["url"]].append(gid)
+                except ToolError:
+                    continue
+    return {u: gs for u, gs in out.items() if gs}
+
+
+# ----------------------------------------------------------------------------- automatic rulings
+# The turn rule's second build: a green release.sh result is routine, so it is
+# no longer delivered. The server logs it (a routing line marked log_only, no recipient), rules it `merged` itself as
+# AUTO_RULER, and leaves a comment on the open items anchored to the PR. It stays on the project's routing page: the daily digest to the
+# keeper is gone with the old routing. A red result (failed, rolled back) is delivered as before, and a
+# green one that cannot take the log-only path is delivered too.
+# The third build: anchor-hub logs the fleet's own routine PR events the same
+# way ([pilot] own_repos; anchorhub/core.py emit), ruled `merged` by AUTO_RULER. A held item that waits on the anchor is still
+# released by such a line (_wakes.anchor_pass), as a ruling would release it.
+AUTO_RULER = _routing.AUTO_RULER   # "stackshot (auto)", shared with anchor-hub, which rules the fleet's own routine PR events (the third build)
+
+_RELEASE_SENDER = "release"     # release.sh's own label (its tell()); no other sender's message takes the log-only path
+_OWN_REPO: list[str] = []
+
+
+def _own_repo() -> str:
+    """This checkout's GitHub repository, "owner/repo" lower-cased, from its origin remote as release.sh reads it (read once
+    per process); "" when there is none or git cannot say, and then no release result goes log-only."""
+    if not _OWN_REPO:
+        try:
+            url = subprocess.run(["git", "-C", str(_live.HERE), "remote", "get-url", "origin"], capture_output=True, text=True, timeout=10).stdout.strip()
+        except Exception:  # noqa: BLE001
+            url = ""
+        m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", url)
+        _OWN_REPO.append(m.group(1).lower() if m else "")
+    return _OWN_REPO[0]
+
+
+def _release_green_ok(sender: str, pr: str) -> bool:
+    """Only release.sh's own green report goes log-only: the sender is exactly
+    `release` and `pr` is a pull request of this repository. A green flag from any other sender, or with no PR, a garbage one
+    or another repository's, is delivered as before, so no script can have its message silently logged."""
+    k = _pr_key(pr)
+    own = _cfg.canon_repo(_own_repo())     # k is canonical already (_pr_key): both sides through [github.moved], so origin old / PR new match, and the reverse
+    return sender == _RELEASE_SENDER and bool(k) and bool(own) and k.rsplit("#", 1)[0] == own
+
+
+def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> str | None:
+    """A green release.sh result (POST /client/message with release=green): log-only. The line goes into the project's
+    routing log with no recipient and log_only, is ruled `merged` by AUTO_RULER at once, and the open items anchored to the
+    PR (_pr_items) get the server's comment; it stays on the project's routing page. Nothing is delivered and no page is
+    owed. An item waiting on the PR is untouched here: its `pr_merged` check closes it on the check pass, and that close
+    releases the items `after` it, as any close does. → the reply, or None when this result cannot go log-only (not a page of the
+    registry, not release.sh's own report of a PR of this repo: _release_green_ok), which the caller then delivers as before."""
+    if not _release_green_ok(sender, pr):
+        return None
+    key = to.strip().rstrip("/")
+    if key.endswith(".md"):
+        key = key[:-3]
+    if not re.match(_cfg.page_dirs_re() + "/", key) or key not in _anc.registry():
+        return None
+    if not _anc.pilot_root(key):
+        return None
+    who = f"{sender} (a script on {machine})"
+    gist = _svcstore._shown_ids(text.strip())
+    nid = _routing.record(key, kind="message", to="", label=f"message to {key}", who=who, text=gist, url=pr,
+                          target="project-wide", pilot=True, log_only=True, reason="log-only: a green release")
+    _routing.rule(nid, "merged", reason="log-only: a green release, ruled automatically", by=AUTO_RULER)
+    commented = []
+    note = "released: " + _clip_line(re.sub(r"^\[release\]\s*", "", gist), 400)
+    for g in dict.fromkeys(g for gs in _pr_items([pr]).values() for g in gs):
+        try:
+            _writes.save(g, _svcstore._load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
+            commented.append(g)
+        except Exception as e:  # noqa: BLE001  — a comment that fails never fails the log line
+            print(f"release: {g} not commented: {e}", file=sys.stderr, flush=True)
+    try:
+        _messaging.MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": f"machine:{machine}", "to": key,
+                                "outcome": "log-only", "error": "", "text": gist}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    _hooks().publish()
+    return (f"logged, not delivered (a green release is log-only): notice {nid} on {key}, ruled merged by {AUTO_RULER}; it stays on the routing page"
+            + (f"; commented on {', '.join(_gh.shown(g) for g in commented)}" if commented else ""))

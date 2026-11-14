@@ -34,8 +34,8 @@ as() { local u="$1"; shift; su - "$u" -c "$*"; }                      # a login 
 as_nologin() { local u="$1"; shift; runuser -u "$u" -- bash -c "cd ~ && $*"; }   # not a login: XDG_RUNTIME_DIR unset
 http_code() { curl -s -o /dev/null -m 5 -w '%{http_code}' "$1"; }
 listener_user() { local pid; pid="$(ss -Hltnp "sport = :$1" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"; [ -n "$pid" ] && ps -o user= -p "$pid" | tr -d ' '; }
-refused_by() { ! su - "$1" -c "cd ~/stackshot && STACKSHOT_URL=http://127.0.0.1:$2 python3 client.py get whoami"; }   # <user> <port>
-resolves_under() { su - "$1" -c "cd ~/stackshot && python3 config.py $2" | grep -q "^$3/"; }                       # <user> <config.py verb> <dir>
+refused_by() { ! su - "$1" -c "cd ~/stackshot && STACKSHOT_URL=http://127.0.0.1:$2 python3 stackshot/fleet/client.py get whoami"; }   # <user> <port>
+resolves_under() { su - "$1" -c "cd ~/stackshot && python3 stackshot/core/config.py $2" | grep -q "^$3/"; }                       # <user> <config.py verb> <dir>
 wait_healthz() { for _ in $(seq 90); do [ "$(http_code "http://127.0.0.1:$1/healthz")" = 200 ] && return 0; sleep 2; done; return 1; }
 
 [ "$(id -u)" = 0 ] || { echo "run as root inside the container" >&2; exit 2; }
@@ -98,8 +98,8 @@ for u in "${USERS[@]}"; do
     check "$u: the puller runs" test "$(systemctl --user -M "$u@" is-active stackshot-puller.service)" = active
     check "$u: the puller process belongs to $u" bash -c "ps -eo user=,args= | grep -q '^$u .*puller.py'"
     check "$u: client.url points at $p" test "$(cat "$h/.config/stackshot/client.url")" = "http://127.0.0.1:$p"
-    check "$u: client.py get whoami answers from $u's server (login shell)" as "$u" 'cd ~/stackshot && python3 client.py get whoami | grep -q machine'
-    check "$u: …and from a shell that is not a login" as_nologin "$u" 'cd ~/stackshot && python3 client.py get whoami | grep -q machine'
+    check "$u: client.py get whoami answers from $u's server (login shell)" as "$u" 'cd ~/stackshot && python3 stackshot/fleet/client.py get whoami | grep -q machine'
+    check "$u: …and from a shell that is not a login" as_nologin "$u" 'cd ~/stackshot && python3 stackshot/fleet/client.py get whoami | grep -q machine'
     other=$([ "$u" = alice ] && echo bob || echo alice)
     check "$u: $u's token is refused by $other's server" refused_by "$u" "${PORT[$other]}"
     as_nologin "$u" './stackshot/bin/stackshot doctor' > "$h/doctor.log" 2>&1        # the non-login path (XDG_RUNTIME_DIR repaired)

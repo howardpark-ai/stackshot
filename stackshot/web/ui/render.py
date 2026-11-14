@@ -416,7 +416,7 @@ def parse_ask(text):
 # The options (the board shows them in a well-readable form for every item with choices):
 # metadata.options on an item that asks him to
 # pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended. The server validates
-# (server._gate_options); the renderer draws what options_of returns, so a hand-edited list that broke the shape draws nothing.
+# (service/wait_gates.py `_gate_options`); the renderer draws what options_of returns, so a hand-edited list that broke the shape draws nothing.
 OPTIONS_MIN, OPTIONS_MAX, OPTION_LABEL_MAX, OPTION_LINE_MAX = 2, 6, 40, 160
 def options_of(r, raw=False):
     """An item's options → [{"label", "line", "recommended"}], [] when it has none or they are misshaped. The labels are as the card shows them: with three or more options whose labels all open

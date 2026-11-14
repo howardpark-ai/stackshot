@@ -1,7 +1,8 @@
 """interp.py — start a stackshot script as a child process even when the interpreter this process runs on is gone.
 
-stackshot.service, anchor-hub.service and the audit timer run `uv run --locked --script <script>`, so `sys.executable` is
-~/.cache/uv/environments-v2/<name>-<hash>/bin/python. A clean-up of that cache deletes the environment under a running
+stackshot.service, anchor-hub.service and the audit timer run `uv run --project <checkout> --locked stackshot <program>`, so `sys.executable` is
+<checkout>/.venv/bin/python (the project environment; a script run on its own, with `uv run --script`, has one in ~/.cache/uv/environments-v2/<name>-<hash>/).
+A clean-up of that environment deletes it under a running
 process: the process keeps going (its interpreter is loaded), but every child started as [sys.executable, "push.py", …]
 fails with "[Errno 2] No such file or directory: '…/bin/python'", and the notice is not delivered.
 

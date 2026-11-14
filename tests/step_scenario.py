@@ -765,7 +765,7 @@ for mode_ in ("powershell", ""):
     finally:
         STEPS["owner_shell"] = WAS15["owner_shell"]
 # the text: a fresh process on a config of each kind
-TEXT15 = ("import asyncio, json, logging, sys\nlogging.disable(logging.WARNING)\nimport server, client\n"
+TEXT15 = ("import asyncio, json, logging, sys\nlogging.disable(logging.WARNING)\nfrom stackshot.web import server; from stackshot.fleet import client\n"
           "print(json.dumps({'tools': {t.name: (t.description or '') for t in asyncio.run(server.mcp.list_tools())}, 'usage': client._usage()}))\n")
 def text15(owner_shell, shell_name=None):
     cfg = _instance._set(toml, "steps", "owner_shell", f'"{owner_shell}"')

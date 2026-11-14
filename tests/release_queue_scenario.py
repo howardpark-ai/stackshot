@@ -446,7 +446,7 @@ check("queue --resume: the killed release is started again, and the waiting one 
 s = fast("q-pick-recycle", merge="ok", pickfiles="docs/a.md,client/hooks/session-start.sh", files=QF(["23"], started=["23"]), units="")
 check("queue: a queued PR that changes the start-loaded hook gets a recycle (recycle-due on the PR), reported green, with no warning",
       s["rc"] == 0 and "recycle-due" in s["msg"] and "session pick: recycle (from client/hooks/session-start.sh)" in s["log"] and "WARNING" not in s["log"] + s["msg"] and "--release" in s["msg"], (s["log"][-500:], s["msg"]))
-s = fast("q-pick-per-call", merge="ok", pickfiles="docs/a.md,client.py,pages.py", files=QF(["23"], started=["23"]), units="")
+s = fast("q-pick-per-call", merge="ok", pickfiles="docs/a.md,stackshot/fleet/client.py,stackshot/projects/pages.py", files=QF(["23"], started=["23"]), units="")
 check("queue: a queued PR that changes only files run fresh at each call picks nothing: no recycle, green", s["rc"] == 0 and "recycle-due" not in s["msg"] and "session pick: nothing" in s["log"] and "--release" in s["msg"], (s["log"][-300:], s["msg"]))
 
 # ---- 17. the review of the first version: a late member of a merge group, after a rollback paused the queue, does not deploy onto a main that is red
@@ -621,14 +621,14 @@ check("group where the queue ejects the second PR: the first is deployed ONCE at
 check("ejected second PR: one red report for it ([release] PR #25 FAILED at merge queue, naming the reason) and one green for the first; the group's failure pauses nothing and the queue goes on (both leave the queue file)",
       len(s["msgs"]) == 2 and sum("FAILED at merge queue" in m and "PR #25" in m for m in s["msgs"]) == 1 and sum("PR #23 merged and deployed" in m for m in s["msgs"]) == 1 and not s["paused"] and s["queue"] == [], (s["msgs"], s["paused"], s["queue"]))
 check("ejected PR: its marker is gone (the queue no longer holds it) and it is not merged by a lone release's path; no `mq drop` was needed", handed(s) == [] and not merges(s) and not any(l.startswith("mq drop") for l in s["mq"]), (handed(s), s["mq"]))
-s = grp("on-group-eject-notice", prs=("23", "25"), tip=M1, mq_prs=f"23=merged@{M1[:7]},25=ejected", files=QF(["23", "25"], started=["23"]), pickfiles="next_rules.py", notice="notify")
+s = grp("on-group-eject-notice", prs=("23", "25"), tip=M1, mq_prs=f"23=merged@{M1[:7]},25=ejected", files=QF(["23", "25"], started=["23"]), pickfiles="stackshot/model/next_rules.py", notice="notify")
 check("group where the queue ejects the second PR: the live notice names only the merged PR (#23), never the ejected one",
       len(s["notice"]) == 1 and s["notice"][0].startswith("release: stackshot PR #23 \u2014 stackshot PR #23 is live at ") and "#25" not in s["notice"][0], (s["notice"], s["msgs"]))
 s = grp("on-group-eject-deploy-fails", prs=("23", "25"), tip=M1, mq_prs=f"23=merged@{M1[:7]},25=ejected", files=QF(["23", "25"], started=["23"]), deploy_fail="1")
 check("group where the queue ejects the second PR and the deploy of the first fails: the group's red report names only the merged PR (#23), never the ejected one",
       (lambda d: s["rc"] == 1 and len(d) == 1 and "[release] PR #23 FAILED at deploy" in d[0] and "#25" not in d[0])([m for m in s["msgs"] if "FAILED at deploy" in m]), (s["rc"], s["msgs"]))
 # plural-wording guard only: it passes on the code before the merged-names fix too
-s = grp("on-group-notice-both", prs=("23", "25"), tip=M2, pickfiles="next_rules.py", notice="notify")
+s = grp("on-group-notice-both", prs=("23", "25"), tip=M2, pickfiles="stackshot/model/next_rules.py", notice="notify")
 check("group where both PRs merge: the live notice names both, in the plural",
       len(s["notice"]) == 1 and s["notice"][0].startswith("release: stackshot PRs #23 #25 \u2014 stackshot PRs #23 #25 are live at "), s["notice"])
 s = grp("on-group-eject-first", tip=M2, prs=("23", "25"), mq_prs=f"23=failed,25=merged@{M2[:7]}", fullshas=M2)

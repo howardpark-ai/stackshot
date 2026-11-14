@@ -147,7 +147,7 @@ check("Next: a sub-step renders inline markdown, a raw tag stays text", "<li>sub
 check("…and the History line is a block that can hold it: div.w, not a span", re.search(r'<li class="ev ev-created"><div class="eh">(?:<b>[^<]+</b> · )?<span class="t">[^<]+</span></div><div class="w"><div class="eb">created as', bd.item_html("a10")) is not None, bd.item_html("a10")[-700:])
 
 # ---- 6b. the brief, flush and bump never need markdown-it (publish.py runs on the system python): import render (the brief) and the board pages' ui/render.py (item text) with it blocked
-_probe = ("import sys; sys.modules['markdown_it'] = None; sys.modules['markdown_it.token'] = None; sys.path.insert(0, " + repr(STACK) + "); import render, config; from ui import render as ui_render; "
+_probe = ("import sys; sys.modules['markdown_it'] = None; sys.modules['markdown_it.token'] = None; sys.path.insert(0, " + repr(STACK) + "); from stackshot.web import render; from stackshot.core import config; from stackshot.web.ui import render as ui_render; "
           "d = str(config.path('paths', 'store')); print(render.render(d, 'brief')); "
           "print(repr(ui_render.md_block('- a\\n- b **c**'))); print(repr(ui_render.md_inline('x **y** https://example.invalid/z')))")
 _r = subprocess.run([sys.executable, "-c", _probe], capture_output=True, text=True, env=dict(os.environ))

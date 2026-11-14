@@ -21,12 +21,12 @@
 #                            state, and does not disable a unit or timer they added (install.sh only ever adds)
 #
 # What restarts, by the files the fast-forward changed:
-#   stackshot.service        any module the server imports (every *.py but the hub's, the clients' and the one-off scripts; the paths are the package's, stackshot/<area>/<module>.py, and the old root forwarders),
-#                            server.py.lock, its unit, icons/* (their URLs carry a version read at the start, render.py ICON_V), fonts/*
+#   stackshot.service        any module the server imports (every *.py but the hub's, the clients' and the one-off scripts; the paths are the package's, stackshot/<area>/<module>.py),
+#                            its unit, icons/* (their URLs carry a version read at the start, render.py ICON_V), fonts/*
 #                            (the code font's, render.py font_href), shared/* (the shared color tool, read at import by ui/colortool.py), or
 #                            stackshot/web/tools/text/*.md (the tools' text files, read at import by web/tools/textfile.py)
-#   anchor-hub.service       anchor-hub.py, anchor-hub.py.lock, anchorhub/*, anchors.py, project_registry.py, projects.py (apply() reaches it), push.py, fleet.py, liveness.py, routing.py, inbox.py, sessions_registry.py, interp.py, config.py, or its unit
-#   stackshot-puller.service puller.py, client.py, config.py, or its unit
+#   anchor-hub.service       stackshot/anchors/anchor_hub.py, stackshot/anchors/anchorhub/*, anchors.py, project_registry.py, projects.py (apply() reaches it), push.py, fleet.py, liveness.py, routing.py, inbox.py, sessions_registry.py, interp.py, config.py (all under stackshot/), or its unit
+#   stackshot-puller.service stackshot/fleet/puller.py, stackshot/fleet/client.py, stackshot/core/config.py, or its unit
 # Code is restarted here, deliberately; stackshot-reload.path only reloads the config file (SIGHUP). It is still held
 # while the units are reinstalled, so a config change never reloads a service whose unit is being replaced.
 # After a server restart the board is published once more, so a change to the renderer is live at once and not at the next timer.
@@ -108,7 +108,7 @@ while IFS= read -r f; do
         units/stackshot.service.in|units/stackshot-reload.*|install.sh) server=1 ;;
         units/anchor-hub.service.in) hub=1 ;;
         units/stackshot-puller.service.in) puller=1 ;;
-        anchor-hub.py|anchorhub/*|push.py|stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
+        push.py|stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;      # push.py at the root is a forwarder for older plugin copies
         stackshot/anchors/merge_log.py) server=1; hub=1 ;;      # the hub writes the merge log and the server reads it: both read the file at their start
         stackshot/anchors/event_log.py) server=1; hub=1 ;;      # the same for the event log (events.jsonl): the hub writes it, the server's last-activity pass reads it
         pyproject.toml|uv.lock) server=1; hub=1 ;;      # the units' pinned dependencies (uv run --project --locked): a new pin takes effect at the restart
@@ -117,13 +117,12 @@ while IFS= read -r f; do
         icons/*) server=1 ;;             # a new icon is a new ?v= in the manifest and the pages' links, read at the start
         fonts/*) server=1 ;;             # the code font's ?v= is in the pages' stylesheet, read at the start (render.py font_href)
         shared/*) server=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (stackshot/web/ui/colortool.py)
-        puller.py|stackshot/fleet/puller.py) puller=1 ;;
-        client.py|stackshot/fleet/client.py) puller=1 ;;
-        config.py|stackshot/core/config.py) server=1; hub=1; puller=1 ;;
-        retired_inputs.py|stackshot/core/retired_inputs.py) server=1; puller=1 ;;      # client.py imports it: the puller's source
-        stackshot/paths.py) server=1; hub=1; puller=1 ;;      # every program finds the checkout's files through it
-        anchors.py|project_registry.py|projects.py|fleet.py|liveness.py|routing.py|inbox.py|sessions_registry.py|interp.py|stackshot/anchors/anchors.py|stackshot/projects/project_registry.py|stackshot/projects/projects.py|stackshot/fleet/fleet.py|stackshot/fleet/liveness.py|stackshot/router/routing.py|stackshot/fleet/inbox.py|stackshot/fleet/sessions_registry.py|stackshot/core/interp.py) server=1; hub=1 ;;
-        *.py) case "$f" in rename_page.py|page_keeper.py|anchor-hub-google-auth.py|tests/*|stackshot/projects/rename_page.py|stackshot/projects/page_keeper.py|stackshot/anchors/anchor_hub_google_auth.py) ;; *) server=1 ;; esac ;;
+        stackshot/fleet/puller.py|stackshot/fleet/client.py) puller=1 ;;
+        config.py|stackshot/core/config.py) server=1; hub=1; puller=1 ;;      # config.py at the root is a forwarder for older plugin copies
+        stackshot/core/retired_inputs.py) server=1; puller=1 ;;      # client.py imports it: the puller's source
+        stackshot/__init__.py|stackshot/__main__.py|stackshot/paths.py) server=1; hub=1; puller=1 ;;      # every program finds the checkout's files through it
+        stackshot/anchors/anchors.py|stackshot/projects/project_registry.py|stackshot/projects/projects.py|stackshot/fleet/fleet.py|stackshot/fleet/liveness.py|stackshot/router/routing.py|stackshot/fleet/inbox.py|stackshot/fleet/sessions_registry.py|stackshot/core/interp.py) server=1; hub=1 ;;
+        *.py) case "$f" in tests/*|stackshot/projects/rename_page.py|stackshot/projects/page_keeper.py|stackshot/anchors/anchor_hub_google_auth.py) ;; *) server=1 ;; esac ;;
     esac
 done <<< "$files"
 plan=""; [ $server = 1 ] && plan="$plan stackshot.service"; [ $hub = 1 ] && plan="$plan anchor-hub.service"; [ $puller = 1 ] && plan="$plan stackshot-puller.service"

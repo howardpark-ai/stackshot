@@ -9,7 +9,7 @@ Layout: ONE store, [paths] store (board-data/ in a repository of its own), <lett
 (the letters mark where an item came from; s = everything created since). This server is the only
 allocator (next-id file) and the only writer; publish.py renders and commits.
 
-Run:  STACKSHOT_CONFIG=<file> uv run --script server.py   (outside the production checkout a run without it is refused)
+Run:  STACKSHOT_CONFIG=<file> uv run --locked --extra server stackshot server   (outside the production checkout a run without it is refused)
       STACKSHOT_AUTH=off …                                 (local test only)
 """
 from __future__ import annotations
@@ -19,13 +19,13 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
 
 import datetime as dt
+import importlib
 import json
 import logging
 import math
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
 import time as _time_mod
@@ -94,7 +94,6 @@ if __name__ == "__main__":
     _LISTEN = _take_port()
 
 from stackshot.github import ghsync as _gh  # noqa: E402  — the GitHub mirror and the id switch, both off unless [github] says so
-from stackshot.core import ghbudget as _gb  # noqa: E402  — the hourly ledger of GitHub calls: the PR-state readers tag theirs (a done check, a step proof, an event wait)
 from stackshot.model import work as _work  # noqa: E402  — a step's status: what is in motion on an item
 from stackshot.web import whatschanged as _wc  # noqa: E402  — the brief's what-changed lines for 7 days after a release that changes a tool
 from stackshot.model import said as _said  # noqa: E402  — the owner's words on an item, checked against his message's transcript (the trailers)
@@ -113,7 +112,6 @@ from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fl
 from stackshot.waits import watchers as _watch  # noqa: E402  — the waits' watchers of the item model: what ends a wait, the relay's ask, the chases (watchers.py)
 from stackshot.waits import handoff as _ho  # noqa: E402  — the hand-off machinery of the item model: the record, the clock, section 5 (handoff.py)
 from stackshot.model import migration as _mig  # noqa: E402  — the migration onto the item model: the planner; the server applies its writes (_migrations.migrate_write)
-from stackshot.model import nextlines as _nl  # noqa: E402  — whose lines are in an item's next: update replaces only the sender's, clear_next wipes all (nextlines.py)
 from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on the checklist: the server makes `<owner>: <what to decide>` for an ask or a your-step, ticks it with his answer, and a session cannot (owner_steps.py)
 from stackshot.model import step_proof as _sp  # noqa: E402  — a step that names the event which completes it: the patterns for its words and the explicit form (step_proof.py)
 from stackshot.model import next_rules as _nr  # noqa: E402  — the write checks of Next: a line names who takes it (N1), a reworded step is no rewrite (N3), an open item keeps an open step (N6) (next_rules.py)
@@ -158,10 +156,10 @@ from stackshot.core import instance as _inst  # noqa: E402  — the owner's name
 from stackshot.core.instance import NAME, OWNER  # noqa: E402  — NAME and OWNER: the one read of [instance] (core/instance.py)
 from stackshot.model.bullet_text import _clip_line  # noqa: E402  — free text as one line of a notice (model/bullet_text.py)
 from stackshot.model.ids import _GID, _norm_id  # noqa: E402  — item ids and where they are read (model/ids.py)
-from stackshot.model.needs import _NEEDS_KINDS, _after_of, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store, _observers_of, _waits_decision  # noqa: E402  — needs, after and observers (model/needs.py)
+from stackshot.model.needs import _after_of, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store, _observers_of, _waits_decision  # noqa: E402  — needs, after and observers (model/needs.py)
 from stackshot.web.tools import text as _wttext  # noqa: E402  — the words and limits the tools state, and the board's time zone (`ZONE`, read on this module when a line says a time, so a suite that pins it sets it there; web/tools/text.py)
 from stackshot.web.tools.text import _ANCHOR_SHAPES, _ASK_NONE, _CLOSE_REFUSAL, _DESC_LINE_MAX, _DESC_MAX_LINES, _FOR_OWNER, _GMAIL_TERMS, _MODEL_PAGE, _NEXT_LINE_MAX  # noqa: E402  — the words and limits the tools state (web/tools/text.py), which this module's passes read too
-from stackshot.web.middleware import _unlink_ids  # noqa: E402  — the shown form of an id turned back to the stored one (web/middleware.py), read where a write's text is stored
+from stackshot.web.middleware import _unlink_ids  # noqa: E402, F401  — the save hooks look it up here at call time (`_late("_unlink_ids")`)
 from stackshot.core import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import), its item files, the next id and the file write (core/store.py); `STORE` is read and set on that module, never here
 from stackshot.core.store import _item_files  # noqa: E402  — core/store.py
 from stackshot.service import writes as _writes  # noqa: E402  — the one write path of an item: its lock (`ITEM_LOCK`), its save (`save`) and the write context (service/writes.py)
@@ -182,6 +180,9 @@ from stackshot.service.owner_words import _BASIS_WORDS, _RELAUNCH, OUTCOMES  # n
 from stackshot.service import save_hooks as _save_hooks  # noqa: E402  — what the save steps, the naming, the message relay and the owner's words still reach in the surface (service/save_hooks.py)
 from stackshot.service import agent_names as _agent_names  # noqa: E402  — naming the working background agent in an item's needs, the items a text names, and the router's push told to the hand-off (service/agent_names.py)
 from stackshot.service import messaging as _messaging  # noqa: E402  — the message tool's relay: `_message`, its refusals, the report written onto an item, and the log `MSG_LOG` (service/messaging.py)
+from stackshot.service import asks as _asks  # noqa: E402  — the ask line: its shape gate, its form in next, the nag, and the leaves of a wrong or moot ask (service/asks.py)
+from stackshot.service import wait_gates as _wait_gates  # noqa: E402  — the write guards of event, anchor and front-step waits, the decision options' gate, and what an update owes the watchers (service/wait_gates.py)
+from stackshot.service import answer_handover as _handover  # noqa: E402  — where an item goes after the owner's answer, a Done or the end of a wait: the hand-over helpers and the answer line (service/answer_handover.py)
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
@@ -476,7 +477,7 @@ def _phase_stamp(gid: str, item: dict[str, Any]) -> None:
 _writes.install(_writes.Steps(
     settle_mover=lambda item, before: _mover_steps._settle_mover_on_save(item, before),
     owner_steps=lambda item, before, writer, author: _mover_steps._owner_steps_on_save(item, before, writer, author),
-    ask_stamp=lambda item, before, writer: _ask_stamp(item, before, writer),
+    ask_stamp=lambda item, before, writer: _asks._ask_stamp(item, before, writer),
     handoff_on_save=lambda gid, before, item, writer, author: _handoff.handoff_on_save(gid, before, item, writer, author),
     handoff_his_over=lambda gid, item, author, quiet: _handoff.handoff_his_over(gid, item, author, quiet),
     handoff_follow=lambda gid, before, item, writer, author, quiet: _handoff.handoff_follow(gid, before, item, writer, author, quiet),
@@ -583,7 +584,6 @@ _wt.FALLBACK_MOVER = _telling.fallback_mover        # model.derive and waiting.m
 
 
 from stackshot.anchors import anchors as _anc  # noqa: E402
-from stackshot.anchors import machine_anchor as _ma  # noqa: E402  — a machine of the fleet as an anchor: its items' movers are told at each check-in (machine_anchor.py)
 from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the merge pass (`_merge_progress_tick`)
 from stackshot.model import merge_tie as _mtie  # noqa: E402  — which open items a merged pull request is tied to (merge_tie.py)
 from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's record of the other activity on pull requests (CI results, comments, reviews, merges): read by the last-activity pass (event_log.py)
@@ -609,292 +609,6 @@ from stackshot.service import foryou_hooks as _foryou_hooks  # noqa: E402  — w
 from stackshot.service.projects import _PROJECT_LOCK, _RENAMING, _new_project, _page_io, _project_agent, _project_agent_mandate, _project_agent_rename_checks, _project_agent_rename_write, _project_agent_retire_checks, _project_agent_retire_write, _project_list, _projects_list  # noqa: E402,F401  — the client API's routes, the archive sweep and the hand-off read them, and the two wrappers that stay here take the lock and call the checks and the writes (service/projects.py)
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
 from stackshot.audit import audit_checks as _ac  # noqa: E402  — the audit's code checks: the filing pass, and the broad wait words of an alive item's next
-_HERE = _paths.ROOT
-
-
-# ----------------------------------------------------------------------------- the ask line
-
-
-def _gate_ask(ask: str) -> str:
-    """An ask as given → its stored form; the shape refusal whatever the stage."""
-    if _rmod.parse_ask(ask) is None:
-        raise ToolError(f'Refused: ask must read "{_rmod.ASK_FORM}" in one line of at most {_rmod.ASK_MAX} characters')
-    return ask.strip()
-
-
-_ASK_IN_NEXT = "A client whose tool has no ask parameter writes the line as the first line of next instead."
-
-
-def _next_put(meta: dict[str, Any], text: str, writer: str, keeper: str, **kw: Any) -> list[tuple[str, str]]:
-    """nextlines.write for the tools: a next text that cannot sit beside other writers' lines is a refusal. → the lines of the text that another session's open line already reads (left out, not added twice)."""
-    try:
-        return _nl.write(meta, text, writer, keeper, _handoff.ho_same, **kw)
-    except _nl.NextFormError as e:
-        raise ToolError(f"Refused: {e}")
-
-
-def _lift_ask(meta: dict[str, Any], refresh: bool = False, writer: str | None = None, keeper: str = "") -> str:
-    """A client whose cached tool schema has no `ask` (a claude.ai chat or Cowork session started before that deploy
-    keeps its tool list, and cannot refresh it) writes the ask line as the first line of `next`, the form the daily audit
-    already counts (seen on one item). On an item that needs a decision and carries no
-    valid ask, that line becomes the ask and leaves `next`, so [ask] refuse_after does not lock such a client out of its own
-    items. `refresh` (the call passed `next` itself; after one item's owner could not refresh a
-    stale ask): an ask-shaped first line also replaces a valid ask it differs from, and leaves `next` when it repeats it. The
-    caller calls it only when its call passed no ask. Next is kept by writer: with `writer` the line looked at is the writer's own first line, never another
-    session's, and the indented lines under the ask line leave next with it. → the reply's note, or ""."""
-    if "decision" not in _needs_kinds(meta):
-        return ""
-    had = str(meta.get("ask") or "").strip()
-    valid = _rmod.parse_ask(had) is not None or bool(_watch.asked_of(meta))
-    if valid and not refresh:
-        return ""
-    line = _nl.lift_first(meta, lambda ln: _rmod.parse_ask(ln) is not None, writer, keeper, _handoff.ho_same)
-    if not line:
-        return ""
-    meta["ask"] = line
-    if valid and line == had:
-        return "\n(note: the first line of next repeated the ask line, so it was taken out of next.)"
-    if valid:
-        return "\n(note: this call passed no ask, so the first line of next, which has the ask's form, replaced the ask line.)"
-    return "\n(note: this call passed no ask, so the first line of next, which has the ask's form, was taken as the ask line.)"
-
-
-def _ask_owed(meta: dict[str, Any]) -> str:
-    """A needs=decision item without a valid ask line: before [ask] refuse_after (or with none set) → the nag line for the
-    reply; from that date → ToolError. "" when the item has no needs=decision or carries a valid ask."""
-    if "decision" not in _needs_kinds(meta) or _rmod.parse_ask(str(meta.get("ask") or "")) is not None or _watch.asked_of(meta):     # a watcher's ask is its own fixed form, while it is up
-        return ""
-    after = _cfg.ask_refuse_after()
-    if after and _pages.zone_now().date() >= dt.date.fromisoformat(after):
-        raise ToolError(f'Refused: a needs=decision item needs an ask line: ask="{_rmod.ASK_FORM}" (≤ {_rmod.ASK_MAX} chars). {_ASK_IN_NEXT}')
-    return (f'\n[ask] a needs=decision item carries an ask line: ask="{_rmod.ASK_FORM}" (≤ {_rmod.ASK_MAX} chars'
-            + (f"; refused from {_rmod.when_words(dt.date.fromisoformat(after))}" if after else "") + ")\n[ask] " + _ASK_IN_NEXT)
-
-# ----------------------------------------------------------------------------- an ask that is wrong or moot leaves the owner's move (ask_leaves.py)
-# The server may take off his move what its author calls wrong, in one plain sentence, and apply what he said. It only removes from his move or applies his word: it never writes an ask,
-# closes an item or answers for him, and it acts on the author's own plain sentence, nothing else a session writes. Everything it does is a line in History and in the reply. A board item the
-# ask waits on being dropped removes nothing: the author's next write to the item carries a line saying so (_ask_after_write).
-def _ask_stamp(item: dict[str, Any], before: dict[str, Any] | None, writer: str) -> None:
-    """`writes.save`'s step: keep who wrote the ask and when (metadata.ask_rec). A failure here never fails a write."""
-    meta = item.get("metadata")
-    if not isinstance(meta, dict):
-        return
-    try:
-        was = (before or {}).get("metadata")
-        was = was if isinstance(was, dict) else None
-        who = (_sr._session_label(writer) or writer) if writer and _askl.changed(meta, was) else ""      # the label may read every machine's sessions.json: only a save that changes the ask needs it
-        _askl.stamp(meta, was, who, time.time())
-    except Exception as e:  # noqa: BLE001
-        print(f"ask: {item.get('id')} record not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _ask_stands(item: dict[str, Any]) -> str:
-    """The ask that stands on the owner's move now ("" when none): the open item's ask line with a decision in needs, never a watcher's own ask."""
-    if item.get("status") != "open":
-        return ""
-    meta = item.get("metadata") or {}
-    return _askl.standing(meta, _needs_kinds(meta), bool(_watch.asked_of(meta)))
-
-
-def _ask_lookup(ref: str) -> "tuple[str, str, float, str] | None":
-    """(status, outcome, when it was last changed: the close time of a closed item, how it ended in words) of the item a number ("12", from the ask's text) or a store id names; None when it cannot be
-    read. An item closed as superseded continues in its replacement: it is followed through the chain to its end and the end's state is returned, so only a chain that ends in a dropped item reads as
-    dropped; a replacement that is open or done is where the question went on, and the ask stands."""
-    try:
-        gid = _norm_id(f"board#{ref}") if ref.isdigit() else _norm_id(ref)
-        it = _svcstore._load(gid)
-    except Exception:  # noqa: BLE001
-        return None
-    chain, seen = [], {gid}
-    while it.get("status") == "completed" and (it.get("metadata") or {}).get("outcome") == "superseded":
-        nxt = str((it.get("metadata") or {}).get("superseded_by") or "")
-        if not nxt:
-            return None
-        try:
-            nxt = _norm_id(nxt)
-            if nxt in seen:
-                return None
-            seen.add(nxt)
-            chain.append(nxt)
-            it = _svcstore._load(nxt)
-        except Exception:  # noqa: BLE001
-            return None
-    try:
-        closed = float(it.get("state_updated") or it.get("updated") or 0)
-    except (TypeError, ValueError):
-        closed = 0.0
-    outcome = str((it.get("metadata") or {}).get("outcome") or "")
-    how = f"superseded by {_gh.shown(chain[0])}, and the replacement chain ended in {_gh.shown(chain[-1])}, which was {outcome}" if chain else outcome
-    return str(it.get("status") or ""), outcome, closed, how
-
-
-def _ask_when(ts: float) -> str:
-    return _rmod.when_words(dt.datetime.fromtimestamp(ts, _wttext.ZONE))
-
-
-def _ask_authors(item: dict[str, Any]) -> "list[str]":
-    """The sessions whose own word about the ask counts: the author the record names, else (an ask stored before the record) the session that moves the item and the one that created it."""
-    meta = item.get("metadata") or {}
-    by = str(_askl.rec_of(meta).get("by") or "")
-    if by:
-        return [by]
-    return [x for x in (_telling.holder(item), str(meta.get("owner") or "")) if x and not _model.is_owner(x)]
-
-
-def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
-    """Take the standing ask off the owner's move: the ask, its options and his stored your-call go, `decision` leaves needs, the item goes back to its author (a live session; else as any answered
-    decision's hand-over leaves it), one History line says what and why, and metadata.ask_left keeps the ask and its options so that his late answer is kept as a comment (_answer). Only its
-    author's own plain sentence (`why`) calls for it; `expect` = the ask the caller saw, so a write that changed it meanwhile leaves it alone. The server's own save: it
-    answers nothing for him, writes no ask and closes nothing. → the reply line ("" when nothing was taken off)."""
-    with _writes.ITEM_LOCK:
-        try:
-            item = _svcstore._load(gid)
-        except ToolError:
-            return ""
-        meta = item.get("metadata")
-        ask = _ask_stands(item)
-        if not isinstance(meta, dict) or not ask or (expect and ask != expect):
-            return ""
-        now = time.time()
-        rec = _askl.rec_of(meta)
-        authors = _ask_authors(item)
-        back = next((a for a in ([sender.strip()] if sender.strip() else []) + authors if a and not _model.is_owner(a)), "")
-        shown_opts = _rmod.options_of(item)
-        meta.pop("ask", None); meta.pop("options", None); meta.pop("idle", None)
-        _holders._state_end(meta, "your-call")
-        _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
-        if back and _then_live(back, meta):
-            meta["then"] = back      # the author takes the item back; read below, so the hand-over sees the `then` set here and not the one stored before
-        mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # after the line above: _decision_hand_over reads the then that stands now
-        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {})}
-        _decision_hand_over(meta, mover_in, then_in, parked=False, waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
-        _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\"")
-        item["metadata"] = meta
-        item["updated"] = item["state_updated"] = item["confirmed"] = now
-        _writes.save(gid, item, note="ask taken off his move")
-    _pubmod._publish()
-    item["gid"] = gid
-    to = _telling.holder(item)
-    line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said it is wrong: {_clip_line(why, 140)}). "
-            f"The item is back with {_sr._session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _telling.notice_link(gid)}")
-    if to and not (sender.strip() and _handoff.ho_same(to, sender)):
-        try:
-            _telling.tell_woken(gid, _session_id(to), f"{_FOR_OWNER} {line}" if _telling.front_keeper(to, str(meta.get("project") or ""))[0] else line, tag="ask")
-        except Exception as e:  # noqa: BLE001  — the ask is off his move; a notice that fails is a stderr line
-            print(f"ask: {gid} mover not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    print(f"ask: {gid} taken off the owner's move (its author's word): {why}", file=sys.stderr, flush=True)
-    return (f"\n(the server took the ask off {OWNER}'s move: you said it is wrong, \"{_clip_line(why, 110)}\". "
-            f"The item is back with {_sr._session_label(to) if to else 'its default mover'}; History says so. His late answer, if one comes, is kept as a comment.)")
-
-
-def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]") -> str:
-    """An update's tail for the ask on its item (the reply's extra lines). Three things, in this order:
-      a write that sets an ask → the ask-time check: his comments and notes since the item's last ask are shown, so one that already answers the ask is seen at the write;
-      a write by the ask's author whose ENTIRE new text (every text parameter of the call, _ASK_TEXT_PARAMS in web/tools/update.py; a line the item already held whole is not new) is one plain sentence, "the ask is wrong|moot|stale|...", the closed shape of
-        ask_leaves.author_says_wrong → the server takes the ask off his move (_ask_leave);
-      a write by the session that wrote the ask, moves the item or created it, while the ask still stands → the one-line reminder to withdraw it if it is wrong or moot, with his notes since the ask; for the
-        ask's author it also says which board item the ask waits on was dropped after the ask was written (ask_leaves.dropped_deps), the only thing the server does about a dropped dependency.
-    A write that clears the ask, or leaves none, adds nothing. Never fails the write: the update is saved."""
-    gid = pre.get("gid") if pre else ""
-    if not gid:
-        return ""
-    try:
-        with _writes.ITEM_LOCK:
-            item = _svcstore._load(gid)
-        now_ask = _ask_stands(item)
-        meta = item.get("metadata") or {}
-        if not now_ask or clear_ask:
-            return ""
-        who = sender.strip()      # a write with no sender is nobody's own word: it takes no ask off his move and gets no reminder
-        if ask.strip():
-            notes = _askl.notes_since(meta, float(pre.get("look") or 0))
-            return _askl.check_line(OWNER, _askl.notes_line(notes, _clip_line, _ask_when)) if notes else ""
-        authors = _ask_authors(item)
-        mine = bool(who) and any(_handoff.ho_same(who, a) for a in authors)
-        if _cfg.ask_leaves_on():
-            word = _askl.author_says_wrong(_askl.new_lines(texts, str(pre.get("old") or ""))) if mine and pre.get("ask") == now_ask else ""
-            if word:
-                out = _ask_leave(gid, word, sender=who, expect=now_ask)
-                if out:
-                    return out
-        if mine or (who and _handoff.ho_same(who, _telling.holder(item))) or (who and _handoff.ho_same(who, str(meta.get("owner") or ""))):
-            since = float(_askl.rec_of(meta).get("at") or pre.get("look") or 0)
-            at = _askl.rec_of(meta).get("at")      # an ask with no record has no time to compare a drop with: nothing is said of its dependencies
-            dropped = _askl.dropped_line(_askl.dropped_deps(now_ask, _ask_lookup, float(at)), _ask_when) if mine and at else ""
-            return _askl.reminder(_gh.shown(gid), OWNER, _askl.notes_line(_askl.notes_since(meta, since), _clip_line, _ask_when), dropped)
-    except Exception as e:  # noqa: BLE001  — the update is saved and published; the ask's lines are a stderr line when they fail
-        print(f"ask: {gid} tail not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return ""
-
-
-# ----------------------------------------------------------------------------- the options
-# metadata.options: the alternatives a needs=decision item asks the owner to pick between, shown on the item page, under the ask in
-# the queue's tooltip and board.md, and in the tool reply.
-# The shape is render.options_of's. A yes/no decision lists two, Approve and Decline (the page draws
-# Approve and Decline only when the owner lists them, so the owner gets one-click buttons); an open question (what, which, how, who, when, where, why) lists its answers as options, or is
-# reworded as a yes/no, because the page's Yes and No fallback cannot answer it (_gate_open_question). An ask or
-# description that names alternatives while the item lists none is refused (_gate_alternatives), with a matcher kept narrow so a go/no-go ask passes (keywords in either; in the
-# Decide part also a list "x, y or z", "x vs y" and labeled choices, "A or B", "A (…) or B (…)", _lettered_alternatives). An ask whose Recommend part does not name the
-# recommended option's label gets a note in the reply (_options_note), never a refusal: scripts file asks of their own wording.
-# The decision gates live in model/decision_gates.py (the option form and the matchers); this module reads the option form and the mockup form for the options gate below.
-from stackshot.model.decision_gates import _MOCKUP_ASK, _OPT_FORM  # noqa: E402
-
-
-# An option is drawn as a clickable card that selects or unselects, so a link inside its label or line would show as raw "[text](url)" text and could
-# take the select click: a markdown link or a bare http(s) URL in an option is refused, and the mockup link goes in the ask.
-_OPTION_LINK = re.compile(r"\[[^\]\n]*\]\([^)\n]*\)|https?://[^\s<>()\[\]]+", re.I)
-
-
-def _gate_options(options: Any) -> list[dict[str, Any]] | None:
-    """options as given → the stored list, [] to clear ("none", "clear", "-", or an empty list), None when not passed. Refuses
-    a misshaped list. A JSON string of the list is read as the list (a client that sends every argument as a string)."""
-    if options is None:
-        return None
-    if isinstance(options, str):
-        t = options.strip()
-        if t.lower() in _ASK_NONE or not t:
-            return []
-        try:
-            options = json.loads(t)
-        except ValueError:
-            raise ToolError(f"Refused: options must be a list: {_OPT_FORM}")
-    if not isinstance(options, list):
-        raise ToolError(f"Refused: options must be a list: {_OPT_FORM}")
-    if not options:
-        return []
-    if not _rmod.OPTIONS_MIN <= len(options) <= _rmod.OPTIONS_MAX:
-        raise ToolError(f"Refused: options takes {_rmod.OPTIONS_MIN} to {_rmod.OPTIONS_MAX} entries, got {len(options)}: {_OPT_FORM}")
-    out, seen = [], set()
-    for i, o in enumerate(options, 1):
-        if not isinstance(o, dict):
-            raise ToolError(f"Refused: option {i} is not an object: {_OPT_FORM}")
-        label, line, rec = _svcstore._shown_ids(str(o.get("label") or "").strip()), _svcstore._shown_ids(_unlink_ids(str(o.get("line") or "").strip())), o.get("recommended", False)
-        if isinstance(rec, str):
-            rec = rec.strip().lower() in ("true", "yes", "1")
-        if not label or not line:
-            raise ToolError(f"Refused: option {i} needs a label and a line: {_OPT_FORM}")
-        hit = _OPTION_LINK.search(label + " " + line)
-        if hit:
-            raise ToolError(f"Refused: option {i} ({label}) carries a link ({hit.group(0)[:80]}). An option is a clickable card that selects or unselects, so a link in it shows as raw text and can take the select click: "
-                            f"take the link out of the option and put it in the ask's Decide part, where a mockup goes as {_MOCKUP_ASK}; the option's line says in words what it is.")
-        if any(c in label + line for c in "\r\n\v\f\x85\u2028\u2029"):
-            raise ToolError(f"Refused: option {i} ({label}): its label and line are one line each")
-        if len(label) > _rmod.OPTION_LABEL_MAX:
-            raise ToolError(f"Refused: option {i}'s label is longer than {_rmod.OPTION_LABEL_MAX} characters; put the detail in its line")
-        if len(line) > _rmod.OPTION_LINE_MAX:
-            raise ToolError(f"Refused: option {i} ({label}): its line is longer than {_rmod.OPTION_LINE_MAX} characters; one sentence")
-        if label.lower() in seen:
-            raise ToolError(f"Refused: two options are labelled {label}")
-        seen.add(label.lower())
-        out.append({"label": label, "line": line, "recommended": rec is True})
-    n = sum(o["recommended"] for o in out)
-    if n != 1:
-        raise ToolError(f"Refused: exactly one option is recommended (recommended: true), got {n}")
-    return out
-
-
-# The other decision gates (an ask that names alternatives, an open question, a mockup link, one decision per item, the owner's own action, the two notes) are decision_gates.py's;
-# their names are imported at `_OPT_FORM` above.
 
 
 def _router_live_after(project: str, n: dict[str, Any]) -> None:
@@ -913,353 +627,6 @@ _router_live.configure(is_front=lambda who, project: _telling.front_keeper(who, 
                        after_rule=_router_live_after)
 
 
-def _watch_anchor_seen(project: str, url: str, since: float) -> str:
-    """At wait-set: what anchor-hub already delivered or logged on this anchor since the item's last move (the routing log keeps every notice it recorded for the project; an event
-    it filtered or never bound is not kept), and whether it watches the anchor at all: any project's page that holds the anchor makes it watched, and the log of each such page is read
-    (the item's own page too). → the reply's lines."""
-    out = ""
-    try:
-        pages = _ascope.holders(_anc.load(), url, _watching.same_anchor)
-    except Exception:  # noqa: BLE001
-        pages = [project]
-    if not pages:
-        out += (f"\n(anchor wait: anchor-hub does not watch {url} for {project}, so no notice will arrive: add it with anchors(project=\"{project}\", add=[\"{url}\"]); "
-                "until then the wait ends only at its backstop)")
-    try:
-        rows = sorted((n for pg in dict.fromkeys([project, *pages]) for n in _routing.read(pg, since=since) if n.get("kind") == "anchor" and _watching.same_anchor(str(n.get("anchor") or ""), url)),
-                      key=lambda n: float(n.get("ts") or 0))
-    except Exception as e:  # noqa: BLE001
-        return out + f"\n(anchor wait: the routing log could not be read ({e.__class__.__name__}), so what anchor-hub saw on {url} since the item's last move is not reported)"
-    if rows:
-        out += (f"\n(anchor wait: anchor-hub already recorded {len(rows)} notice{'s' if len(rows) != 1 else ''} on {url} since the item's last move, "
-                f"which this wait does not count; read {'them' if len(rows) != 1 else 'it'} before waiting for more:\n"
-                + "\n".join(f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(n.get('ts') or 0), _wttext.ZONE))} {_clip_line(str(n.get('text') or ''), 160)} ({n.get('ruling') or 'unruled'})" for n in rows[-8:]) + ")")
-    else:
-        out += f"\n(anchor wait: anchor-hub recorded nothing on {url} since the item's last move)"
-    return out
-
-
-def _evw_box_spec(sp: "_ew.Spec") -> "_ew.Spec":
-    """A box_online spec with the machine as the fleet names it; ToolError naming the known machines when it is none, and when it is online now (nothing to wait for: the precedent of a pr_merged wait
-    on a pull request already merged)."""
-    boxes = _evwaits.evw_boxes()
-    hit = boxes.get(sp.machine.lower())
-    if hit is None:
-        known = sorted({f for f, _r in boxes.values()}, key=str.lower)
-        raise ToolError(f"Refused: box_online names a machine of the fleet and {sp.machine!r} is not one" + (f"; the machines are {', '.join(known)}" if known else "; the server knows no machine yet"))
-    fleet, rec = hit
-    if rec and _lv.puller_online(rec):
-        seen, mins = _lv.ts(rec["puller"]), _lv.online_window() / 60.0
-        shown = lambda t: dt.datetime.fromtimestamp(t, _wttext.ZONE).strftime("%Y-%m-%d %H:%M %Z")
-        raise ToolError(f"Refused: {fleet} is online now (its puller last checked in at {shown(seen)}), so there is nothing to wait for. If it is really down, the same write is accepted once {mins:g} minutes have passed since that "
-                        f"check-in, that is after {shown(seen + _lv.online_window())}; otherwise hand the item to the step that follows, or wait for something that has not happened")
-    return _ew.Spec(sp.kind, "", fleet)
-
-
-def _evwait_preread(kind: Any, phrase: Any) -> None:
-    """Before the item lock: the facts an event wait's write gate reads (_evwait_gate), so the gate itself makes no GitHub call and no git log under the lock every other write waits on. A pr_merged
-    wait reads its pull request on GitHub (paced like the done check: checks.pr_merged, kept in _evwaits.EVW_GH); a pr_released wait warms the git answers for the last-good commit. A failure is the gate's
-    case of 'cannot be read': the wait is stored and the catch-up reads it later."""
-    k = str(kind or "").strip().lower()
-    if (k and k != "event") or not str(phrase or "").strip():
-        return
-    try:
-        sp = _watching.event_spec(phrase)
-        if sp.kind == _ew.PR_MERGED:
-            with _gb.tag("event_wait"):
-                _checks.pr_merged(sp.key, time.time(), _evwaits.EVW_GH)
-        elif sp.kind == _ew.PR_RELEASED and sp.key.rpartition("#")[0] != _cfg.canon_repo(_own_repo()):
-            _rlive.foreign_prs(sp.key.rpartition("#")[0])      # a [released.repos] repository: warm the checkout's merges
-        elif sp.kind == _ew.PR_RELEASED:
-            good, head = _rlive.released_live_base()
-            hit = _evwaits.evw_merge(good, _ew.pr_number(sp))
-            if hit:
-                _evwaits.evw_live_why(hit[0], good, head)
-    except Exception:  # noqa: BLE001
-        return
-
-
-def _evwait_gate(old: dict[str, Any], meta: dict[str, Any], creating: bool = False) -> str:
-    """The write guard of an event wait, on the metadata as the write leaves it: when wait_kind or wait_event changed (or on a create) the phrase is parsed and stored in its canonical form, and a wait for
-    something that has already happened is refused, since nothing would ever report it (a PR already live or merged). pr_released is release.sh's (this repository's pull requests) or a [released.repos] repository's (live in its checkout). Where GitHub or the
-    checkout cannot say, the wait is stored. → the reply's lines."""
-    if _watch.stored_kind(meta) != "event":
-        return ""
-    same_wait = not creating and old.get("wait_kind") == meta.get("wait_kind") and old.get("wait_event") == meta.get("wait_event")
-    for f in ("ask_by", "wake"):      # the backstop is a day (it falls due at 00:00 of that day in the instance timezone) or a time: one that is not after now would bring the item back at once
-        v = str(meta.get(f) or "").strip()
-        ep = _watch.day_epoch(v) if v else None
-        if ep is not None and ep <= time.time() and (not same_wait or old.get(f) != meta.get(f)):
-            raise ToolError(f"Refused: {f} {v} is not after now, so the event wait would end the moment it is stored. A day falls due at 00:00 of that day in the instance timezone, so today's date is already past: give a later day (tomorrow at the earliest) or a time later today")
-    if same_wait:
-        return ""
-    try:
-        sp = _watching.event_spec(meta.get("wait_event"))
-    except _ew.EventWaitError as e:
-        raise ToolError(f"Refused: {e}")
-    if sp.kind == _ew.BOX_ONLINE:
-        sp = _evw_box_spec(sp)
-    meta["wait_event"] = _ew.text(sp)
-    n = _ew.pr_number(sp)
-    if sp.kind == _ew.PR_RELEASED:
-        repo = sp.key.rpartition("#")[0]
-        foreign = repo != _cfg.canon_repo(_own_repo())
-        if foreign and _rlive.released_foreign(repo) is None:
-            raise ToolError(f"Refused: pr_released is release.sh's event and release.sh releases only {_own_repo() or 'this repository'}'s pull requests and those of [released.repos] ({_rlive.released_foreign_why()}); wait for {repo}#{n} with pr_merged {repo}#{n}")
-        try:
-            if foreign:
-                good, head = "", ""
-                hit = _rlive.foreign_prs(repo)[1].get(n)       # a merge in the checkout's HEAD is live
-            else:
-                good, head = _rlive.released_live_base()
-                hit = _evwaits.evw_merge(good, n)
-        except ToolError:
-            hit = None                                   # no last-good or HEAD to read: the wait is stored and the catch-up reads it later
-        if hit and (foreign or not _evwaits.evw_live_why(hit[0], good, head)):
-            raise ToolError(f"Refused: PR #{n} is already merged and live, so there is nothing to wait for. Hand the item to the step that follows it, or wait for something that has not happened")
-    elif sp.kind == _ew.PR_MERGED:
-        rec = _evwaits.EVW_GH.get(_checks.check_ref(sp.key)) or {}      # only what _evwait_preread read before the item lock: no GitHub call is made here
-        if rec.get("merged"):
-            raise ToolError(f"Refused: {sp.key} is already merged, so there is nothing to wait for. Hand the item to the step that follows it")
-        if rec.get("dead"):
-            raise ToolError(f"Refused: {sp.key} {rec['dead']}, so it will never merge")
-    who = "the server reads it" if sp.kind in _ew.PR_KINDS else "the server reads the machine's puller check-ins" if sp.kind == _ew.BOX_ONLINE else "the fleet tool reports it at the end of a recycle (client.py recycled)" if sp.kind == _ew.RECYCLE else "the fleet tool reports the end of each op with client.py event" if sp.kind == _ew.FLEET_OP else "it is reported with client.py event"
-    quiet = "" if _ew.live(sp) else (f" Nothing tells the server of this event yet (nothing posts `client.py event` for it); only the PR kinds, box_online, recycle and fleet_op are live today, so this wait turns on its backstop {meta.get('ask_by') or meta.get('wake')}, not on the event.")
-    return f"\n(event wait: the server watches for {_ew.words(_ew.text(sp))}; {who}. The stall pass does not run for it while it is open; the item comes back to its post-wake mover when the event arrives, or on its backstop date if it never does.{quiet})"
-
-
-def _machine_note(gid: str, item: dict[str, Any], keeper: str = "") -> str:
-    """The reply line of a write that leaves an open step naming a machine of the fleet that is offline now, while the item has no machine anchor for it and no box_online wait on it: a note naming the anchors
-    call, never a refusal. A machine is named when a step has its fleet name or a hostname as a whole word (machine_anchor.names_in); only the item's open steps are read; once per write, every machine in one line.
-    "" for a closed item, when nothing is named and when the machines cannot be read (a stderr line)."""
-    if item.get("status") != "open":
-        return ""
-    try:
-        meta = item.get("metadata") or {}
-        texts = [s["text"] for s in _steps.view(meta, keeper=keeper or str(meta.get("owner") or "")) if s["status"] == _steps.OPEN]
-        if not texts:
-            return ""
-        project = str(meta.get("project") or "")
-        have = set(_ma.counts(_ma.load(), gid, project))
-        if _watch.stored_kind(meta) == "event":
-            try:
-                sp = _watching.event_spec(meta.get("wait_event"))
-                if sp.kind == _ew.BOX_ONLINE:
-                    have.add(_evwaits.machine_state(sp.machine)[0].lower() or sp.machine.lower())
-            except _ew.EventWaitError:
-                pass
-        off: dict[str, str] = {}              # an offline machine named by an open step → when it last checked in
-        boxes = _evwaits.evw_boxes()
-        for fleet in sorted({f for f, _r in boxes.values()}, key=str.lower):
-            _f, _since, online, aliases = _evwaits.machine_state(fleet, boxes)
-            if online or fleet.lower() in have or not any(_ma.names_in(t, aliases) for t in texts):
-                continue
-            seen = _lv.ts((boxes[fleet.lower()][1] or {}).get("puller"))
-            off[fleet] = f"last checked in {dt.datetime.fromtimestamp(seen, _wttext.ZONE).strftime('%Y-%m-%d %H:%M %Z')}" if seen else "has not checked in yet"
-        return _ma.missing_note(_gh.shown(gid), project, list(off), off)
-    except Exception as e:  # noqa: BLE001  — the write is saved: a note that fails is a stderr line
-        print(f"machine anchor: {gid} note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return ""
-
-
-def _anchor_wait_gate(old: dict[str, Any], meta: dict[str, Any], gid: str = "", creating: bool = False) -> None:
-    """The write guard of an anchor wait, on the metadata as the write leaves it: a write that sets or changes wait_anchor on a wait_kind=anchor wait names an anchor that must be on the
-    project's list (the anchors tool), else nothing watches it and the wait ends only at its backstop. Listed = scoped to this item (on any project's page) or project-wide on the item's
-    own project page, the same URL by `_watching.same_anchor`. A stored wait re-saved unchanged is not judged, nor is any other wait kind. A create has no id yet, so only a project-wide anchor counts.
-    The anchors file unreadable (present but not a JSON object; a missing file is an empty list): the wait is stored as before, with a stderr line. A wait_anchor that is no anchor shape the
-    anchors tool accepts is refused with that said, not with an add that would be refused too. Raises ToolError naming the anchors call."""
-    if _watch.stored_kind(meta) != "anchor":
-        return
-    url = _model.clean(meta.get("wait_anchor"))
-    if not url:
-        return
-    if not creating and _watch.stored_kind(old) == "anchor" and _model.clean(old.get("wait_anchor")) == url:
-        return
-    project = str(meta.get("project") or "")
-    try:
-        if _anc.FILE.exists():      # anchors.load() turns a corrupt file into {}, which would refuse every anchor
-            with open(_anc.FILE, encoding="utf-8") as f:
-                if not isinstance(json.load(f), dict):
-                    raise ValueError("the anchors file is not a JSON object")
-        store = _anc.load()
-        listed = [e["url"] for e in (_ascope.anchor_scope(store, gid, project) if gid else [])]
-        listed += [e["url"] for e in _ascope.clean_entries(store.get(project)) if e["items"] is None]
-    except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
-        print(f"anchor wait: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return
-    if any(_watching.same_anchor(u, url) for u in listed):
-        return
-    if not _anc.anchor_id(_anc.split_fragment(url)[0]):
-        raise ToolError(f"Refused: wait_anchor {url!r} is not an anchor shape the anchors tool accepts, so it can never be on the list ({_ANCHOR_SHAPES}). "
-                        "Set wait_anchor to a link of one of those shapes, add it to the anchors list, then set the wait")
-    if _anc.gmail_query_problem(url):
-        raise ToolError(f"Refused: wait_anchor {url!r} is a Gmail query the matcher cannot evaluate ({_anc.gmail_query_problem(url)}), so it can never be on the list. {_GMAIL_TERMS}")
-    if creating:
-        fix = (f"add it project-wide first: anchors(project=\"{project}\", add=[\"{url}\"]); or create the item without the wait, "
-               f"then anchors(project=\"{project}\", add=[\"{url}\"], items=[<its id>]), then set the wait")
-    else:
-        fix = f"anchors(project=\"{project}\", add=[\"{url}\"], items=[\"{_gh.shown(gid)}\"]), then set the wait again"
-    raise ToolError(f"Refused: wait_anchor {url} is not on {project or 'the project'}'s anchors list, so nothing watches it and the wait would end only at its backstop. Add the anchor first: {fix}")
-
-
-def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], model_set: dict[str, str], model_drop: set[str], writer: str, session_write: bool) -> str:
-    """What an update owes the watchers, on the metadata as the write leaves it: a session's write ends the shown arrival (`woke`); a wait newly set, or whose awaited date or anchor moved,
-    stamps its time (a notice older than that is not its arrival) and starts the chases over (they were about the old date); a wait cleared drops both. → the reply's lines."""
-    note = ""
-    old = item_was.get("metadata") or {}
-    if session_write:
-        meta.pop("woke", None)
-    kind = _watch.stored_kind(meta)
-    if kind == "event":
-        note += _evwait_gate(old, meta)
-    if not kind:
-        meta.pop("chases", None)
-        if isinstance(meta.get("watch"), dict):
-            w = {k: v for k, v in meta["watch"].items() if k != "set_at"}
-            meta["watch"] = w
-            if not w:
-                meta.pop("watch")
-    elif any(meta.get(k) != old.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "until", "post_wake_mover", "waits", "wait_mode")):
-        w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
-        w["set_at"] = time.time()
-        meta["watch"] = w
-        meta.pop("chases", None)
-        if kind == "anchor" and (meta.get("wait_anchor") != old.get("wait_anchor") or _watch.stored_kind(old) != "anchor") and meta.get("wait_anchor"):
-            since = float(item_was.get("state_updated") or item_was.get("updated") or 0)
-            note += _watch_anchor_seen(str(meta.get("project") or ""), str(meta["wait_anchor"]), since)
-    return note
-
-
-def _watch_close(item: dict[str, Any], reason: str, now: float) -> None:
-    """Close the item as not planned on the owner's answer to a watcher ask ("drop"): the server's own act, as checks.check_close: outcome dropped, the live fields cleared as a session's close clears them."""
-    meta = dict(item.get("metadata") or {})
-    _steps.close_meta(meta, "dropped", NAME, now)       # a close marks the open steps, the server's own close included
-    for k in ("next", "next_by", "owner_step", "ask", "needs", "options", "after", "hold", "hold_set", "wake", "recycle", "recycle_at", "idle", "check", "watch_reason", "waiting", "wait_failed", "wait_basis", "cap_ok", "undelivered",
-              *_states.DROP_ON_CLOSE, *_states.CLOSE_EXTRA, *_model.DROP_ON_CLOSE, *_watch.DROP_ON_CLOSE):
-        meta.pop(k, None)
-    meta["outcome"], meta["reason"] = "dropped", _fit(reason, _close_reason_max())     # the server's own close keeps to the reason limit a session's close is held to
-    item["status"] = "completed"; item["metadata"] = meta
-    item["updated"] = item["state_updated"] = item["confirmed"] = now
-
-
-def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str], now: float) -> str:
-    """The owner's pick on a watcher ask, applied on the metadata `_answer` is leaving (his decision is already out of needs and the ask and options off the item): arrived → the item goes to
-    the session that takes it after the wait (`then`), alive; not yet / keep waiting → the wait is put back with the date he gave; drop → closed as not planned. → what happened, in words."""
-    w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
-    asked = str(w.get("asked") or "")
-    what = _watch.subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})
-    do = eff["do"]
-    if do == "arrived":
-        was_post = _watch.was_picker(w.get("was"))
-        post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
-        _watch.turn_alive(meta, post, f"{OWNER} says {what} arrived", now)
-        meta.pop("chases", None)
-        return f"arrived → {_watching.watch_label(post)}"
-    if do == "words":     # his words with no button: never an arrival or a drop; the post-wake mover has the item, the wait's record (watch.was) and his words, and judges
-        was_post = _watch.was_picker(w.get("was"))
-        post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))
-        keep = w.get("was")
-        _watch.turn_alive(meta, post, f'{OWNER} answered in words: "{_clip_line(eff.get("text") or "", 300)}"', now)
-        meta.pop("options", None); meta.pop("ask", None)
-        if keep:
-            meta["watch"] = {**(meta.get("watch") if isinstance(meta.get("watch"), dict) else {}), "was": keep}
-        return f"answered in words → {_watching.watch_label(post)}"
-    if do == "wait":
-        meta.pop("then", None); meta.pop("woke", None); meta.pop("mover", None)      # before the restore: the wait's own mover (who picks it up) comes back with it and stays
-        _watch.restore_wait(meta, eff["date"], reset_chases=True, now=now)      # a moved date is a new round: the backstop and the chases start over
-        return f"waits again until {eff['date']}"
-    if do == "drop":
-        item["metadata"] = meta
-        _watch_close(item, f"dropped on {OWNER}'s answer on the board: {what} is not waited for any more", now)
-        meta.clear(); meta.update(item["metadata"])
-        return "dropped"
-    return ""
-
-
-def _front_step_mark(gid: str, h: "str | None", now: float, mover: str = "") -> bool:
-    """The front-step rule's clock (front_step.py), written as the server's own bookkeeping (no writer: no activity, no confirm, no notice, no History line). With a step hash `h` and the item's mover:
-    `metadata.stuck_since` = {step, mover, at: now} when the item is open, `h` is still its first open step, the finding still holds against that mover (read again under the lock) and no clock for that step
-    under that mover is there already; with None: the clock is dropped. → whether the item was written."""
-    from stackshot.audit import audit_checks as _ac  # noqa: PLC0415
-    from stackshot.audit import front_step as _fs  # noqa: PLC0415
-    with _writes.ITEM_LOCK:
-        item = _svcstore._load(gid)
-        meta = item.get("metadata")
-        if not isinstance(meta, dict):
-            return False
-        if h is None:
-            if _fs.CLOCK not in meta:
-                return False
-            meta.pop(_fs.CLOCK, None)
-        else:
-            first = _ac.first_open_step(meta)
-            if item.get("status") != "open" or not first or not mover or _fs.step_hash(first) != h or _fs.clock(meta, h, mover) is not None:
-                return False
-            if _fs.still_holds(gid, item, _svcstore._load, mover, now):
-                return False
-            meta[_fs.CLOCK] = {"step": h, "mover": mover, "at": now}
-        _writes.save(gid, item)
-        return True
-
-
-def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, now: float) -> "dict[str, Any]":
-    """The front-step rule's move (front_step.py): the item's first open step, whose hash is `h`, opens with `opener` (a front agent or a retired session) and has had its clock for `hours` hours, is reworded
-    to open with `mover`, the item's mover, through the same pieces an update's reword uses (nextlines.reword, steps.apply, the step's proof), the line now the mover's own. A History line (the stall
-    log) names the original opener, so the step is put back by a reword. Read again under the lock: nothing moves when the item is closed, the step is another or reworded, or the clock is not due. The clock is
-    dropped and the step's hash is kept in `metadata.stuck_moved`, so the step moves once. The server's own write (no writer). → {"moved": bool, "why": str, "line": the step's new first line}."""
-    from stackshot.audit import audit_checks as _ac  # noqa: PLC0415
-    from stackshot.audit import front_step as _fs  # noqa: PLC0415
-    with _writes.ITEM_LOCK:
-        item = _svcstore._load(gid)
-        meta = item.get("metadata")
-        if not isinstance(meta, dict) or item.get("status") != "open":
-            return {"moved": False, "why": "the item is not open"}
-        first = _ac.first_open_step(meta)
-        if not first or _fs.step_hash(first) != h or _steps.opener(first) != opener:
-            return {"moved": False, "why": "the first open step is not the one the clock was kept for"}
-        at = _fs.clock(meta, h, mover)
-        if at is None or now - at < hours * 3600:
-            return {"moved": False, "why": "its clock is not due"}
-        if (why := _fs.still_holds(gid, item, _svcstore._load, mover, now)):
-            return {"moved": False, "why": why}
-        name = _sr._session_label(mover) or mover
-        new_text = _fs.reopen(first, name)
-        if not new_text:
-            return {"moved": False, "why": "the step's first line cannot be reopened with the mover's name"}
-        keeper = str(meta.get("owner") or "")
-        steps_old = _steps.view(meta, keeper=keeper)
-        i = next((k for k, st in enumerate(steps_old) if st["status"] == _steps.OPEN and st["text"] == first), None)
-        if i is None:
-            return {"moved": False, "why": "the step is not on the checklist"}
-        if any(k != i and st["status"] == _steps.OPEN and _steps.key(st["text"]) == _steps.key(new_text) for k, st in enumerate(steps_old)):
-            return {"moved": False, "why": "another open step already reads the same"}
-        if not _nl.reword(meta, first, new_text, keeper, writer=steps_old[i].get("writer") or None, new_writer=_session_id(mover) or mover):
-            return {"moved": False, "why": "the step's line is not in next"}
-        proofs = dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
-        if (pv := proofs.pop(_steps.key(first), None)) is not None:
-            proofs[_steps.key(new_text)] = pv                       # an event that finishes the step still finishes it
-            meta["step_proof"] = proofs
-        steps_old[i] = {**steps_old[i], "text": new_text}
-        meta["steps"] = _steps.stored(_steps.apply(steps_old, str(meta.get("next") or ""), [], [], NAME, now, strict=False, reworded={i: new_text}))
-        meta.pop(_fs.CLOCK, None)
-        meta[_fs.LANDED] = {"step": _fs.step_hash(new_text), "mover": mover, "at": now}       # the hourly audit line counts the mover's quiet time from here, wake or none
-        meta[_fs.MOVED] = [*[x for x in (meta.get(_fs.MOVED) if isinstance(meta.get(_fs.MOVED), list) else []) if x != h], h][-_fs.MOVED_KEEP:]
-        shown = f"{(now - at) / 3600:.1f}".rstrip("0").rstrip(".")
-        _stall.note(meta, now, f"step moved from {_sr._session_label(opener) or opener} to {name} after {shown} hours open with the stuck-elsewhere finding unanswered (reword it back to undo): "
-                    f"\"{_clip_line(_steps.strip_opener(_steps.first_line(first)), 70)}\"")
-        _writes.save(gid, item, note="front step moved to the mover")
-        return {"moved": True, "why": "", "line": _steps.first_line(new_text)}
-
-
-def _filing_deliver(to: str, text: str, fyi: bool = False) -> "tuple[bool, str]":
-    """The ten-minute passes' message (filing and dates), sent from inside the server as a script's message to a session (the same function the `message` route calls); a refusal is a failed delivery, as the route's 400 is."""
-    from stackshot.audit import audit_run as _ar
-    try:
-        return True, _messaging._message(to, text, _ar.SENDER, "server", os.uname().nodename, fyi)
-    except ToolError as e:
-        return False, str(e)
-
-
 def _filing_tick() -> "dict[str, Any] | None":
     """The ten-minute filing pass (audit_run.filing_pass over audit_checks.filing_findings): is each open item filed in the right state? A finding goes to its mover once, as the daily
     audit sends one. Stands still when the audit is off or runs in agent mode (the rollback), like the daily run. The pass also carries the front-step rule (front_step.py): a stuck-elsewhere step held by a front
@@ -1267,7 +634,7 @@ def _filing_tick() -> "dict[str, Any] | None":
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     from stackshot.audit import audit_run as _ar
-    return _ar.filing_pass(env=_ar.Env(deliver=_filing_deliver, step_mark=_front_step_mark, step_move=_front_step_move, wake_park=_wake_park, wait_end=_wait_end_fix, wait_facts=_wait_end_facts))
+    return _ar.filing_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver, step_mark=_wait_gates._front_step_mark, step_move=_wait_gates._front_step_move, wake_park=_wake_park, wait_end=_wait_end_fix, wait_facts=_wait_end_facts))
 
 
 def _dates_expected_tick() -> "dict[str, Any] | None":
@@ -1276,7 +643,7 @@ def _dates_expected_tick() -> "dict[str, Any] | None":
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     from stackshot.audit import audit_run as _ar
-    return _ar.dates_pass(env=_ar.Env(deliver=_filing_deliver), entered=_laddersvc.ladder_enter_quiet if _laddersvc.ladder_on() else None)
+    return _ar.dates_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver), entered=_laddersvc.ladder_enter_quiet if _laddersvc.ladder_on() else None)
 
 
 def _dates_tick() -> "list[str]":
@@ -1311,7 +678,7 @@ def _silence_env() -> Any:
     """The audit passes' environment, built in one place for the hourly line, the idle hand-over, the balancer and the queue reading: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`front_keeper` of `stackshot/service/telling.py`), which is stricter than the
     role map (a project's keeper is not front for its own project; a transcript id resolves). Every pass judges a hand-off by the very answer the others do."""
     from stackshot.audit import audit_run as _ar
-    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _telling.front_keeper(who, project)[0], front_strict=lambda who, project: _telling.front_keeper(who, project, True)[0],
+    return _ar.Env(deliver=_wait_gates._filing_deliver, front=lambda who, project: _telling.front_keeper(who, project)[0], front_strict=lambda who, project: _telling.front_keeper(who, project, True)[0],
                     front_or_unread=lambda who, project: _telling.front_keeper(who, project, unread_front=True)[0])
 
 
@@ -1806,84 +1173,6 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
 # ---- an item's contact (contact.py): the front agent the person the board is for talks to about the item; stored in metadata.contact, a filing field
 
 
-# ----------------------------------------------------------------------------- automatic rulings
-# The turn rule's second build: a green release.sh result is routine, so it is
-# no longer delivered. The server logs it (a routing line marked log_only, no recipient), rules it `merged` itself as
-# AUTO_RULER, and leaves a comment on the open items anchored to the PR. It stays on the project's routing page: the daily digest to the
-# keeper is gone with the old routing. A red result (failed, rolled back) is delivered as before, and a
-# green one that cannot take the log-only path is delivered too.
-# The third build: anchor-hub logs the fleet's own routine PR events the same
-# way ([pilot] own_repos; anchorhub/core.py emit), ruled `merged` by AUTO_RULER. A held item that waits on the anchor is still
-# released by such a line (_wakes.anchor_pass), as a ruling would release it.
-AUTO_RULER = _routing.AUTO_RULER   # "stackshot (auto)", shared with anchor-hub, which rules the fleet's own routine PR events (the third build)
-
-_RELEASE_SENDER = "release"     # release.sh's own label (its tell()); no other sender's message takes the log-only path
-_OWN_REPO: list[str] = []
-
-
-def _own_repo() -> str:
-    """This checkout's GitHub repository, "owner/repo" lower-cased, from its origin remote as release.sh reads it (read once
-    per process); "" when there is none or git cannot say, and then no release result goes log-only."""
-    if not _OWN_REPO:
-        try:
-            url = subprocess.run(["git", "-C", str(_HERE), "remote", "get-url", "origin"], capture_output=True, text=True, timeout=10).stdout.strip()
-        except Exception:  # noqa: BLE001
-            url = ""
-        m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", url)
-        _OWN_REPO.append(m.group(1).lower() if m else "")
-    return _OWN_REPO[0]
-
-
-def _release_green_ok(sender: str, pr: str) -> bool:
-    """Only release.sh's own green report goes log-only: the sender is exactly
-    `release` and `pr` is a pull request of this repository. A green flag from any other sender, or with no PR, a garbage one
-    or another repository's, is delivered as before, so no script can have its message silently logged."""
-    k = _pr_key(pr)
-    own = _cfg.canon_repo(_own_repo())     # k is canonical already (_pr_key): both sides through [github.moved], so origin old / PR new match, and the reverse
-    return sender == _RELEASE_SENDER and bool(k) and bool(own) and k.rsplit("#", 1)[0] == own
-
-
-def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> str | None:
-    """A green release.sh result (POST /client/message with release=green): log-only. The line goes into the project's
-    routing log with no recipient and log_only, is ruled `merged` by AUTO_RULER at once, and the open items anchored to the
-    PR (_pr_items) get the server's comment; it stays on the project's routing page. Nothing is delivered and no page is
-    owed. An item waiting on the PR is untouched here: its `pr_merged` check closes it on the check pass, and that close
-    releases the items `after` it, as any close does. → the reply, or None when this result cannot go log-only (not a page of the
-    registry, not release.sh's own report of a PR of this repo: _release_green_ok), which the caller then delivers as before."""
-    if not _release_green_ok(sender, pr):
-        return None
-    key = to.strip().rstrip("/")
-    if key.endswith(".md"):
-        key = key[:-3]
-    if not re.match(_cfg.page_dirs_re() + "/", key) or key not in _anc.registry():
-        return None
-    if not _anc.pilot_root(key):
-        return None
-    who = f"{sender} (a script on {machine})"
-    gist = _svcstore._shown_ids(text.strip())
-    nid = _routing.record(key, kind="message", to="", label=f"message to {key}", who=who, text=gist, url=pr,
-                          target="project-wide", pilot=True, log_only=True, reason="log-only: a green release")
-    _routing.rule(nid, "merged", reason="log-only: a green release, ruled automatically", by=AUTO_RULER)
-    commented = []
-    note = "released: " + _clip_line(re.sub(r"^\[release\]\s*", "", gist), 400)
-    for g in dict.fromkeys(g for gs in _pr_items([pr]).values() for g in gs):
-        try:
-            _writes.save(g, _svcstore._load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
-            commented.append(g)
-        except Exception as e:  # noqa: BLE001  — a comment that fails never fails the log line
-            print(f"release: {g} not commented: {e}", file=sys.stderr, flush=True)
-    try:
-        _messaging.MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": f"machine:{machine}", "to": key,
-                                "outcome": "log-only", "error": "", "text": gist}, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    _pubmod._publish()
-    return (f"logged, not delivered (a green release is log-only): notice {nid} on {key}, ruled merged by {AUTO_RULER}; it stays on the routing page"
-            + (f"; commented on {', '.join(_gh.shown(g) for g in commented)}" if commented else ""))
-
-
 # ----------------------------------------------------------------------------- MCP surface
 # The FastMCP instance, its middleware, the tools and the routes are web/app.py's `build`; this module hands it the callables they take (late-bound, so a suite that replaces one here still reaches it).
 from stackshot.web import app as _app  # noqa: E402  — the MCP application (web/app.py): FastMCP, the middleware, the tools (web/tools/), the board's sign-in and the routes (web/routes/), registered in that order; what they take from this module is passed late-bound, looked up at each call
@@ -1894,9 +1183,9 @@ mcp = _app.build(
     model_report_line=lambda *a, **k: _model_report_line(*a, **k),
     notice_asked=lambda *a, **k: _notice_asked(*a, **k),
     notice_report=lambda *a, **k: _notice_report(*a, **k),
-    evwait_preread=lambda *a, **k: _evwait_preread(*a, **k),
+    evwait_preread=lambda *a, **k: _wait_gates._evwait_preread(*a, **k),
     sender_not_owner=lambda *a, **k: _owner_words._sender_not_owner(*a, **k),
-    ask_after_write=lambda *a, **k: _ask_after_write(*a, **k),
+    ask_after_write=lambda *a, **k: _asks._ask_after_write(*a, **k),
     update=lambda *a, **k: _update_svc._update(*a, **k),
     wait_alias_gate=lambda *a, **k: _wait_alias_gate(*a, **k),
     busy_live=lambda *a, **k: _busy_live(*a, **k),
@@ -2147,7 +1436,7 @@ def _wait_end_facts() -> "_we.Facts":
         except Exception:  # noqa: BLE001
             return False
     return _we.Facts(machines={k: f for k, (f, _r) in boxes.items()}, online=frozenset(f.lower() for f, r in boxes.values() if r and _lv.puller_online(r)),
-                     own_repo=_cfg.canon_repo(_own_repo()), released=frozenset(a.lower() for r in _cfg.released_repos() for a in _cfg.repo_aliases(r)),
+                     own_repo=_cfg.canon_repo(_relsvc._own_repo()), released=frozenset(a.lower() for r in _cfg.released_repos() for a in _cfg.repo_aliases(r)),
                      item_prs=prs, item_anchors=scoped, anchor_url=takes)
 
 
@@ -2174,7 +1463,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
         return no("no plan")
     facts = _wait_end_facts()
     if op == "event":
-        _evwait_preread("event", plan.get("phrase"))
+        _wait_gates._evwait_preread("event", plan.get("phrase"))
     with _writes.ITEM_LOCK:
         item = _svcstore._load(gid)
         meta = item.get("metadata")
@@ -2237,7 +1526,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 meta["wait_anchor"] = url
                 meta["wait_event"] = _clip_line(plan.get("event"), _model.LINE_MAX)
                 waiting_as("anchor")
-                _anchor_wait_gate(was["metadata"], meta, gid)
+                _wait_gates._anchor_wait_gate(was["metadata"], meta, gid)
                 what = f"anchor wait on {_clip_line(url, 50)}"
             elif op == "proof":
                 if _we.line_hash(_steps.view(meta)[int(plan["pos"]) - 1]["text"]) != tok.rpartition("|")[2]:
@@ -2252,9 +1541,9 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 what = f"until={back}"
             else:
                 meta["wait_anchor"] = str(plan.get("url") or "")
-                _anchor_wait_gate(was["metadata"], meta, gid)
+                _wait_gates._anchor_wait_gate(was["metadata"], meta, gid)
                 what = f"wait_anchor={_clip_line(plan.get('url'), 50)}"
-            _watch_on_write(gid, was, meta, {}, set(), "", False)       # the wait's stamp, and the event wait's gate (a wait for what has already happened is refused)
+            _wait_gates._watch_on_write(gid, was, meta, {}, set(), "", False)       # the wait's stamp, and the event wait's gate (a wait for what has already happened is refused)
             _sf.record(meta, _sf.WAIT_END, tok, _we.history({**plan, "pos": gap.pos}, gap.line, gap.pos, back, _sr._session_label(mover) or mover), now)
             _writes.save(gid, item, note="wait set")
             saved = True
@@ -2879,7 +2168,7 @@ _wake_hooks.install(_wake_hooks.Hooks(
     after_open=_late_in(_item_read, "_after_open"),
     event_activity_tick=_late("_event_activity_tick"),
     follow_superseded=_late_in(_mover_steps, "_follow_superseded"),
-    hand_stored_then=_late("_hand_stored_then"),
+    hand_stored_then=_late_in(_handover, "_hand_stored_then"),
     hold_flag=_late_in(_holders, "_hold_flag"),
     is_held=_late_in(_holders, "_is_held"),
     item_mover_model=_late("_item_mover_model"),
@@ -2887,7 +2176,7 @@ _wake_hooks.install(_wake_hooks.Hooks(
     merge_progress_tick=_late("_merge_progress_tick"),
     model_of=_late_in(_item_read, "_model_of"),
     old_wait_off=_late_in(_item_read, "_old_wait_off"),
-    own_repo=_late("_own_repo"),
+    own_repo=_late_in(_relsvc, "_own_repo"),
     publish=_late_in(_pubmod, "_publish"),
     rmod_confirmed_at=lambda *a, **k: _rmod.confirmed_at(*a, **k),
     rmod_needs_kind=lambda *a, **k: _rmod.needs_kind(*a, **k),
@@ -2970,9 +2259,9 @@ _checks_hooks.install(_checks_hooks.Hooks(
     date_parked=_late_in(_item_read, "_date_parked"),
     hold_flag=_late_in(_holders, "_hold_flag"),
     is_held=_late_in(_holders, "_is_held"),
-    own_repo=_late("_own_repo"),
-    pr_key=_late("_pr_key"),
-    pr_url=lambda: _PR_URL,
+    own_repo=_late_in(_relsvc, "_own_repo"),
+    pr_key=_late_in(_relsvc, "_pr_key"),
+    pr_url=lambda: _relsvc._PR_URL,
     publish=_late_in(_pubmod, "_publish"),
     rmod_needs_kind=lambda *a, **k: _rmod.needs_kind(*a, **k),
     role_name=_late_in(_sr, "_role_name"),
@@ -3011,7 +2300,7 @@ _passes_hooks.install(_passes_hooks.Hooks(
     shown_needs=_late("_shown_needs"),
     stamp_write_op=_late("_stamp_write_op"),
     switchover_on=_late_in(_item_read, "_switchover_on"),
-    watch_on_write=_late("_watch_on_write"),
+    watch_on_write=_late_in(_wait_gates, "_watch_on_write"),
     zone=lambda: _wttext.ZONE,
 ))
 
@@ -3026,9 +2315,25 @@ _foryou_hooks.install(_foryou_hooks.Hooks(
 # What the save steps and the owner's words still reach outside service/ (service/mover_steps.py and service/owner_words.py): the debounced publish of the board, the session id of a name, the audit's broad wait words, the words
 # for a time and the time zone. A hook leaves this table when the area that holds it moves under service/.
 _save_hooks.install(_save_hooks.Hooks(
+    anchor_shapes=lambda: _ANCHOR_SHAPES,
+    answer_deliver=_late("_answer_deliver"),
+    answer_note=_late("_answer_note"),
+    answers_of=lambda *a, **k: _rmod.answers_of(*a, **k),
+    ask_form=lambda: _rmod.ASK_FORM,
+    ask_max=lambda: _rmod.ASK_MAX,
+    ask_none=lambda: _ASK_NONE,
+    audit_mod=lambda name: importlib.import_module(f"stackshot.audit.{name}"),
+    gmail_terms=lambda: _GMAIL_TERMS,
     msg_max=lambda: _wttext.MSG_MAX,
+    option_label_max=lambda: _rmod.OPTION_LABEL_MAX,
+    option_line_max=lambda: _rmod.OPTION_LINE_MAX,
+    options_max=lambda: _rmod.OPTIONS_MAX,
+    options_min=lambda: _rmod.OPTIONS_MIN,
+    options_of=lambda *a, **k: _rmod.options_of(*a, **k),
+    parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
     session_id=_late("_session_id"),
+    unlink_ids=_late("_unlink_ids"),
     wait_words=lambda *a, **k: _ac.wait_words(*a, **k),
     when_words=lambda *a, **k: _rmod.when_words(*a, **k),
     zone=lambda: _wttext.ZONE,
@@ -3039,20 +2344,20 @@ _save_hooks.install(_save_hooks.Hooks(
 # and two constants. A hook leaves this table when the area that holds it moves under service/.
 _create_svc.install(_create_svc.Hooks(
     after_open=_late_in(_item_read, "_after_open"),
-    anchor_wait_gate=_late("_anchor_wait_gate"),
-    ask_owed=_late("_ask_owed"),
+    anchor_wait_gate=_late_in(_wait_gates, "_anchor_wait_gate"),
+    ask_owed=_late_in(_asks, "_ask_owed"),
     contact_default=_late_in(_contacts, "_contact_default"),
-    evwait_gate=_late("_evwait_gate"),
+    evwait_gate=_late_in(_wait_gates, "_evwait_gate"),
     fallback_wait_date=_late("_fallback_wait_date"),
     fmt=_late("_fmt"),
     form_notes=_late("_form_notes"),
-    gate_ask=_late("_gate_ask"),
-    gate_options=_late("_gate_options"),
-    lift_ask=_late("_lift_ask"),
-    machine_note=_late("_machine_note"),
+    gate_ask=_late_in(_asks, "_gate_ask"),
+    gate_options=_late_in(_wait_gates, "_gate_options"),
+    lift_ask=_late_in(_asks, "_lift_ask"),
+    machine_note=_late_in(_wait_gates, "_machine_note"),
     model_guards_on=_late_in(_item_read, "_model_guards_on"),
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
-    next_put=_late("_next_put"),
+    next_put=_late_in(_asks, "_next_put"),
     owed_mark=_late("_owed_mark"),
     owner_then_default=_late_in(_mover_steps, "_owner_then_default"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
@@ -3504,7 +2809,7 @@ _gates.install(_gates.Hooks(
     after_reaches=_late_in(_mover_steps, "_after_reaches"),
     answers_of=lambda *a, **k: _rmod.answers_of(*a, **k),
     ask_none=_ASK_NONE,
-    ask_stands=_late("_ask_stands"),
+    ask_stands=_late_in(_asks, "_ask_stands"),
     basis_words=_BASIS_WORDS,
     close_refusal=_CLOSE_REFUSAL,
     contact_alive=_late_in(_contacts, "_contact_alive"),
@@ -3523,7 +2828,7 @@ _gates.install(_gates.Hooks(
     model_page=_MODEL_PAGE,
     open_item_named=_late_in(_item_read, "_open_item_named"),
     outcomes=OUTCOMES,
-    own_repo=_late("_own_repo"),
+    own_repo=_late_in(_relsvc, "_own_repo"),
     owner_words_on=_late_in(_owner_words, "_owner_words_on"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     relaunch=_RELAUNCH,
@@ -3544,9 +2849,9 @@ _gates.install(_gates.Hooks(
 # A hook leaves this table when the area that holds it moves under service/.
 _update_svc.install(_update_svc.Hooks(
     after_open=_late_in(_item_read, "_after_open"),
-    anchor_wait_gate=_late("_anchor_wait_gate"),
+    anchor_wait_gate=_late_in(_wait_gates, "_anchor_wait_gate"),
     ask_none=_ASK_NONE,
-    ask_owed=_late("_ask_owed"),
+    ask_owed=_late_in(_asks, "_ask_owed"),
     basis_put=_late_in(_owner_words, "_basis_put"),
     basis_words=_BASIS_WORDS,
     cap_ok_drop=_late_in(_owner_words, "_cap_ok_drop"),
@@ -3557,27 +2862,27 @@ _update_svc.install(_update_svc.Hooks(
     date_only_wait=_late("_date_only_wait"),
     date_parked=_late_in(_item_read, "_date_parked"),
     eff_state=_late_in(_mover_steps, "_eff_state"),
-    evwait_gate=_late("_evwait_gate"),
-    evwait_preread=_late("_evwait_preread"),
+    evwait_gate=_late_in(_wait_gates, "_evwait_gate"),
+    evwait_preread=_late_in(_wait_gates, "_evwait_preread"),
     fallback_wait_date=_late("_fallback_wait_date"),
     finishes_own_line=_late_in(_holders, "_finishes_own_line"),
     fmt=_late("_fmt"),
     form_notes=_late("_form_notes"),
-    gate_ask=_late("_gate_ask"),
-    gate_options=_late("_gate_options"),
+    gate_ask=_late_in(_asks, "_gate_ask"),
+    gate_options=_late_in(_wait_gates, "_gate_options"),
     handoffs_in=_late_in(_agents, "_handoffs_in"),
     hold_held_by=_late("_hold_held_by"),
     hold_set=_late("_hold_set"),
     is_held=_late_in(_holders, "_is_held"),
-    lift_ask=_late("_lift_ask"),
-    machine_note=_late("_machine_note"),
+    lift_ask=_late_in(_asks, "_lift_ask"),
+    machine_note=_late_in(_wait_gates, "_machine_note"),
     main_agent=_late_in(_agents, "_main_agent"),
     model_apply=_late_in(_holders, "_model_apply"),
     model_guards_on=_late_in(_item_read, "_model_guards_on"),
     model_of=_late_in(_item_read, "_model_of"),
     nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     name_on_write=_late_in(_agent_names, "_name_on_write"),
-    next_put=_late("_next_put"),
+    next_put=_late_in(_asks, "_next_put"),
     owed_mark=_late("_owed_mark"),
     owner_quote_on=_late_in(_owner_words, "_owner_quote_on"),
     owner_state_mover=_late_in(_mover_steps, "_owner_state_mover"),
@@ -3607,7 +2912,7 @@ _update_svc.install(_update_svc.Hooks(
     wake_park_line=_late("_wake_park_line"),
     wake_step_note=_late("_wake_step_note"),
     wake_window_note=_late("_wake_window_note"),
-    watch_on_write=_late("_watch_on_write"),
+    watch_on_write=_late_in(_wait_gates, "_watch_on_write"),
     writer_owes=_late_in(_pdebts, "_writer_owes"),
     zone=lambda: _wttext.ZONE,      # looked up when the reply is made, as the confirm tool did before the move
 ))
@@ -3778,7 +3083,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
     if what == "item-facts":
         return _client_item_facts(str(params.get("key") or ""), str(params.get("ids") or ""))
     if what == "answer":                # a script reads the owner's latest board answer on an item (client.py get answer board#N)
-        return _client_answer(str(params.get("key") or ""))
+        return _handover._client_answer(str(params.get("key") or ""))
     if what == "notice":                # a script reads what the router did with a notice (client.py get notice <id>): the text get(item_id=<id>) shows
         nid = _notice_asked("notice " + str(params.get("key") or "").strip())
         if not nid:
@@ -4057,7 +3362,7 @@ def _recycle_wait_pr(project: str, gid: str, anchors: dict[str, Any] | None = No
     (itself, or one in its SALA_RECYCLE_REF_REPOS) and counts any other as live."""
     best, best_at = "", -1.0
     for e in _item_read._scoped_anchors(project, gid, anchors):
-        key = _pr_key(str(e.get("url") or ""))
+        key = _relsvc._pr_key(str(e.get("url") or ""))
         if not key:
             continue
         try:
@@ -4181,36 +3486,6 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
 
 
 _RECYCLE_DUE_LOCK = threading.Lock()
-_PR_URL = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)", re.I)
-
-
-def _pr_key(url: str) -> str:
-    """A GitHub pull request URL → "owner/repo#n" (lower-cased; /files, a query or a fragment after it ignored), or "". The repo goes through
-    [github.moved] (config.canon_repo), so an old-owner URL and a new-owner URL of one pull request give the same key."""
-    m = _PR_URL.search(url or "")
-    return f"{_cfg.canon_repo(m.group(1))}#{m.group(2)}" if m else ""
-
-
-def _pr_items(refs: list[str]) -> dict[str, list[str]]:
-    """The open items an anchor is scoped to, for each PR URL in `refs` → {the anchor's URL: [item ids]}. A project-wide
-    anchor names no item and does not count."""
-    keys = {_pr_key(r) for r in refs if _pr_key(r)}
-    out: dict[str, list[str]] = {}
-    for entries in _anc.load().values():
-        for e in entries:
-            k = _pr_key(str(e.get("url") or ""))
-            if not k or not e.get("items") or k not in keys:
-                continue
-            for g in e["items"]:
-                try:
-                    gid = _norm_id(g)
-                    if _svcstore._load(gid).get("status") == "open" and gid not in out.setdefault(e["url"], []):
-                        out[e["url"]].append(gid)
-                except ToolError:
-                    continue
-    return {u: gs for u, gs in out.items() if gs}
-
-
 def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
     """`client.py recycle-due`: a script
     marks a recycle as due on an existing item, as a session would with update(recycle=true): the item named by id (`item`),
@@ -4223,9 +3498,9 @@ def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
         raise ToolError(f"Refused: name the item that waits for the recycle (--item <id>) or the pull request whose anchored items do (--pr <url>), "
                         f"one of them. recycle-due never files an item; when no item covers the change, {_when_idle()}")
     if pr:
-        if not _pr_key(pr):
+        if not _relsvc._pr_key(pr):
             raise ToolError(f"Refused: --pr takes a GitHub pull request URL (https://github.com/<owner>/<repo>/pull/<n>) — got {pr!r}")
-        gids = [g for gs in _pr_items([pr]).values() for g in gs]
+        gids = [g for gs in _relsvc._pr_items([pr]).values() for g in gs]
         if not gids:
             raise ToolError(f"Refused: no open item is anchored to {pr}. If an item serves it, anchor the PR to that item "
                             f"(anchors(project, add=[url], items=[id])) and run this again; if none does, {_when_idle()}")
@@ -5129,39 +4404,6 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     return 200, {"item": _gh.shown(gid), "marker": marker, "project": str(meta.get("project") or key), "mover": _sr._session_label(mover), "owner": _sr._session_label(owner), "repeat": False}
 
 
-def _answer_line(item: dict[str, Any]) -> str:
-    """The owner's answer on an item as the one line `client.py get answer` prints: `<kind>` TAB `<chosen option's label>` TAB `<text>` TAB
-    `<when>`; "" when he has not answered. It is his newest decision (kind decision: he answered the item, with an option or in words),
-    even when he commented after it; only when he has decided nothing, his newest comment (kind comment). So a later comment never
-    hides a decision, and a caller resumes on a decision only. The label is empty when he picked none, the text's line breaks are " / " and
-    its tabs spaces, and `when` is when he gave it, an ISO time in the instance's timezone (empty when the answer carries none).
-    metadata.answers is oldest first (as in the get tool); the line does not know which question it answers, so a caller files a new item
-    for each question."""
-    ans = _rmod.answers_of(item)
-    if not ans:
-        return ""
-    a = next((x for x in reversed(ans) if x.get("kind") != "comment"), ans[-1])
-    one = lambda v: " / ".join(" ".join(ln.split()) for ln in str(v or "").splitlines() if ln.strip())
-    try:
-        when = dt.datetime.fromtimestamp(float(a["ts"]), _wttext.ZONE).isoformat(timespec="seconds")
-    except (KeyError, TypeError, ValueError, OverflowError, OSError):
-        when = ""
-    return f"{'comment' if a.get('kind') == 'comment' else 'decision'}\t{one(a.get('choice'))}\t{one(a.get('text'))}\t{when}"
-
-
-def _client_answer(key: str) -> tuple[int, str, str]:
-    """`client.py get answer board#N` -> (status, content type, body): the answer line (_answer_line) or an empty body, 404 for an id that
-    names no item."""
-    if not key.strip():
-        return 400, "text/plain", "key = an item id as shown: board#<n>"
-    try:
-        it = _svcstore._load(_norm_id(key))
-    except ToolError as e:
-        return 404, "text/plain", str(e)
-    line = _answer_line(it)
-    return 200, "text/plain; charset=utf-8", line + "\n" if line else ""
-
-
 def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """One write of the client API → (status, JSON). `machine` is the token's, never the body's."""
     if what == "recycled":      # the fleet tool's end-of-recycle hook: the waits-for-recycle field comes off what the recycle covered
@@ -5234,7 +4476,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         to, text, sender = (str(body.get(k) or "") for k in ("to", "text", "sender"))
         if str(body.get("release") or "") == "green" and text.strip() and sender.strip():   # release.sh's green result: log-only (the turn rule's second build)
             try:
-                res = _release_green(to, text, sender.strip(), machine, str(body.get("pr") or ""))
+                res = _relsvc._release_green(to, text, sender.strip(), machine, str(body.get("pr") or ""))
             except Exception as e:  # noqa: BLE001  — what the log-only path cannot do is delivered as before, never lost
                 print(f"release: log-only failed, delivering instead: {e}", file=sys.stderr, flush=True)
                 res = None
@@ -5448,145 +4690,6 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     return told
 
 
-def _hand_to_mover(meta: dict[str, Any], who: str) -> None:
-    """The one place an answer or a Done gives an item to its then-mover (a session, never he): mover = who, `then` cleared, and who is named in needs, first among the sessions, so the pending
-    answer, the notice (notice_to) finds it and not the page's keeper. The decision path and the Done path both call this, so they cannot drift."""
-    sid = _session_id(who)
-    meta["mover"] = who
-    meta.pop("then", None)
-    _needs_store(meta, _canon_needs([sid, *[x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or _session_id(x) != sid]]))
-
-
-def _then_live(then: str, meta: dict[str, Any]) -> bool:
-    """Is `then` a session that can take an item now: a background agent of the item's project, or a session that is live or in the cloud? The one test every hand-over to a stored `then`
-    makes (a decision answer, the end of a wait), so a retired, unknown or free-text name never becomes a mover."""
-    ctx = _mg.Ctx()
-    return bool(ctx.background_of(then, str(meta.get("project") or "")) or ctx.session_state(then) in ("live", "cloud"))
-
-
-def _hand_stored_then(gid: str, item: dict[str, Any], meta: dict[str, Any]) -> bool:
-    """A wait just ended on `meta` (the old wake pass, the release of an `after` link). A `then` stored on the item was waiting for the owner's move, so it takes the item only when that is what
-    the item was: the stored mover is he or absent, no session is named in needs, and with a stored mover he dropped the item reads alive and not his (no decision in needs, no your-call or
-    your-step, no other wait). An item whose stored mover or needs already name an agent is left alone (an agent-set `then` must not take an item from the agent working it), and so is a `then`
-    that is not a live session (_then_live: free text, a retired or unknown name). A `then` left over when this declines is dropped where it follows nobody (the model reads a `then` only while the owner is the mover, so it
-    would only sit unread): when it already is the stored mover or is named in needs, or is not a live session; in any other case (the item still reads as waiting or his) it stays.
-    Then: the stored mover he goes, mover = `then` named first in needs (_hand_to_mover), and the notice the release sends (notice_to reads needs) reaches it. → True when handed."""
-    then = _model.norm_who(meta.get("then"))
-    if not then or _model.is_owner(then):
-        return False
-    if not _then_live(then, meta):
-        meta.pop("then", None)
-        return False
-    mover_s = _model.norm_who(meta.get("mover"))
-    if (mover_s and not _model.is_owner(mover_s)) or _needs_sessions(meta):
-        sid = _session_id(then)
-        if (mover_s and _session_id(mover_s) == sid) or any(_session_id(x) == sid for x in _needs_sessions(meta)):
-            meta.pop("then", None)      # the `then` already is the mover or is named in needs: it follows nobody
-        return False
-    probe = {k: v for k, v in meta.items() if k != "mover"}
-    mod = _item_read._model_of({**item, "gid": gid, "metadata": probe})
-    if mod.state != _model.ALIVE or _model.is_owner(mod.mover):
-        return False
-    meta.pop("mover", None)
-    _hand_to_mover(meta, then)
-    return True
-
-
-def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parked: bool = False, waiting: bool = False, now: float = 0.0) -> str:
-    """His decision is in (decision already out of needs, your-call ended): the item leaves his hands, as a Done does on a step. With a stored `then` (a session, not he) the
-    item goes to it at once (_hand_to_mover: mover = then, `then` cleared, named first in needs).
-    A `then` that is no live session (_then_live: free text, retired, unknown) is dropped first, and the item takes the no-`then` path below.
-    With no `then`, a stored mover that is he is dropped, so the item reads as it does when nothing is stored: the first session in needs, else the project's builder or -main agent (the model's default `then`).
-    An item that still reads as waiting after the answer (`waiting`; a park, a pick carrying a wake, is one) has no mover: a stored mover that is he goes, and a stored `then` is kept for
-    whoever ends the wait only where the code that ends that wait hands it over. By what the wait is:
-      an open `after` link: `then` stays; _wakes.release_after hands the item to it when the last prerequisite closes (_hand_stored_then), with its usual notice;
-      a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and mover=`then` (the one who picks it up; watch.set_at stamped, as an update does), `then` cleared,
-        so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold. With `[model] watchers = false` no time wait is stored: the park stays as it was, `then`
-        with it, and the old wake pass hands the item to it when the hold ends (_hand_stored_then);
-      `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would sit on the item unread); the wait's own
-        mover (the first session in needs, else the project's builder or -main agent) takes it when it ends. A wait already stored as a watcher's keeps its own post-wake mover.
-    Without this a stored mover=the owner stayed on an item whose state had become doing: "model conflict: mover=the owner on an item whose state is doing", and needs read as the keeper. → who the item was handed to now ("" when to nobody): it is told it is the mover."""
-    then = "" if _model.is_owner(then_in) else then_in
-    if then and not _then_live(then, meta):      # a `then` that is no live session (free text, retired, unknown) takes nothing, here or at the end of a wait: it is dropped and the item falls back to needs or the project's default mover
-        meta.pop("then", None)
-        then = ""
-    if parked or waiting:
-        if _model.is_owner(mover_in):
-            meta.pop("mover", None)
-        if _model.is_owner(then_in):
-            meta.pop("then", None)
-        elif then and not _uw.kind_of(meta):               # no wait stored as a kind (an until alone is a wait on the date, with no kind)
-            if "external" in _needs_kinds(meta):
-                meta.pop("then", None)
-            elif _item_read._after_open(meta):
-                pass
-            elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
-                if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
-                    if _wt.stored_until(meta):
-                        _model.store_picker(meta, then)       # a wait on the date alone stores no kind (until is the whole of it)
-                    else:
-                        meta["wait_kind"] = "time"
-                        _model.store_picker(meta, then)
-                    meta["watch"] = {**(meta["watch"] if isinstance(meta.get("watch"), dict) else {}), "set_at": now or time.time()}
-                    meta.pop("then", None)
-                # [model] watchers = false: no watcher would wake it, so no time wait is stored. The old park stays with `then` on it, and the old wake pass hands the item over when the hold ends (_hand_stored_then)
-            else:
-                meta.pop("then", None)
-        return ""
-    if then:
-        _hand_to_mover(meta, then)
-        return then
-    if _model.is_owner(mover_in):
-        meta.pop("mover", None)
-    if _model.is_owner(then_in):      # a `then` that names him follows nobody: it would read as a conflict once the mover is not he
-        meta.pop("then", None)
-    return ""
-
-
-def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
-    """his Done (his word that his step is done; an empty Send from a page loaded earlier is the same) checks the open steps of the item's checklist that are his, the lines the Your step block shows
-    (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Done is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
-    other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
-    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines."""
-    cl = _steps.view(meta)
-    mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and _steps.is_his(x["text"])]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
-    if not mine:
-        return ""
-    for i in mine:
-        cl[i] = {"text": cl[i]["text"], "status": _steps.DONE, "by": OWNER, "at": now}
-    _nl.prune(meta, [cl[i]["text"] for i in mine], str(meta.get("owner") or ""))
-    meta["steps"] = _steps.stored(cl)
-    return _steps.first_line(cl[mine[0]]["text"])
-
-
-def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "") -> str:
-    """An answer note that has no decision to go with it (the item is closed, or the question it answered has changed) is kept as his comment on the item and told to the mover, as any comment of his
-    is: the board never drops what he wrote. `pick` is the option he sent with it and `why` the words that name it in front of the note ("the item is closed", "the item no longer asks this"). A second
-    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click).
-    → `code`, the notice the page shows (it says the note was kept). The caller holds the item and answer locks."""
-    now = time.time()
-    meta = dict(item.get("metadata") or {})
-    text = f"({why}: {pick}) {note}" if why and pick else note
-    def _ts(a: dict[str, Any]) -> float:
-        try:
-            return float(a.get("ts") or 0)
-        except (TypeError, ValueError):      # a hand-edited record
-            return 0.0
-    for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])[-3:]:
-        if isinstance(a, dict) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
-            return code
-    rec: dict[str, Any] = {"ts": now, "kind": "comment", "text": text, "via": "board"}
-    prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
-    meta["answers"] = [*prior, rec]
-    item["metadata"], item["updated"] = meta, now
-    _writes.save(gid, item, note=_answer_note(rec), author=(OWNER, "board"))
-    item["gid"] = gid
-    told = [t for t in _answer_deliver(gid, item, rec) if t]
-    print(f"answer: {gid} {code}: his note kept as a comment, told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
-    _pubmod._publish()
-    return code
-
-
 def _answer(gid: str, choice: str, text: str, act: str) -> str:
     """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
     and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover (nothing written; `emptynote` is a Send note on a blank box). A step form has two buttons and an optional note box.
@@ -5600,7 +4703,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
     with _writes.ITEM_LOCK, _answers_mod._ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
         item = _svcstore._load(gid)
         if item.get("status") != "open":
-            return _keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
+            return _handover._keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
         meta = dict(item.get("metadata") or {})
         stepped, then, handed, letter, until = False, "", "", "", ""
         if choice:
@@ -5609,7 +4712,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             valid = [f[0] for f in _option_forms(item)] or [o["label"] for o in _rmod.yesno_options(item)]
             if "decision" not in _needs_kinds(meta) or choice not in valid:
                 if "decision" in _needs_kinds(meta) or not isinstance(meta.get(_askl.LEFT), dict):
-                    return _keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this") if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
+                    return _handover._keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this") if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
                 text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
             else:
                 kind = "decision"
@@ -5673,7 +4776,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
-                _check_his_step(meta, rec["step"], now)
+                _handover._check_his_step(meta, rec["step"], now)
             else:                           # N4: his note on the step is his answer too: the server's step is ticked with his words (`→ "…"`); the lines a session wrote stay open for the session that judges them
                 said = _noteread.read(text, _pages.zone_now(), _watch.parse_date)      # what the note says, applied by the server (note_read.py): a note that says he did it, or names a later time
                 if said["until"]:           # "tomorrow evening": his step stays open and the item waits until then, on his words (the park path below); the then-mover is told it is held
@@ -5682,7 +4785,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 else:
                     _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_holders._owner_want(meta), writer=NAME, add=False)
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
-                        _check_his_step(meta, rec["step"], now)
+                        _handover._check_his_step(meta, rec["step"], now)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
             _holders._state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
@@ -5690,7 +4793,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; the owner's words for the wake go with it)
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))      # a needs that named him would read the item as his call again
             if then and not _model.is_owner(then):
-                _hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else notice_to falls back to the page's keeper)
+                _handover._hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else notice_to falls back to the page's keeper)
             if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
                 until = _wakes.parse_wake(until)
                 meta["until"] = until           # the one date the wait ends on (until_write.py); no hold and no wake are stored
@@ -5715,9 +4818,9 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 _owner_words._cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
                             source=f"{OWNER}'s answer on the board, {_rmod.when_words(dt.datetime.fromtimestamp(now, _wttext.ZONE))}")   # "Park until <date>" is his own word for that date
             item["state_updated"] = item["confirmed"] = now
-            effect = _watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop
+            effect = _wait_gates._watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop
             if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
-                handed = _decision_hand_over(meta, mover_in, then_in, parked=bool(parked),
+                handed = _handover._decision_hand_over(meta, mover_in, then_in, parked=bool(parked),
                                     waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
         if askback:                     # the question put back: three days to pick from (watchers.ask_back); the item stays his, needs still names his decision
             meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())

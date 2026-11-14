@@ -200,6 +200,7 @@ check("…and the tag is gone after the call", GB.current() == "", GB.current())
 
 # ---- 5. the server's three callers on one pull request, through their own paths
 from stackshot.web import server
+from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.waits import waiting as _wt
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -210,8 +211,8 @@ from stackshot.web.tools import route as _wt_route
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _wt.cap_needs_owner = lambda: False
 _web_page_debts._refuse_if_owing = lambda debtor: None
-server._OWN_REPO[:] = ["example-owner/stackshot"]
-server._HERE = rlive_svc.HERE = T / "repo"
+released_svc._OWN_REPO[:] = ["example-owner/stackshot"]
+rlive_svc.HERE = T / "repo"
 def gid(i): return f"a{i}"
 def put_item(i, nxt, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing. It lives here. Done when done.", "status": "open",
@@ -225,7 +226,7 @@ PS.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear()
 for f in (T / "state/checks.json", T / "state/step-proof.json"): f.unlink(missing_ok=True)
 checks_svc.CHECK_LAST[0] = 0.0
 F.log.clear(); b0 = dict(by()); t0 = time.time()
-server._evwait_preread("event", f"pr_merged o/r#{PRN}")                                  # the event wait's early read (a request thread)
+wait_gates_svc._evwait_preread("event", f"pr_merged o/r#{PRN}")                                  # the event wait's early read (a request thread)
 checks_svc.check_tick(t0 + 1)                                                                # the done check's pass
 rows = proofs_svc.sweep_proofs(dry=True, save=True)["items"]                                 # the step proof's pass (a dry one reads GitHub and keeps the answers)
 reads_after_window_1 = len(F.requests(PRN))

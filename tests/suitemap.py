@@ -214,7 +214,7 @@ list the tools; a route is no tool. Now (R2):
     wildcard reader of a module (getattr(mod, name) with a name that is not a literal, vars(mod), dir(mod), inspect.getmembers(mod), a module loaded by a path) reads
     every name of that module, the route's function included, so it is selected as before. An attribute read of a name in neither set is not an enumeration, as before.
   * Limits, kept honest: `getattr(mcp, name)` with a name that is not a literal, or vars(mcp) / dir(mcp), on an object that is not a module of ours, gives
-    no key today for tools either (177 non-literal getattr calls in the checkout, most of them forwarders); a literal `getattr(x, "list_tools")` gives
+    no key today for tools either (the checkout has non-literal getattr calls); a literal `getattr(x, "list_tools")` gives
     none either; `from m import *` is no wildcard read (no star import of our modules exists in the checkout). `.routes` also matches any other object's `.routes` (a false positive, wider). A decorator on a method inside a class body is not
     examined, for tools too.
 SUITEMAP_ROUTE_RULE=R1 (R2 by default; any other value is an error, checked when a command starts) gives the old selection: a custom_route binds
@@ -248,7 +248,7 @@ most of them running other methods of Board). Now (C2):
   * Some accesses are no dynamic read: `self.__dict__` and `vars(self)` in a plain method whose first parameter is `self` (an instance's dict holds no class
     attribute), and, on a module object, getattr / setattr / hasattr / delattr, vars, dir, inspect.getmembers and `.__dict__`. A module object is a name that this file binds only by `import x`, `import x as y`, `m = importlib.import_module(...)`,
     `m = __import__(...)` or `m = sys.modules[...]` (or one of those calls written in place); a name bound any other way, anywhere in the file, is not one.
-    A forwarder such as puller.py (`vars(_real)` of an imported module) therefore does not read every attribute of every class.
+    A module that aliases another (`vars(_real)` of an imported module) therefore does not read every attribute of every class.
   * Limits, kept honest: code that reads an attribute by name from the text of a file (a template, a C extension) is not seen (none in the checkout today);
     a method that receives a class as its `self` by hand is taken for an instance; a `self.__dict__` in a class body of its own is the same case. A stdlib
     function that reads an attribute by a name it gets as data, from a place no suite of ours shows, is not seen: `parser.parse_args([], namespace=Cfg())` with a

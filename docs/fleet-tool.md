@@ -31,7 +31,7 @@ and stackshot runs no fleet command. The points of contact:
   form's calls to `/client/projects` and `/client/project*`: [21, the web terminal's project calls](https://github.com/howardpark-ai/salamander/blob/main/docs/stackshot-contracts.md).
 - **Reboots**: `reboot-hooks/stackshot-hook` and `reboot-hooks/anchor-hub-hook`, the participants in the tool's reboot. Contract
   [14, Reboot hooks](https://github.com/howardpark-ai/salamander/blob/main/docs/stackshot-contracts.md#14-reboot-hooks), which points to [reboot-contract.md](https://github.com/howardpark-ai/salamander/blob/main/docs/reboot-contract.md) (version 1, in force).
-- **CLI updates**: after the tool updates the CLI it runs its post-update command (sala's `SALA_POST_UPDATE_CMD`; on the host `python3 <checkout>/publish.py bump`). The `bump_versions` tool is a separate way to do the same refresh by hand. Contract [23, CLI update hook](https://github.com/howardpark-ai/salamander/blob/main/docs/stackshot-contracts.md#23-cli-update-hook), described as `stackshot/web/publish.py bump`.
+- **CLI updates**: after the tool updates the CLI it runs its post-update command (sala's `SALA_POST_UPDATE_CMD`; on the host `python3 <checkout>/stackshot/web/publish.py bump`). The `bump_versions` tool is a separate way to do the same refresh by hand. Contract [23, CLI update hook](https://github.com/howardpark-ai/salamander/blob/main/docs/stackshot-contracts.md#23-cli-update-hook), described as `stackshot/web/publish.py bump`.
 - **Naming**: `fleet.tool_name` (prose only) and `fleet.operator_session` (the session the `sessions` tool names for fleet work). No contract.
 
 Every section linked here is in force. The one proposal in that repository, `session-registry-contract-proposal.md`, is adopted only in

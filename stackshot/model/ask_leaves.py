@@ -2,7 +2,7 @@
 
 An ask that stands on an item is the owner's move. The server removes it from his move in ONE case: its author writes, alone, one plain sentence saying the ask is wrong or moot. A board item the ask
 waits on being dropped only reminds the author, on his next write to the item: a gate is a precondition, not the thing asked, so a dropped gate often makes the ask more live, and only the author can
-tell. Four things are read here, each from what the item already holds; the server's writes are in server.py (`_ask_leave`, `_ask_after_write`).
+tell. Four things are read here, each from what the item already holds; the server's writes are in service/asks.py (`_ask_leave`, `_ask_after_write`).
 
   the record of an ask   `metadata.ask_rec` = {by, at, text}: who wrote the ask, when, and its text. Stamped by `stamp` on every save that changes the ask (the author is the writing session; a
                          server save has none); a new ask also drops `ask_left`, the record of the one taken off. It counts only while its text is the ask's, so a stale record is never read.

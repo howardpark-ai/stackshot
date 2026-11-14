@@ -65,6 +65,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import model as MODEL; from stackshot.waits import server_fixes as SF; from stackshot.waits import wait_end as WE; from stackshot.core import config as CFG; from stackshot.waits import watchers as WATCH
+from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
 from fastmcp.exceptions import ToolError
@@ -79,8 +80,8 @@ ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 telling.front_sender = lambda who: False
-server._evwait_preread = lambda kind, phrase: None                       # no GitHub call
-server._own_repo = lambda: "acme/widgets"
+wait_gates_svc._evwait_preread = lambda kind, phrase: None                       # no GitHub call
+released_svc._own_repo = lambda: "acme/widgets"
 BOXES = {"hp-box": ("hp-box", {}), "hp-up": ("hp-up", {"puller": time.time()})}
 evwaits_svc.evw_boxes = lambda: dict(BOXES)
 from stackshot.fleet import liveness as LV
@@ -334,14 +335,14 @@ check("6 a wake that is a date is the backstop as it stands (nothing to fix)", w
 for p in (T / "store/g").glob("*.json"): p.unlink()
 item(9621, "team-back: wait for the reply in https://github.com/acme/widgets/issues/21")
 anchors_before = (T / "store/anchors.json").read_text()
-real_wow = server._watch_on_write
+real_wow = wait_gates_svc._watch_on_write
 def refusing(*a, **k): raise ToolError("Refused: the wait is refused by a later gate")
-server._watch_on_write = refusing
+wait_gates_svc._watch_on_write = refusing
 try:
     wipe()
     r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
 finally:
-    server._watch_on_write = real_wow
+    wait_gates_svc._watch_on_write = real_wow
 check("6 a gate that refuses after the anchor was added leaves the item as it was", not mt(9621).get("wait_kind") and not mt(9621).get("wait_anchor") and not log(9621) and not SF.mark_tokens(mt(9621), SF.WAIT_END), mt(9621))
 check("6 …and the anchors list as it was", json.loads((T / "store/anchors.json").read_text()) == json.loads(anchors_before), (T / "store/anchors.json").read_text())
 wipe()
@@ -440,13 +441,13 @@ LINK = "https://github.com/acme/widgets/issues/12"
 st = {}; ANC.add(st, "projects/alpha", [LINK], None, by="team-back"); ANC.save(st)
 wide = json.loads((T / "store/anchors.json").read_text())
 item(9721, f"team-back: wait for the reply in {LINK}")
-real_wow = server._watch_on_write
-server._watch_on_write = refusing
+real_wow = wait_gates_svc._watch_on_write
+wait_gates_svc._watch_on_write = refusing
 try:
     wipe()
     r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
 finally:
-    server._watch_on_write = real_wow
+    wait_gates_svc._watch_on_write = real_wow
 check("7 a project-wide anchor already on the list: a refused gate leaves it, and the item as it was", json.loads((T / "store/anchors.json").read_text()) == wide and not mt(9721).get("wait_kind"), mt(9721))
 wipe()
 r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(**FIXING))

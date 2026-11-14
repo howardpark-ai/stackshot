@@ -69,6 +69,8 @@ from stackshot.service import wakes as wakes_svc
 from stackshot.service import writes
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.service import telling
+from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
+from stackshot.service import answer_handover as handover_svc
 from stackshot.fleet import liveness as LV
 from stackshot.web import home
 from stackshot.web import publish as _web_publish
@@ -78,8 +80,8 @@ _web_page_debts._refuse_if_owing = lambda debtor: None
 SENT = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 telling.front_sender = lambda who: False
-server._own_repo = lambda: "acme/widgets"
-server._evwait_preread = lambda kind, phrase: None
+released_svc._own_repo = lambda: "acme/widgets"
+wait_gates_svc._evwait_preread = lambda kind, phrase: None
 evwaits_svc.evw_boxes = lambda: {}
 LV.puller_online = lambda rec: bool(rec)
 (T / "state").mkdir(parents=True, exist_ok=True); (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
@@ -169,11 +171,11 @@ for n, was in ((6, {"post_wake_mover": HELP}), (7, {"mover": HELP})):
                  watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), **was}, "at": now0})
     item(n, subject=f"[zed] was {n}", **ASKED)
     m_ = dict(mt(n))
-    r = server._watch_answer(rd(n), m_, {"do": "arrived", "text": "", "date": ""}, now0)
+    r = wait_gates_svc._watch_answer(rd(n), m_, {"do": "arrived", "text": "", "date": ""}, now0)
     check(f"1 _watch_answer arrived: a snapshot under {key}: the item goes to the agent it names, alive", m_.get("mover") == HELP and m_.get("needs") == [HELP] and HELP in r, (r, m_))
     item(n + 10, subject=f"[zed] was words {n}", **ASKED)
     m_ = dict(mt(n + 10))
-    r = server._watch_answer(rd(n + 10), m_, {"do": "words", "text": "not yet", "date": ""}, now0)
+    r = wait_gates_svc._watch_answer(rd(n + 10), m_, {"do": "words", "text": "not yet", "date": ""}, now0)
     check(f"1 _watch_answer words: a snapshot under {key}: the agent it names has the item", m_.get("mover") == HELP and m_.get("needs") == [HELP] and HELP in r, (r, m_))
 
 # ================================================================ 2. the end of a wait on a date alone
@@ -293,13 +295,13 @@ finally:
 # a decision's hand-over: his answer on an item that now waits (a park, a pick carrying a wake) pops the mover itself
 for label, kw in (("waiting", dict(waiting=True)), ("parked", dict(parked=True))):
     meta_ = {"project": "projects/zedwork", "needs": [BACK], "mover": OWN, "then": BACK, "hold": True, "wake": FUT, "wait_kind": "time"}
-    server._decision_hand_over(meta_, OWN, BACK, now=now0, **kw)
+    handover_svc._decision_hand_over(meta_, OWN, BACK, now=now0, **kw)
     check(f"4 _decision_hand_over ({label}): no stored mover=he is left, and the item reads as waiting with an agent picker", "mover" not in meta_ and model.derive(its(**meta_), now0).state == "waiting", meta_)
 meta_ = {"project": "projects/zedwork", "needs": [BACK], "mover": OWN, "then": OWN, "until": FUT}
-server._decision_hand_over(meta_, OWN, OWN, waiting=True, now=now0)
+handover_svc._decision_hand_over(meta_, OWN, OWN, waiting=True, now=now0)
 check("4 _decision_hand_over: …he as then too: both go", "mover" not in meta_ and "then" not in meta_, meta_)
 meta_ = {"project": "projects/zedwork", "needs": [BACK], "mover": OWN, "then": BACK, "until": FUT}
-server._decision_hand_over(meta_, OWN, BACK, waiting=True, now=now0)
+handover_svc._decision_hand_over(meta_, OWN, BACK, waiting=True, now=now0)
 check("4 _decision_hand_over: a date-only wait with an agent in then stores the picker as `mover` (never the old key), then goes", meta_.get("mover") == BACK and "post_wake_mover" not in meta_ and "then" not in meta_, meta_)
 
 # the watchers' turn to him: a wait that ends on a question to him leaves no stored mover (he is the mover by needs=decision), the agent that picks it up after is `then`
@@ -311,12 +313,12 @@ check("4 turn_to_owner: the stored mover goes, the picker is the then beside him
 item(41, needs=["decision"], ask="Did it arrive?", options=[{"label": "Arrived"}], subject="[zed] relay answered",
      watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), "mover": HELP}, "at": now0}, then=HELP, mover=OWN)
 m_ = dict(mt(41))
-r = server._watch_answer(rd(41), m_, {"do": "wait", "text": "", "date": day(9)}, now0)
+r = wait_gates_svc._watch_answer(rd(41), m_, {"do": "wait", "text": "", "date": day(9)}, now0)
 check("4 _watch_answer (not yet): the wait is back with its own picker as mover, then goes, no stray mover=he", m_.get("mover") == HELP and "then" not in m_ and m_.get("ask_by") == day(9) and "waits again" in r, (r, m_))
 item(42, needs=["decision"], ask="Did it arrive?", options=[{"label": "Arrived"}], subject="[zed] relay arrived", then=HELP, mover=OWN,
      watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), "post_wake_mover": HELP}, "at": now0})
 m_ = dict(mt(42))
-r = server._watch_answer(rd(42), m_, {"do": "arrived", "text": "", "date": ""}, now0)
+r = wait_gates_svc._watch_answer(rd(42), m_, {"do": "arrived", "text": "", "date": ""}, now0)
 check("4 _watch_answer (arrived): the agent has it, alive, no stray mover=he", m_.get("mover") == HELP and m_.get("needs") == [HELP], (r, m_))
 # a decision item parked by his answer through the board's own entry
 item(43, needs=["decision"], mover=OWN, then=BACK, ask="Decide: whether to go ahead \u00b7 Recommend: go \u00b7 Stakes: a day either way \u00b7 By: no date",

@@ -1,11 +1,12 @@
 """anchor-hub — receive change events on a project's anchors and push a one-line notice into the sessions bound to them
-(the session-anchors PRD in the config repo). The hub is anchorhub/core.py; the receivers are anchorhub/{slack,gworkspace,notion,github}.py
+(the session-anchors PRD in the config repo). The hub is stackshot/anchors/anchorhub/core.py; the receivers are stackshot/anchors/anchorhub/{slack,gworkspace,notion,github}.py
 (one module each since an earlier change). Bindings come from the board store (board-data/anchors.json: a project's anchors →
 its name line (`display-name:`), which the router stands in for, + the movers of its open items in scope) plus extra.json in the hub's state dir. Delivery goes through push.py.
 
-  anchor-hub.py            run (systemd user service anchor-hub.service)
-  anchor-hub.py status     print bindings + last events
-  anchor-hub.py bindings   print the materialised anchor → sessions map
+  stackshot anchor-hub            run (systemd user service anchor-hub.service)
+  stackshot anchor-hub status     print bindings + last events
+  stackshot anchor-hub bindings   print the materialised anchor → sessions map
+  stackshot anchor-hub -h         this text (any other word is refused: it never starts a hub)
 """
 import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
@@ -40,6 +41,12 @@ from stackshot.anchors.anchorhub import slack, gworkspace, notion, github
 # ---------- main ----------
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
+    if cmd in ("-h", "--help", "help"):
+        print((__doc__ or "").strip())
+        return
+    if cmd not in ("run", "bindings", "status"):
+        print(f"anchor-hub: unknown command {cmd!r} (run, status or bindings; -h for usage)", file=sys.stderr)
+        sys.exit(2)
     if cmd == "bindings":
         for a, s in sorted(load_bindings().items()): print(f"{a:24} → {', '.join(sorted(s))}")
         return
