@@ -286,9 +286,17 @@ def was_picker(was: dict[str, Any] | None) -> str:
     return _model.stored_picker(was or {})
 
 
+def _picker_as_mover(was: dict[str, Any]) -> dict[str, Any]:
+    """A `was` snapshot with the picker stored as `mover`, whichever key the item (or an older snapshot) held it under: the legacy key, which wins while stored, is folded into `mover` and goes."""
+    legacy = _model.norm_who(was.get(_model.LEGACY_PICKER_KEY))
+    if not legacy or legacy.lower() == "none":      # nothing stored, or the word none under the old key (a session of that name there, nobody under `mover`): kept as stored
+        return was
+    return {**{k: v for k, v in was.items() if k != _model.LEGACY_PICKER_KEY}, "mover": legacy}
+
+
 def remember(meta: dict[str, Any], asked: str, now: float) -> None:
     """The item is about to turn to the owner for a watcher ask: keep the wait's fields (what to put back on "not yet" or "keep waiting") and which ask is up, under metadata.watch."""
-    was = {k: meta[k] for k in WAS_FIELDS if meta.get(k) not in (None, "", [])}
+    was = _picker_as_mover({k: meta[k] for k in WAS_FIELDS if meta.get(k) not in (None, "", [])})
     w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
     w.update({"asked": asked, "was": was, "at": now})
     meta["watch"] = w
@@ -305,10 +313,11 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
     """Put the wait back on the item with a new end date (the owner's "not yet" or "keep waiting"): its fields as they were, the end moved to `date` (a relay's ask-by, the backstop of an
     anchor wait: its ask_by, the old wake dropped). A moved date resets the backstop and (reset_chases) the chases, a new round; a notice older than `now` is not the wait's arrival."""
     w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
-    was = dict(w.get("was") or {})
+    was = _picker_as_mover(dict(w.get("was") or {}))      # a snapshot an older version wrote holds the picker under the legacy key: it is put back as `mover`
     by_until = "until" in was                      # a wait that stood on a stored `until` gets its new end there; one on ask_by gets it there, as it always did
     for k in ("wake", "ask_by", "until"):
         meta.pop(k, None)
+    meta.pop(_model.LEGACY_PICKER_KEY, None)      # the picker comes back as `mover`; an old key still on the item would win it
     for k, v in was.items():
         if k not in ("wake", "ask_by", "until"):
             meta[k] = v

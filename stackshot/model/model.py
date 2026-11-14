@@ -112,6 +112,19 @@ def settle_picker_keys(meta: dict[str, Any], setv: Any, drop: Any, was_waiting: 
         meta.pop("mover", None)
 
 
+def keep_picker(meta: dict[str, Any], picker_was: str, setv: Any, drop: Any) -> None:
+    """After a write that ended an item's wait or hold (clear_wait, clear_hold): the picker the item read as before the write stays the live mover, stored as `mover` with the old key popped, whatever the
+    shape (a wait that still stands, an old plain hold, an agent `mover` beside the old key). A wait or a hold never changes who moves the item; only a `mover` write or a hand-over does. `picker_was` is
+    `stored_picker` of the item as it stood before the write (the one reader's answer, read before the wait's fields went: the old key goes with the wait). The owner is not kept: he picks the item up when
+    the wait ends, and settle_picker_keys has dropped that mover. A write that names the mover (or the old key) itself is left as written."""
+    who = norm_who(picker_was)
+    if not who or is_owner(who) or who.lower() == "none" or "mover" in setv or "mover" in drop or LEGACY_PICKER_KEY in setv:
+        return
+    if norm_who(meta.get("mover")).lower() != who.lower():      # an agent or the owner stored beside the old key loses to the picker the reader answered first
+        meta["mover"] = who
+    meta.pop(LEGACY_PICKER_KEY, None)
+
+
 def _restates_legacy(meta: dict[str, Any], same: Callable[[str, str], bool] | None = None) -> bool:
     """Does the stored `mover` name the very session the stored legacy key names? A write that sets a `mover` equal to the old key restates what the item already says, so it changes nothing (the old key stays).
     The same name in any letter case is the same session; `same` (the caller's, with the fleet's names) also equates a session's id with its name."""

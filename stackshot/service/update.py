@@ -973,6 +973,8 @@ def update_unlocked(
     h.model_apply(meta, str(item.get("status") or ""), model_set, model_drop)   # goal, mover, then and the wait's fields: a filing edit
     _model.settle_picker_keys(meta, model_set, model_drop, was_until or _model.waits_stored(item_was.get("metadata") or {}),
                               _model.waits_stored(meta) or bool(was_until and (meta.get("wake") or meta.get("ask_by"))), _anc.same_session)      # the one save rule (a stored until is unfolded into a wake for this write): a new mover, clear_mover and clear_wait never leave the old key or his pick-up standing
+    if item.get("status") == "open" and (clear_wait or clear_hold) and not (relay_clear_hold and not clear_wait) and not (needs_set or clear_needs or agent.strip()) and not any(x.lower() == "decision" or _model.is_owner(x) for x in _needs_of(meta)):      # an item that waits on his answer is his move, whoever picked it up
+        _model.keep_picker(meta, _model.stored_picker(item_was.get("metadata") or {}), model_set, model_drop)      # clear_wait and clear_hold end the wait, never the hand-over: the picker the item read as before the write stays the mover, whichever key stored it
     if "wait_kind" in model_drop:
         h.wait_end_sent_back(meta, (_we.PR, _we.BOX, _we.URL, _we.STORED))      # clear_wait on a wait the server set from the line's words
         if was_until and not (wake or hold):
