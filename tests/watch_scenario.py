@@ -63,7 +63,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.github import ghsync; from stackshot.model import model
+from stackshot.service import gates; from stackshot.service import checks as checks_svc; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.github import ghsync; from stackshot.model import model
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
@@ -167,10 +167,10 @@ item(19, needs=[BACK], wake=day(-1), watch_reason=REASON)
 wakes_svc.wake_pass()
 check("7 reason: the wake pass firing the wake drops the reason", "wake" not in mt(19) and "watch_reason" not in mt(19), mt(19))
 item(20, needs=[BACK], check="unit_active watchtest.service", watch_reason=REASON)
-server._check_close("a20", server._load("a20"), "unit_active watchtest.service", time.time())
+checks_svc.check_close("a20", server._load("a20"), "unit_active watchtest.service", time.time())
 check("7 reason: a done check closing the item drops it", rd(20)["status"] == "completed" and "watch_reason" not in mt(20), mt(20))
 item(21, needs=[BACK], check="unit_active watchtest.service", watch_reason=REASON)
-server._check_fail("a21", server._load("a21"), "unit_active watchtest.service", "the unit was removed", time.time())
+checks_svc.check_fail("a21", server._load("a21"), "unit_active watchtest.service", "the unit was removed", time.time())
 check("7 reason: …and one that fails it", "watch_reason" not in mt(21) and "check" not in mt(21), mt(21))
 
 # ================================================================ ask_by stays allowed from anyone; the retired expected_by is accepted and not stored

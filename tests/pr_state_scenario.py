@@ -1,4 +1,4 @@
-"""Scenario test for pr_state.py, the one reader of a pull request's merged state behind server._pr_merged — fixture data, a fake GitHub on a local
+"""Scenario test for pr_state.py, the one reader of a pull request's merged state behind checks_svc.pr_merged — fixture data, a fake GitHub on a local
 port (with ETags and 304s), no live store, no network.
 
 Covers: the reader on its own (pr_state.merged with a real ghsync client): merged, open, closed without a merge (the record carries `dead`), a refusal
@@ -200,6 +200,7 @@ check("…and the tag is gone after the call", GB.current() == "", GB.current())
 
 # ---- 5. the server's three callers on one pull request, through their own paths
 from stackshot.web import server
+from stackshot.service import checks as checks_svc, proofs as proofs_svc, released_live as rlive_svc
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -207,7 +208,7 @@ server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False
 server._refuse_if_owing = lambda debtor: None
 server._OWN_REPO[:] = ["example-owner/stackshot"]
-server._HERE = T / "repo"
+server._HERE = rlive_svc.HERE = T / "repo"
 def gid(i): return f"a{i}"
 def put_item(i, nxt, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing. It lives here. Done when done.", "status": "open",
@@ -219,11 +220,11 @@ put_item(1, "home-builder: keep going", check=f"pr_merged o/r#{PRN}")           
 put_item(2, f"home-builder: merge https://github.com/o/r/pull/{PRN}")                                              # the step proof (a URL counts anywhere)
 PS.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear()
 for f in (T / "state/checks.json", T / "state/step-proof.json"): f.unlink(missing_ok=True)
-server._CHECK_LAST[0] = 0.0
+checks_svc.CHECK_LAST[0] = 0.0
 F.log.clear(); b0 = dict(by()); t0 = time.time()
 server._evwait_preread("event", f"pr_merged o/r#{PRN}")                                  # the event wait's early read (a request thread)
-server._check_tick(t0 + 1)                                                                # the done check's pass
-rows = server._sweep_proofs(dry=True, save=True)["items"]                                 # the step proof's pass (a dry one reads GitHub and keeps the answers)
+checks_svc.check_tick(t0 + 1)                                                                # the done check's pass
+rows = proofs_svc.sweep_proofs(dry=True, save=True)["items"]                                 # the step proof's pass (a dry one reads GitHub and keeps the answers)
 reads_after_window_1 = len(F.requests(PRN))
 b1 = dict(by())
 check("one window, the three callers on one pull request: one request to GitHub, not three", reads_after_window_1 == 1 and F.requests(PRN) == [200], F.requests(PRN))
@@ -234,26 +235,26 @@ check("…each caller still keeps the record in its own file (checks.json, step-
 check("…the open pull request ticks nothing and closes nothing", rows == [] and json.loads((T / "store/a/1.json").read_text())["status"] == "open", rows)
 F.put(PRN, "merged"); F.log.clear(); b1 = dict(by())
 t1 = PS.known(f"o/r#{PRN}")["next"] + 5                          # five seconds past the stored pace, however long the runner stalled since t0
-server._CHECK_LAST[0] = 0.0
-closed = server._check_tick(t1)
-rows2 = server._sweep_proofs(dry=True, save=True)["items"]
+checks_svc.CHECK_LAST[0] = 0.0
+closed = checks_svc.check_tick(t1)
+rows2 = proofs_svc.sweep_proofs(dry=True, save=True)["items"]
 check("the next window: one more request (the first caller to ask), the PR's merge seen by the done check, and the proof pass finds it without asking again",
       F.requests(PRN) == [200] and closed == [gid(1)] and any(r.get("item") == gid(2) for r in rows2), (F.requests(PRN), closed, rows2))
 b2 = dict(by())
 check("…and that read is counted once, under the done check", delta(b1, b2, "done_check") == 1 and delta(b1, b2, "step_proof") == 0 and delta(b1, b2, "event_wait") == 0, (b1, b2))
-check("server._pr_merged is the reader's entry: same signature, same (merged, error) pair, the PR by its current name",
-      server._pr_merged(f"o/r#{PRN}", t1 + 1, {}) == (True, "") and len(F.requests(PRN)) == 1, F.requests(PRN))
+check("checks_svc.pr_merged is the reader's entry: same signature, same (merged, error) pair, the PR by its current name",
+      checks_svc.pr_merged(f"o/r#{PRN}", t1 + 1, {}) == (True, "") and len(F.requests(PRN)) == 1, F.requests(PRN))
 class _Spy:
     repo_id = 0
     def repo_path(self, rest=""): return "/repos/o/r" + rest
     def request(self, *a, **k): raise AssertionError("no read expected")
-_cg = server._check_gh; server._check_gh = lambda repo: _Spy()
+_cg = checks_svc.check_gh; checks_svc.check_gh = lambda repo: _Spy()
 try:
-    server._pr_merged(f"o/r#{PRN}", t1 + 2, {}); spy_ok = True
+    checks_svc.pr_merged(f"o/r#{PRN}", t1 + 2, {}); spy_ok = True
 except AssertionError:
     spy_ok = False
 finally:
-    server._check_gh = _cg
-check("server._pr_merged goes through server._check_gh at call time (a stub in its place is used) and a fresh shared record needs no client", spy_ok, None)
+    checks_svc.check_gh = _cg
+check("checks_svc.pr_merged goes through checks_svc.check_gh at call time (a stub in its place is used) and a fresh shared record needs no client", spy_ok, None)
 
 print(("ok" if not fails else "FAILED") + f": pr_state scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

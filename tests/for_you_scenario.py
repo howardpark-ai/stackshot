@@ -90,6 +90,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.service import checks as checks_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import complete as _wt_complete
@@ -233,7 +234,7 @@ check("(d) a close by another session: the front agent owner still gets its one 
 CHK = "item_closed a99"
 item(92); item(93); item(94, owner="Oliver"); item(95, owner="an-outside-party"); item(96)
 fy.set_flag("a93", "mute")
-p0 = len(pushes()); server._check_close("a92", server._load("a92"), CHK, time.time()); settle()
+p0 = len(pushes()); checks_svc.check_close("a92", server._load("a92"), CHK, time.time()); settle()
 check("done check: its close tells the front agent owner at once, one marked line, the same shape as a session's close with the check as the closer",
       len(to_owner(A, "a92", p0)) == 1 and to_owner(A, "a92", p0)[0].startswith("[for Oliver] [stackshot] a92 [home] item 92: closed by stackshot's done check: done (done check passed: ")
       and to_owner(A, "a92", p0)[0].endswith(f") \u2192 {BOARD}/items/a92"), pushes()[p0:])
@@ -242,14 +243,14 @@ PRESENT[0] = False; item(67, needs=["osprey-x"]); p0 = len(pushes()); n0 = len(r
 check("Oliver not there for the pane: a close tells the front agent owner nothing, the reply still names it, and the routing log holds a line ruled `held` for it",
       not to_owner(A, "a67", p0) and rd(67)["status"] == "completed"
       and [n for n in routing.read("projects/alpha")[n0:] if n.get("ruling") == "held" and "a67" in str(n.get("label", "")) + str(n.get("text", ""))], (pushes()[p0:], routing.read("projects/alpha")[n0:], outh))
-p0 = len(pushes()); server._check_close("a93", server._load("a93"), CHK, time.time()); settle()
+p0 = len(pushes()); checks_svc.check_close("a93", server._load("a93"), CHK, time.time()); settle()
 check("…a muted item: the owner is not told", not to_owner(A, "a93", p0), pushes()[p0:])
-p0 = len(pushes()); server._check_close("a94", server._load("a94"), CHK, time.time()); server._check_close("a95", server._load("a95"), CHK, time.time()); settle()
+p0 = len(pushes()); checks_svc.check_close("a94", server._load("a94"), CHK, time.time()); checks_svc.check_close("a95", server._load("a95"), CHK, time.time()); settle()
 check("…the owner Oliver, or a name that is no session: nobody is marked for it", not [x for x in pushes()[p0:] if ("a94" in x[1] or "a95" in x[1]) and "[for Oliver]" in x[1]], pushes()[p0:])
 # the other small gaps: [board] tell_owner off, and an owner that is Oliver or no session, on a close and on a handed-back step
 _cfg.CFG.setdefault("board", {})["tell_owner"] = False
 item(97, needs=["osprey-x"], next="osprey-x: only"); item(98, needs=["external", "osprey-x"])
-p0 = len(pushes()); server._check_close("a96", server._load("a96"), CHK, time.time()); out = cl(97); outh = server._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
+p0 = len(pushes()); checks_svc.check_close("a96", server._load("a96"), CHK, time.time()); out = cl(97); outh = server._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
 check("tell_owner off: a done check's close, a session's close and an item back with the owner alone tell the front agent owner nothing", not [x for x in pushes()[p0:] if x[0] == A and re.search(r"a9[678]\b", x[1]) and x[1].startswith("[for Oliver]")]
       and "told at once" not in out + outh, (pushes()[p0:], out, outh))
 _cfg.CFG["board"]["tell_owner"] = True
@@ -276,7 +277,7 @@ d11 = of("a11", "decision"); check("a11's decision row is there", len(d11) == 1)
 server._update("a1", status="open", next="osprey-x: one more thing", sender="osprey-x")
 check("a reopen of a watched item: a reopened row", len(of("a1", "reopened")) == 1 and of("a1", "reopened")[0]["what"].startswith("reopened by osprey-x"), of("a1"))
 it21 = server._load("a21"); n21 = len(of("a21"))
-server._check_fail("a21", it21, "pr_merged https://example.invalid/pr/1", "the pull request was closed unmerged", time.time())
+checks_svc.check_fail("a21", it21, "pr_merged https://example.invalid/pr/1", "the pull request was closed unmerged", time.time())
 c21 = of("a21", "check_failed")
 check("a check that can no longer pass: a check_failed row naming it and why", len(c21) == 1 and "can no longer end: the pull request was closed unmerged" in c21[0]["what"], c21)
 check("an unrelated save of the same item makes no second one", (server._update("a21", next="osprey-x: again", sender="osprey-x"), len(of("a21", "check_failed")))[1] == 1, of("a21"))

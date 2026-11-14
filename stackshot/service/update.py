@@ -44,8 +44,10 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
+from stackshot.service import checks as _checks
 from stackshot.service import gates as _gates
 from stackshot.service import handoff as _handoff
+from stackshot.service import proofs as _proofs
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _shown_ids
@@ -84,7 +86,6 @@ class Hooks:
     basis_words: str                  # how the wait_basis gate names what a park waits on (server._BASIS_WORDS)
     cap_ok_drop: Callable[..., Any]
     cap_ok_put: Callable[..., Any]
-    check_how: str                    # the forms of a done check (server._CHECK_HOW)
     contact_alive: Callable[..., Any]
     contact_fronts: Callable[..., Any]
     contact_same: Callable[..., Any]
@@ -112,7 +113,6 @@ class Hooks:
     gate_recommend_stance: Callable[..., Any]
     gate_subject: Callable[..., Any]
     handoffs_in: Callable[..., Any]
-    handover: Callable[..., Any]
     hold_held_by: Callable[..., Any]
     hold_set: Callable[..., Any]
     is_held: Callable[..., Any]
@@ -133,7 +133,6 @@ class Hooks:
     owner_state_mover: Callable[..., Any]
     owner_then_default: Callable[..., Any]
     owner_want: Callable[..., Any]
-    parse_check: Callable[..., Any]
     parse_wake: Callable[..., Any]
     publish: Callable[..., Any]
     record_fixes: Callable[..., Any]
@@ -150,8 +149,6 @@ class Hooks:
     session_roster: Callable[..., Any]
     state_apply: Callable[..., Any]
     state_end: Callable[..., Any]
-    step_proof_prune: Callable[..., Any]
-    step_proof_set: Callable[..., Any]
     store_ref: Callable[..., Any]
     switchover_on: Callable[..., Any]
     update: Callable[..., Any]
@@ -883,7 +880,7 @@ def update_unlocked(
     chk_new = bool(chk) and chk.lower() not in h.ask_none
     clear_check = clear_check or chk.lower() in h.ask_none      # check="none" or clear_check=true removes it, like needs, due and wake (an older tool list may lack clear_check); check="" is "not passed", as needs="" is
     if chk_new:                                                # a new check beside clear_check replaces the old one, as a new needs beside clear_needs does
-        meta["check"] = h.parse_check(chk, gid)
+        meta["check"] = _checks.parse_check(chk, gid)
     elif clear_check:
         meta.pop("check", None)
     handed: list[str] = []
@@ -891,7 +888,7 @@ def update_unlocked(
         handed = _handoff_to(item.get("metadata") or {}, meta, next, sender.strip() or own_for)
         if handed and not meta.get("check") and not meta.get("wake") and not _telling.front_sender(sender):     # a front agent's hand-off asks for neither: the mover's close lands the result, and its own wake or check is refused below
             raise ToolError(f"Refused: this update hands {_gh.shown(gid)} to {', '.join(handed)} (a line of next in the form `<session>: <action>`) and nothing "
-                            f"would close the item once that work is done. Add check=<what closes it> ({h.check_how}): the server then closes it when the check passes, no session turn spent. "
+                            f"would close the item once that work is done. Add check=<what closes it> ({_checks.CHECK_HOW}): the server then closes it when the check passes, no session turn spent. "
                             f"Only when no check fits, add a date, wake=YYYY-MM-DD (or until=, YYYY-MM-DDTHH:MM, {_cfg.tz_abbr()}), as the backstop of this hand-off: because the write hands the item on, the date is no wait, the item stays active in the new mover's lane and the hand-off is recorded (the same date with no hand-off is a wait, and the item waits until then). "
                             "(A front agent's hand-off is not asked for either: its mover's close or hand-back lands the result through stackshot.) "
                             "Pass the same update again with the check, or with the date alone if none fits. "
@@ -1044,9 +1041,9 @@ def update_unlocked(
         meta.pop("step_proof", None)
     elif steps_on:                                              # the proofs of this checklist's open steps: a call's step_proof sets them, a step that left the list takes its proof along
         if step_proof is not None:
-            steps_note += h.step_proof_set(meta, steps_new if steps_new is not None else steps_old, step_proof)
+            steps_note += _proofs.step_proof_set(meta, steps_new if steps_new is not None else steps_old, step_proof)
         elif steps_new is not None:
-            steps_note += h.step_proof_prune(meta, steps_new)
+            steps_note += _proofs.step_proof_prune(meta, steps_new)
         if steps_new is not None:
             _gates.gate_step_gap(meta, steps_new, steps_old)         # a step that delivers a pull request, followed by another session's step, needs its proof
     elif step_proof is not None:
@@ -1286,10 +1283,10 @@ def _completion_anchor_prompt(gid: str, item: dict[str, Any]) -> str:
 
 
 def _handover_by_hand(gid: str, done: list[str]) -> str:
-    """The reply line of an update that marked steps done: _handover for the item, a failure a stderr line and no line. A write that names the mover or needs itself makes its own hand-off and never reaches this."""
+    """The reply line of an update that marked steps done: proofs.handover for the item, a failure a stderr line and no line. A write that names the mover or needs itself makes its own hand-off and never reaches this."""
     h = _hooks()
     try:
-        ho = h.handover(gid, time.time(), done)
+        ho = _proofs.handover(gid, time.time(), done)
     except Exception as e:  # noqa: BLE001  — the write is saved: a hand-over that fails is a stderr line, and the audit finds the next session unreached
         print(f"handover: {gid} not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""

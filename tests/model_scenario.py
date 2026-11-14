@@ -62,6 +62,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
+from stackshot.service import checks as checks_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
@@ -267,7 +268,7 @@ server._update("a20", sender="home-other", next="home-other: do the thing")
 check("filing: ...the control: a plain write of next by that background agent does name it", len(mt(20)["needs"]) == 2, mt(20))
 # a done-check close drops what a session's close drops
 item(21, needs=[BACK], subject="[home] check close", goal="Closed by its check", mover="team-back", then="home-front", wait_kind="anchor", wait_anchor="https://x/pull/1", wait_event="merged", ask_by=FUT, post_wake_mover="team-back", check="item_closed a3")
-server._check_close("a21", server._load("a21"), "item_closed a3", time.time())
+checks_svc.check_close("a21", server._load("a21"), "item_closed a3", time.time())
 m = mt(21)
 check("check close: the mover, then and the wait are dropped, the goal stays, the item is closed", rd(21)["status"] == "completed" and m["goal"] == "Closed by its check" and not any(k in m for k in model.DROP_ON_CLOSE) and m["outcome"] == "done", (rd(21)["status"], m))
 check("check close: ...the check close is a server save: the last real writer stays and nothing is added", "written_by_server" not in rd(21), rd(21))

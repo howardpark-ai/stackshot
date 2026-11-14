@@ -117,13 +117,14 @@ def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 
 from stackshot.web import server
+from stackshot.service import proofs as proofs_svc, released as released_svc, released_live as rlive_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
-server._HERE = T / "repo"
+server._HERE = rlive_svc.HERE = T / "repo"
 check("the last-good path is release.sh's ($LOGDIR/last-good, LOGDIR = config.py state releases)", server._cfg.state("releases", "last-good") == LAST_GOOD)
 # the delivery path is the real one: tell_woken → the front gate → push.py (a fake that logs what it was asked to send)
 PUSHLOG = T / "push.log"
@@ -147,7 +148,7 @@ check("home-builder is a front agent, so the notices below go through the front 
 
 # ---- 1. release.sh's call: main's full run passed on the merge of PR #41 and it is in last-good
 before = snap()
-r = server._released(PR, sha=M[41])
+r = released_svc.released(PR, sha=M[41])
 rows = {x["item"]: x for x in r["items"]}
 it1 = rd(1)
 check("only open step is the release: completed, outcome done, the reason naming the PR, its merge and last-good",
@@ -211,14 +212,14 @@ check("no notice for the left-alone or untouched items", not any(pushes_for(gx) 
 
 # ---- 2. idempotent: a rerun of released, then the sweep, sends nobody a second notice for PR #41
 p0 = len(pushes())
-r = server._released(PR, sha=M[41])
+r = released_svc.released(PR, sha=M[41])
 check("released again: nothing closed or ticked, the told item is left with why, no second notice",
       not [x for x in r["items"] if x["action"] in ("closed", "ticked", "told")] and len(pushes()) == p0
       and {x["item"]: x["why"] for x in r["items"]}.get("a6") == "its mover was told already that PR #41 is live", (r, pushes()[p0:]))
-d = server._sweep_released()
+d = released_svc.sweep_released()
 check("the sweep after it: closes #43's item, sends no second notice for #41", rd(10)["status"] == "completed"
       and not [p for p in pushes()[p0:] if "PR #41" in p[1]], (d, pushes()[p0:]))
-d = server._sweep_released()
+d = released_svc.sweep_released()
 check("the sweep again: nothing more, nobody told", not [x for x in d["items"] if x["action"] in ("closed", "ticked", "told")] and not pushes()[p0:], (d, pushes()[p0:]))
 
 # ---- 3. live means passed: the API refuses before writing anything
@@ -230,19 +231,19 @@ for name, pr, sha, want in (("a PR that is not merged", url(44), NOT_MERGED, "PR
                             ("a merge not yet in last-good (main's run going)", url(45), M[45], f"is not in the last-good commit {M[43][:7]} yet"),
                             ("a URL of another repository", "https://github.com/someone-else/other/pull/41", M[41], "pull request URL of this repository"),
                             ("no URL", "", M[41], "pull request URL of this repository")):
-    try: server._released(pr, sha=sha); check(f"refused: {name}", False)
+    try: released_svc.released(pr, sha=sha); check(f"refused: {name}", False)
     except server.ToolError as e: check(f"refused: {name}", want in str(e) and str(e).startswith("Refused:"), str(e))
 check("…and none of them wrote or told anything", not same(s0) and len(pushes()) == p0, (same(s0), pushes()[p0:]))
 LAST_GOOD.unlink()
-try: server._released(PR, sha=M[41]); check("refused: no last-good recorded", False)
+try: released_svc.released(PR, sha=M[41]); check("refused: no last-good recorded", False)
 except server.ToolError as e: check("refused: no last-good recorded", "no last-good commit is recorded" in str(e), str(e))
-try: server._sweep_released(); check("the sweep refused: no last-good recorded", False)
+try: released_svc.sweep_released(); check("the sweep refused: no last-good recorded", False)
 except server.ToolError as e: check("the sweep refused: no last-good recorded", "no last-good commit is recorded" in str(e), str(e))
 good(M[43])
 check("…nothing written", not same(s0))
 
 # ---- 4. the sweep before last-good holds the merge: #45's item stays open; dry run first
-d = server._sweep_released(dry=True)
+d = released_svc.sweep_released(dry=True)
 acts = {(x["item"], x["pr"]): x["action"] for x in d["items"]}
 check("dry run: lists what it would close, tick, tell and leave, for the merges in last-good only",
       acts == {("a1", 41): "closed", ("a2", 41): "ticked", ("a3", 41): "left", ("a4", 41): "left", ("a6", 41): "told", ("a9", 41): "closed",
@@ -250,7 +251,7 @@ check("dry run: lists what it would close, tick, tell and leave, for the merges 
                ("a16", 41): "told", ("a17", 41): "told", ("a18", 41): "told", ("a19", 41): "told", ("a20", 41): "closed", ("a21", 41): "told",
                ("a25", 41): "ticked", ("a26", 41): "ticked", ("a27", 41): "closed"} and d["good"] == M[43] and d["head"] == M[45], (acts, d.get("good"), d.get("head")))
 check("dry run: writes nothing and tells nobody", not same(s0) and len(pushes()) == p0, (same(s0), pushes()[p0:]))
-d = server._sweep_released()
+d = released_svc.sweep_released()
 check("the real sweep: the merge after last-good (#45, main's run going) closes nothing", raw(11) == s0[11] and not [x for x in d["items"] if x.get("pr") == 45], d)
 check("…the merges in last-good settle as release.sh's call would", rd(1)["status"] == "completed" and rd(10)["status"] == "completed" and rd(13)["status"] == "open"
       and raw(12) == s0[12] and raw(8) == s0[8], d)
@@ -259,9 +260,9 @@ check("…the closes tell nobody; the ticks and the same-line follow-up tell the
 # ---- 5. a rollback closes nothing: last-good names #45's merge, but the checkout went back before it
 fixtures(); p0 = len(pushes()); s0 = snap()
 good(M[45]); g("reset", "-q", "--hard", M[43])
-try: server._released(url(45), sha=M[45]); check("refused: a merge rolled back out of HEAD", False)
+try: released_svc.released(url(45), sha=M[45]); check("refused: a merge rolled back out of HEAD", False)
 except server.ToolError as e: check("refused: a merge rolled back out of HEAD", f"is not in the live checkout {M[43][:7]} (rolled back)" in str(e), str(e))
-d = server._sweep_released()
+d = released_svc.sweep_released()
 check("the sweep after a rollback: #45's item stays as it was", raw(11) == s0[11] and not [x for x in d["items"] if x.get("pr") == 45], d)
 g("reset", "-q", "--hard", M[45]); good(M[43])
 
@@ -314,7 +315,7 @@ def ffix():
 def fsnap(): return {i: raw(i) for i in FOREIGN}
 def fsame(s0): return [i for i in s0 if raw(i) != s0[i]]
 ffix(); f0 = fsnap(); p0 = len(pushes())
-try: server._released(surl(7), sha=SIBM[7]); check("refused: a sibling PR with no [released.repos] at all", False)
+try: released_svc.released(surl(7), sha=SIBM[7]); check("refused: a sibling PR with no [released.repos] at all", False)
 except server.ToolError as e: check("refused: a sibling PR with no [released.repos] at all, saying that none is configured", "pull request URL of this repository" in str(e) and "none is configured" in str(e) and str(e).startswith("Refused:"), str(e))
 check("…nothing written", not fsame(f0))
 server._cfg.CFG["released"] = {"repos": {SIB: {"checkout": str(SC)}}}
@@ -326,10 +327,10 @@ try:
                                 ("a sha that is no sha (a path or an option)", surl(7), "../../etc/passwd", "is not a commit the checkout of example-owner/sibling knows"),
                                 ("a sha that holds no merge of the PR", surl(9), SIBM[7], "is not merged"),
                                 ("no sha and the PR is not in the checkout's log", surl(9), "", "is not merged")):
-        try: server._released(pr, sha=sha); check(f"foreign refused: {name}", False)
+        try: released_svc.released(pr, sha=sha); check(f"foreign refused: {name}", False)
         except server.ToolError as e: check(f"foreign refused: {name}", want in str(e) and str(e).startswith("Refused:"), str(e))
     check("…none of them wrote or told anything", not fsame(f0) and len(pushes()) == p0, (fsame(f0), pushes()[p0:]))
-    r = server._released(surl(7), sha=SIBM[7][:7])
+    r = released_svc.released(surl(7), sha=SIBM[7][:7])
     rows = {x["item"]: x for x in r["items"]}
     check("foreign released: the PR given by URL, by a bare #7 on an item anchored to it, and with a step after it settle as this repository's do",
           rd(30)["status"] == "completed" and rd(31)["status"] == "completed" and rows.get("a30", {}).get("action") == "closed" and rows.get("a31", {}).get("action") == "closed"
@@ -338,22 +339,22 @@ try:
           and "in the checkout at " in rd(30)["metadata"]["reason"] and "main's tests" not in rd(30)["metadata"]["reason"], rd(30)["metadata"])
     check("…the notice to the mover names the PR with its repository", "PR example-owner/sibling#7 is live; its step is ticked" in pushes_for("a34")[0][1] and "main's tests" not in pushes_for("a34")[0][1], pushes_for("a34"))
     check("…a bare #7 on an item not anchored to the sibling's PR is this repository's #7: untouched; the PR that is not deployed stays open", raw(32) == f0[32] and raw(33) == f0[33] and "a32" not in rows and "a33" not in rows, rows)
-    p1 = len(pushes()); r = server._released(surl(7), sha=SIBM[7])
+    p1 = len(pushes()); r = released_svc.released(surl(7), sha=SIBM[7])
     check("foreign released again: nobody is told twice", not [x for x in r["items"] if x["action"] in ("closed", "ticked", "told")] and len(pushes()) == p1, (r, pushes()[p1:]))
     ffix(); f0 = fsnap()
-    r = server._released(surl(7), sha="")
+    r = released_svc.released(surl(7), sha="")
     check("foreign released with no sha: the merge is found in the checkout's log and the items settle", rd(30)["status"] == "completed" and rd(31)["status"] == "completed" and r["sha"] == SIBM[7], (r, rd(30)["status"]))
     ffix(); f0 = fsnap(); p1 = len(pushes())
-    d = server._sweep_proofs()
+    d = proofs_svc.sweep_proofs()
     acts = {x["item"]: x["action"] for x in d["items"] if x.get("kind") == "pr_released"}
     check("the clock's catch-up (a release the call missed): the sibling's PR given by URL, or by a bare #7 on an item anchored to it, is settled; a bare #7 on an unanchored item and a PR not deployed are not",
           acts.get("a30") == "closed" and acts.get("a40") == "closed" and acts.get("a41") == "closed" and acts.get("a34") == "ticked" and "a42" not in acts and "a33" not in acts and "a32" not in acts
           and raw(33) == f0[33] and raw(42) == f0[42] and raw(32) == f0[32], (acts, d["items"]))
     # a step's proof: pr_released for a listed repository is accepted, for another is refused naming the listed ones
     cl = server._steps.view({"next": "home-builder: restart the unit"}, keeper="")
-    meta = {}; note = server._step_proof_set(meta, cl, [{"step": 1, "proof": f"pr_released {SIB}#8"}])
+    meta = {}; note = proofs_svc.step_proof_set(meta, cl, [{"step": 1, "proof": f"pr_released {SIB}#8"}])
     check("step_proof: pr_released for a listed repository's PR is stored", meta.get("step_proof") == {"home-builder: restart the unit": f"pr_released {SIB}#8"} and "step 1 proof: pr_released" in note, (meta, note))
-    try: server._step_proof_set({}, cl, [{"step": 1, "proof": "pr_released other-owner/else#3"}]); check("step_proof: pr_released for an unlisted repository is refused", False)
+    try: proofs_svc.step_proof_set({}, cl, [{"step": 1, "proof": "pr_released other-owner/else#3"}]); check("step_proof: pr_released for an unlisted repository is refused", False)
     except server.ToolError as e: check("step_proof: pr_released for an unlisted repository is refused, naming the listed one and pr_merged", "pr_released is for this repository's pull requests" in str(e) and SIB in str(e) and "use pr_merged" in str(e), str(e))
     # a path is never taken from the client: a body field named checkout changes nothing
     ffix(); f0 = fsnap()
@@ -367,13 +368,13 @@ try:
     drain()
     server._cfg.CFG["github"] = {"moved": {"old-owner/sibling": SIB}}      # a moved repository's name is compared as the other checks do
     try:
-        check("the table is read through [github.moved]: the old name reaches the same checkout", server._released_foreign("Old-Owner/Sibling") == SC, server._cfg.released_repos())
+        check("the table is read through [github.moved]: the old name reaches the same checkout", rlive_svc.released_foreign("Old-Owner/Sibling") == SC, server._cfg.released_repos())
     finally:
         server._cfg.CFG.pop("github", None)
 finally:
     server._cfg.CFG.pop("released", None)
 ffix(); f0 = fsnap()
-try: server._released(surl(7), sha=SIBM[7]); check("with the table gone again the feature is off: refused", False)
+try: released_svc.released(surl(7), sha=SIBM[7]); check("with the table gone again the feature is off: refused", False)
 except server.ToolError as e: check("with the table gone again the feature is off: refused, nothing written", "none is configured" in str(e) and not fsame(f0), str(e))
 drain()
 

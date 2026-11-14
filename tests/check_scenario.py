@@ -115,6 +115,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import checks as checks_svc
 from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -139,7 +140,7 @@ clock = [now0]
 def tick(n=1):
     out = []
     for _ in range(n):
-        clock[0] += 60; out += server._check_tick(clock[0])
+        clock[0] += 60; out += checks_svc.check_tick(clock[0])
     return out
 def st(): return json.loads((T / "state/checks.json").read_text())
 def gets(n): return [p for m, p in F.log if p == f"/repos/o/r/pulls/{n}"]
@@ -172,16 +173,16 @@ check("lane awsplatform, the old word, is stored as aws-platform", rd(1)["metada
 for bad_lane in ("-x", "x-", "a--b", "aws_platform", "Aws-platform"):
     refused(f"lane {bad_lane}: refused", lambda bl=bad_lane: server._update("a1", check=f"lane home-x {bl}", sender="home-owner"), "lane takes a session name and a lane")
 check("a lane check stored before with the old word is shown as aws-platform",
-      server._check_label("lane home-x awsplatform") == "lane home-x aws-platform" and server._check_label("sala_lane home-x awsplatform") == "sala_lane home-x aws-platform"
-      and server._check_label("lane home-x api") == "lane home-x api" and server._check_label("unit_active a.service") == "unit_active a.service", server._check_label("lane home-x awsplatform"))
+      checks_svc.check_label("lane home-x awsplatform") == "lane home-x aws-platform" and checks_svc.check_label("sala_lane home-x awsplatform") == "sala_lane home-x aws-platform"
+      and checks_svc.check_label("lane home-x api") == "lane home-x api" and checks_svc.check_label("unit_active a.service") == "unit_active a.service", checks_svc.check_label("lane home-x awsplatform"))
 refused("lane without a lane", lambda: server._update("a1", check="lane home-x", sender="home-owner"), "lane takes a session name and a lane")
 refused("lane with a lane that is not a lowercase word", lambda: server._update("a1", check="lane home-x API", sender="home-owner"), "lane takes a session name and a lane")
 refused("…with no lane-names file the refusal still names valid lanes (the floor's codes and the plain ones)", lambda: server._update("a1", check="lane home-x API", sender="home-owner"),
         "lane takes a session name and a lane", "; lanes such as aws-platform, subscription-1, subscription-2, api, sdk")
 check("a re-sent old lane word over a stored one is no changed check; another lane, or a cleared check, is",
-      not server._check_changed("lane home-x max", "lane home-x max") and not server._check_changed("lane home-x subscription-1", "lane home-x max")
-      and not server._check_changed("lane home-x max", "lane home-x subscription-1") and not server._check_changed(None, "") and not server._check_changed("unit_active a.service", "unit_active a.service")
-      and server._check_changed("lane home-x api", "lane home-x max") and server._check_changed("", "lane home-x max") and server._check_changed("lane home-y max", "lane home-x max"))
+      not checks_svc.check_changed("lane home-x max", "lane home-x max") and not checks_svc.check_changed("lane home-x subscription-1", "lane home-x max")
+      and not checks_svc.check_changed("lane home-x max", "lane home-x subscription-1") and not checks_svc.check_changed(None, "") and not checks_svc.check_changed("unit_active a.service", "unit_active a.service")
+      and checks_svc.check_changed("lane home-x api", "lane home-x max") and checks_svc.check_changed("", "lane home-x max") and checks_svc.check_changed("lane home-y max", "lane home-x max"))
 server._cfg.CFG["client"]["lanes_file"] = ""
 refused("lane with no lane record configured (no fleet tool)", lambda: server._update("a1", check="lane home-x api", sender="home-owner"), "[client] lanes_file is empty")
 server._cfg.CFG["client"]["lanes_file"] = f"{tmp}/sala/lanes.tsv"
@@ -290,7 +291,7 @@ item(21)
 item(22, after=["a20"], next="after a20")
 told.clear()
 check("a pass with nothing passed closes nothing", tick(1) == [] and rd(20)["status"] == "open")
-check("a pass less than a minute after the last does nothing", server._check_tick(clock[0] + 30) == [])
+check("a pass less than a minute after the last does nothing", checks_svc.check_tick(clock[0] + 30) == [])
 _wt_complete.stackshot_complete("a21", outcome="done", reason="finished", description="- Finished", sender="home-owner")
 told.clear()
 closed = tick(1)
@@ -333,38 +334,38 @@ check("_owner_words: a board answer (text or choice) alone is none; a said entry
 calls = []
 def unit_run(argv):
     calls.append(list(argv)); return UNIT[0]
-server._unit_run = unit_run
+checks_svc.unit_run = unit_run
 UNIT = ["LoadState=loaded\nActiveState=inactive\n"]
 item(23, check="unit_active stackshot.service", next="team-back: install it")
 check("inactive: not closed, no error; the argv carries -- before the unit", tick(1) == [] and rd(23)["status"] == "open" and st()["items"]["a23"]["err"] == ""
       and calls == [["systemctl", "--user", "show", "-p", "LoadState", "-p", "ActiveState", "--", "stackshot.service"]], (st(), calls))
 UNIT[0] = "LoadState=not-found\nActiveState=inactive\n"
 check("not found: an error, never a close", tick(1) == [] and rd(23)["status"] == "open" and st()["items"]["a23"]["err"] == "unit stackshot.service is not-found", st())
-check("the error is logged once and shown by get", server._CHECK_LOGGED.get("a23") == "unit stackshot.service is not-found"
+check("the error is logged once and shown by get", checks_svc.CHECK_LOGGED.get("a23") == "unit stackshot.service is not-found"
       and "check: unit_active stackshot.service (the server closes the item when it passes; not readable at the last pass: unit stackshot.service is not-found)" in _wt_get.stackshot_get("a23"), _wt_get.stackshot_get("a23"))
 UNIT[0] = ""
 check("no answer: an error", tick(1) == [] and st()["items"]["a23"]["err"] == "systemctl gave no state for stackshot.service", st())
 UNIT[0] = "LoadState=loaded\nActiveState=active\n"
-check("active: closed with the reason", tick(1) == ["a23"] and rd(23)["metadata"].get("reason") == "done check passed: unit_active stackshot.service" and "a23" not in server._CHECK_LOGGED, rd(23)["metadata"])
+check("active: closed with the reason", tick(1) == ["a23"] and rd(23)["metadata"].get("reason") == "done check passed: unit_active stackshot.service" and "a23" not in checks_svc.CHECK_LOGGED, rd(23)["metadata"])
 
 # ---- 4b. a write during the check is not overwritten by the close (the lost update: the check's call can take 20 s)
 item(30, check="unit_active stackshot.service", next="team-back: install it")
 def unit_run_editing(argv):                       # a session's write lands while the check runs; the stub then steps aside
-    calls.append(list(argv)); server._update("a30", next="team-back: install it, then say so", sender="home-owner"); server._unit_run = unit_run; return UNIT[0]
-server._unit_run = unit_run_editing
+    calls.append(list(argv)); server._update("a30", next="team-back: install it, then say so", sender="home-owner"); checks_svc.unit_run = unit_run; return UNIT[0]
+checks_svc.unit_run = unit_run_editing
 check("an item written while its check ran is not closed on that pass, and the write stands", tick(1) == [] and rd(30)["status"] == "open"
       and rd(30)["metadata"].get("next") == "team-back: install it, then say so" and rd(30)["metadata"].get("check") == "unit_active stackshot.service" and not st()["items"].get("a30", {}).get("err"), (rd(30), st()))
 check("…and is closed on the next pass, the check still holding", tick(1) == ["a30"] and rd(30)["metadata"].get("reason") == "done check passed: unit_active stackshot.service", rd(30)["metadata"])
 item(31, check="unit_active stackshot.service", next="team-back: install it")
 def unit_run_closing(argv):                       # a session closes the item itself while the check runs
-    calls.append(list(argv)); _wt_complete.stackshot_complete("a31", outcome="dropped", reason="not needed", description="- Not needed after all", sender="home-owner"); server._unit_run = unit_run; return UNIT[0]
-server._unit_run = unit_run_closing
+    calls.append(list(argv)); _wt_complete.stackshot_complete("a31", outcome="dropped", reason="not needed", description="- Not needed after all", sender="home-owner"); checks_svc.unit_run = unit_run; return UNIT[0]
+checks_svc.unit_run = unit_run_closing
 check("an item a session closed while its check ran keeps that close", tick(1) == [] and rd(31)["status"] == "completed" and rd(31)["metadata"].get("outcome") == "dropped"
       and rd(31)["metadata"].get("reason") == "not needed" and "a31" not in st()["items"], (rd(31)["metadata"], st()))
 item(32, check="unit_active stackshot.service", next="team-back: install it")
 def unit_run_clearing(argv):                      # a session clears the check while it runs: the pass must not close on a check the item no longer carries
-    calls.append(list(argv)); server._update("a32", check="none", sender="home-owner"); server._unit_run = unit_run; return UNIT[0]
-server._unit_run = unit_run_clearing
+    calls.append(list(argv)); server._update("a32", check="none", sender="home-owner"); checks_svc.unit_run = unit_run; return UNIT[0]
+checks_svc.unit_run = unit_run_clearing
 check("an item whose check was cleared while it ran stays open", tick(1) == [] and rd(32)["status"] == "open" and "check" not in rd(32)["metadata"], rd(32))
 check("…and the next pass, with no check on it, leaves it alone", tick(1) == [] and rd(32)["status"] == "open" and "a32" not in st()["items"], (rd(32), st()))
 
@@ -486,17 +487,17 @@ check("6a: the event wait's early read of the same PR inside the pace makes no G
       len(gets(39)) == 1 and evwaits_svc.EVW_GH.get("o/r#39", {}).get("merged") is False and evwaits_svc.EVW_GH["o/r#39"] == st()["github"]["o/r#39"], (F.log, evwaits_svc.EVW_GH))
 proof_gh = {}
 with server._gb.tag("step_proof"):
-    got = server._pr_merged("o/r#39", clock[0] + 1, proof_gh)
+    got = checks_svc.pr_merged("o/r#39", clock[0] + 1, proof_gh)
 check("6a: …nor does the step proof's read (its own dict gets the record all the same), and the pair it returns is the same", len(gets(39)) == 1 and got == (False, "") and proof_gh["o/r#39"]["merged"] is False, (F.log, proof_gh))
 F.closed.add(39); F.merged[39] = False
 tick(5)
 check("6a: at the cadence one GET again, whichever caller asks first", len(gets(39)) == 2, F.log)
 evwaits_svc.EVW_GH.clear()
-got = server._pr_merged("o/r#39", clock[0] + 1, evwaits_svc.EVW_GH)
+got = checks_svc.pr_merged("o/r#39", clock[0] + 1, evwaits_svc.EVW_GH)
 check("6a: a closed-unmerged answer reaches the other reader's dict as `dead` without a second GET (the done check failed the wait)", len(gets(39)) == 2 and got == (False, "") and evwaits_svc.EVW_GH["o/r#39"].get("dead", "").endswith("without being merged"), (F.log, evwaits_svc.EVW_GH))
 item(29, check="pr_merged o/r#404", next="team-back: merge it")
 F.log.clear()
-check("a PR GitHub refuses (404): an error, never a close, logged once", tick(1) == [] and "GitHub refused the read (HTTP 404" in st()["items"]["a29"]["err"] and server._CHECK_LOGGED.get("a29", "").startswith("GitHub refused"), st())
+check("a PR GitHub refuses (404): an error, never a close, logged once", tick(1) == [] and "GitHub refused the read (HTTP 404" in st()["items"]["a29"]["err"] and checks_svc.CHECK_LOGGED.get("a29", "").startswith("GitHub refused"), st())
 check("…tried again at the cadence, not every pass", tick(4) == [] and len(gets(404)) == 1 and tick(1) == [] and len(gets(404)) == 2, F.log)
 F.merged[404] = False; F.down = True; F.log.clear()
 tick(5)
@@ -505,7 +506,7 @@ tick(5)
 check("…doubling while it stays down", st()["github"]["o/r#404"]["back"] == 600.0 and len(gets(404)) == 2, (st(), F.log))
 F.down = False; F.merged[404] = True
 check("…and the doubled wait holds: no GET yet", tick(5) == [] and len(gets(404)) == 2, F.log)
-check("back up: the next read closes it", tick(5) == ["a29"] and len(gets(404)) == 3 and "a29" not in server._CHECK_LOGGED, (F.log, rd(29)["metadata"]))
+check("back up: the next read closes it", tick(5) == ["a29"] and len(gets(404)) == 3 and "a29" not in checks_svc.CHECK_LOGGED, (F.log, rd(29)["metadata"]))
 
 # ---- 6b. a pull request closed without being merged: the check can never pass; the wait fails at once, the keeper is told, the item stays open
 item(35, check="pr_merged o/r#9", next="team-back: merge it")
@@ -553,7 +554,7 @@ check("…with no waiting line at the close, and its record gone from the pass's
 item(68, check="item_closed a62", needs=["decision"], ask=ASKD, next="home-owner: decide")
 tick(1); n68 = len([1 for g, n in _saves if g == "a68" and "done check met" in n])
 server._update("a68", check="unit_active nothing-here.service", sender="home-owner")
-server._unit_run = lambda argv: "LoadState=loaded\nActiveState=active\n"
+checks_svc.unit_run = lambda argv: "LoadState=loaded\nActiveState=active\n"
 check("a different check met under the same open decision gets its own line", tick(1) == [] and len([1 for g, n in _saves if g == "a68" and "done check met" in n]) == n68 + 1 and "unit_active nothing-here.service" in [n for g, n in _saves if g == "a68"][-1], _saves)
 writes.save = _orig_save
 server._update("a68", clear_check=True, sender="home-owner"); item(68, status="completed", outcome="dropped", reason="out of the passes")
@@ -583,7 +584,7 @@ _saves = []
 writes.save = _spy_save
 def waits(g): return [n for gg, n in _saves if gg == g and "done check met" in n]
 UNITS = ["LoadState=loaded\nActiveState=active\n"]
-server._unit_run = lambda argv: UNITS[0]
+checks_svc.unit_run = lambda argv: UNITS[0]
 ACTIVE, INACTIVE, NOANSWER = "LoadState=loaded\nActiveState=active\n", "LoadState=loaded\nActiveState=inactive\n", ""
 item(73, check="unit_active w73.service", needs=["decision"], ask=ASKD, next="home-owner: decide")
 UNITS[0] = ACTIVE; tick(1)
@@ -599,8 +600,8 @@ check("…so met again after that writes a second line", len(waits("a73")) == 2,
 item(74, check="unit_active w74.service", needs=["decision"], ask=ASKD, next="home-owner: decide")
 UNITS[0] = ACTIVE; tick(1)
 def unit_run_editing74(argv):                     # a session's write lands while the check runs
-    server._update("a74", next="home-owner: decide, please", sender="home-owner"); server._unit_run = lambda argv: UNITS[0]; return UNITS[0]
-server._unit_run = unit_run_editing74
+    server._update("a74", next="home-owner: decide, please", sender="home-owner"); checks_svc.unit_run = lambda argv: UNITS[0]; return UNITS[0]
+checks_svc.unit_run = unit_run_editing74
 tick(1)
 check("a write during the check (a race pass) keeps the record", len(waits("a74")) == 1 and st()["items"]["a74"].get("met") == "unit_active w74.service" and rd(74)["status"] == "open", (_saves, st()))
 tick(1)
