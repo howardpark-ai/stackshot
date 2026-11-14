@@ -378,7 +378,7 @@ DATE_ONLY_FIX = "park it: hold=true with the wake and wait_basis (what it waits 
 
 def date_only_wait(it: dict[str, Any], meta: dict[str, Any], mover: str, after_open: Callable[[dict[str, Any]], Any], now: float) -> str:
     """The why-not-now check's deterministic half, for the ten-minute pass: why this item reads as doing although all it does is wait for its wake, as a finding's detail, "" when it does not. It is the
-    shape the write parks (server `_date_only_wait`, through dated_wait.timed_wait_lines): the model shows the item alive (not held, not a wait the board lists already), its mover is a session, the
+    shape the write parks (service/wait_fixes `_date_only_wait`, through dated_wait.timed_wait_lines): the model shows the item alive (not held, not a wait the board lists already), its mover is a session, the
     wake is more than [waiting] dated_wait_min_hours ahead, and every open next line is the mover's and reads as a wait for the wake's own hour or day. It needs no model call, so it is not capped."""
     if _no_session(mover) or it.get("status") != "open":
         return ""

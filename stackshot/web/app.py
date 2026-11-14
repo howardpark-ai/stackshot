@@ -150,17 +150,12 @@ def _custom_route_ro(path, methods, **kw):
 
 def build(
     *,
-    fmt,
     handoff_brief,
     is_parked,
-    model_report_line,
-    notice_asked,
-    notice_report,
     evwait_preread,
     sender_not_owner,
     ask_after_write,
     update,
-    wait_alias_gate,
     busy_live,
     fleet_names,
     inbox_flag_minutes,
@@ -206,10 +201,10 @@ def build(
     _custom_route_plain = mcp.custom_route
     mcp.custom_route = _custom_route_ro
     _tool_notes.bind(main_agent=main_agent)
-    _tool_brief.register(mcp, fmt=fmt, handoff_brief=handoff_brief, is_parked=is_parked, model_report_line=model_report_line)
-    _tool_get.register(mcp, fmt=fmt, notice_asked=notice_asked, notice_report=notice_report)
+    _tool_brief.register(mcp, handoff_brief=handoff_brief, is_parked=is_parked)
+    _tool_get.register(mcp)
     _tool_create.register(mcp, evwait_preread=evwait_preread, sender_not_owner=sender_not_owner)
-    _tool_update.register(mcp, ask_after_write=ask_after_write, sender_not_owner=sender_not_owner, update=update, wait_alias_gate=wait_alias_gate, busy_live=busy_live)
+    _tool_update.register(mcp, ask_after_write=ask_after_write, sender_not_owner=sender_not_owner, update=update, busy_live=busy_live)
     _tool_complete.register(mcp, sender_not_owner=sender_not_owner)
     _tool_sessions.register(mcp, fleet_names=fleet_names)
     _tool_message.register(mcp, inbox_flag_minutes=inbox_flag_minutes, message=message)

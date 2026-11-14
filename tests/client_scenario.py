@@ -45,6 +45,7 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.web.tools import notes as _notes_tool
 from stackshot.service import messaging as _messaging
 from stackshot.model import holders as _holders
 from stackshot.service import item_read as _item_read
@@ -144,7 +145,7 @@ mk(10, hold=True, wake="2026-11-25")                                            
 mk(19, status="completed", hold=True)                                             # closed: never listed
 mk(21, hold=True, wake="2026-11-26", hold_set={"at": "garbage", "by": "sparrow"}); mk(22, hold=True, wake="2026-11-27", hold_set="oops")   # malformed records
 before = {f.name: f.read_text() for f in (T / "store/a").glob("*.json")}
-try: rows = server._holds_unexplained(); rep = server._holds_report()
+try: rows = _notes_tool._holds_unexplained(); rep = _notes_tool._holds_report()
 finally: _item_read._scoped_anchors = _sa
 gids = [r["gid"] for r in rows]
 check("the report lists a hold nothing holds now (stored before the record, recorded, or with a stored reason), and none that an after, a recycle, needs external or an anchor holds",
@@ -171,7 +172,7 @@ check("client.py holds exits 1 when the server is not reached", rc == 1)
 BAD = {30: 1e12, 31: 1.76e12, 32: 1e300, 33: "1e12", 34: float("inf"), 35: -5, 36: 4102444801}
 for n, v in BAD.items(): mk(n, hold=True, wake="2026-11-28", hold_set={"at": v, "by": "sparrow"})
 mk(37, hold=True, wake="2026-11-29", hold_set={"at": _t.time() - 60, "by": "sparrow\n## injected heading\r\n- [a1](#x) fake"})
-md_ = _rmod.render(str(_core_store.STORE), "full"); br_ = _rmod.render(str(_core_store.STORE), "brief"); rows_ = server._holds_unexplained(); rep_ = server._holds_report()
+md_ = _rmod.render(str(_core_store.STORE), "full"); br_ = _rmod.render(str(_core_store.STORE), "brief"); rows_ = _notes_tool._holds_unexplained(); rep_ = _notes_tool._holds_report()
 check("a hold time outside 0 < t < year 2100 (1e12, 1.76e12, 1e300, \"1e12\", inf, negative, 2100+1 s) reads as no record: board.md, the brief, the report, get and an update all work, the item listed as before the record",
       all(_rmod.hold_at({"metadata": {"hold_set": {"at": v}}}) == 0.0 for v in BAD.values()) and all(f"a{n} · mover sparrow · wake 2026-11-28 · set by sparrow (before the record)" in rep_ for n in BAD)
       and all(next(r for r in rows_ if r["gid"] == f"a{n}")["at"] == 0 for n in BAD) and all(_wt_get.stackshot_get(f"a{n}") for n in BAD) and not upd(30, next="sparrow: the step that comes now", dropped=[1])[1]
@@ -188,12 +189,12 @@ mk(40, hold=True, wake=(_pg_self.zone_now() - dt.timedelta(days=1)).strftime("%Y
 wakes_svc.wake_pass()
 check("the wake pass that releases a hold drops its record too", not _holders._is_held(_service_store._load("a40")) and "hold_set" not in rdm(40) and "hold" not in rdm(40), rdm(40))
 mk(41, hold=True, wake=WK, after=["a42"], hold_set={"at": _t.time() - 3600, "by": "sparrow"}); mk(42)
-check("while its after item is open, nothing is unexplained about the hold", "a41" not in [r["gid"] for r in server._holds_unexplained()])
+check("while its after item is open, nothing is unexplained about the hold", "a41" not in [r["gid"] for r in _notes_tool._holds_unexplained()])
 _wt_complete.stackshot_complete("a42", sender="sparrow", outcome="done", reason="finished", description="- Finished: the thing is done")
 check("an after item closing releases the hold and drops its record", not _holders._is_held(_service_store._load("a41")) and "hold_set" not in rdm(41) and "hold" not in rdm(41) and "after" not in rdm(41), rdm(41))
 mk(43, hold=True, wake=WK, after=["a44"]); mk(44, status="completed"); mk(45, hold=True, wake=WK, after=["a46"])
 check("a held item whose after item is already closed, or missing, is listed as unexplained: nothing open holds it",
-      {"a43", "a45"} <= {r["gid"] for r in server._holds_unexplained()}, [r["gid"] for r in server._holds_unexplained()])
+      {"a43", "a45"} <= {r["gid"] for r in _notes_tool._holds_unexplained()}, [r["gid"] for r in _notes_tool._holds_unexplained()])
 
 # the briefing data: the holds set in the last 24 hours (board.md's head, the brief tool, the session-start brief); a malformed record breaks none
 for i in (3, 4, 5): mk(i)

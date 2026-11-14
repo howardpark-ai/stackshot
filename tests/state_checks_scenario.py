@@ -63,6 +63,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import agents as _agents
 from stackshot.service import update as _update_svc
 from stackshot.github import ghsync as _gh
@@ -136,7 +137,7 @@ item(16, needs=[BACK], next="Oliver to run the merge")
 check("3: …but `Oliver to …` is", NOTE3.format(s="doing") in get(16), get(16))
 check("3: the opener rule, as a function", [states.next_names_owner(x) for x in ("Oliver: x", "home: x", "AE: x", "you: x", "You: x", "オリバー: x", "AE to x", "Oliver approved x", "Oliver's x", "AE-UX x", "you can x")] == ["Oliver", "", "Oliver", "Oliver", "Oliver", "Oliver", "Oliver", "", "", "", ""], None)
 item(11, status="completed", needs=[], next="Oliver: closed")
-check("3: …and a closed item", "next names" not in server._fmt({**rd(11), "gid": "a11"}), None)
+check("3: …and a closed item", "next names" not in _get_tool._fmt({**rd(11), "gid": "a11"}), None)
 b = _wt_brief.stackshot_brief()
 check("3: the brief carries it for items 1 to 4 and 16 (five open items name Oliver under an agent's state)", b.count("next names Oliver but the state is") == 5, b.count("next names Oliver but the state is"))
 # the refusal on create and update, the fix accepted, and a legacy item fixed step by step
