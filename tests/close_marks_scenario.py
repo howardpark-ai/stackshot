@@ -6,7 +6,7 @@ Before a close marked nothing: the steps still open stayed open on the closed it
   2  the server's own closes (a done check, the owner's "drop" on a watcher ask) mark the open steps the same way (done / dropped), by the server
   3  reopening is unchanged: the marks stay, the steps an OLD close left open are dropped, the new next is the open step; a closed item's checklist still refuses a mark
   4  the text agents learn it from (complete and update) says it
-  5  the backfill: the server's start-up pass (server._close_marks_pass, once before it serves) marks the open steps of the items closed before (done for outcome done, dropped otherwise) by "stackshot (backfill)" at the item's close time,
+  5  the backfill: the server's start-up pass (migsvc._close_marks_pass, once before it serves) marks the open steps of the items closed before (done for outcome done, dropped otherwise) by "stackshot (backfill)" at the item's close time,
      changes nothing else in the store, logs one line, and a second start does nothing; tools/close_marks_backfill.py is its read-only report (dry run, --json, no --apply, no --live)
 
     tests/run-suite close_marks        → exit 0 / 1"""
@@ -63,6 +63,7 @@ def kinds(i): return [k for k, _ in sts(i)]
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import migrations as migsvc
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
@@ -174,7 +175,7 @@ import io, contextlib
 def start_pass():
     buf = io.StringIO()
     with contextlib.redirect_stderr(buf):
-        got = server._close_marks_pass()
+        got = migsvc._close_marks_pass()
     return got, buf.getvalue()
 got, log = start_pass()
 check("start-up pass: marks the four items, and logs one line with the counts", [r["item"] for r in got] == [f"board#{BID_A}", f"board#{BID_B}", f"board#{BID_D}", f"board#{BID_F}"] and sum(1 for l in log.splitlines() if "migrate: close marks:" in l) == 1

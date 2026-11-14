@@ -11,7 +11,7 @@ never touched. owner_name, the clocks and every other field stay as they are. ro
 its `ids` map. The inbox hold lists (held-*.txt, release-*.txt) are the fleet tool's files and are not touched either: stackshot reads them in either
 form (inbox.py, push.py) and never writes a permanent id into them.
 
-Who writes: never this CLI. The apply runs INSIDE the server, at its start and before it serves a request (server.py _session_ids_pass), when
+Who writes: never this CLI. The apply runs INSIDE the server, at its start and before it serves a request (`migrations._session_ids_pass` in service/migrations.py), when
 `<state>/session-ids-migrate.request` exists. The server consumes the file (also when the registry cannot be read at that start: nothing is done,
 and the request is made again once it reads), applies before it starts any writer thread or serves a request, so nothing else writes an item
 meanwhile (not every writer takes the item lock, so the lock is not what makes it safe), saves each item through its usual save, and writes

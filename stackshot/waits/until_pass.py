@@ -197,7 +197,7 @@ def entry_problem(side: Any) -> str:
 
 
 def reading(S: Any, gid: str, item: dict[str, Any]) -> dict[str, Any]:
-    """What the item reads as, for the check that the pass changes no reading: the phase, kind of wait, mover and watched status (server._retire_reading), the board's held flag, the phase and wait kind a save
+    """What the item reads as, for the check that the pass changes no reading: the phase, kind of wait, mover and watched status (retire_passes._retire_reading), the board's held flag, the phase and wait kind a save
     would store, the date the wait ends on, and the model's conflicts (a new one is a difference)."""
     probe = {**copy.deepcopy(item), "gid": gid}
     seen = copy.deepcopy(probe)
@@ -218,8 +218,8 @@ def same(r0: dict[str, Any], r1: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the server's side: the ops `until` and `ununtil` of the migration route
-# Every function takes `S`, the server module: the item lock, the file helpers and the refusal shape are the migration route's own (server.py). The pass is the stamp pass's shape (server._stamp_one): one item
-# at a time under its lock, the file read and replaced whole with only the wait keys (and the History log) changed (server._stamp_write: no hand-off, no notice, no clock, no mover settled), a sha256
+# Every function takes `S`, the server module (the running server passes `stamp.PassHost`: the names moved to service/stamp.py and service/retire_passes.py resolve through it): the item lock, the file helpers and the refusal shape are the migration route's own (server.py). The pass is the stamp pass's shape (stamp._stamp_one): one item
+# at a time under its lock, the file read and replaced whole with only the wait keys (and the History log) changed (stamp._stamp_write: no hand-off, no notice, no clock, no mover settled), a sha256
 # check so a writer that takes no lock is never overwritten, and an undo that puts back only what the pass left.
 def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
     """Rewrite the stored wait of one open item as `until` → {"item", "action": set | same | kept | moved | refused | would_set, "why", "form", "new", "before", "after", "sha256_before"} (before and after = the

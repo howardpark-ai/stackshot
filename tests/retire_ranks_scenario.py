@@ -55,6 +55,7 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import client_reads as client_reads_svc
+from stackshot.service import migrations as migsvc
 from stackshot.model import holders as _holders
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -167,11 +168,11 @@ check("read: the client items carry no rank key", cl and all("rank" not in x for
 check("read: render keeps no rank helpers", not any(hasattr(render, n) or hasattr(r2, n) for n in ("rank_of", "builder_of", "queue_key", "queues", "rank_words", "rank_badge")) and not hasattr(server, "_rank_queues"), None)
 
 # ================================================================ the cleanup
-dry = server._retire_rank_pass(apply=False)
+dry = migsvc._retire_rank_pass(apply=False)
 check("cleanup: a dry run lists the open items that store a rank or a queued state, in id order, and writes nothing",
       [x["item"] for x in dry] == ["a1", "a2", "a3", "a6"] and [x["rank"] for x in dry] == [2, 1, None, 4] and [x["queued"] for x in dry] == [True, False, True, False]
       and all((T / f"store/a/{i}.json").read_bytes() == orig_bytes[i] for i in range(1, 7)), dry)
-done = server._retire_rank_pass()
+done = migsvc._retire_rank_pass()
 check("cleanup: the pass reports the same four items", [x["item"] for x in done] == ["a1", "a2", "a3", "a6"], done)
 for i in (1, 2, 3, 6):
     m = rd(i)["metadata"]
@@ -184,7 +185,7 @@ check("cleanup: …no clock moved: updated, state_updated and confirmed are as t
 check("cleanup: …a clean item and a closed one are not written (the closed one keeps its old fields)", all((T / f"store/a/{i}.json").read_bytes() == orig_bytes[i] for i in (4, 5)) and rd(5)["metadata"].get("rank") == 3, rd(5)["metadata"])
 snapshot()
 bytes_after = {i: (T / f"store/a/{i}.json").read_bytes() for i in range(1, 7)}
-again = server._retire_rank_pass()
+again = migsvc._retire_rank_pass()
 check("cleanup: a second run finds nothing and writes nothing (idempotent)", again == [] and all((T / f"store/a/{i}.json").read_bytes() == bytes_after[i] for i in range(1, 7)), again)
 check("cleanup: …no mover was settled and no hand-off ended by it", all(rd(i)["metadata"].get("mover") == before[i]["metadata"].get("mover") and rd(i)["metadata"].get("handoff") == before[i]["metadata"].get("handoff") for i in (1, 2, 3, 6)), None)
 for tag, mod in (("render.py", render), ("ui/render.py", r2)):

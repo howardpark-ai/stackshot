@@ -63,6 +63,9 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as WK_, waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.service import stamp as stamp_svc
+from stackshot.service import retire_passes as retire_svc
+HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc)   # the `S` of until_pass: the server module, then the stamp and retire modules that own the names it reads
 from stackshot.service import item_read as _item_read
 import stackshot.core.config as _cfg_
 from stackshot.service import store as _service_store
@@ -150,7 +153,7 @@ check("2 …a bare wake says why it stays", "backstop" in dry[6]["why"], dry[6])
 
 # ---- 3. the write
 def reading(i):
-    return UP.reading(server, f"g{i}", raw(i))
+    return UP.reading(HOST, f"g{i}", raw(i))
 before_r = {i: reading(i) for i in OPEN}
 cmeta = {i: _service_store._load(f"g{i}")["metadata"] for i in OPEN}
 st_, d_ = call(op="until", items=[f"g{i}" for i in OPEN], pass_id="20260101-000000-abcdef")
@@ -355,26 +358,26 @@ check("10 a hold beside an open after item, one with the kind anchor and one wit
 check("10 a hold beside an open after item and a hold on needs external are refused (their reading would change) and left byte for byte", all(r10[i]["action"] == "refused" for i in (83, 84, 85)), {i: r10[i]["action"] for i in (83, 84, 85)})
 
 put(86, needs=[BACK], hold=True, wake=day(3)); b86 = bytes_of(86)
-orig_sw = server._stamp_write
+orig_sw = stamp_svc._stamp_write
 def sneaky(p, raw_, h0, edits):
     d = json.loads(p.read_text()); d["metadata"]["noted_by_a_writer_without_the_lock"] = d["metadata"].get("noted_by_a_writer_without_the_lock", 0) + 1
     p.write_text(json.dumps(d, ensure_ascii=False, indent=1))
     return orig_sw(p, raw_, h0, edits)
-server._stamp_write = sneaky
+stamp_svc._stamp_write = sneaky
 try:
     st_, d_ = call(op="until", items=["g86"])
 finally:
-    server._stamp_write = orig_sw
+    stamp_svc._stamp_write = orig_sw
 check("10 a writer without the lock that changes the item between the read and the replace: answered moved, its write stands, the wait is not rewritten", d_["results"][0]["action"] == "moved" and mt(86).get("noted_by_a_writer_without_the_lock") == 1 and mt(86).get("wake") == day(3) and "until" not in mt(86), (d_["results"][0]["action"], wk(mt(86))))
 st_, d_ = call(op="until", items=["g86"])
 check("10 …and the next run rewrites it", d_["results"][0]["action"] == "set" and mt(86).get("until") == day(3), d_["results"][0]["action"])
 d0 = call(op="until", items=["g86"])[1]
 ent = {"item": "g86", "before": {"until": None, "wake": day(3), "hold": True}, "after": {"until": day(3), "wake": None, "hold": None}, "history": "x", "dropped": []}
-server._stamp_write = sneaky
+stamp_svc._stamp_write = sneaky
 try:
     st_, d_ = call(op="ununtil", items=[ent])
 finally:
-    server._stamp_write = orig_sw
+    stamp_svc._stamp_write = orig_sw
 check("10 the undo answers moved the same way and leaves the other writer's change", d_["results"][0]["action"] == "moved" and mt(86).get("until") == day(3) and mt(86).get("noted_by_a_writer_without_the_lock") == 2, d_["results"][0]["action"])
 
 # ---- 11. the two History renderers print the same date for a backstop

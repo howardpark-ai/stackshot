@@ -45,7 +45,7 @@ from stackshot.waits import watchers as _watch
 @dataclass(frozen=True)
 class Hooks:
     """What the minute set still reaches in server.py: the tick functions and the publish, in the names they have there without the leading underscore. server.py builds one and gives it to `install`."""
-    phase_tick: Callable[[], Any]  # server._phase_tick
+    phase_tick: Callable[[], Any]  # stamp._phase_tick
     balance_tick: Callable[[], Any]  # service.audit_ticks._balance_tick
     answer_tick: Callable[[], Any]  # server._answer_tick
     roles_sync_safe: Callable[[], Any]  # server._roles_sync_safe

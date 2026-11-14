@@ -55,6 +55,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import create as create_svc
+from stackshot.service import github_events as ghev_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
@@ -232,7 +233,7 @@ check("7 the done check's close moves the clock (an event the check waited for)"
 checks_svc.check_wait("a21", _service_store._load("a21"), "item_closed a2")
 check("7 the done check met while the item waits on a decision moves it", (act(21) or 0) >= t7, act(21))
 # the owner's comment on GitHub, stamped at the comment's own time
-def comment(i, ts, cid): return server._github_comment(f"a{i}", {"id": cid, "ts": ts, "text": "go ahead", "url": "https://example.test/c"})
+def comment(i, ts, cid): return ghev_svc._github_comment(f"a{i}", {"id": cid, "ts": ts, "text": "go ahead", "url": "https://example.test/c"})
 t_c = t7 - 300
 check("7 the owner's comment on GitHub is recorded", comment(22, t_c, 1) is True)
 check("7 …and moves the clock to the comment's own time, not to the time it was read", t_c - 1 <= (act(22) or 0) <= t_c + 1 and act(22) < t7 - 100, (act(22), t_c, t7))

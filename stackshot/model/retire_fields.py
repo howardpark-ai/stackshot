@@ -1,5 +1,5 @@
 """retire_fields.py — the data change that takes the stored state words and their carry fields out of an open item's storage. Pure functions of an item's metadata, its description and the clock: no server
-import, so the server's retire pass (server._retire_one), tools/retire_fields_report.py and the tests share one copy.
+import, so the server's retire pass (retire_passes._retire_one), tools/retire_fields_report.py and the tests share one copy.
 
 What an open item stores of the old model, and where the value goes (the alive/waiting reading of the item does not change: the server refuses an item whose reading would):
 

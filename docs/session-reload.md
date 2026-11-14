@@ -46,7 +46,7 @@ Everything a running agent session reads from this repository falls in one of fo
 What this repository does not contain, and so what no pick here can reach: skills, plugin files and plugin hooks (a plugin is its own repository; its
 hooks run `stackshot/projects/pages.py` of this checkout as a new process at each event, so they fall under kind 2, and its SessionStart entry runs `stackshot/projects/pages.py keeper`,
 kind 1), a rule file a session loads through its CLAUDE.md (the rulebook the `rules` tool serves is a file outside the checkout, read at each call;
-`_rules_text` in `stackshot/web/server.py`, `stackshot_rules` in `stackshot/web/tools/rules.py`, whose description is in `stackshot/web/tools/text/rules.md`), a status line, and a settings file (`stackshot client install` writes the hook registration into
+`_rules_text` and `stackshot_rules` in `stackshot/web/tools/rules.py`, whose description is in `stackshot/web/tools/text/rules.md`), a status line, and a settings file (`stackshot client install` writes the hook registration into
 `~/.claude/settings.json` of a box; see below).
 
 ## How the hooks are registered

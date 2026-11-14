@@ -1,4 +1,4 @@
-"""Scenario test for the phase sweep (server._phase_sweep, _phase_tick; the minute set's tick `phase_sweep`): the stored phase and waits_on kept true as the clock moves, and the readers take the decision from the pair, so the sweep is what moves the display at an edge.
+"""Scenario test for the phase sweep (stamp_svc._phase_sweep, _phase_tick; the minute set's tick `phase_sweep`): the stored phase and waits_on kept true as the clock moves, and the readers take the decision from the pair, so the sweep is what moves the display at an edge.
 Fixture data, no live store written, no network, no server socket. The clock is held (tools/stamp_phase.frozen) at every step, so an edge is crossed by choosing the time, never by waiting.
 
 An open item stores `phase` and `waits_on` (tests/phase_scenario.py, tests/stamp_scenario.py). A save restamps them, but the clock moves what the board shows an item as without any write. Once a minute, at the
@@ -60,6 +60,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.service import stamp as stamp_svc
 from stackshot.web import search as _search
 from stackshot.github import ghsync as _gh
 from stackshot.core import config as _cfg
@@ -99,9 +100,9 @@ def pair(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
 KEYS = ("phase", "waits_on")
 def without(d): return {**d, "metadata": {k: v for k, v in d["metadata"].items() if k not in KEYS}}
 def want(i, t):
-    with frozen(t): return server._stamp_values(f"g{i}", _service_store._load(f"g{i}"))
+    with frozen(t): return stamp_svc._stamp_values(f"g{i}", _service_store._load(f"g{i}"))
 def sweep(t):
-    with frozen(t): return server._phase_sweep()
+    with frozen(t): return stamp_svc._phase_sweep()
 def state_listing(): return sorted(str(p.relative_to(T / "state")) for p in (T / "state").rglob("*"))
 
 # ---- fixtures: one item for each edge, a few that never move, and the cases of the earlier suites
@@ -186,6 +187,14 @@ with contextlib.redirect_stderr(buf), frozen(TL):
     server._on_hup()
 check("2 E6: …the reload that puts it back restamps it waiting", pair(50) == ("waiting", "time"), pair(50))
 check("2 the start runs the sweep after the wake pass and before the runner starts", (lambda s: 0 < s.index("wake_pass()") < s.index("_phase_tick()") < s.index("_runner.start()"))(inspect.getsource(server._start_background)), None)
+import ast as _ast, textwrap
+_start_tree = _ast.parse(textwrap.dedent(inspect.getsource(server._start_background)))
+_start_calls = [_ast.unparse(n.func) for n in sorted((n for n in _ast.walk(_start_tree) if isinstance(n, _ast.Call)), key=lambda n: (n.lineno, n.col_offset))]
+_start_order = [c for c in _start_calls if c in ("_migrations.migrate_holds", "_migrations.migrate_needs", "_migrations._session_ids_pass", "_migrations.migrate_owner_mover", "_migrations._retire_rank_pass",
+                "_migrations._mover_backfill_pass", "_handoff.handoff_repair_pass", "_migrations._close_marks_pass", "_wakes.wake_pass", "_stamp_svc._phase_tick", "_runner.start")]
+check("2 the start passes run in the order they always did (holds, needs, session ids, owner mover, retire ranks, mover backfill, hand-off repair, close marks, wake pass, phase sweep), then the runner starts",
+      _start_order == ["_migrations.migrate_holds", "_migrations.migrate_needs", "_migrations._session_ids_pass", "_migrations.migrate_owner_mover", "_migrations._retire_rank_pass", "_migrations._mover_backfill_pass",
+                       "_handoff.handoff_repair_pass", "_migrations._close_marks_pass", "_wakes.wake_pass", "_stamp_svc._phase_tick", "_runner.start"], _start_order)
 
 # ---- 3. no item lock unless something is stamped
 res = {}
@@ -247,29 +256,29 @@ check("5 a closed item (a stale stamp on it too) is byte-identical after every s
 put(70, needs=[BACK], state="doing"); sweep(TL)
 d = raw(70); d["metadata"]["hold"] = True; d["metadata"]["wake"] = local_str(TL + 5 * DAY)                      # a session put it on hold: the fields now read waiting, the stored pair says alive
 (T / "store/g/70.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))
-real_commit = server._stamp_commit
+real_commit = stamp_svc._stamp_commit
 def racing(p, tmpf, h0):
     x = json.loads(p.read_text()); x["metadata"]["next"] = "team-back: a session wrote this meanwhile"; x["updated"] += 5
     p.write_text(json.dumps(x, ensure_ascii=False, indent=1)); return real_commit(p, tmpf, h0)
-moved0 = server._PHASE_SWEEP["moved"]; server._stamp_commit = racing
+moved0 = stamp_svc._PHASE_SWEEP["moved"]; stamp_svc._stamp_commit = racing
 try:
     done = sweep(TL)
 finally:
-    server._stamp_commit = real_commit
+    stamp_svc._stamp_commit = real_commit
 check("6 a write between the read and the replace: nothing stamped, `moved` counted, the session's change stands, no temporary file left",
-      done == [] and server._PHASE_SWEEP["moved"] == moved0 + 1 and mt(70)["next"] == "team-back: a session wrote this meanwhile" and pair(70) == ("alive", None) and not list((T / "store/g").glob(".*")), (done, mt(70)))
+      done == [] and stamp_svc._PHASE_SWEEP["moved"] == moved0 + 1 and mt(70)["next"] == "team-back: a session wrote this meanwhile" and pair(70) == ("alive", None) and not list((T / "store/g").glob(".*")), (done, mt(70)))
 done = sweep(TL)
 check("6 …the next sweep stamps it, and the session's change survives", done == ["g70"] and pair(70) == ("waiting", "time") and mt(70)["next"] == "team-back: a session wrote this meanwhile", (done, mt(70)))
 
 # ---- 7. the standby copy
 d = raw(10); d["metadata"]["hold"] = True; d["metadata"]["wake"] = local_str(TL + 5 * DAY); (T / "store/g/10.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))
-b, runs0 = bytes_of(10), server._PHASE_SWEEP["runs"]
+b, runs0 = bytes_of(10), stamp_svc._PHASE_SWEEP["runs"]
 _ro._reload_for_test(True)
 try:
-    got = (sweep(TL), server._phase_tick(), server._stamp_one("g10")["action"])
+    got = (sweep(TL), stamp_svc._phase_tick(), stamp_svc._stamp_one("g10")["action"])
 finally:
     _ro._reload_for_test(False)
-check("7 STACKSHOT_READ_ONLY: the sweep and the tick return nothing, count no run, and write nothing (the stamp itself is refused)", got == ([], [], "refused") and bytes_of(10) == b and server._PHASE_SWEEP["runs"] == runs0, got)
+check("7 STACKSHOT_READ_ONLY: the sweep and the tick return nothing, count no run, and write nothing (the stamp itself is refused)", got == ([], [], "refused") and bytes_of(10) == b and stamp_svc._PHASE_SWEEP["runs"] == runs0, got)
 check("7 …off the standby the same sweep stamps it", sweep(TL) == ["g10"] and pair(10) == ("waiting", "time"), pair(10))
 
 # ---- 8. the tick and the status
@@ -331,17 +340,17 @@ def shift_proof(label, src_store, base, anchors_file=None):
             with frozen(t):
                 with fields_only():
                     d0 = {g: SP.display_of(server, items0[g], g) for g in opens}      # what the fields give at this clock, before the sweep
-                first_ = server._phase_sweep()
+                first_ = stamp_svc._phase_sweep()
                 items1 = SP.load_dir(R_ / "store")
                 d1 = {g: SP.display_of(server, items1[g], g) for g in opens}
-                derived = {g: server._stamp_values(g, _service_store._load(g)) for g in opens}
+                derived = {g: stamp_svc._stamp_values(g, _service_store._load(g)) for g in opens}
             stamped_total += len(first_)
             check(f"9 {label} {name}: after one sweep every open item ({len(opens)}) stores the pair derived now", all((items1[g]["metadata"].get("phase") or "", items1[g]["metadata"].get("waits_on") or "") == derived[g] for g in opens), [g for g in opens if (items1[g]["metadata"].get("phase") or "", items1[g]["metadata"].get("waits_on") or "") != derived[g]][:5])
             check(f"9 {label} {name}: …only the two keys changed, on the items stamped alone, and no closed item was touched", SP.files_outside(items0, items1) == [] and all(items0[g] == items1[g] for g in items0 if g not in opens) and sorted(first_) == sorted(g for g in opens if SP.pair(items0[g]) != SP.pair(items1[g])), (SP.files_outside(items0, items1)[:5], first_[:5]))
             check(f"9 {label} {name}: …the displayed output (state, kind, list word, model line, get's text, the brief's block) after it is byte-equal to what the fields gave before it", d0 == d1, [g for g in opens if d0[g] != d1[g]][:5])
             ms = {p: p.stat().st_mtime_ns for p in (R_ / "store").rglob("*.json")}
             with frozen(t):
-                again = server._phase_sweep()
+                again = stamp_svc._phase_sweep()
             check(f"9 {label} {name}: …and a second sweep writes nothing (mtimes equal)", again == [] and ms == {p: p.stat().st_mtime_ns for p in (R_ / "store").rglob("*.json")}, again)
         finally:
             _core_store.STORE, _anc.FILE = real_store, real_anc

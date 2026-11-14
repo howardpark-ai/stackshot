@@ -145,6 +145,7 @@ def main(argv: list[str]) -> int:
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         from stackshot.web import server  # noqa: PLC0415  — after the environment points at the copy
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        from stackshot.service import stamp as _stamp  # noqa: PLC0415
         _web_publish._publish = lambda: None
         now = time.time()
         bad = 0
@@ -159,7 +160,7 @@ def main(argv: list[str]) -> int:
             all_rows += rows
             if a.sweep:
                 with SP.frozen(later):
-                    stamped = server._phase_sweep()
+                    stamped = _stamp._phase_sweep()
                 rows = rows_at(server, root / "repo/board-data", later, f"+{a.hours:g} h swept")
                 bad += report(rows, f"+{a.hours:g} h after one sweep on the copy ({len(stamped)} restamped)")
                 all_rows += rows

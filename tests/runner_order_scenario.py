@@ -48,6 +48,7 @@ from stackshot.service import wakes as wakes_svc, event_waits as evwaits_svc
 from stackshot.service import runner as runner_svc
 from stackshot.service import stall_tick as stalltick_svc
 from stackshot.service import page_debt as pdebt_svc
+from stackshot.service import stamp as stamp_svc
 from stackshot.service import checks as checks_svc, proofs as proofs_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -67,7 +68,7 @@ SERVER_FNS = {"wake_pass": "minute_wake_pass", "anchor_pass": "minute_anchor_pas
               "balance_tick": "_balance_tick", "handoff_tick": "handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "clients_tick",
               "pilot_fallback_tick": "_pilot_fallback_tick", "stall_tick": "stall_tick",
               "handback_tick": "handback_tick", "fleet_publish": "fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return {"clients_tick": fleetev, "handoff_tick": handoff_svc, "handback_tick": telling, "fleet_publish": runner_svc, "minute_wake_pass": wakes_svc, "minute_anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc, "_pilot_fallback_tick": pdebt_svc, "_balance_tick": audit_ticks_svc, "_filing_tick": audit_ticks_svc, "_dates_tick": audit_ticks_svc, "_silence_tick": audit_ticks_svc, "_archive_tick": audit_ticks_svc}.get(fn, server)       # the owner of a tick function: the pilot fallback is the page-debt call's, the hand-back tick is the telling's, the publish step is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the balancer and the filing, dates, audit-line and archive passes are service/audit_ticks.py's, the rest are the server's
+def own(fn): return {"clients_tick": fleetev, "handoff_tick": handoff_svc, "handback_tick": telling, "fleet_publish": runner_svc, "minute_wake_pass": wakes_svc, "minute_anchor_pass": wakes_svc, "minute_wake_catchup": wakes_svc, "next_wake": wakes_svc, "evwait_tick": evwaits_svc, "stall_tick": stalltick_svc, "check_tick": checks_svc, "proof_tick": proofs_svc, "_pilot_fallback_tick": pdebt_svc, "_balance_tick": audit_ticks_svc, "_filing_tick": audit_ticks_svc, "_dates_tick": audit_ticks_svc, "_silence_tick": audit_ticks_svc, "_archive_tick": audit_ticks_svc, "_phase_tick": stamp_svc}.get(fn, server)       # the owner of a tick function: the pilot fallback is the page-debt call's, the phase tick is the stamp pass's (service/stamp.py), the hand-back tick is the telling's, the publish step is the runner's, the wake passes and the event wait are service/wakes.py's and service/event_waits.py's, the balancer and the filing, dates, audit-line and archive passes are service/audit_ticks.py's, the rest are the server's
 clk = Clock()
 log: list[tuple[str, float]] = []
 saved = {}

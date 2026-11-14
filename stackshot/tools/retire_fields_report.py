@@ -48,12 +48,13 @@ say = MM.say
 
 
 def reading(server: Any, it: dict[str, Any], gid: str, now: float) -> dict[str, Any]:
-    """What the fields give for the item at the clock now (server._retire_reading: phase, kind of wait, mover, watched) and, apart, the list and the old
+    """What the fields give for the item at the clock now (retire_passes._retire_reading: phase, kind of wait, mover, watched) and, apart, the list and the old
     state word it reads as."""
+    from stackshot.service import retire_passes as _retire_passes  # noqa: PLC0415
     probe = {**it, "gid": gid}
     ao = lambda i_: server._item_read._after_open(i_.get("metadata") or {})      # noqa: E731
     with SP.frozen(now), SP.fields_only(server):
-        r = server._retire_reading(gid, it)
+        r = _retire_passes._retire_reading(gid, it)
         mod = server._item_read._model_of(probe)
         return {**r, "list": server._client_reads._item_list(probe), "word": mod.today}
 
@@ -75,6 +76,7 @@ def dry_run(a: argparse.Namespace) -> int:
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         from stackshot.web import server  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
+        from stackshot.service import retire_passes as _retire_passes  # noqa: PLC0415
         from stackshot.core import config as _cfg  # noqa: PLC0415
         from stackshot.github import ghsync as _gh  # noqa: PLC0415
         _web_publish._publish = lambda: None
@@ -84,9 +86,9 @@ def dry_run(a: argparse.Namespace) -> int:
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
         max_lines = int(_cfg.CFG["description"].get("max_lines", 8))
         before = {g: reading(server, items[g], g, now) for g in opens}
-        planned = {g: server._retire_one(g, dry=True) for g in opens}
-        wrote = {g: server._retire_one(g) for g in opens}
-        again = {g: server._retire_one(g) for g in opens}
+        planned = {g: _retire_passes._retire_one(g, dry=True) for g in opens}
+        wrote = {g: _retire_passes._retire_one(g) for g in opens}
+        again = {g: _retire_passes._retire_one(g) for g in opens}
         after_items = SP.load_dir(d)
         rows: list[dict[str, Any]] = []
         stores: collections.Counter[str] = collections.Counter()
@@ -96,7 +98,7 @@ def dry_run(a: argparse.Namespace) -> int:
                 if meta.get(f) not in (None, ""):
                     stores[f] += 1
             aft = reading(server, after_items[g], g, now)
-            why = server.retire_same(before[g], aft)
+            why = _retire_passes.retire_same(before[g], aft)
             same = not why and before[g]["list"] == aft["list"]
             if before[g]["list"] != aft["list"]:
                 why = (why + "; " if why else "") + f"list {before[g]['list']} -> {aft['list']}"
@@ -120,7 +122,7 @@ def dry_run(a: argparse.Namespace) -> int:
             for r, text in needs:
                 n1, n0 = r["description_lines"]
                 longest = max((len(x) for x in text.splitlines()), default=0)
-                bad = server._description_fit_why(text)
+                bad = _retire_passes._description_fit_why(text)
                 if bad:
                     over.append(r["item"])
                 print(f"  {r['item']}: {text.rstrip(chr(10)).splitlines()[-1]}   [{n0} -> {n1} lines, longest line {longest} of {max_chars} characters{', OVER THE LIMIT: ' + bad if bad else ''}]")

@@ -245,6 +245,7 @@ STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
 from stackshot.service import recycle as recycle_svc
+from stackshot.service import migrations as migsvc
 from stackshot.service import messaging as _messaging
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import update as _update_svc
@@ -1726,7 +1727,7 @@ g_bg = bk[0]; f_bg = STORE / g_bg[0] / f"{g_bg[1:]}.json"
 snap("before the close"); it_bg = json.loads(f_bg.read_text())
 it_bg.update(status="completed", description="- It ended well", state_updated=time.time(), updated=time.time()); it_bg["metadata"].update(outcome="done", reason="it is in")
 f_bg.write_text(json.dumps(it_bg))
-rows_bg, skip_bg = server._close_description_repair(apply=True)
+rows_bg, skip_bg = migsvc._close_description_repair(apply=True)
 jobs_bg = [(p_.name, json.loads(p_.read_text())) for p_ in G.pending()]
 check("the close repair restores the description and queues its sync as a background body sync: after every live job, and no create or close job",
       any(r_["gid"] == g_bg for r_ in rows_bg) and rd(g_bg[0], int(g_bg[1:]))["description"] == D(f"edit of {G.shown(g_bg)}") and jobs_bg

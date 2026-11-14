@@ -87,6 +87,7 @@ def refused(name, f, *want, none=()):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
 from stackshot.web.tools import get as _get_tool
+from stackshot.service import github_events as ghev_svc
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import item_read as _item_read
 from stackshot.service import mover_steps as _mover_steps
@@ -798,10 +799,10 @@ out_ap = upd(162, "team-back", clear_needs=True, next="team-back: carry on")
 check("12 his hand-off: clear_needs ends it too, and the reply says the mover came back", isinstance(ho(162).get("taken_at"), float) and f"(mover: {OWN} →" in out_ap, (out_ap, ho(162)))
 to_him(27)
 c_d = {"id": 67, "ts": time.time() + 5, "text": "go ahead", "url": "https://github.com/x/y/issues/1#issuecomment-67"}
-server._github_comment("a27", c_d)
+ghev_svc._github_comment("a27", c_d)
 check("12 his hand-off: his comment on GitHub ends it", isinstance(ho(27).get("taken_at"), float) and ho(27)["taken_at"] == c_d["ts"], ho(27))
 to_him(28)
-server._github_comment("a28", {"id": 68, "ts": now0 - 7200, "text": "an old comment", "url": "https://github.com/x/y/issues/1#issuecomment-68"})
+ghev_svc._github_comment("a28", {"id": 68, "ts": now0 - 7200, "text": "an old comment", "url": "https://github.com/x/y/issues/1#issuecomment-68"})
 check("12 his hand-off: …a comment made before the hand-off does not", not ho(28).get("taken_at"), ho(28))
 to_him(29)
 it_am = _service_store._load("a29"); it_am["metadata"]["state"] = "your-step"; it_am["metadata"]["step"] = "gh pr merge 1"; it_am["metadata"].pop("needs"); it_am["metadata"].pop("ask", None)

@@ -66,6 +66,9 @@ from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import fleet_events as fleetev
 from stackshot.service import migrations as migsvc
+from stackshot.service import stamp as stamp_svc
+from stackshot.service import retire_passes as retire_svc
+from stackshot.service import github_events as ghev_svc
 from stackshot.service import page_debt as pdebt_svc
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
@@ -227,11 +230,11 @@ class _Clock:                    # the server's clock stopped at the wake itself
     def time(self): return self.at
     def __getattr__(self, k): return getattr(time, k)
 real_time = server.time
-server.time = event_activity_svc.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
+server.time = event_activity_svc.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = stamp_svc.time = retire_svc.time = ghev_svc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = audit_ticks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
 try:
     at_wake = (_wait_fixes_svc._wake_alone_on_agent(m_basis), "alone is a wait until that date" in _wait_fixes_svc._wake_window_note(m_basis))
 finally:
-    server.time = event_activity_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
+    server.time = event_activity_svc.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = stamp_svc.time = retire_svc.time = ghev_svc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = client_reads_svc.time = recycle_svc.time = mprog_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
 check("11 …a wake exactly now is not waiting any more: the basis no longer exempts it, so the note rules apply again (alone, and the window note fires)", at_wake == (True, True), at_wake)
 bw = dict(it_of(1), metadata=dict(mt(1, "g")))
 ep = W.wake_epoch(W1)
