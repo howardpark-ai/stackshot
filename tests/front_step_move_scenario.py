@@ -42,6 +42,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.model import nextlines as NL
 from stackshot.web import server
+from stackshot.service import audit_ticks as audit_ticks_svc
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import messaging as _messaging
 _cfg.CFG["audit"]["mode"] = "script"
@@ -333,11 +334,11 @@ real_roles = _anc.file_roles
 _anc.file_roles = lambda reg=None, live=None: ROLES
 cfg_audit["front_step_move_hours"] = 3
 _cfg.CFG["audit"]["enabled"] = True
-res = server._filing_tick()
+res = audit_ticks_svc._filing_tick()
 check("6 the server's tick starts the clocks through the writers it passes", res is not None and sorted(res["front_steps"]["started"]) == ["board#1", "board#5", "board#6", "board#7", "board#8"] and clock_of("a1") is not None, res)
 d = get("a1"); d["metadata"]["stuck_since"]["at"] = time.time() - 3 * H - 5; put("a1", d)
 msgs.clear()
-res = server._filing_tick()
+res = audit_ticks_svc._filing_tick()
 check("6 …and moves a step whose clock is due, telling the mover through the server's own message function as an fyi", [m["id"] for m in res["front_steps"]["moved"]] == ["board#1"] and opener_of("a1") == "home-agent"
       and [(m[0], m[5]) for m in msgs if "is now yours" in m[1]] == [("home-agent", True)] and all(m[2] == "stackshot audit" for m in msgs), (res["front_steps"], msgs))
 _messaging._message = real_msg; _anc.file_roles = real_roles

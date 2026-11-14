@@ -8,7 +8,7 @@ Two moments, one rule (the state: the project's page lists no agent, none is pen
    left but open items → the project is put on the wait list (`<state>/archive-wait.json`, key → {since, by}; the key is the project's id when it has no
    page) and stays as it is. A verb that cannot run puts it on the same list, so the sweep tries again. A project whose record has no agents field at all was
    never staffed and is never archived this way.
-2. The sweep. `sweep` (server._archive_tick, the ten-minute set) looks at the projects on the wait list only: the open items are counted once for all of
+2. The sweep. `sweep` (audit_ticks._archive_tick, the ten-minute set) looks at the projects on the wait list only: the open items are counted once for all of
    them, and a project with none left is archived, whether its items were completed or handed to another project. A project that has an agent
    again (or a pending one), that is archived already, or that is gone leaves the list without a write. A write that fails stays
    on the list for the next sweep. So the rule holds whichever event came last, and a repeat does nothing: a project on no list is never touched, which is
