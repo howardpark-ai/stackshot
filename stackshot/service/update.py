@@ -355,7 +355,7 @@ def _doing_wait_note(meta: dict[str, Any], next_: str = "", busy: str | None = N
     """A valid reason to wait on an item does not warrant marking it as on agent and letting it sit there for hours: it should be marked waiting.
     A note on the reply (never a refusal) when the item ends the write in the stored state doing, not on hold, and a line of next this write set reads as a wait on a time or an event
     rather than work in hand (model_guards.reads_as_wait). Not when `busy` (the words for what of the holder's own runs on the item, asked by the update tool before the lock: gates.busy_note_answer, audit/busy_hold.py)
-    is not empty: a running subagent of the holder is tied to the item, so the wait wording is about its own run, which is work in hand, and the note's advice to park would be the hold the update refuses. None or
+    is not empty: a running subagent of the holder, or a running release of a pull request tied to the item, is on the item, so the wait wording is about that run, which is work in hand, and the note's advice to park would be the hold the update refuses. None or
     "" (nothing running, or nothing could be told) leaves the note as it is."""
     if meta.get("state") != "doing" or meta.get("hold"):
         return ""

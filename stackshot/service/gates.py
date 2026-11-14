@@ -1041,6 +1041,12 @@ BUSY_HOLD_REFUSAL = ("Refused: this item is being moved now: {live} is running o
                      "instead of a hold. Park it with a hold only once nothing of yours is running on it.")
 
 
+BUSY_RELEASE_PREFIX = "a release of PR #"      # what the words of a running release begin with (audit/busy_hold.py `live_release`): the refusal that names one is BUSY_RELEASE_REFUSAL
+BUSY_RELEASE_REFUSAL = ("Refused: this item is being moved now: {live}, so it is not paused. Keep it in hand and write where its step stands (work=<one line>, state in progress), "
+                        "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, post_wake_mover=<who takes it then>). "
+                        "Park it with a hold only once nothing is running on it.")
+
+
 def _given(v: Any) -> bool:
     """Does a parameter carry a value (a non-empty string, a non-empty list, a true flag)?"""
     return bool(v.strip()) if isinstance(v, str) else bool(v)
@@ -1074,8 +1080,8 @@ def gate_busy_hold(gid: str, sender: str, *, hold: bool = False, wake: str = "",
                    next_text: str = "", status: str = "", done: Any = None, clear_hold: bool = False, clear_wake: bool = False, clear_wait: bool = False, clear_needs: bool = False,
                    clear_after: bool = False, clear_next: bool = False, live: Callable[[str, str], str] | None = None) -> None:
     """Refuse (ToolError) a hold the item's mover sets on an item it is moving at this moment: an item an agent is working on is kept in hand, never paused. An item already on hold counts (its mover is the one who
-    picks it up). `live(item, mover)` is the server's proof (audit/busy_hold.py): the words for what of the mover's own is running on the item (`your subagent "<description>"`), "" when nothing is or nothing can
-    be told; None passes every write. A write that parks is a hold, or a date alone (a wake or an until: the write turns it into a hold), with no named blocker: neither in this write (a wait_kind other than time,
+    picks it up). `live(item, mover)` is the server's proof (audit/busy_hold.py): the words for what of the mover's own is running on the item (`your subagent "<description>"`, or `a release of PR #<n> tied to this item is running (<what was read>)`
+    for a release of a pull request tied to the item that is running, which gets its own refusal text), "" when nothing is or nothing can be told; None passes every write. A write that parks is a hold, or a date alone (a wake or an until: the write turns it into a hold), with no named blocker: neither in this write (a wait_kind other than time,
     an after link, a needs, a relay's ask_by) nor already stored on the item (an anchor, relay, item or event wait, an open `after`, a `needs` that names someone outside: any wait the model reads as other than a
     plain wait on a time), and no clear_* of the park. Never refused: the guard off (`[model] busy_hold_guard`), an owner's write, a write by anyone but the item's mover, a closed item or a write that closes it or
     ticks a step (done=), a hand-off to another session, and anything that cannot be read: a failure of the check itself passes the write, as `gate_self_wait` does. `gid` = the stored item."""
@@ -1099,12 +1105,12 @@ def gate_busy_hold(gid: str, sender: str, *, hold: bool = False, wake: str = "",
         print(f"busy hold guard: {gid} not judged: {e.__class__.__name__}: {e}; the write passes", file=sys.stderr, flush=True)
         return
     if what:
-        raise ToolError(BUSY_HOLD_REFUSAL.format(live=what))
+        raise ToolError((BUSY_RELEASE_REFUSAL if what.startswith(BUSY_RELEASE_PREFIX) else BUSY_HOLD_REFUSAL).format(live=what))
 
 
 def busy_note_answer(gid: str, *, hold: bool = False, next_text: str = "", reword: Any = None, mover: str = "", live: Callable[[str, str], str] | None = None) -> "str | None":
     """What of the holder's own runs on item `gid` (the words, "" for nothing), asked BEFORE the item lock, for the reply note that tells the holder of a doing item whose next reads as a wait to park it
-    (service/update.py `_doing_wait_note`): while a running subagent of the holder is tied to the item the wait wording is about its own run, work in hand. None when the note cannot be made (the guard off, no proof, a
+    (service/update.py `_doing_wait_note`): while a running subagent of the holder, or a running release of a pull request tied to the item, is tied to the item the wait wording is about its own run, work in hand. None when the note cannot be made (the guard off, no proof, a
     hold, an item that is not open and doing, no line of this call that reads as a wait) and when anything cannot be read: the note then stays as it is. The proof is asked only when the note could be made, and the
     holder is looked up only then."""
     try:

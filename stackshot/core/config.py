@@ -327,7 +327,7 @@ def audit_hourly_line() -> bool:
 
 
 def model_busy_hold_guard() -> bool:
-    """[model] busy_hold_guard (default true): the refusal of a hold an item's mover sets while one of its own running subagents is tied to that item (gates.gate_busy_hold). false = the check never runs. Read live, as `wait_guard_on` is."""
+    """[model] busy_hold_guard (default true): the refusal of a hold an item's mover sets while one of its own running subagents, or a running release of a pull request tied to the item, is tied to that item (gates.gate_busy_hold). false = the check never runs. Read live, as `wait_guard_on` is."""
     v = get("model", "busy_hold_guard")
     return True if v is None else (v not in (False, 0) and str(v).strip().lower() not in ("false", "no", "off", "0"))
 
