@@ -1,66 +1,27 @@
-"""field_gates.py: the write-time checks of an item's fields and the registry readers they look pages up with: the subject (its scope prefix and length, `_gate_subject`, `_project_subject_prefix`),
-the description (short `- ` bullets, `_gate_description`, and its opening goal, `_gate_goal`), `next` (a named actor and a length per line, `_gate_next`; the marks of a dropped step), a session's bare URLs
-(`_gate_bare_urls`), the metadata (`_gate_metadata`, with its page lookup in the registry: `_registry_hit`, `_registry_hits`, `_registry_text`), the small limits they read (`_subject_max`, `_close_reason_max`,
-`_description_limits`, `_next_line_max`, `_bullets_on`, `_fit`) and the reader of the flag that marks a session's own write (`service/writes.SESSION_NEXT`).
+"""field_gates.py: the write-time checks of an item's fields: the subject (its scope prefix and length, `_gate_subject`), the description (short `- ` bullets, `_gate_description`, and its opening
+goal, `_gate_goal`), `next` (a named actor and a length per line, `_gate_next`; the marks of a dropped step), a session's bare URLs (`_gate_bare_urls`), the small limits they read (`_subject_max`,
+`_close_reason_max`, `_description_limits`, `_next_line_max`, `_bullets_on`, `_fit`) and the two sentences a refusal borrows from the fleet settings (`_when_idle`, `_fleet_tool`).
 
-server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the store's
-path, the registry (`projects/project_registry.py`), the pure text modules and the write path's flags (service/writes.py). server.py imports each name its writes, its tools and the suites read back from here, so `server._gate_description`, `server._fit`,
-and the others stay the names they use. The flag of a session's own write (`SESSION_NEXT`) is service/writes.py's: set (`.on`) by the create and update tools' own calls in server.py and read here; it is never rebound.
-No suite sets a name on `server` that code here reads."""
+Each is a rule of the item's own text and the instance's settings: it raises ToolError with the refusal, or returns what it normalized, and reads nothing from the store and changes nothing. The two
+checks that apply to a session's own write only (`_gate_next`'s actor check, `_gate_bare_urls`) take that as the `session` argument: the caller reads the per-write flag (`service/writes.py`) and passes it. The
+metadata check, which looks a project's page up in the registry and may rebuild it, and the registry readers it uses are `service/gates.py`'s."""
 from __future__ import annotations
 
-import datetime as dt
 import json
 import re
 import shlex
-import sys
 from typing import Any
 
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
+from stackshot.core.instance import OWNER
 from stackshot.model import bullet_text as _bt
 from stackshot.model import model_guards as _mg
 from stackshot.model import next_rules as _nr
 from stackshot.model import nextlines as _nl
-from stackshot.projects import brains as _brains
-from stackshot.projects import pages as _pages
-from stackshot.projects import projects as _prj
-from stackshot.web import render as _rmod
-from stackshot.core import store as _store
-from stackshot.core.instance import OWNER
 from stackshot.model.bullet_text import _clip_line
-from stackshot.projects.project_registry import _registry, _roles_sync_safe
-from stackshot.service import writes as _writes
-
-
-
-# ----------------------------------------------------------------------------- registries
-def _registry_text() -> str:
-    """The page registry file's text for the client API (`/client/registry`), with the project record's entries laid over the pages when there are any: a hook on another machine reads
-    the same registry as the server does. The file's own text when no entry changes a page."""
-    text = (_store.STORE / "projects.json").read_text(encoding="utf-8")
-    try:
-        doc = json.loads(text)
-        pages = doc.get("pages") if isinstance(doc, dict) else None
-        laid = _prj.with_record(pages) if isinstance(pages, dict) else pages
-        return text if laid is pages else _prj.registry_json({**doc, "pages": laid})
-    except Exception:  # noqa: BLE001
-        return text         # a file that does not parse is served as it always was; only an unreadable one is "no registry yet"
-
-
-def _registry_hits(name: str, value: str) -> list[str]:
-    """Every registry key the value can name, in match order (a bare slug may name projects/<slug> and infra/<slug>)."""
-    reg = _registry(name)
-    if name == "projects" and _prj.is_id(value):                 # a project's permanent id names its page (phase A: stored data still carries the key)
-        k = _prj.id_to_key(value, reg)
-        return [k] if k and k in reg else []
-    return [k for k in dict.fromkeys(pat.format(value=value) for pat in _cfg.CFG["registries"][name].get("match", ["{value}"])) if k in reg]
-
-
-def _registry_hit(name: str, value: str) -> tuple[str | None, dict[str, Any]]:
-    hits = _registry_hits(name, value)
-    return (hits[0], _registry(name)[hits[0]]) if hits else (None, {})
+from stackshot.web import render as _rmod
 
 
 # ----------------------------------------------------------------------------- gates (all deterministic)
@@ -91,21 +52,6 @@ def _fit(text: str, limit: int) -> str:
 
 # a subject that already opens with a bracketed tag or a "word:" (`[Work] x`, `[work]x`, ` [work] x`, `work: x`) is somebody's attempt at a prefix, not a missing one: it is refused as ever, the list named
 _SUBJECT_TAGGED = re.compile(r"[\s​-‏⁠﻿]*(?:\[[^\]]*\]|\w+:)")
-
-
-def _project_subject_prefix(project: str) -> str:
-    """The scope prefix a subject for `project` takes: "[<scope>] " of the project's scope when the instance has that prefix, else [subject] fallback_prefix when it is one of the prefixes;
-    "" when the project does not name one record, the record has no scope, or neither applies (the subject is then refused for its missing prefix, as before)."""
-    try:
-        recs = _prj.refs(project, _registry("projects"))
-    except Exception:  # noqa: BLE001 — a project record that cannot be read: the gate refuses the subject as it always did
-        return ""
-    if len(recs) != 1:
-        return ""
-    prefixes = list(_cfg.CFG["subject"]["prefixes"])
-    fallback = str(_cfg.get("subject", "fallback_prefix") or "")
-    scope = str(recs[0].get("scope") or "")
-    return next((p for p in (f"[{scope}] " if scope else "", fallback) if p and p in prefixes), "")
 
 
 def _gate_subject(subject: str, current: str | None = None) -> None:
@@ -215,12 +161,12 @@ def _gate_goal(desc: str) -> None:
                     "and `- Problem: X fails when Y` as the second. `Goal:` is case-sensitive and sits right after the dash." + _GOAL_RETRY)
 
 
-def _gate_bare_urls(fields: dict[str, str], stored: dict[str, Any] | None = None) -> None:
-    """A session's write through the create and update tools (`writes.SESSION_NEXT`) may not put a bare http(s) URL in description, next or ask: the page does not always draw one as a
+def _gate_bare_urls(fields: dict[str, str], stored: dict[str, Any] | None = None, session: bool = False) -> None:
+    """A session's write through the create and update tools (`session`: the per-write flag the caller reads) may not put a bare http(s) URL in description, next or ask: the page does not always draw one as a
     link, so a reader sees plain text. A URL inside `[words](url)`, a code span or a fenced block is fine. Judges the text written in this call, `fields` by name, and of that only a URL
     the stored text of the field (`stored`, an update's) does not already hold, so an update that sets a field again with an old bare URL in it is not refused for that. Scripts and the
     server's own writes are not judged. How a page draws a bare URL is not changed here."""
-    if not _writes.session_next():
+    if not session:
         return
     for field, text in fields.items():
         if not text:
@@ -260,13 +206,13 @@ def _next_len(line: str) -> int:
     return _visible_len(s[i:])
 
 
-def _gate_next(next_: str, has_ask: bool = False) -> None:
+def _gate_next(next_: str, has_ask: bool = False, session: bool = False) -> None:
     """a `next` line over [metadata.next] line_max (200; 0 = off) characters is refused, where it used to be noted. Checks only the text written
     in this call. A link counts by its text and a naked URL not at all, as in a description. Not judged: a `<owner>: `command`` line (the
     whole command in one backtick span; any other line of his is prose and counts), and next's first non-blank line when it is an ask line and
     the call passes no `ask` (a client without the ask parameter writes the ask there; the server lifts it). Hashes, test counts and past
-    tense stay notes (_report_note). (a session's write through the create and update tools only, writes.SESSION_NEXT): a line that opens with no `<actor>:` is refused, naming the line and the fix; a sub-line under a named step is fine."""
-    if _writes.session_next() and (bad := _nr.unnamed(next_, skip_first=None if has_ask else (lambda ln: _rmod.parse_ask(ln) is not None))):
+    tense stay notes (_report_note). (a session's write through the create and update tools only, `session`): a line that opens with no `<actor>:` is refused, naming the line and the fix; a sub-line under a named step is fine."""
+    if session and (bad := _nr.unnamed(next_, skip_first=None if has_ask else (lambda ln: _rmod.parse_ask(ln) is not None))):
         raise ToolError(f"Refused: a line of next names no one: \"{_clip_line(bad[0], 60)}\"" + (f" (and {len(bad) - 1} more)" if len(bad) > 1 else "") + (f" ({h})" if (h := _nr.hint(bad[0])) else "") + f". One step is one action with one named actor: {_nr.FIX}. "
                         "A line under a step that belongs to it starts with `- `; results go on the project page (Current state or a timeline line), never into next")
     limit = _next_line_max()
@@ -307,71 +253,3 @@ def _nl_text_without(meta: dict[str, Any], texts: list[str], keeper: str) -> str
     probe = json.loads(json.dumps(meta))
     _nl.prune(probe, texts, keeper)
     return str(probe.get("next") or "")
-
-
-def _gate_metadata(meta: dict[str, Any], *, creating: bool) -> None:
-    rules = _cfg.CFG["metadata"]
-    for key, rule in rules.items():
-        val = meta.get(key)
-        if rule.get("required") and creating and val in (None, ""):
-            raise ToolError(f"Refused: metadata.{key} is required")
-        if val in (None, "", []):
-            continue
-        if key == "needs":                   # a list of the enum's kinds and session names, gated by gates.gate_needs
-            if not isinstance(val, list):
-                raise ToolError("Refused: metadata.needs is a list")
-            continue
-        if "enum" in rule and val not in rule["enum"]:
-            raise ToolError(f"Refused: metadata.{key} must be one of {rule['enum']} — got {val!r}")
-        if rule.get("format") == "YYYY-MM-DD":
-            try:
-                dt.date.fromisoformat(str(val))
-            except ValueError:
-                raise ToolError(f"Refused: metadata.{key} must be YYYY-MM-DD ({_cfg.tz_abbr()}) — got {val!r}")
-        if rule.get("type") == "list" and not isinstance(val, list):
-            raise ToolError(f"Refused: metadata.{key} must be a list")
-        if rule.get("type") == "string" and not isinstance(val, str):
-            raise ToolError(f"Refused: metadata.{key} must be a string")
-        if "registry" in rule:
-            hit, _ = _registry_hit(rule["registry"], str(val))
-            if not hit and rule["registry"] == "projects":
-                # The registry is rebuilt on publish, i.e. after a successful write — so a page created minutes ago is
-                # missing exactly when the first item for it arrives (a first item for a new page can arrive before
-                # the pages checkout has it). Rebuild once, then re-check.
-                try:
-                    _pages.cmd_registry(quiet=True)
-                except Exception:
-                    pass
-                _roles_sync_safe()                  # a new hub's agents are front at once, not at the next publish
-                hit, _ = _registry_hit(rule["registry"], str(val))
-            if not hit and rule["registry"] == "projects":
-                # Fail open for a second brain ([[brains]]): a key it holds whose copy is missing or stale cannot be looked up, so it is
-                # taken as written (the full key) and a warning naming the brain is logged; the board never blocks on that brain.
-                want = _pages.norm(str(val))
-                if _brains.skip(want, "create's page check accepts its keys unchecked") and not _prj.is_id(str(val)):
-                    print(f"create: metadata.{key} = {want} is in second brain {_brains.for_key(want).name!r}, whose copy cannot be read: accepted unchecked",
-                          file=sys.stderr, flush=True)
-                    meta[key] = want
-                    continue
-            if not hit and rule["registry"] == "projects":
-                # The record says the project has no page: there is no page to name, so the refusal below (which is for a page that does not exist) does not apply. The item stores
-                # the project's permanent id. A project whose record points at a page that does not resolve is not this case: it is still refused.
-                nopage = _prj.pageless(str(val))
-                if nopage:
-                    meta[key] = nopage["id"]
-                    continue
-            if not hit:
-                reg = _registry(rule["registry"])
-                known = sorted(k.split("/", 1)[1] for k in reg if k.startswith(_cfg.page_dirs()[0] + "/"))
-                infra = sorted(k for k in reg if any(k.startswith(d + "/") for d in _cfg.page_dirs()[1:]))
-                raise ToolError(
-                    f"Refused: metadata.{key} = {val!r} names no page. Every board item belongs to a project page "
-                    f"(gbrain projects/<slug>, or infra/<slug> for a machine/service item, written as the bare slug or the full key); "
-                    f"create the page first, then the item. Existing project slugs: {', '.join(known)}. Infra pages: {', '.join(infra)}"
-                    + (f". Where it looked: {where}." if (where := _brains.looked_in(_pages.norm(str(val)))) else "")
-                )
-            if rule["registry"] == "projects":
-                hits = _registry_hits(rule["registry"], str(val))
-                if len(hits) > 1:
-                    raise ToolError(f"Refused: metadata.{key} = {val!r} is ambiguous — it names {' and '.join(hits)}; write the full key")
-                meta[key] = hit          # the item stores the page's full key (projects/<slug> or infra/<slug>) — the board and the hooks never guess

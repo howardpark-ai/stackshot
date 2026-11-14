@@ -12,7 +12,7 @@ from stackshot.core import config as _cfg
 from stackshot.model.ids import _norm_id
 from stackshot.service import telling as _telling
 from stackshot.web.auth import oauth as _oauth
-from stackshot.web.field_gates import _registry_hits
+from stackshot.service import gates as _gates
 from stackshot.web.publish import _publish
 from stackshot.web.tools.text import _ANCHOR_SHAPES, _GMAIL_TERMS, _lead, load_text
 
@@ -119,7 +119,7 @@ def _machine_listing(entries: list[dict[str, Any]]) -> str:
 
 def _anchors(project: str, add: list[str] | None = None, items: list[str] | None = None, remove: list[str] | None = None, who: str = "") -> str:
     value = project.strip().strip("/")
-    hits = _registry_hits("projects", value)
+    hits = _gates.registry_hits("projects", value)
     store = _anc.load()
     if not hits:
         # A key whose page is gone (renamed by hand: the old slug is a redirect stub, which the registry skips) can still hold

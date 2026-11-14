@@ -10,8 +10,8 @@ from stackshot.core.instance import NAME, OWNER
 from stackshot.model import draft as _draft, step_commands as _sc
 from stackshot.waits import event_waits as _ew, waiting as _wt
 from stackshot.web import render as _rmod
-from stackshot.web.decision_gates import _OPT_FORM
-from stackshot.web.field_gates import NEXT_PREFIX_ROOM, _close_reason_max, _subject_max
+from stackshot.model.decision_gates import _OPT_FORM
+from stackshot.model.field_gates import NEXT_PREFIX_ROOM, _close_reason_max, _subject_max
 from stackshot.web.tools import textfile as _tf
 
 _FOR_OWNER = f"[for {OWNER}]"   # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance)

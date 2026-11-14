@@ -424,7 +424,7 @@ try:
 finally: gates._hooks_ = saved
 check("4 a gate that needs the hooks and finds none is refused with a message that names the install", all(g[0] == "raised" and "no hooks installed" in g[1] for g in got), got)
 fields = [f.name for f in dataclasses.fields(gates.Hooks)]
-check("4 the table the server installed has every hook of the dataclass", gates._hooks_ is not None and [f for f in fields if not hasattr(gates._hooks_, f)] == [] and len(fields) >= 39, fields)
+check("4 the table the server installed has every hook of the dataclass", gates._hooks_ is not None and [f for f in fields if not hasattr(gates._hooks_, f)] == [] and len(fields) >= 37, fields)
 try: gates.Hooks(**{f: None for f in fields[:-1]}); built = True
 except TypeError: built = False
 check("4 a table with a hook missing cannot be built", not built)
@@ -469,9 +469,8 @@ hook_gates = []
 for f in ("stackshot/service/update.py", "stackshot/service/create.py"):
     for node in ast.walk(ast.parse(pathlib.Path(STACK, f).read_text(encoding="utf-8"))):
         if isinstance(node, ast.Attribute) and node.attr.startswith("gate_") and isinstance(node.value, ast.Name) and node.value.id in ("h", "hk"): hook_gates.append(f"{f}:{node.attr}")
-stayed = {"gate_alternatives", "gate_ask", "gate_bare_urls", "gate_description", "gate_goal", "gate_metadata", "gate_mockup", "gate_next", "gate_one_decision", "gate_open_question", "gate_options",
-          "gate_own_action", "gate_recommend_stance", "gate_recycle_item", "gate_subject"}
-check("5 the two services reach through their hooks only the gates that stayed on the server (the field and decision checks of web/)", all(x.split(":", 1)[1] in stayed for x in hook_gates), [x for x in hook_gates if x.split(":", 1)[1] not in stayed])
+stayed = {"gate_ask", "gate_options"}
+check("5 the two services reach through their hooks only the gates that stayed on the server (the ask's and the options' checks); the field and decision rules are model/'s, called on their modules", all(x.split(":", 1)[1] in stayed for x in hook_gates), [x for x in hook_gates if x.split(":", 1)[1] not in stayed])
 
 # ---------------------------------------------------------------- end
 print(f"gates scenario: {len(ran) - len(fails)}/{len(ran)} checks")

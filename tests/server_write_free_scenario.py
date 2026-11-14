@@ -94,8 +94,8 @@ check("3 the done check's table holds only late lookups and lambdas (a function 
 passes_tab = next((n.value.args[0] for n, t in installs if t == "_passes_hooks"), None)
 passes_plain = [kw.arg for kw in passes_tab.keywords if not is_late(kw.value) and not isinstance(kw.value, ast.Lambda)] if isinstance(passes_tab, ast.Call) else ["no table"]
 check("3 the page-debt, migration and fleet-event table holds only late lookups and lambdas (a function replaced on the server is the one the passes call), never a value copied at the install", not passes_plain, passes_plain)
-expected = {"_ASK_NONE", "_SUBJECT_TAGGED", "_BASIS_WORDS", "_CLOSE_REFUSAL", "_MODEL_PAGE", "OUTCOMES", "_RELAUNCH"}
-check("3 the values captured are the seven the tool text and the gates share (an eighth is a decision: say here why it cannot go stale)", set(captured) == expected, sorted(set(captured) ^ expected))
+expected = {"_ASK_NONE", "_BASIS_WORDS", "_CLOSE_REFUSAL", "_MODEL_PAGE", "OUTCOMES", "_RELAUNCH"}
+check("3 the values captured are the six the tool text and the gates share (an eighth is a decision: say here why it cannot go stale)", set(captured) == expected, sorted(set(captured) ^ expected))
 
 # ---------------------------------------------------------------- 4. telling
 telling_public = {n.name for n in parse("service/telling.py").body if isinstance(n, ast.FunctionDef) and not n.name.startswith("_")} - {"install"}

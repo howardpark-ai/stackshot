@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.model import field_gates as _fg
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import complete as _wt_complete
@@ -274,7 +275,7 @@ check("the update tool as served carries the same guidance", "never before" in (
 server._cfg.CFG["fleet"].update(tool_name="", recycle_when_idle="")      # no fleet tool: nothing named, no command suggested
 try: _wt_create._create(subject="[home] Recycle the sessions on box-a", description="- A thing", project="projects/alpha", owner="home-here"); check("with no fleet tool, create still refuses a recycle item", False)
 except server.ToolError as e: check("with no fleet tool, create still refuses a recycle item and names no tool or command", "update(<item>, recycle=true)" in str(e) and "sala" not in str(e) and "next recycle" in str(e), str(e))
-check("with no fleet tool the prose says 'the fleet tool'", server._fleet_tool() == "the fleet tool" and server._when_idle().startswith("leave it for the next recycle"), (server._fleet_tool(), server._when_idle()))
+check("with no fleet tool the prose says 'the fleet tool'", _fg._fleet_tool() == "the fleet tool" and _fg._when_idle().startswith("leave it for the next recycle"), (_fg._fleet_tool(), _fg._when_idle()))
 server._cfg.CFG["fleet"].update(tool_name="sala", recycle_when_idle="sala recycle --when-idle")
 
 # ---- 6. the client verb

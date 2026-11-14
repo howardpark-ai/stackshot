@@ -1,5 +1,5 @@
-"""Scenario test for the gate that refuses a needs=decision item whose ask names alternatives while it lists no options (server._gate_alternatives,
-server._lettered_alternatives) — fixture data, no live store, no network, no server process (the server module is imported and called in-process, on a temporary config).
+"""Scenario test for the gate that refuses a needs=decision item whose ask names alternatives while it lists no options (decision_gates._gate_alternatives,
+decision_gates._lettered_alternatives) — fixture data, no live store, no network, no server process (the server module is imported and called in-process, on a temporary config).
 
 Without options the item page draws a bare Yes / No for the ask, which is wrong for a pick between alternatives. The gate already read keywords ("which of the two", "pick one",
 "Option A") and a list ("x, y or z", "x vs y"); it missed labeled choices in the Decide part: "A or B", "A (full height, as now) or B (starts below the cards)", "A: … or B: …". This covers, on create and on update:

@@ -6,8 +6,11 @@ of what a write means. The checks that come before the lock (`fix_front_mover`, 
 
 What stays on server.py, and is reached through `Hooks` (which server.py fills once with `install`; this module cannot import server.py, the surface sits above it): the per-write thread-local flags (`question`,
 `terminal_row`, `reformat`, `session_next`, read through accessors until the telling and the routes that set them move), the helpers of the areas that still sit there (the hand-off machinery, the roster and the contact
-lookups, the effective state, the wake parser, the anchors scoped to an item) and the checks that sit in web/ (the field and decision checks, the renderer's answers and times). A function hook is looked up on server.py when a gate
+lookups, the effective state, the wake parser, the anchors scoped to an item) and what the renderer answers (the answers and times). A function hook is looked up on server.py when a gate
 runs, so a suite that replaces one there still reaches the gate; a suite that replaces a gate patches it here, on its owner.
+
+The rules of an item's fields and of an ask's options are model/'s (`field_gates.py`, `decision_gates.py`), called on those modules. The metadata gate looks a project's page up in the registry and may rebuild it, so it
+is here (`gate_metadata`) with the registry readers it uses (`registry_hits`, `registry_hit`, `registry_text`) and the scope prefix a project's record gives a subject (`project_subject_prefix`).
 
 Imports point down only: this module imports the domain and core and the store's readers beside it (service/store.py), never web/ and never audit/."""
 from __future__ import annotations
@@ -25,6 +28,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
+from stackshot.core import store as _store
 from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _session_label
@@ -33,6 +37,7 @@ from stackshot.model import ask_leaves as _askl
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model import contact as _contact
 from stackshot.model import draft as _draft
+from stackshot.model import field_gates as _fg
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -43,7 +48,10 @@ from stackshot.model import states as _states
 from stackshot.model import step_commands as _sc
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
+from stackshot.projects import brains as _brains
 from stackshot.projects import pages as _pages
+from stackshot.projects import projects as _prj
+from stackshot.projects.project_registry import _registry, _roles_sync_safe
 from stackshot.service import handoff as _handoff
 from stackshot.service import telling as _telling
 from stackshot.service import watching as _watching
@@ -69,7 +77,6 @@ class Hooks:
     ask_none: Any            # the closed list of words that clear an ask (server._ASK_NONE)
     ask_stands: Callable[..., Any]
     basis_words: Any
-    close_reason_max: Callable[..., Any]            # field_gates._close_reason_max (web/): the instance's longest close reason
     close_refusal: Any            # the full close rule a refused close appends (server._CLOSE_REFUSAL)
     contact_alive: Callable[..., Any]
     contact_fronts: Callable[..., Any]
@@ -78,7 +85,6 @@ class Hooks:
     follow_superseded: Callable[..., Any]
     front_held: Callable[..., Any]            # audit/front_step.held: the front agent a step opens with when the write check refuses it (service/ imports no audit/)
     front_pair_ok: Callable[..., Any]
-    gate_description: Callable[..., Any]            # field_gates._gate_description (web/): the description's own checks, a close's outcome_text goes through them
     handoffs_in: Callable[..., Any]
     handover_kind: Callable[..., Any]
     hub_sessions: Callable[..., Any]
@@ -1169,11 +1175,11 @@ def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, supers
         raise ToolError(f"Refused: outcome must be one of {' | '.join(h.outcomes)} — got {outcome!r}")
     if len([ln for ln in reason.splitlines() if ln.strip()]) > 1:
         raise ToolError("Refused: reason is one line: the end state reached and why the item closed")
-    rmax = h.close_reason_max()
+    rmax = _fg._close_reason_max()
     if rmax and len(reason) > rmax:
         raise ToolError(f"Refused: the reason is {len(reason)} characters and the limit is {rmax}. Shorten it to the end state reached and why the item closed; "
                         "the detail goes in the outcome_text bullets (and the project page's timeline).")
-    h.gate_description(outcome_text, "outcome_text")
+    _fg._gate_description(outcome_text, "outcome_text")
     if not superseded_by.strip():
         return ""
     if outcome != "superseded":
@@ -1348,3 +1354,115 @@ def gate_step_gap(meta: dict[str, Any], steps_new: list[dict[str, Any]], steps_o
         raise ToolError(f"Refused: step {n} ({_clip_line(_steps.first_line(steps_new[n - 1]['text']), 60)}) delivers {ref} and another session's step follows: split it so `{phrase}` is a step of its own (it ticks itself), "
                         f"or, if the PR landing finishes the step, add step_proof=[{{\"step\": {n}, \"proof\": \"{proof}\"}}]" + (" (another repository's PR: pr_merged <owner>/<repo>#<n>)" if ref.startswith("#") else "")
                         + (f" (and {len(gaps) - 1} more step{'s' if len(gaps) > 2 else ''})" if len(gaps) > 1 else ""))
+
+
+# ----------------------------------------------------------------------------- registries
+def registry_text() -> str:
+    """The page registry file's text for the client API (`/client/registry`), with the project record's entries laid over the pages when there are any: a hook on another machine reads
+    the same registry as the server does. The file's own text when no entry changes a page."""
+    text = (_store.STORE / "projects.json").read_text(encoding="utf-8")
+    try:
+        doc = json.loads(text)
+        pages = doc.get("pages") if isinstance(doc, dict) else None
+        laid = _prj.with_record(pages) if isinstance(pages, dict) else pages
+        return text if laid is pages else _prj.registry_json({**doc, "pages": laid})
+    except Exception:  # noqa: BLE001
+        return text         # a file that does not parse is served as it always was; only an unreadable one is "no registry yet"
+
+
+def registry_hits(name: str, value: str) -> list[str]:
+    """Every registry key the value can name, in match order (a bare slug may name projects/<slug> and infra/<slug>)."""
+    reg = _registry(name)
+    if name == "projects" and _prj.is_id(value):                 # a project's permanent id names its page (phase A: stored data still carries the key)
+        k = _prj.id_to_key(value, reg)
+        return [k] if k and k in reg else []
+    return [k for k in dict.fromkeys(pat.format(value=value) for pat in _cfg.CFG["registries"][name].get("match", ["{value}"])) if k in reg]
+
+
+def registry_hit(name: str, value: str) -> tuple[str | None, dict[str, Any]]:
+    hits = registry_hits(name, value)
+    return (hits[0], _registry(name)[hits[0]]) if hits else (None, {})
+
+
+
+def project_subject_prefix(project: str) -> str:
+    """The scope prefix a subject for `project` takes: "[<scope>] " of the project's scope when the instance has that prefix, else [subject] fallback_prefix when it is one of the prefixes;
+    "" when the project does not name one record, the record has no scope, or neither applies (the subject is then refused for its missing prefix, as before)."""
+    try:
+        recs = _prj.refs(project, _registry("projects"))
+    except Exception:  # noqa: BLE001 — a project record that cannot be read: the gate refuses the subject as it always did
+        return ""
+    if len(recs) != 1:
+        return ""
+    prefixes = list(_cfg.CFG["subject"]["prefixes"])
+    fallback = str(_cfg.get("subject", "fallback_prefix") or "")
+    scope = str(recs[0].get("scope") or "")
+    return next((p for p in (f"[{scope}] " if scope else "", fallback) if p and p in prefixes), "")
+
+
+def gate_metadata(meta: dict[str, Any], *, creating: bool) -> None:
+    rules = _cfg.CFG["metadata"]
+    for key, rule in rules.items():
+        val = meta.get(key)
+        if rule.get("required") and creating and val in (None, ""):
+            raise ToolError(f"Refused: metadata.{key} is required")
+        if val in (None, "", []):
+            continue
+        if key == "needs":                   # a list of the enum's kinds and session names, gated by gates.gate_needs
+            if not isinstance(val, list):
+                raise ToolError("Refused: metadata.needs is a list")
+            continue
+        if "enum" in rule and val not in rule["enum"]:
+            raise ToolError(f"Refused: metadata.{key} must be one of {rule['enum']} — got {val!r}")
+        if rule.get("format") == "YYYY-MM-DD":
+            try:
+                dt.date.fromisoformat(str(val))
+            except ValueError:
+                raise ToolError(f"Refused: metadata.{key} must be YYYY-MM-DD ({_cfg.tz_abbr()}) — got {val!r}")
+        if rule.get("type") == "list" and not isinstance(val, list):
+            raise ToolError(f"Refused: metadata.{key} must be a list")
+        if rule.get("type") == "string" and not isinstance(val, str):
+            raise ToolError(f"Refused: metadata.{key} must be a string")
+        if "registry" in rule:
+            hit, _ = registry_hit(rule["registry"], str(val))
+            if not hit and rule["registry"] == "projects":
+                # The registry is rebuilt on publish, i.e. after a successful write — so a page created minutes ago is
+                # missing exactly when the first item for it arrives (a first item for a new page can arrive before
+                # the pages checkout has it). Rebuild once, then re-check.
+                try:
+                    _pages.cmd_registry(quiet=True)
+                except Exception:
+                    pass
+                _roles_sync_safe()                  # a new project's agents are front at once, not at the next publish
+                hit, _ = registry_hit(rule["registry"], str(val))
+            if not hit and rule["registry"] == "projects":
+                # Fail open for a second brain ([[brains]]): a key it holds whose copy is missing or stale cannot be looked up, so it is
+                # taken as written (the full key) and a warning naming the brain is logged; the board never blocks on that brain.
+                want = _pages.norm(str(val))
+                if _brains.skip(want, "create's page check accepts its keys unchecked") and not _prj.is_id(str(val)):
+                    print(f"create: metadata.{key} = {want} is in second brain {_brains.for_key(want).name!r}, whose copy cannot be read: accepted unchecked",
+                          file=sys.stderr, flush=True)
+                    meta[key] = want
+                    continue
+            if not hit and rule["registry"] == "projects":
+                # The record says the project has no page: there is no page to name, so the refusal below (which is for a page that does not exist) does not apply. The item stores
+                # the project's permanent id. A project whose record points at a page that does not resolve is not this case: it is still refused.
+                nopage = _prj.pageless(str(val))
+                if nopage:
+                    meta[key] = nopage["id"]
+                    continue
+            if not hit:
+                reg = _registry(rule["registry"])
+                known = sorted(k.split("/", 1)[1] for k in reg if k.startswith(_cfg.page_dirs()[0] + "/"))
+                infra = sorted(k for k in reg if any(k.startswith(d + "/") for d in _cfg.page_dirs()[1:]))
+                raise ToolError(
+                    f"Refused: metadata.{key} = {val!r} names no page. Every board item belongs to a project page "
+                    f"(gbrain projects/<slug>, or infra/<slug> for a machine/service item, written as the bare slug or the full key); "
+                    f"create the page first, then the item. Existing project slugs: {', '.join(known)}. Infra pages: {', '.join(infra)}"
+                    + (f". Where it looked: {where}." if (where := _brains.looked_in(_pages.norm(str(val)))) else "")
+                )
+            if rule["registry"] == "projects":
+                hits = registry_hits(rule["registry"], str(val))
+                if len(hits) > 1:
+                    raise ToolError(f"Refused: metadata.{key} = {val!r} is ambiguous — it names {' and '.join(hits)}; write the full key")
+                meta[key] = hit          # the item stores the page's full key (projects/<slug> or infra/<slug>) — the board and the hooks never guess

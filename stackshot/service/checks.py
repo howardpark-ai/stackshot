@@ -30,6 +30,7 @@ from stackshot.core.store import _item_files
 from stackshot.github import ghsync as _gh
 from stackshot.github import pr_state as _prs
 from stackshot.model import activity as _activity
+from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
 from stackshot.model import states as _states
 from stackshot.model import steps as _steps
@@ -335,7 +336,7 @@ def check_close(gid: str, it: dict[str, Any], check: str, now: float) -> None:
     for k in ("next", "next_by", "owner_step", "ask", "needs", "options", "after", "hold", "hold_set", "wake", "recycle", "recycle_at", "idle", "check", "watch_reason", "waiting", "wait_failed", "wait_basis", *_states.DROP_ON_CLOSE, *_states.CLOSE_EXTRA, *_model.DROP_ON_CLOSE, *_watch.DROP_ON_CLOSE):
         meta.pop(k, None)
     label = check_label(check)
-    meta["outcome"], meta["reason"] = "done", _hooks().fit(f"done check passed: {label}", _hooks().close_reason_max())     # kept to the reason limit a session's close is held to
+    meta["outcome"], meta["reason"] = "done", _fg._fit(f"done check passed: {label}", _fg._close_reason_max())     # kept to the reason limit a session's close is held to
     it["status"] = "completed"; it["metadata"] = meta
     it["updated"] = it["state_updated"] = it["confirmed"] = now
     _writes.save(gid, it, activity=_activity.EVENT)      # no writer, no note: the History line is the change itself ("completed · done — done check passed: …"); the event the check waited for is activity

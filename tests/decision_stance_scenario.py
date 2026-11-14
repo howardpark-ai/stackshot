@@ -1,5 +1,5 @@
 """Scenario test for the gate that keeps the item page's Yes / No fallback from being drawn under a question it cannot answer when the question is not phrased with an English question word
-(server._gate_recommend_stance, ask_read.recommend_stance) — fixture data, no live store, no network, no server socket.
+(decision_gates._gate_recommend_stance, ask_read.recommend_stance) — fixture data, no live store, no network, no server socket.
 
 A needs=decision item with no options gets a bare Yes / No on the item page. The open-question gate reads the Decide part for an English question word, so a noun phrase or a question in another language
 passed it and the page drew Yes / No under "who joins and which topic". The write check reads the Recommend part instead: with no options it must be a yes or a no, in any language (the English words ship;
@@ -79,6 +79,7 @@ def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as wk
+from stackshot.model import decision_gates as _dg
 from stackshot.service import watching as watching_svc
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
@@ -183,11 +184,11 @@ try:
     ev = {"wait_event": "countersigned NDA"}
     for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options()), ("the drop question", wk.drop_ask(ev), wk.drop_options())):
         m = {"needs": ["decision"], "ask": ask, "options": opts, "watch": {"asked": "relay" if "relay" in what else "dropit"}}
-        passes(f"5 watcher: {what} passes the Recommend gate", lambda m=m: server._gate_recommend_stance(m))
+        passes(f"5 watcher: {what} passes the Recommend gate", lambda m=m: _dg._gate_recommend_stance(m))
         m2 = {**m, "options": None}
-        passes(f"5 watcher: {what} without its options is still the watcher's own and passes", lambda m2=m2: server._gate_recommend_stance(m2))
+        passes(f"5 watcher: {what} without its options is still the watcher's own and passes", lambda m2=m2: _dg._gate_recommend_stance(m2))
     ask, opts = watching_svc.watch_ask("a1", {}, "its wait ended")
-    passes("5 post-wake: the question the server builds (two options) passes", lambda: server._gate_recommend_stance({"needs": ["decision"], "ask": ask, "options": opts}))
+    passes("5 post-wake: the question the server builds (two options) passes", lambda: _dg._gate_recommend_stance({"needs": ["decision"], "ask": ask, "options": opts}))
     writes.QUESTION.on = True
     try:
         out = passes("5 question route: a script's question with a Recommend that is no yes or no still files an item", lambda: mk(ask=ASK(GUEST, "none, your call")))

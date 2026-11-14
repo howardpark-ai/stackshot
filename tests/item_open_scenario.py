@@ -60,6 +60,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+from stackshot.model import field_gates as _fg
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
 _orig_run = server.subprocess.run
@@ -146,7 +147,7 @@ close(o["item"])
 
 # ---- 5. bad bullets: refused, never cut, nothing filed
 n4 = len(items())
-max_lines, line_max = server._description_limits()
+max_lines, line_max = _fg._description_limits()
 ok_lines = ["- a fact"] * (max_lines - 1)
 st, o = io_(marker="test_trim:max", description=ok_lines)
 check(f"{max_lines - 1} lines (the most that leaves room for the attribution line) are taken, the description has {max_lines} lines", st == 200 and len(item(o["item"])["description"].splitlines()) == max_lines, (st, o))

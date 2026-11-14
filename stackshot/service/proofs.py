@@ -31,6 +31,7 @@ from stackshot.fleet.sessions_registry import _session_label, _sessions_index
 from stackshot.github import ghsync as _gh
 from stackshot.github import pr_state as _prs
 from stackshot.model import activity as _activity
+from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
 from stackshot.model import nextlines as _nl
 from stackshot.model import states as _states
@@ -307,7 +308,7 @@ def proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: b
     pure = [i for i, p in hits.items() if p]
     rest = [i for i in opened if i not in pure]
     if not rest:      # its only open steps are this event's proof: the item is done
-        reason = _hooks().fit(f"{ref} is live ({live}){tests}" if kind == _sp.PR_RELEASED else f"{ref} is merged ({live})", _hooks().close_reason_max())
+        reason = _fg._fit(f"{ref} is live ({live}){tests}" if kind == _sp.PR_RELEASED else f"{ref} is merged ({live})", _fg._close_reason_max())
         row.update(action="closed", reason=reason, step=step)
         if dry:
             return row

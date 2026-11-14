@@ -6,9 +6,9 @@ reads the item, runs the gates, applies the fields, the checklist, the wait, the
 write names the mover itself, QUIET when it only files or re-bullets), charges the page debt, tells the sessions the write concerns, publishes, and builds the reply. The order of those steps is part of what an update means and
 is kept as it was in server.py. `confirm_item` only sets the `confirmed` clock (a QUIET save).
 
-The write gates an update runs are service/gates.py's (`_gates.gate_*`, called in the order they ran in server.py). The field and decision checks and the notices an update runs are still server.py's, because the create tool, the close
-and the telling run the same ones; they are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves `Hooks` when its area moves
-under service/ (the telling next). A hook is looked up on server.py when an update runs, so a suite that replaces one there still reaches the update; a suite that replaces a gate patches it on service/gates.py. The per-write flags of server.py that an update reads or sets stay thread-locals there until the areas that share them move, and are reached through `Hooks` too: `session_next` (the create or update tool's
+The write gates an update runs are service/gates.py's (`_gates.gate_*`, called in the order they ran in server.py), the field and decision rules model/'s (`field_gates.py`, `decision_gates.py`), each called on its module. The notices an update runs
+and the helpers of the areas that still sit in server.py are reached through `Hooks`, which server.py fills once with `install` (this module cannot import server.py: the surface sits above it), and each of them leaves `Hooks` when its area moves
+under service/ (the telling next). A hook is looked up on server.py when an update runs, so a suite that replaces one there still reaches the update; a suite that replaces a gate or a rule patches it on its owner. The per-write flags of server.py that an update reads or sets stay thread-locals there until the areas that share them move, and are reached through `Hooks` too: `session_next` (the create or update tool's
 own call), `reformat` (the re-bullet route), `terminal_row` (the terminal prompt's and the job-gap routes' row), `close_was_set` (the item as it stood before the close, for the telling) and `wake_event_set` (the minute loop).
 
 Imports point down only: this module imports the domain and core and the store's readers beside it (service/store.py), never web/."""
@@ -31,6 +31,8 @@ from stackshot.core.instance import OWNER
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
+from stackshot.model import decision_gates as _dg
+from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import next_rules as _nr
@@ -75,9 +77,8 @@ _FILING_ONLY = frozenset({"project", "subject", "priority", "owner_name", "obser
 
 @dataclass(frozen=True)
 class Hooks:
-    """What an update still reaches in server.py (the field and decision checks and notices it shares with the create tool, the close and the telling, the per-write flags and a few constants), in the names they have there without the leading underscore;
+    """What an update still reaches in server.py (the notices and helpers it shares with the create tool, the close and the telling, the per-write flags and a few constants), in the names they have there without the leading underscore;
     server.py builds one and gives it to `install`. A gate raises `ToolError` itself; a flag is a function that reads (or, `close_was_set`, writes) the thread-local."""
-    actor_note: Callable[..., Any]
     after_open: Callable[..., Any]
     anchor_wait_gate: Callable[..., Any]
     ask_none: tuple[str, ...]      # the words that mean no ask, no observers, no check (server._ASK_NONE)
@@ -98,20 +99,8 @@ class Hooks:
     finishes_own_line: Callable[..., Any]
     fmt: Callable[..., Any]
     form_notes: Callable[..., Any]
-    gate_alternatives: Callable[..., Any]
     gate_ask: Callable[..., Any]
-    gate_bare_urls: Callable[..., Any]
-    gate_description: Callable[..., Any]
-    gate_goal: Callable[..., Any]
-    gate_metadata: Callable[..., Any]
-    gate_mockup: Callable[..., Any]
-    gate_next: Callable[..., Any]
-    gate_one_decision: Callable[..., Any]
-    gate_open_question: Callable[..., Any]
     gate_options: Callable[..., Any]
-    gate_own_action: Callable[..., Any]
-    gate_recommend_stance: Callable[..., Any]
-    gate_subject: Callable[..., Any]
     handoffs_in: Callable[..., Any]
     hold_held_by: Callable[..., Any]
     hold_set: Callable[..., Any]
@@ -119,15 +108,12 @@ class Hooks:
     lift_ask: Callable[..., Any]
     machine_note: Callable[..., Any]
     main_agent: Callable[..., Any]
-    marks_given: Callable[..., Any]
     model_apply: Callable[..., Any]
     model_guards_on: Callable[..., Any]
     model_of: Callable[..., Any]
     nag: Callable[..., Any]
     name_on_write: Callable[..., Any]
     next_put: Callable[..., Any]
-    nl_text_without: Callable[..., Any]
-    options_note: Callable[..., Any]
     owed_mark: Callable[..., Any]
     owner_quote_on: Callable[..., Any]
     owner_state_mover: Callable[..., Any]
@@ -142,7 +128,6 @@ class Hooks:
     render_option_lines: Callable[..., Any]
     render_same_ref: Callable[..., Any]
     render_when_words: Callable[..., Any]
-    require_marks: Callable[..., Any]
     said_note: Callable[..., Any]
     scoped_anchors: Callable[..., Any]
     session_id: Callable[..., Any]
@@ -680,7 +665,7 @@ def update_unlocked(
     said_l = _gates.gate_said(said, sender.strip() or own_for, debtor)   # the trailers: his words checked against the transcript; a failed check refuses the write here
     reformat = bool(description) and bool(_writes.reformat())   # a re-bullet changes the form of the description, never what it says: the state clock and the confirm stay, no page is owed
     rewording = _steps.reword_given(reword)      # reword={position: new text}: an open step's words change; an empty mapping ({} or "{}") is not given
-    marks = h.marks_given(done) or h.marks_given(dropped) or rewording or work_tick >= 0      # a step checked, dropped or reworded is a change of next; so is the step a status done ticks
+    marks = _fg._marks_given(done) or _fg._marks_given(dropped) or rewording or work_tick >= 0      # a step checked, dropped or reworded is a change of next; so is the step a status done ticks
     state_change = bool((description and not reformat) or next_touch or marks or needs_set or clear_needs or status or due or clear_due or wake or clear_wake or hold or clear_hold or after_set or clear_after)   # _STATE_FIELDS (+ the hold and its wake, and after); the rest is filing
     was, was_held = item.get("status"), h.is_held(item)
     was_parked = was_held or h.date_parked(item, was_until)      # (the relay line and the minute loop read a wait on a date as the park it replaces; the reply notes read the hold flag alone)
@@ -707,18 +692,18 @@ def update_unlocked(
         raise ToolError("Refused: a completed item keeps no draft (a close drops it); draft goes with an open item")
     if state_change:
         h.refuse_if_owing(debtor)
-    h.gate_bare_urls({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was})   # only the fields this call sets; a stored bare URL is no reason to refuse
+    _fg._gate_bare_urls({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was}, session=_writes.session_next())   # only the fields this call sets; a stored bare URL is no reason to refuse
     if subject:
-        h.gate_subject(subject, str(item.get("subject") or ""))
+        _fg._gate_subject(subject, str(item.get("subject") or ""))
         item["subject"] = subject
     if description:
-        h.gate_description(description)
+        _fg._gate_description(description)
         if (_writes.session_next() and not reformat and not sender.strip().startswith("a script on ")
                 and description.strip() != str(item_was.get("description") or "").strip()):     # a replacement of the text by a session, not the stored text sent back
-            h.gate_goal(description)
+            _fg._gate_goal(description)
         item["description"] = description
     if next:
-        h.gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none)
+        _fg._gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none, session=_writes.session_next())
     steps_on = was != "completed" or reopening          # a closed item's checklist is its record: no write touches it until the item is reopened
     if marks and not steps_on:
         raise ToolError(f"Refused: {_gh.shown(gid)} is closed and its checklist is the record of what was done; reopen it (status=open with a next) before marking or rewording a step")
@@ -749,8 +734,8 @@ def update_unlocked(
             if _writes.session_next() and _nr.grows(_steps.first_line(steps_old[i]["text"]), _steps.first_line(text)):       # N3 holds for a reword as for a rewritten line: the old text plus added words is progress, which goes on the page
                 raise ToolError(f"Refused: reword: the new text of step {i + 1} is its old text with words added (\"{_clip_line(_steps.first_line(text), 90)}\"): a step is never rewritten to add progress, so progress, results and what was tried go on the project page "
                                 f"(Current state or a timeline line). Reword the step to a different action, or mark it dropped=[{i + 1}] and write the longer one as a new line of next")
-            h.gate_next(text, has_ask=True)
-        h.gate_bare_urls({"next": "\n".join(reword_ix.values())}, {"next": "\n".join(steps_old[i]["text"] for i in reword_ix)})
+            _fg._gate_next(text, has_ask=True, session=_writes.session_next())
+        _fg._gate_bare_urls({"next": "\n".join(reword_ix.values())}, {"next": "\n".join(steps_old[i]["text"] for i in reword_ix)}, session=_writes.session_next())
         proofs = dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
         for i, text in reword_ix.items():
             old_text = steps_old[i]["text"]
@@ -1009,14 +994,14 @@ def update_unlocked(
         wait_note += fb_note
     _gates.gate_ask_on_wait(gid, item, meta, was_needs, closing)           # a decision asked of the owner on an item that still waits: the clear_wait hint
     watch_note = h.watch_on_write(gid, item_was, meta, model_set, model_drop, debtor, sender.strip())   # the wait's record, the arrival that was shown
-    h.gate_metadata(meta, creating=False)
+    _gates.gate_metadata(meta, creating=False)
     lifted = "" if (ask or clear_ask or item.get("status") == "completed") else h.lift_ask(meta, refresh=bool(next), writer=next_writer, keeper=keeper_was)   # a client without the ask parameter
     steps_note = merged_note + reword_note
     steps_new = None                                            # the checklist this write leaves (set below when the write touches it): reads it
     if steps_on and not closing and (next_touch or marks):      # the checklist follows next, and next follows a mark: a marked line leaves next with its writer
         marked_text = [steps_old[i]["text"] for i in (*done_ix, *drop_ix)]
         if _writes.session_next():                 # N3: nothing leaves the list; a reworded open step is no rewrite of its text to add words to it (a session's write only)
-            leaving, arriving = _nr.moves(steps_old, done_ix, drop_ix, h.nl_text_without(meta, marked_text, keeper_was))
+            leaving, arriving = _nr.moves(steps_old, done_ix, drop_ix, _fg._nl_text_without(meta, marked_text, keeper_was))
             leaving = [(i, t) for i, t in leaving if i not in drop_ix]      # a step marked dropped stays on the list as dropped: the extended line that replaces it is a new action, not a rewrite (reviewer note d)
             if grown := _nr.growths([t for _, t in leaving], arriving):
                 old_s, new_s = grown[0]
@@ -1025,8 +1010,8 @@ def update_unlocked(
                                 f"so nothing leaves the list that way: the old step is left without a mark. Keep the step as it is, or mark it (done=[{pos}] when the work is finished, dropped=[{pos}] when it is no longer wanted) and write the next step as a new action; "
                                 "progress, results and what was tried go on the project page (Current state or a timeline line)")
         try:
-            steps_new = _steps.apply(steps_old, h.nl_text_without(meta, marked_text, keeper_was), done_ix, drop_ix, steps_by, time.time(),
-                                     written=next, own=lambda w: not w or _handoff.ho_same(w, next_writer), wipe=clear_next, strict=h.require_marks(), reworded=reword_ix)
+            steps_new = _steps.apply(steps_old, _fg._nl_text_without(meta, marked_text, keeper_was), done_ix, drop_ix, steps_by, time.time(),
+                                     written=next, own=lambda w: not w or _handoff.ho_same(w, next_writer), wipe=clear_next, strict=_fg._require_marks(), reworded=reword_ix)
         except _steps.StepError as e:
             raise ToolError(f"Refused: {e}")
         _nl.prune(meta, marked_text, keeper_was)
@@ -1064,19 +1049,19 @@ def update_unlocked(
         raise ToolError(f"Refused: {_gh.shown(gid)} is closed and its checklist is the record of what was done; reopen it (status=open with a next) before giving a step a proof")
     asked = lifted + ("" if item.get("status") == "completed" else h.ask_owed(meta))   # a needs=decision item left without an ask (a completion never needs one)
     if item.get("status") != "completed" and not closing and (ask or meta.get("ask") != ask_was):   # only a call that writes or changes the ask
-        h.gate_one_decision(meta, item.get("description") or "", bool(lifted) and not ask)
+        _dg._gate_one_decision(meta, item.get("description") or "", bool(lifted) and not ask)
     if item.get("status") != "completed" and (ask or (description and not reformat) or needs_set or opts is not None):   # only a call that writes what it reads
-        h.gate_alternatives(meta, item.get("description") or "")
+        _dg._gate_alternatives(meta, item.get("description") or "")
     if item.get("status") != "completed" and not closing and (ask or meta.get("ask") != ask_was or opts is not None
                                                                or (needs_set and "decision" not in [str(x).lower() for x in was_needs])):   # a write that sets the ask or the options, or puts the item on his call: an open question needs options
-        h.gate_open_question(meta)
-        h.gate_recommend_stance(meta)       # the same writes: no options and a Recommend that is no yes or no
+        _dg._gate_open_question(meta)
+        _dg._gate_recommend_stance(meta)       # the same writes: no options and a Recommend that is no yes or no
     if item.get("status") != "completed" and not closing and (ask or (description and not reformat) or next_touch or needs_set or opts is not None):   # a write that sets the ask or the text it is read against
-        h.gate_mockup(meta, item.get("description") or "")
+        _dg._gate_mockup(meta, item.get("description") or "")
     if item.get("status") != "completed" and not closing and (ask or needs_set or opts is not None or next_touch):   # his own action asked as a decision: only a call that writes what it reads
-        h.gate_own_action(meta, next_only=not (ask or needs_set or opts is not None))
+        _dg._gate_own_action(meta, next_only=not (ask or needs_set or opts is not None))
     if item.get("status") != "completed" and (ask or opts):
-        asked += h.options_note(meta) + h.actor_note(meta, options=bool(opts), ask=bool(ask))
+        asked += _dg._options_note(meta) + _dg._actor_note(meta, options=bool(opts), ask=bool(ask))
     hold_note = ""
     if ((hold and meta.get("hold") and meta.get("state") in _states.STATES and meta["state"] != "parked")
             or (relay_hold and meta.get("state") in _model.ALIVE_STATES)) and not state_st:     # a hold makes the item read parked: a state of another kind cannot stand beside it; a relay or event wait stores no flag, so the hold ends only the alive states the model's conflict line names (a waiting state stands beside the wait and keeps its fields)

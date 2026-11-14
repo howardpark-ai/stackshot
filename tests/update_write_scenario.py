@@ -12,7 +12,7 @@ update means. This suite installs hooks that record each call and return what a 
   7  complete        the complete write makes the update with status=completed through the hook the server fills, then appends the anchors prompt (a failing prompt is told, not raised)
   8  confirm         a confirm moves the `confirmed` clock only, saves quietly under the confirm activity, publishes and appends the nag; its writer is the sender or the item's mover; its reply tells the time in the zone the server holds
   9  the helpers     the private helpers that moved with the write, called directly: the retired-input note, the hand-off line test, the stale-next mark, the hand-off list, the contact after a move, the doing note, the loose wait reason, the time-wait reading, each on a non-default input and an edge, expected values taken from main's own functions
-  10 the table       the table the server builds holds every hook and looks each up when it is called (a patch of the server's name, or of the nag's owner, after the install reaches the update); every `_late("<name>")` target of its two tables is a name of the server; the zone is the server's own;
+  10 the table       the table the server builds holds every hook and looks each up when it is called (a patch of the server's name, or of the nag's owner, after the install reaches the update); the field and decision rules are model/'s, called on their modules, so a patch of the owner reaches the update; every `_late("<name>")` target of its two tables is a name of the server; the zone is the server's own;
                      a write with no hooks installed is refused
  11  the layers      service/update.py imports nothing from web/, and web/server.py defines none of the moved bodies (the three tools, in web/tools/, are thin wrappers)
 
@@ -85,6 +85,16 @@ def flag(name):
 # the write gates are service/gates.py's, not hooks: the update calls them on that module, so this suite replaces each there (the recorder above) and puts the real ones back before it imports the server
 REAL_GATES = {n: getattr(gates, n) for n in dir(gates) if n.startswith("gate_") and callable(getattr(gates, n))}
 for _n in REAL_GATES: setattr(gates, _n, hook(_n))
+# the field and decision rules are model/'s, not hooks either: the update calls each on its module, so this suite replaces each there with the same recorder, under the name the order lists it by
+# (the owner's name without its leading underscore)
+from stackshot.model import decision_gates as _dg, field_gates as _fg
+MOVED = {"gate_subject": (_fg, "_gate_subject"), "gate_description": (_fg, "_gate_description"), "gate_goal": (_fg, "_gate_goal"), "gate_next": (_fg, "_gate_next"),
+         "gate_bare_urls": (_fg, "_gate_bare_urls"), "marks_given": (_fg, "_marks_given"), "nl_text_without": (_fg, "_nl_text_without"), "require_marks": (_fg, "_require_marks"),
+         "gate_one_decision": (_dg, "_gate_one_decision"), "gate_alternatives": (_dg, "_gate_alternatives"), "gate_open_question": (_dg, "_gate_open_question"),
+         "gate_recommend_stance": (_dg, "_gate_recommend_stance"), "gate_mockup": (_dg, "_gate_mockup"), "gate_own_action": (_dg, "_gate_own_action"),
+         "options_note": (_dg, "_options_note"), "actor_note": (_dg, "_actor_note")}
+REAL_MOVED = {n: getattr(m, a) for n, (m, a) in MOVED.items()}
+for _n, (_m, _a) in MOVED.items(): setattr(_m, _a, hook(_n))
 # the telling is service/telling.py's, not a hook either: the update calls each notice on that module, so this suite replaces the ones it calls there with the same recorder (logged under the name the hook had)
 REAL_TELLING = {n: getattr(telling, n) for n in ("front_sender", "handoff_notify", "holder", "mentions_reply", "owner_reached", "page_keeper", "pilot_charge", "pilot_relay", "push_noted", "quiet_line",
                                                  "tell_decided", "tell_handback", "tell_needed", "tell_observers", "tell_owner", "tell_owner_change", "tell_owner_close", "writer_charge")}
@@ -382,6 +392,7 @@ try: update.Hooks(**{f.name: None for f in dataclasses.fields(update.Hooks)[:-1]
 except TypeError as e: short = str(e)
 check("10 a hook table with a hook missing cannot be built", short is not None, short)
 for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
+for _n, _f in REAL_MOVED.items(): setattr(MOVED[_n][0], MOVED[_n][1], _f)      # and the real field and decision rules
 for _n, _f in REAL_TELLING.items(): setattr(telling, _n, _f)      # and the real notices
 from stackshot.web import server, page_debts
 from stackshot.web.tools import text as _wt_text
@@ -394,7 +405,7 @@ for node in ast.walk(srv_tree):
         LATE[node.func.value.id] = [c.args[0].value for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_late" and c.args and isinstance(c.args[0], ast.Constant)]
 missing = {t: [n for n in names_ if not hasattr(server, n)] for t, names_ in LATE.items()}
 check("10 every name the server's create table and update table look up late (`_late(\"<name>\")`) is an attribute of the server module (a renamed gate would otherwise fail only when a write reaches it)",
-      set(LATE) == {"_create_svc", "_update_svc"} and len(LATE.get("_create_svc", ())) >= 40 and len(LATE.get("_update_svc", ())) >= 72 and not any(missing.values()), ({t: len(v) for t, v in LATE.items()}, missing))
+      set(LATE) == {"_create_svc", "_update_svc"} and len(LATE.get("_create_svc", ())) >= 23 and len(LATE.get("_update_svc", ())) >= 55 and not any(missing.values()), ({t: len(v) for t, v in LATE.items()}, missing))
 # the helpers that moved with the write, called directly on inputs where each differs from its default and on an edge, through the table the server builds. The expected values are what main's own version of each
 # function returned for the same input (server.py before the move, run on a scratch config); a roster, the contact lookups and the wait-basis gate are the server's names replaced for a case, the way a suite does.
 H = update
@@ -495,11 +506,13 @@ page_debts._nag = lambda owner="": f"<nag for {owner!r}>"
 try: via_table = tbl.nag("wr3-owner")
 finally: page_debts._nag = real_nag
 check("10 the nag is page_debts' own function looked up at each call (a patch of its owner after the install reaches the update)", via_table == "<nag for 'wr3-owner'>", via_table)
-real_gate = server._gate_subject
-server._gate_subject = lambda *a, **k: "<patched gate>"
-try: via_gate = tbl.gate_subject("x")
-finally: server._gate_subject = real_gate
-check("10 …and a gate that stays on the server is looked up late too (a suite's patch of the server's name reaches the update)", via_gate == "<patched gate>", via_gate)
+real_gate = _fg._gate_subject
+def _patched_gate(*a, **k): raise ToolError("<patched gate>")
+_fg._gate_subject = _patched_gate
+try: update.update_item(put(990001), subject="[home] changed by the patched gate", sender=OWNER); via_gate = None
+except ToolError as e: via_gate = str(e)
+finally: _fg._gate_subject = real_gate
+check("10 the field and decision rules are model/'s, called on their modules at each call (a suite's patch of the owner reaches the update), and none is a hook", via_gate == "<patched gate>" and not ({f.name for f in dataclasses.fields(update.Hooks)} & set(MOVED)) and len(MOVED) >= 16, (via_gate, sorted(MOVED)))
 real_upd = server._update
 server._update = lambda *a, **k: "<patched update>"
 try:

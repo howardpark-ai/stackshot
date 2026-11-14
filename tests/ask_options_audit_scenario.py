@@ -142,8 +142,9 @@ check("2/3 a yes/no with a matching Recommend (no options, a stored pair, a Reco
 mm = ask_read.recommend_missing({"ask": ask("which", "Beta"), "options": opts("Alpha", "Beta", rec="Alpha")})
 check("3 the matcher is the write gates': the server's names are ask_read's own", mm == "Alpha", mm)
 from stackshot.web import server
-check("3 …server._open_question, _recommend_missing, _alternatives and _yes_no_options are ask_read's functions", server._open_question is ask_read.open_question and server._recommend_missing is ask_read.recommend_missing
-      and server._alternatives is ask_read.alternatives and server._yes_no_options is ask_read.yes_no_options and server._lettered_alternatives is ask_read.lettered_alternatives)
+from stackshot.model import decision_gates as _dg
+check("3 …_dg._open_question, _recommend_missing, _alternatives and _yes_no_options are ask_read's functions", _dg._open_question is ask_read.open_question and _dg._recommend_missing is ask_read.recommend_missing
+      and _dg._alternatives is ask_read.alternatives and _dg._yes_no_options is ask_read.yes_no_options and _dg._lettered_alternatives is ask_read.lettered_alternatives)
 
 # ---- 3b. a Recommend that names its option in another form is no mismatch
 LAYOUT = lambda rec, o: asking(0, ask("which layout the item page uses", rec), o)[1]["metadata"]
@@ -206,13 +207,13 @@ got, _all = found(build(asking(9179, ask("which layout the item page uses", "έ�
 check("3b3 through the check a Greek Recommend equal to its label is no finding", got == {}, got)
 got, _all = found(build(asking(9012, ask("which layout the item page uses", "άρνηση"), opts(*GR, rec="έγκριση")), asking(9010, ask("which layout the item page uses", "άλλος τρόπος"), opts(*GR, rec="έγκριση"))))
 check("3b3 …and a Greek Recommend naming another option, or none, is found", set(got) == {"board#9012", "board#9010"} and "names another ('άρνηση')" in got["board#9012"]["detail"], got)
-check("3b3 the write-time note (server._options_note, which reads recommend_missing) is quiet for a Greek Recommend that names its label and speaks for one that does not",
-      server._options_note(LAYOUT("έγκριση", opts(*GR, rec="έγκριση"))) == "" and "“έγκριση”" in server._options_note(LAYOUT("άρνηση", opts(*GR, rec="έγκριση"))), (server._options_note(LAYOUT("έγκριση", opts(*GR, rec="έγκριση"))), server._options_note(LAYOUT("άρνηση", opts(*GR, rec="έγκριση")))))
+check("3b3 the write-time note (_dg._options_note, which reads recommend_missing) is quiet for a Greek Recommend that names its label and speaks for one that does not",
+      _dg._options_note(LAYOUT("έγκριση", opts(*GR, rec="έγκριση"))) == "" and "“έγκριση”" in _dg._options_note(LAYOUT("άρνηση", opts(*GR, rec="έγκριση"))), (_dg._options_note(LAYOUT("έγκριση", opts(*GR, rec="έγκριση"))), _dg._options_note(LAYOUT("άρνηση", opts(*GR, rec="έγκριση")))))
 
 NFD_GR = LAYOUT(unicodedata.normalize("NFD", "έγκριση"), opts(*GR, rec="έγκριση"))      # the Recommend typed as separate accent marks; the label is the composed letters
-check("3b3 the write gate and the audit agree on decomposed Greek: recommend_missing and server._options_note are quiet for it, as recommend_mismatch is",
-      ask_read.recommend_missing(NFD_GR) == "" and server._options_note(NFD_GR) == "" and ask_read.recommend_mismatch(NFD_GR) == "",
-      (ask_read.recommend_missing(NFD_GR), server._options_note(NFD_GR), ask_read.recommend_mismatch(NFD_GR)))
+check("3b3 the write gate and the audit agree on decomposed Greek: recommend_missing and _dg._options_note are quiet for it, as recommend_mismatch is",
+      ask_read.recommend_missing(NFD_GR) == "" and _dg._options_note(NFD_GR) == "" and ask_read.recommend_mismatch(NFD_GR) == "",
+      (ask_read.recommend_missing(NFD_GR), _dg._options_note(NFD_GR), ask_read.recommend_mismatch(NFD_GR)))
 check("3b3 …and the label stored decomposed against a composed Recommend, and an NFD Recommend naming another label, are read the same way",
       ask_read.recommend_missing(LAYOUT("έγκριση", opts(*(unicodedata.normalize("NFD", k) for k in GR), rec=unicodedata.normalize("NFD", "έγκριση")))) == ""
       and ask_read.recommend_missing(LAYOUT(unicodedata.normalize("NFD", "άρνηση"), opts(*GR, rec="έγκριση"))) == "έγκριση")
@@ -247,9 +248,9 @@ try:
     kw_off()
     check("3b4 …and with it off again 'nope Narrow' names the option as it always did", PART("nope Narrow") == "" and not found_for("nope Narrow"), (PART("nope Narrow"), found_for("nope Narrow")))
     # the write-time note: its substring read already finds a glued particle, and a configured refusal word before the only mention makes the label unnamed
-    NOTE = lambda rec: server._options_note(LAYOUT(rec, opts(*WNT, rec="Narrow")))
+    NOTE = lambda rec: _dg._options_note(LAYOUT(rec, opts(*WNT, rec="Narrow")))
     kw_set(particles=["zz"], refusals=["nope"])
-    check("3b4 the write-time note (server._options_note): quiet for a label with its particle; speaks with the refusal word before the only mention, and not for 'nope Wide, Narrow' or without the word",
+    check("3b4 the write-time note (_dg._options_note): quiet for a label with its particle; speaks with the refusal word before the only mention, and not for 'nope Wide, Narrow' or without the word",
           NOTE("Narrowzz") == "" and "“Narrow”" in NOTE("nope Narrow") and NOTE("nope Wide, Narrow") == "" and NOTE("Narrow") == "" and NOTE("Narrow, nope Wide") == "" and NOTE("nope Narrow, Narrow") == "",
           [NOTE(x) for x in ("Narrowzz", "nope Narrow", "nope Wide, Narrow", "Narrow", "Narrow, nope Wide", "nope Narrow, Narrow")])
     kw_off()
@@ -263,7 +264,7 @@ finally:
 # ---- 3b5. [keywords.ask_options] `refusals_after`: a word that turns away the label right before it (invented stand-ins: "nay", "instead"; particles "xa", "xo"; labels Keep and Remove)
 KR = ("Keep", "Remove")
 KRM = lambda rec, r="Remove": ask_read.recommend_mismatch(LAYOUT(rec, opts(*KR, rec=r)))
-KRN = lambda rec, r="Remove": server._options_note(LAYOUT(rec, opts(*KR, rec=r)))
+KRN = lambda rec, r="Remove": _dg._options_note(LAYOUT(rec, opts(*KR, rec=r)))
 def found_kr(rec, recommended="Remove"):
     got, _all = found(build(asking(9310, ask("which of the two the item page does", rec), opts(*KR, rec=recommended))))
     return bool(got)

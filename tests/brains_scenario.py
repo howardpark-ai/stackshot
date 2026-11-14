@@ -164,6 +164,7 @@ check("2 a healthy second brain reports no problem", brains.problem(brains.for_k
 
 # ---- 3. the second copy is missing: fail open everywhere
 from stackshot.web import server
+from stackshot.service import gates as _gates
 from stackshot.service import page_debt as pdebt_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -182,12 +183,12 @@ check("3 the registry keeps the second brain's pages as last read", "projects/be
 check("3 exists() cannot tell (None), never False", _pg.exists("projects/beta-one") is None)
 meta = {"project": "beta-new", "owner": "someone"}
 with stderr() as err:
-    try: server._gate_metadata(meta, creating=True); refused = ""
+    try: _gates.gate_metadata(meta, creating=True); refused = ""
     except Exception as e: refused = str(e)
 check("3 create's page check accepts a key of the unreadable brain", not refused and meta["project"] == "projects/beta-new", refused or meta)
 check("3 create's check logs a warning naming the brain", "second" in err.getvalue() and "beta-new" in err.getvalue(), err.getvalue())
 meta = {"project": "nosuchpage", "owner": "someone"}
-try: server._gate_metadata(meta, creating=True); refused = ""
+try: _gates.gate_metadata(meta, creating=True); refused = ""
 except Exception as e: refused = str(e)
 check("3 a default-brain key that names no page is still refused", "names no page" in refused, refused)
 SID = "aaaaaaaa-0000-4000-8000-000000000001"
@@ -297,7 +298,7 @@ why = brains.problem(brains.for_key("gamma"))
 check("7 a git folder with no page (a clone in progress) is no usable copy either", "holds no pages" in why, why)
 meta = {"project": "beta-fresh", "owner": "someone"}
 with stderr() as err:
-    try: server._gate_metadata(meta, creating=True); refused = ""
+    try: _gates.gate_metadata(meta, creating=True); refused = ""
     except Exception as e: refused = str(e)
 check("7 create's page check accepts the key of a brain whose copy is an empty folder (no 'names no page')", not refused and meta["project"] == "projects/beta-fresh", refused or meta)
 check("7 and logs a warning naming the brain", "second" in err.getvalue() and "beta-fresh" in err.getvalue(), err.getvalue())
@@ -323,7 +324,7 @@ why = brains.problem(brains.for_key("gamma"))
 check("8 the copy counts as stale", "has not been synced" in why, why)
 meta = {"project": "beta-stale", "owner": "someone"}
 with stderr() as err:
-    try: server._gate_metadata(meta, creating=True); refused = ""
+    try: _gates.gate_metadata(meta, creating=True); refused = ""
     except Exception as e: refused = str(e)
 check("8 create's page check accepts a key of the stale brain and says so", not refused and meta["project"] == "projects/beta-stale" and "second" in err.getvalue(), (refused, meta, err.getvalue()))
 SID3 = "aaaaaaaa-0000-4000-8000-000000000004"
@@ -334,7 +335,7 @@ with stderr():
 check("8 the page hook accepts the touch in the stale brain", stale == [] and hook_skip == {"projects/gamma": "second"}, (stale, hook_skip))
 os.utime(fetch, None)
 meta = {"project": "beta-stale", "owner": "someone"}
-try: server._gate_metadata(meta, creating=True); refused = ""
+try: _gates.gate_metadata(meta, creating=True); refused = ""
 except Exception as e: refused = str(e)
 check("8 once synced, the same key is checked again and refused", "names no page" in refused, refused or meta)
 
@@ -636,12 +637,12 @@ with contextlib.redirect_stdout(out):
 check("16 the load output carries the warning", "[[brains]] second prefix 'docs/beta-'" in out.getvalue(), out.getvalue())
 # a page reported missing under a routed prefix says which brain it looked in
 meta = {"project": "docs/beta-z", "owner": "someone"}
-try: server._gate_metadata(meta, creating=True); refused = ""
+try: _gates.gate_metadata(meta, creating=True); refused = ""
 except Exception as e: refused = str(e)
 check("16 the missing-page refusal names the brain it looked in and the prefix that routed it",
       "names no page" in refused and "second brain 'second'" in refused and "prefix 'docs/beta-'" in refused and str(T / "second") not in refused, refused)
 meta = {"project": "no-such-default-page", "owner": "someone"}
-try: server._gate_metadata(meta, creating=True); refused = ""
+try: _gates.gate_metadata(meta, creating=True); refused = ""
 except Exception as e: refused = str(e)
 check("16 a page of the default brain gets no such sentence", "names no page" in refused and "second brain" not in refused and "Where it looked" not in refused, refused)
 check("16 looked_in is empty for the default brain and names a slug route", brains.looked_in("projects/alpha") == "" and "slug 'projects/gamma'" in (set_brains(SECOND) or brains.looked_in("gamma")))

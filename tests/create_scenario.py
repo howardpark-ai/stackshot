@@ -11,7 +11,7 @@ a create means. This suite installs hooks that record each call and return what 
   5  request map    a retry with the same request id returns the item the first call made and runs no gate; an entry whose item is gone files anew; the map is written whole and leaves no temporary file
   6  github ids     with the issue-number ids on, the id is the issue's; a GitHub that does not answer is a refusal without the queue and a temporary id with it (budget or outage), told in the reply
   7  hooks          a create without hooks installed is refused, and a hook table with a hook missing cannot be built
-  8  the table      the table the server builds holds every hook, and looks each up when it is called: a patch of the owner (the nag's page_debts, a gate on the server) after the install reaches the create
+  8  the table      the table the server builds holds every hook, and looks each up when it is called: a patch of the owner (the nag's page_debts, a field or decision rule on its module) after the install reaches the create
 
     tests/run-suite create        -> exit 0 / 1"""
 import dataclasses, json, os, pathlib, re, sys, threading
@@ -74,6 +74,16 @@ def flag(name):
 # the write gates are service/gates.py's, not hooks: the create calls them on that module, so this suite replaces each there (the recorder above) and puts the real ones back before it imports the server
 REAL_GATES = {n: getattr(gates, n) for n in dir(gates) if n.startswith("gate_") and callable(getattr(gates, n))}
 for _n in REAL_GATES: setattr(gates, _n, hook(_n))
+# the field and decision rules are model/'s and the similar-items note and the project's subject prefix are the create's and service/gates.py's, none a hook either: the create calls each on its owner, so this suite replaces each there
+# with the same recorder, under the name the order below lists it by (the owner's name without its leading underscore)
+from stackshot.model import decision_gates as _dg, field_gates as _fg
+MOVED = {"gate_subject": (_fg, "_gate_subject"), "gate_recycle_item": (_fg, "_gate_recycle_item"), "gate_description": (_fg, "_gate_description"), "gate_goal": (_fg, "_gate_goal"),
+         "gate_next": (_fg, "_gate_next"), "gate_bare_urls": (_fg, "_gate_bare_urls"), "gate_one_decision": (_dg, "_gate_one_decision"), "gate_alternatives": (_dg, "_gate_alternatives"),
+         "gate_open_question": (_dg, "_gate_open_question"), "gate_recommend_stance": (_dg, "_gate_recommend_stance"), "gate_mockup": (_dg, "_gate_mockup"),
+         "gate_own_action": (_dg, "_gate_own_action"), "options_note": (_dg, "_options_note"), "actor_note": (_dg, "_actor_note"),
+         "similar_note": (create, "similar_note"), "project_subject_prefix": (gates, "project_subject_prefix")}
+REAL_MOVED = {n: getattr(m, a) for n, (m, a) in MOVED.items()}
+for _n, (_m, _a) in MOVED.items(): setattr(_m, _a, hook(_n))
 # the telling is service/telling.py's, not a hook either: the create calls each notice on that module, so this suite replaces the five it calls there with the same recorder
 REAL_TELLING = {n: getattr(telling, n) for n in ("handoff_notify", "pilot_charge", "pilot_relay", "tell_needed", "writer_charge")}
 for _n in REAL_TELLING: setattr(telling, _n, hook(_n))
@@ -82,7 +92,6 @@ def make_hooks(**over):
     for f in dataclasses.fields(create.Hooks):
         if f.name in FLAGS: kw[f.name] = flag(f.name)
         elif f.name == "ask_none": kw[f.name] = ("none", "clear", "-")
-        elif f.name == "subject_tagged": kw[f.name] = re.compile(r"^\[[a-z]+\] ")
         else: kw[f.name] = hook(f.name)
     kw.update(over)
     return create.Hooks(**kw)
@@ -337,11 +346,12 @@ check("7 a create with no hooks installed is refused, naming the install", bare 
 try: create.Hooks(**{f.name: None for f in dataclasses.fields(create.Hooks)[:-1]}); short = None
 except TypeError as e: short = str(e)
 check("7 a hook table with a hook missing cannot be built", short is not None, short)
-check("7 the table holds the two constants, and neither a flag (service/writes.py's) nor a notice (service/telling.py's)", {"ask_none", "subject_tagged"} <= {f.name for f in dataclasses.fields(create.Hooks)} and not ({"session_next", "question", "terminal_row"} | set(REAL_TELLING)) & {f.name for f in dataclasses.fields(create.Hooks)}, None)
+check("7 the table holds the one constant, and neither a flag (service/writes.py's) nor a notice (service/telling.py's)", {"ask_none"} <= {f.name for f in dataclasses.fields(create.Hooks)} and not ({"session_next", "question", "terminal_row"} | set(REAL_TELLING)) & {f.name for f in dataclasses.fields(create.Hooks)}, None)
 
 # ---------------------------------------------------------------- 8. the table the server builds
 # The server's own table, not this suite's: a hook is looked up when it is called, so a suite that replaces the owner's function after the install still reaches the create.
 for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
+for _n, _f in REAL_MOVED.items(): setattr(MOVED[_n][0], MOVED[_n][1], _f)      # and the real field and decision rules, the similar-items note and the subject prefix
 for _n, _f in REAL_TELLING.items(): setattr(telling, _n, _f)      # and the real notices
 from stackshot.web import server, page_debts
 tbl = create._hooks()
@@ -352,11 +362,14 @@ page_debts._nag = lambda owner="": f"<nag for {owner!r}>"
 try: via_table = tbl.nag("wr3-owner")
 finally: page_debts._nag = real_nag
 check("8 the nag is page_debts' own function looked up at each call (a patch of its owner after the install reaches the create)", via_table == "<nag for 'wr3-owner'>", via_table)
-real_gate = server._gate_subject
-server._gate_subject = lambda *a, **k: "<patched gate>"
-try: via_gate = tbl.gate_subject("x")
-finally: server._gate_subject = real_gate
-check("8 …and a gate that stays on the server is looked up late too (a suite's patch of the server's name reaches the create)", via_gate == "<patched gate>", via_gate)
+real_gate = _fg._gate_subject
+def _patched_gate(*a, **k): raise ToolError("<patched gate>")
+_fg._gate_subject = _patched_gate
+try: mk(); via_gate = None
+except ToolError as e: via_gate = str(e)
+finally: _fg._gate_subject = real_gate
+n_mv = len(MOVED)
+check("8 the field and decision rules are model/'s, called on their modules at each call (a suite's patch of the owner reaches the create), and none is a hook", via_gate == "<patched gate>" and not ({f.name for f in dataclasses.fields(create.Hooks)} & set(MOVED)) and n_mv >= 16, sorted(MOVED))
 
 writes.save = real_save
 print(f"create scenario: {len(ran) - len(fails)}/{len(ran)} checks")
