@@ -111,7 +111,7 @@ REMIND_TRIES = 3             # a ten-minute pass sends an unanswered finding thi
 TIGHTEN_SHARE = 0.20          # a run that flags more than this share of the open items trips a tightening review
 FAIL_STOP = 3                 # model calls in a row that fail (no answer) end the calls of the run
 MSG_MAX = 4000
-# what the message tool says when a message goes to a front agent without the mark (server._gate_front)
+# what the message tool says when a message goes to a front agent without the mark (service/messaging.py `_gate_front`)
 FRONT_REFUSAL = "is a front agent of"
 CHECKS_MODEL = ("next-done", "wrong-needs", "ask-missing", "unneeded-escalation", "older-than-page", "obsolete-wait", "why-not-now", "goal-unclear")
 _BOARD_RX = re.compile(r"\bboard#(\d+)\b")

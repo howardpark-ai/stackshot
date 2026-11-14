@@ -220,6 +220,7 @@ os.remove(T / "state/anchor-hub/held-msg.txt"); clear()
 
 # ================================================================= 4. the client API's poll, and push.py / the message tool
 from stackshot.fleet import client; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+from stackshot.service import messaging as _messaging
 from stackshot.web import publish as _web_publish
 from stackshot.service import fleet_events as fleetev
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -252,7 +253,7 @@ with TestClient(app) as c:
     real_run = subprocess.run
     subprocess.run = lambda argv, *a, **k: (seen.append(argv), _R())[1]
     try:
-        server._message(ENG, "hello", "site-main")
+        _messaging._message(ENG, "hello", "site-main")
     finally:
         subprocess.run = real_run
     check("the message tool passes the permanent id on to push.py (the inbox resolves it once, from what the sender wrote)", seen and seen[-1][seen[-1].index("--from") + 2] == ENG, seen[-1:] )

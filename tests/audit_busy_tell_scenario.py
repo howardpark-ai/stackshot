@@ -65,6 +65,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from stackshot.service import agents as _agents
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
 from stackshot.core import readonly as _ro
@@ -101,7 +102,7 @@ _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
 def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
 telling.tell_woken = fake_tell
-server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
+_messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
 fleetev.inbox_flag_send = lambda *a, **k: sent.append(("flag", "", "", "flag"))
 panes = {}; dead = {}                                              # a name -> its pane's registry status; a name -> why it has no pane
 def fake_status(who, idx=None):

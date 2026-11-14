@@ -122,6 +122,7 @@ check("2 a negation passes", ww(alive("home-agent: no waiting for a slot, run it
 check("2 a waiting item has none (its next is the record of its wait)", ww(item(21, wrote=now - H, state="blocked", needs=["home-agent"], after=["a6"], next="home-agent: waiting for the build when it closes")[1]) == ([], []))
 check("2 a closed item has none", ww(item(22, status="completed", wrote=now - H, state="doing", next="home-agent: wait for it", outcome="done")[1]) == ([], []))
 from stackshot.web import server
+from stackshot.service import messaging as _messaging
 from fastmcp.exceptions import ToolError
 from stackshot.web.tools import get as _wt_get
 _cfg.CFG["audit"]["mode"] = "script"
@@ -199,8 +200,8 @@ check("3 …and it is sent then", len(sent) >= 1 and sum(t.count("board#") for _
 clear_state()
 for k, v in pass_items.items(): (T / f"store/a/{k[1:]}.json").write_text(json.dumps(v))
 msgs = []
-real_msg = server._message
-server._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
+real_msg = _messaging._message
+_messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
 _cfg.CFG["audit"]["enabled"] = False
 check("4 the tick stands still while the audit is off", server._filing_tick() is None and msgs == [])
 _cfg.CFG["audit"]["enabled"] = True; _cfg.CFG["audit"]["mode"] = "agent"
@@ -224,9 +225,9 @@ finally:
 check("4 the tick hands the pass the server's wait-end fix and facts (wait_end.py), as it hands the front-step and park functions",
       len(seen_env) == 1 and seen_env[0].wait_end is server._wait_end_fix and seen_env[0].wait_facts is server._wait_end_facts and seen_env[0].wake_park is server._wake_park)
 def refuse(*a, **k): raise ToolError("Refused: nobody by that name")
-server._message = refuse
+_messaging._message = refuse
 check("4 a refusal is a failed delivery (False and the refusal's words), as the message route's 400 is", server._filing_deliver("x", "t") == (False, "Refused: nobody by that name"))
-server._message = real_msg
+_messaging._message = real_msg
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

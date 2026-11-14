@@ -226,10 +226,11 @@ check("2 …and it is sent then", len(sent) == 1 and dsent().count("board#") >= 
 # ---- 3. the server's tick
 clear_state()
 from stackshot.web import server; from stackshot.service import foryou_events as fyev
+from stackshot.service import messaging as _messaging
 for k, v in pass_items.items(): (T / f"store/a/{k[1:]}.json").write_text(json.dumps(v))
 msgs = []
-real_msg = server._message
-server._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
+real_msg = _messaging._message
+_messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
 _cfg.CFG["audit"]["enabled"] = False
 check("3 the expected-time look stands still while the audit is off", server._dates_expected_tick() is None and msgs == [])
 _cfg.CFG["audit"]["enabled"] = True; _cfg.CFG["audit"]["mode"] = "agent"
@@ -260,7 +261,7 @@ try: server._dates_tick(); err = None
 except RuntimeError as e: err = str(e)
 check("3 …and an error in the expected-time look is raised too, after the For-you look has run", ran_log == ["foryou", "expected"] and err == "dates broke", (ran_log, err))
 fyev._foryou_tick, server._dates_expected_tick = real_fy, real_ex
-server._message = real_msg
+_messaging._message = real_msg
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

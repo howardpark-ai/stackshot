@@ -18,7 +18,7 @@ class Hooks:
     """What the hand-off passes still reach in server.py, in the names they have there without the leading underscore. server.py builds one and gives it to `install`. A hook that reads a value is a function with no argument."""
     after_open: Callable[..., Any]  # item_read._after_open
     front_pair_ok: Callable[..., Any]  # holders._front_pair_ok
-    item_refs: Callable[..., Any]  # server._item_refs
+    item_refs: Callable[..., Any]  # service/agent_names.py _item_refs
     ladder_enter: Callable[..., Any]  # service/ladder.ladder_enter
     ladder_first: Callable[..., Any]  # service/ladder.ladder_first
     ladder_on: Callable[..., Any]  # service/ladder.ladder_on

@@ -42,6 +42,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.anchors import anchors as A; from stackshot.tools import page_agent_report as PAR; from stackshot.audit import audit_run as AR
+from stackshot.service import messaging as _messaging
 from stackshot.core import instance as _core_instance
 from stackshot.projects import projects as _prj
 from stackshot.fleet import sessions_registry as _fleet_sessions_registry
@@ -112,7 +113,7 @@ r = _wt_update.stackshot_update(item_id=g_late, sender=LATE, priority="p2")
 check("update by the off-map session: the reply ends with the note", tail(r).startswith(f"(note: projects/delta has no agents-map line for {LATE}."), tail(r))
 r = _wt_update.stackshot_update(item_id=g_late, sender=MAIN, priority="p3")
 check("update by a session the map lists: no note", NOTE not in r, tail(r))
-server._message = lambda to, text, sender, **k: "held for the router — the router rules notice abc123"          # the delivery has its own suites: this one checks what the tool adds to its reply
+_messaging._message = lambda to, text, sender, **k: "held for the router — the router rules notice abc123"          # the delivery has its own suites: this one checks what the tool adds to its reply
 r = _wt_message.stackshot_message(to="projects/delta", text="a question about the plan", sender=LATE)
 check("a message to a project page from an off-map session: the note follows the reply", r.startswith("held for the router") and tail(r).startswith(f"(note: projects/delta has no agents-map line for {LATE}."), r)
 r = _wt_message.stackshot_message(to="projects/delta", text="a question about the plan", sender=MAIN)

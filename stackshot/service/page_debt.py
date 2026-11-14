@@ -22,13 +22,16 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.fleet import liveness as _lv
+from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _sessions_index
 from stackshot.github import ghsync as _gh
 from stackshot.model import said as _said
 from stackshot.model.needs import _needs_of
 from stackshot.projects import brains as _brains
 from stackshot.router import page_debt as _page_debt
+from stackshot.router import router_live as _router_live
 from stackshot.router import routing as _routing
+from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
 from stackshot.service.passes_hooks import hooks as _hooks
 from stackshot.service.store import _load
@@ -238,3 +241,52 @@ def page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None,
                     days[key] = prev
                 _page_debt.write_days(days)
     return out
+
+
+def _pilot_fallback_tick(now: float | None = None) -> int:
+    """a writer's pilot debt still unsettled past [page_rule] grace_minutes moves to the keeper: re-marked to the keeper,
+    dropped from the writer, and the keeper gets the board notice saying who left it undone. The turn rule's fourth build:
+    the debts that move to one keeper in the same tick go in one message (pilot_relay_many); one alone
+    keeps its old text. Batching never waits: a debt moves at the first tick past the grace, as before, with whatever else
+    is due for that keeper in that tick. → how many moved."""
+    now = time.time() if now is None else now
+    with _hooks().owed_lock():
+        d = _hooks().owed_load()
+        if not any(e.get("moves") for os_ in d.values() for e in os_.values()):
+            return 0
+        d = _hooks().owed_settle(); grace = _hooks().grace_min() * 60; due = []
+        for key, os_ in d.items():
+            if _hooks().owed_brain_skip(key):       # a second brain that cannot be read: its debts wait where they are for this run
+                continue
+            for o, e in list(os_.items()):
+                if e.get("moves") and now - float(e.get("ts", 0)) > grace:
+                    due.append((key, o, e)); del os_[o]
+        if not due:
+            return 0
+        for key, o, e in due:
+            stew = str(e["moves"]); prev = d.get(key, {}).get(stew) or {}
+            settle = "ct" if "ct" in (e.get("settle"), prev.get("settle")) else str(e.get("settle") or "")
+            # `moved` and `debts` (step 3b): the debts that moved here, each with its item, what changed and who left it undone, which the
+            # page-debt call (page_debt.page_debt_pass) reads; the keeper's own later debt (_owed_mark) overwrites the entry and so ends the mark
+            debts = [*(prev.get("debts") or []), {"item": e.get("item") or "", "what": str(e.get("what") or "changed"), "writer": o}] if prev.get("moved") else \
+                    [{"item": e.get("item") or "", "what": str(e.get("what") or "changed"), "writer": o}]
+            d.setdefault(key, {})[stew] = {"ts": now, "item": e.get("item") or "", **({"settle": settle} if settle else {}), "moved": True, "debts": debts}
+        _hooks().owed_save(d)
+    if _page_debt.live():     # step 3b, live: the 30-minute relay to the keeper is the page-debt call's now (page_debt.page_debt_pass)
+        return len(due)
+    out: dict[str, list[tuple[str, str, dict[str, Any], str, str]]] = {}     # keeper → [(project, gid, item, what, writer)], in the order due
+    for key, o, e in due:
+        gid = str(e.get("item") or "")
+        try:
+            item = _svcstore._load(gid)
+        except Exception:
+            item = {}
+        if not _telling.front_keeper(str(e["moves"]), key)[0] or _router_live.holds(key, str(e["moves"])):     # a front agent gets no page-owed notice (as pilot_relay), unless it is only the address of a nameless page's notices: the router's
+            out.setdefault(str(e["moves"]), []).append((key, gid, item, str(e.get("what") or "changed"), o))
+    for stew, rows in out.items():
+        if len(rows) == 1:
+            key, gid, item, what, o = rows[0]
+            _telling.pilot_relay(key, gid, item, what, o, stew, tail=f"{_sr._session_label(o)} left its page update undone past {_hooks().grace_min()} min, so it is yours as its keeper")
+        else:
+            _telling.pilot_relay_many(stew, rows)
+    return len(due)
