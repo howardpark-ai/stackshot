@@ -86,6 +86,15 @@ def pick_who(who: Any) -> str:
     return "" if w.lower() == "none" else w
 
 
+LEGACY_PICKER_KEY = "post_wake_mover"      # the old stored name of a waiting item's `mover` (who picks it up when the wait ends); read only through stored_picker
+
+
+def stored_picker(meta: dict[str, Any]) -> str:
+    """A waiting item's picker as stored, read in one place: the legacy key first (while it is stored it wins, as it always did), else the stored `mover`, where the literal word none names
+    nobody. "" when neither is stored (the default picker is the caller's)."""
+    return norm_who((meta or {}).get(LEGACY_PICKER_KEY)) or pick_who((meta or {}).get("mover"))
+
+
 @dataclass(frozen=True)
 class Wait:
     """What a waiting item waits on. `kind` is the stored wait_kind or the one the item's fields read as; `until` is the date the wait is read to end (a wake, a verifying
@@ -159,7 +168,7 @@ class Model:
 
     @property
     def picker(self) -> str:
-        """Who takes the item after this step: on a waiting item the one who picks it up when the wait ends (the stored post_wake_mover, else the stored mover, else the default),
+        """Who takes the item after this step: on a waiting item the one who picks it up when the wait ends (stored_picker: the stored post_wake_mover, else the stored mover, else the default),
         `then` while the owner moves an alive one, else the mover itself. `mover` stays empty while an item waits: it is who moves it NOW."""
         if self.state == WAITING and self.wait:
             return self.wait.mover
@@ -196,11 +205,13 @@ def owner_state(m: dict[str, Any], today: str) -> bool:
     return today in OWNER_STATES or "decision" in _states.kinds_of(m)
 
 
-def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[dict[str, Any]], Any] | None = None) -> dict[str, str] | None:
+def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[dict[str, Any]], Any] | None = None, waiting: bool = False) -> dict[str, str] | None:
     """Does a STORED mover disagree with the state the item stands in on the owner's side? → None when nothing is to change, else {"mover", "then"}: the values to store ("" drops the field).
       in his state (your-call, your-step, needs decision), an agent stored as mover  → he is the mover; `then` stays if stored (an agent), else the agent that was mover
       the wait on him is over (alive in an agent's state), he stored as mover → an agent in `then` is the mover again and `then` goes, as _answer's Done does it; else only the mover goes
-      a wait replaces his state (waiting), he stored as mover → the agent in `then` is the one who picks it up (mover := then, `then` goes) when no post_wake_mover is stored; with one stored, or no agent in `then`, only the mover goes
+      a wait replaces his state (waiting), he stored as mover → the agent in `then` is the one who picks it up (mover := then, `then` goes) when no post_wake_mover is stored; with one stored, or no agent in `then`, only the mover goes;
+        this last rule runs only for `waiting=True`, which the update path passes (a write that did not name a mover): a stored mover = him on a waiting item is where "he picks it up when the wait ends" is written, so the on-save
+        backstop and the start repair (the default) leave it alone and return None for a waiting item
     The way back only happens for an item that stood in his state (`was_his`: the caller knows it from the version before the write, or, for the migration, from his hand-off record or
     an answer of his on the item): a mover=the owner that a writer stored on an agent's state with no such history is a conflict the model flags, not a hand-back.
     A closed item and an item with no stored mover settle nothing; an unnamed mover is the model's own default and needs no storing."""
@@ -221,7 +232,9 @@ def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[di
         if then_s and not is_owner(then_s):
             return {"mover": then_s, "then": ""}       # the hand-back, as _answer's Done does it: the agent becomes the mover and `then` goes (it would read as a conflict beside an agent mover)
         return {"mover": ""}                           # no agent in then: only the mover goes, a stored then is left as it is
-    if then_s and not is_owner(then_s) and not norm_who(m.get("post_wake_mover")):
+    if not waiting:
+        return None
+    if then_s and not is_owner(then_s) and not norm_who(m.get(LEGACY_PICKER_KEY)):
         return {"mover": then_s, "then": ""}           # a wait replaces his state: the agent he named to take it picks it up when the wait ends (when no post_wake_mover is stored to say otherwise)
     return {"mover": ""}                               # only the stale live mover goes; a stored post_wake_mover or then stays exactly as stored
 
@@ -319,10 +332,10 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
         if kind == "item":
             due = not (after_open(item) if after_open else _wt.after_of(m)) and bool(_wt.after_of(m))
     mv_d, _ = _defaults(m, today)
-    mover_s, post_s = pick_who(m.get("mover")), norm_who(m.get("post_wake_mover"))
+    mover_s, post_s = pick_who(m.get("mover")), norm_who(m.get(LEGACY_PICKER_KEY))
     if mover_s and post_s and mover_s != post_s:
         conflicts.append(f"mover={mover_s} and post_wake_mover={post_s} are both stored on a waiting item and differ: post_wake_mover picks it up when the wait ends, until it is moved into mover")
-    picker_s = post_s or mover_s        # a stored post_wake_mover (the old name, not yet moved) wins; a mover alone is the picker
+    picker_s = stored_picker(m)        # a stored post_wake_mover (the old name, not yet moved) wins; a mover alone is the picker
     post_d = owner_display() if kind == "relay" else mv_d       # a relay's ask-by day turns the item to him (section 4); the rest the section 3 chain
     picker = picker_s or post_d
     then_s = norm_who(m.get("then")) if is_owner(picker) else ""         # `then` stands only while he is the one who picks the item up
@@ -389,7 +402,7 @@ def _wait_of(item: dict[str, Any], mod: Model, kind: str) -> Model:
     m = item.get("metadata") or {}
     su = _wt.stored_until(m)
     wake = su or clean(m.get("wake"))
-    picker_s = norm_who(m.get("post_wake_mover")) or pick_who(m.get("mover"))
+    picker_s = stored_picker(m)
     picker = picker_s or mod.mover
     kind = "time" if kind == _wl.LIST and not _wl.valid(m) else kind      # a stored list the fields do not hold reads as the date alone, as derive reads it
     wait = Wait(kind=kind, kind_explicit=False, until=wake if kind == "time" else "", backstop=wake if kind != "time" else "", by_until=bool(su),
