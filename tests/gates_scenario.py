@@ -63,7 +63,7 @@ class _Owner:
     def __getattr__(self, name): return getattr(server if MAIN else gates, _own(name))
 G = _Owner()
 GATES = ("fix_front_mover", "gate_front_step", "gate_needs_session", "gate_needs", "gate_observers", "gate_work_writer", "gate_draft_args", "gate_draft", "gate_step", "gate_state_args",
-         "gate_model_args", "gate_ask_on_wait", "gate_model", "gate_owner_step", "gate_decision_again", "gate_repark", "gate_clock_renewal", "gate_after", "gate_sender_watch", "gate_self_wait",
+         "gate_model_args", "gate_ask_on_wait", "gate_model", "gate_owner_step", "gate_decision_again", "gate_repark", "gate_clock_renewal", "gate_after", "gate_sender_watch", "gate_self_wait", "gate_busy_hold",
          "ask_pre", "gate_contact", "gate_handoff", "until_in", "gate_close", "gate_said", "gate_cap", "gate_wait_basis", "gate_step_gap")      # every gate that moved (the helpers and constants beside them stay private)
 
 @contextlib.contextmanager
@@ -349,13 +349,13 @@ def update_order(kw, n):
 # the label -> the gates in the order main ran them (GATES_MAIN=1 prints each ORDER line)
 ORDER_WANT = {
     'an update that asks the owner while the item waits':
-        ["until_in", "gate_self_wait", "ask_pre", "gate_needs", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_cap", "gate_ask_on_wait", "gate_step_gap"],
+        ["until_in", "gate_self_wait", "gate_busy_hold", "ask_pre", "gate_needs", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_cap", "gate_ask_on_wait", "gate_step_gap"],
     "an update that parks the item with a wake, a hold and the wait's reason":
-        ["until_in", "gate_self_wait", "ask_pre", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_cap", "gate_ask_on_wait", "gate_step_gap", "gate_sender_watch", "gate_decision_again", "gate_clock_renewal", "gate_repark", "gate_model"],
+        ["until_in", "gate_self_wait", "gate_busy_hold", "ask_pre", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_cap", "gate_ask_on_wait", "gate_step_gap", "gate_sender_watch", "gate_decision_again", "gate_clock_renewal", "gate_repark", "gate_model"],
     'an update that moves the mover, sets an until and watches':
-        ["fix_front_mover", "fix_front_mover", "fix_front_mover", "until_in", "gate_self_wait", "ask_pre", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_cap", "gate_ask_on_wait", "gate_step_gap", "gate_sender_watch", "gate_decision_again", "gate_clock_renewal", "gate_repark", "gate_model", "gate_owner_step", "gate_draft", "gate_step", "gate_handoff", "gate_front_step"],
+        ["fix_front_mover", "fix_front_mover", "fix_front_mover", "until_in", "gate_self_wait", "gate_busy_hold", "ask_pre", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_cap", "gate_ask_on_wait", "gate_step_gap", "gate_sender_watch", "gate_decision_again", "gate_clock_renewal", "gate_repark", "gate_model", "gate_owner_step", "gate_draft", "gate_step", "gate_handoff", "gate_front_step"],
     'an update that closes the item':
-        ["until_in", "gate_self_wait", "ask_pre", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_close", "gate_ask_on_wait"],
+        ["until_in", "gate_self_wait", "gate_busy_hold", "ask_pre", "gate_state_args", "gate_draft_args", "gate_model_args", "gate_said", "gate_close", "gate_ask_on_wait"],
 }
 
 # ---------------------------------------------------------------- what a main run prints

@@ -22,6 +22,7 @@ _ask_after_write = None      # set by register: the server's own, looked up at e
 _sender_not_owner = None      # set by register: the server's own, looked up at each call
 _update = None      # set by register: the server's own, looked up at each call
 _wait_alias_gate = None      # set by register: the server's own, looked up at each call
+_busy_live = None      # set by register: the server's proof of what of a mover's own runs on an item (gates.gate_busy_hold); None passes every write
 
 
 _OPEN_ITEMS = [OWNER, *_ALIASES[:1], "you"]
@@ -209,6 +210,9 @@ def stackshot_update(
     alias_ends = _wait_alias_gate(alias_used)
     _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
+    _gates.gate_busy_hold(_norm_id(item_id, bare=_bare_id_ok(status)), sender, hold=hold, wake=wake, ask_by=ask_by, wait_kind="list" if list_in else wait_kind, needs=needs, after=after or "",
+                          mover=mover, next_text=next, status=status, done=done, clear_hold=clear_hold, clear_wake=clear_wake, clear_wait=clear_wait, clear_needs=clear_needs, clear_after=clear_after,
+                          clear_next=clear_next, live=(lambda g_, who_: _busy_live(g_, who_)) if _busy_live is not None else None)      # before the item lock: an item its mover is moving is not paused
     ask_pre = _gates.ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
     with _writes.session_write():
         out = _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
@@ -223,9 +227,10 @@ def stackshot_update(
         return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
 
 
-def register(mcp, *, ask_after_write, sender_not_owner, update, wait_alias_gate) -> None:
+def register(mcp, *, ask_after_write, sender_not_owner, update, wait_alias_gate, busy_live=None) -> None:
     """Adds the tool of this module to `mcp`, and takes the server's callables the bodies use."""
-    global _ask_after_write, _sender_not_owner, _update, _wait_alias_gate
+    global _ask_after_write, _sender_not_owner, _update, _wait_alias_gate, _busy_live
+    _busy_live = busy_live
     _ask_after_write = ask_after_write
     _sender_not_owner = sender_not_owner
     _update = update

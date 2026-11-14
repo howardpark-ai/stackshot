@@ -2099,6 +2099,14 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
     return _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
 
 
+def _busy_live(gid: str, mover: str) -> str:
+    """What of `mover`'s own runs on the item `gid` right now, in the words of the refusal of a hold on it (audit/busy_hold.py, service/gates.py `gate_busy_hold`): a running subagent of the mover tied to the item as the hourly audit
+    ties one (`_mover_subagents`, the anchors `_rlive.released_anchors`). "" when none is, or when it cannot be told (a mover whose subagents cannot be read is unknown, never a refusal)."""
+    from stackshot.audit import busy_hold as _bh
+    from stackshot.tools import next_report as _nr
+    return _bh.live_work(gid, mover, subagents=lambda who: _mover_subagents(who), items=lambda: _nr.load_all(None), anchored=_rlive.released_anchors, same=_handoff.ho_same, shown=_nr.shown)
+
+
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,
                  subagents: "Callable[[str], list[dict[str, Any]]] | None" = None, anchored: "dict[str, Any] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, on by default), run from the ten-minute audit tick: an open item on an agent with no activity for 45 minutes (`hourly.EVERY`, so the line lands inside the hour), and no audit line in the last
@@ -3028,6 +3036,7 @@ mcp = _app.build(
     ask_after_write=lambda *a, **k: _ask_after_write(*a, **k),
     update=lambda *a, **k: _update(*a, **k),
     wait_alias_gate=lambda *a, **k: _wait_alias_gate(*a, **k),
+    busy_live=lambda *a, **k: _busy_live(*a, **k),
     fleet_names=lambda *a, **k: _fleetev.fleet_names(*a, **k),
     inbox_flag_minutes=lambda *a, **k: _fleetev.inbox_flag_minutes(*a, **k),
     message=lambda *a, **k: _message(*a, **k),
@@ -4956,6 +4965,7 @@ _update_svc.install(_update_svc.Hooks(
     ask_owed=_late("_ask_owed"),
     basis_put=_late("_basis_put"),
     basis_words=_BASIS_WORDS,
+    busy_live=_late("_busy_live"),
     cap_ok_drop=_late("_cap_ok_drop"),
     cap_ok_put=_late("_cap_ok_put"),
     contact_alive=_late("_contact_alive"),

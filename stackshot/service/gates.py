@@ -1037,6 +1037,56 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
         raise ToolError(f"Refused: {why}")
 
 
+BUSY_HOLD_REFUSAL = ("Refused: this item is being moved now: {live} is running on it, so it is not paused. Keep it in hand and write where its step stands (work=<one line>, state in progress) "
+                     "instead of a hold. Park it with a hold only once nothing of yours is running on it.")
+
+
+def _given(v: Any) -> bool:
+    """Does a parameter carry a value (a non-empty string, a non-empty list, a true flag)?"""
+    return bool(v.strip()) if isinstance(v, str) else bool(v)
+
+
+def gate_busy_hold(gid: str, sender: str, *, hold: bool = False, wake: str = "", ask_by: str = "", wait_kind: str = "", needs: Any = "", after: Any = "", mover: str = "",
+                   next_text: str = "", status: str = "", done: Any = None, clear_hold: bool = False, clear_wake: bool = False, clear_wait: bool = False, clear_needs: bool = False,
+                   clear_after: bool = False, clear_next: bool = False, live: Callable[[str, str], str] | None = None) -> None:
+    """Refuse (ToolError) a hold the item's mover sets on an item it is moving at this moment: an item an agent is working on is kept in hand, never paused. An item already on hold counts (its mover is the one who
+    picks it up). `live(item, mover)` is the server's proof (audit/busy_hold.py): the words for what of the mover's own is running on the item (`your subagent "<description>"`), "" when nothing is or nothing can
+    be told; None passes every write. A write that parks is a hold, or a date alone (a wake or an until: the write turns it into a hold), with no named blocker (a wait_kind, an after link, a needs, a relay's
+    ask_by) and no clear_* of the park. Never refused: the guard off (`[model] busy_hold_guard`), an owner's write, a write by anyone but the item's mover, a closed item or a write that closes it or ticks a step
+    (done=), a hand-off to another session, and anything that cannot be read: a failure of the check itself passes the write, as `gate_self_wait` does. `gid` = the stored item."""
+    hk = _hooks()
+    try:
+        if live is None or not _cfg.model_busy_hold_guard() or not sender.strip() or _model.is_owner(sender) or str(status or "").strip().lower() in ("completed", "closed"):
+            return
+        wake_set = _given(wake) and wake.strip().lower() not in hk.ask_none
+        if not (hold or wake_set) or clear_hold or clear_wake or clear_wait or _given(done):
+            return
+        if wait_kind.strip().lower() not in ("", "time") or _given(ask_by) or _given(after) or _given(needs):
+            return                                                    # a wait on something else, named: someone's step, another item, an event, an outside party
+        item = _load(gid)
+        if item.get("status") != "open":
+            return
+        meta = dict(item.get("metadata") or {})
+        if _given(mover):
+            meta["mover"] = mover.strip()
+        if clear_needs:
+            meta.pop("needs", None)
+        if clear_after:
+            meta.pop("after", None)
+        mod = _model.derive({**item, "metadata": meta}, after_open=lambda i_: hk.after_open(i_.get("metadata") or {}), anchored=lambda i_: False)
+        who = mod.mover or mod.picker                                  # an item already on hold has no mover while it waits: the one who picks it up is whose item it is
+        if not who or _model.is_owner(who) or not _handoff.ho_same(who, sender):
+            return
+        if next_text.strip() and not clear_next and [h for h in hk.handoffs_in(next_text, hk.session_roster()) if not _handoff.ho_same(h, sender)]:
+            return                                                    # a hand-off to another session: the work moves, nothing of the sender's is paused
+        what = live(gid, who)
+    except Exception as e:  # noqa: BLE001  — the rule is an extra: a failure in it (or an unreadable subagent) lets the write through, never a 500
+        print(f"busy hold guard: {gid} not judged: {e.__class__.__name__}: {e}; the write passes", file=sys.stderr, flush=True)
+        return
+    if what:
+        raise ToolError(BUSY_HOLD_REFUSAL.format(live=what))
+
+
 _ASK_HELD_TEXT_KEYS = ("steps", "work", "wait_basis")      # records of lines: only the `text` of each is held, never its status, state, name or time ("open", "done", "dropped" are not the item's text)
 
 

@@ -85,6 +85,7 @@ class Hooks:
     ask_owed: Callable[..., Any]
     basis_put: Callable[..., Any]
     basis_words: str                  # how the wait_basis gate names what a park waits on (server._BASIS_WORDS)
+    busy_live: Callable[..., Any]       # server._busy_live: what of a mover's own runs on an item (audit/busy_hold.py): "" when nothing is, or nothing can be told
     cap_ok_drop: Callable[..., Any]
     cap_ok_put: Callable[..., Any]
     contact_alive: Callable[..., Any]
@@ -350,15 +351,22 @@ def _contact_after_move(meta: dict[str, Any], new_project: str) -> str:
     return h.store_ref(main) if main else ""
 
 
-def _doing_wait_note(meta: dict[str, Any], next_: str = "") -> str:
+def _doing_wait_note(meta: dict[str, Any], next_: str = "", busy: Callable[[], Any] | None = None) -> str:
     """A valid reason to wait on an item does not warrant marking it as on agent and letting it sit there for hours: it should be marked waiting.
     A note on the reply (never a refusal) when the item ends the write in the stored state doing, not on hold, and a line of next this write set reads as a wait on a time or an event
-    rather than work in hand (model_guards.reads_as_wait)."""
+    rather than work in hand (model_guards.reads_as_wait). Not when `busy()` (the busy-hold proof, audit/busy_hold.py) says a running subagent of the mover is tied to the item: the wait wording is then about
+    the mover's own run, which is work in hand, and the note's advice to park would be the hold the update refuses. A proof that raises or says nothing leaves the note as it is."""
     if meta.get("state") != "doing" or meta.get("hold"):
         return ""
     found = _mg.reads_as_wait(next_) if next_ else ""
     if not found:
         return ""
+    if busy is not None:
+        try:
+            if busy():
+                return ""
+        except Exception:  # noqa: BLE001  — unknown is never a reason to drop the note
+            pass
     return (f"\n(note: this item is doing, but its next reads as a wait ({found}), not work in hand; a doing item that waits shows as on an agent while nobody works it. "
             "Park it this turn with update(hold=true, until=\"<the time it waits for>\", wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\"))")
 
@@ -1256,7 +1264,7 @@ def update_unlocked(
                  + (f"; its date {_wt.wake_value(meta)} stays, and no date parks an item on his call" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=(lambda: h.busy_live(gid, _telling.holder(item))) if _cfg.model_busy_hold_guard() and _telling.holder(item) else None) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + named + told + h.nag(debtor))
 
 
