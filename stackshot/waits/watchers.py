@@ -289,9 +289,6 @@ def was_picker(was: dict[str, Any] | None) -> str:
 def remember(meta: dict[str, Any], asked: str, now: float) -> None:
     """The item is about to turn to the owner for a watcher ask: keep the wait's fields (what to put back on "not yet" or "keep waiting") and which ask is up, under metadata.watch."""
     was = {k: meta[k] for k in WAS_FIELDS if meta.get(k) not in (None, "", [])}
-    if _model.LEGACY_PICKER_KEY in was and (was.get("wait_kind") or "mover" in was):      # a wait that stores a kind (or one that stores both keys) is put back with its picker as `mover` (the old key goes); a wait on a date alone keeps the key it stored, which its end reads (watching._ends_on_the_date)
-        was["mover"] = was_picker(was)
-        was.pop(_model.LEGACY_PICKER_KEY)
     w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
     w.update({"asked": asked, "was": was, "at": now})
     meta["watch"] = w
@@ -315,9 +312,6 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
     for k, v in was.items():
         if k not in ("wake", "ask_by", "until"):
             meta[k] = v
-    if _model.LEGACY_PICKER_KEY in was and (was.get("wait_kind") or "mover" in was):      # an older snapshot holds the old key: the picker goes back as `mover` and the old key never stands beside it (a date-only wait with the old key alone keeps it, as above)
-        meta["mover"] = was_picker(was)
-        meta.pop(_model.LEGACY_PICKER_KEY, None)
     meta["until" if by_until else "ask_by"] = date
     if reset_chases:
         meta.pop("chases", None)

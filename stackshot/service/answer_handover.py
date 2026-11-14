@@ -119,7 +119,7 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
     An item that still reads as waiting after the answer (`waiting`; a park, a pick carrying a wake, is one) has no mover: a stored mover that is he goes, and a stored `then` is kept for
     whoever ends the wait only where the code that ends that wait hands it over. By what the wait is:
       an open `after` link: `then` stays; _wakes.release_after hands the item to it when the last prerequisite closes (_hand_stored_then), with its usual notice;
-      a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and mover=`then` (watch.set_at stamped, as an update does), `then` cleared,
+      a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and post_wake_mover=`then` (watch.set_at stamped, as an update does), `then` cleared,
         so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold. With `[model] watchers = false` no time wait is stored: the park stays as it was, `then`
         with it, and the old wake pass hands the item to it when the hold ends (_hand_stored_then);
       `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would sit on the item unread); the wait's own
@@ -141,11 +141,12 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
                 pass
             elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
                 if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
+                    # The one writer that still stores the old key (deferred to the later steps, on purpose): a later `clear_hold`, `clear_wait` or `clear_wake` drops the old key with the wait group, and the
+                    # item ends alive on its default mover with no hand-off, as it always did; stored as `mover` the agent would stay as the live mover, a design choice for later, not for this change.
                     if _wt.stored_until(meta):
-                        _model.store_picker(meta, then)       # a wait on the date alone stores no kind (until is the whole of it)
+                        meta["post_wake_mover"] = then       # a wait on the date alone stores no kind (until is the whole of it)
                     else:
-                        meta["wait_kind"] = "time"
-                        _model.store_picker(meta, then)
+                        meta["wait_kind"], meta["post_wake_mover"] = "time", then
                     meta["watch"] = {**(meta["watch"] if isinstance(meta.get("watch"), dict) else {}), "set_at": now or time.time()}
                     meta.pop("then", None)
                 # [model] watchers = false: no watcher would wake it, so no time wait is stored. The old park stays with `then` on it, and the old wake pass hands the item over when the hold ends (_hand_stored_then)

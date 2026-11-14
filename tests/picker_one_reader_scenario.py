@@ -303,7 +303,7 @@ handover_svc._decision_hand_over(meta_, OWN, OWN, waiting=True, now=now0)
 check("4 _decision_hand_over: …he as then too: both go", "mover" not in meta_ and "then" not in meta_, meta_)
 meta_ = {"project": "projects/zedwork", "needs": [BACK], "mover": OWN, "then": BACK, "until": FUT}
 handover_svc._decision_hand_over(meta_, OWN, BACK, waiting=True, now=now0)
-check("4 _decision_hand_over: a date-only wait with an agent in then stores the picker as `mover` (never the old key), then goes", meta_.get("mover") == BACK and "post_wake_mover" not in meta_ and "then" not in meta_, meta_)
+check("4 _decision_hand_over: a date-only wait with an agent in then stores the picker (the old form, as before)", "mover" not in meta_ and meta_.get("post_wake_mover") == BACK and "then" not in meta_, meta_)
 
 # the watchers' turn to him: a wait that ends on a question to him leaves no stored mover (he is the mover by needs=decision), the agent that picks it up after is `then`
 meta_ = {"project": "projects/zedwork", "needs": [BACK], "mover": HELP, "wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1)}
@@ -326,7 +326,7 @@ item(43, needs=["decision"], mover=OWN, then=BACK, ask="Decide: whether to go ah
      options=[{"label": "Approve", "line": "Go ahead as proposed", "recommended": True}, {"label": "Decline", "line": "Do not go ahead", "recommended": False}],
      hold=True, wake=day(30), hold_set={"by": "t", "at": now0}, subject="[zed] a decision on a parked item")
 r = server._answer("a43", "Approve", "", "")
-check("4 the board's answer on a parked decision: the stored mover=he does not survive his answer, the agent in then is the picker through the wait, stored as `mover`", r == "decision" and mt(43).get("mover") == BACK and "post_wake_mover" not in mt(43) and "decision" not in (mt(43).get("needs") or [])
+check("4 the board's answer on a parked decision: the stored mover=he does not survive his answer, the agent in then is the picker through the wait", r == "decision" and "mover" not in mt(43) and "decision" not in (mt(43).get("needs") or [])
       and model.derive(rd(43), now0).state == "waiting" and model.derive(rd(43), now0).wait.mover == BACK, (r, mt(43)))
 
 # the wait-end fix: a step in words that waits for another item gets its wait stored with the mover as the picker, never a mover=he
@@ -344,8 +344,8 @@ gitem(9201, "zed-back: wait for board#" "9202 to close, then write the summary")
 items_ = {f"g{p.stem}": json.loads(p.read_text()) for p in (T / "store/g").glob("*.json")}
 r = AR.filing_pass(now=now0, items=items_, anchors={}, env=env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=_wait_fixes_svc._wait_end_facts))
 m_ = mt(9201, "g")
-check("4 _wait_end_fix: the wait is stored with the mover as the picker, stored as `mover` and never as the old key or as mover=he; the model reads it as waiting on the agent",
-      m_.get("after") == ["g9202"] and m_.get("mover") == BACK and "post_wake_mover" not in m_ and model.derive(rd(9201, "g"), now0).state == "waiting" and model.derive(rd(9201, "g"), now0).wait.mover == BACK, (m_, r.get("wait_end")))
+check("4 _wait_end_fix: the wait is stored with the mover as the picker and no stored mover=he; the model reads it as waiting on the agent",
+      m_.get("after") == ["g9202"] and "mover" not in m_ and m_.get("post_wake_mover") == BACK and model.derive(rd(9201, "g"), now0).state == "waiting" and model.derive(rd(9201, "g"), now0).wait.mover == BACK, (m_, r.get("wait_end")))
 
 # ================================================================ 5. the phase reads
 PH = [

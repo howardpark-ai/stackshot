@@ -489,7 +489,7 @@ check("backstop (open relay line): …the words of what arrived and what did not
 check("backstop (open relay line): …the model reads it as the owner's move", mod_of(184).owner_moves, mod_of(184))
 out = server._answer("a184", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer"); m = mt(184)
 check("backstop (open relay line): `not yet` with a date puts the list back: its lines (what had arrived stays), mode and post-wake mover, the backstop moved to that day, nothing of the question left",
-      out == "decision" and m.get("wait_kind") == "list" and m.get("wait_mode") == "all" and m.get("until") == day(10) and arrived_of(184) == [True, False, False] and m.get("mover") == BACK and "post_wake_mover" not in m      # the list goes back with its picker stored as `mover`
+      out == "decision" and m.get("wait_kind") == "list" and m.get("wait_mode") == "all" and m.get("until") == day(10) and arrived_of(184) == [True, False, False] and m.get("post_wake_mover") == BACK
       and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and WL.valid(m) and mod_of(184).wait.kind == "list", (out, m))
 check("backstop (open relay line): …and it is watched again (the next moment is that day)", wk.watches(rd(184)) and wk.next_moment(m) == wk.day_epoch(day(10)), None)
 # the owner says arrived / drop

@@ -5,8 +5,8 @@ session told, the same arrival). One rule holds on every save that names the pic
 mover), `clear_mover` and `clear_wait` drop both keys, and `clear_wait` also drops a stored `mover` that is he (the pick-up went with the wait) while an agent's `mover` stays as the live mover. Covered:
 
   1  wait-end fix    each op of the filing pass's wait fix (after, event, anchor) stores `mover` and no old key, over an old key left on the item too
-  2  hand-over       a decision's hand-over of a time wait (a hold with a wake, a wait on a date alone) stores `mover = then`, `then` cleared; the shapes that store nothing (external, an open after, a hold with
-                     no wake, a dead then, the watchers off) are as they were; with `external` in needs the item is as it was on main
+  2  hand-over       a decision's hand-over of a time wait (a hold with a wake, a wait on a date alone) is exactly as on main (the one writer deferred to the later steps: it still stores the old key, so a later
+                     clear_hold, clear_wait or clear_wake ends as it always did); the shapes that store nothing (external, an open after, a hold with no wake, a dead then, the watchers off) are as they were
   3  snapshot        a watch.was snapshot written now holds `mover`; an old snapshot (the old key) is read, and restore_wait puts the wait back with `mover` (a wait on a date alone keeps the key it stored)
   4  plan            the cold call's answer key stays post_wake_mover, the validated answer carries `mover`; the state migration's plan sets `mover` and drops a stored old key; its route applies the save rule
   5  save rule       an update that sets mover on a waiting item with an old key stored; clear_mover and clear_wait on each form (old key, mover, both, he, an agent); an alive item; an item with external in needs
@@ -103,6 +103,7 @@ def old_form(meta):
     if "mover" in m: m[LEG] = m.pop("mover")
     return m
 def stores_mover(meta, who): return meta.get("mover") == who and LEG not in meta
+def stores_old(meta, who): return meta.get(LEG) == who and "mover" not in meta
 
 # ================================================================ 1. the wait-end fix (the filing pass)
 ROLES = {BACK: {"role": "background"}, HELP: {"role": "background"}, FRONT: {"role": "front"}}
@@ -147,15 +148,15 @@ def hand(meta, mover_in, then_in, **kw):
     m_ = dict(meta); handover_svc._decision_hand_over(m_, mover_in, then_in, now=now0, **kw); return m_
 BASE = {"project": "projects/zedwork", "needs": [BACK]}
 m_ = hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, waiting=True)
-check("2 a hold with a wake and an agent in then: a time wait, mover = then, the old key never, then cleared, the stamp set", m_.get("wait_kind") == "time" and stores_mover(m_, HELP) and "then" not in m_ and m_["watch"]["set_at"] == now0, m_)
+check("2 a hold with a wake and an agent in then: a time wait, the picker = then under the old key (deferred on purpose: see the end-of-wait matrix below), then cleared, the stamp set", m_.get("wait_kind") == "time" and stores_old(m_, HELP) and "then" not in m_ and m_["watch"]["set_at"] == now0, m_)
 m_ = hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, parked=True)
-check("2 …a parked item is the same", m_.get("wait_kind") == "time" and stores_mover(m_, HELP) and "then" not in m_, m_)
+check("2 …a parked item is the same", m_.get("wait_kind") == "time" and stores_old(m_, HELP) and "then" not in m_, m_)
 m_ = hand({**BASE, "mover": OWN, "then": HELP, "until": FUT}, OWN, HELP, waiting=True)
-check("2 a wait on a date alone: no kind, mover = then, the old key never, then cleared", "wait_kind" not in m_ and stores_mover(m_, HELP) and "then" not in m_ and m_["until"] == FUT, m_)
+check("2 a wait on a date alone: no kind, the picker = then under the old key, then cleared", "wait_kind" not in m_ and stores_old(m_, HELP) and "then" not in m_ and m_["until"] == FUT, m_)
 m_ = hand({**BASE, "then": HELP, LEG: BACK, "hold": True, "wake": FUT}, "", HELP, waiting=True)
-check("2 an old key stored on the item is replaced by mover = then (the one picker, never two)", stores_mover(m_, HELP), m_)
+check("2 an old key stored on the item is replaced by the then (the one picker, never two)", stores_old(m_, HELP), m_)
 m_ = hand({**BASE, "mover": BACK, "then": HELP, "until": FUT}, BACK, HELP, waiting=True)
-check("2 a stored agent mover is replaced by the then (the answer names who takes it)", stores_mover(m_, HELP), m_)
+check("2 a stored agent mover: the then takes it, as on main (the old key is the picker and reads first)", m_.get(LEG) == HELP and m_.get("mover") == BACK and D(**m_).wait.mover == HELP, m_)
 # the shapes that store no picker are as they were
 item(1, subject="[zed] an open item the others wait after")
 for label, meta, kw in (("an open after link", {**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT, "after": ["a1"]}, dict(waiting=True)),
