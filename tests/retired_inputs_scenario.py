@@ -58,6 +58,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import retired_inputs as RI; from stackshot.model import states; from stackshot.waits import watchers; from stackshot.fleet import client as _client
+from stackshot.web.tools import get as _get_tool
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
@@ -182,17 +183,17 @@ item(20, needs=[BACK, "external"], mover=BACK, state="outside", party="Acme lega
 item(21, needs=[BACK], mover=BACK, state="verifying", proof="the dashboard is green", end=day(6), next="team-back: watch it")
 item(22, needs=[BACK], mover=BACK, state="doing", next="team-back: build it")
 item(23, needs=[BACK], mover=BACK, party="CI", chase=day(2), next="team-back: watch the PR")
-before = {i: (server._fmt({**rd(i), "gid": f"a{i}"}), server._item_list({**rd(i), "gid": f"a{i}"})) for i in (20, 21, 22, 23)}
+before = {i: (_get_tool._fmt({**rd(i), "gid": f"a{i}"}), server._item_list({**rd(i), "gid": f"a{i}"})) for i in (20, 21, 22, 23)}
 for i in (20, 21, 22, 23):
     m0 = dict(mt(i))
     err, text = upd(i, priority="p2")
     m1 = mt(i)
     keep = {k: m0[k] for k in ("state", "party", "chase", "end", "proof") if k in m0}
     check(f"stored: a{i} keeps {sorted(keep) or 'its fields'} through a priority write", not err and all(m1.get(k) == v for k, v in keep.items()), (text, {k: m1.get(k) for k in keep}))
-    after = (server._fmt({**rd(i), "gid": f"a{i}"}), server._item_list({**rd(i), "gid": f"a{i}"}))
+    after = (_get_tool._fmt({**rd(i), "gid": f"a{i}"}), server._item_list({**rd(i), "gid": f"a{i}"}))
     pick = lambda t: [l for l in t.splitlines() if re.match(r"(model|state|wait|party|chase|mover|needs)", l)]
     check(f"stored: a{i} reads the same in get and the list after the write", pick(before[i][0]) == pick(after[0]) and before[i][1] == after[1], (pick(before[i][0]), pick(after[0])))
-check("stored: the readers still take the fields (a stored outside item reads as a wait on the party)", states.stored({**rd(20)}) == "outside" and "Acme legal" in server._fmt({**rd(20), "gid": "a20"}), None)
+check("stored: the readers still take the fields (a stored outside item reads as a wait on the party)", states.stored({**rd(20)}) == "outside" and "Acme legal" in _get_tool._fmt({**rd(20), "gid": "a20"}), None)
 
 # ================================================================ 7 unseated_dropped
 err, text = upd(22, clear_needs=True, mover=OTHER, next=f"{OTHER}: take over")

@@ -86,6 +86,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import item_read as _item_read
 from stackshot.service import mover_steps as _mover_steps
@@ -187,7 +188,7 @@ def start(i, sender, **kw):
 ZONE = _wt_text.ZONE
 assert datetime.datetime.now(ZONE).utcoffset() == datetime.timedelta(seconds=ZONE_OFFSET)
 hhmm = lambda ts: datetime.datetime.fromtimestamp(ts, ZONE).strftime("%H:%M")
-def got(i): return server._fmt({**rd(i), "gid": f"a{i}"})
+def got(i): return _get_tool._fmt({**rd(i), "gid": f"a{i}"})
 MIN = 60.0
 
 # ================================================================ 1. the record

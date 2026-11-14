@@ -57,6 +57,8 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import notes as _notes_tool
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
@@ -219,8 +221,8 @@ for i, name, meta, phase, kind, stored_kind in CASES:
     it = shown(i)
     check(f"5 {i} {name}: model.view with the phase stored equals the old derivation, field for field (state, wait kind, until, basis, post-wake mover, today's state)", new_of(it) == old_of(bare(it)), (new_of(it), old_of(bare(it))))
     check(f"5 {i} {name}: …the wire list word and the model line are the same with the phase stored or not", server._item_list(it) == server._item_list(bare(it))
-          and server._model_lines(it, short=True) == server._model_lines(bare(it), short=True) and _model.words(new_of(it)) == _model.words(old_of(bare(it))), None)
-    check(f"5 {i} {name}: …and so are get's text and the brief's item block", server._fmt(it) == server._fmt(bare(it)) and server._fmt(it, brief=True) == server._fmt(bare(it), brief=True), None)
+          and _notes_tool._model_lines(it, short=True) == _notes_tool._model_lines(bare(it), short=True) and _model.words(new_of(it)) == _model.words(old_of(bare(it))), None)
+    check(f"5 {i} {name}: …and so are get's text and the brief's item block", _get_tool._fmt(it) == _get_tool._fmt(bare(it)) and _get_tool._fmt(it, brief=True) == _get_tool._fmt(bare(it), brief=True), None)
     check(f"5 {i} {name}: …the pair read back is the stored one", _model.shown_pair(new_of(it)) == (phase, kind), _model.shown_pair(new_of(it)))
 u0_ = _model.UNSTAMPED["count"]
 for i, name, *_r in CASES: new_of(shown(i))
@@ -339,8 +341,8 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
             stamped = copy.deepcopy(it)
             server._phase_stamp(gid, stamped)
             new = _model.view(stamped, _model.derive(stamped, now_, after_open=after, anchored=lambda i: False), now_, after)
-            rows.append((gid, it, (old, new, stamped, server._item_list(bare(it)), server._item_list(stamped), server._model_lines(bare(it), short=True), server._model_lines(stamped, short=True),
-                                         server._fmt(bare(it)) + server._fmt(bare(it), brief=True), server._fmt(stamped) + server._fmt(stamped, brief=True))))
+            rows.append((gid, it, (old, new, stamped, server._item_list(bare(it)), server._item_list(stamped), _notes_tool._model_lines(bare(it), short=True), _notes_tool._model_lines(stamped, short=True),
+                                         _get_tool._fmt(bare(it)) + _get_tool._fmt(bare(it), brief=True), _get_tool._fmt(stamped) + _get_tool._fmt(stamped, brief=True))))
     finally:
         _core_store.STORE = real_store
     bad = [g for g, it, r in rows if it is None]

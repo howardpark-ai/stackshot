@@ -58,6 +58,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
 from stackshot.web import publish as _web_publish
@@ -107,7 +108,7 @@ check("1 field: create stores the draft as written, many lines, Japanese and ind
 g = _wt_get.stackshot_get(gid)
 check("1 field: get shows it as a `draft:` block, every line as written", "\ndraft:\n" + JA + "\n" in "\n" + g + "\n", g)
 item(1, needs=["team-back"], next="team-back: build it", draft=JA)
-bf = server._fmt(json.loads(raw(1)) | {"gid": "a1"}, brief=True)
+bf = _get_tool._fmt(json.loads(raw(1)) | {"gid": "a1"}, brief=True)
 check("1 field: the brief only says the draft is there (it loads into every session)", "draft: 7 lines" in bf and "オリバー" not in bf, bf)
 item(2, needs=["team-back"], next="team-back: build it")
 out = upd(2, draft=JA + "\r\n\r\n")

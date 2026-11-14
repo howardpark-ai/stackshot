@@ -64,6 +64,7 @@ def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model_guards as mg
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import update as _update_svc
 from stackshot.router import router_live as _router_live
 from stackshot.router import routing as _routing
@@ -312,7 +313,7 @@ item(31, subject="[home] names no one", next="home-peer: just do it")
 check("3 get: no board#N in next → no block", "named in next" not in _wt_get.stackshot_get("board#31"), None)
 item(32, status="completed", outcome="done", reason="x", needs=[], next="", subject="[home] closed")
 check("3 get: a closed item shows none", "named in next" not in _wt_get.stackshot_get("board#32"), None)
-nl = server._next_names_lines({"gid": "g30", "metadata": {"next": "home-peer: " + " ".join(f"board#{i}" for i in range(71, 83))}})
+nl = _get_tool._next_names_lines({"gid": "g30", "metadata": {"next": "home-peer: " + " ".join(f"board#{i}" for i in range(71, 83))}})
 check("3 get: …at most eight, then a count", len(nl) == 1 + 8 + 1 and nl[-1] == "- … and 4 more", nl)
 
 # ================================================================ 5. a cleared wait names the next lines that still wait on it

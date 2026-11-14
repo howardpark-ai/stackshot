@@ -15,14 +15,13 @@ from stackshot.waits import watchers as _watch
 from stackshot.web import whatschanged as _wc
 from stackshot.web.auth import oauth as _oauth
 from stackshot.web.page_debts import _nag
+from stackshot.web.tools import get as _get, notes as _notes
 from stackshot.web.tools.text import _lead, load_text
 
 _T = load_text("brief", {"BOARD_URL": str(_inst.BOARD_URL)})
 
-_fmt = None      # set by register: the server's own, looked up at each call
 _handoff_brief = None      # set by register: the server's own, looked up at each call
 _is_parked = None      # set by register: the server's own, looked up at each call
-_model_report_line = None      # set by register: the server's own, looked up at each call
 
 
 def _world_waits_text() -> str:
@@ -71,7 +70,7 @@ def stackshot_brief() -> str:
     changed = "\n".join(_wc.lines())                  # step 4b: what changed in the tools in the last 7 days (whatschanged.py, generated from the tools' text snapshot), at the top
     if changed:
         head = changed + ("\n\n" + head if head else "")
-    guards = _model_report_line()                    # what the model's write guards would refuse on the items already there, in one line
+    guards = _notes._model_report_line()                    # what the model's write guards would refuse on the items already there, in one line
     if guards:
         head = (head + "\n\n" if head else "") + guards
     world = _world_waits_text()                      # the relay waits, "waiting on the world"
@@ -86,17 +85,15 @@ def stackshot_brief() -> str:
             it = json.load(f)
         _legacy_hold(it); _ip.read_through(it)
         if it.get("status") == "open":
-            it["gid"] = gid; (held if _is_parked(it) else mine).append(_fmt(it, brief=True))
+            it["gid"] = gid; (held if _is_parked(it) else mine).append(_get._fmt(it, brief=True))
     hold = ("\n\nOn hold (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
     return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} on hold below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
             + "\n\nFull board: " + _inst.BOARD_URL + " · any item by id: the get tool") + _nag()
 
 
-def register(mcp, *, fmt, handoff_brief, is_parked, model_report_line) -> None:
+def register(mcp, *, handoff_brief, is_parked) -> None:
     """Adds the tool of this module to `mcp`, and takes the server's callables the bodies use."""
-    global _fmt, _handoff_brief, _is_parked, _model_report_line
-    _fmt = fmt
+    global _handoff_brief, _is_parked
     _handoff_brief = handoff_brief
     _is_parked = is_parked
-    _model_report_line = model_report_line
     mcp.tool(name="brief", description=_lead(_BRIEF_DESC))(stackshot_brief)

@@ -63,6 +63,8 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.web.tools import notes as _notes_tool
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.model import model as _model
@@ -133,7 +135,7 @@ check("queued: …and is no state the item can be written in", "queued" not in s
 # ================================================================ your-call: a stored one stands on needs decision and the ask; a write that takes either away drops the word
 item(11, needs=["decision"], ask=ASK, state="your-call")
 item(12, needs=["decision"], ask=ASK, state="your-call")
-check("your-call: a stored one is read as stored", states.stored(rd(12)) == "your-call" and "state: your-call" in server._fmt({**rd(12), "gid": "a12"}), None)
+check("your-call: a stored one is read as stored", states.stored(rd(12)) == "your-call" and "state: your-call" in _get_tool._fmt({**rd(12), "gid": "a12"}), None)
 out = upd(12, clear_needs=True)
 check("your-call: a later write that takes the decision away drops the state, says so and names what it stood on (it is no refusal: no call can clear a state)",
       "state" not in mt(12) and "decision" not in mt(12).get("needs", []) and "stored state your-call dropped" in out and "needs decision and the ask" in out, (mt(12), out[-300:]))
@@ -243,7 +245,7 @@ out = upd(38, hold=True, wake=day(3), wait_basis=f"paper delivery confirmed {day
 check("hold: hold=true on a doing item drops the stored state and says why", "state" not in mt(38) and "expected_by" not in mt(38) and hd_(mt(38)) is True
       and "stored state doing dropped: a hold ends it; the item reads parked" in out, (mt(38), out[-300:]))
 check("hold: …it reads as waiting on a time from its until (the hold and the wake are stored as that one date) and shows no state word",
-      _model.derive({**rd(38), "gid": "a38"}).state == "waiting" and _WT.stored_until(mt(38)) and "state: " not in server._fmt({**rd(38), "gid": "a38"}), None)
+      _model.derive({**rd(38), "gid": "a38"}).state == "waiting" and _WT.stored_until(mt(38)) and "state: " not in _get_tool._fmt({**rd(38), "gid": "a38"}), None)
 item(132, needs=[BACK], hold=True, wake=day(30), wait_basis={"text": f"Printer order confirmed {day(35)}", "wake": day(30), "by": "x", "at": now0}, state="parked")
 upd(132, hold=True)
 check("hold: hold=true again on a parked item keeps its state", mt(132)["state"] == "parked", mt(132))
@@ -280,13 +282,13 @@ check("derived: …a hold whose after target is closed is a plain park", D(56) =
 check("derived: a value that is no state is ignored: derived", D(55) == ("doing", True), D(55))
 check("derived: the words: a stored state reads `state: doing`, a derived one shows no word", states.words(rd(48), lambda it: []) == "" and states.words(rd(50)) == "state: doing", None)
 # get
-txt = server._fmt({**rd(40), "gid": "a40"})
+txt = _get_tool._fmt({**rd(40), "gid": "a40"})
 check("get: a derived state shows no state word (the model line says who moves it)", "state: " not in txt and "model:" in txt, txt)
-txt = server._fmt({**rd(50), "gid": "a50"})
+txt = _get_tool._fmt({**rd(50), "gid": "a50"})
 check("get: a stored one reads `state: doing` with no expected time under it, whatever the file still holds", "state: doing\n" in txt + "\n" and "(derived)" not in txt.split("state: doing")[1].split("\n")[0] and "expected_by" not in txt, txt)
-txt = server._fmt({**rd(44), "gid": "a44"})
+txt = _get_tool._fmt({**rd(44), "gid": "a44"})
 check("get: an after link to an open item reads blocked from the fields (the server's own look at the other item) and shows no state word", D(44) == ("blocked", True) and "state: " not in txt, txt)
-txt = server._fmt({**rd(49), "gid": "a49"})
+txt = _get_tool._fmt({**rd(49), "gid": "a49"})
 check("get: a closed item shows no state line", "state:" not in txt, txt)
 # the brief
 b = _wt_brief.stackshot_brief()
@@ -378,7 +380,7 @@ check("far-by items API: …the items API sends no expected time for them, howev
 bf0 = render.Board(str(T / "store")).brief()
 check("far-by brief: the brief carries no line about doing items with a far expected_by (the line is gone)", "have an expected_by more than 12 h out" not in bf0 and "expected_by" not in bf0, [l for l in bf0.splitlines() if "doing items" in l][:5])
 g(34, needs=[BACK], next="home-peer: wait for board#21 and board#23", state="doing")
-nn = "\n".join(server._next_names_lines(dict(rd(34, "g"), gid="g34")))
+nn = "\n".join(_get_tool._next_names_lines(dict(rd(34, "g"), gid="g34")))
 check("far-by named in next: a doing item with a far stored time is open, mover, like any doing item", "board#21: open, mover" in nn and "board#23: open, mover" in nn, nn)
 g(35, needs=[BACK], state="doing", expected_by=hrs(60), expected_reason="waits on Sunday's timer run", hold=True, wake=day(3))      # stored doing, held, with a far legacy time: parked already, left alone
 check("far-by held: the held doing item is on hold as the server reads it, and its legacy time would otherwise select it", W.is_held(rd(35, "g")) and W.doing_agent(rd(35, "g")), rd(35, "g").get("metadata"))
@@ -425,9 +427,9 @@ dw50 = _dw.of(dict(rd(50, "g"), gid="g50"), now_)
 check("dated wait: the signature is stable across calls and moves with a dated line or the wake",
       _dw.signature(dw50) == _dw.signature(_dw.of(dict(rd(50, "g"), gid="g50"), now_ + 60)) and _dw.signature(dw50) != _dw.signature(_dw.of(dict(rd(53, "g"), gid="g53"), now_))
       and _dw.of(dict(rd(58, "g"), gid="g58"), now_) is None, None)
-mls = "\n".join(server._model_lines(dict(rd(50, "g"), gid="g50")))
+mls = "\n".join(_notes_tool._model_lines(dict(rd(50, "g"), gid="g50")))
 check("dated wait: get and brief say the board lists it as waiting until the wake, and why", "the board lists it as waiting until" in mls and "dated for later" in mls, mls)
-check("dated wait: …an item that stays doing carries no such note", "the board lists it as waiting" not in "\n".join(server._model_lines(dict(rd(51, "g"), gid="g51"))), None)
+check("dated wait: …an item that stays doing carries no such note", "the board lists it as waiting" not in "\n".join(_notes_tool._model_lines(dict(rd(51, "g"), gid="g51"))), None)
 
 # a date counts as a wait only when the step says it waits for it: a deadline or a reference date does not
 g(62, needs=[BACK], state="doing", wake=wk(24), next=f"team-back: land the PR by {prose(2)}")
@@ -484,7 +486,7 @@ check("dated wait: …the named day already past, no date in the step, one undat
       all(view_of(n).state == _model.ALIVE for n in (91, 92, 93, 95)), [view_of(n).state for n in (91, 92, 93, 95)])
 check("dated wait: …the month spelled out ('after <Month> <day>') counts, a deadline ('by <Mon day>') does not, an open after link is no dated wait",
       view_of(94).state == _model.WAITING and view_of(96).state == _model.ALIVE and _dw.of(dict(rd(97, "g"), gid="g97"), now_) is None, (view_of(94), view_of(96)))
-check("dated wait: …the item is listed as waiting and get names why", lst(90) == "waiting" and lst(92) == "agents" and "the board lists it as waiting until" in "\n".join(server._model_lines(dict(rd(90, "g"), gid="g90"))), (lst(90), lst(92)))
+check("dated wait: …the item is listed as waiting and get names why", lst(90) == "waiting" and lst(92) == "agents" and "the board lists it as waiting until" in "\n".join(_notes_tool._model_lines(dict(rd(90, "g"), gid="g90"))), (lst(90), lst(92)))
 # a doing item on hold with a wake more than the hour ahead is a wait on that wake; no wake, a past wake or a wake within the hour leaves it alone
 g(100, needs=[BACK], state="doing", hold=True, wake=wk(24), next="team-back: read the run on main, then the checks on later runs")
 g(101, needs=[BACK], state="doing", hold=True, next="team-back: read the run on main")
@@ -505,7 +507,7 @@ check("held wait: …an item whose needs hold decision is no held item", view_of
 check("held wait: …the dated-step reading (dated_wait.of) still leaves a held item alone, and the stored model is unchanged",
       _dw.of(dict(rd(100, "g"), gid="g100"), now_) is None and _dw.held_wait(dict(rd(100, "g"), gid="g100"), now_) is not None and _dw.held_wait(dict(rd(101, "g"), gid="g101"), now_) is None
       and _model.derive(dict(rd(100, "g"), gid="g100"), now_, after_open=lambda i: [], anchored=lambda i: False).state == _model.ALIVE, None)
-check("held wait: get says the board lists it as waiting until the wake and that it is on hold", "on hold until its wake" in "\n".join(server._model_lines(dict(rd(100, "g"), gid="g100"))), "\n".join(server._model_lines(dict(rd(100, "g"), gid="g100"))))
+check("held wait: get says the board lists it as waiting until the wake and that it is on hold", "on hold until its wake" in "\n".join(_notes_tool._model_lines(dict(rd(100, "g"), gid="g100"))), "\n".join(_notes_tool._model_lines(dict(rd(100, "g"), gid="g100"))))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": state scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

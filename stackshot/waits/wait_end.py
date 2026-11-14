@@ -2,7 +2,7 @@
 
 A line of `next` that says "wait for item 812 to close", "once PR #7 is released", "when hp-box is back online" or "wait for the reply in <link>" is a wait, but the item stores none of it: no `after`, no event or anchor wait, no step proof. Nothing
 then tells the item the wait ended, so it sits as work until somebody notices. The write guards refuse new lines of this shape; this module finds the legacy ones and the ones another session wrote, for the ten-minute filing pass
-(audit_checks.wait_end_gaps reads the items with it, audit_run.wait_end_pass acts, server._wait_end_fix writes).
+(audit_checks.wait_end_gaps reads the items with it, audit_run.wait_end_pass acts, service/wait_fixes._wait_end_fix writes).
 
 The gaps (each a `Gap`, `kind` in KINDS), read from the mover's own open steps and the steps that name nobody (another session's step and the owner's are never read):
 

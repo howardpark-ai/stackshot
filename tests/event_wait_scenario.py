@@ -65,6 +65,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
@@ -296,7 +297,7 @@ check("recycle-wanted: an item that asks for a recycle is counted, an event wait
 # ================================================================ the display
 _cfg.CFG.setdefault("model", {})["watchers"] = True
 html = render.Board().item_html("a1") if hasattr(render, "Board") and False else ""
-home = server._fmt({**rd(1), "gid": "a1"})
+home = _get_tool._fmt({**rd(1), "gid": "a1"})
 check("get: the model line says what the item waits on", "PR #7 live" in home or "fleet event" in home or "event" in home, home[:600])
 
 # ================================================================ review fixes: the poll looks up only the PRs the waits name, once per commit

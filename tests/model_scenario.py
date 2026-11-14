@@ -62,6 +62,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.anchors import anchors as _anc
@@ -295,7 +296,7 @@ b = _wt_brief.stackshot_brief()
 check("brief: one short model line per open item: no `derived:` tail, no conflict lines", "model: alive · mover team-back" in b and "derived:" not in b and "model conflict" not in b, [l for l in b.splitlines() if l.startswith("model")][:6])
 g = _wt_get.stackshot_get("a22")
 check("brief: ...get keeps the full line", "model: alive · mover team-back · derived: mover" in g, g)
-check("brief: ...none for a closed item in a brief format", not any(l.startswith("model:") for l in server._fmt({**rd(21), "gid": "a21"}, brief=True).splitlines()) and "model: dead" in server._fmt({**rd(21), "gid": "a21"}), None)
+check("brief: ...none for a closed item in a brief format", not any(l.startswith("model:") for l in _get_tool._fmt({**rd(21), "gid": "a21"}, brief=True).splitlines()) and "model: dead" in _get_tool._fmt({**rd(21), "gid": "a21"}), None)
 
 
 # ================================================================ every revision records its author

@@ -78,6 +78,9 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import wait_fixes as _wait_fixes_svc
+from stackshot.web.tools import notes as _notes_tool
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.service import messaging as _messaging
 from stackshot.fleet import sessions_registry as SR24
@@ -115,7 +118,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
+CLK = _Clock(); server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = stall_svc.time = stalltick_svc.time = CLK
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
@@ -386,7 +389,7 @@ put(1, act=90, stall={"log": ladder_log})
 before11 = rd(1)
 tick(); tick(now0 + 61 * MIN); tick(now0 + 122 * MIN)
 check("11 the lines are not in the stall ladder's log: its eight entries are exactly as they were, none crowded out, and no Audit text is in it", mt(1)["stall"] == {"log": ladder_log} and len(lines(1)) == 3, (mt(1).get("stall"), len(lines(1))))
-txt11 = server._fmt(_service_store._load("a1"))
+txt11 = _get_tool._fmt(_service_store._load("a1"))
 check("11 `get` prints the newest line with its own prefix (audit:) and the ladder's last three as stall: lines, never an Audit line as a stall step",
       sum(1 for l in txt11.splitlines() if l.startswith("audit: ")) == 1 and "Audit " + hm(now0 + 122 * MIN) in txt11 and not any(l.startswith("stall: ") and "Audit " in l for l in txt11.splitlines())
       and sum(1 for l in txt11.splitlines() if l.startswith("stall: ")) == 3, [l for l in txt11.splitlines() if l.startswith(("audit:", "stall:"))])
@@ -437,7 +440,7 @@ good = {"at": now0 - 600, "text": "Audit 10:00: idle, nothing verified", "kind":
 torn = [{"at": "bad", "text": "x", "kind": "audit"}, {"at": float("inf"), "text": "x", "kind": "audit"}, {"at": 1e30, "text": "x", "kind": "audit"}, {"at": float("nan"), "text": "x", "kind": "audit"},
         {"at": now0 - 300, "kind": "audit"}, {"at": now0 - 200, "text": 7, "kind": "audit"}, {"at": None, "text": "x", "kind": "audit"}, "not a dict", {"at": True, "text": "x", "kind": "audit"}]
 put(1, act=90, hourly_audit={"log": [good] + torn})
-txt15 = server._fmt(_service_store._load("a1"))
+txt15 = _get_tool._fmt(_service_store._load("a1"))
 check("15 `get` on an item whose log holds torn entries (a time that is no number, inf, 1e30, nan, no text, a text that is no string, not a dict) does not raise and prints the one good line", sum(1 for l in txt15.splitlines() if l.startswith("audit: ")) == 1 and "Audit 10:00: idle, nothing verified" in txt15, [l for l in txt15.splitlines() if l.startswith("audit:")])
 check("15 …the torn entries are left out of the log, not read", HL.log_of(mt(1)) == [good] and HR.last_line(mt(1))["at"] == good["at"])
 put(2, act=90); base15 = rd(2)

@@ -94,7 +94,6 @@ if __name__ == "__main__":
     _LISTEN = _take_port()
 
 from stackshot.github import ghsync as _gh  # noqa: E402  — the GitHub mirror and the id switch, both off unless [github] says so
-from stackshot.model import work as _work  # noqa: E402  — a step's status: what is in motion on an item
 from stackshot.web import whatschanged as _wc  # noqa: E402  — the brief's what-changed lines for 7 days after a release that changes a tool
 from stackshot.model import said as _said  # noqa: E402  — the owner's words on an item, checked against his message's transcript (the trailers)
 from stackshot.model import states as _states  # noqa: E402  — an open item's stored state, what each state carries, and the derived one (states.py)
@@ -106,21 +105,15 @@ from stackshot.model import model as _model  # noqa: E402  — the item model of
 from stackshot.model import queued as _queued  # noqa: E402  — a mover busy on another item: the rule that reads its other on-agent items as waiting, queued behind it (queued.py; `[model] queued_behind`)
 from stackshot.waits import dated_wait as _dw  # noqa: E402  — a doing item the board lists as waiting for its wake (dated_wait.py; the end-of-turn question skips a basis wait)
 from stackshot.web import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
-from stackshot.model import model_guards as _mg  # noqa: E402  — the item model's write guards and the report on existing items (model_guards.py)
 from stackshot.model import steps as _steps  # noqa: E402  — the checklist behind next: done, dropped and open steps, next derived from it (steps.py)
 from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fleet event (wait_kind=event): the phrase, what matches it (event_waits.py)
 from stackshot.waits import watchers as _watch  # noqa: E402  — the waits' watchers of the item model: what ends a wait, the relay's ask, the chases (watchers.py)
 from stackshot.waits import handoff as _ho  # noqa: E402  — the hand-off machinery of the item model: the record, the clock, section 5 (handoff.py)
 from stackshot.model import migration as _mig  # noqa: E402  — the migration onto the item model: the planner; the server applies its writes (_migrations.migrate_write)
 from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on the checklist: the server makes `<owner>: <what to decide>` for an ask or a your-step, ticks it with his answer, and a session cannot (owner_steps.py)
-from stackshot.model import step_proof as _sp  # noqa: E402  — a step that names the event which completes it: the patterns for its words and the explicit form (step_proof.py)
-from stackshot.model import next_rules as _nr  # noqa: E402  — the write checks of Next: a line names who takes it (N1), a reworded step is no rewrite (N3), an open item keeps an open step (N6) (next_rules.py)
 from stackshot.model import bullet_text as _bt  # noqa: E402  — how a line reads and how a text becomes `- ` bullets, for the gates, the cold call's close and the question route (bullet_text.py)
 from stackshot.model import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
 from stackshot.waits import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
-from stackshot.waits import server_fixes as _sf  # noqa: E402  — the server's facts-only fixes of a write and what records them: a wake that is the whole of a wait, a front agent as mover, a loose wait reason, a settled pick (server_fixes.py)
-from stackshot.waits import wait_end as _we  # noqa: E402  — a next line that waits in words for something nothing tells the item has happened, and the fix the filing pass makes of it (wait_end.py)
-from stackshot.waits import until_write as _uw  # noqa: E402  — the write side of the one `until` date of a wait: the old fields folded into it, a kind with no date (until_write.py)
 from stackshot.model import ask_leaves as _askl  # noqa: E402  — a wrong or moot ask leaves the owner's move on its own: the pure half (ask_leaves.py)
 from stackshot.model import note_read as _noteread  # noqa: E402  — what the owner's note on his step says: done, or a later time (note_read.py)
 from stackshot.fleet import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
@@ -147,7 +140,6 @@ from stackshot.service import page_debt as _pdsvc  # noqa: E402  — the page-de
 from stackshot.service import passes_hooks as _passes_hooks  # noqa: E402  — what the page-debt call, the migrations and the fleet events still reach on this module (service/passes_hooks.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
 from stackshot.service import foryou as _fy  # noqa: E402  — the For you list's file: the board's route that serves it to the fleet tool reads its payload (service/foryou.py)
-from stackshot.model import draft as _draft  # noqa: E402  — an item's draft: the verbatim text the owner pastes elsewhere, its size cap and the write guard (draft.py)
 from stackshot.web import runners as _runners  # noqa: E402  — the Runners page: each CI runner by machine and repo, idle, running or offline with the CI switch's reason (runners.py)
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
@@ -156,7 +148,9 @@ from stackshot.core import instance as _inst  # noqa: E402  — the owner's name
 from stackshot.core.instance import NAME, OWNER  # noqa: E402  — NAME and OWNER: the one read of [instance] (core/instance.py)
 from stackshot.model.bullet_text import _clip_line  # noqa: E402  — free text as one line of a notice (model/bullet_text.py)
 from stackshot.model.ids import _GID, _norm_id  # noqa: E402  — item ids and where they are read (model/ids.py)
-from stackshot.model.needs import _after_of, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store, _observers_of, _waits_decision  # noqa: E402  — needs, after and observers (model/needs.py)
+from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store  # noqa: E402  — needs, after and observers (model/needs.py)
+from stackshot.web.tools import get as _tool_get  # noqa: E402  — the item as `get` and the brief show it, the notice's ruling (web/tools/get.py)
+from stackshot.web.tools import notes as _tool_notes  # noqa: E402  — the notes a reply carries: form notes, the model lines, the guard report, the holds report (web/tools/notes.py)
 from stackshot.web.tools import text as _wttext  # noqa: E402  — the words and limits the tools state, and the board's time zone (`ZONE`, read on this module when a line says a time, so a suite that pins it sets it there; web/tools/text.py)
 from stackshot.web.tools.text import _ANCHOR_SHAPES, _ASK_NONE, _CLOSE_REFUSAL, _DESC_LINE_MAX, _DESC_MAX_LINES, _FOR_OWNER, _GMAIL_TERMS, _MODEL_PAGE, _NEXT_LINE_MAX  # noqa: E402  — the words and limits the tools state (web/tools/text.py), which this module's passes read too
 from stackshot.web.middleware import _unlink_ids  # noqa: E402, F401  — the save hooks look it up here at call time (`_late("_unlink_ids")`)
@@ -181,6 +175,7 @@ from stackshot.service import save_hooks as _save_hooks  # noqa: E402  — what 
 from stackshot.service import agent_names as _agent_names  # noqa: E402  — naming the working background agent in an item's needs, the items a text names, and the router's push told to the hand-off (service/agent_names.py)
 from stackshot.service import messaging as _messaging  # noqa: E402  — the message tool's relay: `_message`, its refusals, the report written onto an item, and the log `MSG_LOG` (service/messaging.py)
 from stackshot.service import asks as _asks  # noqa: E402  — the ask line: its shape gate, its form in next, the nag, and the leaves of a wrong or moot ask (service/asks.py)
+from stackshot.service import wait_fixes as _wait_fixes  # noqa: E402  — the wait and hold fixes with I/O and the old wait parameters' window (service/wait_fixes.py)
 from stackshot.service import wait_gates as _wait_gates  # noqa: E402  — the write guards of event, anchor and front-step waits, the decision options' gate, and what an update owes the watchers (service/wait_gates.py)
 from stackshot.service import answer_handover as _handover  # noqa: E402  — where an item goes after the owner's answer, a Done or the end of a wait: the hand-over helpers and the answer line (service/answer_handover.py)
 if _ro.is_read_only():
@@ -551,7 +546,6 @@ from stackshot.model.field_gates import (  # noqa: E402
     _close_reason_max,
     _description_limits,
     _fit,
-    _next_len,
     _next_line_max,
     _subject_max,
     _when_idle,
@@ -588,10 +582,8 @@ from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's re
 from stackshot.model import merge_tie as _mtie  # noqa: E402  — which open items a merged pull request is tied to (merge_tie.py)
 from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's record of the other activity on pull requests (CI results, comments, reviews, merges): read by the last-activity pass (event_log.py)
 from stackshot.model import last_activity as _lastact  # noqa: E402  — the item's one "last activity" record, `metadata.last_activity` (last_activity.py)
-from stackshot.anchors import anchor_scope as _ascope  # noqa: E402  — which anchors count for an item: the one reader, from every project's page (anchor_scope.py)
 from stackshot.web import render as _rmod  # noqa: E402
 from stackshot.model import ask_read as _ar  # noqa: E402  — how an ask and its options are read (open question, alternatives, Yes/No pair, Recommend), shared with the audit (ask_read.py)
-from stackshot.router import routing as _routing  # noqa: E402  — the routing log (the pilot)
 from stackshot.router import router as _router  # noqa: E402  — the router's judging half: the rules in code and the thin call (router_live.py acts on them)
 from stackshot.router import page_debt as _page_debt  # noqa: E402  — the page-debt call (router step 3b): settings, prompt, checked edit, page read and write ([router] page_debt)
 from stackshot.router import router_live as _router_live  # noqa: E402  — the router: holds every project's notices for itself, rules them and delivers the passes
@@ -634,7 +626,7 @@ def _filing_tick() -> "dict[str, Any] | None":
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     from stackshot.audit import audit_run as _ar
-    return _ar.filing_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver, step_mark=_wait_gates._front_step_mark, step_move=_wait_gates._front_step_move, wake_park=_wake_park, wait_end=_wait_end_fix, wait_facts=_wait_end_facts))
+    return _ar.filing_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver, step_mark=_wait_gates._front_step_mark, step_move=_wait_gates._front_step_move, wake_park=_wait_fixes._wake_park, wait_end=_wait_fixes._wait_end_fix, wait_facts=_wait_fixes._wait_end_facts))
 
 
 def _dates_expected_tick() -> "dict[str, Any] | None":
@@ -1177,17 +1169,12 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
 # The FastMCP instance, its middleware, the tools and the routes are web/app.py's `build`; this module hands it the callables they take (late-bound, so a suite that replaces one here still reaches it).
 from stackshot.web import app as _app  # noqa: E402  — the MCP application (web/app.py): FastMCP, the middleware, the tools (web/tools/), the board's sign-in and the routes (web/routes/), registered in that order; what they take from this module is passed late-bound, looked up at each call
 mcp = _app.build(
-    fmt=lambda *a, **k: _fmt(*a, **k),
     handoff_brief=lambda *a, **k: _handoff.handoff_brief(*a, **k),
     is_parked=lambda *a, **k: _item_read._is_parked(*a, **k),
-    model_report_line=lambda *a, **k: _model_report_line(*a, **k),
-    notice_asked=lambda *a, **k: _notice_asked(*a, **k),
-    notice_report=lambda *a, **k: _notice_report(*a, **k),
     evwait_preread=lambda *a, **k: _wait_gates._evwait_preread(*a, **k),
     sender_not_owner=lambda *a, **k: _owner_words._sender_not_owner(*a, **k),
     ask_after_write=lambda *a, **k: _asks._ask_after_write(*a, **k),
     update=lambda *a, **k: _update_svc._update(*a, **k),
-    wait_alias_gate=lambda *a, **k: _wait_alias_gate(*a, **k),
     busy_live=lambda *a, **k: _busy_live(*a, **k),
     fleet_names=lambda *a, **k: _fleetev.fleet_names(*a, **k),
     inbox_flag_minutes=lambda *a, **k: _fleetev.inbox_flag_minutes(*a, **k),
@@ -1208,894 +1195,10 @@ mcp = _app.build(
 )
 
 
-_NAKED_URL = re.compile(r"(?<!\]\()https?://[^\s)\]>]+")
-
-
-# Words that say an item waits on the owner running something (a command must sit on the item, not only in a session's chat). Narrow on purpose: the note is a nudge.
-_CMD_EN = r"\b(?:paste|command|commands)\b|\brun (?:this|these|the|it|a)\b"
-
-
-def _cmd_rx():
-    """The command cues: the English ones plus [keywords.server] command_cues (compiled once per set of words, so a reload is seen)."""
-    return _cfg.kw_rx("server.cmd", lambda a: _CMD_EN + _cfg.kw_pipe(a), (("server", "command_cues"),), re.I)
-
-
-def _command_note(meta: dict[str, Any]) -> str:
-    """A needs=decision item whose ask or next says the owner runs a command or a paste, while next carries neither a link nor a
-    code span → the note naming the rule; "" otherwise."""
-    if "decision" not in _needs_kinds(meta):
-        return ""
-    nxt = str(meta.get("next") or "")
-    if not _cmd_rx().search(str(meta.get("ask") or "") + "\n" + nxt) or "`" in nxt or "](" in nxt or re.search(r"https?://", nxt):
-        return ""
-    return (f"this item waits on {OWNER} running a command or a paste, but next carries neither the command (a `code span`) nor a link to it: "
-            "the item carries it, in next when it is short, otherwise on the project page with next linking to it; a chat reply alone scrolls past")
-
-
-# A board item's next read like a log (results, commit hashes and test counts in it). next is only the next
-# concrete action; the note names what in next reads like a report and never refuses. Per line; a line that starts `<owner>:` (a command
-# he runs) is exempt from every signal. A markdown link's URL and a naked URL are cut out first, so a hash in a link target (and a PR or
-# issue link alone) is quiet, while a bare hash or one in link text counts. The matchers live in next_rules.py (report_signals), which the daily audit's tools/next_report.py reads too.
-_RX_LINK_URL = _nr.RX_LINK_URL
-
-
-def _report_note(next_: str) -> str:
-    """The note when next reads like a report: a commit hash, a test count, a past-tense report ("merged", "done at", "live since",
-    "deployed", "released" at a line's start or after "PR #N"; a status word mid-line such as "PR #12 is live" or "was merged", unless a condition word comes first), a stamp of when work began ("since 09:30", "at work since"),
-    or, with the refusal off, a line over 200 characters; "" otherwise. One note per write, naming the line (the first two it found). A step is an action, never a status;
-    the write goes through. (A line over [metadata.next] line_max is refused, _gate_next.)"""
-    seen: dict[str, str] = {}
-    lines: list[str] = []
-    for raw in str(next_ or "").splitlines():
-        ln = re.sub(r"^\s*(?:[-*\u2022]\s+)?", "", raw)
-        if not ln.strip() or ln.lower().startswith(f"{OWNER.lower()}:"):
-            continue
-        ln = _NAKED_URL.sub("", _RX_LINK_URL.sub(r"\1", ln))
-        hit = False
-        for kind, found in _nr.report_signals(ln).items():
-            hit = True
-            if kind not in seen:
-                seen[kind] = found
-        if not _next_line_max() and _next_len(ln) > 200 and "a line over 200 characters" not in seen:     # the refusal is off ([metadata.next] line_max = 0, or require_bullets = false): the old note
-            seen["a line over 200 characters"] = ""
-            hit = True
-        if hit and len(lines) < 2:
-            lines.append(_clip_line(ln.strip(), 70))
-    if not seen:
-        return ""
-    what = ", ".join(f"{k} ({v})" if v else k for k, v in seen.items())
-    where = " in " + " and ".join(f'"{x}"' for x in lines) if lines else ""
-    return (f"next reads like a report ({what}){where}: a step is an action, never a status; next holds the next action, one per line, each naming who takes it; "
-            "put results, hashes and test counts on the project page (Current state or a timeline line)")
-
-
-def _form_notes(description: str = "", next_: str = "", parked: bool = False, meta: dict[str, Any] | None = None, gid: str = "", cmd: bool = False, ext: bool = False) -> str:
-    """The board's form rules a reply can check, which left the rulebook. Each speaks only
-    when broken, as a note and never a refusal: a URL not on words, an owner's hold without a wake, a hold on an item that waits
-    on someone outside (unless its thread is anchored to it), an item put on someone outside with no anchor scoped to it.
-    `parked` = this call put the item on hold; `ext` = this call put external into its needs."""
-    out = []
-    naked = [m.group(0).rstrip(".,;:") for f in (description, next_) for m in _NAKED_URL.finditer(f or "")]
-    if naked:
-        out.append(f"a naked URL ({naked[0][:80]}{', …' if len(naked) > 1 else ''}): put each link on the words it belongs to, [text](url)")
-    if parked and meta is not None:
-        if "external" in _needs_kinds(meta) and (why := _anchored_wait(gid, meta)):
-            out.append(why)
-            ext = False                        # the hold note already says to anchor it: once
-    if ext and meta is not None and not _item_read._scoped_anchor_exists(gid, meta):
-        # an item waiting on an outside reply with no anchor
-        out.append("this item now waits on someone outside, and no thread is anchored to it: anchor the thread it waits on in this same turn "
-                   f"(anchors(project, add=[url], items=[{gid or 'its id'}])), so its reply wakes you and the item links it")
-    if parked and meta is not None and _waits_on_owner(str(meta.get("next") or "")):
-        out.append(f"this hold's next says it waits on {OWNER}: an item waiting on {OWNER} is never parked. Give it needs=decision with its ask, "
-                   f"or after=[<the item that carries the ask>], which releases it when that item closes (a wake on an item {OWNER} has already answered is fine)")
-    if cmd and meta is not None and (why := _command_note(meta)):
-        out.append(why)
-    if why := _report_note(next_):
-        out.append(why)
-    return "".join(f"\n(note: {x}.)" for x in out)
-
-
-def _wake_alone_on_agent(meta: dict[str, Any]) -> bool:
-    """A wake with no hold on an item that is on agent: what the two wake notes (_wake_window_note, _wake_step_note) share. False for an item on hold or with no wake, one waiting on his decision
-    or on an open `after`, one with needs=external, one whose wake carries a wait_basis and is still ahead (the board lists it as waiting until the wake: model.view), and one stored as outside, verifying or blocked
-    (none of those is on agent)."""
-    if meta.get("hold") or _wt.stored_until(meta) or not _wt.wake_value(meta) or _waits_decision(meta) or _item_read._after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
-        return False
-    return not ("external" in [str(x).lower() for x in _wt.needs_of(meta)] or str(meta.get("state") or "").lower() in ("outside", "verifying", "blocked"))
-
-
-def _wake_window_note(meta: dict[str, Any]) -> str:
-    """Work moving in real time is on agent, however long it takes; a wait-and-see window the work itself needs is waiting (parked). A note on the
-    reply (never a refusal) when a write sets a wake without hold and the item's next, as it now stands (this call's lines and the stored ones), waits for that wake's day
-    (model_guards.reads_as_window): a wake alone is a wait until that date, and the item is parked till then. Not for an item that is not on agent: one on hold, waiting on his decision, waiting
-    on an open `after`, with needs=external, or stored as outside, verifying or blocked."""
-    if not _wake_alone_on_agent(meta):
-        return ""
-    found = _mg.reads_as_window(meta.get("next"), _wt.wake_value(meta))
-    if not found:
-        return ""
-    return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's next waits for that date (\"{found}\"), so the item waits until then, listed as waiting. "
-            "To move the date: update(until=\"<when the window ends>\"); "
-            "if you keep moving the work and a step can run now, drop the date with until=\"none\")")
-
-
-def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only: bool = False, legacy_wake: bool = False) -> list[str]:
-    """What makes the open next lines of an item wait (dated_wait.timed_wait_lines) when its wake stands alone on agent (_wake_alone_on_agent), the writer is its mover and every open line is the mover's
-    (or names nobody) and reads as a wait for a time or an event; [] otherwise. `dated_only` keeps the wake's own hour or day and drops the outside event."""
-    meta = item.get("metadata") or {}
-    if legacy_wake and _wt.stored_until(meta) and not str(meta.get("wait_kind") or "").strip():      # a wake an older write stored, folded into until by this write: it is read as the wake it was (a date this write sets is the wait)
-        meta = dict(meta); _uw.unfold(meta); item = {**item, "metadata": meta}
-    if not _wake_alone_on_agent(meta) or not any(str(x or "").strip() for x in senders):
-        return []
-    mod = _item_read._model_of(item)
-    if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not any(_handoff.ho_same(mod.mover, x) for x in senders):
-        return []
-    return _dw.timed_wait_lines(meta.get("next"), _wt.wake_value(meta), _pages.zone_now().date(),
-                                lambda who: _handoff.ho_same(mod.mover, who) or _sr._session_label(mod.mover).casefold() == who.casefold(), dated_only)
-
-
-def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any, wake_in: str, senders: tuple[str, ...], reason: str) -> tuple[str, str]:
-    """The write's own correction of a wake that is the whole of a wait: (the wait_basis to park it with, the reply line), or ("", "") when the date is no wait, as on work in hand. It is a wake alone
-    (_wake_alone_on_agent) more than [waiting] dated_wait_min_hours ahead, set or kept by the item's mover, whose every open next line, as this write leaves it (`next_after`), is the mover's and
-    reads as a wait for the wake's own hour or day (dated_wait.timed_wait_lines): nothing is left to do before it, so the item is stored waiting on a time from this write, as the park the note
-    used to ask for (the caller sets hold=true with this basis and the usual gates read it). The basis is the call's wait_reason with the wake day; with none (a stored wake, a next written alone) the
-    step's own words. ("", "") when the basis would not pass the gate or the wake cannot be read: the note stands."""
-    try:
-        w = {**meta, "next": next_after}
-        if wake_in:
-            w["wake"] = _wakes.parse_wake(wake_in)
-        at = _wt.wake_epoch(w.get("wake")) if w.get("wake") else None
-        if at is None or at <= time.time() + _wt.dated_wait_min_hours() * 3600.0:
-            return "", ""
-        found = _wake_step_found({**item, "metadata": w}, senders, dated_only=True)
-        if not found:
-            return "", ""
-        day = _wakes.wake_at(w["wake"]).date().isoformat()
-        why = " ".join(str(reason or "").split())
-        for text in ((f"{why[:240]} (wake {day})" if why else ""), f"the only open step is timed ({found[0]}), wake {day}"):
-            if not text:
-                continue
-            try:
-                _gates.gate_wait_basis({**item, "metadata": w}, text, w["wake"], held=True)
-            except ToolError:
-                continue
-            return text, (f"\n(parked: wake {w['wake']} alone is a wait until that date (outside a hand-off), and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
-                          f"so the item waits until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this wake alone)")
-    except Exception as e:  # noqa: BLE001  — the correction is an extra: a failure leaves the write as it was, with the note
-        print(f"date-only wait: not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return "", ""
-
-
-def _wake_park_line(wake: str, basis: str) -> str:
-    """The History line of a park the server made (server_fixes.WAKE_PARK): what it did, the reason it kept, and how the mover sends it back."""
-    return (f"parked: wake {wake} alone is a wait until that date (outside a hand-off) and the only open next line waits for it; the item waits until then (reason: {_clip_line(basis, 70)}). "
-            "clear_hold=true sends it back and the server leaves that wake alone")
-
-
-def _wake_park(gid: str, now: float) -> "dict[str, Any]":
-    """The ten-minute filing pass's park of a wake that is the whole of a wait (audit_run.wake_park_pass; server_fixes.WAKE_PARK): the same park a write makes (hold, the basis `_date_only_wait`
-    builds from the step's own words, the wake as stored), made as the server's own save: no writer, so the item's author, its activity clock and a pending decision answer are untouched
-    (the model is `_front_step_move`). Read again under the lock. Nothing for an item that is not open or that the owner moves, a wake the mover sent back, or one `_date_only_wait` does not park
-    (the finding stands then). Never closes an item and writes no ask. → {"parked": bool, "wake": str, "why": str}."""
-    with _writes.ITEM_LOCK:
-        item = _svcstore._load(gid)
-        meta = item.get("metadata")
-        if not isinstance(meta, dict) or item.get("status") != "open" or not _wt.wake_value(meta) or meta.get("hold"):
-            return {"parked": False, "why": "not an open item with a wake and no hold"}
-        mod = _item_read._model_of(item)
-        if not mod.mover or _model.is_owner(mod.mover) or _waits_decision(meta):
-            return {"parked": False, "why": f"{OWNER} moves it"}
-        wake = str(_wt.wake_value(meta))
-        if _sf.declined(meta, _sf.WAKE_PARK, wake):
-            return {"parked": False, "why": "the mover sent this wake back"}
-        basis, _note = _date_only_wait(item, meta, meta.get("next"), "", (mod.mover,), "")
-        if not basis:
-            return {"parked": False, "why": "not a wake that is the whole of a wait"}
-        try:
-            basis_ok = _gates.gate_wait_basis(item, basis, wake, held=True)
-            _gates.gate_cap(item, [], "wake", wake, _wakes.wake_at(wake).timestamp(), basis_ok)
-        except ToolError as e:
-            return {"parked": False, "why": str(e)[:200]}
-        meta["hold"] = True
-        _hold_set(meta, NAME, now)
-        _owner_words._cap_ok_drop(meta, "wake")
-        if meta.get("state") in _states.STATES and meta["state"] != "parked":      # a hold makes the item read parked: the stored state of another kind goes, as in the write's own park
-            _holders._state_end(meta)
-        _mover_steps._state_apply(meta, "open", "", {}, frozenset({"wake", "hold", "wait_basis"}))
-        _owner_words._basis_put(meta, basis_ok, wake, NAME)
-        _sf.record(meta, _sf.WAKE_PARK, wake, _wake_park_line(wake, basis_ok), now)
-        _writes.save(gid, item, note="wake parked")
-        return {"parked": True, "wake": wake, "why": ""}
-
-
-def _wait_end_facts() -> "_we.Facts":
-    """What the wait-end rule (wait_end.py) reads of the world: the fleet's machines and which are online, this repository and [released.repos], and, per item, the pull requests and links its anchors
-    name. Read from files, no network (the anchors file is read once per call of the factory)."""
-    boxes = _evwaits.evw_boxes()
-    store = _anc.load()
-
-    def scoped(gid: str) -> list[str]:
-        try:
-            project = str((_svcstore._load(gid).get("metadata") or {}).get("project") or "")
-        except Exception:  # noqa: BLE001
-            return []
-        return [str(e["url"]) for e in _item_read._scoped_anchors(project, gid, store)]
-
-    def prs(gid: str) -> list[str]:
-        out = []
-        for u in scoped(gid):
-            m = _we._PR_URL.match(u)
-            if m:
-                out.append(f"{_cfg.canon_repo(m.group(1))}#{int(m.group(2))}")
-        return out
-
-    def takes(url: str) -> bool:
-        try:
-            return bool(_anc.anchor_id(_anc.split_fragment(url)[0])) and not _anc.gmail_query_problem(url)
-        except Exception:  # noqa: BLE001
-            return False
-    return _we.Facts(machines={k: f for k, (f, _r) in boxes.items()}, online=frozenset(f.lower() for f, r in boxes.values() if r and _lv.puller_online(r)),
-                     own_repo=_cfg.canon_repo(_relsvc._own_repo()), released=frozenset(a.lower() for r in _cfg.released_repos() for a in _cfg.repo_aliases(r)),
-                     item_prs=prs, item_anchors=scoped, anchor_url=takes)
-
-
-def _wait_end_sent_back(meta: dict[str, Any], kinds: "tuple[str, ...]") -> None:
-    """The mover sends a wait the server set back (clear_after, clear_wait, step_proof "none"): each token of the given kinds that server_fixes marks for WAIT_END is unmarked and declined, so the
-    server leaves that line alone until its words change."""
-    for tok in _sf.mark_tokens(meta, _sf.WAIT_END):
-        if _we.kind_of_token(tok) in kinds:
-            _sf.unmark(meta, _sf.WAIT_END, tok)
-            _sf.decline(meta, _sf.WAIT_END, tok)
-
-
-def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, Any]":
-    """The ten-minute filing pass's fix of a wait a next line states in words (audit_run.wait_end_pass; server_fixes.WAIT_END; wait_end.py): the item is read again under the lock and the gap found again
-    from its words (a line that changed, a wait the mover sent back, a decision on the owner, a held item: nothing is written), then the plan is set through the gates a write passes: `after`
-    (gates.gate_after), an event wait (_evwait_gate), an anchor wait (the link is added to the anchors scoped to the item, _anchor_wait_gate) or a step proof (proofs.step_proof_set), a backstop day (the wake or ask_by it
-    has, else now plus [waiting] cap_days), and a History line (server_fixes.record). A waiting item takes its mover as post_wake_mover. The server's own save: no writer. A gate's refusal leaves the item as
-    it was. Never closes an item and writes no ask. -> {"fixed": bool, "what": str, "why": str}."""
-    tok, op = str(plan.get("token") or ""), str(plan.get("op") or "")
-
-    def no(why: str) -> "dict[str, Any]":
-        return {"fixed": False, "what": "", "why": why}
-    if not tok or op not in ("after", "event", "anchor", "proof", "backstop", "anchor_pick"):
-        return no("no plan")
-    facts = _wait_end_facts()
-    if op == "event":
-        _wait_gates._evwait_preread("event", plan.get("phrase"))
-    with _writes.ITEM_LOCK:
-        item = _svcstore._load(gid)
-        meta = item.get("metadata")
-        if not isinstance(meta, dict) or item.get("status") != "open" or meta.get("hold") or _waits_decision(meta):
-            return no("not an open item the mover moves")
-        mod = _item_read._model_of(item)
-        alive = mod.state == _model.ALIVE
-        mover = mod.mover if alive else (mod.wait.mover if mod.wait else "")
-        if not mover or _model.is_owner(mover):
-            return no(f"{OWNER} moves it")
-        if _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok):
-            return no("this line was fixed or sent back already")
-        gap = next((g for g in _we.item_gaps(gid, meta, mover, "alive" if alive else "waiting", facts, _item_read._open_item_named, _handoff.ho_same, now,
-                                             pending=lambda t: _sf.declined(meta, _sf.WAIT_END, t)) if g.token == tok and g.plan.get("op") == op), None)
-        if gap is None:
-            return no("the line or the wait changed")
-        was = json.loads(json.dumps(item))
-        # a backstop day is a date (watchers.day_epoch): a stored until, ask_by or wake that is no date is no backstop, and the cap day takes its place
-        dated = [str(v) for v in (_wt.stored_until(meta), meta.get("ask_by"), meta.get("wake")) if _watch.day_epoch(v) is not None]
-        has_back = bool(dated)
-        back = dated[0] if dated else _we.backstop_day(now, _wt.cap_days(), _wttext.ZONE)
-        anchor_undo: "tuple[Any, Any] | None" = None
-        saved = False
-
-        def undo_anchor() -> None:
-            """A gate refused after the anchor was added to the list: the list goes back as it was, unless someone else changed it since."""
-            if anchor_undo is None:
-                return
-            try:
-                if _anc.load() == anchor_undo[1]:
-                    _anc.save(anchor_undo[0])
-            except Exception as e:  # noqa: BLE001
-                print(f"wait end: {gid} anchor not taken back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-        def waiting_as(kind: str) -> None:
-            meta.pop("mover", None)
-            meta["post_wake_mover"] = mover
-            meta["wait_kind"] = kind
-            if not has_back:
-                meta["until"] = back        # the one date the wait ends on (until_write.py); an item that stores its date as wake or ask_by keeps it as it is
-            _holders._state_end(meta)
-
-        try:
-            if op == "after":
-                meta["after"] = _gates.gate_after(plan.get("ids"), gid)
-                waiting_as("item")
-                what = f"after={', '.join(str(x) for x in plan.get('shown') or ())}"
-            elif op == "event":
-                meta["wait_event"] = str(plan.get("phrase") or "")
-                waiting_as("event")
-                what = f"wait_event={plan.get('phrase')}"
-            elif op == "anchor":
-                url = str(plan.get("url") or "")
-                project = str(meta.get("project") or "")
-                store = _anc.load()
-                if not any(_watching.same_anchor(e["url"], url) for e in _ascope.anchor_scope(store, gid, project)):
-                    before = json.loads(json.dumps(store))
-                    _anc.add(store, project, [url], [gid], by=NAME)
-                    _anc.save(store)
-                    anchor_undo = (before, json.loads(json.dumps(_anc.load())))
-                meta["wait_anchor"] = url
-                meta["wait_event"] = _clip_line(plan.get("event"), _model.LINE_MAX)
-                waiting_as("anchor")
-                _wait_gates._anchor_wait_gate(was["metadata"], meta, gid)
-                what = f"anchor wait on {_clip_line(url, 50)}"
-            elif op == "proof":
-                if _we.line_hash(_steps.view(meta)[int(plan["pos"]) - 1]["text"]) != tok.rpartition("|")[2]:
-                    return no("the step changed")
-                _proofs.step_proof_set(meta, _steps.view(meta), [{"step": int(plan["pos"]), "proof": str(plan["proof"])}])
-                what = f"step {plan['pos']} proof {plan['proof']}"
-            elif op == "backstop":
-                if not has_back:
-                    meta["until"] = back
-                if not _watch.can_end(meta):
-                    return no("a backstop day does not end this wait")
-                what = f"until={back}"
-            else:
-                meta["wait_anchor"] = str(plan.get("url") or "")
-                _wait_gates._anchor_wait_gate(was["metadata"], meta, gid)
-                what = f"wait_anchor={_clip_line(plan.get('url'), 50)}"
-            _wait_gates._watch_on_write(gid, was, meta, {}, set(), "", False)       # the wait's stamp, and the event wait's gate (a wait for what has already happened is refused)
-            _sf.record(meta, _sf.WAIT_END, tok, _we.history({**plan, "pos": gap.pos}, gap.line, gap.pos, back, _sr._session_label(mover) or mover), now)
-            _writes.save(gid, item, note="wait set")
-            saved = True
-        except ToolError as e:
-            return no(str(e)[:200])
-        except Exception as e:  # noqa: BLE001  — one item's failure never stops the pass
-            print(f"wait end: {gid} not fixed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-            return no(f"{e.__class__.__name__}")
-        finally:
-            if not saved:
-                undo_anchor()       # a refusal leaves the item as it was, the anchors list too
-    _pubmod._publish()
-    return {"fixed": True, "what": what, "why": ""}
-
-
-def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...], legacy_wake: bool = False) -> str:
-    """A mover set a wake with no hold on a step that only waits, and the item sat on agent while nobody worked it. A note on the reply (never a refusal) when a write
-    ends with a wake and no hold (set now or stored), the writer is the item's mover, and every open line of next is the mover's (or names nobody) and reads as a wait for a time or an event
-    (model_guards.reads_as_timed_step: timed at the wake's own hour or day, or started by an outside event). Not when a line is an action to take now, when another party's step is in flight
-    (a line that opens with another name, the owner included), when the wake is not alone (the cases _wake_alone_on_agent skips), or when the writer is not the mover. A wait for the wake's own
-    hour or day more than an hour away is parked by the write itself (_date_only_wait), so it reaches this note only inside the hour."""
-    meta = item.get("metadata") or {}
-    found = _wake_step_found(item, senders, legacy_wake=legacy_wake)
-    if not found:
-        return ""
-    return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's only open next line{'s' if len(found) > 1 else ''} of yours wait{'' if len(found) > 1 else 's'} for a time or an event (\"{found[0]}\"), "
-            "so the item waits until then, listed as waiting. To move the date: update(until=\"<when the wait ends>\"), "
-            "with wait_reason=<what the step waits on> when you set the date"
-            + ("; when it waits on a named person outside answering, park it as an outside wait instead of a plain hold: needs=[\"external\"] with wait_kind=\"relay\", wait_event=<who> and ask_by=YYYY-MM-DD" if any(_mg.is_reply_trigger(f) for f in found) else "")
-            + "; if the step can run now, write it as the action and drop the date with until=\"none\")")
-
-
-# An item parked on a timed hold while his choice was open calls for 'needs your call', not 'on hold':
-# an item waiting on him is never held; it carries needs=decision with its ask, or after=<the item carrying the ask>.
-# A hold whose next says it waits on him draws a note, never a refusal (a wake on an item he has already answered is legitimate).
-# Narrow on purpose: a waiting word, then the owner or "his"/"<owner>'s" with a decision noun, or "until/for <owner> to decide" and
-# the like. A next that only mentions him ("per the owner's call, deploy") stays quiet.
-_O = re.escape(OWNER)
-_DECIDE_NOUN = r"(?:call|decision|answer|reply|go-ahead|go|ok|okay|approval|pick|choice|word|review|sign-off|input|confirmation)"
-_DECIDE_VERB = r"(?:decide|decides|answer|answers|reply|replies|approve|approves|pick|picks|choose|chooses|confirm|confirms|sign off|signs off|weigh in|weighs in)"
-_WAITS_ON_OWNER_RX = re.compile(
-    rf"\b(?:wait(?:s|ing|ed)?|await(?:s|ing)?|blocked|pending|parked|held|hold(?:s|ing)?|until|till)\s+(?:(?:on|for|upon)\s+)?"
-    rf"(?:{_O}(?!['’])\b|(?:{_O}['’]s|his)\s+{_DECIDE_NOUN}\b)"
-    rf"|\bneeds?\s+(?:{_O}['’]s|his)\s+{_DECIDE_NOUN}\b"
-    rf"|\b(?:until|till|once|when|for)\s+{_O}\s+(?:to\s+)?{_DECIDE_VERB}\b", re.I)
-
-
-def _waits_on_owner(text: str) -> bool:
-    """True when text says the item waits on the owner (waiting on the owner, his call, until the owner decides); a passing mention is not, nor is a quoted span or a pick he already made
-    (server_fixes.settled_out: 'his answer was "wait until Oliver decides"', 'Oliver picked A')."""
-    return bool(_WAITS_ON_OWNER_RX.search(_sf.settled_out(text, _sf.owner_names())))
-
-
-def _anchored_wait(gid: str, meta: dict[str, Any]) -> str:
-    """An item that waits on someone outside may be parked when the thread it waits on is
-    anchored to it and named in its next, since the anchor's notice wakes the mover; its wake is then a backstop at most
-    [waiting] cap_days out (the same cap as any wait; a longer one needs the owner's words). → the note a hold on an item that waits on someone outside owes, "" when it owes none."""
-    try:
-        scoped = _item_read._scoped_anchors(str(meta.get("project") or ""), gid)
-    except Exception:
-        scoped = []
-    if not any(e["url"] in str(meta.get("next") or "") for e in scoped):
-        return (f"on hold while it waits on someone outside: such an item is not parked but stays with needs=external, unless {OWNER} "
-                f"parked it or the thread it waits on is anchored to it (anchors(project, add=[url], items=[{gid or 'its id'}])) and named in next")
-    cap = _wt.cap_days()
-    try:
-        far = _wakes.wake_at(_wt.wake_value(meta)) - _pages.zone_now() > dt.timedelta(days=cap + 1) and not _wt.cap_words(meta, "wake")
-    except ValueError:
-        far = False
-    return (f"on hold on an anchored thread with a wake more than {cap:g} days out: the wake is only a backstop, "
-            f"at most {cap:g} days away (a longer one needs {OWNER}'s words), since the anchor's notice wakes you sooner") if far else ""
-
-
-# The hold investigation (many holds on many items, he asked for few): who set a hold is recorded
-# (metadata.hold_set {at, by}), and a hold counts as explained only by what holds the item NOW (never by a stored reason): an open
-# after, a pane recycle, needs external, an anchor scoped to the item. The unexplained-holds report and the briefings read this.
-def _hold_held_by(gid: str, meta: dict[str, Any]) -> list[str]:
-    """What holds an item on hold now, as render.HOLD_WHY keys: `after` an open item it waits on, `recycle` a pane recycle,
-    `external` needs external, `anchor` an anchor scoped to the item. [] when none does."""
-    out = []
-    if _item_read._after_open(meta):
-        out.append("after")
-    if meta.get("recycle"):
-        out.append("recycle")
-    if "external" in _needs_kinds(meta):
-        out.append("external")
-    if _item_read._scoped_anchors(str(meta.get("project") or ""), gid):
-        out.append("anchor")
-    return out
-
-
-def _hold_set(meta: dict[str, Any], by: str, now: float | None = None) -> None:
-    """Record who set a hold and when (metadata.hold_set), for the unexplained-holds report and the briefings."""
-    meta["hold_set"] = {"at": time.time() if now is None else now, "by": " ".join(str(by).split())[:80]}
-
-
-def _holds_unexplained() -> list[dict[str, Any]]:
-    """Every open item on hold that nothing holds now (_hold_held_by). A stored reason is never trusted. A hold stored before the
-    record has no setter: `by` is "" and `at` is 0. Read only: the item's mover releases each (update clear_hold=true, which the server takes from any session that writes the item) or gives it a condition.
-    → [{gid, owner, wake, by, at, subject}], oldest hold first."""
-    rows = []
-    for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if not isinstance(it, dict):
-            continue
-        _legacy_hold(it); _legacy_needs(it); _ip.read_through(it)
-        if not _holders._is_held(it):
-            continue
-        meta = it.get("metadata") or {}
-        if _hold_held_by(gid, meta):
-            continue
-        owner = _telling.holder(it)
-        rows.append({"gid": gid, "owner": _sr._session_label(_session_id(owner)) if owner else "", "wake": str(_wt.wake_value(meta) or ""),
-                     "by": _rmod.hold_by(it), "at": _rmod.hold_at(it), "subject": str(it.get("subject") or "")})
-    return sorted(rows, key=lambda r: (r["at"], r["gid"]))
-
-
-def _holds_report() -> str:
-    """The unexplained holds as the client prints them: one line each, for the item's mover to release one by one."""
-    rows = _holds_unexplained()
-    if not rows:
-        return "no open item is on hold without something holding it\n"
-    out = [f"{len(rows)} open item(s) on hold that nothing holds now (no open after, pane recycle, needs external or item-scoped anchor); "
-           "its mover releases each with update clear_hold=true (the server takes it from any session that writes the item), or gives it its condition; the mover shown is who holds it:"]
-    for r in rows:
-        when = _rmod.when_words(dt.datetime.fromtimestamp(r["at"], _wttext.ZONE)) if r["at"] else "before the record"
-        out.append(f"{_gh.shown(r['gid'])} · mover {r['owner'] or 'none'} · wake {r['wake'] or 'none'} · set by {r['by'] or 'unknown'} ({when}) · {r['subject']}")
-    return "\n".join(out) + "\n"
-
-
-_GUARD_REPORT: dict[str, Any] = {"at": 0.0, "rep": None}
-_GUARD_REPORT_LOCK = threading.Lock()
-
-
-def _model_report(max_age: float = 60.0) -> "_mg.Report":
-    """What the item model's write guards would refuse on the items already in the store (model_guards.report): read only, nothing is refused or changed. One read of the store
-    and of the sessions, kept `max_age` seconds, since the brief asks for it on every call."""
-    with _GUARD_REPORT_LOCK:
-        now = time.time()
-        if _GUARD_REPORT["rep"] is not None and now - float(_GUARD_REPORT["at"]) < max_age:
-            return _GUARD_REPORT["rep"]
-        items: dict[str, dict[str, Any]] = {}
-        for gid, _p in _item_files():
-            try:
-                items[gid] = _svcstore._load(gid)
-            except Exception:  # noqa: BLE001  — one unreadable item never stops the report
-                continue
-        rep = _mg.report(items, _mg.Ctx(now=now, label=_sr._session_label, shown=_gh.shown), one_mover=bool(_cfg.get("model", "one_mover", default=True)))
-        _GUARD_REPORT.update(at=now, rep=rep)
-        return rep
-
-
-def _model_report_line() -> str:
-    """The brief's one line of counts ("" when nothing would be refused, or the report cannot be read: a brief never fails over it)."""
-    try:
-        line = _mg.brief_line(_model_report())
-    except Exception as e:  # noqa: BLE001
-        print(f"model guards: report not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return ""
-    return line + ("" if _item_read._model_guards_on() else " (the guards are off: [model] guards = false)") if line else ""
-
-
-def _mover_lines(item: dict[str, Any]) -> list[str]:
-    """What get and a write's reply lead with: `mover:` (who moves an alive item now, as the model reads it: the stored mover, else the default) and `then:` (who takes it after
-    the answer or step; it stands only beside the owner). A waiting item shows who picks it up when the wait ends as its mover, and `then:` only when he is that one; a closed one has none at all. [] when the reading fails: a get never fails over it."""
-    try:
-        mod = _item_read._model_of(item)
-        who = lambda w: _sr._session_label(w) if w and not _model.is_owner(w) else (w or "no one")
-        if mod.state == _model.ALIVE:
-            return [f"mover: {who(mod.mover)}" + ("" if mod.mover_explicit else " (derived)")] + ([f"then: {who(mod.then)}" + ("" if mod.then_explicit else " (derived)")] if mod.then else [])
-        if mod.state == _model.WAITING and mod.wait:
-            return [f"mover: {who(mod.wait.mover)} (picks it up when the wait ends)"] + ([f"then: {who(mod.then)}"] if mod.then else [])
-    except Exception as e:  # noqa: BLE001
-        print(f"model: {item.get('gid') or item.get('id')} mover not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return []
-
-
-def _shown_waiting_note(item: dict[str, Any], mod: "_model.Model") -> str:
-    """The tail of the `model:` line for a stored doing item the board lists as waiting (model.view: a wake with every open step dated for that day or later, a wake on a held doing item, or a still-future wake that carries a wait_basis):
-    ` · the board lists it as waiting until <time> (<why>)`, "" for every other item. The stored state stays doing, and `model: alive` is what the guards and the router read."""
-    vw = _model.view(item, mod, after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}))
-    if vw is mod or vw.state != _model.WAITING or mod.state != _model.ALIVE or not vw.wait:
-        return ""
-    return f" · the board lists it as waiting until {vw.wait.until}" + (f" ({vw.wait.basis})" if vw.wait.basis else "")
-
-
-def _arrival_when(ts: float) -> str:
-    """The time a line of a wait on a list arrived, for the `model:` line: YYYY-MM-DD HH:MM and the zone's name (as the refusals that give a time name it), in the board's zone; "" for a time no date can show,
-    so the line keeps its arrival words and drops the time (a get never loses its model line over one)."""
-    try:
-        t = dt.datetime.fromtimestamp(float(ts), _cfg.tz())      # the zone read at the call, as tz_abbr reads it (ZONE is fixed at import): the clock and its name never come from two zones
-        return f"{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}"
-    except (ValueError, OverflowError, OSError):
-        return ""
-
-
-def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
-    """The `model:` line of get (and its conflicts, one line each); the brief's (short) is one line for an open item, with no `derived:` tail, no conflicts and none for a closed item.
-    [] when the reading fails: a get never fails over it."""
-    try:
-        mod = _item_read._model_of(item)
-        shown_as = _shown_waiting_note(item, mod)
-        if short:
-            return [_model.words(mod, _sr._session_label, _gh.shown, derived=False, when=_arrival_when) + shown_as] if mod.state != _model.DEAD else []
-        extra = [x for x in (_watch.chases_line(item.get("metadata") or {}, _sr._session_label), _watch.woke_line(item.get("metadata") or {}, _sr._session_label)) if x and item.get("status") == "open"]
-        return [_model.words(mod, _sr._session_label, _gh.shown, when=_arrival_when) + shown_as] + extra + [f"model conflict: {c}" for c in mod.conflicts]
-    except Exception as e:  # noqa: BLE001
-        print(f"model: {item.get('gid') or item.get('id')} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return []
-
-
 # ----------------------------------------------------------------------------- the hand-off machinery (service/handoff.py, service/handoff_cold.py)
 # The hand-off record, its delivery, the minute pass, the cold call and the display are service/handoff.py's and service/handoff_cold.py's. What stays here is the item model's switch
 # and the reader of one item the hooks of those modules and of the wake passes share.
 _ho.SERVER = NAME
-
-
-_NEXT_NAMES_MAX = 8      # how many items next names get a line in get (the first ones, in the order next names them)
-_BOARD_REF_RX = re.compile(r"(?<![\w#/&-])board#([1-9]\d*)(?!\d)", re.I)
-
-
-def _next_names_lines(item: dict[str, Any]) -> list[str]:
-    """(a closed item must not be reported as waiting): the lines get shows under next, one per
-    board#N that next names, in the order it names them, with that item's live state: `board#N: closed Tue Feb 3rd 2099 14:10 (done)`, `board#N: open, mover my-engineer`, `board#N: open,
-    waiting after board#N`, `board#N: not found`. The item itself is left out. A reading that fails gives no line, never a failed get."""
-    m = item.get("metadata") or {}
-    me = _gh.resolve(str(item.get("gid") or item.get("id") or ""))
-    seen: list[str] = []
-    for n in _BOARD_REF_RX.findall(str(m.get("next") or "")):
-        try:
-            g = _norm_id(f"board#{n}")
-        except ToolError:
-            continue
-        if g != me and g not in seen:
-            seen.append(g)
-    lines = []
-    for g in seen[:_NEXT_NAMES_MAX]:
-        try:
-            it = _svcstore._load(g); it["gid"] = g
-        except ToolError:
-            lines.append(f"- {_gh.shown(g)}: not found")
-            continue
-        except Exception:  # noqa: BLE001
-            continue
-        cm = it.get("metadata") or {}
-        if it.get("status") == "completed":
-            at = float(it.get("state_updated") or it.get("updated") or 0)
-            sup = str(cm.get("superseded_by") or "")
-            lines.append(f"- {_gh.shown(g)}: closed" + (f" {_rmod.when_words(dt.datetime.fromtimestamp(at, _wttext.ZONE))}" if at else "")
-                         + f" ({_rmod.outcome_word(cm.get('outcome') or 'done')}{' by ' + _gh.shown(sup) if sup else ''})")
-            continue
-        try:
-            mod = _model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}))      # the same view as the home page, so a long-doing item reads as waiting here too
-            who = lambda w: _sr._session_label(w) if w and not _model.is_owner(w) else (w or "no one")
-            if mod.state == _model.WAITING:
-                left = _item_read._after_open(cm)
-                lines.append(f"- {_gh.shown(g)}: open, waiting" + (f" after {', '.join(_gh.shown(x) for x in left)}" if left else ""))
-            else:
-                lines.append(f"- {_gh.shown(g)}: open, mover {who(mod.mover)}")
-        except Exception:  # noqa: BLE001
-            lines.append(f"- {_gh.shown(g)}: open")
-    if len(seen) > _NEXT_NAMES_MAX:
-        lines.append(f"- … and {len(seen) - _NEXT_NAMES_MAX} more")
-    return ["named in next:", *lines] if lines else []
-
-
-def _fmt(item: dict[str, Any], brief: bool = False) -> str:
-    m = item.get("metadata") or {}
-    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _item_read._is_parked(item) else ''}] {item.get('subject')}"]
-    if not brief:                            # step 4b: get leads with the mover (and then); the brief's item lines carry the `model:` line, which names it
-        out.extend(_mover_lines(item))
-    if item.get("description"):
-        out.append(item["description"])
-    if m.get("goal"):                        # the end-state in one sentence
-        out.append(f"goal: {m['goal']}")
-    if item.get("status") == "completed" and m.get("outcome"):   # how it ended
-        out.append(f"outcome: {_rmod.outcome_word(m['outcome'])}" + (f" by {m['superseded_by']}" if m.get("superseded_by") else ""))
-        if m.get("reason"):
-            out.append(f"reason: {m['reason']}")
-        if m.get("outcome_text") and not brief:    # how it ended, in bullets: the description above stays what the item was about (the brief leaves it out, like the description's length)
-            out.append(f"outcome text:\n{m['outcome_text']}")
-    if item.get("status") == "open":         # where it stands: the stored state with the fields it carries; an item that stores none shows no state line (the model line below says alive or waiting)
-        out.extend(w for w in [_states.words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))] if w)
-        out.extend(f"{k}: {v}" for k, v in _states.carry_of(item).items())
-        if _draft.of(item):                          # the verbatim text the owner pastes elsewhere, as stored (many lines); the brief, which loads into every session, only says it is there
-            d_ = _draft.of(item)
-            out.append(f"draft: {len(d_.splitlines())} lines, {len(d_)} characters (get shows it)" if brief else "draft:\n" + d_)
-        out.extend(_mover_steps._state_check_notes(item))            # next names the owner under an agent's state; next may be stale (the owner-step and stale-next checks)
-    out.extend(_model_lines(item, brief))                   # dead, alive or waiting, with the mover and the wait
-    if not brief:
-        out.extend(_handoff.handoff_lines(item))                    # step 2: handed to X, not yet taken | taken | returned
-    for k in ("project", "needs", "ask", "priority", "due", "wake", "until"):       # the creator is no line here (the History says "created by"); the mover leads the model line
-        if k == "needs":                     # the list
-            needs = _needs_of(m)
-            if needs:
-                out.append("needs: " + ", ".join(_shown_needs(needs)))
-            continue
-        if k == "ask":                       # the ask only while it waits on his decision, as the options below
-            if _rmod.open_ask(item):
-                out.append(f"ask: {_rmod.open_ask(item)}")
-        elif k == "project":
-            if m.get(k):
-                out.append(f"project: {_ip.line_of(m)}")      # the top-level project, with the page the item is filed on after it when that is a sub-page (item_project.line_of)
-        elif m.get(k):
-            out.append(f"{k}: {m[k]}")
-        if k == "ask" and _rmod.open_options(item):   # under the ask, one line each; only while it waits on his decision
-            out.append("options:\n" + "\n".join("- " + ln for ln in _rmod.option_lines(item)))
-    if not brief and _contacts._contact_label(item):   # the front agent the person talks to about the item (the brief, which loads into every session, leaves it out)
-        out.append(f"contact: {_contacts._contact_label(item)}")
-    if _item_read._is_parked(item) and _rmod.hold_set_of(item):   # who set the hold, and when
-        hs = _rmod.hold_set_of(item)
-        out.append(f"hold: set by {_rmod.hold_by(item) or 'unknown'}"
-                   + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), _wttext.ZONE))}" if _rmod.hold_at(item) else ""))
-    if item.get("status") == "open" and _wt.basis_of(m):   # a wake past the cap that stands on a real-world date, and who said so
-        wb = m["wait_basis"]
-        out.append(f"wait basis: {_wt.basis_of(m)} (lifts the {_wt.cap_days():g}-day cap for the wake {_wt.wake_value(m)} only; set by {wb.get('by') or 'unknown'}"
-                   + (f" {_rmod.when_words(dt.datetime.fromtimestamp(float(wb['at']), _wttext.ZONE))}" if isinstance(wb.get("at"), (int, float)) else "") + ")")
-    if item.get("status") == "open" and _wt.words_of(m):   # his words behind the wake, quoted, and where they came from
-        ww = _wt.words_of(m)
-        out.append(f"{OWNER}'s words behind the wake {_wt.wake_value(m)}: “{_clip_line(ww['quote'], 300)}”" + (f" ({ww['source']})" if ww["source"] else ""))
-    if _after_of(m):                         # what must close first, each with its state
-        states = []
-        for g in _after_of(m):
-            try:
-                states.append(f"{g} ({_svcstore._load(g).get('status')})")
-            except ToolError:
-                states.append(f"{g} (missing)")
-        out.append("after: " + ", ".join(states) + ("" if _item_read._after_open(m) else " — all closed" if item.get("status") == "open" else ""))
-    if _observers_of(m):
-        out.append("observers: " + ", ".join(_shown_ref(x) for x in _observers_of(m)))
-    if item.get("status") != "completed" and _work.lines_of(m):   # what is in motion on it, one line (the item page shows each on its step)
-        out.append("step status: " + _work.words(m))
-    for e in _said.entries_of(m):            # the trailers: his words on the item, each with where it was checked; an acted entry is a pasted result that proves a step, not his words
-        sess_ = _sr._session_label(e["session"]) or "unknown session"
-        when_ = f" · {_rmod.when_words(dt.datetime.fromtimestamp(e['ts'], _wttext.ZONE))}" if e["ts"] else ""
-        if e["kind"] == _said.ACTED:
-            out.append(f"{e['tag']}: pasted in {sess_}{when_} · " + ("checked against the transcript" if e["checked"] else "unchecked") + f" (proof of a step, not his words) · “{_clip_line(e['quote'], 200)}”")
-            continue
-        out.append(f"{e['tag']}: {OWNER} · {sess_}{when_}" + (" · checked" if e["checked"] else " · unchecked")
-                   + f" · “{_clip_line(e['quote'], 200)}”")
-    ans = _rmod.answers_of(item)
-    if ans:                                  # phase 3: his answers from the board, the last three, oldest first
-        out.append(f"{OWNER}'s answers on the board" + (f" (last 3 of {len(ans)})" if len(ans) > 3 else "") + ":\n" + "\n".join(
-            f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(a.get('ts') or 0), _wttext.ZONE))} {'comment' if a.get('kind') == 'comment' else 'note on his step' if a.get('kind') == 'step-reply' else 'answer'}: "
-            + _answer_words(a, 1200) + (f" [chosen option: {a['choice']}: {a['choice_line']}]" if a.get("choice") and a.get("choice_line") else "") for a in ans[-3:]))
-    idle = m.get("idle") if isinstance(m.get("idle"), dict) else {}
-    if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm. The idle pass only ever asked the fleet's builder (no code writes `recovery` now; the line reads the record it left), so this line keeps that wording: the hand-off and stall ladders, which can ask a front-only project's -main agent, write their own lines ("handoff:", "stall:")
-        w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), _wttext.ZONE))
-        out.append(f"idle: poked {idle.get('to') or '?'} {w('poked')}" + (f", the fleet's builder was asked to recover it {w('recovery')}" if idle.get("recovery") else ""))
-    from stackshot.audit import hourly_log as _hlog
-    for x in _hlog.log_of(m)[-1:]:           # the newest hourly audit line (audit/hourly.py), with its own prefix: it is no step of the stall pass
-        out.append(f"audit: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}")
-    for x in _stall.log_of(m)[-3:]:          # what the stall pass did (its mover's pane had no turn running), the last three, oldest first
-        out.append(f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}")
-    if _rmod.waits_recycle(item):            # waits for a pane recycle, since when
-        at = m.get("recycle_at")
-        out.append("recycle: waits for a pane recycle" + (f" (since {_rmod.when_words(dt.datetime.fromtimestamp(float(at), _wttext.ZONE))})" if isinstance(at, (int, float)) else ""))
-    gid = str(item.get("gid") or "")
-    if item.get("status") == "open" and m.get("check"):   # the done check: what closes it, and what the last pass found
-        out.append("check: " + _checks.check_label(str(m["check"])) + _checks.check_words(gid, item))
-    if item.get("status") == "open" and isinstance(m.get("step_proof"), dict) and m["step_proof"]:   # a step that names the event which ticks it (step_proof)
-        told_ = {str(x) for x in (m.get(_proofs.RELEASED_TOLD) or [])}
-        sp_, dead_ = [], False
-        for i, s_ in enumerate(_steps.view(m, keeper=str(m.get("owner") or "")), 1):
-            if s_["status"] == _steps.OPEN and _steps.key(s_["text"]) in m["step_proof"]:
-                pv = m["step_proof"][_steps.key(s_["text"])]
-                isdead = f"dead {_sp.read_stored(pv)[1]}" in told_
-                dead_ = dead_ or isdead
-                sp_.append(f"{i}. {_steps.first_line(s_['text'])[:70]} ← {pv}" + (" (dead: that pull request was closed without being merged; reword or drop the step)" if isdead else ""))
-        if sp_:
-            out.append("step proof: " + "; ".join(sp_) + ("" if dead_ and all("(dead:" in x for x in sp_) else " (the server ticks the step when it happens)"))
-    if item.get("status") == "open" and _GID.match(gid):   # a wait that can no longer end
-        fail = _wt.failed_of(m)
-        if fail:
-            out.append(f"wait failed: {fail.get('what') or 'a wait'}: {fail.get('why') or 'it can no longer end'} ({_rmod.when_words(dt.datetime.fromtimestamp(float(fail['at']), _wttext.ZONE))})")
-    if item.get("status") == "open" and isinstance(m.get("undelivered"), list) and m["undelivered"]:   # a notice that was not delivered (a log line nobody read)
-        out.append("undelivered notices:\n" + "\n".join(
-            f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(u.get('at') or 0), _wttext.ZONE))} ({u.get('tag') or 'notice'}) to {u.get('to') or '?'}: {u.get('why') or 'not delivered'}"
-            for u in m["undelivered"] if isinstance(u, dict)))
-    seen = _rmod.confirmed_at(item, _path(gid) if _GID.match(gid) else None)
-    if seen:                                 # when the item was last confirmed true, and whether that is stale for its lane
-        fresh, age = _rmod.freshness(item, time.time())
-        out.append(f"confirmed: {_rmod.when_words(dt.datetime.fromtimestamp(seen, _wttext.ZONE))} ({'stale ' + _rmod.age_words(age) if fresh == 'stale' else fresh})")
-    if m.get("next"):
-        out.append("next:\n" + str(m["next"]))
-        if item.get("status") == "open" and not brief:
-            out.extend(_next_names_lines(item))      # the live state of each item next names, so nobody relays a stale status
-    try:                                     # with a step done or dropped, the whole checklist with its positions (done=[…] and dropped=[…] take them)
-        cl = _steps.view(m, closed=item.get("status") == "completed")
-        if any(x["status"] != _steps.OPEN for x in cl):
-            def _cl_line(i: int, x: dict[str, Any]) -> str:
-                who = f" · {x['by']}" if x.get("by") else ""
-                when = f" · {_rmod.when_words(dt.datetime.fromtimestamp(float(x['at']), _wttext.ZONE))}" if x.get("at") else ""
-                return f"{i}. [{x['status']}{who}{when}] {_clip_line(_steps.first_line(x['text']), 110)}"
-            out.append("checklist:\n" + "\n".join(_cl_line(i, x) for i, x in enumerate(cl, 1)))
-    except Exception:  # noqa: BLE001  — a reading that fails never fails the get
-        pass
-    try:                                     # the anchors that count for this item: those scoped to it on any project's page (a page other than the item's own project is named) + its project's project-wide ones
-        project = str(m.get("project") or "")
-        pa = _ascope.anchor_scope(_anc.load(), str(item.get("gid") or item.get("id")), project, wide=True)
-        if pa:
-            out.append("anchors (any project): " + " · ".join(f"{e['url']} [{'items: ' + ', '.join(e['items']) if e.get('scoped') else 'project-wide'}"
-                                                 + (f"; held by {', '.join(x for x in e['pages'] if x != project)}" if any(x != project for x in e["pages"]) else "") + "]" for e in pa))
-    except Exception:
-        pass
-    return "\n".join(out)
-
-
-# ----------------------------------------------------------------------------- a notice's ruling (get with a notice id)
-_RULING_SAYS = {"merged": "merged into a digest (nobody is told at once)", "held": "held (kept for the daily digest or the page pass; nobody is told at once)",
-                "dropped": "dropped (nobody needed it)"}
-_REPEAT_OF = re.compile(r"\brepeat of (?:notice )?([0-9a-f]{6})\b")
-
-
-def _notice_asked(item_id: str) -> str:
-    """The notice id get was asked for, "" when item_id names an item. A notice id is six hex characters (routing.record's token_hex(3)), with
-    "notice " before it or not; bare, it is an item id first when the store holds an item of that name (a12345 reads as both)."""
-    m = re.fullmatch(r"(notice[\s:#]*)?([0-9a-f]{6})", str(item_id).strip().lower())
-    if not m:
-        return ""
-    if not m.group(1):
-        try:
-            if _path(_norm_id(m.group(2))).exists():
-                return ""
-        except ToolError:
-            pass
-    return m.group(2)
-
-
-def _notice_report(nid: str) -> str:
-    """What the router did with a notice, from its own records: the routing log (the notice and its latest ruling: routing.lookup, which parses only the
-    lines that carry the id) and live.jsonl (router_live.trace: the rule or call that ruled it, the item it went onto, an error while it waits). The
-    live log is read first, only because it names the project's file; the ruling shown is the routing log's, so a `route` overrule shows as it stands."""
-    tr = _router_live.trace(nid)
-    hint = str(((tr.get("ruled") or tr.get("last")) or {}).get("key") or "")
-    hit = _routing.lookup(nid, hint)
-    if hit is None:
-        raise ToolError(f"no notice {nid} in the routing log — a notice id is the six hex characters a message to a project returns (\"notice a1b2c3\"); an item id reads board#<n>"
-                        + (f" (and the store holds no item {nid})" if _GID.match(nid) else ""))
-    key, n = hit
-    when = lambda t: _rmod.when_words(dt.datetime.fromtimestamp(float(t), _wttext.ZONE))
-    text = " ".join(str(n.get("text") or "").split())
-    text = text if len(text) <= 120 else text[:119].rstrip() + "…"
-    out = [f"notice {nid}: {n.get('label') or n.get('kind') or 'a notice'}", f"project: {key}", f"sender: {n.get('who') or 'unknown'}",
-           f"sent: {when(n.get('ts') or 0)}", f"text: {text}"]
-    ruling = str(n.get("ruling") or "")
-    if ruling:
-        by, target = str(n.get("ruled_by") or ""), str(n.get("ruled_to") or "")
-        out.append("ruling: " + (f"passed to {target or 'nobody named'}" if ruling == "passed" else _RULING_SAYS.get(ruling, ruling)))
-        if n.get("reason"):
-            out.append(f"reason: {n['reason']}")
-        rep = _REPEAT_OF.search(str(n.get("reason") or ""))
-        if rep:
-            out.append(f"repeat of: notice {rep.group(1)}")
-        live = tr.get("ruled") if by == _router_live.BY and (tr.get("ruled") or {}).get("ruling") == ruling else None
-        if live:
-            how = {"code": "code", "call": "the router's call", "fallback": "fallback"}.get(str(live.get("source") or ""), str(live.get("source") or "the router"))
-            out.append("rule: " + (f"{live['rule']} ({how})" if live.get("rule") else how))
-            out.append(f"item: {_gh.shown(str(live['item'])) if live.get('item') else 'none'}")
-        elif by == _routing.AUTO_RULER:
-            out.append("rule: ruled at once when it was logged, nothing delivered (code)")
-        elif by and by != _router_live.BY:
-            out.append("rule: overruled by hand with the route tool")
-        if by:
-            out.append(f"ruled by: {by}")
-        if n.get("ruled_at"):
-            out.append(f"ruled: {when(n['ruled_at'])}")
-        return "\n".join(out)
-    now, tick = time.time(), _router_live.tick_s()
-    if tr.get("stuck"):
-        out += ["ruling: none, stuck", f"reason: {str(tr['stuck'].get('reason') or 'the router could not write its ruling')[:200]}"]
-    elif n.get("live") and n.get("pilot"):
-        due = float(n.get("ts") or 0) + tick
-        late = now > due + _router.timeout_s()
-        out += ["ruling: none yet, still held for the router",
-                f"expected: by {when(due)} (the router takes up held notices every {int(tick)} s; a judgment call can add up to {int(_router.timeout_s())} s)"
-                + (" — it is late: a failed judgment is tried again at the router's next tick" if late else "")]
-        last = tr.get("last") or {}
-        if last.get("status") == "error" and last.get("error"):
-            out.append(f"last try: {str(last['error'])[:200]}")
-    elif n.get("pilot"):
-        out.append("ruling: none yet, waiting for a ruling (the route tool rules it)")
-    else:
-        out.append("ruling: none, recorded as a count only (no ruling is owed)")
-    return "\n".join(out)
-
-
-# The one `until` date of a wait (until_write.py). The old parameters wake, ask_by and hold are aliases of it: a write that passes one stores `until` (and no old field) and its reply names `until`.
-# They are accepted for 14 days after the release that stores `until`, then refused with a pointer to `until`: [model] wait_alias_until (YYYY-MM-DD, read at the call, so moving it needs no release)
-# is the last day they are accepted; the code's own default, until_write.ALIAS_UNTIL, is Wed Nov 25th 2026 (14 days after Wed Nov 11th 2026).
-def _wait_alias_until() -> dt.date:
-    """[model] wait_alias_until (YYYY-MM-DD, default the code's): the last day wake, ask_by and hold are still accepted as aliases of until. A value that is not a date reads as the default."""
-    v = str(_cfg.get("model", "wait_alias_until", default=_uw.ALIAS_UNTIL) or _uw.ALIAS_UNTIL).strip()
-    try:
-        return dt.date.fromisoformat(v)
-    except ValueError:
-        return dt.date.fromisoformat(_uw.ALIAS_UNTIL)
-
-
-def _wait_alias_check() -> None:
-    """At the server's start: one stderr warning when [model] wait_alias_until is missing or not a date, so the code's own default end of the alias window (until_write.ALIAS_UNTIL) never stands in silently."""
-    v = str(_cfg.get("model", "wait_alias_until", default="") or "").strip()
-    try:
-        dt.date.fromisoformat(v)
-    except ValueError:
-        print(f"config: [model] wait_alias_until is {'missing' if not v else 'not a date (' + v + ')'}: the old wait parameters (wake, ask_by, hold) stay accepted to the code's default, {_uw.ALIAS_UNTIL}", file=sys.stderr, flush=True)
-
-
-def _wait_alias_gate(used: list[str]) -> dt.date:
-    """The old wait parameters a call passed (`used`: wake, ask_by, hold) → the last day they are accepted; a ToolError naming `until` from the day after it."""
-    ends = _wait_alias_until()
-    if used and dt.datetime.now(_cfg.tz()).date() > ends:
-        raise ToolError(f"Refused: {', '.join(used)} {'is' if len(used) == 1 else 'are'} not a parameter any more (accepted until {ends:%Y-%m-%d}). The date a wait ends on is until=<YYYY-MM-DD, or YYYY-MM-DDTHH:MM> "
-                        "(with wait_kind beside it when the wait stands on more than the date); until=\"none\" drops it.")
-    return ends
-
-
-def _fallback_wait_date(meta: dict[str, Any], next_text: Any, description: Any, due: Any) -> tuple[str, str, str]:
-    """The date for a wait that came with a kind and no date → (YYYY-MM-DD, how it was found, the reply line). Never raises: a failure reading the item's words or the items it waits after
-    leaves tomorrow (until_write.fallback_date)."""
-    today = _pages.zone_now().date()
-    texts: list[str] = []
-    try:
-        for ln in str(next_text or "").splitlines():
-            t = ln.strip().lstrip("-* ").strip()
-            if t and not _model.is_owner(_steps.opener(t) or ""):
-                texts.append(t.split(": ", 1)[1] if _steps.opener(t) and ": " in t else t)
-        texts += [ln.strip().lstrip("-* ").strip() for ln in str(description or "").splitlines()]
-    except Exception:  # noqa: BLE001  — the words only help to find a date
-        texts = []
-    other: list[str] = []
-    for g in _wt.after_of(meta):
-        try:
-            other.append(_wt.until_of((_svcstore._load(g).get("metadata") or {})))
-        except Exception:  # noqa: BLE001  — an item that cannot be read gives no date
-            continue
-    d, how, said = _uw.fallback_date(texts, today, _watch.parse_date, _wt.cap_days(), str(due or meta.get("due") or ""), other)
-    return d, how, _uw.fallback_note(_uw.kind_of(meta), d, how, said)
-
-
-def _record_fixes(meta: dict[str, Any], fixes: "list[tuple[str, str, str]] | None") -> None:
-    """Put what a tool wrapper fixed onto the item's metadata (server_fixes.record): (fix, token, History line); a line of "" takes the mark off instead (the mover sent the value again)."""
-    for fix, token, line in fixes or ():
-        if line:
-            _sf.record(meta, fix, token, line, time.time())
-        else:
-            _sf.unmark(meta, fix, token)
 
 
 def _late(name: str) -> Callable[..., Any]:
@@ -2270,7 +1373,7 @@ _checks_hooks.install(_checks_hooks.Hooks(
     session_down=_late_in(_pane_recovery, "_session_down"),
     session_id=_late("_session_id"),
     session_roster=_late_in(_agents, "_session_roster"),
-    wait_end_sent_back=_late("_wait_end_sent_back"),
+    wait_end_sent_back=_late_in(_wait_fixes, "_wait_end_sent_back"),
 ))
 
 # What the page-debt call, the migrations and the fleet events still reach on this module (service/page_debt.py, service/migrations.py, service/fleet_events.py): the ledger of the page debts, the grace minutes,
@@ -2349,9 +1452,9 @@ _create_svc.install(_create_svc.Hooks(
     ask_owed=_late_in(_asks, "_ask_owed"),
     contact_default=_late_in(_contacts, "_contact_default"),
     evwait_gate=_late_in(_wait_gates, "_evwait_gate"),
-    fallback_wait_date=_late("_fallback_wait_date"),
-    fmt=_late("_fmt"),
-    form_notes=_late("_form_notes"),
+    fallback_wait_date=_late_in(_wait_fixes, "_fallback_wait_date"),
+    fmt=_late_in(_tool_get, "_fmt"),
+    form_notes=_late_in(_tool_notes, "_form_notes"),
     gate_ask=_late_in(_asks, "_gate_ask"),
     gate_options=_late_in(_wait_gates, "_gate_options"),
     lift_ask=_late_in(_asks, "_lift_ask"),
@@ -2363,11 +1466,11 @@ _create_svc.install(_create_svc.Hooks(
     owner_then_default=_late_in(_mover_steps, "_owner_then_default"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
-    record_fixes=_late("_record_fixes"),
+    record_fixes=_late_in(_wait_fixes, "_record_fixes"),
     refuse_if_owing=_late_in(_pdebts, "_refuse_if_owing"),
     said_note=_late_in(_owner_words, "_said_note"),
     session_id=_late("_session_id"),
-    wait_alias_gate=_late("_wait_alias_gate"),
+    wait_alias_gate=_late_in(_wait_fixes, "_wait_alias_gate"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     writer_owes=_late_in(_pdebts, "_writer_owes"),
     ask_none=_ASK_NONE,
@@ -2860,20 +1963,20 @@ _update_svc.install(_update_svc.Hooks(
     contact_alive=_late_in(_contacts, "_contact_alive"),
     contact_fronts=_late_in(_contacts, "_contact_fronts"),
     contact_same=_late_in(_contacts, "_contact_same"),
-    date_only_wait=_late("_date_only_wait"),
+    date_only_wait=_late_in(_wait_fixes, "_date_only_wait"),
     date_parked=_late_in(_item_read, "_date_parked"),
     eff_state=_late_in(_mover_steps, "_eff_state"),
     evwait_gate=_late_in(_wait_gates, "_evwait_gate"),
     evwait_preread=_late_in(_wait_gates, "_evwait_preread"),
-    fallback_wait_date=_late("_fallback_wait_date"),
+    fallback_wait_date=_late_in(_wait_fixes, "_fallback_wait_date"),
     finishes_own_line=_late_in(_holders, "_finishes_own_line"),
-    fmt=_late("_fmt"),
-    form_notes=_late("_form_notes"),
+    fmt=_late_in(_tool_get, "_fmt"),
+    form_notes=_late_in(_tool_notes, "_form_notes"),
     gate_ask=_late_in(_asks, "_gate_ask"),
     gate_options=_late_in(_wait_gates, "_gate_options"),
     handoffs_in=_late_in(_agents, "_handoffs_in"),
-    hold_held_by=_late("_hold_held_by"),
-    hold_set=_late("_hold_set"),
+    hold_held_by=_late_in(_wait_fixes, "_hold_held_by"),
+    hold_set=_late_in(_wait_fixes, "_hold_set"),
     is_held=_late_in(_holders, "_is_held"),
     lift_ask=_late_in(_asks, "_lift_ask"),
     machine_note=_late_in(_wait_gates, "_machine_note"),
@@ -2891,7 +1994,7 @@ _update_svc.install(_update_svc.Hooks(
     owner_want=_late_in(_holders, "_owner_want"),
     parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
     publish=_late_in(_pubmod, "_publish"),
-    record_fixes=_late("_record_fixes"),
+    record_fixes=_late_in(_wait_fixes, "_record_fixes"),
     refuse_if_owing=_late_in(_pdebts, "_refuse_if_owing"),
     release_after=lambda *a, **k: _wakes.release_after(*a, **k),
     render_hold_at=lambda *a, **k: _rmod.hold_at(*a, **k),
@@ -2907,12 +2010,12 @@ _update_svc.install(_update_svc.Hooks(
     store_ref=_late_in(_sr, "_store_ref"),
     switchover_on=_late_in(_item_read, "_switchover_on"),
     update=_late_in(_update_svc, "_update"),
-    wait_end_sent_back=_late("_wait_end_sent_back"),
+    wait_end_sent_back=_late_in(_wait_fixes, "_wait_end_sent_back"),
     wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
     wake_event_set=lambda: _runner.WAKE_EVENT.set(),
-    wake_park_line=_late("_wake_park_line"),
-    wake_step_note=_late("_wake_step_note"),
-    wake_window_note=_late("_wake_window_note"),
+    wake_park_line=_late_in(_wait_fixes, "_wake_park_line"),
+    wake_step_note=_late_in(_wait_fixes, "_wake_step_note"),
+    wake_window_note=_late_in(_wait_fixes, "_wake_window_note"),
     watch_on_write=_late_in(_wait_gates, "_watch_on_write"),
     writer_owes=_late_in(_pdebts, "_writer_owes"),
     zone=lambda: _wttext.ZONE,      # looked up when the reply is made, as the confirm tool did before the move
@@ -3086,15 +2189,15 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
     if what == "answer":                # a script reads the owner's latest board answer on an item (client.py get answer board#N)
         return _handover._client_answer(str(params.get("key") or ""))
     if what == "notice":                # a script reads what the router did with a notice (client.py get notice <id>): the text get(item_id=<id>) shows
-        nid = _notice_asked("notice " + str(params.get("key") or "").strip())
+        nid = _tool_get._notice_asked("notice " + str(params.get("key") or "").strip())
         if not nid:
             return 400, "text/plain", "key = a notice id: the six hex characters a message to a project returns (\"notice a1b2c3\")"
         try:
-            return 200, "text/plain; charset=utf-8", _notice_report(nid)
+            return 200, "text/plain; charset=utf-8", _tool_get._notice_report(nid)
         except ToolError as e:
             return 404, "text/plain", str(e)
     if what == "holds":                 # the open items on hold whose hold names no reason: read only, each mover releases its own
-        return 200, "text/plain; charset=utf-8", _holds_report()
+        return 200, "text/plain; charset=utf-8", _tool_notes._holds_report()
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
     return 404, "text/plain", "no such read: registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles"
@@ -4970,7 +4073,7 @@ def _start_background() -> list[str]:
     _stallsvc.stall_pause_check()                    # a pause of the stall pass read at the start begins its clock now (or keeps the one in <state>/stall_pause.json) and logs its end time
     for _n in _cfg.notes():                 # a setting missing from the one-file config that changes behaviour silently (the page rules off): a pause of the stall pass, with its end
         print(f"config: {_n}", file=sys.stderr, flush=True)
-    _wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
+    _wait_fixes._wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
     try:
         if _migrations.migrate_holds():                # status on_hold → open + metadata.hold, before the first publish and the runner
             _pubmod._publish()

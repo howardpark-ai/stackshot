@@ -90,6 +90,8 @@ check("completion_due: the same anchor on two pages is asked about on each (each
 
 # ---- the readers built on it
 from stackshot.web import server
+from stackshot.service import wait_fixes as _wait_fixes_svc
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import item_read as _item_read
 from stackshot.anchors import anchors as ANC
@@ -103,9 +105,9 @@ check("the server reads an anchor held by another project's page (_scoped_anchor
       and _item_read._scoped_anchors(A, "z9") == [], (urls(_item_read._scoped_anchors(A, "a1")), urls(_item_read._scoped_anchors(A, "b2"))))
 check("...and from the anchors a pass already loaded", urls(_item_read._scoped_anchors(A, "a1", store)) == [SOLO, DM] and _item_read._scoped_anchors(A, "a1", None) == _item_read._scoped_anchors(A, "a1"))
 check("the note a hold owes sees it: an outside item whose thread is anchored on another page is not told to anchor it", _item_read._scoped_anchor_exists("b2", {"project": A}) and not _item_read._scoped_anchor_exists("z9", {"project": A}))
-check("a hold that waits on a notice from an anchor on another page is held by it (_hold_held_by)", server._hold_held_by("b2", {"project": A}) == ["anchor"] and server._hold_held_by("z9", {"project": A}) == [])
+check("a hold that waits on a notice from an anchor on another page is held by it (_hold_held_by)", _wait_fixes_svc._hold_held_by("b2", {"project": A}) == ["anchor"] and _wait_fixes_svc._hold_held_by("z9", {"project": A}) == [])
 
-shown = server._fmt({"gid": "a1", "id": "a1", "subject": "[home] item a1", "description": "- A thing, finished when it works", "status": "open", "metadata": {"project": A, "owner": "Oliver"}})
+shown = _get_tool._fmt({"gid": "a1", "id": "a1", "subject": "[home] item a1", "description": "- A thing, finished when it works", "status": "open", "metadata": {"project": A, "owner": "Oliver"}})
 line = next((x for x in shown.splitlines() if x.startswith("anchors (any project):")), "")
 check("get lists the anchors that count for the item, naming the page of one held by another project, and its own project's project-wide anchors",
       f"{SOLO} [items: a1]" in line and f"{DM} [items: a1, b2; held by {B}]" in line and "https://example.invalid/wide [project-wide]" in line and "bwide" not in line, line)

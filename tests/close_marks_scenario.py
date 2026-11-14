@@ -62,6 +62,7 @@ def sts(i): return [(x["status"], x.get("by") or "") for x in rd(i)["metadata"].
 def kinds(i): return [k for k, _ in sts(i)]
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
@@ -102,7 +103,7 @@ _update_svc._update("board#6", sender="home-front", done=[1])                   
 at6 = rd(6)["metadata"]["steps"][0]["at"]
 close(6, "dropped")
 check("a step marked before the close is untouched (by, at, status); the others follow the outcome", kinds(6) == ["done", "dropped", "dropped"] and rd(6)["metadata"]["steps"][0]["at"] == at6, rd(6)["metadata"]["steps"])
-g1 = server._fmt({**rd(1), "gid": "g1"})
+g1 = _get_tool._fmt({**rd(1), "gid": "g1"})
 check("get on the closed item lists a checklist with no open step", "checklist:" in g1 and "[open" not in g1 and "[done · home-front" in g1, g1[-400:])
 item(8, next="home-front: one", steps=[{"text": "home-front: gone", "status": "open"}, {"text": "home-front: one", "status": "open"}])
 close(8, "done")
@@ -199,7 +200,7 @@ check("a second start is idempotent: it marks nothing, writes no file and logs n
 item(9185, status="completed", close_at=CLOSE, outcome="done", reason="x", next=None, steps=OLD("home-front: F left open, found by a later start"))
 got3, _ = start_pass()
 check("a later start marks an item closed meanwhile with an open step, and only it", [r["item"] for r in got3] == [f"board#{BID_C}"] and kinds(9185) == ["done"], got3)
-g9186 = server._fmt({**rd(9186), "gid": "g9186"})
+g9186 = _get_tool._fmt({**rd(9186), "gid": "g9186"})
 check("get on a backfilled item shows no open step", "checklist:" in g9186 and "[open" not in g9186, g9186[-400:])
 
 print(("ok" if not fails else "FAILED") + f": close marks scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

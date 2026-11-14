@@ -3,7 +3,7 @@
 A mover that sets a wake while every open line of its next waits for that wake's own hour or day ("at 08:00 run the check") left the item reading as doing with nobody working it, until someone
 asked. Checked here against a scratch store and config (no port, no real server, no model call):
 
-  1  the write (server `_date_only_wait`, through dated_wait.timed_wait_lines): such a write is parked in the same call: on hold with the wake and a wait_basis (the call's wait_reason with the wake day,
+  1  the write (service/wait_fixes `_date_only_wait`, through dated_wait.timed_wait_lines): such a write is parked in the same call: on hold with the wake and a wait_basis (the call's wait_reason with the wake day,
      else the step's own words, falling back to the words when the reason would not pass the basis gate), stored phase waiting and waits_on time, the board's reading waiting on a time; the reply says so
      and says what to write if a step can run now; a next written alone on an item that keeps a stored wake is parked the same way
   2  a real reminder stays one: a line that is an action to take now, a timed line beside an action, a wake within the hour, a step started by an outside event (its note stays), another party's step in

@@ -10,7 +10,7 @@ from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import ask_leaves as _askl, model as _model, states as _states, work as _work
 from stackshot.model.ids import _bare_id_ok, _norm_id
-from stackshot.service import gates as _gates, writes as _writes
+from stackshot.service import gates as _gates, wait_fixes as _wait_fixes, writes as _writes
 from stackshot.service.store import _load
 from stackshot.waits import until_write as _uw, wait_list_write as _wlw, waiting as _wt
 from stackshot.web.auth import oauth as _oauth
@@ -21,7 +21,6 @@ from stackshot.web.tools.text import _AFTER_PARAM, _ALIASES, _ASK_NONE, _CHECK_P
 _ask_after_write = None      # set by register: the server's own, looked up at each call
 _sender_not_owner = None      # set by register: the server's own, looked up at each call
 _update = None      # set by register: the server's own, looked up at each call
-_wait_alias_gate = None      # set by register: the server's own, looked up at each call
 _busy_live = None      # set by register: the server's proof of what of a mover's own runs on an item (gates.gate_busy_hold); None passes every write
 
 
@@ -207,7 +206,7 @@ def stackshot_update(
         if old_:
             raise _gates.waits_clash(old_)
     wake, ask_by, until_wait, alias_used, alias_date = _gates.until_in(item_id, status, until, wake, ask_by, hold, "list" if list_in else wait_kind)     # the date as the gates below read it; wake, ask_by and hold are aliases of until
-    alias_ends = _wait_alias_gate(alias_used)
+    alias_ends = _wait_fixes._wait_alias_gate(alias_used)
     _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
     gid_ = _norm_id(item_id, bare=_bare_id_ok(status))
@@ -231,12 +230,11 @@ def stackshot_update(
         return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
 
 
-def register(mcp, *, ask_after_write, sender_not_owner, update, wait_alias_gate, busy_live=None) -> None:
+def register(mcp, *, ask_after_write, sender_not_owner, update, busy_live=None) -> None:
     """Adds the tool of this module to `mcp`, and takes the server's callables the bodies use."""
-    global _ask_after_write, _sender_not_owner, _update, _wait_alias_gate, _busy_live
+    global _ask_after_write, _sender_not_owner, _update, _busy_live
     _busy_live = busy_live
     _ask_after_write = ask_after_write
     _sender_not_owner = sender_not_owner
     _update = update
-    _wait_alias_gate = wait_alias_gate
     mcp.tool(name="update", description=_lead(_T.description("update")))(stackshot_update)

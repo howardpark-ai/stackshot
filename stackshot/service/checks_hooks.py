@@ -29,7 +29,7 @@ class Hooks:
     session_down: Callable[..., Any]  # pane_recovery._session_down
     session_id: Callable[..., Any]  # server._session_id
     session_roster: Callable[..., Any]  # agents._session_roster
-    wait_end_sent_back: Callable[..., Any]  # server._wait_end_sent_back
+    wait_end_sent_back: Callable[..., Any]  # service/wait_fixes._wait_end_sent_back
 
 
 _hooks_: Hooks | None = None

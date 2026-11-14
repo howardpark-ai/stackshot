@@ -122,6 +122,7 @@ check("2 a negation passes", ww(alive("home-agent: no waiting for a slot, run it
 check("2 a waiting item has none (its next is the record of its wait)", ww(item(21, wrote=now - H, state="blocked", needs=["home-agent"], after=["a6"], next="home-agent: waiting for the build when it closes")[1]) == ([], []))
 check("2 a closed item has none", ww(item(22, status="completed", wrote=now - H, state="doing", next="home-agent: wait for it", outcome="done")[1]) == ([], []))
 from stackshot.web import server
+from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import messaging as _messaging
 from fastmcp.exceptions import ToolError
@@ -224,7 +225,7 @@ try:
 finally:
     _AR4.filing_pass = real_filing_pass
 check("4 the tick hands the pass the server's wait-end fix and facts (wait_end.py), as it hands the front-step and park functions",
-      len(seen_env) == 1 and seen_env[0].wait_end is server._wait_end_fix and seen_env[0].wait_facts is server._wait_end_facts and seen_env[0].wake_park is server._wake_park)
+      len(seen_env) == 1 and seen_env[0].wait_end is _wait_fixes_svc._wait_end_fix and seen_env[0].wait_facts is _wait_fixes_svc._wait_end_facts and seen_env[0].wake_park is _wait_fixes_svc._wake_park)
 def refuse(*a, **k): raise ToolError("Refused: nobody by that name")
 _messaging._message = refuse
 check("4 a refusal is a failed delivery (False and the refusal's words), as the message route's 400 is", wait_gates_svc._filing_deliver("x", "t") == (False, "Refused: nobody by that name"))

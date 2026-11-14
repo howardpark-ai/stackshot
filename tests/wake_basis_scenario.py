@@ -56,6 +56,9 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR
+from stackshot.service import wait_fixes as _wait_fixes_svc
+from stackshot.web.tools import notes as _notes_tool
+from stackshot.web.tools import get as _get_tool
 from stackshot.service import asks as asks_svc, wait_gates as wait_gates_svc, answer_handover as handover_svc
 from stackshot.github import ghsync as _gh
 from stackshot.web import publish as _web_publish
@@ -88,7 +91,7 @@ def AO(i):                      # the items an item waits after that are still o
 def derive_of(n): return _model.derive(it_of(n), now_, after_open=AO, anchored=lambda i: False)
 def view_of(n): return _model.view(it_of(n), derive_of(n), now_, AO)
 lst = lambda n: server._item_list(it_of(n))
-brief = lambda n: server._fmt(it_of(n), brief=True)
+brief = lambda n: _get_tool._fmt(it_of(n), brief=True)
 NEXT = "team-back: check the build later and report back to the owner"     # no date a step could be read for
 BASIS = "the subscription renews on 2099-01-20"
 
@@ -132,7 +135,7 @@ row_txt = re.sub(r"<[^>]+>", "", bd.home_wait(pair[0], pair[1]) + " " + bd.wait_
 check("1 …its row names the basis, who set it, who picks it up and the end date", BASIS in row_txt and "set by" in row_txt and "picks it up" in row_txt and "until" in row_txt, row_txt)
 order = [p[0]["gid"] for p in hl["waiting"] if p[0]["gid"] in ("g1", "g17")]
 check("1 …the Waiting sort orders it by its wake (the sooner wake first)", order == ["g17", "g1"], order)
-mls = "\n".join(server._model_lines(it_of(1), short=True))
+mls = "\n".join(_notes_tool._model_lines(it_of(1), short=True))
 check("1 …the brief and get say the board lists it as waiting until the wake, and why (the basis)", f"the board lists it as waiting until {W1} ({BASIS})" in mls and "model: alive" in mls, mls)
 check("1 …the brief's item block carries that line", "the board lists it as waiting until" in brief(1), brief(1)[-400:])
 check("1 …a plain doing item carries no such note", "the board lists it as waiting" not in brief(18), None)
@@ -215,19 +218,19 @@ WD = iso(30)
 NX_W = f"team-back: collect logs until {WD}, then review"
 m_plain = {"owner": U["home-front"], "mover": BACK, "needs": [BACK], "wake": WD, "next": NX_W, "project": "projects/alpha"}
 m_basis = dict(m_plain, wait_basis=basis(WD))
-check("11 control: a wake alone whose next waits for its day draws the window note", "alone is a wait until that date" in server._wake_window_note(m_plain) and server._wake_alone_on_agent(m_plain), server._wake_window_note(m_plain))
+check("11 control: a wake alone whose next waits for its day draws the window note", "alone is a wait until that date" in _wait_fixes_svc._wake_window_note(m_plain) and _wait_fixes_svc._wake_alone_on_agent(m_plain), _wait_fixes_svc._wake_window_note(m_plain))
 check("11 a wake that carries a basis draws neither the window note nor the timed-step note: the item is listed as waiting, not on agent",
-      server._wake_window_note(m_basis) == "" and not server._wake_alone_on_agent(m_basis) and server._wake_step_note(dict(it_of(1), metadata=m_basis), (BACK,)) == "", server._wake_window_note(m_basis))
+      _wait_fixes_svc._wake_window_note(m_basis) == "" and not _wait_fixes_svc._wake_alone_on_agent(m_basis) and _wait_fixes_svc._wake_step_note(dict(it_of(1), metadata=m_basis), (BACK,)) == "", _wait_fixes_svc._wake_window_note(m_basis))
 class _Clock:                    # the server's clock stopped at the wake itself
     def __init__(self, at): self.at = at
     def time(self): return self.at
     def __getattr__(self, k): return getattr(time, k)
 real_time = server.time
-server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
+server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = _Clock(W.wake_epoch(WD))
 try:
-    at_wake = (server._wake_alone_on_agent(m_basis), "alone is a wait until that date" in server._wake_window_note(m_basis))
+    at_wake = (_wait_fixes_svc._wake_alone_on_agent(m_basis), "alone is a wait until that date" in _wait_fixes_svc._wake_window_note(m_basis))
 finally:
-    server.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
+    server.time = _wait_fixes_svc.time = _notes_tool.time = _get_tool.time = fleetev.time = migsvc.time = pdebt_svc.time = handoff_svc.time = hcold_svc.time = checks_svc.time = proofs_svc.time = released_svc.time = asks_svc.time = wait_gates_svc.time = handover_svc.time = _pane_recovery.time = _mover_steps.time = _owner_words.time = real_time
 check("11 …a wake exactly now is not waiting any more: the basis no longer exempts it, so the note rules apply again (alone, and the window note fires)", at_wake == (True, True), at_wake)
 bw = dict(it_of(1), metadata=dict(mt(1, "g")))
 ep = W.wake_epoch(W1)
