@@ -5,7 +5,7 @@ stamps and the file write of `writes` in recorders (which call the real function
 
   1  contexts       PLAIN runs the mover settling and the owner steps; NAMED runs the owner steps only; QUIET runs neither; the other steps (ask, the three hand-off steps, phase, the lists, the search
                     index) run in all three, and the two hand-off steps that take `quiet` are told so for QUIET alone; a context outside the three is refused
-  2  order          the whole sequence of a PLAIN save, from the read-only guard to the search index; the phase is stored before the progress clock reads it; the project's id is stamped before the
+  2  order          the whole sequence of a PLAIN save, from the read-only guard to the search index; the phase is stored before the last-activity record reads it; the project's id is stamped before the
                     item file is written, and the file holds it
   3  mirror         `mirror=False` queues no GitHub job even when GitHub is on; `mirror=True` queues one when it is on and none when it is off; `background` reaches the job
   4  read-only      the guard is the first thing a save does: a refused guard stops it before any step, any stamp or the file, and the stored item stays as it was
@@ -56,7 +56,7 @@ def fake_steps():
         handback_drop=step("handback_drop"), answer_ack=step("answer_ack"))
 writes.install(fake_steps())
 
-real = {n: getattr(writes, n) for n in ("record_writer", "_stamp_activity", "_stamp_progress", "_stamp_last_activity")}
+real = {n: getattr(writes, n) for n in ("record_writer", "_stamp_activity", "_stamp_last_activity")}
 real_guard, real_ip_stamp, real_write_item = ro.guard, ip.stamp, cstore._write_item
 real_enabled, real_on_change = gh.enabled, gh.on_change
 def wrap(name):
@@ -64,10 +64,10 @@ def wrap(name):
         rec(name)
         return real[name](*a, **k)
     return run
-def progress(item, *a, **k):
-    SEEN["phase_at_progress"] = (item.get("metadata") or {}).get("phase")
-    rec("progress")
-    return real["_stamp_progress"](item, *a, **k)
+def last_activity(item, *a, **k):
+    SEEN["phase_at_last_activity"] = (item.get("metadata") or {}).get("phase")
+    rec("_stamp_last_activity")
+    return real["_stamp_last_activity"](item, *a, **k)
 def guard(what=""):
     rec("guard")
     return real_guard(what)
@@ -82,7 +82,7 @@ GH_ON = [False]
 def gh_enabled(): return GH_ON[0]
 def on_change(gid, before, item, background=False):
     rec("ghsync", background=background)
-writes.record_writer = wrap("record_writer"); writes._stamp_activity = wrap("_stamp_activity"); writes._stamp_progress = progress; writes._stamp_last_activity = wrap("_stamp_last_activity")
+writes.record_writer = wrap("record_writer"); writes._stamp_activity = wrap("_stamp_activity"); writes._stamp_last_activity = last_activity
 ro.guard = guard; ip.stamp = ip_stamp; cstore._write_item = write_item; gh.enabled = gh_enabled; gh.on_change = on_change
 
 def blank(i, **kw): return {"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": "open", "metadata": {"project": "projects/alpha"}, **kw}
@@ -117,12 +117,11 @@ check("1 the three contexts are the three values", (writes.PLAIN.settle, writes.
 
 # ---------------------------------------------------------------- 2. order
 FULL = ["guard", "settle_mover", "owner_steps", "record_writer", "_stamp_activity", "ask_stamp", "handoff_on_save", "handoff_his_over", "handoff_follow", "phase_stamp",
-        "progress", "_stamp_last_activity", "ip.stamp", "write_item", "foryou_on_save", "landed_on_save", "search_touch"]
+        "_stamp_last_activity", "ip.stamp", "write_item", "foryou_on_save", "landed_on_save", "search_touch"]
 check("2 the whole order of a PLAIN save, from the guard to the search index", plain == FULL, plain)
 check("2 a QUIET save keeps that order without the two steps it leaves out", quiet == [s for s in FULL if s not in ("settle_mover", "owner_steps")], quiet)
-check("2 the phase is stored before the progress clock", plain.index("phase_stamp") < plain.index("progress"), plain)
-check("2 …and the progress clock reads the phase just stored", SEEN.get("phase_at_progress") == "wr2-phase", SEEN)
-check("2 the last-activity record comes after the progress clock", plain.index("progress") < plain.index("_stamp_last_activity"), plain)
+check("2 the phase is stored before the last-activity record", plain.index("phase_stamp") < plain.index("_stamp_last_activity"), plain)
+check("2 …and the last-activity record reads the phase just stored", SEEN.get("phase_at_last_activity") == "wr2-phase", SEEN)
 check("2 the project's id is stamped before the item file is written", plain.index("ip.stamp") < plain.index("write_item"), plain)
 check("2 …and the file written holds what the stamp set", dict(next(d for n, d in plain_log if n == "write_item"))["marked"] is True and rd(101)["metadata"].get("wr2_ip_marker") == 1, (plain_log, rd(101)["metadata"]))
 check("2 the lists and the search index follow the file", plain.index("write_item") < min(plain.index(s) for s in ("foryou_on_save", "landed_on_save", "search_touch")), plain)

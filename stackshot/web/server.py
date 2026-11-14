@@ -138,7 +138,7 @@ from stackshot.model import ask_leaves as _askl  # noqa: E402  — a wrong or mo
 from stackshot.model import note_read as _noteread  # noqa: E402  — what the owner's note on his step says: done, or a later time (note_read.py)
 from stackshot.fleet import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
 from stackshot.model import activity as _activity  # noqa: E402  — the item's `activity` clock: when something real last happened on the work, and which saves count (activity.py)
-from stackshot.model import progress as _progress  # noqa: E402  — the item's `progress` clock: when the work last moved (a step marked, a state change, a merge), not when it was last written to (progress.py)
+from stackshot.model import progress as _progress  # noqa: E402  — what counts as the item having moved (a step marked, a state change, a merge), read by the last-activity record and the merge pass (progress.py)
 from stackshot.service import runner as _runner  # noqa: E402  — the minute tick table, the wake event and the background threads (service/runner.py)
 from stackshot.service import wakes as _wakes  # noqa: E402  — the wake pass, the anchor pass, the item and anchor release and the minute tick bodies of the wake passes (service/wakes.py)
 from stackshot.service import watching as _watching  # noqa: E402  — the waits' watchers: a wait that ends turns its item; anchor ids and the routine-line test (service/watching.py)
@@ -1612,7 +1612,7 @@ def _page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None
 
 from stackshot.anchors import anchors as _anc  # noqa: E402
 from stackshot.anchors import machine_anchor as _ma  # noqa: E402  — a machine of the fleet as an anchor: its items' movers are told at each check-in (machine_anchor.py)
-from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the progress clock's merge pass
+from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the merge pass (`_merge_progress_tick`)
 from stackshot.model import merge_tie as _mtie  # noqa: E402  — which open items a merged pull request is tied to (merge_tie.py)
 from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's record of the other activity on pull requests (CI results, comments, reviews, merges): read by the last-activity pass (event_log.py)
 from stackshot.model import last_activity as _lastact  # noqa: E402  — the item's one "last activity" record, `metadata.last_activity` (last_activity.py)
@@ -2448,7 +2448,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff.handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
-    the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
+    the server's own bookkeeping (no writer): it does not move the activity clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
     passes within 45 minutes write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
     from stackshot.audit import hourly as _hourly
     from stackshot.audit import hourly_log as _hlog
@@ -6945,11 +6945,12 @@ def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
 
 # ----------------------------------------------------------------------------- a merged pull request is progress for the item it is tied to
 # An item whose pull request merged has moved, whether or not the merge settles a step: a pull request that is one of several steps never wrote the "merged <ref>" entry of `released_told`
-# (that is the settle path's, `proofs.proof_item`, and it also tells the mover), so the progress clock (model/progress.py) did not run for it and the item was handed up as not moving. The earliest
+# (that is the settle path's, `proofs.proof_item`, and it also tells the mover), so the last-activity record (model/last_activity.py) saw no merge for it. The earliest
 # reliable signal is the hub's merge log (anchors/merge_log.py): `Hub.emit` appends one line for every merge it sees, from the read it makes anyway, with the board ids the pull request's
 # body names; nothing here reads GitHub. A merge is tied to an item (model/merge_tie.py) by an anchor scoped to it (never a project-wide one), by its body naming the item, or by the item's own words
-# naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
+# naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.merges` sees a merge newly recorded and the last-activity record takes it.
 _MERGE_PROG_KEEP = 20       # keys kept in an item's merged_seen (as released_told keeps its last 20)
+_MERGE_BACKLOG_S = 6 * 3600.0      # a merge older than this is not recorded: the backlog of a day of downtime, or a shorter file read again from its start
 
 
 def _merge_progress_state_path() -> Path:
@@ -6981,10 +6982,10 @@ def _anchor_repo(url: str) -> str:
 
 def _merge_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
     """The lines worth acting on: each parsed on its own (merge_log.normal), so a line of the wrong shape (a hand edit, a torn write that still parsed) is logged and skipped and the offset moves on
-    past it; and only those younger than `main_hours` plus two hours, on every pass. A merge from the backlog of a day of downtime stamps the item's progress at the time of the save, which would be a
-    clock reset for work that happened long ago: it is no progress now, so it is not stamped."""
+    past it; and only those younger than `_MERGE_BACKLOG_S` (six hours), on every pass. A merge from the backlog of a day of downtime would be recorded at the time of the save, which would move
+    the item's clocks for work that happened long ago: it is no news now, so it is not recorded."""
     out: list[dict[str, Any]] = []
-    floor = now - (_laddersvc.ladder_main_hours() + 2.0) * 3600.0
+    floor = now - _MERGE_BACKLOG_S
     for row in rows:
         try:
             r = _mlog.normal(row)
@@ -7049,8 +7050,8 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
 
 def _merge_progress_tick(now: float | None = None) -> list[str]:
     """The pass: read the hub's merge log from where it stopped, and for each open item a merged pull request is tied to (merge_tie.tied) add the pull request to the item's `merged_seen` and save it,
-    which moves the item's progress clock (progress.moved). On every pass a line that is malformed is logged and skipped, and one older than the hand-up interval plus two hours is skipped (`_merge_rows`: the
-    backlog of a day of downtime, or a shorter file read again from its start, would stamp items for merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
+    which the last-activity record takes (progress.merges). On every pass a line that is malformed is logged and skipped, and one older than six hours is skipped (`_merge_rows`: the
+    backlog of a day of downtime, or a shorter file read again from its start, would record merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
     or held is left alone. An item that cannot be read or saved is logged and skipped: the others are saved and the offset is stored, so one bad item does not abort the pass every minute. → the ids saved."""
     if _watch.holding():
         return []
@@ -7098,7 +7099,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
 # `metadata.last_activity` (model/last_activity.py) takes what each save did that is visible activity (`_stamp_last_activity` in `service/writes.py`, run by `writes.save`) and, here, the events the hub saw on a pull request
 # tied to the item: a CI result, a comment by a person, a review, a merge (anchors/event_log.py: `Hub.emit` appends one line each, as it does for a merge, from what the event holds). The ties are
 # merge_tie's, through `_merge_tied`, the same rules and the same items as the merge pass (anchored, the pull request's body, the item's own words; open items off the stall ladder, waiting and held
-# ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress`, adds no History line and
+# ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it does not move the `activity` clock, adds no History line and
 # is no publish (the home page is kept for 30 s, so the On agent rows and the item page pick the record up on their next draw). A commit to a tied pull request comes in the same way: the hub's GitHub receiver sees the head sha change and emits it at the time it saw it (after downtime, at the commit's committer date).
 _EVENT_ACT_FLOOR_H = _elog.FLOOR_H       # an event older than this is not read (a day of downtime, or a shorter file read again from its start): the record would only fill with old news (the hub applies the same window to the event's own time when it writes the line)
 _EVENT_ACT_AHEAD_S = _elog.AHEAD_S       # …nor one stamped more than this ahead of the server's clock (a skew of minutes is allowed and read as now)

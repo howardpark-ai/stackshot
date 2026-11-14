@@ -1435,7 +1435,7 @@ for p_ in (T / "cli").glob("*.json"): p_.unlink()
 set_cfg(); clear_pushes(); inbox(); failing(); queued(); paused(); cold("no json at all here"); COLD_MSGS.clear()
 server._cfg.CFG["stall"] = {}
 stall_svc.stall_since(now0 - 7200)                   # the stall pass first ran before every clock below
-def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, "main_hours": 10000, **kw}      # main_hours: a value no scenario reaches; the hand-up of an item that has not moved is tests/ladder_progress_scenario.py's
+def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, **kw}
 def stk(at):
     """One stall pass at `at` (its 20-second gate reset), the threads it started finished → the items it acted on."""
     stall_svc.STALL_LAST[0] = 0.0

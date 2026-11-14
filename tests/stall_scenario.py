@@ -984,7 +984,7 @@ close(67)
 # ================================================================ 22. the one ladder ([ladder] enabled): the stall pass takes the later rungs of an entry the hand-off audit or the dates pass made
 # A pane with no turn running starts no ladder here. With the flag off (the default) sections 1 to 21 above are the ladder.
 from stackshot.waits import ladder as LD
-def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, "main_hours": 10000, **kw}      # main_hours: a value no scenario reaches; the hand-up of an item that has not moved is tests/ladder_progress_scenario.py's
+def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, **kw}
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "no turn running" in p[1]]
 cold("no json at all here"); COLD_MSGS.clear(); set_cfg(); set_stall()
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, as at the top (an earlier section's config swap may have dropped it)

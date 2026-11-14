@@ -362,7 +362,7 @@ def run(hub: Hub):
         """The anchor was first read (the seed in `watch`) on a pull request that has merged already. A merge within LATE_MERGE_S, at most LATE_SKEW ahead of the hub's clock, gets its merge line now in each log that does not hold it, so an anchor added
         after the merge still counts it (the item it is scoped to is credited by the same tie as for any merge: an anchor scoped to items ties them, a project-wide one none). Recorded only (Hub.record): the sessions
         of the anchor are not told. The event log's line is stamped at the time it merged, and so is the merge log's (the server's merge pass skips a merge older than its floor, so a merge of 20 hours ago credits
-        last activity but moves no progress clock). The body's refs are not read: it can be edited long after the merge, and the anchor's own scope is the tie here. A pull request still open, closed unmerged, merged
+        last activity but is not recorded by the merge pass). The body's refs are not read: it can be edited long after the merge, and the anchor's own scope is the tie here. A pull request still open, closed unmerged, merged
         longer ago or at an unreadable or future time is a silent seed, as before. → False when the line could not be written: the caller does not seed, so the next pass reads the pull request again."""
         try:
             merged = (i.get("pull_request") or {}).get("merged_at")

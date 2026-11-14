@@ -574,7 +574,7 @@ def minute_wake_catchup() -> None:
 
 
 def minute_anchor_pass() -> None:
-    """The anchor pass, in a tick of its own so that a failure in it does not stop the next one; published when it released something. The progress clock's merge pass (`_merge_progress_tick`) rides
+    """The anchor pass, in a tick of its own so that a failure in it does not stop the next one; published when it released something. The merge pass (`_merge_progress_tick`) rides
     on it: it reads what the anchor receiver saw, as the anchor pass does, and a failure in either does not stop the other."""
     try:
         released = anchor_pass()
@@ -583,7 +583,7 @@ def minute_anchor_pass() -> None:
         print(f"anchor pass: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
         moved = _hooks().merge_progress_tick()
-    except Exception as e:  # noqa: BLE001  — the clock is groundwork for the hand-up of a stuck item; the anchor pass is not stopped for it
+    except Exception as e:  # noqa: BLE001  — the anchor pass is not stopped for it
         moved = []
         print(f"merge progress: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:

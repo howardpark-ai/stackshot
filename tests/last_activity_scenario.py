@@ -8,7 +8,7 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
   3  the event log: kinds, a burst is one line per kind, a bot's comment is left out, a line is never written for what names no pull request; `Hub.emit` writes it for a CI result, a comment, a review and a merge
      and for nothing else; the merge log is untouched by a line of another kind
   4  the pass: each kind of event of a tied pull request stamps the right words at the event's time; the same tie rules as a merge (anchored, the body, the item's own words; a project-wide anchor, a waiting item,
-     a held one and a closed one are left alone); the other clocks (activity, progress, updated, History, merged_seen) are as they were
+     a held one and a closed one are left alone); the other clocks (activity, updated, History, merged_seen) are as they were
   5  the pass's care: newest wins; a torn, malformed or oversized line is skipped and bounded in the log; a restart resumes from the offset; a replaced file is read from its start; an old event is not read; one
      item that cannot be saved stops no other; nothing raises out of the pass; a standby and a held board run nothing
   6  a body names an item for anyone: only a merge ties through it (a comment, a review and a CI result tie by an anchor scoped to the item or the item's own words); a line the hub is still writing waits, a file
@@ -65,7 +65,7 @@ def put(i, mover="home-peer", status="open", act=30, **meta):
     base.update(meta)
     at = now0 - act * MIN
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": at, "state_updated": at, "confirmed": at,
-                                                       "activity": at, "progress": at, "written_at": at, "written_by": "home-front", "metadata": base}))
+                                                       "activity": at, "written_at": at, "written_by": "home-front", "metadata": base}))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def wr(i, d): (T / f"store/a/{i}.json").write_text(json.dumps(d))
@@ -209,10 +209,10 @@ save_at(now0 + 10 * MIN, 300, lambda d_: d_["metadata"].update(next="home-peer: 
 save_at(now0 + 11 * MIN, 300, lambda d_: d_.update(confirmed=now0 + 11 * MIN), activity=ACT.CONFIRM)
 save_at(now0 + 12 * MIN, 300, lambda d_: None, note="still on it", activity=ACT.MESSAGE)
 check("2 a status line, a \"no change\" reply, a confirm and a note do not move it", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"}, la(300))
-d_ = server._load("a300"); server._stall.note(d_["metadata"], now0 + 13 * MIN, "it has not moved for 4 hours: handed up"); CLK.t = now0 + 13 * MIN
+d_ = server._load("a300"); server._stall.note(d_["metadata"], now0 + 13 * MIN, "its mover is live but wrote nothing for 4 hours: -main was told"); CLK.t = now0 + 13 * MIN
 try: writes.save("a300", d_, activity=ACT.BOOKKEEPING)
 finally: CLK.t = None
-check("2 the ladder's own History line (a save of the server's, no writer) does not move it, and the History line is on the item", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and any("handed up" in x.get("text", "") for x in server._stall.log_of(mt(300))), mt(300).get("stall") or mt(300).keys())
+check("2 the ladder's own History line (a save of the server's, no writer) does not move it, and the History line is on the item", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and any("-main was told" in x.get("text", "") for x in server._stall.log_of(mt(300))), mt(300).get("stall") or mt(300).keys())
 save_at(now0 + 20 * MIN, 300, lambda d_: d_["metadata"].update(mover="home-peer2", needs=["home-peer2"]))
 check("2 a session's state change (a new mover) moves it, newest wins", la(300) == {"at": now0 + 20 * MIN, "what": "mover changed"} and lk(300) == "state_change", la(300))
 save_at(now0 + 30 * MIN, 300, lambda d_: d_["metadata"].update(released_told=["merged acme/widgets#12"]), writer="", activity=ACT.EVENT)
@@ -223,7 +223,7 @@ d_ = rd(303); d_["status"] = "completed"; wr(303, d_)
 save_at(now0 + 32 * MIN, 303, lambda d_: d_["metadata"].update(steps=[ASTEP("x", "done", now0)]))
 check("2 a closed item gets no record", la(303) is None, la(303))
 save_at(now0 + 33 * MIN, 302, lambda d_: d_["metadata"].update(steps=[ASTEP("y", "open")]), writer="home-peer", activity=ACT.WRITE)
-check("2 the other clocks are as they were: a save that records nothing leaves progress and activity to their own rules (a step added moves neither the record nor progress)", la(302) is None and rd(302)["progress"] == now0 - 30 * MIN, (la(302), rd(302)["progress"]))
+check("2 a save that records nothing leaves no record (a step added moves nothing)", la(302) is None, la(302))
 
 # ================================================================ 3. the event log and the hub
 ALLK = "comment+review+ci_failed+ci_passed"      # the kinds a source can vouch for: the tests below that are not about the filter vouch for all of them
@@ -302,8 +302,8 @@ check("4 each kind has its own words, kind and time, the event's own: a400 (anch
       and la(403) == {"at": now0 + 13 * MIN, "what": "review on PR 34"} and la(404) == {"at": now0 + 14 * MIN, "what": "PR 35 merged"} and la(410) == {"at": now0 + 16 * MIN, "what": "review on PR 50"}
       and [lk(i) for i in (400, 401, 402, 403, 404, 410)] == ["ci_result", "pr_merged", "comment", "review", "pr_merged", "review"], [la(i) for i in (400, 401, 402, 403, 404, 410)])
 check("4 the ones not tied are untouched, file for file", all(rd(i) == before_all[i] for i in (411, 412, 413)), None)
-check("4 the other clocks are as they were: activity, progress, updated, written_by, the History and merged_seen of every item saved",
-      all(all(rd(i).get(k) == before_all[i].get(k) for k in ("activity", "progress", "updated", "written_by", "written_at", "confirmed", "state_updated")) and mt(i).get("merged_seen") == before_all[i]["metadata"].get("merged_seen")
+check("4 the other clocks are as they were: activity, updated, written_by, the History and merged_seen of every item saved",
+      all(all(rd(i).get(k) == before_all[i].get(k) for k in ("activity", "updated", "written_by", "written_at", "confirmed", "state_updated")) and mt(i).get("merged_seen") == before_all[i]["metadata"].get("merged_seen")
           and mt(i).get("stall") == before_all[i]["metadata"].get("stall") for i in (400, 401, 402, 403, 404, 410)) and not any("last_activity" in str(before_all[i]) for i in before_all), None)
 d1 = {k: v for k, v in rd(404)["metadata"].items() if k not in ("last_activity", "phase")}; check("4 …and nothing else of the metadata changed (the phase every save of the server stores aside)", d1 == before_all[404]["metadata"], d1)
 check("4 the offset is stored at the end of the log it read", EL.load_offset() == EL.path().stat().st_size, EL.load_offset())
@@ -406,18 +406,18 @@ saved = ev_pass(now0 + 72 * MIN)
 check("5 …the pass runs when they let go", sorted(saved) == ["a420", "a421"] and la(420)["at"] == now0 + 70 * MIN, saved)
 # the merge pass and the event pass together: a merge ties the same, the merge pass still records it, the words agree
 ML.path().unlink(missing_ok=True); (T / "state/merge-progress.json").unlink(missing_ok=True)
-put(430, mover="home-peer"); d_ = rd(430); d_["progress"] = now0 - 3 * H; wr(430, d_)
+put(430, mover="home-peer")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/70", "items": ["a430"]}]}))
 ML.append({"ts": now0 + 80 * MIN, "repo": "acme/widgets", "n": 70, "refs": []}); emit(70, "pr_merged", "alice", 80 * MIN)
 CLK.t = now0 + 81 * MIN
 gh_ = server._cfg.CFG.setdefault("github", {}); gh_["issues_letter"] = "a"
 try: moved = server._merge_progress_tick(now0 + 81 * MIN)
 finally: CLK.t = None
-check("5 the merge pass is as before: it records the merge in merged_seen and moves progress, and the record says which pull request merged", moved == ["a430"] and mt(430).get("merged_seen") == ["acme/widgets#70"] and rd(430)["progress"] == now0 + 81 * MIN
-      and la(430) == {"at": now0 + 81 * MIN, "what": "PR 70 merged"}, (moved, la(430), rd(430).get("progress")))
-d_ = rd(430); progress_, activity_ = d_["progress"], d_["activity"]
+check("5 the merge pass is as before: it records the merge in merged_seen and moves activity, and the record says which pull request merged", moved == ["a430"] and mt(430).get("merged_seen") == ["acme/widgets#70"] and rd(430)["activity"] == now0 + 81 * MIN
+      and la(430) == {"at": now0 + 81 * MIN, "what": "PR 70 merged"}, (moved, la(430), rd(430).get("activity")))
+d_ = rd(430); activity_ = d_["activity"]
 saved = ev_pass(now0 + 82 * MIN)
-check("5 …and the event pass finds its merge event older than the record: nothing is written", saved == [] and rd(430)["progress"] == progress_ and rd(430)["activity"] == activity_ and la(430)["at"] == now0 + 81 * MIN, (saved, la(430)))
+check("5 …and the event pass finds its merge event older than the record: nothing is written", saved == [] and rd(430)["activity"] == activity_ and la(430)["at"] == now0 + 81 * MIN, (saved, la(430)))
 
 
 # ================================================================ 6. a body names an item for anyone: only a merge ties through it
@@ -891,7 +891,7 @@ check("14 …the pass credits the item the anchor is scoped to (pr_merged at the
 (T / "state/merge-progress.json").unlink(missing_ok=True); gh_["issues_letter"] = "a"; CLK.t = time.time() + 5
 try: done13 = server._merge_progress_tick(time.time() + 5)
 finally: CLK.t = None
-check("14 …and the merge pass records the 2-hour merge on its item (progress clock) but not the 20-hour one, which is past its floor (credited as activity, no progress)",
+check("14 …and the merge pass records the 2-hour merge on its item but not the 20-hour one, which is past its floor (credited as activity by the event pass)",
       done13 == ["a600"] and "acme/widgets#90" in (mt(600).get("merged_seen") or []) and not mt(603).get("merged_seen"), (done13, mt(600).get("merged_seen"), mt(603).get("merged_seen")))
 
 # ================================================================ 14. a green head after a green head is activity on the item the pull request is anchored to (it was dropped: only a pass after a failure was reported)

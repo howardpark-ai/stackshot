@@ -1,25 +1,19 @@
-"""progress.py — the item's `progress` clock: when the work last moved, as opposed to when anyone last said something about it.
+"""progress.py: what counts as the item having MOVED, as opposed to anyone having said something about it.
 
-The pure half: no server import, no clock read, no file. service/writes.py's save asks `moved` once per save and stamps the item (`item["progress"]`, epoch seconds, top level beside
-`activity`); the hand-up of an item that is not moving (service/stall_tick.py, waits/ladder.py) reads `at`.
-
-Why a clock of its own. `activity` (activity.py) answers "has anyone written to this item": a status line, a note, a reply and a message all move it, which is right for a quiet-time check and
-wrong for a stuck one, since a busy mover that answers "no change" every hour keeps it fresh. `progress` moves only for what is movement:
+The pure half: no server import, no clock read, no file. The last-activity record (model/last_activity.py) asks `moved`, `marks`, `merges` and `state_of` for the signals it takes from a save: a step
+marked done or dropped, a state change, a pull request recorded as merged. (The item's own `progress` clock and the hand-up that read it are gone: a long busy stretch now tells the project's -main
+agent through `audit/busy_tell.py`, and a live background mover's silence through the ladder's `main` rung; a stored `progress` field on an old item is read by nothing.)
 
   counts   a step marked done or dropped, a state change (the item's status, its phase, the kind of its wait, its mover, its state or its needs), a pull request merged for the item
            (the "merged <ref>" entry of `metadata.released_told` the server adds when the merge settles the item; and a key of `metadata.merged_seen`, which the server adds when the
            hub saw a pull request tied to the item merge: scoped to it by an anchor, its body naming the item, or the item's own words naming it; `server._merge_progress_tick`, the hub's
            merge log), the item being created
   does not a status line (`work`), a note, a reply, a message, a bare confirm, a new or reworded step, a description edit; and a save that is no one's write about the work (an audit's, a migration's,
-           the server's own bookkeeping) moves the clock only by a status or phase change (a wake, a close), never by a step mark, a merge note, a mover, a state or needs
-
-An item saved before the field existed has none: `at` reads the latest of its last write, its last state change, its last activity and the time its latest step was marked, so a deploy does
-not hand up every item that merely lacks the field; the first save that is no progress seeds the field from what the item read as before it. No pass rewrites the store for this."""
+           the server's own bookkeeping) moves the item only by a status or phase change (a wake, a close), never by a step mark, a merge note, a mover, a state or needs"""
 from __future__ import annotations
 
 from typing import Any
 
-FIELD = "progress"
 DONE, DROPPED = "done", "dropped"
 MERGED = "merged "          # the prefix of an entry of `metadata.released_told` for a merge (a bare ref there is a release)
 TOLD = "released_told"
@@ -33,13 +27,6 @@ def _meta(item: dict[str, Any] | None) -> dict[str, Any]:
 
 def _norm(v: Any) -> str:
     return " ".join(str(v or "").split())
-
-
-def _num(v: Any) -> float:
-    try:
-        return float(v or 0)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def marks(item: dict[str, Any] | None) -> frozenset[tuple[str, str]]:
@@ -89,43 +76,3 @@ def moved(before: dict[str, Any] | None, after: dict[str, Any], real: bool = Tru
     if real and merges(after) - merges(before):
         out.append("merged")
     return out
-
-
-def at(item: dict[str, Any] | None) -> float:
-    """When the item last made progress: its `progress` stamp, else (an item from before the field) the latest of its last write, its last state change, its last activity and the time its
-    latest step was marked, else 0."""
-    it = item or {}
-    v = _num(it.get(FIELD))
-    if v > 0:
-        return v
-    out = max(_num(it.get("updated")), _num(it.get("state_updated")), _num(it.get("activity")))
-    for s in _meta(it).get("steps") or []:
-        if isinstance(s, dict) and s.get("status") in (DONE, DROPPED):
-            out = max(out, _num(s.get("at")))
-    return out
-
-
-def stamp(item: dict[str, Any], before: dict[str, Any] | None, now: float, real: bool = True) -> bool:
-    """Apply one save to the item: progress sets the clock to `now`; any other save leaves it, and an item with no clock yet gets one seeded from what it read as before this save, so the save
-    that was no progress is not its first progress. Only an open item has a clock. → True when the item's field changed."""
-    if item.get("status") != "open":
-        return False      # the clock is for items that can be handed up: a closed item gets none (a repair pass that marks the steps of a closed item writes nothing new), and a reopened one is stamped by the state change
-    old = item.get(FIELD)
-    if moved(before, item, real):
-        item[FIELD] = now
-    elif not old:
-        seed = at(before if before is not None else item)
-        if seed > 0:
-            item[FIELD] = seed
-    return item.get(FIELD) != old
-
-
-def due(item: dict[str, Any], now: float, hours: float, handed_at: float = 0.0, alive_at: float = 0.0) -> bool:
-    """Is the item to be handed up for not moving: its last progress is `hours` or more behind, and it was not handed up for that stretch already (the last hand-up, `handed_at`, is `hours` or
-    more behind too). Progress after a hand-up starts a stretch of its own, which `hours` after it can end in another hand-up. `alive_at`: when the item last became alive (the server's record of
-    when it first saw the item due after a park or a wait): the time is counted from the later of that and the last progress, so a parked item is not handed up for the park."""
-    last = max(at(item), float(alive_at or 0))
-    if last <= 0:
-        return False
-    span = hours * 3600.0
-    return now - last >= span and now - float(handed_at or 0) >= span

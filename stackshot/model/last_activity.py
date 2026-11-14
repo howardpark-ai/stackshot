@@ -5,7 +5,7 @@ last visible activity. The home page's On agent rows and the item page show it (
 
 The one definition of activity. Something visible happened to the item when:
 
-  a save moved the item's progress (model/progress.py `moved`, the same test, so this adds no second opinion): a step marked done or dropped, a state change (status, phase, the kind
+  a save moved the item (model/progress.py `moved`, the same test, so this adds no second opinion): a step marked done or dropped, a state change (status, phase, the kind
   of a wait, mover, state, needs), a pull request recorded as merged, the item created. A save that is no one's write about the work (progress.moved with real=False) is the server's
   own bookkeeping and counts only by a status or phase change, as it does for progress; or
   a pull request tied to the item had an event: a CI result (failed, or a new head passing), a comment by a person, a review, a merge, a new head commit (anchors/event_log.py, tied by merge_tie).
@@ -271,7 +271,7 @@ def apply(item: dict[str, Any], events: Iterable[Any] = (), now: float | None = 
 
 def stamp(item: dict[str, Any], before: dict[str, Any] | None, now: float, real: bool = True, extra: Iterable[Any] = ()) -> bool:
     """Apply one save: the signals it made (save_signals) become the record when later. `extra` are further signals of the same save the caller found (the mover's `update`, `update_signals`); they come first, so of signals at the same time a
-    progress signal wins over them (the last given wins). Only an open item has one (as the progress clock). → True when the field changed."""
+    progress signal wins over them (the last given wins). Only an open item has one. → True when the field changed."""
     if item.get("status") != "open":
         return False
     sigs = [*extra, *save_signals(before, item, now, real)]

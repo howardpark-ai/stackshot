@@ -3,7 +3,7 @@ History line saying what the audit verified, or that it is idle. Fixture items i
 network, no model call, no message sent.
 
   1  due and verified: the mover's pane is busy, a subagent runs (a status line in progress, the mover's own), a tied pull request had a CI result in the last hour (metadata.last_activity), or several of
-     them: `Audit hh:mm: verified …` in the instance's zone; the entry of the item's own log, metadata.hourly_audit.log (not the stall ladder's metadata.stall.log), has kind `audit`; a line that rests on a busy pane or a subagent alone says `live state only`; a line that verified something is stamped as the item's last-activity record (section 16), one that verified nothing or rests on a recorded event alone is not; the activity clock, the progress clock, `updated` and the
+     them: `Audit hh:mm: verified …` in the instance's zone; the entry of the item's own log, metadata.hourly_audit.log (not the stall ladder's metadata.stall.log), has kind `audit`; a line that rests on a busy pane or a subagent alone says `live state only`; a line that verified something is stamped as the item's last-activity record (section 16), one that verified nothing or rests on a recorded event alone is not; the activity clock, `updated` and the
      writer are as they were; an idle, shell or unreadable pane, another agent's status line, a done or old one, and a pull request event older than an hour verify nothing
   2  due and nothing verified: `Audit hh:mm: idle, nothing verified`, kind `audit_idle`, `hourly.idle_marked`; the last-activity record is untouched
   3  not due: under 45 minutes of silence (a confirm just now moves nothing), a recent write, an item that just left a hold; the quiet-time clock (`silence.clock`) decides
@@ -119,7 +119,7 @@ def put(i, mover="home-peer", status="open", act=90, **meta):
     base.update(meta)
     at = now0 - act * MIN
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": now0 - 2 * MIN, "state_updated": at, "confirmed": now0 - 2 * MIN,
-                                                       "activity": at, "progress": at, "written_at": at, "written_by": mover, "metadata": base}))
+                                                       "activity": at, "written_at": at, "written_by": mover, "metadata": base}))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def lines(i): return HL.log_of(mt(i))
@@ -187,8 +187,8 @@ W1 = {1: "audit verified the mover's pane is in a turn", 3: "audit verified a su
 check("1 a line that verified something is stamped as the item's last-activity record (kind audit, the line's phrases), one that verified nothing (item 2) is not, and one that rests on a recorded event alone (item 5) leaves that event as it was, at its own time and kind",
       all(mt(i).get("last_activity") == {"at": now0, "kind": "audit", "what": W1[i]} for i in (1, 3, 6))
       and "last_activity" not in mt(2) and mt(4)["last_activity"] == before[4]["metadata"]["last_activity"] and mt(5)["last_activity"] == before[5]["metadata"]["last_activity"] == {"at": now0 - 20 * MIN, "kind": "review", "what": "review on PR 9"}, [mt(i).get("last_activity") for i in range(1, 7)])
-check("1 the save is the server's own bookkeeping: the activity clock, the progress clock, `updated`, the confirm and the writer are exactly as they were",
-      all(all(rd(i)[k] == before[i][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) for i in range(1, 7)))
+check("1 the save is the server's own bookkeeping: the activity clock, `updated`, the confirm and the writer are exactly as they were",
+      all(all(rd(i)[k] == before[i][k] for k in ("activity", "updated", "state_updated", "confirmed", "written_by", "written_at")) for i in range(1, 7)))
 ch = lambda i: {k for k in mt(i) if mt(i)[k] != before[i]["metadata"].get(k)}
 check("1 …the History shows it: the revision's new entries of the item's own log are the line (hourly_log.new_entries), and nothing else changed in the metadata but the log and the phase stamp every save adds",
       [e["text"] for e in HL.new_entries(before[1]["metadata"], before[1]["metadata"])] == [] and [e["text"] for e in HL.new_entries(before[2]["metadata"], rd(2)["metadata"])] == [L[2][0]["text"]]
@@ -464,7 +464,7 @@ check("9 a tied pull request's merge, comment, CI result, review and new head co
 check("9 a recorded commit under an hour old verifies (recorded, so the line is no live-only one) and one older than an hour verifies nothing (idle)", lines(7)[0]["text"] == f"Audit {hm(now0)}: verified commit on PR 4" and lines(7)[0]["kind"] == "audit"
       and lines(6)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(6)[0]["kind"] == "audit_idle" and HR.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit"}), [lines(6), lines(7)])
 # an item with no timestamp at all
-nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "progress", "updated", "state_updated", "created", "confirmed", "written_at")]
+nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "updated", "state_updated", "created", "confirmed", "written_at")]
 try: wt = HR.due({"a1": nots}, "a1", now0, server._silence_env(), lambda w: "busy", handoff_svc.ho_same)
 except Exception as e_: wt = e_
 check("9 an item with no timestamp at all is read without an error, and a line for it is written or not at all (never a crash)", wt is None or isinstance(wt, dict), wt)
@@ -500,8 +500,8 @@ check("16 verified (a busy pane): the item's last activity is the audit at the l
       mt(1)["last_activity"] == {"at": now0, "kind": "audit", "what": "audit verified the mover's pane is in a turn"}, mt(1).get("last_activity"))
 b1 = parts("a1", now0 + 2 * MIN)
 check("16 …on the home row: the pill is active (green), the words and the clock are the audit's", b1 is not None and 'data-b="ok"' in b1[1] and ">active<" in b1[1] and last_words(b1[1]) == f"Last: audit verified the mover's pane is in a turn at {hm(now0)}", b1)
-check("16 …and the item's own clocks are as they were: the audit's write moves neither `activity` nor `progress` (the silence clock reads the same as before the line), `updated` and the writer too",
-      all(rd(1)[k] == snap16[1][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) and SL.clock(rd(1), "team-back") == SL.clock(snap16[1], "team-back") == now0 - 90 * MIN)
+check("16 …and the item's own clocks are as they were: the audit's write does not move `activity` (the silence clock reads the same as before the line), `updated` and the writer too",
+      all(rd(1)[k] == snap16[1][k] for k in ("activity", "updated", "state_updated", "confirmed", "written_by", "written_at")) and SL.clock(rd(1), "team-back") == SL.clock(snap16[1], "team-back") == now0 - 90 * MIN)
 check("16 idle (nothing verified): the record is untouched and the row still reads idle over 1 h and the older event; an item with no record gets none",
       mt(2)["last_activity"] == OLD and mt(2)["last_activity"] == snap16[2]["metadata"]["last_activity"] and lines(2)[0]["kind"] == "audit_idle" and "last_activity" not in mt(3) and lines(3)[0]["kind"] == "audit_idle"
       and "idle over 1 h" in parts("a2", now0 + 2 * MIN)[1] and last_words(parts("a2", now0 + 2 * MIN)[1]) == f"Last: step 1 done at {hm(now0 - 80 * MIN)}" and parts("a3", now0) is None, (mt(2).get("last_activity"), lines(2), parts("a2", now0)))
@@ -1322,7 +1322,7 @@ clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()      # the mover's one item on an agent, so its busy pane verifies it
 put(5, mover="home-peer", act=90, steps=[tagged(None)])
 save24(5, now0 - 70 * MIN, status_of(5, "an hour ago", ts=now0 - 70 * MIN))
-d5 = rd(5); d5["activity"] = d5["progress"] = now0 - 90 * MIN; wr5 = (T / "store/a/5.json"); wr5.write_text(json.dumps(d5))      # the hour's silence is the item's, whatever the save above moved
+d5 = rd(5); d5["activity"] = now0 - 90 * MIN; wr5 = (T / "store/a/5.json"); wr5.write_text(json.dumps(d5))      # the hour's silence is the item's, whatever the save above moved
 got24 = tick()
 check("24 the audit's own line still stamps (kind audit, its words) over an older update, and the update's own text is no longer the record", got24 == ["a5"] and rec24(5) == {"at": now0, "kind": "audit", "what": "audit verified the mover's pane is in a turn"} and lines(5)[0]["kind"] == "audit", (got24, rec24(5), lines(5)))
 save24(5, now0 + 5 * MIN, status_of(5, "back at it", ts=now0 + 5 * MIN))

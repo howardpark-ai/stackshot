@@ -10,7 +10,7 @@ mover and does not go to the owner. Not looked at: an item in a hold or on a wai
 agent (the hand-off ladder has it), a cold call running, a pane the registry does not show (nothing can be told of it), and an item whose hand-off record already carries the recovery request. Each step is written onto
 the item (metadata.stall.log, a History line) and the journal.
 
-With the one ladder on (service/ladder.py) the same walk takes the ladder's rungs instead, and hands an item that is not moving up to its project's -main agent. The state and the steps are service/stall.py's; the
+With the one ladder on (service/ladder.py) the same walk takes the ladder's rungs instead, and hands a silent live background mover's item up to its project's -main agent. The state and the steps are service/stall.py's; the
 pure rules are waits/stall.py and waits/ladder.py. What the pass still reaches in server.py comes through `Hooks` in service/stall_hooks.py, looked up when it runs. A suite that replaces a function or a clock
 of the pass sets it here (and `time` here, since this module reads its own).
 
@@ -25,7 +25,6 @@ from typing import Any
 from stackshot.core import instance as _inst
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _sessions_index
-from stackshot.model import progress as _progress
 from stackshot.model import queued as _queued
 from stackshot.service import handoff as _handoff
 from stackshot.service import ladder as _laddersvc
@@ -55,10 +54,6 @@ def stall_tick(now: float | None = None) -> list[str]:
     idx = _sessions_index()
     keep: dict[str, dict[str, Any]] = {}
     todo: list[tuple[str, str, str, dict[str, Any]]] = []
-    alive_old = _laddersvc.alive_load() if ladder_on else {}
-    alive: dict[str, float] = {}      # open items due now, and since when (the first pass that saw them so; kept across passes): `alive_load`
-    stuck: list[tuple[str, str, float]] = []      # (gid, mover) of the alive items that have not moved for `[ladder] main_hours`: handed up to -main after the rungs below (`ladder_stuck`)
-    main_hours = _laddersvc.ladder_main_hours()
     queue = _hooks().queue_map(now, _hooks().next_report_all(None)) if _queued.enabled() else {}      # an item queued behind another of its mover's reads waiting: the ladder leaves it as it leaves a waiting one
     for gid, _p in _item_files():
         try:
@@ -67,7 +62,6 @@ def stall_tick(now: float | None = None) -> list[str]:
                 continue
             if _stall.not_due(it, now, lambda i_: _hooks().after_open(i_.get("metadata") or {})) or gid in queue:
                 continue                 # its work is not due now (the board shows it waiting, or it is the owner's or an outsider's move): no record is kept, so its clock starts when it is due
-            alive[gid] = alive_old.get(gid) or now
             old = old_st.get(gid)
             if not ladder_on:
                 old = _ladder.unwind(old)      # the flag was turned off in the middle of a ladder: its steps are read in the old table (the builder rung stays reachable)
@@ -76,8 +70,6 @@ def stall_tick(now: float | None = None) -> list[str]:
             who = _stallsvc.stall_mover(gid, it)
             meta = it.get("metadata") or {}
             r = _ho.record_of(it)
-            if ladder_on and who and _ho.is_session_name(who) and _progress.due(it, now, main_hours, float(meta.get(_laddersvc.PROGRESS_UP) or 0), alive[gid]):
-                stuck.append((gid, who, alive[gid]))      # alive, a session moves it and nothing has moved for the interval: whatever the pane or the mover's replies say, -main hears of it (below)
             if not who or not _ho.is_session_name(who) or (r and r.get("recovery_at")):
                 continue                 # no session mover, or the fleet's builder was asked already for this record
             if isinstance(r and r.get("cold"), dict) and r["cold"].get("state") == "running" and now - float(r["cold"].get("at") or 0) < _ho.COLD_STALE:
@@ -120,7 +112,7 @@ def stall_tick(now: float | None = None) -> list[str]:
             if quiet:
                 floor = 0.0              # the quiet entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
             live = bool(back and (status or not idx or not _handoff.handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live
-            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live, main_every=main_hours * 3600.0) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
+            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
             if act == "cold" and not _handoff.cold_call_on():
                 act = "builder"
             if act:
@@ -159,17 +151,6 @@ def stall_tick(now: float | None = None) -> list[str]:
                     told.add(who)
         except Exception as e:  # noqa: BLE001
             print(f"stall: {gid} step {act} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if ladder_on and alive != alive_old:
-        _laddersvc.alive_save(alive)      # a stretch of being alive ends when the item is not due (a hold, a wait) or closed: it is dropped, and counted again from the pass that sees it due
-    for gid, who, since_alive in stuck:      # the items that are not moving go up in the same notice as a silent live mover's (`main_rows`); one already handed up in this pass carries its mark and is left
-        try:
-            if _laddersvc.ladder_stuck(gid, who, now, main_rows, main_info, since_alive):
-                acted.append(gid)
-                ent = keep.get(gid)
-                if isinstance(ent, dict):
-                    ent["main_at"] = now      # the silent-mover notice counts its repeat interval from this one too
-        except Exception as e:  # noqa: BLE001
-            print(f"stall: {gid} not handed up for not moving: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     with _stallsvc.STALL_LOCK:
         cur = _stallsvc.stall_load()
         gone = {g for g in old_st if g not in cur}       # an entry forgotten while the pass ran (his answer) stays forgotten

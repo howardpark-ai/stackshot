@@ -3241,7 +3241,7 @@ _anc47 = (T / "store/anchors.json").read_text()
 GREEN = "[release] PR #113 merged and deployed — a change — main at 0606060, restarted: stackshot.service, healthz ok · log /x/pr-113.log"
 n0 = len(wait_push(0)); owed0 = json.dumps(server._owed_load(), sort_keys=True); comments = []
 _ge, _goc = server._gh.enabled, server._gh.on_change
-server._gh.enabled = lambda: True; server._gh.on_change = lambda gid, before, after, name="", sid="", note="", background=False: comments.append((gid, before == {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in after.items() if k not in ("activity", "progress")}, name, note, after.get("activity")))      # an item from before the activity and progress clocks gains the fields at its first save (seeded from its last update, so a server note moves nothing), and an open item gains its stored phase: the item is otherwise unchanged
+server._gh.enabled = lambda: True; server._gh.on_change = lambda gid, before, after, name="", sid="", note="", background=False: comments.append((gid, before == {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in after.items() if k not in ("activity",)}, name, note, after.get("activity")))      # an item from before the activity clock gains the field at its first save (seeded from its last update, so a server note moves nothing), and an open item gains its stored phase: the item is otherwise unchanged
 st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
 server._gh.enabled, server._gh.on_change = _ge, _goc
 time.sleep(0.3)

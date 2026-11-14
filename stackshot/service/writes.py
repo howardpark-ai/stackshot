@@ -38,7 +38,6 @@ from stackshot.model import item_project as _ip
 from stackshot.model import last_activity as _lastact
 from stackshot.model import migration as _mig
 from stackshot.model import model as _model
-from stackshot.model import progress as _progress
 from stackshot.router import routing as _routing
 from stackshot.service.store import _path
 
@@ -188,18 +187,6 @@ def _stamp_activity(item: dict[str, Any], before: dict[str, Any] | None, writer:
         print(f"activity: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def _stamp_progress(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
-    """Move the item's `progress` clock when this save is progress (a step marked done or dropped, a state change, a merge recorded), seed it for an item that has none (progress.stamp). Called
-    once the fields are final, after the phase is stamped. A save that is no one's write about the work (the same test as the activity clock's: a migration, an audit, the server's bookkeeping) moves the
-    clock only by a status or phase change. A failure here never fails the write."""
-    try:
-        who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
-        real = _activity.counts(_activity.kind_of(writer, author, kind), who, audit_writer_names())
-        _progress.stamp(item, before, time.time(), real)
-    except Exception as e:  # noqa: BLE001  — the clock is groundwork for the hand-up of a stuck item; a write is never refused for it
-        print(f"progress: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
 def _is_mover(item: dict[str, Any], writer: str) -> bool:
     """Is `writer` (a session's name or id) the item's mover as the item stands now: the model's mover while it is alive, the post-wake mover while it waits, else the stored mover (the board's own reading,
     tools/board_report.mover_of)? A name, an alias and an id of one session are one mover (`anchors.canonical`: the registry's permanent id, else the fleet's). No writer, no mover or the owner as mover is no."""
@@ -228,7 +215,7 @@ def _update_signals(item: dict[str, Any], before: dict[str, Any] | None, writer:
 
 
 def _stamp_last_activity(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
-    """Record in `metadata.last_activity` what this save did that is visible activity (last_activity.stamp: the progress clock's own test, with the words for it); the events on a tied pull request come
+    """Record in `metadata.last_activity` what this save did that is visible activity (last_activity.stamp: model/progress.py's own test, with the words for it); the events on a tied pull request come
     through `_event_activity_tick`. A session's own write as the item's mover that sets a status line (the update tool's `work`) to text different from the step's previous status is an `update`, the item's
     hourly update, counted here beside the audit's line (`last_activity.update_signals`): the same text again, a write by anyone else (a front agent relaying, the owner's answer, the audit) and the server's own
     save are none. It only records, with no publish of its own (the home page is kept for 30 s, then drawn again, and picks the record up); the On agent rows and the item page show it. A failure here never fails the write."""
@@ -285,7 +272,6 @@ def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", autho
     steps.handoff_his_over(gid, item, author, quiet)     # his hand-off ends with his answer, or when the item is no longer his to move
     steps.handoff_follow(gid, before, item, writer, author, quiet)      # the record follows the mover whatever changed it: the server's own save, a script's, his answer; a stale open record ends
     steps.phase_stamp(gid, item)      # last, once the fields are final: the phase the board shows the item as (alive or waiting) is stored beside the fields it is read from
-    _stamp_progress(item, before, writer, author, activity)      # the progress clock reads the phase just stored: only a step marked, a state change or a merge moves it
     _stamp_last_activity(item, before, writer, author, activity)      # the last-activity record takes the same signals, with the words for them
     _ip.stamp(item.get("metadata"))      # and the project's permanent id beside the page it is filed on (a key that names a project sets it)
     _cstore._write_item(p, item)
