@@ -225,8 +225,7 @@ def reload_due(loaded: str = "", here: str = "", now: float | None = None) -> bo
 
 
 def _ours(name: str, m, here: str | None = None) -> bool:
-    """Is this sys.modules entry a module of the checkout's package (also under an old top-level name, `client` for `stackshot.fleet.client`, which
-    the forwarders at the checkout's root alias)? __main__ never is: it is the code that is running."""
+    """Is this sys.modules entry a module of the checkout's package? __main__ never is: it is the code that is running."""
     f = getattr(m, "__file__", None)
     if not f or name == "__main__":
         return False

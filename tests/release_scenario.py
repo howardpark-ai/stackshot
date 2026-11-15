@@ -1281,8 +1281,8 @@ for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), {S_, H_}
                           ("stackshot/__init__.py: every program starts through it", ("stackshot/__init__.py",), {S_, H_, P_}), ("stackshot/__main__.py", ("stackshot/__main__.py",), {S_, H_, P_}),
                           ("stackshot/paths.py", ("stackshot/paths.py",), {S_, H_, P_}), ("stackshot/core/config.py: the puller reads it too", ("stackshot/core/config.py",), {S_, H_, P_}),
                           ("stackshot/fleet/puller.py: the puller only", ("stackshot/fleet/puller.py",), {P_}), ("stackshot/fleet/client.py: the puller only", ("stackshot/fleet/client.py",), {P_}),
-                          ("stackshot/fleet/push.py: the hub only", ("stackshot/fleet/push.py",), {H_}), ("push.py, the root forwarder: the hub only", ("push.py",), {H_}),
-                          ("config.py, the root forwarder: all three", ("config.py",), {S_, H_, P_}), ("pages.py, the root forwarder: the server", ("pages.py",), {S_}), ("stackshot/anchors/anchor_hub.py: the hub only", ("stackshot/anchors/anchor_hub.py",), {H_}),
+                          ("stackshot/fleet/push.py: the hub only", ("stackshot/fleet/push.py",), {H_}),
+                          ("stackshot/anchors/anchor_hub.py: the hub only", ("stackshot/anchors/anchor_hub.py",), {H_}),
                           ("stackshot/anchors/anchors.py: the server and the hub", ("stackshot/anchors/anchors.py",), {S_, H_}), ("a module of the server (stackshot/web/server.py)", ("stackshot/web/server.py",), {S_}),
                           ("a suite (tests/x_scenario.py)", ("tests/x_scenario.py",), set()), ("a module the server never runs (stackshot/projects/rename_page.py)", ("stackshot/projects/rename_page.py",), set()),
                           ("units/anchor-hub.service.in: the hub only", ("units/anchor-hub.service.in",), {H_}), ("units/stackshot-puller.service.in: the puller only", ("units/stackshot-puller.service.in",), {P_}),
@@ -1295,8 +1295,7 @@ for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), {S_, H_}
                           ("stackshot/fleet/fleet.py: the server and the hub", ("stackshot/fleet/fleet.py",), {S_, H_}), ("stackshot/fleet/liveness.py: the server and the hub", ("stackshot/fleet/liveness.py",), {S_, H_}),
                           ("stackshot/router/routing.py: the server and the hub", ("stackshot/router/routing.py",), {S_, H_}), ("stackshot/fleet/inbox.py: the server and the hub", ("stackshot/fleet/inbox.py",), {S_, H_}),
                           ("stackshot/fleet/sessions_registry.py: the server and the hub", ("stackshot/fleet/sessions_registry.py",), {S_, H_}), ("stackshot/core/interp.py: the server and the hub", ("stackshot/core/interp.py",), {S_, H_}),
-                          ("stackshot/projects/page_keeper.py: nothing (a one-off script)", ("stackshot/projects/page_keeper.py",), set()), ("stackshot/anchors/anchor_hub_google_auth.py: nothing (a one-off script)", ("stackshot/anchors/anchor_hub_google_auth.py",), set()),
-                          ("connectors.py, the root forwarder: the server", ("connectors.py",), {S_})):
+                          ("stackshot/projects/page_keeper.py: nothing (a one-off script)", ("stackshot/projects/page_keeper.py",), set()), ("stackshot/anchors/anchor_hub_google_auth.py: nothing (a one-off script)", ("stackshot/anchors/anchor_hub_google_auth.py",), set())):
     rc, got, out = plan(*files)
     units = got[0].split()[1:] if got and got[0] != "restarts: none" else []
     check(f"deploy.sh plan: {what} restarts exactly {sorted(want) or 'nothing'}, the server first", rc == 0 and len(got) == 1 and set(units) == want and len(units) == len(want) and (not units or S_ not in units or units[0] == S_), (rc, got, out[-300:]))

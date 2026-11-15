@@ -970,8 +970,7 @@ def cmd_client_mint(a: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------- the programs of the package
-# `stackshot <program> ...` runs the module as `python3 -m` would, with the arguments after the program's name. Four of them (pages, push, config and
-# connectors) also still run by their old path at the checkout's root, for plugin copies older than 0.1.7: those four files forward to these.
+# `stackshot <program> ...` runs the module as `python3 -m` would, with the arguments after the program's name. No program has a path at the checkout's root.
 PROGRAMS = {
     "config": ("stackshot.core.config", "the instance config: get, path, state, secrets, file, check"),
     "client": ("stackshot.fleet.client", "one machine's half of stackshot: get, post, message ... (install and mint are the setup commands above)"),
