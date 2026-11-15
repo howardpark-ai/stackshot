@@ -281,6 +281,18 @@ def was_picker(was: dict[str, Any] | None) -> str:
     return _model.stored_picker(was or {})
 
 
+def ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
+    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker).
+    With `external` in needs the item goes back to others at its date, as it always did, whichever mover is stored: only the old post_wake_mover key turns it. Without `external`, a picker stored under
+    either key (`mod.wait.mover_explicit`) turns it, the one place a stored mover alone now ends a wait the way the old key did. The one reader of this: the migration pass (waits/mover_pass.py) and the
+    watchers' wake (service/watching.py `watch_fire`) cannot read it two ways."""
+    if str(meta.get("wait_kind") or "").strip():
+        return False
+    if "external" in [str(n).strip().lower() for n in _wt.needs_of(meta)]:
+        return not str(meta.get(_model.LEGACY_PICKER_KEY) or "").strip()
+    return not mod.wait.mover_explicit
+
+
 def _picker_as_mover(was: dict[str, Any]) -> dict[str, Any]:
     """A `was` snapshot with the picker stored as `mover`, whichever key the item (or an older snapshot) held it under: the legacy key, which wins while stored, is folded into `mover` and goes."""
     legacy = _model.norm_who(was.get(_model.LEGACY_PICKER_KEY))

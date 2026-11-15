@@ -110,14 +110,8 @@ def watch_failed(gid: str, now: float) -> None:
 
 
 def _ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
-    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker).
-    With `external` in needs the item goes back to others at its date, as it always did, whichever mover is stored: only the old post_wake_mover key turns it. Without `external`, a picker stored under
-    either key (`mod.wait.mover_explicit`) turns it, the one place a stored mover alone now ends a wait the way the old key did."""
-    if str(meta.get("wait_kind") or "").strip():
-        return False
-    if "external" in [str(n).strip().lower() for n in _wt.needs_of(meta)]:
-        return not str(meta.get(_model.LEGACY_PICKER_KEY) or "").strip()
-    return not mod.wait.mover_explicit
+    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker). With `external` in needs only the old post_wake_mover key turns it (waits/watchers.py `ends_on_the_date`, which the migration pass reads too)."""
+    return _watch.ends_on_the_date(meta, mod)
 
 
 def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]], detail: dict[str, str] | None = None, recheck: bool = False, ev: dict[str, Any] | None = None) -> bool:
