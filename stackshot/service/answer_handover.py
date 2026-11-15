@@ -23,7 +23,7 @@ from stackshot.model import model_guards as _mg
 from stackshot.model import nextlines as _nl
 from stackshot.model import steps as _steps
 from stackshot.model.ids import _norm_id
-from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_of, _needs_store
+from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store
 from stackshot.service import item_read as _item_read
 from stackshot.service import store as _svcstore
 from stackshot.service import writes as _writes
@@ -91,6 +91,7 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
       an open `after` link: mover=`then`, the one who picks it up when the last prerequisite closes (_wakes.release_after), `then` cleared;
       a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and mover=`then`, the one who picks it up when the wait ends (watch.set_at stamped, as an update does), `then` cleared,
         so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold;
+      a wait stored as a kind (no relay, no `external`, no session in needs, no stored picker): mover=`then`, `then` cleared (the kind and the watch are the wait's own, nothing stamped);
       `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would sit on the item unread); the wait's own
         mover (the first session in needs, else the project's builder or -main agent) takes it when it ends. A wait already stored as a watcher's keeps its own picker.
     Without this a stored mover=the owner stayed on an item whose state had become doing: "model conflict: mover=the owner on an item whose state is doing", and needs read as the keeper. → who the item was handed to now ("" when to nobody): it is told it is the mover."""
@@ -118,6 +119,11 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
                 meta.pop("then", None)
             else:
                 meta.pop("then", None)
+        elif then and _uw.kind_of(meta) != "relay" and "external" not in _needs_kinds(meta) and not _needs_sessions(meta) and not _model.stored_picker(meta):
+            # a wait stored as a kind (a wake, an item, an anchor, an event wait) with no picker: the `then` is read nowhere (it is the owner's follow-up, and it is no longer his), so it is stored as the
+            # picker it stood for, and the kind and the watch stay as they are
+            meta["mover"] = then
+            meta.pop("then", None)
         return ""
     if then:
         _hand_to_mover(meta, then)

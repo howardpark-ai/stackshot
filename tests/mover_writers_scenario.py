@@ -177,6 +177,26 @@ for label, extra in (("a wait on a date alone", {"until": FUT}), ("a hold with a
     check(f"2 external in needs, {label}: then is dropped, the mover he goes, no picker and no kind stored: the item is as main left it", m_ == {k: v for k, v in meta.items() if k not in ("mover", "then")}, m_)
     m_ = hand({**meta, LEG: BACK}, OWN, HELP, waiting=True)
     check(f"2 …with the old key stored on it: it stays as it was, never moved", m_.get(LEG) == BACK and "mover" not in m_ and "then" not in m_, m_)
+# a wait stored as a kind, with no relay, no external, no session in needs and no stored picker: the then it carried stands in for the picker
+STORED = {"project": "projects/zedwork", "needs": [], "until": FUT}
+for kind, extra in (("event", {"wait_event": "pr_merged other/repo#7"}), ("anchor", {"wait_anchor": "https://github.com/acme/widgets/issues/5", "wait_event": "the reply"}), ("item", {"after": ["a1"]}), ("time", {"hold": True, "wake": FUT})):
+    meta = {**STORED, "wait_kind": kind, **extra, "mover": OWN, "then": HELP}
+    m_ = hand(meta, OWN, HELP, waiting=True)
+    check(f"2 a {kind} wait stored as a kind, nothing else naming a picker: the then becomes `mover`, then is gone, the kind and the rest stay as they were", m_.get("mover") == HELP and "then" not in m_ and LEG not in m_
+          and m_.get("wait_kind") == kind and {k: v for k, v in m_.items() if k not in ("mover", "then")} == {k: v for k, v in meta.items() if k not in ("mover", "then")}, m_)
+RELAYED = {**STORED, "wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT}
+m_ = hand({**RELAYED, "mover": OWN, "then": HELP}, OWN, HELP, waiting=True)
+check("2 …a relay (the owner picks it up): the then stays beside him, nothing is stored as the picker", m_.get("then") == HELP and "mover" not in m_ and LEG not in m_ and m_.get("wait_kind") == "relay", m_)
+m_ = hand({**RELAYED, "then": HELP}, "", HELP, waiting=True)
+check("2 …a relay with no mover stored: the then stays, nothing is stored as the picker", m_.get("then") == HELP and "mover" not in m_ and LEG not in m_, m_)
+meta = {**STORED, "wait_kind": "event", "wait_event": "pr_merged other/repo#7", "needs": [BACK, "external"], "mover": OWN, "then": HELP}
+m_ = hand(meta, OWN, HELP, waiting=True)
+check("2 …an external wait: the then is left alone, nothing is stored as the picker", m_.get("then") == HELP and "mover" not in m_ and LEG not in m_ and m_.get("wait_kind") == "event", m_)
+for label, meta in (("a session in needs", {**STORED, "needs": [BACK], "wait_kind": "event", "wait_event": "pr_merged other/repo#7", "mover": OWN, "then": HELP}),
+                    ("a picker stored as mover", {**STORED, "wait_kind": "event", "wait_event": "pr_merged other/repo#7", "mover": BACK, "then": HELP}),
+                    ("a picker stored under the old key", {**STORED, "wait_kind": "event", "wait_event": "pr_merged other/repo#7", LEG: BACK, "then": HELP})):
+    m_ = hand(meta, OWN if meta.get("mover") == OWN else "", HELP, waiting=True)
+    check(f"2 …{label}: the item is left as it was (only a stored mover that is he goes), the then does not take a picker's place", m_ == {k: v for k, v in meta.items() if not (k == "mover" and v == OWN)}, m_)
 
 # ================================================================ 3. the snapshot of a wait, and its restore
 def remembered(meta):
