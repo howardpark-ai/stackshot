@@ -8,7 +8,7 @@ the agent the item was handed to as the mover, whichever key stored it. Covered:
 
   1  wait-end fix    each op of the filing pass's wait fix (after, event, anchor) stores the picker as `mover` and drops an old key it finds
   2  hand-over       a decision's hand-over of a time wait (a hold with a wake, a wait on a date alone) stores the picker as `mover`; the shapes that store nothing (external, an open after, a hold with no wake, a dead then,
-                     the watchers off) are as they were
+                     he as then) are as they were
   3  snapshot        a watch.was snapshot holds the picker as `mover`, an old snapshot is put back as `mover`; was_picker reads every form
   4  plan            the cold call's answer key stays post_wake_mover, the validated answer carries `mover`; the state migration's plan sets `mover` and drops a stored old key; its route applies the save rule
   5  save rule       an update that sets mover on a waiting item with an old key stored; clear_mover and clear_wait on each form (old key, mover, both, he, an agent); an alive item; an item with external in needs
@@ -162,20 +162,14 @@ m_ = hand({**BASE, "mover": BACK, "then": HELP, "until": FUT}, BACK, HELP, waiti
 check("2 a stored agent mover: the then takes it (the one picker is `mover`, no old key appears)", stores_mover(m_, HELP) and D(**m_).wait.mover == HELP, m_)
 # the shapes that store no picker are as they were
 item(1, subject="[zed] an open item the others wait after")
-for label, meta, kw in (("an open after link", {**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT, "after": ["a1"]}, dict(waiting=True)),
-                        ("a hold with no wake", {**BASE, "mover": OWN, "then": HELP, "hold": True}, dict(waiting=True)),
+for label, meta, kw in (("a hold with no wake", {**BASE, "mover": OWN, "then": HELP, "hold": True}, dict(waiting=True)),
                         ("a then that is no live session", {**BASE, "mover": OWN, "then": "nobody-here", "hold": True, "wake": FUT}, dict(waiting=True)),
                         ("he as then", {**BASE, "mover": OWN, "then": OWN, "hold": True, "wake": FUT}, dict(waiting=True))):
     m_ = hand(meta, OWN, meta.get("then", ""), **kw)
     check(f"2 {label}: no picker is stored, as before", "mover" not in m_ and LEG not in m_ and "wait_kind" not in m_, m_)
-check("2 …an open after link keeps then for the release of the after (as before)", hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT, "after": ["a1"]}, OWN, HELP, waiting=True).get("then") == HELP, None)
-_orig_enabled = server._watch.enabled
-server._watch.enabled = lambda: False
-try:
-    m_ = hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, waiting=True)
-finally:
-    server._watch.enabled = _orig_enabled
-check("2 the watchers off: no time wait is stored, then stays with the old park (as before)", "mover" not in m_ and LEG not in m_ and "wait_kind" not in m_ and m_.get("then") == HELP, m_)
+m_ = hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT, "after": ["a1"]}, OWN, HELP, waiting=True)
+check("2 an open after link: no time wait is stored, the picker = then is stored as `mover` for the release of the after (the release finds it with no then), then cleared, no stamp (the last prerequisite's close releases it)",
+      stores_mover(m_, HELP) and "then" not in m_ and LEG not in m_ and "wait_kind" not in m_ and "watch" not in m_, m_)
 # external in needs: exactly as on main (then dropped, nothing stored), for the wait on a date alone and for the hold with a wake
 for label, extra in (("a wait on a date alone", {"until": FUT}), ("a hold with a wake", {"hold": True, "wake": FUT})):
     meta = {"project": "projects/zedwork", "needs": [BACK, "external"], "mover": OWN, "then": HELP, **extra}

@@ -276,8 +276,22 @@ def owner_state(m: dict[str, Any], today: str) -> bool:
     return today in OWNER_STATES or "decision" in _states.kinds_of(m)
 
 
+def stray_then(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any] | None = None) -> bool:
+    """Does an open item store a `then` that nothing reads? `then` stands only while the owner moves the item: the alive item's mover is the owner, or the waiting item's picker is the owner. On an item an
+    agent moves (an alive agent mover, or a wait an agent picks up) a stored `then` is data nobody reads, and the write contract drops it."""
+    if item.get("status") != "open" or not norm_who((item.get("metadata") or {}).get("then")):
+        return False
+    mod = derive(item, None, after_open)
+    if mod.state == ALIVE:
+        return not is_owner(mod.mover)
+    if mod.state == WAITING and mod.wait is not None:
+        return not is_owner(mod.wait.mover)
+    return False
+
+
 def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[dict[str, Any]], Any] | None = None, waiting: bool = False) -> dict[str, str] | None:
-    """Does a STORED mover disagree with the state the item stands in on the owner's side? → None when nothing is to change, else {"mover", "then"}: the values to store ("" drops the field).
+    """Does a STORED mover disagree with the state the item stands in on the owner's side, or a stored `then` stand beside an agent? → None when nothing is to change, else the values to store ("" drops the field):
+    {"mover", "then"}, {"mover"} or {"then"}.
       in his state (your-call, your-step, needs decision), an agent stored as mover  → he is the mover; `then` stays if stored (an agent), else the agent that was mover
       the wait on him is over (alive in an agent's state), he stored as mover → an agent in `then` is the mover again and `then` goes, as _answer's Done does it; else only the mover goes
       a wait replaces his state (waiting), he stored as mover → the agent in `then` is the one who picks it up (mover := then, `then` goes) when no post_wake_mover is stored; with one stored, or no agent in `then`, only the mover goes;
@@ -285,9 +299,27 @@ def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[di
         backstop and the start repair (the default) leave it alone and return None for a waiting item
     The way back only happens for an item that stood in his state (`was_his`: the caller knows it from the version before the write, or, for the migration, from his hand-off record or
     an answer of his on the item): a mover=the owner that a writer stored on an agent's state with no such history is a conflict the model flags, not a hand-back.
-    A closed item and an item with no stored mover settle nothing; an unnamed mover is the model's own default and needs no storing."""
+      a stored `then` on an item that is not his (an alive agent mover, or a wait an agent picks up) → `then` goes: it stands only while he moves the item, and beside an agent it is data nobody reads
+        (alone, {"then": ""}; with a mover change above, the same result carries `then` as that change leaves the item)
+    A closed item settles nothing; an item with no stored mover settles only a stray `then`; an unnamed mover is the model's own default and needs no storing."""
     if item.get("status") != "open":
         return None
+    ch = _settle_mover(item, was_his, after_open, waiting)
+    if ch is None:
+        return {"then": ""} if stray_then(item, after_open) else None
+    if "then" in ch:
+        return ch
+    m = dict(item.get("metadata") or {})
+    for k, v in ch.items():
+        if v:
+            m[k] = v
+        else:
+            m.pop(k, None)
+    return {**ch, "then": ""} if stray_then({**item, "metadata": m}, after_open) else ch
+
+
+def _settle_mover(item: dict[str, Any], was_his: bool, after_open: Callable[[dict[str, Any]], Any] | None, waiting: bool) -> dict[str, str] | None:
+    """The mover half of `settle`: the rules above, up to the stray `then`."""
     m = item.get("metadata") or {}
     mover_s, then_s = norm_who(m.get("mover")), norm_who(m.get("then"))
     if not mover_s:

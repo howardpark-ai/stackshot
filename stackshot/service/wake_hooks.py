@@ -20,7 +20,6 @@ class Hooks:
     after_open: Callable[..., Any]  # item_read._after_open
     event_activity_tick: Callable[..., Any]  # service.event_activity._event_activity_tick
     follow_superseded: Callable[..., Any]  # mover_steps._follow_superseded
-    hand_stored_then: Callable[..., Any]  # service.answer_handover._hand_stored_then
     hold_flag: Callable[..., Any]  # holders._hold_flag
     is_held: Callable[..., Any]  # holders._is_held
     item_mover_model: Callable[..., Any]  # service/client_reads._item_mover_model

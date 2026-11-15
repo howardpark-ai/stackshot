@@ -208,7 +208,7 @@ check("4 server: an empty heartbeat (every session would look gone) checks nothi
 got = handoff_svc.orphan_handover(apply=True, now=now0)
 check("5 server: the apply reports six moves and no skip", got["applied"] and ids(got["moved"]) == sorted([B(101), B(102), B(103), B(106), B(108), B(112)]) and got["skipped"] == 0, got)
 m_c, m_d, m_e, m_f, m_g = (mt(i) for i in (101, 102, 103, 106, 108))
-check("5 server: the alive item's mover and `then` follow the retired session to its successor, which heads `needs`", m_c["mover"] == "par-main" and m_c["then"] == "par-main" and (m_c["needs"] or [""])[0] == "par-main"
+check("5 server: the alive item's mover follows the retired session to its successor, which heads `needs`; the stored `then` beside an agent is dropped by the save", m_c["mover"] == "par-main" and not m_c.get("then") and (m_c["needs"] or [""])[0] == "par-main"
       and "kid-main" not in json.dumps(m_c.get("needs")), m_c)
 check("5 server: …the hand-off record names the new mover, comes from the server, and carries the orphan reason", m_c["handoff"]["to"] == "par-main" and m_c["handoff"]["via"] == "orphan" and "kid-main is gone" in m_c["handoff"]["reason"]
       and m_c["handoff"]["redirected_from"] == "kid-main", m_c.get("handoff"))
@@ -265,11 +265,11 @@ item(120, "projects/par/kid", mover="kid-main", then="kid-main", post_wake_mover
 item(121, "projects/par/kid", mover="kid-main", then="kid-main", post_wake_mover="kid-main")
 done_m = handoff_svc.handoff_exec([H.Step("move", f"a{120}", "kid-main did not take it", "kid-main", "bgp-back", via="redirect")], now0 + 300, verify=False)
 m_i = mt(120)
-check("8 minute pass: a move by the minute pass changes the stored mover and `needs` and records the hand-off, and leaves `then` and a post-wake mover as they were, with no stall line (as on main)",
-      done_m == [f"a{120}"] and m_i["mover"] == "bgp-back" and m_i["needs"][0] == "bgp-back" and m_i["then"] == "kid-main" and m_i["post_wake_mover"] == "kid-main" and "stall" not in m_i
+check("8 minute pass: a move by the minute pass changes the stored mover and `needs` and records the hand-off, and leaves a post-wake mover as it was (the save drops the `then` beside an agent), with no stall line",
+      done_m == [f"a{120}"] and m_i["mover"] == "bgp-back" and m_i["needs"][0] == "bgp-back" and not m_i.get("then") and m_i["post_wake_mover"] == "kid-main" and "stall" not in m_i
       and m_i["handoff"]["to"] == "bgp-back" and m_i["handoff"].get("via") == "redirect", m_i)
 done_o = handoff_svc.handoff_exec([H.Step("move", f"a{121}", "kid-main is gone", "kid-main", "bgp-back", via="orphan")], now0 + 301, verify=False)
-check("8 minute pass: …the same move as the audit's hand-over (via orphan) also follows `then` and the post-wake mover, which is why the keys are limited to it", done_o == [f"a{121}"] and mt(121)["then"] == "bgp-back"
+check("8 minute pass: …the same move as the audit's hand-over (via orphan) also follows the post-wake mover, which is why the keys are limited to it (the `then` beside an agent is dropped by the save)", done_o == [f"a{121}"] and not mt(121).get("then")
       and mt(121)["post_wake_mover"] == "bgp-back" and ST.log_of(mt(121)), mt(121))
 
 # 9: a partial view of the fleet moves nothing it cannot prove

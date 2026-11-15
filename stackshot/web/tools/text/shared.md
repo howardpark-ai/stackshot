@@ -174,7 +174,9 @@ an alive item now, on a waiting item whoever takes it when the wait ends; {{OWNE
 background agent; a front agent (a session {{OWNER}} talks to) only by
 itself: a create or update from another session that sets mover to one gets the project's builder instead, and the
 reply and History say so (send the same mover again to keep it; with no builder it is refused)>; then=<who takes it
-after {{OWNER}}'s answer or step; then=<front agent> from another session gets the builder the same way>;
+after {{OWNER}}'s answer or step; it stands only while he moves the item, and on an item a session moves or
+waits on it is dropped with a note in the reply: to hand an item on, set mover=<session>; then=<front agent> from
+another session gets the builder the same way>;
 wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor an anchor wait watches>, which must be
 on the project's anchors list first (add it with the anchors tool, scoped to this item), else the write is refused;
 wait_event=<what you expect there (an anchor wait), or the party or event {{OWNER}} relays (a relay wait), or the
@@ -197,7 +199,7 @@ then). The mirror is refused too: a write that leaves an open item with mover={{
 it has no step and no ask, is refused: pass step=<one line>, or needs=["decision"] with ask=…, or give the item to a
 session (mover=<session>) and write his part in a next line that starts `{{OWNER}}:`. A waiting item, a close, a
 rename, a priority or project write and a re-bullet are not judged by it. A wait that replaces his state drops the
-mover and keeps then as the one who takes it when the wait ends. "none" clears a field; clear_goal, clear_mover and
+mover, and the session in then picks the item up when the wait ends (it is stored as the mover). "none" clears a field; clear_goal, clear_mover and
 clear_then clear theirs, clear_wait the wait's four (wait_kind, wait_anchor, wait_event, ask_by). A close drops the
 mover and the wait and keeps the goal. The wait ends by itself when its kind's event comes: a time at its wake; an
 item when the last `after` item closes; an anchor when the anchor watcher's notice for wait_anchor reaches the server,
@@ -337,8 +339,10 @@ session needs names for the mover it replaces is swapped for the new one.
 
 ## param THEN
 Who takes the item after {{OWNER}}'s answer or step (it becomes the mover then): a session name or id, or the
-project's background agent. A front agent only by itself: a create or update from another session that sets
-then=<front agent> gets the project's builder instead, as for mover.
+project's background agent. It stands only while he is the mover: on an item a session moves, or one that waits
+on a session, a then is dropped and the reply says so; to hand an item on, set mover=<session>. A front agent only by
+itself: a create or update from another session that sets then=<front agent> gets the project's builder instead, as
+for mover.
 
 ## param POST_WAKE
 The old name of mover, read as mover for a while (the reply says so). On an item that waits it is who takes the item

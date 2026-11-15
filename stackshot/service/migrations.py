@@ -110,7 +110,10 @@ def migrate_owner_mover() -> list[str]:
                 if ch:
                     was_mover = _model.norm_who(it["metadata"].get("mover"))
                     _hooks().settle_apply(it["metadata"], ch)
-                    did.append(f"mover {was_mover} → {ch['mover'] or 'default'}" + (f", then {ch['then']}" if ch.get("then") else ""))
+                    if "mover" in ch:
+                        did.append(f"mover {was_mover} → {ch['mover'] or 'default'}" + (f", then {ch['then']}" if ch.get("then") else ""))
+                    else:  # a then-only result: the then beside a session mover goes, the mover stays
+                        did.append("then dropped (it stands only while he moves the item)")
             r = _ho.pending_his(it) if _handoff.handoff_on() else None
             if r is not None:
                 answers = [float(a.get("ts") or 0) for a in (it["metadata"].get("answers") or []) if isinstance(a, dict) and float(a.get("ts") or 0) >= float(r.get("at") or 0)]
@@ -799,7 +802,7 @@ def migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     _hooks().sender_not_owner(str(spec.get("sender") or ""))
     op = str(spec.get("op") or "apply")
     state = lambda: {"guards": _hooks().model_guards_on(), "pause": bool(_cfg.get("model", "pause", default=False)), "switchover": _hooks().switchover_on(), "handoff": _handoff.handoff_on(),
-                     "watchers": _watch.enabled(), "held": _watch.holding(), "by": by}
+                     "held": _watch.holding(), "by": by}
     if op not in ("begin", "apply", "end", "wake_text", "send_wake", "stamp", "unstamp", "retire", "unretire", "project_id", "unproject_id", "until", "ununtil", "lastact", "unlastact"):
         raise ToolError("Refused: op = begin | apply | end | wake_text | send_wake | stamp | unstamp | retire | unretire | project_id | unproject_id | until | ununtil | lastact | unlastact")
     if op in ("stamp", "unstamp"):

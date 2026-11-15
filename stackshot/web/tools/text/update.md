@@ -280,7 +280,8 @@ passes or merges a notice from that anchor (never when it drops one; in a projec
 it arrives), and tells the sessions in its needs (else the project's builder, else its -main agent). clear_hold=true
 releases it now (its date goes with it); until="none" (or clear_wake=true) drops the date: an item that waits on
 nothing else is active again, and a hold stays only when an after, an anchor or a recycle still holds it. mover hands
-the item over: set mover=<session> (then=<who takes it after {{OWNER}}'s answer or step>) and the new mover is told; a
+the item over: set mover=<session> (then=<who takes it after {{OWNER}}'s answer or step>, kept only while he is the
+mover; on an item a session moves it is dropped with a note) and the new mover is told; a
 front agent gets no hand-off notice, so an update from another session that sets mover or then (or post_wake_mover, the old
 name of mover) to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as
 sent; with no builder it is refused, except a mover set by a front agent of the item's project to another of its front

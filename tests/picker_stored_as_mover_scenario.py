@@ -165,7 +165,10 @@ guards(False)
 for label, meta in (("external in needs", {**BASE, "needs": [BACK, "external"], "mover": OWN, "then": HELP, "until": FUT}), ("an open after link", {**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT, "after": ["a1"]})):
     item(1, subject="[zed] an open item the others wait after")
     m_ = hand(meta, OWN, HELP, waiting=True)
-    check(f"A hand-over with {label}: no picker is stored as before", LEG not in m_ and "mover" not in m_, m_)
+    if "after" in meta:      # a wait on a link opens a wait of its own: the picker is stored as `mover` (never the old key), and the `then` is gone
+        check(f"A hand-over with {label}: the picker is stored as `mover`, no old key, no `then`", LEG not in m_ and m_.get("mover") == HELP and "then" not in m_, m_)
+    else:
+        check(f"A hand-over with {label}: no picker is stored as before", LEG not in m_ and "mover" not in m_, m_)
 
 # ================================================================ B. the wait-end fix (the filing pass; its after wait has no end the guards would accept, so the guards stay off here)
 for g_ in (False,):

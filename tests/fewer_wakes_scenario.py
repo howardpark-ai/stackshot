@@ -497,6 +497,7 @@ check("3e negative: a hand-back with no close in the window is delivered when it
 _update_svc._update("a23", needs=["osprey-main"], next="osprey-main: first", sender="osprey-front2"); settle()
 f1 = held(); k = list(f1)[0]
 _update_svc._update("a23", needs=["osprey-x"], next="osprey-x: more work", sender="osprey-main"); settle()
+item(23, needs=["osprey-x"], then="osprey-main")      # the stored shape a hand-back needs (a `then` beside the builder, which a save now drops: the stored data is migrated separately)
 _update_svc._update("a23", needs=["osprey-main"], next="osprey-main: second", sender="osprey-front2"); settle()
 f2 = held()
 check("3f: a second hand-back of the same item inside the window is the same held line, with the first due time (one line for the item)",
@@ -524,7 +525,8 @@ _update_svc._update("a27", needs=["osprey-main"], next="osprey-main: look", send
 _wt_complete.stackshot_complete("a28", outcome="done", reason="done", description="- done", sender="osprey-x"); settle()
 check("3i negative: closing another item does not drop it", len(held()) == 1 and telling.handback_tick(now=t3 + 181) == ["a27"] and len(hb_notes("a27", n0)) == 1, (held(), hb_notes("a27", n0)))
 # a reopened item is open again: a new hand-back is held again
-_update_svc._update("a20", status="open", next="osprey-x: more", needs=["osprey-x"], then="osprey-main", sender="osprey-main"); settle()
+_update_svc._update("a20", status="open", next="osprey-x: more", needs=["osprey-x"], sender="osprey-main"); settle()
+item(20, needs=["osprey-x"], then="osprey-main")      # the stored shape a hand-back needs (see 3f)
 p0 = len(pushes()); _update_svc._update("a20", needs=["osprey-main"], next="osprey-main: look again", sender="osprey-front2"); settle()
 check("…a reopened item's new hand-back is held like any other", len(held()) == 1, held())
 
@@ -539,6 +541,7 @@ check("3j negative: when the held line cannot be written it is sent at once, nev
       len(hb_notes("a29", n0)) == 1 and len(held()) == k0 and "unless you close" not in out and "told it is back with them alone" in out, (out, hb_notes("a29", n0), held()))
 def rehold(gid):          # the item goes to the builder and comes back: a fresh held line
     _update_svc._update(gid, needs=["osprey-x"], next="osprey-x: more work", sender="osprey-main"); settle()
+    item(int(gid[1:]), needs=["osprey-x"], then="osprey-main")      # the stored shape a hand-back needs (see 3f)
     _update_svc._update(gid, needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
 n0 = len(pushes()); _real_send = telling.handback_send; calls = []
 def _send_fails(rec): calls.append(rec["gid"]); raise OSError("router log full")

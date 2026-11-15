@@ -4,7 +4,7 @@ A waiting item names what it waits on (model.py: wait_kind time | item | anchor 
 half lives here: the readings (which items the watchers own, which are due, on what cause), the text of each arrival, the relay's fixed ask and its options, the chases, the
 reading of the owner's answer to those asks, the date he gives. The server (server.py, the `_watch_*` functions) reads and writes the items, sends the messages and calls these.
 
-  The watchers act ONLY on an item with a stored wait_kind, while [model] watchers is true. Every other item keeps today's wake pass and `after` release
+  The watchers act ONLY on an item with a stored wait_kind. Every other item keeps today's wake pass and `after` release
   until the step 4 migration, so no item is moved by two mechanisms (`watches` is the gate those read).
 
   time    the wake passes → alive, the post-wake mover
@@ -47,11 +47,6 @@ _OPT_MARK = " · Options: "
 
 
 # ---------------------------------------------------------------------------------------------------------------- the switches
-def enabled() -> bool:
-    """[model] watchers (default true): the waits' watchers. false turns this module's transitions off, and an item with a stored wait_kind falls back to today's machinery."""
-    return bool(_cfg.get("model", "watchers", default=True))
-
-
 _HOLD: dict[str, Any] = {"until": 0.0, "by": "", "since": 0.0}      # the migration's own pause: held in the server process, never in the config file, and it lapses by itself
 HOLD_CEILING_S = 3600.0        # the most one pass may hold the board, from its `begin`, however often it renews: a pass that runs past this lapses
 
@@ -126,9 +121,9 @@ def can_end(meta: dict[str, Any]) -> bool:
 
 
 def watches(item: dict[str, Any]) -> bool:
-    """Does this module own the item's wait: watchers are on, the item is open, it stores a wait_kind and a watcher can end that wait. The wake pass and the `after` release
+    """Does this module own the item's wait: the item is open, it stores a wait_kind and a watcher can end that wait. The wake pass and the `after` release
     skip such an item; one whose wait no watcher can end (a time wait with no date, an anchor wait with no anchor) keeps today's mechanisms."""
-    return enabled() and item.get("status") == "open" and can_end(item.get("metadata") or {})
+    return item.get("status") == "open" and can_end(item.get("metadata") or {})
 
 
 # ---------------------------------------------------------------------------------------------------------------- when a wait is over

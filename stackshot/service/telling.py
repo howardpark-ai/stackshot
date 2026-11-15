@@ -244,7 +244,7 @@ def held_by(item: dict[str, Any], was: dict[str, Any] | None = None) -> tuple[st
             if mod.state == _model.ALIVE:
                 cands = [(mod.mover, "mover"), (mod.then, "then")]
             elif mod.wait:      # a waiting item: the post-wake mover when the writer named one, else the stored mover / `then` (it relays), else the model's default for who takes it after the wait.
-                # The order is the one the hand-over writers (_hand_stored_then, _decision_hand_over, release_after in service/wakes.py) still use: they hand to the stored `then`, so the reader must find the same session.
+                # The order is the one the writers that store a wait's picker (_decision_hand_over, release_after in service/wakes.py) use, so the reader finds the same session.
                 cands = [(_model.stored_picker(meta), "then" if _model.norm_who(meta.get(_model.LEGACY_PICKER_KEY)) else "mover"), (_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then"), (mod.wait.mover, "then")]
     except Exception:  # noqa: BLE001  — a notice's addressee is never worth failing a write over
         cands = []
@@ -269,21 +269,36 @@ def quiet_line(item: dict[str, Any], owner: str = "") -> str:
 _HELD_LINE = re.compile(r"\n\(its (?:mover|then) ")
 
 
-def then_label(item: dict[str, Any]) -> str:
-    """The item's `then` (stored, else the model's) as a session label; "" when it has none or it is the owner."""
+def _then_who(item: dict[str, Any]) -> tuple[str, str]:
+    """(who, word) for the session a notice names beside the item's owner: an alive item's `then` and the `then` beside the user as a waiting item's picker are worded "then"; an agent
+    that picks a waiting item up when the wait ends is worded "mover" (it is the item's mover, not a `then`). ("", "") when the item names none or it is the owner."""
     h = _hooks()
     try:
         mod = h.model_of({**item, "gid": item.get("gid") or item.get("id") or ""})
-        who = mod.then if mod.state == _model.ALIVE else ((mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else "")
+        if mod.state == _model.ALIVE:
+            who, word = mod.then, "then"
+        elif mod.wait:
+            who, word = (mod.then, "then") if _model.is_owner(mod.wait.mover) else (mod.wait.mover, "mover")
+        else:
+            who, word = "", ""
     except Exception:  # noqa: BLE001
-        who = _model.norm_who((item.get("metadata") or {}).get("then"))
-    return "" if (not who or _model.is_owner(who)) else (_session_label(who) or who)
+        who, word = _model.norm_who((item.get("metadata") or {}).get("then")), "then"
+    return ("", "") if (not who or _model.is_owner(who)) else (who, word)
 
 
-def then_part(item: dict[str, Any]) -> str:
-    """", then <session>" for a notice that names who takes the item after the owner; "" when it has no `then` (the notice names no creator)."""
-    t = then_label(item)
-    return f", then {t}" if t else ""
+def then_label(item: dict[str, Any]) -> str:
+    """The session beside the owner a notice names (an alive item's `then`, a waiting item's picker) as a session label; "" when it has none or it is the owner."""
+    who, _word = _then_who(item)
+    return (_session_label(who) or who) if who else ""
+
+
+def then_part(item: dict[str, Any], to: str = "") -> str:
+    """", then <session>" (or ", mover <session>" for an agent that picks a waiting item up) for a notice that names who takes the item beside its owner; "" when it names none (the notice names no
+    creator), or when it is `to`, the session the notice goes to (the notice already names its recipient)."""
+    who, word = _then_who(item)
+    if not who or (to and _hooks().session_id(who) == _hooks().session_id(to)):
+        return ""
+    return f", {word} {_session_label(who) or who}"
 
 
 def keeper_words(project: str, keeper: str) -> str:
@@ -902,7 +917,7 @@ def tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, h
         if owner and sid == hk.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
             quiet = quiet_line(item, owner); continue
         nxt = next_head(meta, writer)[:160]
-        thn = then_part(item)
+        thn = then_part(item, to=sid)
         tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)} now needs you (named in its needs by {who}): {item.get('subject') or ''} ({project}){thn}"
                               + (f"; next: {nxt}" if nxt else "") + f". Do your part and close it or hand it back (sender={_session_label(s)!r}); "
                               f"Your turn-end board check asks about it until then. → {notice_link(gid)}", tag="needs")
@@ -1404,7 +1419,7 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
             project, owner = str(m_.get("project") or ""), holder(it)
             if not _router_live.holds(project, sid):      # the recipient is the item's mover, so there is no "its own item" to tell directly
                 keep.append((g, it)); continue
-            thn = then_part(it)
+            thn = then_part(it, to=sid)
             try:
                 nid = _routing.record(project, kind="board", to="", label=f"close {me}", who="stackshot", text=f"{cause}; {_gh.shown(g)} names it{thn}: {it.get('subject') or ''}",
                                       url=notice_link(g), target="for " + _session_label(sid), pilot=True, live=True)
@@ -1420,7 +1435,7 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
         for g, it in keep[:_MENTION_LINES_MAX]:
             m_ = it.get("metadata") or {}
             project, owner = str(m_.get("project") or ""), holder(it)
-            thn = then_part(it)
+            thn = then_part(it, to=sid)
             nid = ""
             if _anc.pilot_root(project) and sid != (h.session_id(owner) if owner else ""):
                 try:
@@ -1457,7 +1472,7 @@ def tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip: 
         if not kid:
             print(f"waiting: {gid} wait failed ({why}); no keeper to tell", file=sys.stderr, flush=True)
         return ""
-    tell_kind("stuck", gid, kid, f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({project}){then_part(item)}: its wait ({what}) can no longer end: {why}. "
+    tell_kind("stuck", gid, kid, f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({project}){then_part(item, to=kid)}: its wait ({what}) can no longer end: {why}. "
                           f"The item stays open. As {keeper_words(project, k)}: see that its mover or the session doing the work "
                           f"gives it what it waits on now (a new check, a wake, an item to wait after) or closes it. → {notice_link(gid)}", tag="wait")
     return kid
@@ -1612,7 +1627,7 @@ def tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
     oid = h.session_id(owner) if owner else ""
     front = bool(owner) and front_keeper(owner, project)[0]
     if oid and not front:
-        tell_woken(gid, oid, f"[stackshot] {_gh.shown(gid)} closed itself: its done check passed ({label}): {item.get('subject') or ''} ({project}){then_part(item)} → {notice_link(gid)}", tag="check")
+        tell_woken(gid, oid, f"[stackshot] {_gh.shown(gid)} closed itself: its done check passed ({label}): {item.get('subject') or ''} ({project}){then_part(item, to=oid)} → {notice_link(gid)}", tag="check")
         told.append(oid)
     elif not oid:
         print(f"check: {gid} closed, and nobody moves it to tell", file=sys.stderr, flush=True)

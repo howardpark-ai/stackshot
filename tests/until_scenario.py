@@ -149,7 +149,7 @@ check("stored_kind: an until-only item reads time; a stored kind stands; none is
 check("time_epoch / backstop_epoch / next_moment: the until, by the minute when it has one", WK.time_epoch(UT) == ep(at(2, "09:30")) and WK.backstop_epoch(UT) == ep(at(2, "09:30")) and WK.next_moment(UT) == ep(at(2, "09:30")) and WK.time_epoch(UF) == ep(day(2)))
 check("time_epoch: the until wins over a wake, and a verifying item's end date is only the fallback", WK.time_epoch({"until": day(3), "wake": day(1)}) == ep(day(3)) and WK.time_epoch({"state": "verifying", "end": day(2)}) == W.due_epoch(day(2))
       and WK.time_epoch({"state": "verifying", "end": day(2), "until": day(5)}) == ep(day(5)))
-check("can_end / watches: an until-only wait can be ended and is watched; with watchers off it is not", WK.can_end(UF) and WK.watches({"status": "open", "metadata": UF}) and not WK.watches({"status": "completed", "metadata": UF}) and not WK.watches({"status": "open", "metadata": {"needs": [BACK]}}))
+check("can_end / watches: an until-only wait can be ended and is watched", WK.can_end(UF) and WK.watches({"status": "open", "metadata": UF}) and not WK.watches({"status": "completed", "metadata": UF}) and not WK.watches({"status": "open", "metadata": {"needs": [BACK]}}))
 check("due: an until-only wait is due as time once its minute has passed, not before", WK.due({"metadata": UO}, now) == "time" and WK.due({"metadata": UF}, now) == "" and WK.due({"metadata": UT}, ep(at(2, "09:30")) - 1) == "" and WK.due({"metadata": UT}, ep(at(2, "09:30"))) == "time")
 check("due: a turn that failed is left alone for the backoff, and next_moment says when it is looked at again", WK.due({"metadata": {**UO, "watch": {"failed_at": now - 60}}}, now) == ""
       and WK.due({"metadata": {**UO, "watch": {"failed_at": now - WK.BACKOFF - 1}}}, now) == "time" and WK.next_moment({**UO, "watch": {"failed_at": now}}) == now + WK.BACKOFF)
@@ -196,11 +196,6 @@ check("states.derive: a hold with an until and the owner's words for that until 
 base = lambda **kw: item(state="doing", needs=[BACK], **kw)
 WAITING_TIME = "the board shows it waiting (time)"
 check("stall.not_due: an until-only wait is a wait the board shows, ahead or passed, so the stall pass leaves it alone", ST.not_due(base(until=day(2)), now) == WAITING_TIME and ST.not_due(base(until=day(-1)), now) == WAITING_TIME)
-_cfg.CFG.setdefault("model", {})["watchers"] = False
-check("stall.not_due (watchers off): the board's reading is the same, a bare wake ahead is only a reminder and holds nothing off; due_at is the until, or the wake once it has passed",
-      ST.not_due(base(until=day(2)), now) == WAITING_TIME and ST.not_due(base(until=day(-1)), now) == WAITING_TIME and ST.not_due(base(wake=day(2)), now) == ""
-      and ST.due_at(base(until=day(-1))) == ep(day(-1)) and ST.due_at(base(wake=day(-1))) == ep(day(-1)) and ST.due_at(base(wake=day(2)), now) == 0.0)
-_cfg.CFG["model"]["watchers"] = True
 check("stall.due_at: no date is 0", ST.due_at(base()) == 0.0)
 # silence.reading: an item that waits is not on an agent, whatever its last write; the same item with no date is
 sil = base(until=day(2)); sil["updated"] = sil["state_updated"] = now - 30 * H
@@ -301,23 +296,11 @@ check("recycle_svc._held_only_for_recycle: the same through the server, from the
 vf = lambda **kw: {"status": "open", "metadata": {"state": "verifying", "end": day(2), "needs": [BACK], "project": "projects/quill", **kw}}
 check("waits_on_end (both renderers): a verifying item waits on its end date only when it stores no until", all(mod_.waits_on_end(vf()) and not mod_.waits_on_end(vf(until=day(3))) for mod_ in (RR, UR)))
 
-# the wake sweep: when the watchers do not own the wait, an until-only item is released, not left waiting for ever
-_cfg.CFG.setdefault("model", {})["watchers"] = False
-w1 = sitem(911, hold=True, until=day(-1), needs=[BACK], mover=BACK)
-w2 = sitem(912, until=day(-1), needs=[BACK], mover=BACK)
-w3 = sitem(913, hold=True, until=day(3), needs=[BACK], mover=BACK)
-coll = {g: at_ for g, _p, _it, at_ in wakes_svc.wake_rows()}
-check("_wakes collects an item that stores only an until, at the moment of that date", {w1, w2, w3} <= set(coll) and coll[w1] == wakes_svc.wake_at(day(-1)) and coll[w3] == wakes_svc.wake_at(day(3)), coll)
-check("_next_wake sees it (the runner sleeps until the earliest)", wakes_svc.next_wake() is not None and wakes_svc.next_wake() <= wakes_svc.wake_at(day(-1)))
-woke = wakes_svc.wake_pass()
-check("_wake_pass releases a hold that stood on an until, and drops the until with it", w1 in woke and "hold" not in smt(911) and "until" not in smt(911) and "hold_set" not in smt(911), (woke, smt(911)))
-check("_wake_pass treats an until on an item not on hold as a reminder, and the until goes", w2 in woke and "until" not in smt(912) and srd(912)["status"] == "open", (woke, smt(912)))
-check("_wake_pass leaves an until still ahead alone", w3 not in woke and smt(913).get("until") == day(3) and smt(913).get("hold"), (woke, smt(913)))
+# the wake park reads an until as the wake
 w4 = sitem(914, until=day(3), needs=[BACK], mover=BACK)
 pk = _wait_fixes_svc._wake_park(w4, now)
 check("_wake_park reads an until as the wake: it gets past 'no wake' to judge the wait", pk["why"] != "not an open item with a wake and no hold", pk)
 check("_wake_park: an item with no date at all is still 'no wake'", _wait_fixes_svc._wake_park(sitem(915, needs=[BACK], mover=BACK), now)["why"] == "not an open item with a wake and no hold")
-_cfg.CFG["model"]["watchers"] = True
 
 # the arrival text through the server's own turn
 w5 = sitem(921, until=day(-1), needs=[BACK], mover=BACK)

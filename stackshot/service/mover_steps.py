@@ -34,6 +34,9 @@ from stackshot.service.store import _path
 from stackshot.waits import wait_list as _wl
 
 
+THEN_DROPPED_NOTE = "\n(then dropped: it stands only while {owner} moves the item; to hand it on, set mover=<session>)"      # the reply note when a `then` is stored beside an agent
+
+
 def _session_id(value: str) -> str:
     """The session id of a name, as the server reads it (service/save_hooks.py's `session_id` hook)."""
     return _hooks().session_id(value)
@@ -178,7 +181,8 @@ def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bo
     mover = he; `then` stays if stored, else the stored agent mover becomes `then`, so his answer or Done hands the item back to whoever had it (the same `then` _answer and Done
     read). A mover the write names itself is not touched here: the guard (model_guards mover_state) refuses it with the fix, and the mirror (owner_mover: the owner as mover with the item in none of his states) refuses him as mover beside an agent's state. `named` is also true for a bookkeeping write (filing_only, the re-bullet): it flips nothing with nobody told.
     The way back: when the item stood in his state before this write (`item_was`) and no longer does (his decision out of needs, the state moved on), the mover he held goes back to `then` (the
-    agent that had it), or to the model's default when none is stored; a wait that replaces his state drops it. → the note for the reply ("" when nothing moved).
+    agent that had it), or to the model's default when none is stored; a wait that replaces his state drops it. A `then` that stands beside an agent's mover goes too (settle's third result,
+    `{"then": ""}`, alone or with a mover change), with the note that it stands only while the user moves the item. → the note for the reply ("" when nothing moved).
     [model] guards = false, a filing write and a close are left alone."""
     if named or not _item_read._model_guards_on() or item_now.get("status") != "open":
         return ""
@@ -195,20 +199,41 @@ def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bo
         better = _owner_then(str(meta.get("project") or ""), mover_s, "", str(meta.get("next") or ""), _needs_sessions(meta))      # D9: a front agent that relayed the ask is not its then when a builder does the work
         if better:
             ch = {**ch, "then": better}
+    then_before = _model.norm_who(meta.get("then"))
     _holders._settle_apply(meta, ch)
+    dropped = THEN_DROPPED_NOTE.format(owner=OWNER) if then_before and not _model.norm_who(meta.get("then")) and not ch.get("mover") else ""      # the `then` went and no mover change took it (a hand-back that makes it the mover says so itself)
+    if "mover" not in ch:
+        return dropped                      # only a `then` that nothing reads went
     if ch["mover"] == h:
         keep = ch["then"]
         back = "" if keep == mover_s else f" (to have it come back to you instead, set then=<you>)"
         return f"\n(mover: {_sr._session_label(mover_s) or mover_s} → {h}: the item is in his state ({_eff_state(item_now)}), so he moves it; then {_sr._session_label(keep) or keep} takes it after his answer or Done){back}"
     to = ch["mover"]
     return (f"\n(mover: {h} → {_sr._session_label(to) or to}: the item is out of his hands, so {_sr._session_label(to) or to} moves it again)" if to
-            else f"\n(mover: {h} dropped: the item is out of his hands, so its default mover moves it)")
+            else f"\n(mover: {h} dropped: the item is out of his hands, so its default mover moves it)") + dropped
+
+
+def _then_stands(item_now: dict[str, Any], meta: dict[str, Any]) -> str:
+    """The write contract of `then` for a write that names the mover itself (`_owner_state_mover` leaves those alone): `then` stands only while the user moves the item, so a `then` stored beside an
+    agent's mover, or beside an agent that picks up a wait, is dropped with a note, never refused. Settled by model.settle (the same third result, `{"then": ""}`), on the metadata `meta` as this write leaves it
+    (`item_now` carries it); a create calls it too. A closed item and [model] guards = false are left alone. → the note for the reply ("" when nothing was dropped)."""
+    if not _item_read._model_guards_on() or item_now.get("status") != "open" or not _model.norm_who(meta.get("then")):
+        return ""
+    try:
+        ch = _model.settle(item_now, False, lambda i_: _item_read._after_open(i_.get("metadata") or {}))
+    except Exception as e:  # noqa: BLE001  — a reading that fails changes nothing
+        print(f"model: then not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return ""
+    if ch != {"then": ""}:
+        return ""          # a mover change is the mover step's: only a stray `then` alone is this step's
+    _holders._settle_apply(meta, ch)
+    return THEN_DROPPED_NOTE.format(owner=OWNER)
 
 
 def _settle_mover_on_save(item: dict[str, Any], before: dict[str, Any] | None) -> bool:
     """The backstop of the same rule for every save that is not an update's own: the server's moves (a wake, his answer on the board, a create). An open item
     whose stored mover disagrees with the side of his state it stands on is settled in place (model.settle): an agent mover on an item that waits on him becomes he, the agent in `then`; the mover he
-    held goes back to `then` when the item leaves his state. Runs before the hand-off record, so a move to him is a hand-off to him and the way back needs none. A filing write and
+    held goes back to `then` when the item leaves his state; a stored `then` on an item the user does not move is dropped by the same save (settle's third result). Runs before the hand-off record, so a move to him is a hand-off to him and the way back needs none. A filing write and
     [model] guards = false leave it. Never fails a save. → True when it changed the item."""
     if not _item_read._model_guards_on() or item.get("status") != "open":
         return False

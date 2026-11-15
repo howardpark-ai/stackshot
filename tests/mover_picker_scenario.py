@@ -136,8 +136,8 @@ check("words: an alive item an agent moves shows no then", W_(D(needs=[BACK], mo
 def S(meta, was_his=True, waiting=True): return model.settle({"status": "open", "metadata": {"project": "projects/zedwork", **meta}}, was_his, waiting=waiting)      # a waiting item settles only from the update path (waiting=True)
 check("settle: a wait replaces his state (mover him, an agent in then): the agent picks it up, then goes", S({"mover": OWN, "then": BACK, "hold": True, "wake": FUT, "wait_kind": "time"}) == {"mover": BACK, "then": ""}, S({"mover": OWN, "then": BACK, "hold": True, "wake": FUT, "wait_kind": "time"}))
 check("settle: …with no agent in then only the stale mover goes", S({"mover": OWN, "hold": True, "wake": FUT, "wait_kind": "time"}) == {"mover": ""}, None)
-check("settle: …a post_wake_mover stored beside his mover and an agent in then: only the mover goes, then and the old name stay as stored",
-      S({"mover": OWN, "then": BACK, "post_wake_mover": HELP, "hold": True, "wake": FUT, "wait_kind": "time"}) == {"mover": ""}, S({"mover": OWN, "then": BACK, "post_wake_mover": HELP, "hold": True, "wake": FUT, "wait_kind": "time"}))
+check("settle: …a post_wake_mover stored beside his mover and an agent in then: the mover goes, and so does the then (an agent picks the item up, so the then stands beside no one); the old name stays as stored",
+      S({"mover": OWN, "then": BACK, "post_wake_mover": HELP, "hold": True, "wake": FUT, "wait_kind": "time"}) == {"mover": "", "then": ""}, S({"mover": OWN, "then": BACK, "post_wake_mover": HELP, "hold": True, "wake": FUT, "wait_kind": "time"}))
 check("settle: …a stored agent mover on a waiting item is never dropped", S({"mover": HELP, "needs": [BACK], "hold": True, "wake": FUT, "wait_kind": "time"}) is None and S({"mover": HELP, "needs": [BACK], "hold": True, "wake": FUT, "wait_kind": "time"}, False) is None, None)
 check("settle: …nor a mover he stored on a waiting item that never stood in his state", S({"mover": OWN, "then": BACK, "hold": True, "wake": FUT, "wait_kind": "time"}, False) is None, None)
 

@@ -26,9 +26,7 @@ _is_parked = None      # set by register: the server's own, looked up at each ca
 
 def _world_waits_text() -> str:
     """The brief's "Waiting on the world" (design section 4): the open items whose stored wait is news only the owner relays, one line each (what, ask-by date, chases), the earliest
-    ask-by first. "" when none, or the watchers are off: a brief never fails over it."""
-    if not _watch.enabled():
-        return ""
+    ask-by first. "" when none: a brief never fails over it."""
     rows: list[tuple[str, str]] = []
     stuck: list[str] = []
     for gid, _p in _item_files():

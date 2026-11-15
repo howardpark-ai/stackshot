@@ -105,9 +105,10 @@ check("update: another session's front-agent mover becomes the builder, and the 
 check("update: the fix is on the item", MAIN in json.dumps(rd(1)["metadata"].get("server_fixed")), rd(1)["metadata"].get("server_fixed"))
 r = _wt_update.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN)
 check("update: sending the same front-agent mover again keeps it as sent, with a note", telling.holder(rd(1)) == MAIN and "kept as you sent it" in r, r)
-put(1, mover=BUILD)
+put(1, mover=OWNER, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", then=REVIEW, state="your-call")      # a `then` stands only beside the user's own call
 r = _wt_update.stackshot_update(item_id="a1", sender=BUILD, then=MAIN)
 check("update: then=<front agent> by another session becomes the builder", fixed(r, MAIN, "then") and rd(1)["metadata"].get("then") == BUILD, r)
+put(1, mover=BUILD)
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=BUILD, mover=REVIEW))
 check("update: a background mover is accepted", r == "" and telling.holder(rd(1)) == REVIEW, r)
 put(2, mover=BUILD)

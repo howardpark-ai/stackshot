@@ -50,7 +50,7 @@ FLAGS = _Flags(session_next=False, question=False, terminal_row=False)
 RET = {}                                                     # a hook's return value by name, where the default below is not what a case needs
 RAISE = {}                                                   # a hook that refuses (ToolError) by name
 BORED = {"gate_options": [], "gate_needs": [], "gate_observers": [], "gate_after": [], "gate_said": [], "parse_check": "", "gate_model_args": ({}, {}), "contact_default": "",
-         "gate_draft_args": ("", False), "step_proof_set": "", "fallback_wait_date": ("", "", ""), "evwait_gate": "", "owner_then_default": "", "lift_ask": "", "ask_owed": "",
+         "gate_draft_args": ("", False), "step_proof_set": "", "fallback_wait_date": ("", "", ""), "evwait_gate": "", "then_stands": "", "owner_then_default": "", "lift_ask": "", "ask_owed": "",
          "options_note": "", "actor_note": "", "gate_model": "", "after_open": False, "model_guards_on": True, "pilot_charge": ("", ""), "writer_owes": False, "pilot_relay": "",
          "tell_needed": "", "handoff_notify": "", "machine_note": "", "fmt": "<item>", "said_note": "", "form_notes": "", "similar_note": "", "nag": "", "session_id": None,
          "gate_ask": None, "gate_contact": "", "wait_alias_gate": None, "project_subject_prefix": "", "writer_charge": ""}
@@ -127,7 +127,7 @@ FLAG_READS = ("session_next", "question", "terminal_row")
 got = names(skip=FLAG_READS)
 check("1 the whole order of a session's create, from the subject gate to the last note of the reply", got == [
     "gate_subject", "gate_recycle_item", "gate_description", "gate_goal", "gate_next", "gate_bare_urls", "gate_options", "session_id", "gate_said", "wait_alias_gate", "gate_model_args",
-    "gate_waits", "contact_default", "next_put", "gate_step_gap", "evwait_gate", "owner_then_default", "gate_draft_args", "gate_metadata", "lift_ask", "ask_owed", "gate_one_decision", "gate_alternatives",
+    "gate_waits", "contact_default", "next_put", "gate_step_gap", "evwait_gate", "then_stands", "owner_then_default", "gate_draft_args", "gate_metadata", "lift_ask", "ask_owed", "gate_one_decision", "gate_alternatives",
     "gate_open_question", "gate_recommend_stance", "gate_mockup", "gate_own_action", "options_note", "actor_note", "gate_model", "anchor_wait_gate", "gate_owner_step", "model_guards_on",
     "gate_front_step", "refuse_if_owing", "record_fixes", "save", "pilot_charge", "owed_mark", "tell_needed", "handoff_notify", "publish", "machine_note", "fmt", "said_note", "form_notes",
     "similar_note", "nag"], got)

@@ -133,7 +133,7 @@ for body, want in (({"kind": "pr_released"}, "kind is one of"), ({"kind": "fleet
     refused(f"report: {body} is refused", lambda body=body: rep(body), want)
 
 W = lambda **m: {"status": "open", "metadata": {"wait_kind": "event", **m}}
-check("watchers: an event wait with a real phrase and a backstop can be ended and is watched; one with a bad phrase, none or no backstop is not (it keeps the old mechanisms); off with [model] watchers",
+check("watchers: an event wait with a real phrase and a backstop can be ended and is watched; one with a bad phrase, none or no backstop is not (it keeps the old mechanisms)",
       wk.watches(W(wait_event="recycle", ask_by=day(3))) and wk.watches(W(wait_event="recycle", wake=day(3))) and not wk.watches(W(wait_event="recycle")) and not wk.watches(W(wait_event="whenever", ask_by=day(3))) and not wk.watches(W(ask_by=day(3))) and wk.stored_kind({"wait_kind": "event"}) == "event" and "event" in model.WAIT_KINDS, None)
 check("watchers: the backstop (ask_by or wake) is the only date the clock reads for an event wait; before it nothing is due", wk.due(W(wait_event="recycle", ask_by=day(-1)), now0) == "backstop"
       and wk.due(W(wait_event="recycle", ask_by=day(3)), now0) == "" and wk.due(W(wait_event="recycle", wake=day(-1)), now0) == "backstop" and wk.due(W(wait_event="recycle"), now0) == ""
@@ -296,7 +296,6 @@ check("recycle-wanted: an item that asks for a recycle is counted, an event wait
       "a51" in wanted and "a50" in wanted and "a52" not in wanted, wanted)
 
 # ================================================================ the display
-_cfg.CFG.setdefault("model", {})["watchers"] = True
 html = render.Board().item_html("a1") if hasattr(render, "Board") and False else ""
 home = _get_tool._fmt({**rd(1), "gid": "a1"})
 check("get: the model line says what the item waits on", "PR #7 live" in home or "fleet event" in home or "event" in home, home[:600])
