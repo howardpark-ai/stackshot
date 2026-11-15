@@ -484,7 +484,7 @@ reset()
 lst(184, [Tm(day(-2)), Re("the lease"), It("a185")], mode="all", until=day(-1), then="home-other"); item(185, subject="[home] open")
 woke = wakes_svc.wake_pass(); m = mt(184)
 check("backstop (open relay line): the owner is asked, as a relay's ask-by day asks: the fixed question about the relay line's event, three options, the post-wake mover as `then`", "a184" in woke and m.get("needs") == ["decision"]
-      and m.get("ask") == "Decide: has the lease arrived? · Options: arrived / not yet, ask again on <date> / drop" and [o["label"] for o in m["options"]] == ["arrived", "not yet, ask again on <date>", "drop"] and m.get("then") == BACK and "mover" not in m, m)
+      and m.get("ask") == "Decide: has the lease arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop" and [o["label"] for o in m["options"]][0::5] == ["arrived", "drop"] and len(m["options"]) == 6 and m.get("then") == BACK and "mover" not in m, m)
 check("backstop (open relay line): …the words of what arrived and what did not are on the item, nobody is messaged, and the wait is put by", m["woke"]["to"] == OWN and m["woke"]["what"].startswith(f"backstop day {day(-1)}: arrived ") and "still open" in m["woke"]["what"] and not sent("watch")
       and all(k not in m for k in GONE) and m["watch"]["was"]["wait_kind"] == "list" and len(m["watch"]["was"]["waits"]) == 3 and m["watch"]["was"]["waits"][0].get("arrived"), m)
 check("backstop (open relay line): …the model reads it as the owner's move", mod_of(184).owner_moves, mod_of(184))
@@ -564,7 +564,7 @@ reset()
 lst(220, [Re("the first quote"), Re("the second quote"), Tm(day(9))], mode="all", until=day(-1)); d = rd(220); d["metadata"]["waits"][0]["arrived"] = {"at": now0 - 100, "what": "the first quote was relayed"}; put(220, d)
 check("relay_event: the first OPEN relay line's event (an arrived one is not asked about)", WL.relay_event(mt(220)) == "the second quote" and WL.relay_event({**GOOD, "waits": [Re("a"), Re("b")]}) == "a", WL.relay_event(mt(220)))
 wakes_svc.wake_pass(); m = mt(220)
-check("backstop (two relay lines, the first arrived): the owner is asked about the OPEN one", m.get("ask") == "Decide: has the second quote arrived? · Options: arrived / not yet, ask again on <date> / drop" and m.get("needs") == ["decision"]
+check("backstop (two relay lines, the first arrived): the owner is asked about the OPEN one", m.get("ask") == "Decide: has the second quote arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop" and m.get("needs") == ["decision"]
       and "the first quote was relayed" in m["woke"]["what"] and "still open: news of the second quote" in m["woke"]["what"], m)
 # (b) an arrived line is still found by the close (open_only=False): the item is one the close is for, not a mention
 WO: list[set[str]] = []

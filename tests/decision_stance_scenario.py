@@ -14,7 +14,7 @@ other languages' words come from [keywords.ask_options] yes_no_words, here Greek
   6  the reading functions; 7 the tool text says it
 
     tests/run-suite decision_stance        → exit 0 / 1"""
-import json, os, re, sys, pathlib, time, logging
+import json, os, re, sys, pathlib, time, logging, datetime as dt
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="stance-"); T = pathlib.Path(tmp)
@@ -185,7 +185,7 @@ try:
 
     # ================================================================ 5. the asks the server writes itself and the question route
     ev = {"wait_event": "countersigned NDA"}
-    for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options()), ("the drop question", wk.drop_ask(ev), wk.drop_options())):
+    for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options(dt.date(2026, 11, 16))), ("the drop question", wk.drop_ask(ev), wk.drop_options(dt.date(2026, 11, 16)))):
         m = {"needs": ["decision"], "ask": ask, "options": opts, "watch": {"asked": "relay" if "relay" in what else "dropit"}}
         passes(f"5 watcher: {what} passes the Recommend gate", lambda m=m: _dg._gate_recommend_stance(m))
         m2 = {**m, "options": None}

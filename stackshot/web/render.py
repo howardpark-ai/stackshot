@@ -22,6 +22,7 @@ from stackshot.model import work as _work   # an item's work lines, what is in m
 from stackshot.model import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
 from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
+from stackshot.waits import watchers as _watchers   # a relay or "drop it?" question may mark no option recommended (options_of)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
 from stackshot.web import itempage as _ip  # the item page's words on the item model: since, next lines
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
@@ -327,9 +328,13 @@ def parse_ask(text):
     return {k: v.strip() for k, v in m.groupdict().items()} if m else None
 # The options (the board shows them in a well-readable form for every item with choices):
 # metadata.options on an item that asks him to
-# pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended. The server validates
+# pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended (a relay or "drop it?" question the server writes itself marks none: only the owner knows whether the news came). The server validates
 # (service/wait_gates.py `_gate_options`); the renderer draws what options_of returns, so a hand-edited list that broke the shape draws nothing.
 OPTIONS_MIN, OPTIONS_MAX, OPTION_LABEL_MAX, OPTION_LINE_MAX = 2, 6, 40, 160
+def _watcher_ask(r):
+    """Is this item's question one the waits' watchers wrote (a relay or "drop it?" ask)? Those alone may carry no recommended option."""
+    m = r.get("metadata") or {}
+    return _watchers.asked_of(m) != ""
 def options_of(r, raw=False):
     """An item's options → [{"label", "line", "recommended"}], [] when it has none or they are misshaped. The labels are as the card shows them: with three or more options whose labels all open
     with their own place's letter, that letter is dropped (option_labels.strip_letters; the badge draws it). `raw=True` gives the labels as stored. Nothing is written."""
@@ -339,7 +344,8 @@ def options_of(r, raw=False):
     for o in v:
         if not isinstance(o, dict) or not str(o.get("label") or "").strip() or not str(o.get("line") or "").strip(): return []
         out.append({"label": str(o["label"]).strip(), "line": str(o["line"]).strip(), "recommended": o.get("recommended") is True})
-    if sum(o["recommended"] for o in out) != 1: return []
+    n = sum(o["recommended"] for o in out)
+    if n != 1 and not (n == 0 and _watcher_ask(r)): return []
     if not raw:
         for o, label in zip(out, _ol.strip_letters([o["label"] for o in out])): o["label"] = label
     return out
