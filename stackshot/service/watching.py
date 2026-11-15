@@ -167,7 +167,8 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
         if ask_him:
             asked = "dropit" if chased else "relay"
             ask = _watch.drop_ask(meta) if chased else _watch.relay_ask(meta)
-            opts = _watch.drop_options() if chased else _watch.relay_options()
+            today = dt.datetime.fromtimestamp(now, _hooks().zone()).date()      # the date buttons count from the owner's day
+            opts = _watch.drop_options(today) if chased else _watch.relay_options(today)
             _watch.remember(meta, asked, now)
             _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if (chased or kind == _wl.LIST) else f"{_watch.subject_of(meta)} is due: its ask-by day {_watch.relay_day(meta)} came", now)
             mover = OWNER
@@ -223,6 +224,7 @@ def watch_pass(now: float | None = None, wout: dict[str, list[tuple[str, dict[st
     now = time.time() if now is None else now
     out: dict[str, list[tuple[str, dict[str, Any], str]]] = {} if wout is None else wout
     moved: list[str] = []
+    watch_refresh_asks(now)      # an open relay or "drop it?" question put before the date buttons is rebuilt with them (idempotent)
     for gid, _p in _item_files():
         try:
             if WATCH_BACKOFF.get(gid, 0.0) > now:
@@ -444,6 +446,34 @@ def watch_floor(it: dict[str, Any]) -> float:
     except (TypeError, ValueError):
         set_at = 0.0
     return max(float(it.get("state_updated") or 0), set_at or float(it.get("updated") or 0))
+
+
+def watch_refresh_asks(now: float | None = None) -> list[str]:
+    """The repair behind the date buttons: an open item that sits on a relay or "drop it?" question put before the buttons carried the three dates gets its ask's options part and its buttons rebuilt
+    (`watchers.refreshed`). A question whose date buttons have gone stale (its earliest day has come) is rebuilt the same way, counted from today. Idempotent: a question whose date buttons are still ahead is left as it is, so a second run the same day writes nothing. A filing save (no clock moves, nobody told), like watch_stamp. It runs
+    from the watchers' pass, so the first tick after a release does it and a question that was open is drawn with the buttons from then on. → the gids rebuilt."""
+    now = time.time() if now is None else now
+    today = dt.datetime.fromtimestamp(now, _hooks().zone()).date()
+    done: list[str] = []
+    for gid, _p in _item_files():
+        try:
+            it = _load(gid)
+            if it.get("status") != "open" or _watch.refreshed(it.get("metadata") or {}, today) is None:      # a cheap read first; the item is read again under the lock
+                continue
+            with _writes.ITEM_LOCK:
+                it = _load(gid)
+                meta = dict(it.get("metadata") or {})
+                new = _watch.refreshed(meta, today) if it.get("status") == "open" else None
+                if new is None:
+                    continue
+                meta["ask"], meta["options"] = new
+                it["metadata"] = meta
+                _writes.save(gid, it)
+            done.append(gid)
+            print(f"watch: {gid} its {_watch.asked_of(meta)} question now carries date buttons counted from today", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one bad item never stops the pass
+            print(f"watch: {gid} question not refreshed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return done
 
 
 def watch_stamp(gid: str) -> None:

@@ -72,7 +72,7 @@ item(1, "[home] ship the thing", age=6 * D, needs=["decision"], ask=ASK, options
 item(2, "[home] run the check", age=3 * D, needs=["decision"], next="Oliver: run `ssh box sala status` and send me the output", owner="front")                                          # amber, a command
 item(3, "[home] a yes or no", age=1 * H, needs=["decision"], ask="Decide: use the cheaper plan? · Recommend: no · Stakes: low · By: Mon", next="Oliver: decide", owner="front")   # no colour, no options
 item(4, "[home] open the link", age=2.5 * D, needs=["decision"], next="Oliver: open https://example.invalid/portal/setup and finish the form", owner="front")                      # amber, a link
-item(5, "[home] has the party answered", age=30 * 60, needs=["decision"], ask="Decide: has Acme's reply arrived? · Options: arrived / not yet, ask again on <date> / drop",
+item(5, "[home] has the party answered", age=30 * 60, needs=["decision"], ask="Decide: has Acme's reply arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop",
      options=[{"label": "arrived", "line": "It came.", "recommended": False}, {"label": "not yet, ask again on <date>", "line": "Give the date in the box.", "recommended": True},
               {"label": "drop", "line": "No longer wanted.", "recommended": False}], then="team-back", next="team-back: read the reply", owner="front",
      woke={"what": "Acme's reply is due today", "to": "Oliver", "at": now - 30 * 60})                                                                                        # a relay come due

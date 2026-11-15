@@ -14,12 +14,12 @@ reading of the owner's answer to those asks, the date he gives. The server (serv
           first → alive, the post-wake mover, "the anchor stayed silent"
   event   the server is told of the fleet event the wait names (event_waits.py: a PR merged or released, a recycle, a fleet op's result, a job's run) → alive, the post-wake mover, with what
           happened; the backstop passes first → alive, the post-wake mover, "the event did not come". The stall pass does not run for it (a waiting item has no mover to nag)
-  relay   the ask-by day comes → alive with the owner as mover, a ready question: has <party>'s <event> arrived? arrived / not yet, ask again on <date> / drop
+  relay   the ask-by day comes → alive with the owner as mover, a ready question: has <party>'s <event> arrived? arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop
   list    several waits of any of the kinds above at once (waits/wait_list.py): each line is marked when it arrives, and the item comes back when every line has (`all`) or the first has (`any`) → alive,
           the post-wake mover, with what arrived and what did not; the backstop day passing first → the same (an open relay line then asks the owner, as a relay's ask-by day does). No chases on a list
 
   Chases (a relay or anchor wait): a follow-up an older item logged is only read (no call logs one now). With two on the item, the wait's next end (the ask-by day or the
-  backstop) brings the item to the owner as "drop it?" (drop / keep waiting until <date>) instead of the usual arrival. Reading taken: "after two chases with no reply"
+  backstop) brings the item to the owner as "drop it?" (drop / ask again in a week, two weeks or a month / keep waiting until <date>) instead of the usual arrival. Reading taken: "after two chases with no reply"
   is judged when the wait comes due, since only then has the last chase had its time to be answered.
 
 [model] pause = true holds every transition here (and the wake pass beside them); when it turns false the due ones fire in one pass, one message per recipient."""
@@ -44,6 +44,9 @@ NEEDS_DATE = "needdate"                    # what answer_effect says when "not y
 ASK_AGAIN = "Ask again on "                # the label of an ask-back button; the date follows ("Ask again on Tue Nov 17th")
 _ASK_HEAD = "Decide: "
 _OPT_MARK = " · Options: "
+WHEN_WORDS = "ask again in a week, two weeks or a month"      # how the ask names the three date buttons (date_options): their days are counted from the day the question is put, so the ask text stays one fixed line
+RELAY_TAIL = f"arrived / {WHEN_WORDS} / {NOT_YET} / drop"      # the options part of the relay ask, in the order of the buttons
+DROP_TAIL = f"drop / {WHEN_WORDS} / {KEEP}"      # the options part of the "drop it?" ask
 
 
 # ---------------------------------------------------------------------------------------------------------------- the switches
@@ -223,13 +226,13 @@ def subject_of(meta: dict[str, Any], clip: int = 110) -> str:
 
 
 def relay_ask(meta: dict[str, Any]) -> str:
-    """The relay question, fixed (the design doc): "Decide: has <party>'s <event> arrived? · Options: arrived / not yet, ask again on <date> / drop"."""
-    return f"{_ASK_HEAD}has {subject_of(meta)} arrived?{_OPT_MARK}arrived / not yet, ask again on <date> / drop"
+    """The relay question, fixed (the design doc): "Decide: has <party>'s <event> arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"."""
+    return f"{_ASK_HEAD}has {subject_of(meta)} arrived?{_OPT_MARK}{RELAY_TAIL}"
 
 
 def drop_ask(meta: dict[str, Any]) -> str:
-    """The question an item chased twice comes with: "Decide: drop it? … · Options: drop / keep waiting until <date>"."""
-    return (f"{_ASK_HEAD}drop it? {subject_of(meta, 80)} did not arrive after {len(chases_of(meta))} chases{_OPT_MARK}drop / keep waiting until <date>")
+    """The question an item chased twice comes with: "Decide: drop it? … · Options: drop / ask again in a week, two weeks or a month / keep waiting until <date>"."""
+    return (f"{_ASK_HEAD}drop it? {subject_of(meta, 80)} did not arrive after {len(chases_of(meta))} chases{_OPT_MARK}{DROP_TAIL}")
 
 
 def is_watcher_ask(ask: Any) -> bool:
@@ -238,17 +241,48 @@ def is_watcher_ask(ask: Any) -> bool:
     return t.startswith(_ASK_HEAD) and _OPT_MARK in t and " · Recommend: " not in t
 
 
-def relay_options() -> list[dict[str, Any]]:
-    """The relay question's buttons, in the shape of an option the owner's page offers (label, line, recommended)."""
+def date_options(today: dt.date) -> list[dict[str, Any]]:
+    """The three date buttons, counted from `today`: a week, two weeks, a month ("Ask again on Tue Nov 17th"). No option is marked recommended: only the owner knows whether the news came. The day is stored on the
+    button (`date`): a pick is read from it, never from the label (answer_effect)."""
+    dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
+    return [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": False, "date": d.isoformat()} for d in dates]
+
+
+def relay_options(today: dt.date) -> list[dict[str, Any]]:
+    """The relay question's buttons, in the shape of an option the owner's page offers (label, line, recommended): arrived, the three dates counted from `today` (date_options), the date typed in the box, drop.
+    None is marked recommended (the page draws no badge: options_of lets a watcher ask carry none)."""
     return [{"label": ARRIVED, "line": "It came: the item goes on to the session that takes it after the wait.", "recommended": False},
-            {"label": NOT_YET, "line": "Give the date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the item waits again and the question comes back then.", "recommended": True},
+            *date_options(today),
+            {"label": NOT_YET, "line": "Give another date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the item waits again and the question comes back then.", "recommended": False},
             {"label": DROP, "line": "It is no longer wanted: the item closes as not planned.", "recommended": False}]
 
 
-def drop_options() -> list[dict[str, Any]]:
-    """The "drop it?" question's buttons."""
-    return [{"label": DROP, "line": "It is no longer wanted: the item closes as not planned.", "recommended": True},
-            {"label": KEEP, "line": "Give the date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the wait goes on and the chases start again.", "recommended": False}]
+def drop_options(today: dt.date) -> list[dict[str, Any]]:
+    """The "drop it?" question's buttons: drop, the three dates counted from `today`, the date typed in the box. None is marked recommended."""
+    return [{"label": DROP, "line": "It is no longer wanted: the item closes as not planned.", "recommended": False},
+            *date_options(today),
+            {"label": KEEP, "line": "Give another date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the wait goes on and the chases start again.", "recommended": False}]
+
+
+def has_date_buttons(meta: dict[str, Any]) -> bool:
+    """Does the stored question already carry the date buttons (a button with a stored `date`)? The mark of the new shape: a question put before the date buttons existed has none."""
+    return any(isinstance(o, dict) and o.get("date") for o in meta.get("options") or [])
+
+
+def stale_date_buttons(meta: dict[str, Any], today: dt.date) -> bool:
+    """Do the stored date buttons reach no further than today (the earliest button's `date` is `today` or before)? A question that sat past its first button's day: a pick of it would find no day to wait until."""
+    days = [str(o["date"]) for o in meta.get("options") or [] if isinstance(o, dict) and o.get("date")]
+    return bool(days) and min(days) <= today.isoformat()
+
+
+def refreshed(meta: dict[str, Any], today: dt.date) -> tuple[str, list[dict[str, Any]]] | None:
+    """The stored relay or "drop it?" question of an open item, in today's shape: (ask, options), or None when it needs nothing (no watcher ask on it, or its date buttons are there and still ahead of `today`, so a second look the same day changes nothing).
+    A question put before the buttons is given them; one whose buttons are stale (its earliest day has come) has them counted again from `today`. The question's own head (what it asks about) is kept as stored; its options part and its buttons are rebuilt."""
+    asked = asked_of(meta)
+    if not asked or (has_date_buttons(meta) and not stale_date_buttons(meta, today)):
+        return None
+    head = str(meta.get("ask") or "").split(_OPT_MARK)[0]
+    return head + _OPT_MARK + (RELAY_TAIL if asked == "relay" else DROP_TAIL), (relay_options(today) if asked == "relay" else drop_options(today))
 
 
 def day_words(day: dt.date) -> str:
@@ -258,13 +292,11 @@ def day_words(day: dt.date) -> str:
 
 def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list[dict[str, Any]]]:
     """The question the board puts back when a date button came with a note that holds no date it can read: (ask, options), still the shape of a watcher ask (is_watcher_ask), so the item stays
-    on his move and his next pick is read as before. Three dates counted from `today` (a week, two weeks, a month) as buttons, then the first question's own buttons (arrived, "not yet, ask again on <date>", drop),
+    on his move and his next pick is read as before. The first question's own buttons again, which carry the three dates counted from `today` (a week, two weeks, a month),
     so nothing he could do is taken away and a date typed in the box has its button. The note is quoted short; it is already kept on the item as his comment."""
     clip = " ".join(str(note or "").split()).replace("\u00b7", "-")      # whitespace first (a line break or a no-break space too), then every middle dot: the ask's own separators must stay the only ones
     clip = clip if len(clip) <= 80 else clip[:79].rstrip() + "…"
-    dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
-    opts = [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": i == 0, "date": d.isoformat()} for i, d in enumerate(dates)]      # the day is stored on the button: a pick is read from it, never from the label
-    opts += [{**o, "recommended": False} for o in (relay_options() if asked_of(meta) == "relay" else drop_options())]      # the first question's own buttons stay: a date typed in the box still has its button
+    opts = (relay_options(today) if asked_of(meta) == "relay" else drop_options(today))      # the first question's own buttons: the three dates (date_options), the date typed in the box, arrived or drop
     kept = f"I kept your note (\u201c{clip}\u201d) but could not read a date from it." if clip else "I kept your answer but it holds no date I can use."
     w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
     what = subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})      # the wait's fields moved to watch.was when the item turned to him

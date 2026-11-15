@@ -131,7 +131,7 @@ fine = build(
     asking(24, ask("whether what we shipped is enough", "yes")),                              # "what" only later in a yes/no frame
     asking(25, ask("should we ship A or hold", "yes")),                                      # a "should" frame passes the read the write gates use
     item(26, state="doing", needs=["home-agent"], ask=OPEN, mover="home-agent", next="home-agent: build it"),      # needs no decision
-    item(27, state="your-call", needs=["decision"], mover="Oliver", ask="Decide: when does the vendor reply arrive? · Options: arrived / not yet, ask again on <date> / drop", next="Oliver: decide", watch={"asked": "relay"}),      # a watcher's own ask
+    item(27, state="your-call", needs=["decision"], mover="Oliver", ask="Decide: when does the vendor reply arrive? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop", next="Oliver: decide", watch={"asked": "relay"}),      # a watcher's own ask
     asking(28, OPEN, status="completed", outcome="done"),                                     # closed
     item(29, state="your-call", needs=["decision"], mover="Oliver", next="Oliver: decide"),    # no ask at all: ask-missing's
     asking(30, YESNO, description="- Which of the two options is better?\n- Option A or option B"),   # the same words in the description only

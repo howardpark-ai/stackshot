@@ -204,8 +204,8 @@ clear_then clear theirs, clear_wait the wait's four (wait_kind, wait_anchor, wai
 mover and the wait and keeps the goal. The wait ends by itself when its kind's event comes: a time at its wake; an
 item when the last `after` item closes; an anchor when the anchor watcher's notice for wait_anchor reaches the server,
 and any new notice at the anchor that reaches the server and passes the project's keeper wakes the item; an event when
-the server is told of it; a relay on its ask_by day, when it comes to {{OWNER}} as a question (arrived / not yet, ask
-again on a date / drop); a date beside it is its backstop. The item then turns alive with its mover. A moved
+the server is told of it; a relay on its ask_by day, when it comes to {{OWNER}} as a question (arrived / ask again in a week,
+two weeks or a month / not yet, ask again on a date / drop); a date beside it is its backstop. The item then turns alive with its mover. A moved
 ask_by or wake resets the backstop. Several waits at once are a list: waits (2 to 8 lines), wait_mode all | any, until as its backstop day; the item is
 back when every line has arrived (all) or the first has (any), at its until at the latest. Example:
 update(waits=[{"kind": "item", "after": "board#N"}, {"kind": "event", "event": "pr_merged <n>"}], wait_mode="any",

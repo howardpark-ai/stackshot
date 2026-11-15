@@ -14,7 +14,7 @@ data, no live store, no network, no server socket.
   5  the tool text: create and update say an open question lists options or is a yes/no, no longer say an open question gets Yes and No beside a box, and say the Recommend names the label
 
     uv run tests/open_question_ask_scenario.py        → exit 0 / 1"""
-import json, os, re, sys, pathlib, time, logging
+import json, os, re, sys, pathlib, time, logging, datetime as dt
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="openq-"); T = pathlib.Path(tmp)
@@ -188,13 +188,13 @@ check("3 update: …no note", "(note: the ask's Recommend" not in (out or ""), o
 
 # ================================================================ 4. the asks the server writes itself
 ev = {"wait_event": "countersigned NDA"}
-for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options()), ("the drop question", wk.drop_ask(ev), wk.drop_options())):
+for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options(dt.date(2026, 11, 16))), ("the drop question", wk.drop_ask(ev), wk.drop_options(dt.date(2026, 11, 16)))):
     m = {"needs": ["decision"], "ask": ask, "options": opts, "watch": {"asked": "relay" if "relay" in what else "dropit"}}
     check(f"4 watcher: {what} is no open question and its Recommend part is not judged", _dg._open_question(m) == "" and _dg._recommend_missing(m) == "", (ask, _dg._open_question(m)))
     passes(f"4 watcher: {what} passes the open-question gate and names its recommended label", lambda m=m: (_dg._gate_open_question(m), _dg._recommend_missing(m)))
     m2 = {**m, "options": None}
     passes(f"4 watcher: {what} without its options is still the watcher's own and passes the open-question gate", lambda m2=m2: _dg._gate_open_question(m2))
-wm = {"needs": ["decision"], "ask": "Decide: what has arrived? · Options: arrived / not yet, ask again on <date> / drop", "watch": {"asked": "relay"}}
+wm = {"needs": ["decision"], "ask": "Decide: what has arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop", "watch": {"asked": "relay"}}
 check("4 watcher: a watcher's own ask that happens to open with an interrogative word is read as the watcher's and not refused", _dg._open_question(wm) != "" and wk.asked_of(wm) == "relay", wm)
 passes("4 watcher: …the open-question gate lets it stand with no options", lambda: _dg._gate_open_question(wm))
 refused("4 watcher: …while the same words with no watcher mark on the item are refused", lambda: _dg._gate_open_question({k: v for k, v in wm.items() if k != "watch"}), *OQ[:3])
