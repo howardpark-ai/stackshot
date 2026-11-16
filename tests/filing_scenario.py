@@ -113,6 +113,25 @@ check("1b an item the owner moves: the opener that is `then` (or no `then` named
 daily, _p, _n = AC.field_findings(owned, {}, now, env(), ten_minute=True)
 check("1b the daily run agreed with the filing pass (ten_minute=True)", [f["id"] for f in daily if f["category"] == "stuck-elsewhere"] == ["board#9042"], daily)
 
+# ---- 1c. his step the server made from an ask is no wait: an ask ending "until Dec 6th" makes the line `Oliver: … until Dec 6th`
+OWN_LINE = "Oliver: which address the form gives as current while the family stays put until Dec 6th"
+ASK_U = "Decide: which address the form gives as current while the family stays put until Dec 6th · Recommend: the old one · Stakes: a form · By: no date"
+BID = lambda n: "board" + chr(35) + str(n)      # the id a finding shows
+own_n = f"alpha-main: apply Oliver's pick, then close\n{OWN_LINE}"
+steps_ = build(item(34, wrote=now - H, state="your-call", needs=["decision"], mover="Oliver", ask=ASK_U, next=own_n, owner_step=OWN_LINE, then="alpha-main"),      # the server's line, recorded
+               item(35, wrote=now - H, state="your-call", needs=["decision"], mover="Oliver", ask=ASK_U, next=own_n, then="alpha-main"),                          # the same words, no record: a line a session wrote
+               doing(36, 1, nxt="home-agent: waiting until 09:00 on the box"),                                                                                 # a mover's own wait line
+               item(37, wrote=now - H, state="your-call", needs=["decision"], mover="Oliver", ask=ASK_U, owner_step=OWN_LINE, then="alpha-main",
+                    next=f"{OWN_LINE}\nalpha-main: waiting until 09:00 on the box"))                                                                      # a mover's wait line after the server's (his line is the first hit without the fix)
+fs, fl = AC.filing_findings(steps_, {}, now, env())
+check("1c an ask ending 'until Dec 6th' makes his step, and the server-made line is no reads-as-wait finding", not any(f["id"] == BID(34) and f["category"] in ("reads-as-wait", "wait-end", "event-missing") for f in fs) and not any(f["id"] == BID(34) for f in fl), [f for f in fs if f["id"] == BID(34)])
+check("1c …the same words with no record (a line a session wrote) are read as any line is", any(f["id"] == BID(35) and f["category"] == "reads-as-wait" for f in fs), fs)
+check("1c …a mover's own 'waiting until 09:00' still reads as a wait", any(f["id"] == BID(36) and f["category"] == "reads-as-wait" and "waiting until 09:00" in f["detail"] for f in fs), fs)
+check("1c …beside the server's line a mover's wait line is the finding, and the finding names that line only",
+      [f["detail"] for f in fs if f["id"] == BID(37) and f["category"] == "reads-as-wait"] and "waiting until 09:00" in [f["detail"] for f in fs if f["id"] == BID(37) and f["category"] == "reads-as-wait"][0]
+      and "address" not in [f["detail"] for f in fs if f["id"] == BID(37) and f["category"] == "reads-as-wait"][0], [f for f in fs if f["id"] == BID(37)])
+check("1c wait_words: the recorded line is skipped, its words add no broad flag", AC.wait_words(steps_["a34"], None, now) == ([], []) and AC.wait_words(steps_["a35"], None, now)[0], (AC.wait_words(steps_["a34"], None, now), AC.wait_words(steps_["a35"], None, now)))
+
 # ---- 2. the words of next
 alive = lambda nxt: item(20, wrote=now - H, state="doing", needs=["home-agent"], next=nxt)[1]
 ww = lambda it: AC.wait_words(it, None, now)

@@ -133,6 +133,10 @@ PRECISE = ["home-front: wait for the PR to merge", "home-front: waiting on Robin
 check("next wait: every line of the precise list is caught", all(mg.wait_lines(x)[0] for x in PRECISE), [x for x in PRECISE if not mg.wait_lines(x)[0]])
 NEG = ["home-front: no waiting for a slot", "home-front: not blocked on anything", "home-front: never wait for it", "home-front: there is no need to wait for the build", "home-front: we are not waiting on Robin"]
 check("next wait: a negation passes", not any(mg.wait_lines(x)[0] for x in NEG), [x for x in NEG if mg.wait_lines(x)[0]])
+OWN_ = "Oliver: which address the form gives as current while the family stays put until Dec 6th"
+check("next wait: the line the server made for the owner from an ask (own_step) is not read, however it ends; the same words with no record, a session's line, and a mover's wait line beside it are",
+      mg.wait_lines(OWN_, OWN_) == ([], []) and mg.wait_lines(f"- {OWN_}", OWN_)[0] == [] and mg.wait_lines(OWN_)[0] and mg.wait_lines(OWN_, "Oliver: another step")[0]
+      and [h[0] for h in mg.wait_lines(f"home-front: waiting until 09:00\n{OWN_}", OWN_)[0]] == ["home-front: waiting until 09:00"], (mg.wait_lines(OWN_, OWN_), mg.wait_lines(OWN_)))
 h, b = mg.wait_lines("home-front: run it when ready\nhome-front: merge after the review\nhome-front: once done, ship\nhome-front: poll until it passes")
 check("next wait: the broad list (when, once, after, until) is not a hit, and is named", not h and b == ["when", "after", "once", "until"], (h, b))
 check("next wait: a plain action is neither; a code span and a server note are not read", mg.wait_lines("home-front: ship the fix\n(server: waiting for a recycle)\nhome-front: run `until true; do :; done`") == ([], []), mg.wait_lines("home-front: ship the fix\n(server: waiting for a recycle)\nhome-front: run `until true; do :; done`"))
