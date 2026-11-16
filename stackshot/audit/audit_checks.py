@@ -369,7 +369,8 @@ def wait_words(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any]
         return [], []
     if mod.state != _model.ALIVE:
         return [], []
-    hits, broad = _mg.wait_lines((item.get("metadata") or {}).get("next"))
+    meta_ = item.get("metadata") or {}
+    hits, broad = _mg.wait_lines(meta_.get("next"), meta_.get("owner_step"))
     return hits, ([] if hits else broad)
 
 
@@ -506,7 +507,7 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
         if spoken:
             hits = [h for h in hits if _line_key(h[0]) not in spoken]       # the lines the rule words (or handled: fixed by the server, sent back by the mover): a second message for them would repeat it
             rest = "\n".join(ln for ln in str(meta.get("next") or "").splitlines() if _line_key(ln) not in spoken)
-            broad = [] if hits else _mg.wait_lines(rest)[1]                 # the broad words of the other lines only; a line of another kind that waits still gets its own reads-as-wait finding
+            broad = [] if hits else _mg.wait_lines(rest, meta.get("owner_step"))[1]                 # the broad words of the other lines only; a line of another kind that waits still gets its own reads-as-wait finding
         for g in [g for g in wgaps if g.kind == _we.EVENT]:
             add(gid, meta, mover, "event-missing", g.evidence, to=_cfg.audit_builder(), fix=_we.event_fix(g, mover))
             break

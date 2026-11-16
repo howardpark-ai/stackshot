@@ -208,14 +208,19 @@ def _unaside(plain: str) -> str:
     return plain
 
 
-def wait_lines(text: Any) -> tuple[list[tuple[str, str]], list[str]]:
+def wait_lines(text: Any, own_step: Any = "") -> tuple[list[tuple[str, str]], list[str]]:
     """What a next text says about waiting: ([(the line, the precise pattern it matched)], the broad words found in lines the precise list did not catch). A negation before the
-    match ("no waiting for a slot", "not blocked on") passes it; a code span or a link is not read. Lines the server appends in parentheses are not read."""
+    match ("no waiting for a slot", "not blocked on") passes it; a code span or a link is not read. Lines the server appends in parentheses are not read. `own_step` is the item's
+    `metadata.owner_step`, the line the server made from the ask or the step for the owner (owner_steps): that line is the owner's step on a question put to him, never a wait a mover
+    parks, so it is not read ("Decide: which address to give until Dec 6th" makes the line `<owner>: which address to give until Dec 6th`). A `<owner>:` line a session wrote is read as any other."""
     hits: list[tuple[str, str]] = []
     broad: list[str] = []
+    from stackshot.model import owner_steps as _os      # noqa: PLC0415  (owner_steps reaches this module through nextlines)
     for raw in _FENCE_RX.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), str(text or "")).splitlines():      # a fenced block is code, not a line of next
         line = clean(raw)
         if not line or line.startswith("(") or _MARK_RX.sub("", line).startswith("("):
+            continue
+        if own_step and _os.same_line(line, own_step):
             continue
         plain = _plain(line)
         hit = ""
@@ -947,7 +952,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                                        + ("" if creating else f"; add supplies=<one line: what {'their' if many else 'its'} output gives this item> to say what it takes from {it_}") + "). "
                                        f"When it only needs a look on a day and not another item's close, until=YYYY-MM-DD makes the item wait until then (outside a hand-off the date parks the item, and the board lists it as waiting). " + plain_)
         if mod is not None and mod.state == _model.ALIVE:
-            hits, broad = wait_lines(nxt)
+            hits, broad = wait_lines(nxt, m.get("owner_step"))
             hits = [h for h in hits if h[0] not in defer_lines]      # a line the new guard refuses is not refused twice
             if hits:
                 line, why = hits[0]

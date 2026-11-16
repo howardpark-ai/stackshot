@@ -374,6 +374,54 @@ bf_meta["steps"][0]["text"] = f"{H1} → Ship"
 add2_, have2_ = NB.audit(bf_meta, "open", OWNER)
 check("next_backfill finds a done step of his stored with his name twice or once, and adds none", add_ == [] and add2_ == [] and len(have_) == 1 and len(have2_) == 1 and have_[0]["why"].startswith("ticked by"), (add_, have_, add2_, have2_))
 
+# ---- 11. his step made from an ask is never read as a wait: an ask that ends "until Dec 6th" makes the line `Oliver: … until Dec 6th`, and no later write to the item is refused for it
+from stackshot.core import config as _cfg
+_model_cfg0 = dict(_cfg.CFG.get("model") or {}); _cfg.CFG["model"] = {**_model_cfg0, "switchover": True}      # the switchover judges every write whole, stored lines included: the live setting this section is about
+try:
+    ASK_U = "Decide: which address the form gives as current while the family stays put until Dec 6th · Recommend: the old one · Stakes: a form · By: no date"
+    U1 = "Oliver: which address the form gives as current while the family stays put until Dec 6th"
+    item(80)
+    upd(80, needs="decision", ask=ASK_U, options=OPTS)
+    check("11 an ask whose Decide part ends 'until Dec 6th' makes his step, recorded as the server's line", his(80) == [OPEN(U1)] and mt(80).get("owner_step") == U1, (st(80), mt(80)))
+    try:
+        upd(80, description="- Goal: A thing, finished when it works\n- one more fact")
+        check("11 …a write that touches neither next nor the ask passes: the server-made line is not judged as a wait", his(80) == [OPEN(U1)] and "one more fact" in rd(80)["description"], st(80))
+    except ToolError as e_:
+        check("11 …a write that touches neither next nor the ask passes: the server-made line is not judged as a wait", False, str(e_))
+    try:
+        upd(80, ask=ASK2, options=OPTS)
+        check("11 …a reworded ask replaces the server-made line", [s_ for s_, _ in his(80)] == ["dropped", "open"] and his(80)[0][1] == U1 and his(80)[1][1] == H2 and mt(80).get("owner_step") == H2, st(80))
+    except ToolError as e_:
+        check("11 …a reworded ask replaces the server-made line", False, str(e_))
+    try:
+        upd(80, ask=ASK_U, options=OPTS, next="home-agent: build it, then test it")
+        check("11 …an ask that ends 'until Dec 6th' set again beside a session's next write passes", his(80)[-1] == OPEN(U1) and "home-agent: build it, then test it" in mt(80)["next"], st(80))
+    except ToolError as e_:
+        check("11 …an ask that ends 'until Dec 6th' set again beside a session's next write passes", False, str(e_))
+    # an item already stored in that state (his line from before the fix, the mark recorded) takes writes again
+    item(81, needs=["decision"], ask=ASK_U, options=OPTS, next=f"home-agent: build it\n{U1}", owner_step=U1,
+         steps=[{"text": "home-agent: build it", "status": "open", "by": "home-agent", "at": now - 7200}, {"text": U1, "status": "open", "by": _core_instance.NAME, "at": now - 7200}])
+    try:
+        upd(81, ask=ASK2, options=OPTS)
+        check("11 an item stored with that line takes a plain ask reword, which replaces the line", his(81)[-1] == OPEN(H2) and mt(81).get("owner_step") == H2, st(81))
+    except ToolError as e_:
+        check("11 an item stored with that line takes a plain ask reword, which replaces the line", False, str(e_))
+    # a session's own wait line is still a wait, beside his
+    item(82, needs=["home-agent"], next="home-agent: waiting until 09:00 on the box")
+    refused("11 a new session line 'x: waiting until 09:00' is still refused as a wait", lambda: upd(82, next="home-agent: waiting until 09:00 on the box"), "reads as a wait", i=82)
+    item(83, needs=["decision"], ask=ASK_U, options=OPTS, next=f"{U1}\nhome-agent: waiting until 09:00 on the box", owner_step=U1,
+         steps=[{"text": U1, "status": "open", "by": _core_instance.NAME, "at": now - 7200}, {"text": "home-agent: waiting until 09:00 on the box", "status": "open", "by": "home-agent", "at": now - 7200}])      # his line first: the first hit is his without the fix
+    try:
+        upd(83, description="- Goal: A thing, finished when it works\n- more"); check("11 a stored session wait line after his server-made line is still judged", False)
+    except ToolError as e_:
+        check("11 a stored session wait line after his server-made line is still judged, and the refusal names that line and none of his", "waiting until 09:00" in str(e_) and "stay put" not in str(e_) and "address" not in str(e_), str(e_))
+        check("11 …and the refusal leaves the item as it was", rd(83)["metadata"]["next"].endswith("waiting until 09:00 on the box"), rd(83)["metadata"]["next"])
+    # a `Oliver:` line a session wrote is no server line: the mark does not cover it
+    item(84, needs=["home-agent"], next="home-agent: build it\nOliver: wait until Dec 6th for the form")
+    refused("11 a `Oliver:` line a session wrote (no mark) is judged as any session's line", lambda: upd(84, description="- Goal: A thing, finished when it works\n- more"), "reads as a wait", i=84)
+finally:
+    _cfg.CFG["model"] = _model_cfg0
+
 # ---- 9. the pure helpers
 check("decide_of: the Decide part; a leading `Decide:` stripped; a watcher's ask cut at its first ` · `; plain words kept",
       HS.decide_of(ASK) == D1 and HS.decide_of("Decide:   x   · Recommend: y") == "x" and HS.decide_of("is it there yet? · wake Fri") == "is it there yet?" and HS.decide_of("") == "", HS.decide_of(ASK))

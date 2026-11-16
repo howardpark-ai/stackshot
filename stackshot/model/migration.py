@@ -583,7 +583,7 @@ def _plan_alive(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model
     set_: dict[str, Any] = {}
     drop: list[str] = []
     notes: list[str] = []
-    hits, _broad = _mg.wait_lines(m.get("next"))
+    hits, _broad = _mg.wait_lines(m.get("next"), m.get("owner_step"))
     if hits:
         read = env.reads.get(gid)
         if read is None:
