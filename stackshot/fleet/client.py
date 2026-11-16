@@ -138,7 +138,8 @@ runs on every box.
                                 Same gate as post project-agent-rename: --sender must be a label in the server's [project_agent] form_senders
                                 (sala's: sala-retire) AND the token a machine in form_machines, else 403 (no default label: pass it).
                                 Prints the server's JSON, exit 0: {"project", "key", "result", "agent", "note", ...} with
-                                200 "line removed" = the agent was on the project's agents map and is off it, the page written from the record ·
+                                200 "line removed" = the agent was on the project's agents map and is off it, the page written from the record (or the agent is the
+                                project's own session, named by its page's display-name, on a one-session project with no agents map: its agents map is now empty) ·
                                 200 "dropped" = the agent was only pending here: the pending entry is removed · 200 "not listed" (with a "reason") = the
                                 agent is on the project's map nowhere and not pending: nothing was changed (a repeat call after a lost reply is this).
                                 The answer carries "mirror" {state, key, note}: "failed" means the page was not written (the record is right; the project's

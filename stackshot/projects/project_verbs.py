@@ -973,7 +973,9 @@ def agent_mandate(project: str, name: str, mandate: str, *, by: str = "", io: An
 
 def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
     """Take an agent off the project's agents map (and any pending entry of the name). The page's block follows (mirror), with a timeline line when the page changed. The map stays present when it
-    is emptied (the project was staffed once). A name that is not listed changes nothing. → {project, key, changed, entry, mirror, result, name, front, left}, with `result` "line removed", "dropped" (it was only a pending entry) or "not listed"."""
+    is emptied (the project was staffed once). A name that is not listed changes nothing, with one exception: the project's own name (the page's `display-name:`) on a project that has no agents map at all
+    is a one-session project's session leaving, so the record gets an empty agents map (the project was staffed once, by that session) and the answer is "line removed" with `own` true.
+    → {project, key, changed, entry, mirror, result, name, front, left, own}, with `result` "line removed", "dropped" (it was only a pending entry) or "not listed"."""
     def work(ctx: Ctx) -> dict:
         pid = ctx.pid_of(project)
         if not pid:
@@ -988,18 +990,22 @@ def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: 
         if have is None:
             if gone:
                 return {"pid": pid, "result": "dropped", "name": gone[0][0], "front": gone[0][1], "left": len(ag)}
-            return {"pid": pid, "result": "not listed", "name": name, "front": True, "left": len(ag)}
+            if "agents" not in e and not ag and str(e.get("name") or "").casefold() == name.casefold():
+                e["agents"] = {}            # a one-session project: its session is its agent, so its leaving empties the set, as the last agent of a staffed project does
+                return {"pid": pid, "result": "line removed", "name": e["name"], "front": True, "left": 0, "own": True}
+            return {"pid": pid, "result": "not listed", "name": name, "front": True, "left": len(ag), "own": False}
         front = bool(ag[have].get("front"))
         del ag[have]
         e["agents"] = ag
         _former_agent(e, have, True)
-        return {"pid": pid, "result": "line removed", "name": have, "front": front, "left": len(ag)}
+        return {"pid": pid, "result": "line removed", "name": have, "front": front, "left": len(ag), "own": False}
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
     removed = out["result"] == "line removed"
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "name", "front", "left")}, by=by, drop=(out["name"],),
-                   timeline=f"{out['name']} retired; its line removed from the agents map" if removed else "", tag=f"retire-{out['name']}")
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "name", "front", "left", "own") if k in out}, by=by, drop=(out["name"],),
+                   timeline=(f"{out['name']} retired; the project's own session, so its agents map is now empty" if out.get("own") else f"{out['name']} retired; its line removed from the agents map") if removed else "",
+                   tag=f"retire-{out['name']}")
 
 
 def agent_rename(project: str, old: str, new: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
@@ -1503,7 +1509,8 @@ def retire_answer(rec: dict[str, Any], key: str, where: str, res: dict[str, Any]
         return 200, {"project": rec["id"], "key": key, "result": "dropped", "agent": res["name"], "page_owed": False, "mirror": m,
                      "note": f"{res['name']} was only pending for {where}: dropped from the record, so no page update is owed for it.", **extra}
     return 200, {"project": rec["id"], "key": key, "result": "line removed", "agent": res["name"], "front": res["front"], "page_owed": False, "mirror": m,
-                 "note": f"Took {res['name']} off {where}'s agents map in the project record" + (f"; the page {key} follows from the record, with a timeline line." if key else " (the project has no page).") + tail,
+                 "note": (f"{res['name']} is the project's own session and {where} had no agents map: its agents map in the project record is now empty" if res.get("own") else f"Took {res['name']} off {where}'s agents map in the project record")
+                         + (f"; the page {key} follows from the record, with a timeline line." if key else " (the project has no page).") + tail,
                  **extra}
 
 
