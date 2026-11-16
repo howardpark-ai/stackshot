@@ -29,6 +29,8 @@ no command that can leave a child behind holds a lock descriptor.
 
 The session pick (section 16) and the report's destination (report_to).
 
+The Codex review trial (section 18): for a PR still open, `salamander codex-review <repo> <pr>` is started in a user unit of its own (detached with setsid when systemd-run fails) before the wait for the checks and never waited for, with the SALA_ variables set in the release's environment passed on; a merged or closed PR, a dry run, salamander missing or the review switched off (SALA_CODEX_REVIEW off, false, no or 0 in any case, [release] codex_review) start none, and a review that fails or hangs changes neither the release's result nor its duration.
+
     tests/run-suite release        → exit 0 / 1  (the release queue and the CI-run poller are release_queue_scenario.py: tests/run-suite release_queue)"""
 import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threading, time
 import _scratch
@@ -1300,6 +1302,82 @@ for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), {S_, H_}
     rc, got, out = plan(*files)
     units = got[0].split()[1:] if got and got[0] != "restarts: none" else []
     check(f"deploy.sh plan: {what} restarts exactly {sorted(want) or 'nothing'}, the server first", rc == 0 and len(got) == 1 and set(units) == want and len(units) == len(want) and (not units or S_ not in units or units[0] == S_), (rc, got, out[-300:]))
+
+# ---- 18. the Codex review trial: `salamander codex-review <repo> <pr>` is started, in a user unit of its own, for a PR that is still open, and nothing about the release depends on it
+CODEX_LINE = f"codex-review {R} 23"
+def outcome(s): return str((s["rc"], s["msgs"], s["sleeps"], s["deploys"], s["order"], s["released"], s["lastgood"])).replace(str(s["dir"]), "@DIR")   # what a release is, apart from its log: none of it may move with the review (a scenario's own folder is in its messages)
+def codex_wait(s, name, secs=20):   # the review stub is detached: wait for the file it writes last
+    end = time.monotonic() + secs
+    while time.monotonic() < end and not (s["dir"] / name).exists(): time.sleep(0.05)
+    return (s["dir"] / name).exists()
+def own_session(s):   # the review's process: a session leader of its own, no standard input, and open above fd 2 only its own script and its log (no lock, no pipe of the release, the log's tee included)
+    return (len(s["codex_sid"]) == 2 and s["codex_sid"][0] == s["codex_sid"][1] and s["codex_in"] == "/dev/null"
+            and all(t.endswith(("/bin/salamander", "codex-review-23.log")) for t in (x.split("=", 1)[1] for x in s["codex_fds"]) if t))
+base = scenario("codex-base", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": "off"})
+check("codex review off by SALA_CODEX_REVIEW=off: not started, no systemd-run, one log line says why, the release is as ever",
+      base["rc"] == 0 and base["codex"] == [] and base["sysrun"] == [] and "codex review of PR #23 not started: SALA_CODEX_REVIEW=off" in base["log"] and base["deployed"], (base["rc"], base["codex"], base["log"]))
+s = scenario("codex-open", merge="ok", checks="pending,pass")
+lines = s["log"].splitlines()
+at = next((i for i, l in enumerate(lines) if "codex review of PR #23 started" in l), -1)
+check("an open PR: `salamander codex-review <repo> <pr>` is started once, with the repo and the PR number, and the log says so, naming the unit and the output file",
+      s["rc"] == 0 and s["codex"] == [CODEX_LINE] and at > 0 and re.search(r"started in its own unit salamander-codex-review-23-\d+ \(output \S+/releases/codex-review-23\.log\); the release does not wait for it", lines[at]), (s["rc"], s["codex"], s["log"]))
+check("...after the line that names the PR and before the wait for its checks, so the review runs while the checks are waited for",
+      "PR #23:" in lines[at - 1] and next((i for i, l in enumerate(lines) if l.endswith(" checks pass")), -1) > at, lines[:6])
+check("...it is started in a transient user unit of its own (systemd-run --user --quiet --collect --unit salamander-codex-review-<pr>-<epoch>), its output and errors appended to the review's log, and the command is salamander's by its full path",
+      len(s["sysrun"]) == 1 and re.fullmatch(r"--user --quiet --collect --unit salamander-codex-review-23-\d+ -p StandardOutput=append:\S+/releases/codex-review-23\.log -p StandardError=append:\S+/releases/codex-review-23\.log "
+                                             rf"(--setenv=\S+ )+{re.escape(str(s['dir']))}/bin/salamander codex-review {re.escape(R)} 23", s["sysrun"][0]), s["sysrun"])
+check("...which has the PATH of the release and none of the SALA_ variables that are not set there", " --setenv=PATH=" in s["sysrun"][0] and "SALA_" not in s["sysrun"][0] and not any(l.startswith("SALA_") for l in s["codex_env"]) and any(l.startswith("PATH=") for l in s["codex_env"]), (s["sysrun"], s["codex_env"]))
+check("...a session of its own, no standard input, no lock and no pipe of the release", own_session(s), (s["codex_sid"], s["codex_in"], s["codex_fds"]))
+check("...and the release itself is the release of a PR with no review: same exit status, messages, waits, deploys, order and records",
+      outcome(s) == outcome(base), (outcome(s), outcome(base)))
+s = scenario("codex-env", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": "on", "SALA_CODEX_TIMEOUT": "77", "SALA_CODEX_BIN": "codex-x", "SALA_CONFIG": "/example/salamander.cfg", "XDG_STATE_HOME": "/example/state"})
+check("the SALA_CODEX_* variables (SALA_CODEX_REVIEW included), SALA_CONFIG and XDG_STATE_HOME that are set in the release's environment are passed to the unit with --setenv, and reach the review",
+      s["rc"] == 0 and len(s["sysrun"]) == 1 and all(f" --setenv={kv} " in s["sysrun"][0] for kv in ("SALA_CODEX_REVIEW=on", "SALA_CODEX_TIMEOUT=77", "SALA_CODEX_BIN=codex-x", "SALA_CONFIG=/example/salamander.cfg", "XDG_STATE_HOME=/example/state"))
+      and "SALA_CODEX_HOME" not in s["sysrun"][0] and all(kv in s["codex_env"] for kv in ("SALA_CODEX_REVIEW=on", "SALA_CODEX_TIMEOUT=77", "SALA_CODEX_BIN=codex-x", "SALA_CONFIG=/example/salamander.cfg", "XDG_STATE_HOME=/example/state")), (s["sysrun"], s["codex_env"]))
+for word in ("off", "OFF", "Off", "false", "FALSE", "False", "no", "NO", "0"):
+    s = scenario(f"codex-off-{word}", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": word})
+    check(f"SALA_CODEX_REVIEW={word} in the release's environment: not started, no unit, one log line says why, the release is the same as the one with the review off",
+          s["codex"] == [] and s["sysrun"] == [] and f"codex review of PR #23 not started: SALA_CODEX_REVIEW={word}\n" in s["log"] and outcome(s) == outcome(base), (s["codex"], s["sysrun"], s["log"]))
+for word in ("on", "yes", "1"):
+    s = scenario(f"codex-on-{word}", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": word})
+    check(f"SALA_CODEX_REVIEW={word} is not an off word: the review is started, and the unit is given the value", s["codex"] == [CODEX_LINE] and len(s["sysrun"]) == 1 and f" --setenv=SALA_CODEX_REVIEW={word} " in s["sysrun"][0], (s["codex"], s["sysrun"]))
+s = scenario("codex-nounit", merge="ok", checks="pending,pass", sysrun="fail")
+check("no user manager (systemd-run fails): the review is started detached instead (setsid nohup), the log says which way, and the release is the same",
+      s["rc"] == 0 and len(s["sysrun"]) == 1 and s["codex"] == [CODEX_LINE] and re.search(r"codex review of PR #23 started detached, no user unit \(systemd-run failed; output \S+/releases/codex-review-23\.log\); the release does not wait for it", s["log"])
+      and outcome(s) == outcome(base), (s["rc"], s["sysrun"], s["codex"], s["log"]))
+check("...a session of its own there too, no standard input, no lock and no pipe of the release", own_session(s), (s["codex_sid"], s["codex_in"], s["codex_fds"]))
+s = scenario("codex-merged", viewstate="MERGED")
+check("a PR already merged (a rerun): not started, and no line about it: the step is only for an open PR", s["rc"] == 0 and s["codex"] == [] and s["sysrun"] == [] and "codex review" not in s["log"], (s["codex"], s["log"]))
+s = scenario("codex-closed", viewstate="CLOSED")
+check("a PR that is closed: the release fails \"pr state\" as before and the review is not started", s["rc"] == 1 and s["codex"] == [] and s["sysrun"] == [] and "codex review" not in s["log"], (s["codex"], s["msg"]))
+s = scenario("codex-no-salamander", merge="ok", checks="pending,pass", nosalamander=True)
+check("salamander not on PATH: skipped, one log line says why, and the release is the same as the one with the review off",
+      s["codex"] == [] and s["sysrun"] == [] and "codex review of PR #23 not started: salamander is not on PATH" in s["log"] and outcome(s) == outcome(base), (s["codex"], s["log"], outcome(s), outcome(base)))
+s = scenario("codex-config-off", merge="ok", checks="pending,pass", codex_cfg="off")
+check("[release] codex_review = false: skipped with a line that names the key; the release is the same", s["codex"] == [] and s["sysrun"] == [] and "codex review of PR #23 not started: [release] codex_review is off" in s["log"] and outcome(s) == outcome(base), (s["codex"], s["log"]))
+for cfg, what in (("missing", "a config.py that predates the key"), ("crash", "a config.py that does not run")):
+    s = scenario(f"codex-config-{cfg}", merge="ok", checks="pending,pass", codex_cfg=cfg)
+    check(f"{what} reads as on: the review is started and the release is the same", s["rc"] == 0 and s["codex"] == [CODEX_LINE] and outcome(s) == outcome(base), (s["rc"], s["codex"], s["log"]))
+s = scenario("codex-off-env-wins", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": "off"}, codex_cfg="crash")
+check("SALA_CODEX_REVIEW=off is decided before the config is read", s["codex"] == [] and "SALA_CODEX_REVIEW=off" in s["log"], (s["codex"], s["log"]))
+for how, kw in (("its own unit", {}), ("no unit", {"sysrun": "fail"})):
+    s = scenario(f"codex-fail-{how[:2]}", merge="ok", checks="pending,pass", codex="fail", **kw)
+    check(f"a review that errors out (output on both streams, exit 7), started in {how}: the release has the same result as without it, and the error stays in the review's file",
+          s["codex"] == [CODEX_LINE] and outcome(s) == outcome(base) and "cannot start the review" in s["codex_out"] and "cannot start the review" not in s["out"], (s["rc"], s["codex"], s["codex_out"], s["out"][:300]))
+    s = scenario(f"codex-hang-{how[:2]}", merge="ok", checks="pending,pass", codex="hang", **kw)
+    hung_at_end = (s["codex_hung"], s["codex_done"])
+    (s["dir"] / "codex.release").write_text("")
+    check(f"a review that hangs, started in {how}: the release ends with the same result, long before the review could (it was still running when the release returned), and its output pipe was not held",
+          s["codex"] == [CODEX_LINE] and hung_at_end == (True, False) and outcome(s) == outcome(base) and s["secs"] < 30, (s["codex"], hung_at_end, s["secs"], outcome(s)))
+    check("...and when it is let go it ends by itself (nothing of it was left waiting on the release)", codex_wait(s, "codex.done"), os.listdir(s["dir"]))
+s = scenario("codex-hang-red", merge="ok", checks="fail", codex="hang")
+(s["dir"] / "codex.release").write_text("")
+check("a release that fails (a red check) while a review hangs fails the same way as one with the review off",
+      s["codex"] == [CODEX_LINE] and s["rc"] == 1 and "FAILED at checks" in s["msg"] and s["secs"] < 30, (s["rc"], s["msg"], s["secs"]))
+s = scenario("codex-pick", raw=["--pick", "23"], pickfiles="server.py")
+check("--pick (a dry run) starts no review", s["rc"] == 0 and s["codex"] == [] and s["sysrun"] == [], s["codex"])
+s = scenario("codex-pick-files", raw=["--pick-files", "server.py"])
+check("--pick-files (a dry run) starts no review", s["rc"] == 0 and s["codex"] == [] and s["sysrun"] == [], s["codex"])
 
 long = [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 check(f"no scenario polls more than {MAX_POLLS} times (one that waits main's run out to the 3 h cap: pass RELEASE_CAP_MAIN, as most do)", not long, long)

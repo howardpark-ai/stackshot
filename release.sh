@@ -47,7 +47,14 @@
 #   ./release.sh queue --resume   after a pause, once main is fixed: the queue goes on (waiting PRs start up to the cap, and a queued release that was started but is no longer running starts again)
 #   ./release.sh --run <pr> [--recycle | --no-recycle]
 #                                 the steps themselves (what the unit runs):
-#                                 1. the PR is open and mergeable; 2. its checks pass (waits up to 50 min for a pending or queued one: the CI runners take one job at a time);
+#                                 1. the PR is open and mergeable;
+#                                 1a. THE CODEX REVIEW (a two-week trial, codex_review_start): for a PR that is still open (a rerun on a merged PR skips it), right before the wait for the checks, `salamander codex-review <owner/repo> <pr>` is started in a
+#                                 transient user unit of its own (systemd-run, salamander-codex-review-<pr>-<epoch>, its output appended to <state>/releases/codex-review-<pr>.log), so it outlives this release; with no user manager it is started
+#                                 detached with setsid nohup instead. It is never waited for; it has a model other than ours review the PR read-only and post the result on it as a comment. It cannot change this release's result or timing: the
+#                                 call's own failure, a hang or a non-zero exit are nobody's here, and the log gets one line saying how it was started or why not (SALA_CODEX_REVIEW off, false, no or 0 in this release's environment, [release]
+#                                 codex_review = false, salamander not on PATH). The unit gets PATH, XDG_STATE_HOME, SALA_CONFIG, SALA_CODEX_REVIEW and the other SALA_CODEX_* variables that are set in this release's environment. A group release
+#                                 (THE TWO MERGE QUEUES, run_group) does not start it;
+#                                 2. its checks pass (waits up to 50 min for a pending or queued one: the CI runners take one job at a time);
 #                                 2a. A CONFLICT THAT IS ONLY THE GENERATED TOOL-TEXT SNAPSHOT is mended instead of failing (regen_snapshot, tools/snapshot_regen.py): two PRs that both change tool text
 #                                 conflict on tests/tool_text.snapshot.json and on nothing else, and the by-hand fix is always the same. When the first look at the PR says CONFLICTING, or GitHub removed the PR
 #                                 from the merge queue and the PR conflicts with main now, this fetches main and the PR head (git only: no GitHub call), merges main into the head in a temporary worktree of its own
@@ -254,6 +261,39 @@ released() {  # $1 = a PR, $2 = its merge commit: main's full run passed on it a
     local out
     if out="$(python3 stackshot/fleet/client.py released --pr "https://github.com/$REPO/pull/$1" --sha "$2" 2>&1 9>&- 8>&- 7>&- 6>&-)"; then say "items of PR #$1: $(echo "$out" | sed 's/^stackshot: //' | paste -sd ';' -)"
     else say "the items of PR #$1 were not settled: $(echo "$out" | tail -1 | sed 's/^stackshot: //')"; fi
+    return 0
+}
+codex_review_start() {  # $1 = a PR that was just read as open: start `salamander codex-review <repo> <pr>` (a read-only review by another model, posted on the PR as a comment) and say in one log line how it was started or why not.
+                        # A trial that must never touch the release: nothing waits for it, its output goes to <state>/releases/codex-review-<pr>.log (never into this release's), and every way of failing here (a missing tool, an unwritable log,
+                        # a spawn that errors or hangs: the systemd-run call is cut at 20 s) is swallowed, so this function returns 0 whatever happens. It gets a transient user unit of its own, because this release runs in one and systemd
+                        # ends a unit's whole cgroup when its main process exits, which would cut a review that outlives the release; the unit has none of the release's environment but what is passed with --setenv. With no user manager
+                        # (systemd-run fails) it is started with setsid nohup instead, in this unit's cgroup, holding none of the locks (fds 4 to 9) nor the pipe to the log's tee (fd 3 where bash puts it). Off by SALA_CODEX_REVIEW (off,
+                        # false, no or 0, any case: the words [release] codex_review takes) in this release's environment, or [release] codex_review = false; also skipped when salamander is not on PATH
+    local pr="$1" why="" cfg="" sal="" v="" unit="" crlog="$LOGDIR/codex-review-$1.log"; local -a senv=()
+    case "${SALA_CODEX_REVIEW:-}" in
+        [Oo][Ff][Ff]|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|0) why="SALA_CODEX_REVIEW=$SALA_CODEX_REVIEW" ;;
+    esac
+    if [ -z "$why" ]; then
+        sal="$(command -v salamander 2>/dev/null)" || sal=""
+        if [ -z "$sal" ]; then why="salamander is not on PATH"
+        else
+            cfg="$(python3 -c 'from stackshot.core import config; print("on" if getattr(config, "release_codex_review", lambda: True)() else "off")' 2>/dev/null)" || cfg=""   # a config.py without the key, or one that does not run, reads as on
+            [ "$cfg" != off ] || why="[release] codex_review is off"
+        fi
+    fi
+    if [ -n "$why" ]; then say "codex review of PR #$pr not started: $why"; return 0; fi
+    unit="salamander-codex-review-$pr-$(date +%s)"
+    for v in PATH XDG_STATE_HOME SALA_CONFIG SALA_CODEX_REVIEW SALA_CODEX_BIN SALA_CODEX_HOME SALA_CODEX_MAX_DIFF SALA_CODEX_TIMEOUT SALA_CODEX_PUBLIC_SCAN SALA_CODEX_SCAN_TIMEOUT; do
+        [ -n "${!v+x}" ] && senv+=("--setenv=$v=${!v}")   # what salamander reads from its environment; the unit has only these
+    done
+    if timeout -k 2 20 systemd-run --user --quiet --collect --unit "$unit" -p "StandardOutput=append:$crlog" -p "StandardError=append:$crlog" "${senv[@]}" \
+           "$sal" codex-review "$REPO" "$pr" </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; then
+        say "codex review of PR #$pr started in its own unit $unit (output $crlog); the release does not wait for it"
+    elif ( setsid nohup "$sal" codex-review "$REPO" "$pr" </dev/null >>"$crlog" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- & ) 2>/dev/null; then
+        say "codex review of PR #$pr started detached, no user unit (systemd-run failed; output $crlog); the release does not wait for it"
+    else
+        say "codex review of PR #$pr not started: neither systemd-run nor setsid could start it"
+    fi
     return 0
 }
 idle_recycle() {  # ask the fleet tool for a recycle once the box is idle: [fleet] recycle_when_idle, the reason appended; 1 when none is set or it failed
@@ -1850,6 +1890,7 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
     if [ $resumed = 1 ]; then resume_merged   # 4: merged already
     else
     say "PR #$pr: $title (head ${headsha:0:7})"
+    codex_review_start "$pr"   # step 1a: the PR was just read as open; the review is started here, before the wait for the checks, and never waited for
     if [ "$regen_pushed" = 1 ]; then wait_pr_checks "pr tests" progress "the PR's tests pass on the pushed head ${headsha:0:7}"   # as after a regeneration below: a quick check alone must not read as a pass on the new head
     else wait_pr_checks checks quiet "checks pass"; fi
     q_paused_stop   # the wait for the checks can be long: a pause that came meanwhile stops this release before it enqueues the PR

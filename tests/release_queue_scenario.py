@@ -585,6 +585,8 @@ check("release.sh --group 23 25: starts the unit stackshot-release-23 running --
 s = grp("on-group-fast")
 check("group of two (fast path): ONE `mq add 23 25`, then `mq wait` for each PR in turn, nothing else asked of the queue, no plain merge call and no enqueue",
       s["rc"] == 0 and s["mq"] == [MQ_ADD2, wait_(23), wait_(25)] and not merges(s) and "update-branch" not in s["gh"], (s["rc"], s["mq"], s["gh"], glog(s)[-600:]))
+# a guard, not a test that fails first: run_group has no call to codex_review_start, so this passes today; it fails the day someone adds one there (the review is for the single-PR release, whose checks wait it runs beside)
+check("group of two: no Codex review is started (the trial is for the one-PR release, whose checks it runs beside)", s["codex"] == [] and "codex review" not in glog(s), (s["codex"], glog(s)[-400:]))
 check("group of two (fast path): deployed ONCE, at the later merge commit, pinned (DEPLOY_TO), before main's run is read; the gate says why it deployed at once",
       s["deploys"] == [M2] and s["order"][:2] == [f"deploy:{M2}", "client:message"] and "deploying b2b2b2b at once" in glog(s) and "main's full run follows" in glog(s), (s["deploys"], s["order"], glog(s)[-900:]))
 check("group of two: a `done:` line in EACH PR's own log (what a waiter and the board hooks read), the same sha; no FAILED in either",
