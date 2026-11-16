@@ -423,7 +423,7 @@ def release_report_to() -> str:
 
 def release_codex_review() -> bool:
     """[release] codex_review (default true): whether release.sh starts `salamander codex-review <repo> <pr>`, a read-only review of the PR by another model that is posted on the PR as a comment, for each single-PR release
-    (started in a user unit of its own, never waited for, never able to fail or delay a release). false, "false", "no", "off" or "0" = not started. SALA_CODEX_REVIEW (the same words, any case) in the environment of a direct
+    (started in a user unit of its own, never waited for, never able to fail or delay a release). false, "false", "no", "off" or "0" = not started. SALA_CODEX_REVIEW (the same words, any case, surrounding whitespace ignored) in the environment of a direct
     `release.sh --run` call turns it off as well. Read by release.sh at each release."""
     v = get("release", "codex_review")
     return True if v is None else (v not in (False, 0) and str(v).strip().lower() not in ("false", "no", "off", "0"))
