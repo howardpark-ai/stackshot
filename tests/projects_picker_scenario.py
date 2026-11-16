@@ -1432,6 +1432,34 @@ st, out = rt("projects/arc-nomap", "home-arc-nomap-main")
 check("archive: a retire of a name on a project that was never staffed → 'not listed', archived false or absent, nothing written, not on the wait list, status active",
       st == 200 and out["result"] == "not listed" and not out.get("archived") and not rio.puts and len(rio.timeline) == n_tl
       and "projects/arc-nomap" not in wait_keys() and status_of("projects/arc-nomap") == "active", (st, out))
+# a one-session project (a display-name: line, no agents: map): the retire of the session that line names is its last agent leaving
+ren_page("projects/arc-solo", "type: project\ntitle: arc-solo\norg: home\ndisplay-name: home-arc-solo\nstatus: active")
+ren_page("projects/arc-solo-items", "type: project\ntitle: arc-solo-items\norg: home\ndisplay-name: home-arc-solo-items\nstatus: active")
+arc_page("projects/arc-named", ["home-arc-named-main"])         # staffed, so the session its display-name names is not on its map
+p.cmd_registry(quiet=True); fresh()
+rio.puts.clear(); rio.timeline.clear()
+st, out = rt("projects/arc-solo", "home-arc-solo")
+check("archive: a one-session project (no agents map) whose own session retires → 200 'line removed', the note names the own session, archived true, the page's status archived, nothing waits",
+      st == 200 and out["result"] == "line removed" and out["agent"] == "home-arc-solo" and "own session" in out["note"] and out["archived"] is True and status_of("projects/arc-solo") == "archived"
+      and "projects/arc-solo" not in wait_keys(), (st, out, rio.pages["projects/arc-solo"]))
+check("archive: …the record now holds an empty agents map, the page gets only its status line (it never had an agents block), and its timeline says it was archived because its last agent was retired",
+      pverbs.pr.entries()[rec("projects/arc-solo")["id"]].get("agents") == {} and "agents" not in p.frontmatter_text(rio.pages["projects/arc-solo"]) and tl_texts("projects/arc-solo") == ["archived; its last agent was retired"],
+      (tl_texts("projects/arc-solo"), rio.pages["projects/arc-solo"]))
+rio.puts.clear(); n_tl = len(rio.timeline)
+st, out = rt("projects/arc-solo", "home-arc-solo")
+check("archive: …said again → 'not listed', nothing written", st == 200 and out["result"] == "not listed" and not rio.puts and len(rio.timeline) == n_tl, (st, out))
+i6 = open_item("projects/arc-solo-items")
+st, out = rt("projects/arc-solo-items", "home-arc-solo-items")
+check("archive: a one-session project whose session retires with an open item → 'line removed', not archived, the note names the item, on the wait list, status active",
+      st == 200 and out["result"] == "line removed" and out["archived"] is False and f"a{i6}" in out["archive_note"] and "projects/arc-solo-items" in wait_keys() and status_of("projects/arc-solo-items") == "active", (st, out))
+d6 = json.loads(item_file(i6).read_text()); d6["status"] = "completed"; item_file(i6).write_text(json.dumps(d6))
+res = dict(audit_ticks_svc._archive_tick())
+check("archive sweep: …the item completed → the next sweep archives it (the record has an agents map now, so the sweep does not call it never staffed) and it leaves the list",
+      res.get("projects/arc-solo-items") == "archived" and status_of("projects/arc-solo-items") == "archived" and "projects/arc-solo-items" not in wait_keys(), (res, wait_keys()))
+rio.puts.clear(); n_tl = len(rio.timeline)
+st, out = rt("projects/arc-named", "home-arc-named")
+check("archive: the project's own name retired on a staffed project (it is not on the map) → 'not listed', nothing written, still staffed and active", st == 200 and out["result"] == "not listed" and not out.get("archived")
+      and not rio.puts and len(rio.timeline) == n_tl and status_of("projects/arc-named") == "active" and agents_of("projects/arc-named")[0] != [], (st, out))
 
 # the pieces on their own
 ss = ARC.set_status

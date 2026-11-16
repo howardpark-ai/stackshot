@@ -7,7 +7,9 @@ Two moments, one rule (the state: the project's page lists no agent, none is pen
    left and no open item → the project is archived by the verb (project_verbs.archive: the record's status first, then the page's `status:` line). No agent
    left but open items → the project is put on the wait list (`<state>/archive-wait.json`, key → {since, by}; the key is the project's id when it has no
    page) and stays as it is. A verb that cannot run puts it on the same list, so the sweep tries again. A project whose record has no agents field at all was
-   never staffed and is never archived this way.
+   never staffed and is never archived this way, with one exception: a one-session project, a page with a `display-name:` line and no `agents:` map, whose own session (the name
+   the line gives) is the one retired. That retire gives the record an empty agents map (the verb: the session was the project's agent), so it is judged as any project
+   whose last agent left.
 2. The sweep. `sweep` (audit_ticks._archive_tick, the ten-minute set) looks at the projects on the wait list only: the open items are counted once for all of
    them, and a project with none left is archived, whether its items were completed or handed to another project. A project that has an agent
    again (or a pending one), that is archived already, or that is gone leaves the list without a write. A write that fails stays
@@ -17,7 +19,7 @@ Two moments, one rule (the state: the project's page lists no agent, none is pen
 The open items of a project are the ones of its own page, of the pages under it and of the pages that name it as their hub (an item on hold counts as open).
 A project whose status already is archived (for one with no entry in the record yet: whose page's `status:` is a retired word, the registry's retired_statuses) is left alone.
 When "archived" is not among the configured retired_statuses the page would not move to the Projects page's Archived group, so nothing is written and the answer says why.
-A retire that found the agent on no list ("not listed") never archives: the project's agent set did not change.
+A retire that found the agent on no list ("not listed") never archives: the project's agent set did not change (the one-session retire above is not "not listed": it answers "line removed").
 
 `tools/archive_empty_projects.py` lists the projects that meet the rule now (dry run; `--apply` archives them).
 

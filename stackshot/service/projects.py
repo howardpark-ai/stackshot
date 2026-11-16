@@ -420,7 +420,7 @@ def _project_agent_retire(machine: str, body: dict[str, Any]) -> tuple[int, dict
     A refused put (a revision that moved on) is read again and tried again; a page that still cannot be written is told in the answer, the record being right. The quick checks and the key in _RENAMING are under _PROJECT_LOCK; the gbrain calls run
     outside it, so a slow gbrain stalls nobody else, and a second retire or rename of the same page meanwhile is a 409 "in progress".
     Answers: 200 {result: "line removed"} the agent was on the page's `agents:` map (front or `background:`) and its line is gone (a pending entry for
-    the same name is dropped with it) · 200 {result: "dropped"} the agent was only pending here (its page line still owed): the pending entry is removed,
+    the same name is dropped with it; also the project's own session, named by its `display-name:`, on a one-session project that has no agents map: the record gets an empty one, and the note says so) · 200 {result: "dropped"} the agent was only pending here (its page line still owed): the pending entry is removed,
     no page is written · 200 {result: "not listed"} it is on no page of the project and not pending: nothing to do (a repeat after a lost reply, or a
     session that never had a line), with the reason · 404 unknown project · 400 a bad body, name or sender, an ambiguous slug, a page that is not a hub
     · 403 not the form · 409 a rename or retire of the page is in progress; try again · 422 the agents block is in a shape that cannot be edited in place
