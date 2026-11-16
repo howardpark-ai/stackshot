@@ -19,7 +19,10 @@ fails = []; ran = []; dirs = []
 # (include = the checkout); but every Python start would still load coverage and write a data file, so a measured run took three times a plain one and set main's wall time.
 # This process itself stays measured (the variables are only left out of what it starts); strace follows the children all the same, so the files release.sh touches are still recorded.
 def without_coverage(env): return {k: v for k, v in env.items() if not k.startswith("COVERAGE_")}
-def _env0(): return without_coverage(os.environ)   # a function so a check can take it again with the variables set (a plain run has none at import)
+# Nor the caller's own settings of what the scenarios decide for themselves (a scenario that wants one passes it through `extra`): SALA_CONFIG, XDG_STATE_HOME and every SALA_CODEX_* variable
+# (SALA_CODEX_REVIEW=off in the shell that runs the suite would switch the review off in every scenario; the rest are what the review's unit is handed, and a scenario asserts exactly which).
+def without_caller_sala(env): return {k: v for k, v in env.items() if k not in ("SALA_CONFIG", "XDG_STATE_HOME") and not k.startswith("SALA_CODEX_")}
+def _env0(): return without_caller_sala(without_coverage(os.environ))   # a function so a check can take it again with the variables set (a plain run has none at import)
 ENV0 = _env0()
 NOTLIVE = "ba5e0000000000000000000000000000000000ba"   # RT_LIVE for an old-path release that fails on main: a checkout at a commit older than the merge (the git stub says "in it" for HEAD when RT_LIVE is unset)
 def check(name, cond, got=None):
@@ -295,15 +298,15 @@ NOTIFY = ('#!/bin/sh\nfor a in "$@"; do printf "%s\\0" "$a"; done >> "$RT_DIR/no
 # The default answer (none) comes from a shell stub: the measured run on main (coverage in every Python child, under strace -f) made one Python start per wait
 # cycle of every scenario cost enough to push the suite past its 1800 s limit (main's run 9000001); the Python one below answers only a scenario that sets RT_SALAMANDER.
 # `salamander codex-review <repo> <pr>` (the trial review release.sh starts detached, never waited for): logs one line per start in codex.log, apart from ci-runs' salamander.log, and records how it was started (codex.fds: the descriptors above
-# 2 it holds, as n=target, the shell's own directory read showing as an empty target; codex.in: where its standard input points; codex.sid: its pid and session id, equal when it was started by setsid, written last, whole; codex.env: the SALA_*, XDG_STATE_HOME and PATH variables it was started with). RT_CODEX = ok (exits 0, the default) | fail (prints on both streams, exits 7) | hang (codex.hung appears and it
+# 2 it holds, as n=target, the shell's own directory read showing as an empty target; codex.in: where its standard input points; codex.sid: its pid and session id, equal when it was started by setsid, written whole before anything else it does; codex.env: the SALA_*, XDG_STATE_HOME and PATH variables it was started with). RT_CODEX = ok (exits 0, the default) | fail (prints on both streams, then codex.done appears, last, and it exits 7) | hang (codex.hung appears and it
 # waits until the test touches codex.release, the scenario's folder goes, or a minute has passed; codex.done appears when it ends).
 SALAMANDER_SH = ('#!/bin/sh\n'
                  'if [ "${1:-}" = codex-review ]; then\n  echo "$*" >> "$RT_DIR/codex.log"\n'
                  '  for f in /proc/$$/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] 2>/dev/null && { printf "%s=" "$n"; readlink "$f"; }; done > "$RT_DIR/codex.fds"; readlink /proc/$$/fd/0 > "$RT_DIR/codex.in"\n'
                  '  env | grep -E "^(SALA_|XDG_STATE_HOME=|PATH=)" > "$RT_DIR/codex.env"; read -r pid _ _ _ _ sid _ < /proc/$$/stat\n'
-                 '  echo "$pid $sid" > "$RT_DIR/codex.sid.tmp"; mv "$RT_DIR/codex.sid.tmp" "$RT_DIR/codex.sid"   # whole or absent: a reader never sees it half written\n'
+                 '  echo "$pid $sid" > "$RT_DIR/codex.sid.tmp$$"; mv "$RT_DIR/codex.sid.tmp$$" "$RT_DIR/codex.sid"   # whole or absent: a reader never sees it half written\n'
                  '  case "${RT_CODEX:-ok}" in\n'
-                 '    fail) echo "codex-review: cannot start the review"; echo "codex-review: cannot start the review" >&2; exit 7 ;;\n'
+                 '    fail) echo "codex-review: cannot start the review"; echo "codex-review: cannot start the review" >&2; : > "$RT_DIR/codex.done"; exit 7 ;;\n'   # codex.done last, after the text: the harness waits for it
                  '    hang) : > "$RT_DIR/codex.hung"; n=0; while [ -d "$RT_DIR" ] && [ ! -e "$RT_DIR/codex.release" ] && [ $n -lt 300 ]; do /usr/bin/sleep 0.2; n=$((n+1)); done; : > "$RT_DIR/codex.done"; exit 0 ;;\n'
                  '  esac\n  exit 0\nfi\n'
                  # `salamander mq` (THE MERGE QUEUE, SHADOW): a stand-in that logs its arguments apart from ci-runs' (mq.log) and answers from RT_MQ_ADD (ok | fail | slow) and RT_MQ_WAIT
@@ -400,7 +403,7 @@ MAX_POLLS = 200   # a scenario that waits main's run out to the default RELEASE_
 SYSTEMCTL = ('#!/bin/sh\necho "$*" >> "$RT_DIR/systemctl.log"\nfor a; do u=$a; done\nq=0; case " $* " in *" --quiet "*) q=1 ;; esac\n'
              'for p in ${RT_ACTIVE:-}; do [ "$u" = "stackshot-release-$p.service" ] && { [ $q = 1 ] || echo active; exit 0; }; done\n[ $q = 1 ] || echo inactive; exit 3\n')
 # The review's own unit (release.sh codex_review_start): `systemd-run --user --quiet --collect --unit salamander-codex-review-<pr>-<epoch> -p StandardOutput=append:<log> ... --setenv=K=V ... <salamander> codex-review <repo> <pr>`.
-# Its argument line is written to sysrun.log, one line per call. RT_SYSRUN = ok (the default) | fail (no user manager: exit 1, nothing started). On ok the stand-in starts the command detached, as a transient unit would: its own session,
+# Its argument line is written to sysrun.log, one line per call. RT_SYSRUN = ok (the default) | fail (no user manager: exit 1, nothing started) | timeout, kill (below). On ok the stand-in starts the command detached, as a transient unit would: its own session,
 # stdin /dev/null, stdout and stderr appended to the StandardOutput file, and an environment of its own, nothing of the caller's but the --setenv ones (and RT_DIR and RT_CODEX, the test's wiring). Never the host's systemd.
 SYSRUN_CODEX = r"""case "$*" in *--unit\ salamander-codex-review-*)
   echo "$*" >> "$RT_DIR/sysrun.log"
@@ -416,6 +419,14 @@ SYSRUN_CODEX = r"""case "$*" in *--unit\ salamander-codex-review-*)
   (setsid env -i RT_DIR="$RT_DIR" ${RT_CODEX:+RT_CODEX=$RT_CODEX} $envs "$@" </dev/null >>"$so" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &)
   exit 0 ;;
 esac
+"""
+# RT_SYSRUN = timeout | kill: the call that `timeout -k 2 20` cuts after the unit did start (a bus that answers late). A `timeout` stand-in, in the scenario's own bin and only for these two, runs the call (the stand-in above starts the review)
+# and reports the cut at once instead of after 20 s: status 124 (timeout) or 137 (kill: the KILL that follows the grace). Any other `timeout` call goes to the real one. Measured: GNU and uutils timeout both give 124, and 137 when -k had to KILL.
+TIMEOUT_CUT = r"""#!/bin/sh
+case "$*" in "-k 2 20 systemd-run --user --quiet --collect --unit salamander-codex-review-"*)
+  shift 3; "$@"; [ "${RT_SYSRUN:-}" != kill ] || exit 137; exit 124 ;;
+esac
+exec /usr/bin/timeout "$@"
 """
 SYSTEMD_RUN_DEFAULT = '#!/bin/sh\n' + SYSRUN_CODEX + 'echo "systemd-run stand-in: a call no scenario expects: $*" >&2\nexit 1\n'   # a scenario without `units`: only the review's unit is answered
 SYSTEMD_RUN = ('#!/bin/sh\n' + SYSRUN_CODEX + 'n=$(echo "$*" | sed -E \'s/.*--unit stackshot-release-([0-9]+).*/\\1/\')\n'
@@ -449,6 +460,7 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
         (d / "xdg/mergequeue").mkdir(parents=True, exist_ok=True)
         (d / "xdg/mergequeue/example-owner__stackshot.toml").write_text(mqhost.replace("@DIR@", str(d)) if "=" in mqhost else f'mode = "{mqhost}"\n')
     if units is None: (d / "bin/systemd-run").write_text(SYSTEMD_RUN_DEFAULT); (d / "bin/systemd-run").chmod(0o755)   # the review's unit is answered here, whatever a scenario is about (the host's own systemd-run would start a real unit)
+    if env.get("sysrun") in ("timeout", "kill"): (d / "bin/timeout").write_text(TIMEOUT_CUT); (d / "bin/timeout").chmod(0o755)
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
     for pkg in ("stackshot", "stackshot/core", "stackshot/fleet"):   # release.sh runs the checkout's modules by their package paths: stand-ins for two of them
         (box / pkg).mkdir(parents=True, exist_ok=True); (box / pkg / "__init__.py").write_text("")
@@ -501,10 +513,13 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
         t0 = time.monotonic(); r = subprocess.run(argv, env=e, capture_output=True, text=True, timeout=secs); took = time.monotonic() - t0
     # the review stub is started detached and nothing waits for it, so it may write its first lines after release.sh has returned: wait (never longer than 20 s) for it to get that far, when the release log says it was started
     plog = d / "releases" / f"pr-{pr}.log"
-    if plog.exists() and re.search(r"codex review of PR #\d+ started ", plog.read_text()):
-        stage = "codex.hung" if e.get("RT_CODEX") == "hang" else "codex.sid"   # the last file the stub writes before it exits or waits
+    plogt = plog.read_text() if plog.exists() else ""
+    if re.search(r"codex review of PR #\d+(: systemd-run did not answer .* may have started| started )", plogt):
+        stage = {"hang": "codex.hung", "fail": "codex.done"}.get(e.get("RT_CODEX"), "codex.sid")   # the last file the stub writes before it exits or waits (fail: after its text, which a reader of codex_out needs whole)
+        starts = 2 if "the review was also started detached" in plogt else 1   # a systemd-run call that timed out is followed by the detached start: two stubs, each logging its start
         for _ in range(400):
-            if (d / stage).exists(): break
+            clog = d / "codex.log"
+            if (d / stage).exists() and len((clog.read_text() if clog.exists() else "").splitlines()) >= starts: break
             time.sleep(0.05)
     for ph in pheld: ph.close()
     if grabber: done.set(); grabber.join()

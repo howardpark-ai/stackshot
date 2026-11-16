@@ -88,9 +88,9 @@ notice_cmd = ""                                     # the command that tells the
 report_to = "projects/example"                      # the page key (or session name) release.sh sends the report of each release to (green or red, the PR, the commit, what was restarted), and names in the line
                                                     # it prints when a release starts. The default is the stand-in page of the example config: point it at a page of your own, for example "projects/example-reports"
 codex_review = true                                 # release.sh starts `salamander codex-review <repo> <pr>` for each single-PR release (a group release starts none): a read-only review of the PR by another model, posted as a PR comment, in a user unit of its own, never waited for.
-                                                    # false = not started: this is the switch for a queued release and for `release.sh N`. SALA_CODEX_REVIEW=off (also false, no, 0) works in the environment of a direct `release.sh --run <pr>` call,
-                                                    # and always in salamander's config file (~/.config/salamander/config); a unit started by `release.sh N` or the queue has none of the calling shell's variables
-                                                    # (the environment variable SALA_CODEX_REVIEW=off does the same, and so does a box with no `salamander` on PATH)
+                                                    # false = not started: this is the switch for a queued release and for `release.sh N`. The environment variable SALA_CODEX_REVIEW=off (also false, no, 0, in any case,
+                                                    # surrounding whitespace ignored) works only in a direct `release.sh --run <pr>` call: a unit started by `release.sh N` or the queue has none of the calling shell's variables.
+                                                    # SALA_CODEX_REVIEW=off in salamander's config file (~/.config/salamander/config) always works (the review is started and does nothing). A box with no `salamander` on PATH starts none.
 
 [subject]
 prefixes = ["[work] ", "[home] "]                   # every subject starts with one of these

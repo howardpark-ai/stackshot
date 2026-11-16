@@ -29,7 +29,7 @@ no command that can leave a child behind holds a lock descriptor.
 
 The session pick (section 16) and the report's destination (report_to).
 
-The Codex review trial (section 18): for a PR still open, `salamander codex-review <repo> <pr>` is started in a user unit of its own (detached with setsid when systemd-run fails) before the wait for the checks and never waited for, with the SALA_ variables set in the release's environment passed on; a merged or closed PR, a dry run, salamander missing or the review switched off (SALA_CODEX_REVIEW off, false, no or 0 in any case, [release] codex_review) start none, and a review that fails or hangs changes neither the release's result nor its duration.
+The Codex review trial (section 18): for a PR still open, `salamander codex-review <repo> <pr>` is started in a user unit of its own (detached with setsid when systemd-run fails) before the wait for the checks and never waited for, with the SALA_ variables set in the release's environment passed on; a merged or closed PR, a dry run, salamander missing or the review switched off (SALA_CODEX_REVIEW off, false, no or 0 in any case, [release] codex_review) start none, and a review that fails or hangs changes neither the release's result nor its duration; a systemd-run call that times out (it may have started the unit) gets the detached start as well; the caller's own SALA_CODEX_*, SALA_CONFIG and XDG_STATE_HOME never reach a scenario.
 
     tests/run-suite release        → exit 0 / 1  (the release queue and the CI-run poller are release_queue_scenario.py: tests/run-suite release_queue)"""
 import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threading, time
@@ -52,6 +52,28 @@ finally:
 check("harness: release.sh's stubs (scenario()) and the git calls (genv) are started without the COVERAGE_ variables of a measured run, and keep the rest",
       "RT_DIR=" in _stub_env and "COVERAGE_" not in _stub_env and "GIT_AUTHOR_NAME=t" in _git_env and "COVERAGE_" not in _git_env
       and _h.without_coverage({"COVERAGE_PROCESS_START": "x", "COVERAGE_FILE": "y", "PATH": "p"}) == {"PATH": "p"}, ([l.split("=")[0] for l in _stub_env.splitlines() if l.startswith("COVERAGE_")], [l.split("=")[0] for l in _git_env.splitlines() if l.startswith("COVERAGE_")], "RT_DIR=" in _stub_env, "GIT_AUTHOR_NAME=t" in _git_env))
+# the caller's own SALA_CODEX_*, SALA_CONFIG and XDG_STATE_HOME (a shell with the review switched off, say) must not reach a scenario: ENV0 leaves them out, and a scenario that sets one itself (extra=) still gets its own value
+_callers = {"SALA_CODEX_REVIEW": "off", "SALA_CODEX_BIN": "from-shell-codex", "SALA_CONFIG": "/nonexistent/from-shell-salamander.cfg", "XDG_STATE_HOME": "/nonexistent/from-shell-state"}
+_held2 = {k: os.environ.get(k) for k in _callers}
+try:
+    os.environ.update(_callers)
+    _h.ENV0 = _h._env0()
+    _callenv = scenario("shell-env", merge="ok", checks="pending,pass")
+    _callenv_x = scenario("shell-env-extra", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": "on", "SALA_CONFIG": "/example/own.cfg", "XDG_STATE_HOME": "/example/own-state"})
+    _callenv_keys = set(_h.ENV0) & set(_callers)
+    _callenv_other = {k for k in os.environ if k not in ("SALA_CONFIG", "XDG_STATE_HOME") and not k.startswith(("SALA_CODEX_", "COVERAGE_"))} - set(_h.ENV0)   # what the caller has that ENV0 lost, apart from those
+finally:
+    _h.ENV0 = _env0
+    for k, v in _held2.items(): os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+check("harness: ENV0 leaves out SALA_CONFIG, XDG_STATE_HOME and every SALA_CODEX_* variable of the caller, and keeps the rest of its environment",
+      not _callenv_keys and not _callenv_other and "PATH" in _h._env0() and _h.without_caller_sala({"SALA_CODEX_X": "1", "SALA_OTHER": "2", "XDG_CONFIG_HOME": "c", "XDG_STATE_HOME": "s", "SALA_CONFIG": "f"}) == {"SALA_OTHER": "2", "XDG_CONFIG_HOME": "c"},
+      (_callenv_keys, _callenv_other))
+check("a caller with SALA_CODEX_REVIEW=off, SALA_CODEX_BIN, SALA_CONFIG and XDG_STATE_HOME set still gets the review started with none of them (the scenario decides)",
+      _callenv["rc"] == 0 and _callenv["codex"] == ["codex-review example-owner/stackshot 23"] and len(_callenv["sysrun"]) == 1 and "SALA_" not in _callenv["sysrun"][0] and "/nonexistent/" not in _callenv["sysrun"][0]
+      and not any("from-shell" in l for l in _callenv["codex_env"]) and "not started" not in _callenv["log"], (_callenv["rc"], _callenv["codex"], _callenv["sysrun"], _callenv["codex_env"], _callenv["log"]))
+check("...and a scenario's own `extra` values win over the caller's: they are what the unit is handed",
+      _callenv_x["codex"] == ["codex-review example-owner/stackshot 23"] and all(f" --setenv={kv} " in _callenv_x["sysrun"][0] for kv in ("SALA_CODEX_REVIEW=on", "SALA_CONFIG=/example/own.cfg", "XDG_STATE_HOME=/example/own-state"))
+      and "from-shell" not in _callenv_x["sysrun"][0], (_callenv_x["sysrun"], _callenv_x["codex_env"]))
 R = "example-owner/stackshot"
 ENQUEUE = f"id=PRNODE23 h={HEADSHA}"   # the enqueue mutation the stub saw: the PR's node id and the head it is pinned to
 MERGE_SHORT = "0106c0d"
@@ -1337,14 +1359,26 @@ for word in ("off", "OFF", "Off", "false", "FALSE", "False", "no", "NO", "0"):
     s = scenario(f"codex-off-{word}", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": word})
     check(f"SALA_CODEX_REVIEW={word} in the release's environment: not started, no unit, one log line says why, the release is the same as the one with the review off",
           s["codex"] == [] and s["sysrun"] == [] and f"codex review of PR #23 not started: SALA_CODEX_REVIEW={word}\n" in s["log"] and outcome(s) == outcome(base), (s["codex"], s["sysrun"], s["log"]))
+for raw_word, trimmed in ((" off ", "off"), ("\toff", "off"), ("False \n", "False")):   # surrounding whitespace is ignored, as the config key's value is (str(v).strip())
+    s = scenario(f"codex-off-ws-{trimmed}-{len(raw_word)}", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": raw_word})
+    check(f"SALA_CODEX_REVIEW={raw_word!r} (surrounding whitespace): read as {trimmed!r}, not started, one log line says why",
+          s["codex"] == [] and s["sysrun"] == [] and f"codex review of PR #23 not started: SALA_CODEX_REVIEW={trimmed}\n" in s["log"] and outcome(s) == outcome(base), (s["codex"], s["sysrun"], s["log"]))
+s = scenario("codex-on-ws", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": " on "})
+check("SALA_CODEX_REVIEW=' on ' is not an off word either: the unit is asked for (the stub cannot carry a value with spaces into the review itself, so only the call is read)",
+      len(s["sysrun"]) == 1 and "not started" not in s["log"] and "started in its own unit" in s["log"], (s["sysrun"], s["log"]))
 for word in ("on", "yes", "1"):
     s = scenario(f"codex-on-{word}", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": word})
     check(f"SALA_CODEX_REVIEW={word} is not an off word: the review is started, and the unit is given the value", s["codex"] == [CODEX_LINE] and len(s["sysrun"]) == 1 and f" --setenv=SALA_CODEX_REVIEW={word} " in s["sysrun"][0], (s["codex"], s["sysrun"]))
 s = scenario("codex-nounit", merge="ok", checks="pending,pass", sysrun="fail")
 check("no user manager (systemd-run fails): the review is started detached instead (setsid nohup), the log says which way, and the release is the same",
-      s["rc"] == 0 and len(s["sysrun"]) == 1 and s["codex"] == [CODEX_LINE] and re.search(r"codex review of PR #23 started detached, no user unit \(systemd-run failed; output \S+/releases/codex-review-23\.log\); the release does not wait for it", s["log"])
+      s["rc"] == 0 and len(s["sysrun"]) == 1 and s["codex"] == [CODEX_LINE] and re.search(r"codex review of PR #23 started detached, no user unit \(systemd-run failed; output \S+/releases/codex-review-23\.log\); it stays in the release's cgroup, so a stop of the release ends it, and the release does not wait for it", s["log"])
       and outcome(s) == outcome(base), (s["rc"], s["sysrun"], s["codex"], s["log"]))
 check("...a session of its own there too, no standard input, no lock and no pipe of the release", own_session(s), (s["codex_sid"], s["codex_in"], s["codex_fds"]))
+for what, mode, rc_ in (("times out (status 124)", "timeout", "124"), ("needs the KILL after the grace (status 137)", "kill", "137")):
+    s = scenario(f"codex-cut-{mode}", merge="ok", checks="pending,pass", sysrun=mode)
+    check(f"a systemd-run call that {what}, after the unit did start: both starts happen (one systemd-run call, two codex-review starts, the unit's and the detached one), the log says so, and the release is the same",
+          s["rc"] == 0 and len(s["sysrun"]) == 1 and s["codex"] == [CODEX_LINE, CODEX_LINE] and re.search(rf"codex review of PR #23: systemd-run did not answer within 20 s \(status {rc_}\), so unit salamander-codex-review-23-\d+ may have started; the review was also started detached \(a second start waits on the per-PR lock and posts nothing; output \S+/releases/codex-review-23\.log\); the detached one stays in the release's cgroup, so a stop of the release ends it, and the release does not wait for it", s["log"])
+          and "not started" not in s["log"] and "started detached, no user unit" not in s["log"] and outcome(s) == outcome(base), (s["rc"], s["sysrun"], s["codex"], s["log"]))
 s = scenario("codex-merged", viewstate="MERGED")
 check("a PR already merged (a rerun): not started, and no line about it: the step is only for an open PR", s["rc"] == 0 and s["codex"] == [] and s["sysrun"] == [] and "codex review" not in s["log"], (s["codex"], s["log"]))
 s = scenario("codex-closed", viewstate="CLOSED")
