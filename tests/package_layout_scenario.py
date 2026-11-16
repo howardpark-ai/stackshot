@@ -1,8 +1,7 @@
-"""Scenario test for the package layout (stackshot/<area>/<module>.py) and for the forwarders at the old root paths — no server, no network.
+"""Scenario test for the package layout (stackshot/<area>/<module>.py) and for the root of the checkout, which holds no forwarder — no server, no network.
 
-The code lives in the `stackshot` package. Every root forwarder of the moved modules is gone but four (PLUGIN_FORWARDERS below), which older copies of the stackshot plugin still name. Covers:
-  * exactly those four forwarders: any other file outside the package and the tests that holds a `_TARGET = "stackshot...."` line fails the suite, and so does any other `.py` file at the checkout's root
-  * each of the four reaches its module (the same module object, state shared), keeps its mode and runs the module's main as a script
+The code lives in the `stackshot` package. No module has a file at the checkout's root: the last four root forwarders (pages.py, push.py, config.py, connectors.py) are gone. Covers:
+  * no file outside the package and the tests holds a `_TARGET = "stackshot...."` line, no `.py` file sits at the checkout's root, and the four old names are absent from it
   * no script at the root or in tools/ carries inline metadata or a lock of its own; the moved copies carry none
   * the package's puller reads its own VERSION line on disk and runs from the checkout; client, puller, config and push import only the standard library
   * no module of the package imports a flat name or edits sys.path
@@ -29,15 +28,9 @@ def run(args, cwd=None, **kw):
     p = subprocess.run(args, capture_output=True, text=True, timeout=120, env=ENV, cwd=cwd or str(T), **kw)
     return p.returncode, p.stdout, p.stderr
 
-# ---- the forwarders, found as files: a forwarder is a file with a `_TARGET = "stackshot...."` line, anywhere in the checkout but the package and the tests
-# The four root forwarders that stay, the one explicit list: installed copies of the stackshot plugin older than 0.1.7 still run `$S/pages.py` and `$S/push.py` and import `config.py` and `connectors.py` from the
-# checkout's root, and with these gone the page gate and four other guards would go silently off in a pane that was not relaunched. The list goes (and CONTRIBUTING.md's Forwarders paragraph with it) in a follow-up
-# once no installed plugin copy is older than 0.1.7 and every pane has been relaunched.
-PLUGIN_FORWARDERS = ("pages.py", "push.py", "config.py", "connectors.py")
-KEEP = set(PLUGIN_FORWARDERS)
-def unexpected(found, keep):
-    """the forwarders that should not be there and the kept ones that are gone"""
-    return sorted(set(found) ^ set(keep))
+# ---- no forwarder at the root: the four that stayed for installed copies of the stackshot plugin older than 0.1.7 (pages.py, push.py, config.py, connectors.py) are gone
+# A forwarder is a file with a `_TARGET = "stackshot...."` line, anywhere in the checkout but the package and the tests; a root script is a program that belongs in the package.
+GONE_FROM_ROOT = ("pages.py", "push.py", "config.py", "connectors.py")
 # the `_TARGET` line of a forwarder: either quote, spaces around the `=`, and a trailing comment all still make a forwarder
 TARGET_RX = re.compile(r"""^_TARGET\s*=\s*(?P<q>["'])(?P<t>stackshot[\w.]*)(?P=q)\s*(?:#.*)?$""", re.M)
 FWD = {}      # old path (relative) -> target module
@@ -48,36 +41,15 @@ for f in sorted(ROOT.rglob("*.py")):
     m = TARGET_RX.search(f.read_text(encoding="utf-8"))
     if m:
         FWD[rel.as_posix()] = m.group("t")
-check("the forwarders are exactly the four of PLUGIN_FORWARDERS: no file outside the package and the tests holds a `_TARGET = \"stackshot....\"` line but those", len(KEEP) == 4 and not unexpected(FWD, KEEP) and all(FWD[k].startswith("stackshot.") for k in KEEP), unexpected(FWD, KEEP))
+check("no forwarder is left: no file outside the package and the tests holds a `_TARGET = \"stackshot....\"` line", not FWD, sorted(FWD))
 rootpy = sorted(f.name for f in ROOT.glob("*.py"))
-check("... and no other .py file at the root (a root script is a forwarder or a program that belongs in the package)", rootpy == sorted(KEEP), unexpected(rootpy, KEEP))
-check("a fifth root forwarder (and the loss of a kept one) is seen by that rule", unexpected(list(KEEP) + ["server.py"], KEEP) == ["server.py"] and unexpected(sorted(KEEP)[1:], KEEP) == [sorted(KEEP)[0]] and unexpected(KEEP, ()) == sorted(KEEP))
+check("... and no .py file sits at the root (a root script is a forwarder or a program that belongs in the package)", not rootpy, rootpy)
+check("pages.py, push.py, config.py and connectors.py are each absent from the root", not [n for n in GONE_FROM_ROOT if os.path.lexists(ROOT / n)], [n for n in GONE_FROM_ROOT if os.path.lexists(ROOT / n)])
 
-# a forwarder is a forwarder however its line is written (single quotes, a trailing comment, no spaces): each of these files would be a fifth one
+# a forwarder is a forwarder however its line is written (single quotes, a trailing comment, no spaces): each of these files would be one
 fifth = {"a.py": '_TARGET = "stackshot.core.x"\n', "b.py": "_TARGET = 'stackshot.core.x'\n", "c.py": '_TARGET = "stackshot.core.x"  # moved\n', "d.py": "_TARGET='stackshot.core.x' # moved\n", "e.py": 'import sys\n_TARGET = "stackshot.core.x"\nsys.exit(0)\n'}
 seen = {k: bool(TARGET_RX.search(v)) for k, v in fifth.items()}
-check("a forwarder whose _TARGET line has single quotes, a trailing comment or no spaces is still seen, and a line that names no package module is not", all(seen.values()) and not TARGET_RX.search('_TARGET = "elsewhere.x"\n') and not TARGET_RX.search('# _TARGET = "stackshot.core.x"\n') and unexpected([k for k, v in seen.items() if v] + sorted(KEEP), KEEP) == sorted(fifth), seen)
-
-# each of the four reaches its module: the same module object (state and monkeypatching are shared), a body of no code, and the file mode and shebang it had
-missing = [k for k in sorted(KEEP) if not (ROOT / (FWD.get(k, "x").replace(".", "/") + ".py")).is_file()]
-check("every kept forwarder names a module of the package that exists, and no two name the same one", not missing and len(set(FWD.get(k) for k in KEEP)) == len(KEEP), missing)
-body = [k for k in sorted(KEEP) if (ROOT / k).is_file() and (ROOT / k).read_text(encoding="utf-8").count("\n") > 40]
-check("a forwarder holds no code: none is longer than a screen", not body, body)
-probe = ("import importlib, sys\nsys.path.insert(0, %r)\nbad = []\nfor old, new in %r:\n    try:\n        a = importlib.import_module(old); b = importlib.import_module(new)\n        if a is not b: bad.append((old, new, 'not the same object'))\n"
-         "    except BaseException as e:\n        bad.append((old, new, type(e).__name__ + ': ' + str(e)[:120]))\nimport config\nfrom stackshot.core import config as c2\nconfig.CFG['x_probe'] = 1\nprint(repr(bad), c2.CFG.get('x_probe') == 1)\n") % (STACK, [(k[:-3], FWD.get(k, "")) for k in sorted(KEEP)])
-(T / "probe.py").write_text(probe)
-rc, out, err = run([sys.executable, str(T / "probe.py")])
-check("importing each by its old name gives the package's module object, and a change through the old name is seen through the new one", rc == 0 and out.strip() == "[] True", (rc, out[-900:], err[-600:]))
-EXEC = ["pages.py", "push.py"]
-bad = [f for f in EXEC if not os.access(ROOT / f, os.X_OK) or not (ROOT / f).read_text(encoding="utf-8").startswith("#!")]
-check("pages.py and push.py, executable programs before the move, stay executable with their shebang", not bad, bad)
-for old in sorted(KEEP):
-    target = FWD.get(old, "stackshot.none")
-    r1 = run([sys.executable, str(ROOT / old), "--help"], cwd="/")
-    r2 = run([sys.executable, "-c", f"import sys, runpy; sys.path.insert(0, {STACK!r}); sys.argv = [{target!r}, '--help']; runpy.run_module({target!r}, run_name='__main__', alter_sys=True)"], cwd="/")
-    check(f"python3 {old} --help prints what the module prints and exits the same", r1[0] == r2[0] and r1[1] == r2[1] and (r1[1] or r1[2]), (r1, r2))
-rc, out, err = run([sys.executable, "-I", str(ROOT / "config.py"), "path"], cwd="/")
-check("python3 -I config.py path (isolated mode, another directory) still runs", rc == 0 or "usage" in out + err, (rc, out, err))
+check("a forwarder whose _TARGET line has single quotes, a trailing comment or no spaces is still seen, and a line that names no package module is not", all(seen.values()) and not TARGET_RX.search('_TARGET = "elsewhere.x"\n') and not TARGET_RX.search('# _TARGET = "stackshot.core.x"\n'), seen)
 
 hdr = [p.relative_to(ROOT).as_posix() for p in list(ROOT.glob("*.py")) + list((ROOT / "tools").glob("*.py")) if "# /// script" in p.read_text(encoding="utf-8")]
 locks = [p.relative_to(ROOT).as_posix() for p in list(ROOT.glob("*.lock")) + list((ROOT / "tools").glob("*.lock")) if p.name != "uv.lock"]
@@ -144,7 +116,7 @@ rc, out, err = run([str(ROOT / "bin/stackshot"), "ghmigrate", "-h"], cwd="/")
 check("stackshot <program> -h prints the usage line under the name typed (`stackshot ghmigrate`), not `python3 -m <module>`", rc == 0 and out.startswith("usage: stackshot ghmigrate "), (rc, out[:200], err[-200:]))
 check("... and the parser class is the stock one again once the program has run", "stackshot" not in __import__("argparse").ArgumentParser.__init__.__code__.co_names)
 
-# ---- no caller outside the package names a root script (the four forwarders that stay are for the plugin's older copies, not for this checkout: no exemption, every module name of the package is searched for)
+# ---- no caller outside the package names a root script (no exemption: every module name of the package is searched for)
 # The scan covers every tracked file but the package, the docs (a prose mention is reported by hand, not failed) and this suite's own fixtures: the units, scripts, hooks and workflow, and the suites themselves.
 # A caller is (a) a path that ends in `<module>.py` and does not run inside the package (`$REPO/client.py`, `~/stackshot/config.py`, `$(dirname "$0")/../server.py`, `<checkout>/anchor-hub.py`), or a
 # bare `<module>.py` that follows a run word (`python3 server.py`, `exec server.py`, `--script server.py`); (b) an import statement of a root module, at the start of a line or after `;` or a quote
