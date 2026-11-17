@@ -206,13 +206,26 @@ r = call(lambda: _wt_update.stackshot_update(item_id="a43", sender=SMAIN, mover=
 check("3.7 the target of a project that has a builder is still substituted by the builder, whoever sends it", f"mover={DBUILD}, the project's builder, was used instead" in r and held(43) == DBUILD and not any(t[1] in (U[DMAIN], U[DDESK]) for t in told), (r, held(43), told))
 put(44, mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a44", sender=DBUILD, mover=EMAIN, next=f"{EMAIN}: take it"))
-check("3.8 a front agent of another project than the item's is refused as the target, and the refusal names the rule", msg.startswith("Refused:") and "no builder and no background agent" in msg and "did not meet that" in msg and held(44) == SMAIN, (msg, held(44)))
+check("3.8 a front agent of another project than the item's is refused as the target, and the refusal names the rule", msg.startswith("Refused:") and "no builder and no background agent" in msg and "this call was refused because home-echo-main is not a live front agent of projects/sigma." in msg
+      and "no hand-off notice" not in msg and "gets no notice" not in msg and held(44) == SMAIN, (msg, held(44)))
 put(45, project="projects/echo", mover=EMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a45", sender=DBUILD, mover=SDESK, next=f"{SDESK}: take it"))
 check("3.9 the same from the other side: an item of one project cannot be pointed at a front agent of another", msg.startswith("Refused:") and held(45) == EMAIN, (msg, held(45)))
 put(46, project="projects/echo", mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a46", sender=LONER, mover=EMAIN, next=f"{EMAIN}: take it"))
-check("3.10 a sender no page lists is refused whatever the target", msg.startswith("Refused:") and "did not meet that" in msg and held(46) == SMAIN, (msg, held(46)))
+check("3.10 a sender no page lists is refused whatever the target", msg.startswith("Refused:") and "this call was refused because home-loner is not a session any project page lists." in msg
+      and "no hand-off notice" not in msg and "gets no notice" not in msg and held(46) == SMAIN, (msg, held(46)))
+from stackshot.anchors import anchors as _anc_t
+_real_roles = _anc_t.session_roles
+_anc_t.session_roles = lambda *a, **k: {n: ({**r, "retired": True} if n == DDESK else r) for n, r in _real_roles(*a, **k).items()}
+try:
+    put(50, mover=SMAIN)
+    msg = refusal(lambda: _wt_update.stackshot_update(item_id="a50", sender=DDESK, mover=SDESK, next=f"{SDESK}: take it"))
+finally:
+    _anc_t.session_roles = _real_roles
+check("3.10b a retired sender is named as retired, not as unlisted, and the refusal does not say the front agent gets no notice",
+      msg.startswith("Refused:") and "this call was refused because home-delta-desk is retired." in msg and "not a session any project page lists" not in msg
+      and "no hand-off notice" not in msg and "gets no notice" not in msg and held(50) == SMAIN, (msg, held(50)))
 put(47, mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a47", sender=OWNER, mover=SDESK, next=f"{SDESK}: take it"))
 check("3.11 the owner's own name as sender is no session a page lists: refused", msg.startswith("Refused:") and held(47) == SMAIN, (msg, held(47)))
