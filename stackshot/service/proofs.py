@@ -200,7 +200,11 @@ def handover_kind(name: str, project: str = "") -> str:
     try:
         roles = _anc.session_roles()
         r = roles.get(_hooks().role_name(roles, name)) or {}
-        if r and project and _hv.peer_opener(r, project, _anc.front_only(project)):
+        try:
+            peer = bool(r and project and _hv.peer_opener(r, project, _anc.front_only))      # front_only is read only for a live front agent of this project: a failed read touches that case alone
+        except Exception:  # noqa: BLE001  — the agent keeps the kind it had before peers: a front agent, never moved to
+            peer = False
+        if peer:
             return _hv.SESSION
         if r:
             return _hv.FRONT if r.get("retired") or r.get("role") in ("front", _anc.NAME_ROLE) else _hv.SESSION

@@ -201,8 +201,27 @@ check("7 create: in a front-only project a live front peer's step on an item ano
 put(60, project="projects/echo", owner=ECHO, mover=ECHO, needs=[], next=f"{ECHO}: draft it")
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a60", sender=ECHO, next=f"{ECHO}: draft it\n{PEER}: check it"))
 check("7 update: …and a new line of next opening with the peer is accepted too", r == "" and PEER in stored_next(60), (r, stored_next(60)))
-r = refusal(lambda: _wt_update.stackshot_update(item_id="a60", sender=ECHO, reword={"1": f"{PEER}: draft it"}))
-check("7 update: …and a reword to the peer", r == "" and stored_next(60).startswith(f"{PEER}: draft it"), (r, stored_next(60)))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a60", sender=ECHO, reword={"2": f"{PEER}: look again"}))
+check("7 update: …and a reword of the second step to the peer", r == "" and stored_next(60).endswith(f"{PEER}: look again"), (r, stored_next(60)))
+# a peer's step needs an open step in front of it: the step hand-over follows a done step, so as the first open step nothing would ever move the item
+was = raw(60)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a60", sender=ECHO, reword={"1": f"{PEER}: draft it"}))
+check("7 update: a reword that makes the peer's step the first open step is refused, naming the ways out, and the item is untouched",
+      refused(msg) and "Put an open step before it" in msg and f"mover={PEER}" in msg and f'starts "For {PEER},"' in msg and raw(60) == was, msg)
+before_n = len(os.listdir(T / "store/a"))
+msg = refusal(lambda: _wt_create.stackshot_create(subject="[home] a peer first", description=DESC, project="projects/echo", sender=ECHO, mover=ECHO, next=f"{PEER}: check first\n{ECHO}: then publish"))
+check("7 create: the peer's step as the first open step is refused (nothing would move the item to it) and nothing is stored", refused(msg) and "Put an open step before it" in msg and len(os.listdir(T / "store/a")) == before_n, msg)
+# front_only is read only for a live front agent of the item's own project: a failing read touches that case alone
+real_fo = _anc.front_only
+def fo_boom(*a, **k): raise RuntimeError("registry unreadable")
+put(65, project="projects/echo", owner=ECHO, mover=ECHO, needs=[], next=f"{ECHO}: draft it")
+_anc.front_only = fo_boom
+try:
+    msg_other = refusal(lambda: _wt_update.stackshot_update(item_id="a65", sender=ECHO, next=f"{ECHO}: draft it\n{OTHER}: check it"))
+    msg_peer = refusal(lambda: _wt_update.stackshot_update(item_id="a65", sender=ECHO, next=f"{ECHO}: draft it\n{PEER}: check it"))
+finally:
+    _anc.front_only = real_fo
+check("7 a failing front_only read: another project's front agent is still refused (the read is not made for it), and so is the peer (the old behavior)", refused(msg_other) and refused(msg_peer), (msg_other, msg_peer))
 put(61, project="projects/echo", owner=ECHO, mover=ECHO, needs=[], next=f"{ECHO}: draft it")
 was = raw(61)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a61", sender=ECHO, next=f"{ECHO}: draft it\n{OTHER}: check it"))
@@ -232,6 +251,13 @@ it7 = {"metadata": {"project": "projects/echo"}}; fo7 = lambda p: p == "projects
 check("7 is_peer: a live front agent of the item's project in a front-only project; not another project's, a retired one, a project with a builder, no test given or one that fails",
       FS.is_peer(PEER, it7, rows7, fo7) and not FS.is_peer(OTHER, it7, rows7, fo7) and not FS.is_peer("gone", it7, rows7, fo7) and not FS.is_peer(PEER, it7, rows7, lambda p: False)
       and not FS.is_peer(PEER, it7, rows7, None) and not FS.is_peer(PEER, {"metadata": {}}, rows7, fo7) and not FS.is_peer(PEER, it7, rows7, lambda p: 1 / 0))
+fell = {"metadata": {"project": "projects/echo", "handover": {"step": FS.step_hash(f"{PEER}: x"), "kind": "fallback", "to": PEER}}}
+check("7 is_peer: a step the hand-over fell back on (the peer was down) is no peer's step, so the reword applies again; another step of the item, or a moved record, still is one",
+      not FS.is_peer(PEER, fell, rows7, fo7, f"{PEER}: x") and FS.is_peer(PEER, fell, rows7, fo7, f"{PEER}: y") and FS.is_peer(PEER, fell, rows7, fo7)
+      and FS.is_peer(PEER, {"metadata": {**fell["metadata"], "handover": {**fell["metadata"]["handover"], "kind": "moved"}}}, rows7, fo7, f"{PEER}: x"))
+calls7 = []
+FS.is_peer(OTHER, it7, rows7, lambda p: calls7.append(p) or True); FS.is_peer("gone", it7, rows7, lambda p: calls7.append(p) or True)
+check("7 is_peer reads the project only for a live front agent of the item's own project (not another project's, not a retired one)", calls7 == [], calls7)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

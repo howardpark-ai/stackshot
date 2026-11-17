@@ -333,6 +333,18 @@ _fleet_sessions_registry._sessions_index.cache_clear() if hasattr(_fleet_session
 r = proofs_svc.handover("a75", time.time(), ["home-bfront: write it"])
 (T / "fleet/a/sessions.json").write_text(json.dumps({U[n]: {"name": n, "machine": "a", "seen": time.time()} for n in U}))
 _fleet_sessions_registry._sessions_index.cache_clear() if hasattr(_fleet_sessions_registry._sessions_index, "cache_clear") else None
+# a failing project read touches only the live front agent of the item's own project: a background agent is still handed the item, and the front agent keeps the kind it had
+real_fo = _anc.front_only
+def fo_boom(*a, **k): raise RuntimeError("registry unreadable")
+_anc.front_only = fo_boom
+try:
+    kinds = (proofs_svc.handover_kind("home-two", "projects/alpha"), proofs_svc.handover_kind("home-bpeer", "projects/beta"))
+    item(76, "home-one: merge PR #11\nhome-two: verify it", mover="home-one", steps=[{"text": "home-one: merge PR #11", "status": "done", "by": "home-one", "at": now - 60}, {"text": "home-two: verify it", "status": "open", "by": "", "at": 0}])
+    r76 = proofs_svc.handover("a76", time.time(), ["home-one: merge PR #11"])
+finally:
+    _anc.front_only = real_fo
+check("peer: with the project read failing a background agent is still a session and still gets the item, and the front agent is not made a session (the old kind)",
+      kinds == (HO.SESSION, HO.FRONT) and r76["action"] == "moved" and mover_of(76) == "home-two", (kinds, r76))
 check("peer: a peer that is down is a fallback like any session: the item stays, the record says so", r["action"] == "fallback" and mover_of(75) == "home-bfront" and rd(75)["metadata"].get("handover", {}).get("kind") == HO.FALLBACK, r)
 
 # ---- 10. the audit: a missing proof; the page key for a front mover; a repeat only after an item write

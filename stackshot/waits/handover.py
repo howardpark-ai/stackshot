@@ -6,6 +6,7 @@ a ticked step goes to the item's mover; the session named on the next step is to
 
   next_open(meta, keeper)                      (text, opener) of the first open step that is not a bare sub-step: the step whose session is next
   peer_opener(row, item_project, front_only)   is the step's opener a live front agent of the item's own project in a front-only project: the one front agent a hand-over, the write check and the audit's reword treat as a session
+  open_before(steps, i)                        is a step open before position i of the checklist: only then can a hand-over carry the item to the step at i
   decide(meta, keeper, mover, kind_of, down_of, same)   {"action": move | fallback | none, "to", "step", "hash", "why"}
   mark(meta, h, kind, to, at, why)             the record, `metadata.handover` = {"step": <hash>, "kind": moved | fallback, "to", "at"[, "why"]}; one record, the last step handled
   skip_reason(meta, mover, same, label, owner)   why the hand-over leaves an item alone: on hold, a decision wait, needs naming another session (the server and the audit share it)
@@ -83,11 +84,18 @@ def skip_reason(meta: dict[str, Any], mover: str, same: Callable[[str, str], boo
     return f"its needs name {', '.join(label(x) for x in others)}, not its mover" if others else ""
 
 
-def peer_opener(row: dict[str, Any] | None, item_project: str, front_only: bool) -> bool:
-    """Is a step's opener (`row`: its session-roles row {"role", "project", "retired"}) a live front agent of the project the item is filed under, in a project with no background agent (`front_only`, from
-    anchors.front_only)? Such a peer can be handed the item by `mover=` (builderless.pair_allowed) and is told of it, so a step that opens with it is a real hand-over. A retired agent, one of another project
-    and any front agent of a project that has a builder are not: the write check and the front-step rule treat them as before. One test for the write check, the hand-over and the audit's reword."""
-    return bool(front_only) and _bl.front_of(row, item_project)
+def peer_opener(row: dict[str, Any] | None, item_project: str, front_only: Callable[[str], bool]) -> bool:
+    """Is a step's opener (`row`: its session-roles row {"role", "project", "retired"}) a live front agent of the project the item is filed under, in a project with no background agent (`front_only(project)`, from
+    anchors.front_only)? Such a peer is told of a hand-over like any session, so a step that opens with it is a real hand-over (when an open step comes before it: open_before). A retired agent, one of another
+    project and any front agent of a project that has a builder are not: the write check and the front-step rule treat them as before. `front_only` is called only once the row is a live front agent of the
+    item's own project, so a project read that fails touches that case alone; it raises there and the caller keeps the old behavior. One test for the write check, the hand-over and the audit's reword."""
+    return _bl.front_of(row, item_project) and bool(front_only(item_project))
+
+
+def open_before(steps: list[dict[str, Any]], i: int) -> bool:
+    """Is a step of the checklist `steps` (the dicts of steps.view) open before position `i`, and not a bare sub-step? The hand-over follows a done step to the next open one, so a step the hand-over is to
+    carry the item to needs an open step in front of it: as the first open step it is handed nothing, because no step is done before it."""
+    return any(s["status"] == _steps.OPEN and not _steps.is_bare(s["text"]) for s in steps[:i])
 
 
 def decide(meta: dict[str, Any], keeper: str, mover: str, kind_of: Callable[[str], str], down_of: Callable[[str], str], same: Callable[[str, str], bool]) -> dict[str, Any]:

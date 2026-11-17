@@ -71,7 +71,7 @@ item's creator (a background agent may create items too). mover: who moves the i
 step, kept only while he is the mover: on an item a session moves it is dropped, with a note in the reply); a front agent gets no hand-off notice, so a create from another session that sets mover or then (or
 post_wake_mover, the old name of mover) to a front agent gets the project's builder instead (the reply and History say so; send the same value
 again to keep it as sent; with no builder it is refused, except a mover set by a front agent of the item's project to
-another of its front agents; message the front agent for a check or answer only it can give). With no mover= an alive
+another of its front agents; for a check or answer only it can give, message the project page with a first line `For <front agent>,`). With no mover= an alive
 item is moved by the project's builder (for a page the instance maps to a builder, that one when the project lists
 it), else its -main agent, never by its creator; an item that waits on {{OWNER}}'s call (needs=decision with its ask)
 is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a
@@ -82,8 +82,8 @@ a session as mover and put his part in a next line that starts `{{OWNER}}:`). A 
 agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, hand
 the front agent the item with mover= (front agents of one project with no background agent only), or ask it with a
 message to its project whose first line starts `For <front agent>,`; in a project with no background agent a step that
-opens with a front agent of the item's own project is accepted, and the item moves to that agent when the steps before
-it are done. owner is not a parameter any more: it is still accepted for a few days with a note in the
+opens with a front agent of the item's own project is accepted when an open step comes before it, and the item moves
+to that agent when the steps before it are done (as the first open step it is refused: nothing would move the item). owner is not a parameter any more: it is still accepted for a few days with a note in the
 reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 |
 p2 | p3, shown but not sorted. {{ITEM_FORM}} {{NEEDS_FORM}}
 {{SAID_FORM}}{{CHECK_FORM}}{{STEP_PROOF_FORM}}{{CAP_FORM}}{{AGENT_DUE_FORM}}{{MODEL_FORM}}{{DRAFT_FORM}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{CONTACT_FORM}}The

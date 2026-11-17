@@ -227,7 +227,9 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 open it with the mover's name, hand the front agent the item with mover= (front agents of one project with no
 background agent only), or ask it with a message to its project whose first line starts `For <front agent>,` (a step it
 already holds stays). In a project with no background agent a step that opens with a front agent of the item's own
-project is accepted: when the steps before it are done the item moves to that agent and it is told. A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. {{ITEM_FORM}} {{NEXT_FORM}}
+project is accepted when an open step comes before it (any session may write it): when the steps before it are done
+the item moves to that agent and it is told, as for a background agent's step. As the first open step it is refused:
+nothing would move the item. A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. {{ITEM_FORM}} {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on
@@ -288,7 +290,7 @@ mover; on an item a session moves it is dropped with a note) and the new mover i
 front agent gets no hand-off notice, so an update from another session that sets mover or then (or post_wake_mover, the old
 name of mover) to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as
 sent; with no builder it is refused, except a mover set by a front agent of the item's project to another of its front
-agents; message the front agent for a check or answer only it can give); take over another session's item only when
+agents; for a check or answer only it can give, message the project page with a first line `For <front agent>,`); take over another session's item only when
 asked; a session about to be retired first hands over or completes its open items. mover={{OWNER}} alone is refused on
 an item that is doing: it needs step=… or needs=decision with ask=… in the same write (the refusal says so). An update
 that leaves an open item in a state that is {{OWNER}}'s (his step, or needs holding decision) and names no mover sets

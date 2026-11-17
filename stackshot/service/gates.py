@@ -205,7 +205,8 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
     refused, so nothing could wake it for the step and it would sit until the owner noticed (the mover check of fix_front_mover, applied to a step line). `before` and `after` = the checklist as it stood and
     as this write leaves it (`item` = the item as the write leaves it); only an open step whose text is not among the open steps before is judged, so a step already held by a front agent stays whatever else the
     write changes. Passes: the item's own mover (its own item), a background agent or the owner as opener, an item with no mover or a retired one (front_step.held reads the rest), and, in a front-only project, a live front agent of the item's own project (a peer: the step hand-over
-    moves the item to it, handover.peer_opener). A failing read lets the write through."""
+    moves the item to it, handover.peer_opener) when an open step comes before its step (handover.open_before: with none, nothing would move the item, so it is refused). A failing read lets the write through,
+    except that a failing front_only read leaves a front agent's step refused."""
     h = _hooks()
     if item.get("status") != "open":
         return
@@ -222,16 +223,23 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
         for text in new:
             roles, key = h.role_of(_steps.opener(text))
             live = bool(key) and roles[key].get("role") == "front" and not roles[key].get("retired")
-            # a live front agent of the item's own project, in a project with no background agent, is a peer: when the step comes up the step hand-over moves the item to it (handover.peer_opener,
-            # the same pair `mover=` allows), so the step can fire and passes. Every other front agent, and every front agent of a project that has a builder, is refused as before.
-            peer = live and _hv.peer_opener(roles[key], proj, _anc.front_only(proj))
-            front = h.front_held(text, mover, lambda _n: live and not peer, _handoff.ho_same)
+            # a live front agent of the item's own project, in a project with no background agent, is a peer (handover.peer_opener; front_only is read for that case alone, and a read that fails leaves it
+            # refused, as before peers). The step hand-over moves the item to a peer when the step before it is done, so its step passes only with an open step in front of it: as the first open step nothing
+            # would ever move the item. Every other front agent, and every front agent of a project that has a builder, is refused as before.
+            try:
+                peer = live and _hv.peer_opener(roles[key], proj, _anc.front_only)
+            except Exception:  # noqa: BLE001
+                peer = False
+            i = next((n for n, x in enumerate(after) if _steps.key(x["text"]) == _steps.key(text)), 0)
+            first = peer and not _hv.open_before(after, i)
+            front = h.front_held(text, mover, lambda _n: live and not (peer and not first), _handoff.ho_same)
             if not front:
                 continue
             mv = _session_label(mover) or mover
             # the tail names what works: a plain message to a front agent is refused unless marked, so it is the hand-over (`mover=`, between front agents of one front-only project) and the `For <agent>,` first line to the agent's page
             ask = f"ask {key} with a message to {roles[key]['project']} whose first line starts \"For {key},\""
-            tail = (f"Keep the step with {mv}, hand {key} the item with mover={key} (only between front agents of one project that has no background agent), or {ask}." if _handoff.ho_same(sender, mover)
+            tail = (f"Put an open step before it (the step hand-over moves the item to {key} when that one is done), hand {key} the item with mover={key}, or {ask}." if first
+                    else f"Keep the step with {mv}, hand {key} the item with mover={key} (only between front agents of one project that has no background agent), or {ask}." if _handoff.ho_same(sender, mover)
                     else f"Give the step to {mv} (open it with \"{mv}:\"), or {ask}.")
             raise ToolError(f"Refused: the step \"{_clip_line(_steps.first_line(text), 90)}\" opens with {key}, a user-facing agent of {roles[key]['project']}: it gets no work notice and its own wakes are refused, "
                             f"so nothing would wake it for the step, and {mv} moves {_gh.shown(gid) if gid else 'the item'}. {tail}")

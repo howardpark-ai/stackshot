@@ -545,9 +545,29 @@ wipe_store(); clear_state()
 for k, d in nine: put(k, copy.deepcopy(d))
 run_pass(T0, roles=PEER_ROLES, front_only=failing)
 check("9 a failing front-only read leaves the step as it was, a front agent's: a clock starts", clock_of("a31") is not None, clock_of("a31"))
-cnt = FS.month_count({k: v for k, v in nine[:2]}, PEER_ROLES, now, fo_alpha)
-check("9 month_count: the open steps the write check would refuse leave out the peer's step (a31) and keep the other project's (a32); without the test both count",
-      cnt["open"] == 1 and cnt["ids"] == ["a32"] and FS.month_count({k: v for k, v in nine[:2]}, PEER_ROLES, now)["open"] == 2, (cnt, FS.month_count({k: v for k, v in nine[:2]}, PEER_ROLES, now)))
+# a peer whose hand-over fell back (it was down) is stuck like a front agent's step: the clock starts and the step moves at the threshold, which is the 3-hour reword applying again
+fell_rec = {"step": FS.step_hash("alpha-peer: look at the wording"), "kind": "fallback", "to": "alpha-peer", "at": T0}
+wipe_store(); clear_state()
+for k, d in (nine[0], doing(35, "alpha-peer: look at the wording\nhome-agent: then build it", handover=fell_rec), doing(36, "alpha-peer: look at the wording\nhome-agent: then build it", handover={**fell_rec, "kind": "moved"})):
+    put(k, copy.deepcopy(d))
+run_pass(T0, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 a peer step the hand-over fell back on starts a clock (it is stuck), while the same step with no record, or a moved one, does not", clock_of("a35") is not None and clock_of("a31") is None and clock_of("a36") is None, (clock_of("a35"), clock_of("a31"), clock_of("a36")))
+r = run_pass(T0 + 3 * H, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 …and at the threshold it moves to the mover, as on a project with a builder", opener_of("a35") == "home-agent" and bid(35) in [m["id"] for m in r["front_steps"]["moved"]] and opener_of("a31") == "alpha-peer", r["front_steps"])
+# the monthly count: a peer's step behind an open step is no front-held step (not open, not closed, not closed by someone else); as the first open step the write check refuses it, so it counts
+def stp(text, status, by="", at=0): return {"text": text, "status": status, "by": by, "at": at}
+def citem(nxt, steps, mover="home-agent"):
+    return {"status": "open", "subject": "[home] x", "description": "- A thing", "updated": now, "state_updated": now,
+            "metadata": {"owner": OWNER, "project": "projects/alpha", "mover": mover, "needs": [mover], "next": nxt, "steps": steps}}
+count_items = {
+    "c1": citem("home-agent: first\nalpha-peer: then look", [stp("home-agent: first", "open"), stp("alpha-peer: then look", "open"), stp("alpha-peer: earlier", "done", "home-agent", now - H)]),
+    "c2": citem("alpha-peer: look first\nhome-agent: then build", [stp("alpha-peer: look first", "open"), stp("home-agent: then build", "open")]),
+    "c3": citem("home-agent: first\nbeta-front: then look", [stp("home-agent: first", "open"), stp("beta-front: then look", "open"), stp("beta-front: earlier", "done", "home-agent", now - H)])}
+cnt = FS.month_count(count_items, PEER_ROLES, now, fo_alpha)
+cnt0 = FS.month_count(count_items, PEER_ROLES, now)
+check("9 month_count with the project test: the peer's step behind an open step is left out of open, closed and by_other; the first-open peer step (c2) and another project's front step (c3) count",
+      cnt["open"] == 2 and cnt["ids"] == ["c2", "c3"] and cnt["closed"] == 1 and cnt["by_other"] == 1, cnt)
+check("9 …and without the test (the old count) every one of those front steps counts", cnt0["open"] == 3 and cnt0["closed"] == 2 and cnt0["by_other"] == 2, cnt0)
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
