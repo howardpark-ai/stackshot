@@ -81,8 +81,8 @@ def stall_tick(now: float | None = None) -> list[str]:
                 if old.get("cold_at"):
                     keep[gid] = _stall.fresh(who, _stallsvc.stall_ver(it), old, 0.0)      # what outlives an episode (the cold call's 24-hour bound) stays
                 continue
-            if not front and _ho.awaiting_session(it, who, _handoff.ho_same) and not (ladder_on and old and _handoff.ho_same(old.get("mover"), who) and _ladder.on_ladder(old, now, float((r or {}).get("at") or 0))):
-                continue                 # an untaken hand-off is the hand-off audit's alone (the dates pass does not start it); once that audit has brought it to the one ladder, the ladder takes its rungs here
+            if (not front or _handoff.handoff_peer(it, who)) and _ho.awaiting_session(it, who, _handoff.ho_same) and not (ladder_on and old and _handoff.ho_same(old.get("mover"), who) and _ladder.on_ladder(old, now, float((r or {}).get("at") or 0))):
+                continue                 # an untaken hand-off is the hand-off audit's alone (the dates pass does not start it; a peer front agent's hand-off in a front-only project is clocked by that audit too, so it is no exception); once that audit has brought it to the one ladder, the ladder takes its rungs here
             # review: the registry row shows background work in its status. A pane whose turn is over but which has a run_in_background Bash task running (a CI watch, a release) shows
             # `shell`, not `idle`, and stall.action counts `shell` as idle; a pane with a background subagent running shows `busy` and is left alone. A background agent's `shell` pane is
             # working on that job, so it is not quiet (with `[ladder] enabled` the pane is not read for a background agent at all: its item's own step status decides, below). A front agent does no background work of its own (it hands that to the builder), so its `shell` pane counts as idle. A doing item
