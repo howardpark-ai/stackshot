@@ -195,14 +195,15 @@ def ladder_enter(item: dict[str, Any], st: "_ho.Step", now: float) -> dict[str, 
 
 
 def ladder_ask(gid: str, who: str, now: float, act: str) -> str:
-    """The ask (and the look) of an item the hand-off audit brought: the hand-off's own notice goes to the mover once more, as it was worded (a front agent gets the History line alone: no item notice wakes one)."""
+    """The ask (and the look) of an item the hand-off audit brought: the hand-off's own notice goes to the mover once more, as it was worded (a front agent gets the History line alone: no item notice wakes one,
+    except a peer's hand-off in a front-only project, `handoff_peer`: its notice and this one are `handoff` pushes, which the front-agent gate lets through, and the new mover is the only one told)."""
     with _writes.ITEM_LOCK:
         item = _load(gid)
         r = _ho.record_of(item)
         if item.get("status") != "open" or not r or not _handoff.ho_same(_stallsvc.stall_mover(gid, item), who):
             return ""
         meta = item.setdefault("metadata", {})
-        front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
+        front = _telling.front_keeper(who, str(meta.get("project") or ""))[0] and not _handoff.handoff_peer(item, who)
         _stall.note(meta, now, f"{_session_label(who)} has not taken it" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
         _writes.save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
         text = "" if front else _handoff.handoff_text(gid, item, r)

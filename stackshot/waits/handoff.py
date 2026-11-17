@@ -27,9 +27,10 @@ the sender last): a delivered hand-off not taken within [model] handoff_minutes 
 CLI registry's busy to idle or shell, read by the caller). Section 5, in order: the project's builder (the background agent whose mandate says build, else maintain, merge or engineer: router_live.builder's pick), the cold `claude -p` call (cold_call.py), the sender (the last fallback; never the owner, a script or the server), and when none of these can take it the item is
 handed to the fleet's builder as a recovery request (`recover`: the item stays with its mover and the request is one message; the server sends it to the project's -main agent instead when the project is
 front-only, `anchors.front_only`: no background agent on its map, so the builder step found no one: `_recovery_target` in `service/pane_recovery.py`). A turn that ends in a relaunch is no answer: when the mover's pane was relaunched (a new process) after the notice was delivered and before it wrote, the notice died with the old process, so
-the ladder does not move: the notice is sent again once, to the pane that is back, and the clock restarts from the re-send (`resend`); a second loss goes down the ladder as above. A mover whose session is gone goes down the same ladder without the sender. The owner and a front agent (a session he talks to: an item notice never wakes one) are exempt from the clock and the turn-end rule.
+the ladder does not move: the notice is sent again once, to the pane that is back, and the clock restarts from the re-send (`resend`); a second loss goes down the ladder as above. A mover whose session is gone goes down the same ladder without the sender. The owner and a front agent (a session he talks to: an item notice never wakes one) are exempt from the clock and the turn-end rule, with one exception: in a front-only project (no background agent on its map) a hand-off one front agent made to
+another front agent of the same project (`Env.peer`) is clocked, by the take minutes alone (never by the turn-end rule), unless its target is the project's -main agent: nothing above -main could be asked, so that hand-off stays exempt.
 
-A hand-off to a background agent (a session `Env.remind` resolves, fail closed) that is not taken within `handoff_minutes` of its delivery gets ONE reminder to that session first (`remind`: "start
+A hand-off to a background agent, or to a peer front agent (a session `Env.remind` resolves, fail closed) that is not taken within `handoff_minutes` of its delivery gets ONE reminder to that session first (`remind`: "start
 its subagent alongside the current work"): for such an agent the turn-end rule does not hurry the reminder, the clock alone does. Only when it is still not taken after another `handoff_minutes`
 does the ladder go on (again the clock alone). An anchor scoped to the item and added at or after the hand-off (`Env.anchored`) counts as taken, for every mover: a pull request in flight is a
 build started; an older anchor (an earlier pull request, one added before the hand-over) says nothing about this hand-off.
@@ -338,7 +339,8 @@ class Env:
     status: Callable[[str], tuple[str, float]] = lambda who: ("", 0.0)       # (busy | idle | shell | "", when the status last changed, epoch s) from the CLI's registry
     started: Callable[[str], float] = lambda who: 0.0                        # when the session's live process started (epoch s; 0.0 when unknown) from the CLI's registry: a start after the delivery is a relaunch
     background: Callable[[str], list[str]] = lambda project: []              # the project's builder alone (a list of one, or none)
-    exempt: Callable[[dict[str, Any], str], bool] = lambda item, who: False  # a front agent: never clocked
+    exempt: Callable[[dict[str, Any], str], bool] = lambda item, who: False  # a front agent: never clocked, except a peer's hand-off (`peer`)
+    peer: Callable[[dict[str, Any], str], bool] = lambda item, who: False    # (item, mover) -> the hand-off is one front agent's to another of a front-only project: clocked by the take minutes alone, reminded as a background agent is
     anchored: Callable[[str, dict[str, Any]], bool] = lambda gid, item: False  # an anchor scoped to the item and added at or after the hand-off: a build in flight, counted as taken (the server reads the anchors once per pass)
     remind: Callable[[dict[str, Any], str], str] = lambda item, who: ""      # (item, mover) -> the session id to remind when the mover is a live background agent, else "" (fail closed: nothing is pushed to anything else)
     is_front: Callable[[str, str], bool] = lambda who, project: False       # (session, project) -> a front agent of that project: an automatic return never goes to one
@@ -388,8 +390,9 @@ def relaunched(r: dict[str, Any], env: Env, who: str) -> str:
     return f"{env.label(who)}'s pane was relaunched after the notice"
 
 
-def _due(r: dict[str, Any], env: Env, who: str) -> str:
-    """Why this open, untaken hand-off is due now ("" when it is not): two failed pushes, the clock, or the recipient's turn that ended with no write."""
+def _due(r: dict[str, Any], env: Env, who: str, clock_only: bool = False) -> str:
+    """Why this open, untaken hand-off is due now ("" when it is not): two failed pushes, the clock, or the recipient's turn that ended with no write (not when `clock_only`: a front
+    agent's turn ends with every conversation it has with its owner, so a peer hand-off is timed by the take minutes alone)."""
     start = clock_start(r, env)
     if not start:
         if int(r.get("attempts") or 0) >= 2 and not r.get("queued_at"):
@@ -399,7 +402,7 @@ def _due(r: dict[str, Any], env: Env, who: str) -> str:
         return ""
     if env.now - start >= env.minutes * 60:
         return f"{env.label(who)} did not take it in {_minutes_text(env.minutes)}" + (" after a reminder" if r.get("reminded_at") else "")
-    if r.get("reminded_at"):
+    if clock_only or r.get("reminded_at"):
         return ""                      # after the reminder the clock alone counts: a pane that answers the reminder with a turn that writes nothing has not taken it either, but it gets the whole time
     st, at = env.status(who)
     if st in ("idle", "shell") and at and at > start and env.now - at >= env.idle_grace:      # `shell` is a pane whose turn is over with a background Bash task running
@@ -445,7 +448,7 @@ def plan(items: dict[str, dict[str, Any]], env: Env) -> list[Step]:
       - the hand-off was delivered (or queued, plus the inbox grace) and not taken in `minutes`, or the mover's turn ended with no write, or two pushes failed: down section 5, the
         sender last.
     Not looked at: the owner as mover (never times out), a hand-off already taken, one with a cold call running, one whose recovery was already asked; a front agent's item is exempt from the
-    clock and the turn end, not from the gone mover.
+    clock and the turn end (a peer's hand-off in a front-only project, `env.peer`, is not: it is clocked by the take minutes alone), not from the gone mover.
     With `env.ladder` ([ladder] enabled) none of those walks section 5 here: each one is an `enter` step, which brings the item to the one ladder (ladder.py), and an item already on it is left alone."""
     out: list[Step] = []
     memo_pane: dict[str, str] = {}
@@ -481,7 +484,7 @@ def plan(items: dict[str, dict[str, Any]], env: Env) -> list[Step]:
         if r.get("taken_at") or r.get("no_clock") or env.exempt(item, who):
             continue
         gone = relaunched(r, env, who)
-        due = "" if gone else _due(r, env, who)
+        due = "" if gone else _due(r, env, who, clock_only=env.peer(item, who))
         if not (gone or due) or env.anchored(gid, item):      # an anchor scoped to the item and added since the hand-off is a build started: taken (looked at only for an item that would act)
             continue
         start = clock_start(r, env)

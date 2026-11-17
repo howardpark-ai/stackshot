@@ -206,15 +206,31 @@ def handoff_builder(project: str) -> list[str]:
 
 
 def handoff_exempt(item: dict[str, Any], who: str) -> bool:
-    """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock)."""
+    """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock), except the peer case (`handoff_peer`): one front agent's hand-off to
+    another of a front-only project is told by a notice and then has nothing else watching it, so it is clocked like a builder's."""
     m = item.get("metadata") or {}
-    return _telling.front_keeper(who, str(m.get("project") or ""))[0]
+    return _telling.front_keeper(who, str(m.get("project") or ""))[0] and not handoff_peer(item, who)
 
 
-def handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
+def handoff_peer(item: dict[str, Any], who: str) -> bool:
+    """Is the open hand-off of `item` to the front agent `who` a peer's (front_handed_by_peer: one front agent to another of a front-only project, `from` a live front agent of the item's own project, so a project that lists a
+    background agent, another project's agent and the owner never are), and does `who` have someone above it to ask? The project's -main agent does not (nor does a project with none): the ladder's last rung asks the -main agent, and
+    with none or with the quiet one being it the request would fall to the fleet's builder, so a hand-off there stays unclocked as before. The hander is never told anything; only `who` and, at the ladder's end, the -main agent are."""
+    try:
+        proj = str((item.get("metadata") or {}).get("project") or "")
+        r = _ho.record_of(item)
+        if not r or not (ho_same(r.get("to"), who) or ho_same(r.get("to_id"), who)) or not front_handed_by_peer(r, who, proj):
+            return False
+        main = _anc.fallback_main(proj)      # the same pick the ladder's last rung makes (pane_recovery._recovery_target)
+        return bool(main) and not (ho_same(main, who) or _hooks().session_id(main) == (_hooks().session_id(who) or who))
+    except Exception:  # noqa: BLE001  — an extra: a failed read keeps the exemption
+        return False
+
+
+def handoff_reminder_target(who: str, roles: dict[str, Any] | None, front: bool = False) -> str:
     """The session id a reminder goes to, or "" (fail closed): only a live session that the registry or the fleet resolves and that `roles` lists with a background role (`back`) and not
     retired. Not a front agent, a page's name-line session (the one session of a one-session project is the one the user talks to), an unknown name, and nothing at all when the roles
-    could not be read or anything here raises."""
+    could not be read or anything here raises. `front` (the peer case, `handoff_peer`) asks for a front role instead: the reminder is a `handoff` notice, which the front-agent gate lets through."""
     try:
         if not roles or not who or not _ho.is_session_name(who) or _model.is_owner(who):
             return ""
@@ -222,7 +238,7 @@ def handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
         if not (_anc.is_id(sid) or _sr.resolve(sid)):
             return ""
         entry = roles.get(_hooks().role_name(roles, who)) or {}
-        return sid if entry.get("role") == "back" and not entry.get("retired") else ""
+        return sid if entry.get("role") == ("front" if front else "back") and not entry.get("retired") else ""
     except Exception:  # noqa: BLE001
         return ""
 
@@ -230,7 +246,7 @@ def handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
 def handoff_env(now: float) -> "_ho.Env":
     idx = _sessions_index()          # read once for the pass
     cells: dict[str, Any] = {}       # read at most once per pass, and only when an item would act: the anchors, the role map
-    reminded: dict[str, str] = {}
+    reminded: dict[tuple[str, bool], str] = {}
 
     def anchored(gid: str, item: dict[str, Any]) -> bool:
         try:
@@ -245,18 +261,19 @@ def handoff_env(now: float) -> "_ho.Env":
             return False
 
     def remind(item: dict[str, Any], who: str) -> str:
-        if who not in reminded:
+        key = (who, handoff_peer(item, who))      # a peer front agent is reminded as a background agent is; any other front agent is not
+        if key not in reminded:
             if "roles" not in cells:
                 try:
                     cells["roles"] = _anc.session_roles()
                 except Exception:  # noqa: BLE001
                     cells["roles"] = None
-            reminded[who] = handoff_reminder_target(who, cells["roles"])
-        return reminded[who]
+            reminded[key] = handoff_reminder_target(who, cells["roles"], front=key[1])
+        return reminded[key]
     return _ho.Env(now=now, derive=ho_derive, same=ho_same, minutes=handoff_minutes(), idle_grace=handoff_num("handoff_idle_seconds", _ho.IDLE_GRACE),
                    gone_days=handoff_num("handoff_gone_days", _ho.GONE_DAYS), cold_call=cold_call_on(), pane=lambda w: handoff_pane(w, idx),
                    inbox_grace=handoff_num("handoff_inbox_grace_minutes", 10.0), status=lambda w: handoff_status(w, idx), started=lambda w: handoff_started(w, idx), background=handoff_builder,
-                   exempt=handoff_exempt, label=_session_label, cover_all=_hooks().switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
+                   exempt=handoff_exempt, peer=handoff_peer, label=_session_label, cover_all=_hooks().switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
                    ladder=_hooks().ladder_on(), laddered=lambda g, w, at: _hooks().laddered(g, w, now, at))
 
 
