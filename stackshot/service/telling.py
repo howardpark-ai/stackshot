@@ -410,6 +410,18 @@ def tell_kind(kind: str, *args: Any, **kw: Any) -> "threading.Thread | None":
         FRONT_HINT.kind = old
 
 
+def tell_news(news: "dict[str, str]", *args: Any, **kw: Any) -> "threading.Thread | None":
+    """tell_woken for one notice about several items (gids comma-separated) whose text is a summary of all of them: `news` is {item id: that item's own line}. The gate writes each item's
+    board line from its own entry, never the whole summary on every item (it would read as another item's news, clipped); an item with no entry gets the notice text. The hint lasts for
+    this call only, as tell_kind's does."""
+    old = getattr(FRONT_HINT, "news", None)
+    FRONT_HINT.news = dict(news or {})
+    try:
+        return tell_woken(*args, **kw)
+    finally:
+        FRONT_HINT.news = old
+
+
 def gate_result() -> tuple[str, str]:
     """what the gate did with the last notice tell_kind told on this thread: ("", "") sent as ever (or a recipient that is no front agent), ("fyi", "") filed to ride his next
     turn, ("held", why) nobody is told. A sender words its reply line from it, so a line never says "told" of a notice the gate held. (tell_woken returns None for a held notice, but a
@@ -556,8 +568,9 @@ def _front_board_line(gid: str, owner: str, told: bool, why: str, note: str) -> 
     out: list[str] = []
     try:
         label = _session_label(owner) or str(owner)
-        text = _frontq.line(label, told, why, note)
+        own = getattr(FRONT_HINT, "news", None) or {}      # tell_news: an item's own line, not the summary of them all
         for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)][:5]:
+            text = _frontq.line(label, told, why, str(own.get(g) or note).replace(_FOR_OWNER, " "))      # the owner mark is for the pane, not for the board
             with _writes.ITEM_LOCK:
                 it = _load(g)
                 if it.get("status") != "open":

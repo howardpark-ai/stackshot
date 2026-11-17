@@ -386,7 +386,7 @@ def probe_no_background_agent():
     with _Err() as e: got = tick()
     tm = [x for x in sent if x[1] == U["gamma-main"]]
     return (got == [] and mover_of(1) == "home-peer" and len(sent) == 1 and len(tm) == 1 and tm[0][3] == "stall_summary" and "no builder was free" in tm[0][2] and "stays with home-peer" in tm[0][2]
-            and len(history(1)) == 1 and "no builder was free to take it: gamma-main was told" in history(1)[0] and mt(1)["hand_idle"] == {"none_at": now0}
+            and len(history(1)) == 1 and "no builder was free to take it: a summary goes to gamma-main" in history(1)[0] and mt(1)["hand_idle"] == {"none_at": now0}
             and "idle, no builder free" in e.text)
 rule("5 a project with no background agent of its own keeps the item, however many builders other projects have idle: the History line and -main say so", probe_no_background_agent, [(audit_ticks_svc, "_hand_idle_builders", old_builders)])
 def probe_no_background_agent_once():
@@ -433,7 +433,7 @@ def probe_none_free():
 rule("6 with no builder free nothing moves and -main is told that none was, and only -main", probe_none_free, [(HI, "pick_free", lambda c, busy, status, dead, same, frm="": next((x for x in c if x), ""))])
 wipe(); on(); put(1, act=90); all_busy(); tick()
 h6 = history(1)
-check("6 one History line says so, and the item keeps its mover and its record", len(h6) == 1 and h6[0].startswith("no activity for an hour and nothing verified, but no builder was free to take it: home-main was told") and mt(1)["hand_idle"] == {"none_at": now0}, (h6, mt(1).get("hand_idle")))
+check("6 one History line says so, and the item keeps its mover and its record", len(h6) == 1 and h6[0].startswith("no activity for an hour and nothing verified, but no builder was free to take it: a summary goes to home-main") and mt(1)["hand_idle"] == {"none_at": now0}, (h6, mt(1).get("hand_idle")))
 check("6 the pass leaves the item's hand-off alone: no record, the next lines as they were", HO.record_of(rd(1)) is None or not HO.record_of(rd(1)), HO.record_of(rd(1)))
 def probe_once_per_day():
     wipe(); on(); put(1, act=90); all_busy()

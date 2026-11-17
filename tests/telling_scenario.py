@@ -74,7 +74,7 @@ MOVED = {      # the telling's name here -> the name it had on server.py (a func
     "presence_here": "_presence_here", "presence_minutes": "_presence_minutes", "project_keeper": "_keeper", "push_noted": "_push_noted", "quiet_line": "_quiet",
     "record_undelivered": "_record_undelivered", "stand_in_keeper": "_stand_in_keeper", "tell_check_closed": "_tell_check_closed",
     "tell_close_mentions": "_tell_close_mentions", "tell_close_owner": "_tell_close_owner", "tell_comment": "_tell_comment", "tell_decided": "_tell_decided",
-    "tell_handback": "_tell_handback", "tell_kind": "_tell_kind", "tell_needed": "_tell_needed", "tell_observers": "_tell_observers", "tell_or_hold": "_tell_or_hold",
+    "tell_handback": "_tell_handback", "tell_kind": "_tell_kind", "tell_needed": "_tell_needed", "tell_news": "_tell_news", "tell_observers": "_tell_observers", "tell_or_hold": "_tell_or_hold",
     "tell_owner": "_tell_owner", "tell_owner_change": "_tell_owner_change", "tell_owner_check_closed": "_tell_owner_check_closed",
     "tell_owner_close": "_tell_owner_close", "tell_owner_on": "_tell_owner_on", "tell_wait_failed": "_tell_wait_failed", "tell_woken": "_tell_woken",
     "then_label": "_then_label", "then_part": "_then_part", "_then_who": "_then_who", "touched": "_touched", "writer_charge": "_writer_charge", "writers_since": "_writers_since",

@@ -483,7 +483,7 @@ rule("7 with NO live builder to take it the item stays, nobody is told to disreg
 none_setup(); tick(); m7 = to_main()[0][2]
 check("7 the message to -main is the notice path's (the front agent's mark on line 1, tag stall_summary), says what stayed where, and asks nothing", m7.startswith(_wt_text._FOR_OWNER + "\n") and to_main()[0][3] == "stall_summary" and "Nothing is asked of you and no reply is owed" in m7 and "?" not in m7.split("\n", 1)[1], m7)
 h7 = history(1)
-check("7 one History line says so; the item keeps its mover, its hand-off and the balance record carries only the day's note", len(h7) == 1 and h7[0].startswith("not started or queued for 10 min, but no live builder could take it, so it stays with home-peer: home-main was told")
+check("7 one History line says so; the item keeps its mover, its hand-off and the balance record carries only the day's note", len(h7) == 1 and h7[0].startswith("not started or queued for 10 min, but no live builder could take it, so it stays with home-peer: a summary goes to home-main")
       and mt(1)["balance"] == {"none_at": now0} and HO.record_of(rd(1))["to"] == "home-peer", (h7, mt(1).get("balance")))
 def probe_once_per_day():
     none_setup(); tick(); n1 = len(to_main())

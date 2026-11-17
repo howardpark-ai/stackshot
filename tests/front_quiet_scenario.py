@@ -13,6 +13,8 @@ and the agent touched the item in its current conversation. Fixture data, no liv
      hold drops it, an old record with no writer tells nobody), no start time is no touch, a [presence] minutes that is no number above 0 is said at config load
   8  the board always reaches him: every case that reaches a front pane leaves its board record in the same pass, and a held case leaves it too
      (a progress notice: a History line; a close: the item's close revision; a stuck notice: the wait_failed mark, past due)
+  11 a stall summary to -main (the idle hand-over's and the balancer's, tag stall_summary) asks nothing: progress for the gate, so no turn of its own (held or an fyi line), one board line per item
+     with that item's own line and no owner mark; the busy-stretch and quiet-mover notices (tag stall) are still pushed
 
     tests/run-suite front_quiet        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, subprocess
@@ -520,6 +522,41 @@ p, h = tell("a112", "home-front", f"{telling._FOR_OWNER}\n[stackshot] a112 \"[ho
 check("11 exempt: the busy-stretch notice (tag stall) to a front agent is still pushed with the owner away, and leaves no held line", len(p) == 1 and p[0][0] == U["home-front"] and h == 0 and not quiet_log(112) and not held_log("a112"), (p, h))
 p, h = tell("a112", "home-front", f"{telling._FOR_OWNER}\n[stackshot] you have had no turn running for 10 minutes and these items are still yours: a112 \u2192 https://x/items/a112", tag="stall")
 check("11 exempt: …and so is the notice to a quiet mover (tag stall)", len(p) == 1 and p[0][0] == U["home-front"] and h == 0 and not quiet_log(112), (p, h))
+# a summary of several items through the real gate: each item's board line is its own line, never the whole summary clipped, and carries no owner mark
+LEADS = {g: f"a{g} \"[home] item {g}\" (projects/alpha)" for g in (120, 121, 122)}
+LINES = {f"a{g}": f"{LEADS[g]}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with home-peer" for g in LEADS}
+GIDS = ",".join(LINES)
+MULTI = f"{telling._FOR_OWNER}\n[stackshot] 3 items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in LINES.values()) + "\nNothing is asked of you and no reply is owed; nothing here is for Oliver. → https://x/board"
+def tell_multi(who):
+    p0, h0 = len(pushes()), held.count(U[who])
+    telling.tell_news(LINES, GIDS, U[who], MULTI, tag="stall_summary"); drain()
+    return pushes()[p0:], held.count(U[who]) - h0
+def own_only(g):
+    ql_ = quiet_log(g)
+    return len(ql_) == 1 and f"item {g}\"" in ql_[0]["text"] and not any(f"item {o}\"" in ql_[0]["text"] for o in LEADS if o != g) and "[for " not in ql_[0]["text"] and "stackshot" not in ql_[0]["text"] and "so it stays with home-peer" in ql_[0]["text"]
+unstamp("home-front")
+for g in LEADS: item(g, writer="home-front")
+p, h = tell_multi("home-front")
+check("11 multi: a summary of three items to -main with the owner away starts no turn and adds no fyi line", p == [] and h == 0, (p, h))
+check("11 multi: …each item's board line is that item's own line only (no other item's text, no owner mark, not cut off mid-way)", all(own_only(g) for g in LEADS) and all(len(quiet_log(g)[0]["text"]) < Q.CLIP for g in LEADS), {g: quiet_log(g) for g in LEADS})
+check("11 multi: …and each says the agent was not told, and why", all(quiet_log(g)[0]["text"].startswith("home-front was not told (") and "not there" in quiet_log(g)[0]["text"] for g in LEADS), quiet_log(120))
+stamp("home-front", 60)
+for g in LEADS: item(g, writer="home-front")
+p, h = tell_multi("home-front")
+check("11 multi: the owner there and the items touched: one fyi line for the whole summary, no push; each item's board line is still its own", p == [] and h == 1 and all(own_only(g) for g in LEADS) and all(quiet_log(g)[0]["text"].startswith("home-front hears of it on his next turn:") for g in LEADS), (p, h, quiet_log(121)))
+held.take(U["home-front"])
+# present but the agent did not touch the item: held, with the reason, and the board line says so
+stamp("home-front", 60)
+for g in LEADS: item(g, writer="home-send")
+p, h = tell_multi("home-front")
+check("11 untouched: the owner there but the agent did not touch the items: no push, no fyi line", p == [] and h == 0, (p, h))
+check("11 untouched: …each item's board line is its own and says why it was not told", all(own_only(g) and "was not told (" in quiet_log(g)[0]["text"] and "did not touch" in quiet_log(g)[0]["text"] for g in LEADS), {g: quiet_log(g) for g in LEADS})
+check("11 untouched: …and the routing log has a held line with the reason", any("did not touch" in n["reason"] for n in held_log("a120")), held_log("a120"))
+# a notice that carries no per-item lines (the plain tell_woken path) still writes the notice text, with the owner mark taken out
+unstamp("home-front"); item(123, writer="home-front")
+p, h = tell("a123", "home-front", SUMMARY("a123"), tag="stall_summary")
+check("11 plain: a notice told without per-item lines writes its own text on the item, with no owner mark", len(quiet_log(123)) == 1 and "[for " not in quiet_log(123)[0]["text"] and "no builder was free" in quiet_log(123)[0]["text"], quiet_log(123))
+
 # ================================================================ end
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
