@@ -206,15 +206,14 @@ def handoff_builder(project: str) -> list[str]:
 
 
 def handoff_exempt(item: dict[str, Any], who: str) -> bool:
-    """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock), except the peer case (`handoff_peer`): one front agent's hand-off to
-    another of a front-only project is told by a notice and then has nothing else watching it, so it is clocked like a builder's."""
+    """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock), except the peer case (`handoff_peer`): a hand-off to a front agent of a front-only project by a session some page lists is told by a notice and then has nothing else watching it, so it is clocked like a builder's."""
     m = item.get("metadata") or {}
     return _telling.front_keeper(who, str(m.get("project") or ""))[0] and not handoff_peer(item, who)
 
 
 def handoff_peer(item: dict[str, Any], who: str) -> bool:
-    """Is the open hand-off of `item` to the front agent `who` a peer's (front_handed_by_peer: one front agent to another of a front-only project, `from` a live front agent of the item's own project, so a project that lists a
-    background agent, another project's agent and the owner never are), and does `who` have someone above it to ask? The project's -main agent does not (nor does a project with none): the ladder's last rung asks the -main agent, and
+    """Is the open hand-off of `item` to the front agent `who` a peer's (front_handed_by_peer: a session some page lists handed the item to a live front agent of the item's own front-only project, so a project that lists a
+    background agent, another project's front agent, a sender no page lists and the owner never are), and does `who` have someone above it to ask? The project's -main agent does not (nor does a project with none): the ladder's last rung asks the -main agent, and
     with none or with the quiet one being it the request would fall to the fleet's builder, so a hand-off there stays unclocked as before. The hander is never told anything; only `who` and, at the ladder's end, the -main agent are."""
     try:
         proj = str((item.get("metadata") or {}).get("project") or "")

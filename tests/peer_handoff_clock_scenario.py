@@ -1,4 +1,4 @@
-"""Scenario test for the take clock on a peer hand-off: in a front-only project (anchors.front_only: its `agents:` map lists no `background:` agent, so no builder) one front agent hands an item to another with `mover=`;
+"""Scenario test for the take clock on a peer hand-off: in a front-only project (anchors.front_only: its `agents:` map lists no `background:` agent, so no builder) a session some page lists (a front agent, or a background agent of another project) hands an item to a front agent with `mover=`;
 that hand-off is clocked like a builder's, and the item is the new mover's: only the new mover is reminded, the ladder ends at the project's -main agent, and the hander is told nothing at any point. A project with a
 builder, a hand-off to another project's front agent and one to the -main agent itself keep the old exemption. Fixture data (English stand-in names) in a temporary store, the push replaced by a recorder, no network,
 no model call.
@@ -261,6 +261,11 @@ check("5 the reminder target of a peer is its session id (a front role), a backg
       and handoff_svc.handoff_reminder_target("team-back", roles) == U["team-back"] and handoff_svc.handoff_reminder_target("team-back", roles, front=True) == "", (roles.get("home-peer2"), roles.get("team-back")))
 env0 = H.Env(now=0.0, derive=lambda it: None)
 check("5 Env.peer and Env.exempt default to the old rule", env0.peer({}, "x") is False and env0.exempt({}, "x") is False, None)
+rec_item(27, "projects/delta", "home-peer2", "team-back")
+rec_item(28, "projects/delta", "home-peer2", "home-nobody")
+check("5 a session some page lists (here another project's background agent) may hand over to a front-only project's front agent: that hand-off is a peer's too; a sender no page lists is not (exempt as before)",
+      handoff_svc.handoff_peer(view(27), "home-peer2") and not handoff_svc.handoff_exempt(view(27), "home-peer2") and not handoff_svc.handoff_peer(view(28), "home-peer2") and handoff_svc.handoff_exempt(view(28), "home-peer2"), (ho(27), ho(28)))
+close(27, 28)
 close(14)
 
 # ================================================================ 6. the hander is the -main agent
