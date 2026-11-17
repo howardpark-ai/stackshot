@@ -2,7 +2,8 @@
 
 A timer's script that finds work for a project's background agent asks for one board item of that work. The route is narrow on purpose: the mover must be a background agent the project's page lists, the subject takes
 the project scope's prefix from the server, the description is bullets within the create tool's limits, and the item is marked with the caller's marker (`metadata.item_open`): while an item with that marker is open on
-the same project a repeat call answers it and files nothing. `_ITEMOPEN_LOCK` makes the look for an open item and the write one step. The helpers it files its rows with are service/terminal_prompt.py's.
+the same project a repeat call answers it and files nothing. A front-only project (no background agent on its page) has none to take the item: it is filed with the project's -main agent as its mover
+and says so (`metadata.item_open_fallback`), as job_gap.py does. `_ITEMOPEN_LOCK` makes the look for an open item and the write one step. The helpers it files its rows with are service/terminal_prompt.py's.
 
 A service module: it reads the project record, the anchors' registry and the store and writes through `create_item`. The route that calls it (`_client_post`) is the surface's.
 
@@ -87,15 +88,15 @@ def _itemopen_lines(raw: Any) -> tuple[list[str], str]:
 
 
 def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """`client.py post item-open <marker> --project P --subject S --mover M --step "<M>: ..." --line "..." [--line ...] [--sender L]`: a script asks for ONE board item for a background agent of project P.
+    """`client.py post item-open <marker> --project P --subject S --mover M --step "<M>: ..." --line "..." [--line ...] [--sender L]`: a script asks for ONE board item for a background agent of project P (a front-only project, whose page lists none, files it under its -main agent: see below).
     body: marker (`<kind>:<what>`, the item's mark), project (an id, a page key or a bare slug), subject (the action and its object, no prefix: the server puts the project scope's prefix before it, and a
     prefix the caller wrote is replaced), description (the bullets: a list of lines or one text of lines), step (one line that starts `<mover>: `), mover (a background agent listed under `background:` on the
-    project's page, nobody else: a front agent, the owner, an unlisted name are refused), sender (the script's own label, one word; default client.py). Any other key is refused.
+    project's page, nobody else: a front agent, the owner, an unlisted name are refused; in a front-only project, where the page lists none, the name the script gives is replaced by the -main agent), sender (the script's own label, one word; default client.py). Any other key is refused.
     The item is filed through create_item (service/create.py), the create tool's own code, so the subject, description and next gates, the project page and the GitHub mirror all apply and a refusal is the tool's text (400);
     the caller picks no field the tool does not take for a script (no needs, owner, priority, ask or date). The project's front agent (its -main first) is the item's creator and the mover is named in needs, so it is
     told once at the create. The description ends with "- Opened by <sender> (a script on a client machine)": no host name reaches the item or its GitHub issue. Marked metadata.item_open = <marker>; while an item with
-    the marker is open on this project (read from the store; the marker is per project) a repeat call answers it and files nothing, and once it is closed a call files a new one. A project holds at most 10 open items filed by this route: past it a new marker is a 400 until one closes (a repeat never counts). The row owes no page, as every script route's. 404 no such project, 409 no front agent
-    to file under, 503 the project record cannot be read. -> (status, {item, marker, project, mover, owner, repeat})."""
+    the marker is open on this project (read from the store; the marker is per project) a repeat call answers it and files nothing, and once it is closed a call files a new one. A project holds at most 10 open items filed by this route: past it a new marker is a 400 until one closes (a repeat never counts). The row owes no page, as every script route's. The item is then with the -main agent (`metadata.item_open_fallback`, no needs, one more description line says so) and the answer's `fallback` is true. 404 no such project, 409 no front agent
+    to file under, 503 the project record cannot be read. -> (status, {item, marker, project, mover, owner, repeat, fallback})."""
     extra_keys = sorted(k for k in body if k not in _ITEMOPEN_KEYS)
     if extra_keys:
         return 400, {"error": f"not taken: {', '.join(str(k) for k in extra_keys)}; item-open takes {', '.join(_ITEMOPEN_KEYS)} and nothing else"}
@@ -133,7 +134,8 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     rec = recs[0]
     key = rec["key"]
     back = sorted(str(x) for x in ((_anc.registry().get(key) or {}).get("back_agents") or {}))
-    if mover not in back:
+    fallback = not back and _anc.front_only(key)      # a front-only project has no background agent to hold the item: it goes to its -main agent, as job_gap.py does, and the item says so
+    if mover not in back and not fallback:
         return 400, {"error": f"mover {mover!r} is not a background agent listed on {key}'s page (its agents map): " + (", ".join(back) or "the page lists none")}
     if not step.startswith(mover + ": ") or not step[len(mover) + 2:].strip():
         return 400, {"error": f"step is one line that starts with the mover's name: '{mover}: <what it does>'"}
@@ -141,6 +143,13 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to keep the item; a front agent lists itself first (client.py post project-agent)"}
     owner = front[0]
+    if fallback:
+        max_lines, _line_max = _description_limits()
+        if len(lines) > max_lines - 2:
+            return 400, {"error": f"description has {len(lines)} lines and {key} lists no background agent, so the item says it is with {owner} in one more line, which leaves {max_lines - 2} lines here; shorten it"}
+        step = f"{owner}: {step[len(mover) + 2:].strip()}"      # the script named the background agent it knew of: the step keeps its words under the front agent that holds the item
+        mover = owner
+        lines = [*lines, f"{key} lists no background agent, so this is with {owner}, its front agent"]
     by = f"{sender} (a script on a client machine)"
     prefixes = list(_cfg.CFG["subject"]["prefixes"])
     subject = _svcstore._shown_ids(subject)
@@ -166,16 +175,18 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
             if found:
                 meta = _svcstore._load(found[0]).get("metadata") or {}
                 return 200, {"item": _gh.shown(found[0]), "marker": marker, "project": str(meta.get("project") or key), "mover": _sr._session_label(str(meta.get("mover") or "")),
-                             "owner": _sr._session_label(str(meta.get("owner") or "")), "repeat": True}
+                             "owner": _sr._session_label(str(meta.get("owner") or "")), "repeat": True, "fallback": bool(meta.get("item_open_fallback"))}
             if len(open_here) >= _ITEMOPEN_OPEN_MAX:
                 return 400, {"error": f"{key} already has {len(open_here)} open items filed by this route and the cap is {_ITEMOPEN_OPEN_MAX}: an open item must close before another is filed "
                                       "(a repeat of an open marker is always answered; a marker that changes on every run is the usual cause)"}
             _writes.TERMINAL_ROW.on = True  # a script's notification: it owes no page (the mover is told at the create, by the needs notice)
             try:
-                gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=step, needs=[mover], mover=mover, by=by, extra={"item_open": marker})
+                gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=step, needs="" if fallback else [mover], mover=mover, by=by,
+                                                      extra={"item_open": marker, **({"item_open_fallback": True} if fallback else {})})      # as job_gap: a front mover is not named in needs
             finally:
                 _writes.TERMINAL_ROW.on = False
     except ToolError as e:
         return 400, {"error": str(e)}
     meta = _svcstore._load(gid).get("metadata") or {}
-    return 200, {"item": _gh.shown(gid), "marker": marker, "project": str(meta.get("project") or key), "mover": _sr._session_label(mover), "owner": _sr._session_label(owner), "repeat": False}
+    return 200, {"item": _gh.shown(gid), "marker": marker, "project": str(meta.get("project") or key), "mover": _sr._session_label(mover), "owner": _sr._session_label(owner), "repeat": False,
+                 "fallback": fallback}
