@@ -481,10 +481,10 @@ def handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool 
 
 
 def front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
-    """Is the hand-off `rec` (to the front agent `to`) one front agent made to another of a front-only project (anchors.front_only; the case gates.fix_front_mover lets through)?"""
+    """Is the hand-off `rec` (to the front agent `to`) one a session that some project page lists made to a front agent of a front-only project (anchors.front_only; the case gates.fix_front_mover lets through)?"""
     try:
         _roles, key = _hooks().role_of(to)
-        return bool(key) and _hooks().front_pair_ok(str(rec.get("from") or ""), key, project)
+        return bool(key) and _hooks().front_handover_ok(str(rec.get("from") or ""), key, project)
     except Exception:  # noqa: BLE001
         return False
 
