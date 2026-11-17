@@ -57,6 +57,7 @@ from stackshot.service import telling as _telling
 from stackshot.service import watching as _watching
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path
+from stackshot.waits import builderless as _bl
 from stackshot.waits import event_waits as _ew
 from stackshot.waits import handoff as _ho
 from stackshot.waits import handover as _hv
@@ -84,7 +85,7 @@ class Hooks:
     eff_state: Callable[..., Any]
     follow_superseded: Callable[..., Any]
     front_held: Callable[..., Any]            # audit/front_step.held: the front agent a step opens with when the write check refuses it (service/ imports no audit/)
-    front_pair_ok: Callable[..., Any]
+    front_handover_ok: Callable[..., Any]
     handoffs_in: Callable[..., Any]
     handover_kind: Callable[..., Any]
     hub_sessions: Callable[..., Any]
@@ -157,9 +158,36 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
     return key, proj, list(builder), hub
 
 
-def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", project: str = "") -> ToolError:
-    """The refusal of a front-mover case with no builder to substitute. A project with no background agent says so; one whose background agent only the project record holds (its page line
-    still owed: front_only is False but no builder is listed yet) says the page does not list it yet, not that there is none."""
+def _front_only_why(field: str, key: str, project: str, sender: str) -> str:
+    """Why a hand-over to the front agent `key` of a front-only project was refused, as the clause that follows "this call was refused because": a `then` or `post_wake_mover` tells no one, and a `mover` names
+    the half that failed (front_handover_ok): the sender (retired, or no session a page lists) and / or the target (not a live front agent of the item's project). A failed read names both halves."""
+    if field != "mover":
+        return f"{field}= tells no one (the owner's answer or the wake moves the item), and only mover= hands an item over"
+    try:
+        h = _hooks()
+        nm = _anc.names()
+        s = str(sender or "").strip()
+        roles, skey = h.role_of(s, nm) if s else ({}, "")
+        why = []
+        if not skey:
+            why.append(f"{s} is not a session any project page lists" if s else "the call names no sender")
+        elif roles[skey].get("retired"):
+            why.append(f"{s} is retired")
+        troles, tkey = h.role_of(key, nm)
+        if not _bl.front_of(troles.get(tkey) if tkey else None, project):
+            why.append(f"{key} is not a live front agent of {project or 'the project'}")
+        if why:
+            return " and ".join(why)
+    except Exception:  # noqa: BLE001  — the wording only: a failed read gives both halves
+        pass
+    return f"the sender is not a live session some project page lists, or {key} is not a live front agent of {project or 'the project'}"
+
+
+def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", project: str = "", sender: str = "") -> ToolError:
+    """The refusal of a front-mover case with no builder to substitute, in three cases. A project that has a builder says the front agent gets no hand-off notice (the explanation is still true there); one whose
+    background agent only the project record holds (its page line still owed: front_only is False but no builder is listed yet) says the page does not list it yet, with the same explanation; a front-only project
+    (no background agent) states only the rule that applies to it, a `mover` handed over by any live session some project page lists to a live front agent of the item's project, who is told, and which half of
+    that this call failed (_front_only_why), with no word that a front agent gets no notice."""
     key, proj, builder, hub = case
     owed = False
     if not builder and project:
@@ -167,9 +195,15 @@ def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", pr
             owed = not _anc.front_only(project)
         except Exception:  # noqa: BLE001  — the wording only: a failed read gives the plain text
             owed = False
+    if not builder and not owed:
+        what = project or "the project"
+        rule = (f"A live session some project page lists may hand an item of {what} to a live front agent of it through mover=, and that front agent is told by a hand-off notice" if field == "mover"
+                else f"Only mover= may hand an item of {what} to a live front agent of it, from a live session some project page lists, and that front agent is then told by a hand-off notice")
+        return ToolError(f"Refused: {field}={key} hands an item of {what} to {key}, a user-facing agent of {proj}, and {hub or 'The project'} has no builder and no background agent to hand it to, so keep the item with its current mover. "
+                         f"{rule}; this call was refused because {_front_only_why(field, key, project, sender)}. "
+                         f"For a check or an answer only {key} can give, message it instead (message(to={key}, ...)).")
     where = (f"Hand build work to the project's builder, {builder[0]} ({field}={builder[0]}); " if builder
-             else f"{hub or 'The project'}'s background agent is not on its page yet, so there is no builder to hand it to yet; keep the item with its current mover; " if owed
-             else f"{hub or 'The project'} has no builder and no background agent to hand it to, so keep the item with its current mover; ")
+             else f"{hub or 'The project'}'s background agent is not on its page yet, so there is no builder to hand it to yet; keep the item with its current mover; ")
     return ToolError(f"Refused: {key} is a user-facing agent of {proj}, and {field}={key} from another session hands it an item it gets no notice of "
                      f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). {where}"
                      f"for a check or an answer only {key} can give, message it instead (message(to={key}, ...)).")
@@ -179,7 +213,9 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
     """The front-mover rule as a fix (server_fixes.FRONT_MOVER): a mover, then or post_wake_mover that another session sets to a front agent becomes the project's builder, since the front agent gets
     no hand-off notice. → (the value to use, the note for the reply, the fixes to record on the item: (fix, token, History line), a line of "" = take the mark off). The value is the one sent when it is
     no case (_front_mover_case), or when the server already substituted this very value on this item for this very sender less than a day ago and the sender sends it again: the mover's no, kept as sent with a note, and the server leaves that
-    field alone (another session, or the same one after a day, is substituted as a new case). With no builder to substitute the write is refused as before."""
+    field alone (another session, or the same one after a day, is substituted as a new case). With no builder to substitute, a `mover` goes through when the project is front-only and `front_handover_ok`
+    says so (the target is a live front agent of the item's project, the sender a live session some project page lists, of any project; the target is told by a hand-off notice); `then` and `post_wake_mover`
+    are refused as before (no write of a session tells their target: the owner's answer or the wake moves the item)."""
     h = _hooks()
     case = _front_mover_case(field, value, sender, project, current)
     if case is None:
@@ -192,9 +228,9 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
         return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
-        if field == "mover" and h.front_pair_ok(sender, key, project):      # a front-only project (anchors.front_only): one of its front agents may hand an item to another; the target is told by a notice (handoff_notify)
-            return value, f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is told it is handed the item)", []
-        raise _front_mover_refusal(field, case, project)
+        if field == "mover" and h.front_handover_ok(sender, key, project):      # a front-only project (anchors.front_only): any session a project page lists may hand an item to one of its front agents; the target is told by a notice (handoff_notify)
+            return value, f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is a front agent of the project and is told it is handed the item)", []
+        raise _front_mover_refusal(field, case, project, sender)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
                         f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent; for a check or an answer only {key} can give, message it)"), \
         [(_sf.FRONT_MOVER, _sf.bind(token, by, now), f"{field} {key} → {builder[0]}: {key} is a user-facing agent and gets no hand-off notice from another session; sending {field}={key} again keeps it as sent")]
