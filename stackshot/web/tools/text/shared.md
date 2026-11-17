@@ -26,7 +26,7 @@ answer, the session goes first and adds decision when it is done (or the decisio
 after=); decision sits beside this project's background agents only when the two are independent (beside any other
 session it is refused), and when unsure, in sequence. When decision leaves needs (he has decided), the sessions still
 named are told at once; a session whose work changes the question rewrites the ask. The server hands no item to a
-front agent on its own motion: one back with its front mover alone tells the project's builder (the mover, if the project has no background agent).
+front agent on its own motion: one back with its front mover alone tells the project's builder (the mover, if the project has no builder).
 
 ## text ANCHOR_SHAPES
 Slack channel/DM, Drive file/folder, Gmail thread, gmail:q:<query> or gmail:q@<mailbox>:<query>, Notion page or

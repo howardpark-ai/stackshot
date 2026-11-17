@@ -175,7 +175,7 @@ def handoff_started(who: str, idx: dict[str, Any] | None = None) -> float:
 
 
 def handoff_background(project: str) -> list[str]:
-    """The project's background agents, the one to hand to first first (the send-time guard names one): the builder before the rest, the page's order within each."""
+    """The project's background agents, the one to hand to first first (the send-time guard names one): the builder before the rest, the names' alphabetical order within each (anchors.background_ranked)."""
     return [n for _a, _b, n in handoff_ranked(project)]
 
 
@@ -187,7 +187,7 @@ def handoff_ranked(project: str) -> list[tuple[int, int, str]]:
 
 def handoff_builder(project: str) -> list[str]:
     """Where a hand-off nobody took falls first: the project's BUILDER alone (anchors.builder_of, which front_only reads too: the background agent whose mandate says build, else maintain, merge or
-    engineer, the page's order within each; not every background agent on the page). A list of one, or none."""
+    engineer, the names' alphabetical order within each; not every background agent on the page). A list of one, or none."""
     return _anc.builder_of(project)
 
 

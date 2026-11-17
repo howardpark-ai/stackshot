@@ -225,7 +225,7 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 {{DESC_MAX_LINES}} lines); close: the complete tool. status: open | completed (`needs` says whose move it is).
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
-background agent there, its front agents may take the item by mover= or a step behind an open step
+builder there, its front agents may take the item by mover= or a step behind an open step
 (the item moves to it, told, when the step before is done). A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. {{ITEM_FORM}} {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s

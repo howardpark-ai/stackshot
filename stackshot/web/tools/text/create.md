@@ -80,7 +80,7 @@ decision) has him as mover, and naming a session as mover beside that state is r
 none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name
 a session as mover and put his part in a next line that starts `{{OWNER}}:`). A step of next that opens with a front
 agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or
-send `For <agent>,` to its project page; with no background agent there, its front agents may take the item
+send `For <agent>,` to its project page; with no builder there, its front agents may take the item
 by mover= or a step behind an open step. owner is not a parameter any more: it is still accepted for a few days with a note in the
 reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 |
 p2 | p3, shown but not sorted. {{ITEM_FORM}} {{NEEDS_FORM}}
