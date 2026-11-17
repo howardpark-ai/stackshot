@@ -2536,21 +2536,24 @@ check("CLASS 8b ... and c1 in lower case with spaces is C1", okc.returncode == 0
 # [ahead rmimp c]
 # ---- a removed import of one of ours (Tue Nov 17th 2026): a synthetic map, nothing measured. The map of a commit is measured WITH its imports, so for a line on the old side of a
 # diff "every suite that ran the importer ran the imported module" is true of any module, whatever it does at import (the module was run through that very import). A removed
-# import is quiet only for a module that only binds names. eff.py has an effect at import (a call), bindm.py only binds a name. imp.py imports both and is run by s1 and s2, which
+# import (the file no longer imports the module at module level: a line rewritten that still does, a name added, parenthesised, split, reordered, is no removal) is quiet only for a module that only binds names. eff.py has an effect at import (a call), bindm.py only binds a name. imp.py imports both and is run by s1 and s2, which
 # ran eff.py through it; imp2.py imports bindm.py only (s1, s2 ran it), imp3.py too (s3 ran it, and no suite ran eff.py but s1 and s2).
 R = T / "repoimp"; R.mkdir()
 git("init", "-q", "-b", "main")
-write("eff.py", "REG = []\nREG.append(1)\n")
+write("eff.py", "REG = []\nREG.append(1)\nA = 1\nB = 2\n")
 write("bindm.py", "X = 1\n")
 write("imp.py", "import eff\nimport bindm\n\n\ndef use():\n    return 1\n")
 write("imp2.py", "import bindm\n\n\ndef use2():\n    return 2\n")
 write("imp3.py", "import bindm\n\n\ndef use3():\n    return 3\n")
+write("imp4.py", "from eff import A, B\nimport bindm\n\n\ndef use4():\n    return 4\n")
+write("imp5.py", "import eff\nimport bindm\n\n\ndef use5():\n    return 5\n")
+write("imp6.py", "from eff import A\n\n\ndef use6():\n    return A\n")
 for s_ in ("s1", "s2", "s3"): write(f"tests/{s_}_scenario.py", "print('x')\n")
 harness_stub(R)
 baseimp = commit("base of the removed import cases")
 IM = T / "mapimp.json"
 _ent = lambda py: {"ok": True, "failed": False, "files": [], "dirs": ["", "tests"], "whole": [], "py": py, "seconds": 1}
-_both = {"imp.py": ["", "use"], "imp2.py": ["", "use2"], "eff.py": [""], "bindm.py": [""]}
+_both = {"imp.py": ["", "use"], "imp2.py": ["", "use2"], "imp4.py": ["", "use4"], "imp5.py": ["", "use5"], "imp6.py": ["", "use6"], "eff.py": [""], "bindm.py": [""]}
 IM.write_text(json.dumps({"format": 1, "commit": baseimp, "strace": True, "suites": {"s1": _ent(_both), "s2": _ent(_both), "s3": _ent({"imp3.py": ["", "use3"], "bindm.py": [""]})}}))
 def imp_sel(edit, msg):
     git("checkout", "-q", "-B", f"i{len(ran)}", baseimp)
@@ -2569,8 +2572,19 @@ out, err = imp_sel(lambda: sub("imp2.py", "import bindm\n", "import bindm\nimpor
 check("IMPORT-OUT 4 an added import of a module with effects that every suite running the importer ran already is quiet as before: no suite", out == [], (out, err))
 out, err = imp_sel(lambda: sub("imp2.py", "import bindm\n", "import bindm\nimport bindm as _b\n"), "add binding import")
 check("IMPORT-OUT 5 an added import of a module that only binds names, run by a suite, is quiet as before: no suite", out == [], (out, err))
-out, err = imp_sel(lambda: sub("imp.py", "import eff\n", "import eff as _e\n"), "rewrite effectful import")
-check("IMPORT-OUT 6 an import of a module with effects rewritten (its old line is on the old side) selects the importer's suites", out == ["s1", "s2"], (out, err))
+out, err = imp_sel(lambda: sub("imp.py", "import eff\n", "import eff as _e\n"), "alias effectful import")
+check("IMPORT-OUT 6 an import of a module with effects rewritten with an alias (the module is still imported, nothing is taken out) is quiet as before: no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp6.py", "from eff import A\n", "from eff import A, B\n"), "add a name to an effectful import")
+check("IMPORT-OUT 7 a name added to an import from a module with effects (I2: a pure add) is quiet as before: no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp6.py", "from eff import A\n", "from eff import (\n    A,\n)\n"), "parenthesise an effectful import")
+check("IMPORT-OUT 8 an import from a module with effects parenthesised (the same names) is quiet as before: no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp5.py", "import eff\nimport bindm\n", "import bindm\nimport eff\n"), "reorder imports")
+check("IMPORT-OUT 9 imports reordered, one of them from a module with effects, are quiet as before: no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp4.py", "from eff import A, B\n", "from eff import A\n"), "drop a name of an effectful import")
+check("IMPORT-OUT 10 a name taken out of an import from a module with effects that is still imported is no removal of the import: quiet as before, no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp6.py", "from eff import A\n", "A = 1\n"), "remove the only import of an effectful module")
+check("IMPORT-OUT 11 the only import of a module with effects replaced by a plain binding is a removal: the importer's suites (s1, s2)", out == ["s1", "s2"], (out, err))
+
 # [final]
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

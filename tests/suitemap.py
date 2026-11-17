@@ -188,7 +188,8 @@ annotations). Now:
     NamedTuple or pydantic model field, a class inside a function included), of a module-level variable, a default value, a decorator, and every
     annotation of a file without postponed annotations (they run at import). A change of the `from __future__ import annotations` line itself takes the
     file whole.
-  * An import of one of our modules that is taken out (the line is on the old side of the diff; a line rewritten has its old line there too) is quiet
+  * An import of one of our modules that is taken out (the line is on the old side of the diff and the new file no longer imports the module at module
+    level: a line rewritten that still imports it, a name added, a line parenthesised or split, imports reordered, is no removal) is quiet
     only when that module only binds names and some suite ran it. A module that does more at import is quiet for an import that is ADDED when every
     suite that runs the importer already runs that module, but never for one taken out: the map was measured with the import in place, so every suite
     that ran the importer ran the module through that very import and the test is true of any module whatever it does. Without the import those suites
@@ -1945,6 +1946,8 @@ def py_change(names, S, a, b, old, new):
         # an import the new file gained that may not resolve (see unchecked_imports): the importers fail at import, and no name on the line is read in
         # code that a suite runs (an annotation-only name is no read): the file whole, as the old rule had it
         whole.add(new)
+    # the modules of ours the new file still imports at module level: an import of one of them on the old side is rewritten, not removed
+    still = {mod for _, _, k, _, ex in (mw.stmts if mw is not None and mw.ok else ()) if k == "import-repo" for mod in ex}
     for side, (N, p, ls) in enumerate(((names[0], old, ol), (names[1], new, nl))):
         mn = N.files.get(p) if p else None
         if p is None:
@@ -1981,7 +1984,7 @@ def py_change(names, S, a, b, old, new):
                 continue
             for si, st in sts:
                 _, _, kind, bnames, extra = st
-                if kind == "import-repo" and all(quiet_import(N, S, p, mod, removed=side == 0) for mod in extra):
+                if kind == "import-repo" and all(quiet_import(N, S, p, mod, removed=side == 0 and mod not in still) for mod in extra):
                     kind = "bind"
                 if kind == "effect-mod":
                     if any(p in e.get("py", {}) for e in S.values()):   # a file no suite ran sets no state in one
@@ -2116,7 +2119,8 @@ def library_unresolved(module, name, as_module=False):
 def quiet_import(N, S, path, mod, removed=False):
     """True when a changed import of one of our modules adds nothing at import: the module only binds names and some suite
     ran it already, or every suite that runs the importing file runs the imported one already. A line on the OLD side of the
-    diff (`removed`: an import taken out) is quiet only in the first case. The second is circular there: the map was measured
+    diff (`removed`: an import taken out, the module no longer imported at module level by the file; a line rewritten that still
+    imports it, a name added, the line parenthesised or split, the imports reordered, is not removed) is quiet only in the first case. The second is circular there: the map was measured
     with the import in place, so every suite that ran the importer ran the imported module through that very import, and the
     answer is yes whatever the module does. Without the import the module's effects at import are no longer run by the
     importer's suites, and the next measure shows it: the importer is taken whole, as an import that is not quiet is"""
