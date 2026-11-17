@@ -2,7 +2,7 @@
 
 A timer's script that finds work for a project's background agent asks for one board item of that work. The route is narrow on purpose: the mover must be a background agent the project's page lists, the subject takes
 the project scope's prefix from the server, the description is bullets within the create tool's limits, and the item is marked with the caller's marker (`metadata.item_open`): while an item with that marker is open on
-the same project a repeat call answers it and files nothing. A front-only project (no background agent on its page) has none to take the item: it is filed with the project's -main agent as its mover
+the same project a repeat call answers it and files nothing. A front-only project (no builder) whose page lists no background agent has none to take the item: it is filed with the project's -main agent as its mover
 and says so (`metadata.item_open_fallback`), as job_gap.py does. `_ITEMOPEN_LOCK` makes the look for an open item and the write one step. The helpers it files its rows with are service/terminal_prompt.py's.
 
 A service module: it reads the project record, the anchors' registry and the store and writes through `create_item`. The route that calls it (`_client_post`) is the surface's.

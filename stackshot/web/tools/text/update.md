@@ -225,7 +225,7 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 {{DESC_MAX_LINES}} lines); close: the complete tool. status: open | completed (`needs` says whose move it is).
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
-background agent there, its front agents may take the item by mover= or a step behind an open step
+builder there, its front agents may take the item by mover= or a step behind an open step
 (the item moves to it, told, when the step before is done). A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. {{ITEM_FORM}} {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
@@ -285,8 +285,8 @@ the item over: set mover=<session> (then=<who takes it after {{OWNER}}'s answer 
 mover; on an item a session moves it is dropped with a note) and the new mover is told; a
 front agent gets no hand-off notice, so an update from another session that sets mover or then (or post_wake_mover, the old
 name of mover) to a front agent gets the project's builder instead (the reply and History say so; send it again to keep it as
-sent; with no builder it is refused, except mover= from a session a project page lists to a front agent of the item's
-own project when it has no background agent: the agent is told (then and post_wake_mover stay refused)); take over another session's item only when
+sent; with no builder it is refused, except from a session a project page lists to a front agent of the item's
+own project (mover= tells it; then and post_wake_mover leave it to the answer or the wake)); take over another session's item only when
 asked; a session about to be retired first hands over or completes its open items. mover={{OWNER}} alone is refused on
 an item that is doing: it needs step=… or needs=decision with ask=… in the same write (the refusal says so). An update
 that leaves an open item in a state that is {{OWNER}}'s (his step, or needs holding decision) and names no mover sets

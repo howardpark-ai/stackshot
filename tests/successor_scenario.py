@@ -108,7 +108,7 @@ check("1 pure: …a back_of hint (the server's builder-first list) sets the orde
       and rows["a14"]["to"] == "both-main" and rows["a14"]["front"] is False and S.FRONT_NOTE not in rows["a14"]["why"], rows.get("a14"))
 check("1 pure: a front agent takes an alive item (parent, hub, scope) only when no background agent is live; when its project lists a background agent (a1) the line says no notice is sent to it", rows["a1"]["front"] and not rows["a1"]["told"]
       and S.FRONT_NOTE in rows["a1"]["why"] and S.FRONT_TOLD not in rows["a1"]["why"], rows["a1"]["why"])
-check("1 pure: …and when its project is front-only (no background agent on its page, so no builder to hold the item: a2, a10, a11) the front agent is told once, and the line says so instead (told, not front)",
+check("1 pure: …and when its project is front-only (no builder to hold the item: a2, a10, a11 list no background agent) the front agent is told once, and the line says so instead (told, not front)",
       all(rows[g]["told"] and not rows[g]["front"] and S.FRONT_TOLD in rows[g]["why"] and S.FRONT_NOTE not in rows[g]["why"] for g in ("a2", "a10", "a11")), [rows[g]["why"] for g in ("a2", "a10", "a11")])
 check("1 pure: …a front-only project's own front agent (tier own) is told too, a waiting item's post-wake mover is not (it carries no hand-over line, a6), and a project with a background agent (a3) is as before",
       S.pick("projects/solo", {**REG, "projects/solo": page(["solo-main", "solo-two"])}, lambda n: n == "solo-main", GEN, alive=True).told is True

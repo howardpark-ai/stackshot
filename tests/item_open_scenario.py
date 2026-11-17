@@ -31,18 +31,19 @@ for d in ("store/a", "fleet/a", "sala/a", "brain/projects", "brain/infra", "secr
 (T / "store/next-id").write_text("10"); (T / "store/anchors.json").write_text("{}")
 
 def uid(n): return f"00000000-0000-4000-8000-{n:012d}"
-S = {"build": uid(101), "main": uid(102), "docs": uid(103), "nbmain": uid(104), "gbuild": uid(105), "bmain": uid(106), "bbuild": uid(107), "cmain": uid(108), "cbuild": uid(109)}
+S = {"build": uid(101), "main": uid(102), "docs": uid(103), "nbmain": uid(104), "gbuild": uid(105), "bmain": uid(106), "bbuild": uid(107), "cmain": uid(108), "cbuild": uid(109), "side": uid(110)}
 def row(key, name, project_key):
     return {"id": S[key], "name": name, "aliases": [], "project": None, "project_key": project_key, "role": None, "lane": "max", "model": "opus", "effort": "medium", "pane": name,
             "cwd": "/work", "state": "live", "created": "2026-10-21T21:00:00Z", "retired_at": None,
             "transcripts": [{"id": uid(200 + int(S[key][-3:]) - 100), "machine": "a", "at": "2026-10-21T21:00:00Z", "why": "import"}]}
 ROWS = [row("build", "home-sparrow-builder", "projects/alpha"), row("main", "home-sparrow-main", "projects/alpha"), row("docs", "home-sparrow-docs", "projects/alpha"), row("nbmain", "home-nobuild-main", "projects/nobuild"),
         row("gbuild", "heron-engineer", "ops/general"),
-        row("bmain", "home-beta-main", "projects/beta"), row("bbuild", "home-beta-builder", "projects/beta"), row("cmain", "home-capped-main", "projects/capped"), row("cbuild", "home-capped-builder", "projects/capped")]
+        row("bmain", "home-beta-main", "projects/beta"), row("bbuild", "home-beta-builder", "projects/beta"), row("cmain", "home-capped-main", "projects/capped"), row("cbuild", "home-capped-builder", "projects/capped"), row("side", "home-sparrow-side", "projects/alpha/side")]
 (T / "sala/a/session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-10-22T07:00:00Z", "sessions": {r["id"]: r for r in ROWS}}), encoding="utf-8")
 def page(rel, front):
     q = T / "brain" / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_text("---\n" + front + "\n---\n\n# x\n", encoding="utf-8")
 page("projects/alpha.md", "type: project\ntitle: Alpha\ndisplay-name: home-sparrow\nagents:\n  home-sparrow-docs: keeps the docs\n  home-sparrow-main: talks to Oliver\n  background:\n    home-sparrow-notes: keeps the notes\n    home-sparrow-builder: builds\nstatus: active")
+page("projects/alpha/side.md", "type: project\ntitle: Alpha side\ndisplay-name: home-sparrow-side\nagents:\n  home-sparrow-side: talks to Oliver\nstatus: active")
 page("projects/nobuild.md", "type: project\ntitle: Nobuild\ndisplay-name: home-nobuild\nagents:\n  home-nobuild-main: talks to Oliver\nstatus: active")
 page("projects/beta.md", "type: project\ntitle: Beta\ndisplay-name: home-beta\nagents:\n  home-beta-main: talks to Oliver\n  background:\n    home-beta-builder: builds\nstatus: active")
 page("projects/capped.md", "type: project\ntitle: Capped\ndisplay-name: home-capped\nagents:\n  home-capped-main: talks to Oliver\n  background:\n    home-capped-builder: builds\nstatus: active")
@@ -146,7 +147,7 @@ for who, why in (("home-sparrow-main", "a front agent"), ("home-sparrow-docs", "
                  ("HOME-SPARROW-BUILDER", "the right name in other capitals"), ("home-sparrow", "a prefix of a name")):
     st, e = io_(mover=who, step=f"{who}: deep-scan")
     check(f"mover {who!r} ({why}): 400 naming the listed background agents, nothing filed", st == 400 and "not a background agent" in e["error"] and "home-sparrow-builder" in e["error"] and "home-sparrow-notes" in e["error"] and len(items()) == n3, (st, e))
-# a front-only project (its page lists no background agent) has nobody to hold the item: it is with its -main agent and says so (as the job-gap route does); a project that lists one is unchanged (above)
+# a front-only project (no builder) whose page lists no background agent has nobody to hold the item: it is with its -main agent and says so (as the job-gap route does); a project that lists one is unchanged (above)
 st, fo = io_(marker="test_trim:nobuild", project="projects/nobuild", mover="home-nobuild-builder", step="home-nobuild-builder: deep-scan the suites")
 fit = item(fo["item"]) if st == 200 else {"metadata": {}, "description": ""}; fm = fit["metadata"]
 check("a front-only project: 200, the mover is its -main agent (also the creator), fallback true", st == 200 and fo["mover"] == "home-nobuild-main" and fo["owner"] == "home-nobuild-main" and fo["fallback"] is True and fo["repeat"] is False
@@ -161,6 +162,14 @@ check("…the step must still start with the mover the caller named (nothing fil
 st, e = io_(marker="test_trim:nobuild3", project="projects/nobuild", mover="x", step="x: y", description=[f"- line {i}" for i in range(7)])
 check("…its one more line leaves one fewer for the caller: seven lines are refused, never cut", st == 400 and "lists no background agent" in e["error"] and len(items()) == n3 + 1, (st, e))
 close(fo["item"])
+
+# a sub-page with a map of its own that lists front agents only, under a hub that lists a builder, is not front-only (anchors.front_only: the hub has a builder), so it has no fallback: the route reads the
+# mover from the sub-page's own background agents, finds none and refuses, as it does for a sub-page with no map of its own under that hub. Nothing is filed.
+n_sub = len(items())
+for who in ("home-sparrow-builder", "home-sparrow-side"):
+    st, e = io_(marker="test_trim:side", project="projects/alpha/side", mover=who, step=f"{who}: deep-scan the suites")
+    check(f"a sub-page of front agents under a hub with a builder is no front-only project: mover {who!r} is refused, the page lists none, nothing filed", st == 400 and "not a background agent listed on projects/alpha/side" in e["error"]
+          and e["error"].endswith("the page lists none") and "fallback" not in e and len(items()) == n_sub, (st, e))
 n3 = len(items())
 st, ok_ = io_(mover="home-sparrow-builder")
 check("a project that lists a background agent is unchanged: the named agent is the mover, needs name it, fallback false", st == 200 and ok_["mover"] == "home-sparrow-builder" and ok_["fallback"] is False

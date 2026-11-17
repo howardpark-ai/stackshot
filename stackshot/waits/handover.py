@@ -85,7 +85,7 @@ def skip_reason(meta: dict[str, Any], mover: str, same: Callable[[str, str], boo
 
 
 def peer_opener(row: dict[str, Any] | None, item_project: str, front_only: Callable[[str], bool]) -> bool:
-    """Is a step's opener (`row`: its session-roles row {"role", "project", "retired"}) a live front agent of the project the item is filed under, in a project with no background agent (`front_only(project)`, from
+    """Is a step's opener (`row`: its session-roles row {"role", "project", "retired"}) a live front agent of the project the item is filed under, in a project with no builder (`front_only(project)`, from
     anchors.front_only)? Such a peer is told of a hand-over like any session, so a step that opens with it is a real hand-over (when an open step comes before it: open_before). A retired agent, one of another
     project and any front agent of a project that has a builder are not: the write check and the front-step rule treat them as before. `front_only` is called only once the row is a live front agent of the
     item's own project, so a project read that fails touches that case alone; it raises there and the caller keeps the old behavior. One test for the write check, the hand-over and the audit's reword."""

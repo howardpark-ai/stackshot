@@ -1,4 +1,4 @@
-"""Scenario test for the take clock on a peer hand-off: in a front-only project (anchors.front_only: its `agents:` map lists no `background:` agent, so no builder) a session some page lists (a front agent, or a background agent of another project) hands an item to a front agent with `mover=`;
+"""Scenario test for the take clock on a peer hand-off: in a front-only project (anchors.front_only: no builder) a session some page lists (a front agent, or a background agent of another project) hands an item to a front agent with `mover=`;
 that hand-off is clocked like a builder's, and the item is the new mover's: only the new mover is reminded, the ladder ends at the project's -main agent, and the hander is told nothing at any point. A project with a
 builder, a hand-off to another project's front agent and one to the -main agent itself keep the old exemption. Fixture data (English stand-in names) in a temporary store, the push replaced by a recorder, no network,
 no model call.

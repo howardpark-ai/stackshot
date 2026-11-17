@@ -256,7 +256,7 @@ class Env:
             return _cfg.audit_builder()
 
     def is_front_only(self, project: str) -> bool:
-        """Is the project front-only (anchors.front_only: its `agents:` map lists no background agent)? `front_only` (a fixture's or caller's answer) when given; an environment that names the builder itself
+        """Is the project front-only (anchors.front_only: it has no builder)? `front_only` (a fixture's or caller's answer) when given; an environment that names the builder itself
         (`builder`) has said the project has one; else the registry's answer (`registry` when given). A read that fails raises: the caller keeps the old target."""
         if self.front_only_of:
             return bool(self.front_only_of(project))
@@ -277,7 +277,7 @@ class Env:
 
     def chase_of(self, project: str) -> tuple[str, bool]:
         """(who is told a finding its mover did not answer, and the unmoved digest; whether that session is a front agent, so the message is marked `[for <owner>]`). A front-only project (anchors.front_only: no
-        background agent on its map) has no builder to chase: its -main agent takes both. Every other project goes to `builder_of`, as before, and so does a front-only project whose -main agent cannot be
+        builder) has no builder to chase: its -main agent takes both. Every other project goes to `builder_of`, as before, and so does a front-only project whose -main agent cannot be
         named (said once on stderr), a project with no key, and a project whose registry cannot be read."""
         proj = str(project or "").strip()
         if proj:

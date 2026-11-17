@@ -280,7 +280,7 @@ class Context:
 
 
 _NEEDS_KINDS = ("decision", "external")
-_BUILDER = re.compile(r"\b(?:build|builds|builder|building|maintain\w*|merg\w*|engineer\w*)\b", re.I)
+_BUILDER = _anc.BUILDER
 # A notice that needs the owner: it names a decision, says needs: decision, names the owner or an alias (case as written: a short lowercase alias is a prefix and a
 # host name everywhere), or carries [for <owner>]; the instance's own words for a decision too ([keywords.router] decision), and an alias in another script. Deliberately wide: a
 # notice wrongly passed costs less than one wrongly dropped. The patterns are built from [instance] owner and owner_aliases and cached per set of names.
