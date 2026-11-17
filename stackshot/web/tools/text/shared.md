@@ -8,7 +8,7 @@ the one who moves it now, and who takes it after his answer in then=); a backgro
 as a second mover; empty means the item's mover (mover=, else the project's builder, else its -main agent) moves it.
 The lane follows the first of decision, external, a session (your call · on others · on agent). A session named is
 told when added, is asked about the item at each turn end and hears its wake, recycle and after notices; it passes
-sender=<its name> on its writes, so that they reach the mover as another session's. needs= replaces the whole list
+sender=<its name> on its writes, so they reach the mover as another session's. needs= replaces the whole list
 (name again what should stay); needs="none" or clear_needs=true empties it. decision vs your-step: needs=decision is
 {{OWNER}}'s call, a choice between options; a thing that is {{OWNER}}'s own to do is step=<his action> (update; a
 create has no step), and the board ticks it when he says it is done, so an ask that only asks whether he has done it
@@ -25,9 +25,8 @@ with its ask, or after=<the item that carries the ask>. needs names only who can
 answer, the session goes first and adds decision when it is done (or the decision is its own item, linked with
 after=); decision sits beside this project's background agents only when the two are independent (beside any other
 session it is refused), and when unsure, in sequence. When decision leaves needs (he has decided), the sessions still
-named are told at once; a session whose work changes the question rewrites the ask. The server never hands an item to
-a front agent on its own motion: when the item is back with its front agent mover alone, the project's builder is told
-instead.
+named are told at once; a session whose work changes the question rewrites the ask. The server hands no item to a
+front agent on its own motion: one back with its front mover alone tells the project's builder (the mover, if the project has no background agent).
 
 ## text ANCHOR_SHAPES
 Slack channel/DM, Drive file/folder, Gmail thread, gmail:q:<query> or gmail:q@<mailbox>:<query>, Notion page or
@@ -335,7 +334,7 @@ is who takes the item when the wait ends. A front agent (a session
 {{OWNER}} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets
 mover=<front agent> gets the project's builder instead (the reply and History say so; send it again to keep it;
 with no builder it is refused, except from a session a project page lists to a front agent of the item's own project
-when it has no background agent: the agent is told; then and post_wake_mover stay refused); message the front agent for a check or answer only it can give. On an update that sets no needs, the
+when it has no background agent: the agent is told; then and post_wake_mover stay refused). On an update that sets no needs, the
 session needs names for the mover it replaces is swapped for the new one.
 
 ## param THEN

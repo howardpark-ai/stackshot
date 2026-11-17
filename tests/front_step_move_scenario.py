@@ -508,6 +508,77 @@ AR.filing_pass(now=T0, env=env()); sent.clear(); AR.filing_pass(now=T0 + 30 * H,
 check("8 remind_hours 0 is the old behaviour: sent once, quiet while the item is not written", sent == [], sent)
 cfg_audit["remind_hours"] = 6
 
+# ---- 9. a live front peer of the item's own project in a front-only project: the reword sees only the FIRST open step, which no hand-over carries the item to, so it covers a peer's step like any front agent's;
+#         a peer step waiting behind an open step is never first, so it is never touched
+PEER_ROLES = {**ROLES, "alpha-peer": {"role": "front", "project": "projects/alpha"}, "beta-front": {"role": "front", "project": "projects/beta"},
+              "gone-peer": {"role": "front", "project": "projects/alpha", "retired": True}}
+nine = [doing(31, "alpha-peer: look at the wording\nhome-agent: then build it"),                       # a live front agent of the item's project: a peer
+        doing(32, "beta-front: look at the wording\nhome-agent: then build it"),                       # a front agent of another project
+        doing(33, "gone-peer: look at the wording\nhome-agent: then build it"),                        # a retired agent of the project
+        doing(34, "alpha-peer: look at the wording\nhome-agent: then build it", project="projects/gamma")]      # a peer's page is not the item's project
+def nine_pass(at, front_only):
+    wipe_store(); clear_state()
+    for k, d in nine: put(k, copy.deepcopy(d))
+    run_pass(T0); r = run_pass(at, roles=PEER_ROLES, front_only=front_only)
+    return r["front_steps"]
+def nine_clocks(): return [clock_of(k) is not None for k in ("a31", "a32", "a33", "a34")]
+fo_alpha = lambda p: p == "projects/alpha"
+wipe_store(); clear_state()
+for k, d in nine: put(k, copy.deepcopy(d))
+r = run_pass(T0, roles=PEER_ROLES, front_only=fo_alpha)
+peer_line = next((l for to, t, _f in sent if to == "projects/alpha" for l in t.splitlines() if l.startswith(bid(31) + " ")), "")
+check("9 front-only project: a peer's step that is the first open step starts a clock like another project's front agent, a retired agent and a peer filed under another project", nine_clocks() == [True] * 4 and r["front_steps"]["started"] == [bid(31), bid(32), bid(33), bid(34)], (nine_clocks(), r["front_steps"]))
+r = run_pass(T0 + 3 * H, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 …at the threshold all four move to the mover, the peer's step included (before this rule a first-open peer step stayed for ever)", opener_of("a31") == "home-agent" and sorted(m["id"] for m in r["front_steps"]["moved"]) == [bid(31), bid(32), bid(33), bid(34)], (opener_of("a31"), r["front_steps"]))
+check("9 …and the finding of the peer's step promises the move at the threshold", "moves to home-agent" in peer_line, peer_line)
+wipe_store(); clear_state()
+for k, d in nine: put(k, copy.deepcopy(d))
+run_pass(T0, roles=PEER_ROLES, front_only=lambda p: False)
+check("9 a project with a background agent (front_only false): the same peer's step starts a clock and moves as before", clock_of("a31") is not None, clock_of("a31"))
+r = run_pass(T0 + 3 * H, roles=PEER_ROLES, front_only=lambda p: False)
+check("9 …at the threshold it moves to the mover", opener_of("a31") == "home-agent" and bid(31) in [m["id"] for m in r["front_steps"]["moved"]], r["front_steps"])
+def failing(p): raise RuntimeError("registry unreadable")
+wipe_store(); clear_state()
+for k, d in nine: put(k, copy.deepcopy(d))
+run_pass(T0, roles=PEER_ROLES, front_only=failing)
+check("9 a failing front-only read leaves the step as it was, a front agent's: a clock starts", clock_of("a31") is not None, clock_of("a31"))
+# a peer whose hand-over fell back (it was down) is stuck like a front agent's step: the clock starts and the step moves at the threshold, which is the 3-hour reword applying again
+fell_rec = {"step": FS.step_hash("alpha-peer: look at the wording"), "kind": "fallback", "to": "alpha-peer", "at": T0}
+wipe_store(); clear_state()
+for k, d in (nine[0], doing(35, "alpha-peer: look at the wording\nhome-agent: then build it", handover=fell_rec), doing(36, "alpha-peer: look at the wording\nhome-agent: then build it", handover={**fell_rec, "kind": "moved"})):
+    put(k, copy.deepcopy(d))
+run_pass(T0, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 a peer step the hand-over fell back on starts a clock (it is stuck)", clock_of("a35") is not None, clock_of("a35"))
+r = run_pass(T0 + 3 * H, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 …and at the threshold it moves to the mover, as on a project with a builder", opener_of("a35") == "home-agent" and bid(35) in [m["id"] for m in r["front_steps"]["moved"]], r["front_steps"])
+# a peer step the write check let in behind an open step, whose step before it is then dropped (only a done step runs the hand-over): it is the first open step, nothing carries the item to it, so it is reworded
+def stp9(text, status): return {"text": text, "status": status, "by": "home-agent" if status != "open" else "", "at": now if status != "open" else 0}
+wipe_store(); clear_state()
+_k, _d = doing(37, "home-agent: prep it\nalpha-peer: look at the wording", steps=[stp9("home-agent: prep it", "open"), stp9("alpha-peer: look at the wording", "open")])
+put(_k, _d)
+run_pass(T0, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 a peer step waiting behind an open step is not the first open step: no finding, no clock", clock_of("a37") is None and not any("stuck-elsewhere" in t for _to, t, _f in sent), (clock_of("a37"), sent))
+_d = get("a37"); _d["metadata"]["steps"][0]["status"] = "dropped"; _d["metadata"]["steps"][0]["by"] = "home-agent"; _d["metadata"]["steps"][0]["at"] = T0 + 60
+_d["metadata"]["next"] = "alpha-peer: look at the wording"; put("a37", _d)
+run_pass(T0 + 600, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 …the step before it is dropped: the peer's step is first, the mover keeps the item, and a clock starts (on the previous head: none, the item stayed for ever)", opener_of("a37") == "alpha-peer" and clock_of("a37") is not None, (opener_of("a37"), clock_of("a37")))
+r = run_pass(T0 + 600 + 3 * H, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 …and at the threshold the step is reworded to the mover", opener_of("a37") == "home-agent" and bid(37) in [m["id"] for m in r["front_steps"]["moved"]], r["front_steps"])
+# the monthly count: a peer's step behind an open step is no front-held step (not open, not closed, not closed by someone else); as the first open step the write check refuses it, so it counts
+def stp(text, status, by="", at=0): return {"text": text, "status": status, "by": by, "at": at}
+def citem(nxt, steps, mover="home-agent"):
+    return {"status": "open", "subject": "[home] x", "description": "- A thing", "updated": now, "state_updated": now,
+            "metadata": {"owner": OWNER, "project": "projects/alpha", "mover": mover, "needs": [mover], "next": nxt, "steps": steps}}
+count_items = {
+    "c1": citem("home-agent: first\nalpha-peer: then look", [stp("home-agent: first", "open"), stp("alpha-peer: then look", "open"), stp("alpha-peer: earlier", "done", "home-agent", now - H)]),
+    "c2": citem("alpha-peer: look first\nhome-agent: then build", [stp("alpha-peer: look first", "open"), stp("home-agent: then build", "open")]),
+    "c3": citem("home-agent: first\nbeta-front: then look", [stp("home-agent: first", "open"), stp("beta-front: then look", "open"), stp("beta-front: earlier", "done", "home-agent", now - H)])}
+cnt = FS.month_count(count_items, PEER_ROLES, now, fo_alpha)
+cnt0 = FS.month_count(count_items, PEER_ROLES, now)
+check("9 month_count with the project test: the peer's step behind an open step is left out of open, closed and by_other; the first-open peer step (c2) and another project's front step (c3) count",
+      cnt["open"] == 2 and cnt["ids"] == ["c2", "c3"] and cnt["closed"] == 1 and cnt["by_other"] == 1, cnt)
+check("9 …and without the test (the old count) every one of those front steps counts", cnt0["open"] == 3 and cnt0["closed"] == 2 and cnt0["by_other"] == 2, cnt0)
+
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
 print(f"ok: front step move scenario, {len(ran)} checks")

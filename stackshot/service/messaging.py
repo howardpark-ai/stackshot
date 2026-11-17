@@ -97,9 +97,12 @@ def _reachable(who: str, idx: dict[str, Any]) -> bool:
                 or any(r.get("name") == who and _lv.present(r) for r in idx.values()))
 
 
-def _project_takes(project: str) -> str:
-    """Where a message that is not for the owner goes, in the words of a refusal: the project page (to=<page key>), where the router rules it."""
-    return f"the project, where the router rules it (to={project!r})"
+def _project_takes(project: str, peer: str = "") -> str:
+    """Where a message that is not for the owner goes, in the words of a refusal: the project page (to=<page key>), where the router rules it.
+    `peer` (a front agent's name, given when the sender is itself a front agent): the refusal also names the form that does reach the peer, a message sent to the page key
+    whose first line is `For <peer>,` (the router's for-agent rule passes it to the agent the page lists), since an unmarked message sent to the pane is refused and a plain one to the page key may be held."""
+    takes = f"the project, where the router rules it (to={project!r})"
+    return takes + (f"; to reach {peer} from a front agent of the project, make the message's first line `For {peer},` and send it to={project!r}" if peer else "")
 
 
 def _pane_dead(rec: Any, now: float | None = None) -> str:
@@ -242,7 +245,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     if _FOR_OWNER not in first:
         raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes a message only when the "
                         f"message's first line carries {_FOR_OWNER}. Put {_FOR_OWNER} on the first line if this is for {OWNER}; anything "
-                        f"else goes to {_project_takes(project)} instead.")
+                        f"else goes to {_project_takes(project, name if sender.strip() and _telling.front_sender(sender) else '')} instead.")
     # The mark is for what he has to do; a marked message that says nothing is
     # needed from him (_NOT_FOR_OWNER, in the text after the mark) wakes his pane for nothing, so it goes to the project instead
     m = _NOT_FOR_OWNER_RE.search("\n".join([first.split(_FOR_OWNER, 1)[1], *lines[at + 1:]]))

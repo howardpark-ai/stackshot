@@ -5,7 +5,7 @@ Covers: open (one item filed through the create tool's own code: the subject tak
 marker, the mover a background agent of the page and in needs, the project's -main agent the creator, one step that names the mover, description bullets ending with the attribution line, no machine
 host name anywhere in the item, the mover told once, nothing owed to the page); a repeat call while the item is open answers it and files nothing, another marker is another item, and the same marker on another project is that project's own item (a call never answers or shows another project's item); a call after the
 item was closed files a new item (the open state is read from the store); a mover that is not a background agent the page lists (a front agent, the owner, another project's agent, a made-up name)
-is refused with the listed ones named; bad bullets (none, too many, too long, a control character, a wrong type) are refused and never cut; a missing or malformed marker, a missing field, a step that
+is refused with the listed ones named (a front-only project, whose page lists none, files the item under its -main agent as its mover and says so, as the job-gap route does); bad bullets (none, too many, too long, a control character, a wrong type) are refused and never cut; a missing or malformed marker, a missing field, a step that
 does not start with the mover, a key the route does not take (needs, owner, priority) and a sender with markup or the owner's name are refused with nothing filed; an @name is broken so the mirror pings
 no one; an unknown project a 404, a project with no front agent a 409; a cap of 10 open items per project (the eleventh marker is refused, a repeat at the cap is still answered, a closed item frees a place, the cap is per project); a long sender and a doubled caller prefix; the unknown-write 404 lists the route; eight threads calling at once file one item; over HTTP (401 without a token) and through client.py (the id alone on stdout,
 usage on misuse, the server's refusal on stderr, a server that is not reached).
@@ -146,8 +146,26 @@ for who, why in (("home-sparrow-main", "a front agent"), ("home-sparrow-docs", "
                  ("HOME-SPARROW-BUILDER", "the right name in other capitals"), ("home-sparrow", "a prefix of a name")):
     st, e = io_(mover=who, step=f"{who}: deep-scan")
     check(f"mover {who!r} ({why}): 400 naming the listed background agents, nothing filed", st == 400 and "not a background agent" in e["error"] and "home-sparrow-builder" in e["error"] and "home-sparrow-notes" in e["error"] and len(items()) == n3, (st, e))
-st, e = io_(project="projects/nobuild", mover="home-nobuild-main", step="home-nobuild-main: deep-scan")
-check("a page that lists no background agent: 400 that says so", st == 400 and "lists none" in e["error"] and len(items()) == n3, (st, e))
+# a front-only project (its page lists no background agent) has nobody to hold the item: it is with its -main agent and says so (as the job-gap route does); a project that lists one is unchanged (above)
+st, fo = io_(marker="test_trim:nobuild", project="projects/nobuild", mover="home-nobuild-builder", step="home-nobuild-builder: deep-scan the suites")
+fit = item(fo["item"]) if st == 200 else {"metadata": {}, "description": ""}; fm = fit["metadata"]
+check("a front-only project: 200, the mover is its -main agent (also the creator), fallback true", st == 200 and fo["mover"] == "home-nobuild-main" and fo["owner"] == "home-nobuild-main" and fo["fallback"] is True and fo["repeat"] is False
+      and len(items()) == n3 + 1, (st, fo))
+check("…the item holds the -main agent as its mover, the step keeps its words under that name, no needs, and the item says it is with the front agent", sr._session_label(fm.get("mover")) == "home-nobuild-main"
+      and fm.get("next", "").strip() == "home-nobuild-main: deep-scan the suites" and not fm.get("needs") and fm.get("item_open_fallback") is True and fm.get("item_open") == "test_trim:nobuild"
+      and fit["description"].splitlines()[-2:] == ["- projects/nobuild lists no background agent, so this is with home-nobuild-main, its front agent", "- Opened by test-trim-job (a script on a client machine)"], (fm, fit["description"]))
+st, fo2 = io_(marker="test_trim:nobuild", project="projects/nobuild", mover="home-nobuild-builder", step="home-nobuild-builder: deep-scan the suites")
+check("…a repeat call answers it (repeat true, fallback true) and files nothing", st == 200 and fo2["item"] == fo["item"] and fo2["repeat"] is True and fo2["fallback"] is True and len(items()) == n3 + 1, (st, fo2))
+st, e = io_(marker="test_trim:nobuild2", project="projects/nobuild", mover="x", step="y: no name of the mover")
+check("…the step must still start with the mover the caller named (nothing filed)", st == 400 and "starts with the mover's name" in e["error"] and len(items()) == n3 + 1, (st, e))
+st, e = io_(marker="test_trim:nobuild3", project="projects/nobuild", mover="x", step="x: y", description=[f"- line {i}" for i in range(7)])
+check("…its one more line leaves one fewer for the caller: seven lines are refused, never cut", st == 400 and "lists no background agent" in e["error"] and len(items()) == n3 + 1, (st, e))
+close(fo["item"])
+n3 = len(items())
+st, ok_ = io_(mover="home-sparrow-builder")
+check("a project that lists a background agent is unchanged: the named agent is the mover, needs name it, fallback false", st == 200 and ok_["mover"] == "home-sparrow-builder" and ok_["fallback"] is False
+      and [sr._session_label(x) for x in item(ok_["item"])["metadata"].get("needs") or []] == ["home-sparrow-builder"] and "item_open_fallback" not in item(ok_["item"])["metadata"], (st, ok_))
+close(ok_["item"]); n3 = len(items())
 st, o = io_(marker="test_trim:notes", mover="home-sparrow-notes", step="home-sparrow-notes: deep-scan the suites")
 check("any background agent of the page is taken (not only the builder)", st == 200 and o["mover"] == "home-sparrow-notes" and sr._session_label(item(o["item"])["metadata"]["mover"]) == "home-sparrow-notes", (st, o))
 close(o["item"])
@@ -225,7 +243,7 @@ n6 = len(items())
 st, e = io_(project="projects/ghost")
 check("an unknown project: 404, nothing filed", st == 404 and "no project" in e["error"] and len(items()) == n6, (st, e))
 st, e = io_(project="projects/gamma", mover="x", step="x: y")
-check("a project page with no agents: the mover is refused first (it lists none)", st == 400 and len(items()) == n6, (st, e))
+check("a project page with no agents is front-only, and has no front agent to hold the item either: 409, nothing filed", st == 409 and "front agent" in e["error"] and len(items()) == n6, (st, e))
 page("projects/solo.md", "type: project\ntitle: Solo\ndisplay-name: home-solo\nagents:\n  background:\n    home-solo-builder: builds\nstatus: active")
 os.utime(T / "brain/projects/solo.md", (time.time() - 8 * 3600, time.time() - 8 * 3600)); p.cmd_registry(quiet=True)
 st, e = io_(project="projects/solo", mover="home-solo-builder", step="home-solo-builder: deep-scan")

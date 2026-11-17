@@ -897,9 +897,9 @@ check("the owner stored as a name and needs by id, and the owner stored as an id
       and out61.count("not them") == 1 and out62.count("not them") == 1, (t61, t62, pushes()[p61:], out61[-200:], out62[-200:]))
 item(63, "projects/eta", EM, then=EM, needs=[B]); p63 = len(pushes()); n63 = len(routing.read("projects/eta")); out63 = _update_svc._update("a63", needs=["home-eta-main"], next=HB_NEXT, sender="home-beta", step="Review the PR and merge it"); hb_tick()
 d63 = [x for x in pushes()[p63:] if x[0] in (EM, "home-eta-main") and "a63" in x[1]]
-check("a project with a front agent owner and no builder (projects/eta): the hand-back is told to nobody, the item stays with its mover, the routing log holds a line ruled `held` that says the project lists no builder, and the reply says so",
-      a.pilot_root("projects/eta") == "projects/eta" and not d63 and "nobody is told" in out63 and "stays with them" in out63
-      and [n for n in routing.read("projects/eta")[n63:] if n.get("ruling") == "held" and "no builder" in n.get("reason", "")] != [], (d63, pushes()[p63:], out63[-300:], routing.read("projects/eta")[n63:]))
+check("a front-only project (projects/eta: a front agent owner, no background agent, so no builder to tell instead): the hand-back is told to the front mover itself, marked, once; nothing is held for lack of a builder, and the reply says it was told",
+      a.pilot_root("projects/eta") == "projects/eta" and len(d63) == 1 and d63[0][1].startswith("[for Oliver] [stackshot] a63 is back with you alone (handed back by home-beta)") and "told it is back with them alone" in out63
+      and "nobody is told" not in out63 and [n for n in routing.read("projects/eta")[n63:] if n.get("ruling") == "held" and "no builder" in n.get("reason", "")] == [], (d63, pushes()[p63:], out63[-300:], routing.read("projects/eta")[n63:]))
 cfg(live=True); hb_dropall()
 
 # ---- 14. the audit's batch finding goes to each item's owner (one message per owner), not only to the -main agent
