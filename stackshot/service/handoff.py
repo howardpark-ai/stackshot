@@ -494,8 +494,8 @@ def handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
     """Called by tell_woken when a push to `owner` about these items is over: `outcome` is push.py's last line (delivered … | queued … | inbox …), or "failed". A delivered push
     makes the open hand-off to that session delivered now (its clock starts); one that waits (`inbox`, `queued`: the machine is away, the pane is not reachable now, a reboot's pause)
     is neither delivered nor failed: the puller's ack makes it delivered (handoff_acked), else the clock starts [model] handoff_inbox_grace_minutes after it was queued; only a
-    refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item (a front agent is neither sent it again nor laddered:
-    the failure is a History line and the item stays with it). Never raises."""
+    refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item (a front agent that is not clocked, one handed the item by the server in a step hand-over or an orphan
+    hand-over, is neither sent it again nor laddered: the failure is a History line and the item stays with it; a peer's hand-off is clocked, so it is retried once and then laddered). Never raises."""
     if not handoff_on():
         return
     for g in [x for x in re.split(r"[,\s]+", str(gids or "")) if _GID.match(x)]:
@@ -516,7 +516,7 @@ def handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
                 else:
                     act = _ho.failed(it, owner, why or outcome, now, ho_same)
                     changed = bool(act)
-                    if act and handoff_exempt(it, owner):      # a front agent that is not clocked (a front-only project's orphan hand-off notice; a peer hand-off is clocked, so it is retried and laddered): no second push and no ladder, whose last rung would ask the project's -main agent (maybe this one) to recover; the failure stays on the item
+                    if act and handoff_exempt(it, owner):      # a front agent that is not clocked (the notice of a front-only project's step hand-over or orphan hand-over, the server's own record with no clock; a peer hand-off, a listed session's own move, is clocked, so it is retried and laddered): no second push and no ladder, whose last rung would ask the project's -main agent (maybe this one) to recover; the failure stays on the item
                         _stall.note(it["metadata"], now, f"the hand-off notice to {_session_label(owner)} was not delivered ({_clip_line(why or outcome, 100)}): a front agent is sent no second notice, the item shows on the board")
                         act = ""
                 if changed:
