@@ -188,6 +188,11 @@ annotations). Now:
     NamedTuple or pydantic model field, a class inside a function included), of a module-level variable, a default value, a decorator, and every
     annotation of a file without postponed annotations (they run at import). A change of the `from __future__ import annotations` line itself takes the
     file whole.
+  * An import of one of our modules that is taken out (the line is on the old side of the diff; a line rewritten has its old line there too) is quiet
+    only when that module only binds names and some suite ran it. A module that does more at import is quiet for an import that is ADDED when every
+    suite that runs the importer already runs that module, but never for one taken out: the map was measured with the import in place, so every suite
+    that ran the importer ran the module through that very import and the test is true of any module whatever it does. Without the import those suites
+    no longer run the module, so the importer is taken whole, as an import that is not quiet is (see `quiet_import`).
   * The import statement keeps its own dependency: a name taken from another of our modules (`from tmod import Tag`) whose only uses are dropped
     annotations is still needed by the statement, so a change to that name in its module takes the importing file whole (the import fails otherwise).
   * Limits, kept honest: a function fetched by a variable name (getattr(module, name), inspect.getmembers, `from m import *`, globals()) and then handed to
@@ -428,7 +433,9 @@ def scopes(src):
 # through the module-level bindings that use them), what the bound function or class itself runs, and the suites whose own
 # file names them (server._start_background). Anything else at module level runs at import with effects no name shows (a
 # decorator we do not know, a call statement, an import of one of ours that runs more than bindings): every suite that ran
-# the file. Reads no name shows are taken wide: globals() in a module (any of its names), getattr(module, <not a literal>)
+# the file. Such an import is quiet only when ADDED and every suite that runs the file runs the module already; one taken out
+# is quiet only for a module that only binds names (the map was measured with it in place, so "every suite that ran the file
+# ran the module" is true of any module there: see quiet_import). Reads no name shows are taken wide: globals() in a module (any of its names), getattr(module, <not a literal>)
 # and vars(module) (any of that module's), a module loaded by path (any name of the files it can be).
 # A tool parameter constant (Annotated[…, Field(…)]) and HERE = Path(__file__).resolve().parent only bind a name (Field and the
 # Path methods are pure on a receiver that starts at Path(…) or __file__: PATH_METHODS); the headers (a def's, a method's) that
@@ -1974,7 +1981,7 @@ def py_change(names, S, a, b, old, new):
                 continue
             for si, st in sts:
                 _, _, kind, bnames, extra = st
-                if kind == "import-repo" and all(quiet_import(N, S, p, mod) for mod in extra):
+                if kind == "import-repo" and all(quiet_import(N, S, p, mod, removed=side == 0) for mod in extra):
                     kind = "bind"
                 if kind == "effect-mod":
                     if any(p in e.get("py", {}) for e in S.values()):   # a file no suite ran sets no state in one
@@ -2106,9 +2113,13 @@ def library_unresolved(module, name, as_module=False):
     return _LIB[key]
 
 
-def quiet_import(N, S, path, mod):
+def quiet_import(N, S, path, mod, removed=False):
     """True when a changed import of one of our modules adds nothing at import: the module only binds names and some suite
-    ran it already, or every suite that runs the importing file runs the imported one already"""
+    ran it already, or every suite that runs the importing file runs the imported one already. A line on the OLD side of the
+    diff (`removed`: an import taken out) is quiet only in the first case. The second is circular there: the map was measured
+    with the import in place, so every suite that ran the importer ran the imported module through that very import, and the
+    answer is yes whatever the module does. Without the import the module's effects at import are no longer run by the
+    importer's suites, and the next measure shows it: the importer is taken whole, as an import that is not quiet is"""
     m = N.by_mod.get(mod)
     if m is None:
         return False
@@ -2116,6 +2127,8 @@ def quiet_import(N, S, path, mod):
         # only binds names, but a module no suite ran yet is new to every importer: its calls (a local function at module
         # level) now run there, so the importer's own suites must run (readonly.py reached connectors this way)
         return any(m.path in e.get("py", {}) for e in S.values())
+    if removed:
+        return False
     return all(m.path in e.get("py", {}) for e in S.values() if path in e.get("py", {}))
 
 

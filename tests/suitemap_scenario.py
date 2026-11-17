@@ -2533,6 +2533,44 @@ check("CLASS 8 a class rule that is not C1 or C2 is an error", bad.returncode !=
 okc = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_CLASS_RULE": " c1 "})
 check("CLASS 8b ... and c1 in lower case with spaces is C1", okc.returncode == 0, (okc.returncode, okc.stderr[-300:]))
 
+# [ahead rmimp c]
+# ---- a removed import of one of ours (Tue Nov 17th 2026): a synthetic map, nothing measured. The map of a commit is measured WITH its imports, so for a line on the old side of a
+# diff "every suite that ran the importer ran the imported module" is true of any module, whatever it does at import (the module was run through that very import). A removed
+# import is quiet only for a module that only binds names. eff.py has an effect at import (a call), bindm.py only binds a name. imp.py imports both and is run by s1 and s2, which
+# ran eff.py through it; imp2.py imports bindm.py only (s1, s2 ran it), imp3.py too (s3 ran it, and no suite ran eff.py but s1 and s2).
+R = T / "repoimp"; R.mkdir()
+git("init", "-q", "-b", "main")
+write("eff.py", "REG = []\nREG.append(1)\n")
+write("bindm.py", "X = 1\n")
+write("imp.py", "import eff\nimport bindm\n\n\ndef use():\n    return 1\n")
+write("imp2.py", "import bindm\n\n\ndef use2():\n    return 2\n")
+write("imp3.py", "import bindm\n\n\ndef use3():\n    return 3\n")
+for s_ in ("s1", "s2", "s3"): write(f"tests/{s_}_scenario.py", "print('x')\n")
+harness_stub(R)
+baseimp = commit("base of the removed import cases")
+IM = T / "mapimp.json"
+_ent = lambda py: {"ok": True, "failed": False, "files": [], "dirs": ["", "tests"], "whole": [], "py": py, "seconds": 1}
+_both = {"imp.py": ["", "use"], "imp2.py": ["", "use2"], "eff.py": [""], "bindm.py": [""]}
+IM.write_text(json.dumps({"format": 1, "commit": baseimp, "strace": True, "suites": {"s1": _ent(_both), "s2": _ent(_both), "s3": _ent({"imp3.py": ["", "use3"], "bindm.py": [""]})}}))
+def imp_sel(edit, msg):
+    git("checkout", "-q", "-B", f"i{len(ran)}", baseimp)
+    edit()
+    head = commit(msg)
+    r = tool("select", "--map", str(IM), "--to", head, env={"SUITEMAP_ROOT": str(R)})
+    return r.stdout.split(), r.stderr
+out, err = imp_sel(lambda: sub("imp.py", "import eff\n", ""), "remove effectful import")
+check("IMPORT-OUT 1 a removed import of a module with effects at import selects the importer's suites (s1, s2): the map was measured with the import, so \"every suite that ran "
+      "imp.py ran eff.py\" is true of any module and says nothing", out == ["s1", "s2"], (out, err))
+out, err = imp_sel(lambda: sub("imp.py", "import bindm\n", ""), "remove binding import")
+check("IMPORT-OUT 2 a removed import of a module that only binds names stays quiet: no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp3.py", "import bindm\n", "import bindm\nimport eff\n"), "add effectful import, not run by s3")
+check("IMPORT-OUT 3 an added import of a module with effects that a suite running the importer did not run (s3 ran imp3.py, not eff.py) selects that suite", out == ["s3"], (out, err))
+out, err = imp_sel(lambda: sub("imp2.py", "import bindm\n", "import bindm\nimport eff\n"), "add effectful import, run by all")
+check("IMPORT-OUT 4 an added import of a module with effects that every suite running the importer ran already is quiet as before: no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp2.py", "import bindm\n", "import bindm\nimport bindm as _b\n"), "add binding import")
+check("IMPORT-OUT 5 an added import of a module that only binds names, run by a suite, is quiet as before: no suite", out == [], (out, err))
+out, err = imp_sel(lambda: sub("imp.py", "import eff\n", "import eff as _e\n"), "rewrite effectful import")
+check("IMPORT-OUT 6 an import of a module with effects rewritten (its old line is on the old side) selects the importer's suites", out == ["s1", "s2"], (out, err))
 # [final]
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
