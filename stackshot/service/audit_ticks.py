@@ -384,7 +384,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_none(meta, now)
-                    _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + (f"a summary goes to {_sr._session_label(main)}" if main else "the project has no -main agent to tell"))
                     _writes.save(gid, item, note="audit: idle, no builder free")
                 if main:
                     told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with {_sr._session_label(row['mover'])}"))
@@ -395,8 +395,8 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         try:
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_woken(",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+            _telling.tell_news(dict(pairs), ",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
         except Exception as e:  # noqa: BLE001
             print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return handed
@@ -500,7 +500,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_balance_capped(meta, now)
-                    _stall.note(meta, now, f"already moved {_hi.BALANCE_LIFETIME} times by the balancer, so it stays with {_sr._session_label(row['mover'])} and the ladders have it: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _stall.note(meta, now, f"already moved {_hi.BALANCE_LIFETIME} times by the balancer, so it stays with {_sr._session_label(row['mover'])} and the ladders have it: " + (f"a summary goes to {_sr._session_label(main)}" if main else "the project has no -main agent to tell"))
                     _writes.save(gid, item, note="balance: at its lifetime cap")
                 if main:
                     told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_sr._session_label(row['mover'])} to the ladders"))
@@ -538,7 +538,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_balance_none(meta, now)
-                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no live builder could take it, so it stays with {_sr._session_label(row['mover'])}: " + (f"{_sr._session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no live builder could take it, so it stays with {_sr._session_label(row['mover'])}: " + (f"a summary goes to {_sr._session_label(main)}" if main else "the project has no -main agent to tell"))
                     _writes.save(gid, item, note="balance: no live builder")
                 if main:
                     told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no live builder could take it, so it stays with {_sr._session_label(row['mover'])}"))
@@ -562,8 +562,8 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         try:
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items stay where they are:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_woken(",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+            _telling.tell_news(dict(pairs), ",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
         except Exception as e:  # noqa: BLE001
             print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return moved

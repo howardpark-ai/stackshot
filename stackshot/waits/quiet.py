@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 KEEP = 8            # the lines an item keeps (the History keeps every one it has shown: it reads the item's revisions)
-CLIP = 220          # one line's text
+CLIP = 360          # one line's text: a summary line for one item (its lead, the audit's sentence) fits whole
 
 
 def log_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
