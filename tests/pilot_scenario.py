@@ -2858,6 +2858,16 @@ check("…by its transcript id too, and nothing was delivered", why(lambda: _mes
       and len(wait_push(0)) == n0)
 check("…and the mark below the first line does not count", why(lambda: _messaging._message("work-osprey-main", f"a status line\n{MK} decide this", "home-beta")).startswith("Refused:"))
 check("…nor does a script's message get past it", why(lambda: _messaging._message("work-osprey-main", "run finished", "nightly-job", origin="testbox")).startswith("Refused:"))
+_fs = _messaging._telling.front_sender
+_messaging._telling.front_sender = lambda who: str(who) == "work-peer-main" or _fs(who)      # a sender that is itself a front agent (of a project of the same kind)
+try:
+    r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "work-peer-main"))
+finally:
+    _messaging._telling.front_sender = _fs
+check("a front agent's unmarked message to a peer front agent is refused as any is, and the refusal also names the working form: a first line `For work-osprey-main,` on a message sent to the project's page key",
+      r.startswith("Refused: work-osprey-main is a front agent of projects/alpha") and f"takes a message only when the message's first line carries {MK}" in r
+      and "anything else goes to the project, where the router rules it (to='projects/alpha'); to reach work-osprey-main from a front agent of the project, make the message's first line `For work-osprey-main,` and send it to='projects/alpha' instead." in r, r)
+check("…a sender that is no front agent (the refusal above) is told no such form", "For work-osprey-main," not in why(lambda: _messaging._message("work-osprey-main", "can you look?", "home-beta")))
 res = _messaging._message("work-osprey-main", f"\n  \n{MK} vendor A or B? the keeper recommends A", "home-beta"); pp = wait_push(n0 + 1)
 check("a marked message (first non-empty line) to a front agent is delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-main" and MK in pp[-1][1], pp[-1:])
 res = _messaging._message("work-osprey-x", "sweep the inbox", "home-beta"); pp = wait_push(n0 + 2)

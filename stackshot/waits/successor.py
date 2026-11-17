@@ -14,7 +14,8 @@ answer twice and a second run finds nothing left to do.
                                            4. scope    the scope's general -main agent (anchors.general_main)
                                            None when nothing is live: the item stays and is reported, never given to a guess
                                            An ALIVE item tries the project's background agents first (tier "back": the builder, then the others): the minute pass sends no notice to a front agent
-                                           and never chases one, so a front agent takes an alive item only when no background agent is live (Pick.front, and the History line says so)
+                                           and never chases one, so a front agent takes an alive item only when no background agent is live (Pick.front, and the History line says so). A FRONT-ONLY project
+                                           (anchors.front_only) has no background agent to go to, so its new holder is told once (Pick.told, FRONT_TOLD: the server sends the hand-off notice, service/handoff.py `handoff_exec`)
   orphans(items, derive, gone)             the open items whose session of record is gone: an alive item's mover, a waiting item's post-wake mover; never an item a human moves
   plan(items, reg, derive, gone, ...)      orphans(), each with its pick: a row {gid, project, state, from, gone, to, reason, why} with `to` "" when nothing is live
 
@@ -39,6 +40,7 @@ class Pick(NamedTuple):
     reason: str          # "closest because …": the sentence the item's History carries
     tier: str            # back | own | parent | hub | scope
     front: bool = False  # a user-facing agent: the minute pass pushes no notice to one, so its History line says so and the board shows the item
+    told: bool = False   # a user-facing agent of a front-only project (no builder to hand the item to): the hand-over sends it the one hand-off notice, and its History line says so
 
 
 def agents_of(entry: dict[str, Any] | None) -> list[tuple[str, str]]:
@@ -67,6 +69,7 @@ def _chain(project: str, reg: dict[str, dict[str, Any]]) -> list[str]:
 
 _KIND_WORDS = {"main": "-main agent", "front": "front agent", "back": "background agent"}
 FRONT_NOTE = " (a front agent: no notice is sent to one, the item shows on the board)"
+FRONT_TOLD = " (a front agent of a project with no builder: it is sent the one hand-off notice)"      # a front-only project has nobody else to hold the item, so its new holder is told, once
 
 
 def pick(project: str, reg: dict[str, dict[str, Any]], live: Callable[[str], bool], general: Callable[[str, dict[str, dict[str, Any]]], tuple[str, str]] | None = None,
@@ -84,28 +87,29 @@ def pick(project: str, reg: dict[str, dict[str, Any]], live: Callable[[str], boo
         for name in dict.fromkeys(backs):
             if live(name):
                 return Pick(name, f"closest live agent: the project's background agent {name} (an item with a mover goes to a session that is told of it)", "back")
-    note = FRONT_NOTE if alive else ""
+    only = alive and _anc.front_only(project, reg)      # a front-only project: the front agent that takes an alive item is told (the notice is the only way it hears of the item)
+    note = (FRONT_TOLD if only else FRONT_NOTE) if alive else ""
     own_key = next((k for k in chain if agents_of(reg[k])), "")
     if own_key:
         for name, kind in agents_of(reg[own_key]):
             if live(name):
                 fr = kind != "back"
-                return Pick(name, f"closest live agent: the project's own {_KIND_WORDS[kind]} {name}" + (f" (listed on {own_key})" if own_key != chain[0] else "") + (note if fr else ""), "own", fr and alive)
+                return Pick(name, f"closest live agent: the project's own {_KIND_WORDS[kind]} {name}" + (f" (listed on {own_key})" if own_key != chain[0] else "") + (note if fr else ""), "own", fr and alive and not only, fr and only)
     for k in chain[chain.index(own_key) + 1 if own_key else 0:]:
         for name, kind in agents_of(reg[k]):
             if kind != "back" and live(name):
-                return Pick(name, f"no live agent of the project itself; closest live agent: the parent project {k}'s {_KIND_WORDS[kind]} {name}" + note, "parent", alive)
+                return Pick(name, f"no live agent of the project itself; closest live agent: the parent project {k}'s {_KIND_WORDS[kind]} {name}" + note, "parent", alive and not only, only)
     hub = _anc.hub_of(project, reg)
     if hub and hub not in chain and isinstance(reg.get(hub), dict):
         for name, kind in agents_of(reg[hub]):
             if kind != "back" and live(name):
-                return Pick(name, f"no live agent of the project or its parents; closest live agent: the hub {hub}'s {_KIND_WORDS[kind]} {name}" + note, "hub", alive)
+                return Pick(name, f"no live agent of the project or its parents; closest live agent: the hub {hub}'s {_KIND_WORDS[kind]} {name}" + note, "hub", alive and not only, only)
     try:
         name, page = (general or _anc.general_main)(project, reg)
     except Exception:  # noqa: BLE001
         name, page = "", ""
     if name and live(name):
-        return Pick(name, f"no live agent of the project, its parents or its hub; closest live agent: the scope's general -main agent {name}" + (f" ({page})" if page else "") + note, "scope", alive)
+        return Pick(name, f"no live agent of the project, its parents or its hub; closest live agent: the scope's general -main agent {name}" + (f" ({page})" if page else "") + note, "scope", alive and not only, only)
     return None
 
 
@@ -174,6 +178,6 @@ def plan(items: dict[str, dict[str, Any]], reg: dict[str, dict[str, Any]], deriv
             picks[key] = pick(r["project"], reg, live, general, alive=key[1], back_of=back_of)
         p = picks[key]
         who = label(r["from"]) if r["from"] else ""
-        r.update(to=p.name if p else "", tier=p.tier if p else "", front=bool(p and p.front), reason=p.reason if p else "no live agent of the project, its parents, its hub or its scope",
+        r.update(to=p.name if p else "", tier=p.tier if p else "", front=bool(p and p.front), told=bool(p and p.told), reason=p.reason if p else "no live agent of the project, its parents, its hub or its scope",
                  why=((f"{who} is gone ({r['gone']})" if who else r["gone"]) + (f"; {p.reason}" if p else "; no live successor was found")))
     return rows

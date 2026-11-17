@@ -8,7 +8,7 @@ the one who moves it now, and who takes it after his answer in then=); a backgro
 as a second mover; empty means the item's mover (mover=, else the project's builder, else its -main agent) moves it.
 The lane follows the first of decision, external, a session (your call · on others · on agent). A session named is
 told when added, is asked about the item at each turn end and hears its wake, recycle and after notices; it passes
-sender=<its name> on its writes, so that they reach the mover as another session's. needs= replaces the whole list
+sender=<its name> on its writes, so they reach the mover as another session's. needs= replaces the whole list
 (name again what should stay); needs="none" or clear_needs=true empties it. decision vs your-step: needs=decision is
 {{OWNER}}'s call, a choice between options; a thing that is {{OWNER}}'s own to do is step=<his action> (update; a
 create has no step), and the board ticks it when he says it is done, so an ask that only asks whether he has done it
@@ -25,9 +25,8 @@ with its ask, or after=<the item that carries the ask>. needs names only who can
 answer, the session goes first and adds decision when it is done (or the decision is its own item, linked with
 after=); decision sits beside this project's background agents only when the two are independent (beside any other
 session it is refused), and when unsure, in sequence. When decision leaves needs (he has decided), the sessions still
-named are told at once; a session whose work changes the question rewrites the ask. The server never hands an item to
-a front agent on its own motion: when the item is back with its front agent mover alone, the project's builder is told
-instead.
+named are told at once; a session whose work changes the question rewrites the ask. The server hands no item to a
+front agent on its own motion: one back with its front mover alone tells the project's builder (the mover, if the project has no background agent).
 
 ## text ANCHOR_SHAPES
 Slack channel/DM, Drive file/folder, Gmail thread, gmail:q:<query> or gmail:q@<mailbox>:<query>, Notion page or
