@@ -139,6 +139,10 @@ cold("no json at all here")            # a cold call that gives nothing
 def cli_row(who, status, at):
     """The CLI's own registry row of a pane on this box: an interactive pane, status busy | idle and when it changed (ms)."""
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
+DEAD_ISO = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now0 - 3 * 3600))      # gone three hours: past [client] dead_after_minutes
+def set_gone(who, on=True):
+    """the heartbeat's row of `who` says its pane has been gone for hours (the message tool's dead-recipient rule), or is live again"""
+    (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a", **({"gone": DEAD_ISO} if on and n == who else {})} for n, u in U.items()}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
 handoff_svc.CLI_SESSIONS = T / "cli"
 OWN = _core_instance.OWNER
@@ -179,7 +183,7 @@ done = tick(d1 + 11 * MIN, 1); drain()
 check("1 take minutes later ONE reminder goes to the new mover alone, worded as a reminder, and the record says so", done == ["a1"] and len(texts("home-peer2", "a1")) == 2 and texts("home-peer2", "a1")[1].startswith("[stackshot] reminder: a1 ")
       and bool(ho(1).get("reminded_at")), (ho(1), pushes()))
 d1b = float(ho(1)["delivered_at"])
-check("1 …the reminder fits a front agent: no subagent to start, take it by a step in progress or a work line, or hand it back to the hander", "subagent" not in texts("home-peer2", "a1")[1] and "marking a step in progress or writing a work line" in texts("home-peer2", "a1")[1]
+check("1 …the reminder fits a front agent: no subagent to start, take it by a step in progress or done or a work line, or hand it back to the hander", "subagent" not in texts("home-peer2", "a1")[1] and "marking a step in progress or done, or writing a work line on the item (a note does not count)" in texts("home-peer2", "a1")[1]
       and "hand it back (sender='home-peer')" in texts("home-peer2", "a1")[1], texts("home-peer2", "a1"))
 check("1 …the hander, the project's -main agent and the fleet's builder are told nothing", not pushes_to("home-peer") and not pushes_to("home-delta-main") and not pushes_to("home-fleet"), pushes())
 check("1 …and nothing goes down the ladder before the next take minutes", tick(d1b + 5 * MIN, 1) == [] and not ho(1).get("recovery_at"), ho(1))
@@ -322,6 +326,40 @@ d = float(ho(23).get("delivered_at") or 0) or time.time()
 tick(max(d, time.time()) + 86400 * 2, 23); drain()
 check("7 a project with a background agent: the cold rung is taken as before (the stub was asked)", len(COLD_CALLS) > before, (len(COLD_CALLS), ho(23)))
 close(23)
+
+# 7e. the request's "what the ladder tried" follows the record: a pane that is gone before the clock runs out was never reminded (ladder off) or asked (ladder on)
+set_cfg(cold_call=False)
+cli_row("home-peer2", "idle", now0)
+put(24)
+r = hand(24, "home-peer2"); d = float(r["delivered_at"])
+no_row("home-peer2"); set_gone("home-peer2")
+done = tick(d + 2 * MIN, 24); drain()
+mp = main_recovery_pushes("a24")
+check("7 ladder off, the pane gone 2 minutes after the delivery: the request says the pane is gone and claims no reminder", done == ["a24"] and len(mp) == 1 and "What the ladder tried: the hand-off notice went to home-peer2; home-peer2's pane is gone." in mp[0][1]
+      and not ho(24).get("reminded_at"), (done, mp, ho(24)))
+close(24); set_gone("home-peer2", False)
+_cfg.CFG["ladder"] = {"enabled": True}
+cli_row("home-peer2", "idle", now0)
+put(25)
+r = hand(25, "home-peer2"); d = float(r["delivered_at"])
+no_row("home-peer2"); set_gone("home-peer2")
+done = tick(d + 2 * MIN, 25); drain()
+mp = main_recovery_pushes("a25")
+check("7 ladder on, the pane gone: the request says the pane is gone and claims neither the notice sent again nor a look", len(mp) == 1 and "What the ladder tried: the hand-off notice went to home-peer2; home-peer2's pane is gone." in mp[0][1]
+      and "sent again" not in mp[0][1] and "looked at" not in mp[0][1], (done, mp))
+close(25); set_gone("home-peer2", False)
+_cfg.CFG["ladder"] = {}
+# a pane that was reminded and is gone afterwards: the reminder is claimed, and the pane too
+cli_row("home-peer2", "idle", now0)
+put(26)
+r = hand(26, "home-peer2"); d = float(r["delivered_at"])
+tick(d + 11 * MIN, 26); drain(); d = float(ho(26)["delivered_at"])
+no_row("home-peer2"); set_gone("home-peer2")
+tick(d + 2 * MIN, 26); drain()
+mp = main_recovery_pushes("a26")
+check("7 reminded first and gone after: both are said", len(mp) == 1 and "went to home-peer2 and, with no work started after 10 min, one reminder; home-peer2's pane is gone." in mp[0][1], mp)
+close(26); set_gone("home-peer2", False)
+cli_row("home-peer2", "idle", now0)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
