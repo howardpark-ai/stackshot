@@ -101,8 +101,8 @@ _RECOVERY_ROLE = {"main": "the project's -main agent", "fleet": "the fleet's bui
 def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
     """(who is asked to recover a quiet mover's item, which kind of recipient it is: "main" | "fleet", whether the project has no builder: it is front-only, so the ladder had none to try). The caller computes
     it ONCE per request, on the raw session (a name or an id, never its label), and hands it to `_recovery_tell` and to the wording of what was tried, so the text and the real recipient cannot disagree.
-    A front-only project (anchors.front_only: its `agents:` map lists no background agent, so there is no
-    builder for the ladder to try) ends at its -main agent (`_main_agent`), the session its owner talks to. Every other project ends at the fleet's builder (`fleet_builder` in service/fleet_events.py), as before, and so does a front-only
+    A front-only project (anchors.front_only: it has no builder, so there is none
+    for the ladder to try) ends at its -main agent (`_main_agent`), the session its owner talks to. Every other project ends at the fleet's builder (`fleet_builder` in service/fleet_events.py), as before, and so does a front-only
     project with no -main agent to name, and one whose quiet mover is its -main agent itself (nobody is above it in the project): those are still builderless, so the third value is True for them. A front-only test
     that fails keeps the fleet's builder and says the project has one (False: nothing is claimed about a builder that was not read)."""
     builderless = False

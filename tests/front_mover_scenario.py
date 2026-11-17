@@ -2,7 +2,7 @@
 
 Covers: the server sends a front agent (a user-facing agent on a project's agents map) no hand-off notice, so create and update refuse a write that sets mover, or then
 (which becomes the mover after the owner's answer), to a front agent when the sender is a different session. The refusal says the front agent gets no notice, names the
-project's builder to hand build work to, and says to message the front agent for a check or an answer only it can give. Allowed as before: a front agent naming itself, the
+project's builder to hand build work to, and says to send a check or an answer only it can give as a message to the page key with `For <agent>,` on its first line. Allowed as before: a front agent naming itself, the
 owner as mover, a background agent, and the server's own moves (they do not come through the tools). The needs gate, which reads roles the same way, still refuses a front agent.
 
     tests/run-suite front_mover        → exit 0 / 1"""
@@ -29,7 +29,8 @@ page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type
 (T / "store/projects.json").write_text(json.dumps({"pages": {
     "projects/delta": page(title="Delta", name="Delta", agents={MAIN: "front", SIDE: "answers questions", BUILD: "builds it", REVIEW: "reviews it"},
                            back_agents={BUILD: "builds it", REVIEW: "reviews it"}),
-    "projects/echo": page(title="Echo", name="Echo", agents={ECHO: "front"})}}))
+    "projects/echo": page(title="Echo", name="Echo", agents={ECHO: "front"}),
+    "projects/foxtrot": page(title="Foxtrot", name="Foxtrot", agents={"home-foxtrot-main": "front", "home-foxtrot-watch": "watches the clock"}, back_agents={"home-foxtrot-watch": "watches the clock"})}}))
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
@@ -141,24 +142,28 @@ check("create: post_wake_mover=<front agent> by another session becomes the buil
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a9", sender=MAIN, post_wake_mover=MAIN))
 check("update: a front agent naming itself as post_wake_mover is not refused here", "no hand-off notice" not in r, r)
 
-# ---- a project with no builder and no background agent: the refusal says so once, without a placeholder (the sender is a session no page lists: a session some page lists hands it through, see builderless_handover)
+# ---- a project with no builder: the refusal says so once, names the rule and the path to the peer, without a placeholder (the sender is a session no page lists: a session some page lists hands it through, see builderless_handover)
 STRANGER = "home-stranger"
 put(10, mover=SIDE, project="projects/echo")
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=STRANGER, mover=ECHO))
-check("no builder: the refusal says there is no builder or background agent, with no placeholder", msg.startswith("Refused:") and "no builder and no background agent" in msg and "<background agent>" not in msg
-      and msg.count("background agent") == 1 and "builder, " not in msg, msg)
+check("no builder: the refusal says there is no builder, names the For <peer> path, with no placeholder and no plain message(to=<agent>) advice", msg.startswith("Refused:") and "has no builder to hand it to" in msg and "<background agent>" not in msg
+      and 'with the first line "For home-echo-main, ..."' in msg and f"message(to={ECHO}" not in msg and msg.count("no builder") == 1, msg)
 
-# ---- a background agent only the project record holds (its page line still owed): the project is not front-only, but no builder is listed yet; the refusal says the page does not list it yet
+# ---- a project whose only background agent does not build has no builder: the refusal stands, nothing is substituted by that agent
+put(11, mover=SIDE, project="projects/foxtrot")
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a11", sender=STRANGER, mover="home-foxtrot-main"))
+check("a background agent that does not build is no builder: the front-only refusal, and the agent is not substituted", msg.startswith("Refused:") and "has no builder to hand it to" in msg and "home-foxtrot-watch" not in msg, msg)
+
+# ---- a background agent only the project record holds (its page line still owed) is no builder until the page lists it: the project is front-only and the refusal is the same
 from stackshot.projects import projects as _P
 _PID = _P.ensure_ids(["projects/echo"])["projects/echo"]
 (T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"},
     "pending_agents": {_PID: {"home-echo-engineer": {"mandate_line": "takes the build work", "front": False, "role": "engineer"}}}}))
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=STRANGER, mover=ECHO))
-check("owed background agent: the refusal says it is not on the page yet, never that there is none", msg.startswith("Refused:") and "not on its page yet" in msg and "no builder and no background agent" not in msg
-      and "keep the item with its current mover" in msg and "<background agent>" not in msg, msg)
+check("owed background agent: no builder yet, so the front-only refusal stands (never a substitution by an agent the page does not list)", msg.startswith("Refused:") and "has no builder to hand it to" in msg and "keep the item" not in msg and "<background agent>" not in msg, msg)
 (T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"}, "pending_agents": {}}))
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=STRANGER, mover=ECHO))
-check("owed agent gone: the plain refusal is back", msg.startswith("Refused:") and "no builder and no background agent" in msg, msg)
+check("owed agent gone: the same refusal", msg.startswith("Refused:") and "has no builder to hand it to" in msg, msg)
 
 # ---- a failing roles read lets the write through (one stderr line)
 import io, contextlib

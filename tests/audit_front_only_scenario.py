@@ -1,5 +1,5 @@
 """Scenario test for where the audit sends a project's unmoved findings and its unmoved digest (audit_run.Env.chase_of, audit_run.deliver_findings, the unmoved digest of audit_run.run): a front-only
-project (anchors.front_only: its `agents:` map lists no `background:` agent) has no builder to chase, so both go to its -main agent, marked for the owner as every message to a front agent is; a project with
+project (anchors.front_only: no builder) has none to chase, so both go to its -main agent, marked for the owner as every message to a front agent is; a project with
 a builder is unchanged. Fixture data (English stand-in names) in a temporary store, messages replaced by recorders, no network, no model call.
 
   1  the choice on its own (Env.chase_of): a front-only project with a -main agent -> (that agent, front); a project with a builder -> (the builder, not front); a front-only project whose -main agent cannot

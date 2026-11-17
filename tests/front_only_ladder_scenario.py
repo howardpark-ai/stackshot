@@ -242,7 +242,7 @@ close(14)
 
 # (e) the text a session reads in `get`'s description (the stall form) names the -main agent as well as the fleet's builder
 check("5 the served stall form says where a recovery message goes: a front-only project's -main agent, else the fleet's builder (it said the fleet's builder only)",
-      "the project's -main agent when the project lists no background agent, to the fleet's builder otherwise" in _wt_get._STALL_FORM and "the fleet's builder is sent one message" not in _wt_get._STALL_FORM, _wt_get._STALL_FORM[:200])
+      "the project's -main agent when the project has no builder, to the fleet's builder otherwise" in _wt_get._STALL_FORM and "the fleet's builder is sent one message" not in _wt_get._STALL_FORM, _wt_get._STALL_FORM[:200])
 
 # ================================================================ 4. the choice on its own
 tgt = _pane_recovery._recovery_target

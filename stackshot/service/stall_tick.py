@@ -5,7 +5,7 @@ pane is idle (or `shell`: turn over, a background Bash task running) and its sta
 is looked at. After the minutes: (1) the notice goes to the mover once more; (2) the same minutes later, with no turn and no write: the hand-off's cold call (`handoff_cold`, service/handoff_cold.py) names who takes
 it, or hands over to the builder when it names no one: it never asks the owner (`stall_cold_no_taker`); (3) the same minutes after that, the project's builder (`handoff_builder`, through `handoff_exec`); (4) when none
 can take it, ONE message goes to the fleet's builder (`_recovery_tell` in server.py: the item, the quiet session, what was tried, asking it to take the fix through its usual path), or to the project's -main agent when
-the project is front-only (anchors.front_only: no background agent on its map, so no builder was tried; `_recovery_target`), once for the hand-off record (recovery_at), with a History line; the item stays with its
+the project is front-only (anchors.front_only: no builder, so none was tried; `_recovery_target`), once for the hand-off record (recovery_at), with a History line; the item stays with its
 mover and does not go to the owner. Not looked at: an item in a hold or on a wait, one the owner or an outside party moves (the model derives no session mover), a hand-off in flight to a session that is not a front
 agent (the hand-off ladder has it), a cold call running, a pane the registry does not show (nothing can be told of it), and an item whose hand-off record already carries the recovery request. Each step is written onto
 the item (metadata.stall.log, a History line) and the journal.

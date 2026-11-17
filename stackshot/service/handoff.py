@@ -42,7 +42,6 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _GID
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_of, _needs_store
 from stackshot.projects import projects as _prj
-from stackshot.router import router as _router
 from stackshot.service import handoff_cold as _hcold
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
@@ -176,33 +175,20 @@ def handoff_started(who: str, idx: dict[str, Any] | None = None) -> float:
 
 
 def handoff_background(project: str) -> list[str]:
-    """The project's background agents, the one to hand to first first (the send-time guard names one): the builder before the rest, the page's order within each."""
+    """The project's background agents, the one to hand to first first (the send-time guard names one): the builder before the rest, the names' alphabetical order within each (anchors.background_ranked)."""
     return [n for _a, _b, n in handoff_ranked(project)]
 
 
 def handoff_ranked(project: str) -> list[tuple[int, int, str]]:
-    """(class, order, name) of the project's background agents, best first: those of the page whose hub is the project's (the guards' own reading, model_guards.Ctx.background_of);
-    class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest. The builder is the first of class 0 or 1."""
-    try:
-        reg = _anc.registry()
-        roles = _anc.session_roles(reg)
-        hub = _anc.hub_of(project, reg)
-        out = []
-        for i, (n, r) in enumerate(roles.items()):
-            if r.get("role") != "back" or _anc.hub_of(r.get("project", ""), reg) != hub:
-                continue
-            mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
-            out.append((0 if re.search(r"\bbuild", mand, re.I) else 1 if _router._BUILDER.search(mand) else 2, i, n))
-        return sorted(out)
-    except Exception:  # noqa: BLE001
-        return []
+    """(class, order, name) of the project's background agents, best first (anchors.background_ranked): class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest.
+    The builder is the first of class 0 or 1."""
+    return _anc.background_ranked(project)
 
 
 def handoff_builder(project: str) -> list[str]:
-    """Where a hand-off nobody took falls first: the project's BUILDER alone (router_live.builder's pick: the background agent whose mandate says build, else maintain, merge or
-    engineer, the page's order within each; not every background agent on the page). A list of one, or none."""
-    ranked = handoff_ranked(project)
-    return [ranked[0][2]] if ranked and ranked[0][0] < 2 else []
+    """Where a hand-off nobody took falls first: the project's BUILDER alone (anchors.builder_of, which front_only reads too: the background agent whose mandate says build, else maintain, merge or
+    engineer, the names' alphabetical order within each; not every background agent on the page). A list of one, or none."""
+    return _anc.builder_of(project)
 
 
 def handoff_exempt(item: dict[str, Any], who: str) -> bool:

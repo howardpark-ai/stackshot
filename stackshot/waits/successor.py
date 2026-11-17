@@ -15,7 +15,7 @@ answer twice and a second run finds nothing left to do.
                                            None when nothing is live: the item stays and is reported, never given to a guess
                                            An ALIVE item tries the project's background agents first (tier "back": the builder, then the others): the minute pass sends no notice to a front agent
                                            and never chases one, so a front agent takes an alive item only when no background agent is live (Pick.front, and the History line says so). A FRONT-ONLY project
-                                           (anchors.front_only) has no background agent to go to, so its new holder is told once (Pick.told, FRONT_TOLD: the server sends the hand-off notice, service/handoff.py `handoff_exec`)
+                                           (anchors.front_only) has no builder to go to, so its new holder is told once (Pick.told, FRONT_TOLD: the server sends the hand-off notice, service/handoff.py `handoff_exec`)
   orphans(items, derive, gone)             the open items whose session of record is gone: an alive item's mover, a waiting item's post-wake mover; never an item a human moves
   plan(items, reg, derive, gone, ...)      orphans(), each with its pick: a row {gid, project, state, from, gone, to, reason, why} with `to` "" when nothing is live
 

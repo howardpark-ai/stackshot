@@ -26,7 +26,7 @@ answer, the session goes first and adds decision when it is done (or the decisio
 after=); decision sits beside this project's background agents only when the two are independent (beside any other
 session it is refused), and when unsure, in sequence. When decision leaves needs (he has decided), the sessions still
 named are told at once; a session whose work changes the question rewrites the ask. The server hands no item to a
-front agent on its own motion: one back with its front mover alone tells the project's builder (the mover, if the project has no background agent).
+front agent on its own motion: one back with its front mover alone tells the project's builder (the mover, if the project has no builder).
 
 ## text ANCHOR_SHAPES
 Slack channel/DM, Drive file/folder, Gmail thread, gmail:q:<query> or gmail:q@<mailbox>:<query>, Notion page or
@@ -172,8 +172,8 @@ goal=<the end-state in one sentence, what {{OWNER}} would ask "is it done?" abou
 an alive item now, on a waiting item whoever takes it when the wait ends; {{OWNER}}, a session name or the project's
 background agent; a front agent (a session {{OWNER}} talks to) only by
 itself: a create or update from another session that sets mover to one gets the project's builder instead, and the
-reply and History say so (send it again to keep it; with no builder it is refused, except mover= to a front
-agent of a project with no background agent, which is told)>; then=<who takes it
+reply and History say so (send it again to keep it; with no builder it is refused, except to a front
+agent of the item's project from a session a page lists: mover= tells it)>; then=<who takes it
 after {{OWNER}}'s answer or step; it stands only while he moves the item, and on an item a session moves or
 waits on it is dropped with a note in the reply: to hand an item on, set mover=<session>; then=<front agent> from
 another session gets the builder the same way>;
@@ -333,8 +333,8 @@ Who moves the item now: {{OWNER}}, a session name or id, or the project's backgr
 is who takes the item when the wait ends. A front agent (a session
 {{OWNER}} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets
 mover=<front agent> gets the project's builder instead (the reply and History say so; send it again to keep it;
-with no builder it is refused, except from a session a project page lists to a front agent of the item's own project
-when it has no background agent: the agent is told; then and post_wake_mover stay refused). On an update that sets no needs, the
+with no builder it is refused, except from a session a project page lists to a front agent of the item's own project:
+mover= tells the agent, then and post_wake_mover leave it to the answer or the wake). On an update that sets no needs, the
 session needs names for the mover it replaces is swapped for the new one.
 
 ## param THEN

@@ -2,7 +2,7 @@
 A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as
 mover, follow-ups after the first notice go by the item's step status, not its pane): resend (the notice again), cold
 (a call named who takes it, or closed it), builder (handed to the project's builder), recovery (nobody could take it:
-one message goes to the project's -main agent when the project lists no background agent, to the fleet's builder
+one message goes to the project's -main agent when the project has no builder, to the fleet's builder
 otherwise, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and
 next back; status=open with a new next for a close; a notice or a recovery message already sent cannot be unsent and
 needs nothing; (2) fix the cause through a normal PR to {{NAME}} (hand it to the project's builder); (3) if wrong

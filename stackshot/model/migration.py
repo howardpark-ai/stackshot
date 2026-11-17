@@ -38,7 +38,6 @@ from stackshot.core import config as _cfg
 from stackshot.router import routing as _routing
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
-from stackshot.router import router as _router
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.model import states as _states
 from stackshot.waits import waiting as _wt
@@ -207,21 +206,9 @@ class Env:
         return str(rows[0].get("name")) if rows else w
 
     def background(self, project: str) -> list[str]:
-        """The project's background agents, the builder first (the same ranking as `handoff_ranked` in service/handoff.py, which the hand-off machinery falls to): those of the page the
-        project's agents are grouped under; class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest."""
-        try:
-            reg = self.ctx.reg()
-            roles = self.ctx.roles()
-            hub = _anc.hub_of(project, reg)
-            out = []
-            for i, (n, r) in enumerate(roles.items()):
-                if r.get("role") != "back" or _anc.hub_of(r.get("project", ""), reg) != hub:
-                    continue
-                mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
-                out.append((0 if re.search(r"\bbuild", mand, re.I) else 1 if _router._BUILDER.search(mand) else 2, i, n))
-            return [n for _a, _b, n in sorted(out)]
-        except Exception:  # noqa: BLE001
-            return []
+        """The project's background agents, the builder first (anchors.background_ranked, the ranking the hand-off machinery falls to): those of the page the project's agents are grouped under;
+        class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest."""
+        return [n for _a, _b, n in _anc.background_ranked(project, self.ctx.reg())]
 
     def is_front(self, who: str, project: str) -> bool:
         """Is `who` a user-facing (front) agent of the project's hub: a page's `agents:` entry outside `background:`, or its name line? The pass never takes an item from one."""

@@ -295,7 +295,7 @@ def stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
 
 def stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
     """Step 3: the project's builder (section 5's first choice); none able, the last rung: the fleet's builder is asked to recover the session (`_handoff.handoff_exec`, a `recover` step), or, for a front-only project
-    (anchors.front_only: no background agent on its map), the project's -main agent (`_recovery_target`)."""
+    (anchors.front_only: no builder), the project's -main agent (`_recovery_target`)."""
     with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _handoff.ho_same(stall_mover(gid, item), who):
