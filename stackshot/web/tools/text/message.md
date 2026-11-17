@@ -16,8 +16,7 @@ to hand the item over is update(mover=<agent>). An item id cited only for contex
 since a plain-word id names the receiver on that item. A message to a front agent is refused unless its first line
 carries {{FOR_OWNER}}, and the mark is for what {{OWNER}} has to do (a decision, a go-ahead, a step only he can take):
 a build hand-back, a result, a screenshot, "it's live" or an FYI goes to the project (to=projects/<slug>), where the
-router rules it and passes on what needs the agent (a front agent that wants to reach a peer front agent of its project
-sends it there with the first line For <peer>,); a marked message that says nothing is needed from him (nothing
+router rules it and passes on what needs the agent (front peer: first line For <peer>,); a marked message that says nothing is needed from him (nothing
 needed from {{OWNER}}, no action needed, FYI, for the record, no reply needed, …) is refused too. A background agent's
 message to a front agent (marked, or a project message that opens For <front agent>) that names one to three board
 items is held back, not delivered, only when it clearly reads as a plain status report: the reply then begins 'Not
@@ -30,14 +29,14 @@ named to act, and no prose in a code span. Everything else is delivered (the rep
 message whose item waits on a decision (needs: decision) or names the front agent in its needs. A move to
 needs=decision reaches {{OWNER}} on the board, not through a message. To hand an item to a session set its mover
 (update, mover=<session>), which tells the new mover itself. A merge-queue group number in a release line ("group g7",
-"split from g7", "[g7]") names no item. Long content goes on a page or into a repo, with the pointer in the message
-(at most {{MSG_MAX}} characters). fyi=true marks a message that asks nothing of its receiver (news, a result, a status
-it need not act on): a background agent gets it with the first turn it takes, once, oldest first (the reply begins
+"split from g7", "[g7]") names no item. Long content goes on a page or into a repo, with the pointer in the message.
+fyi=true marks a message that asks nothing of its receiver (news, a result, a status
+it need not act on): a background agent gets it with the first turn it takes, once (the reply begins
 'held for <agent>'s next turn'), and it names the agent in no item's needs, so send it again without fyi if it does
 ask; to a project it is held the same way when the router passes it to a background agent; to a front agent it changes
 nothing, and a message that carries {{FOR_OWNER}} or needs: decision is delivered whatever the flag says. A message to
 a project is answered `held for the router — the router rules notice <id> …`, ending `get(item_id="<id>") shows its
-ruling`: call get with that id to read the ruling. The reply adds NOT PASSED ON when you move the item it names: write
+ruling`: call get with that id. The reply adds NOT PASSED ON when you move the item it names: write
 the item to hand a step on. A reply that begins `inbox` means the line waits in the server's inbox for the session's
 machine to fetch it (about a minute while the session runs){{INBOX_FLAG}}. The receiver sees a labelled [stackshot
 message] turn framed as a teammate's request, never as {{OWNER}}'s instruction or approval.{{OFF_MAP_NOTE}}.

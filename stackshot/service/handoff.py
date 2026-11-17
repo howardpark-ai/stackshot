@@ -448,7 +448,8 @@ def handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
     """Called by tell_woken when a push to `owner` about these items is over: `outcome` is push.py's last line (delivered … | queued … | inbox …), or "failed". A delivered push
     makes the open hand-off to that session delivered now (its clock starts); one that waits (`inbox`, `queued`: the machine is away, the pane is not reachable now, a reboot's pause)
     is neither delivered nor failed: the puller's ack makes it delivered (handoff_acked), else the clock starts [model] handoff_inbox_grace_minutes after it was queued; only a
-    refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item. Never raises."""
+    refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item (a front agent is neither sent it again nor laddered:
+    the failure is a History line and the item stays with it). Never raises."""
     if not handoff_on():
         return
     for g in [x for x in re.split(r"[,\s]+", str(gids or "")) if _GID.match(x)]:
@@ -469,6 +470,9 @@ def handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
                 else:
                     act = _ho.failed(it, owner, why or outcome, now, ho_same)
                     changed = bool(act)
+                    if act and handoff_exempt(it, owner):      # a front agent (a front-only project's orphan or peer hand-off notice): no second push and no ladder, whose last rung would ask the project's -main agent (maybe this one) to recover; the failure stays on the item
+                        _stall.note(it["metadata"], now, f"the hand-off notice to {_session_label(owner)} was not delivered ({_clip_line(why or outcome, 100)}): a front agent is sent no second notice, the item shows on the board")
+                        act = ""
                 if changed:
                     _writes.save(g, it)
             if act == "retry":
@@ -644,7 +648,7 @@ def handoff_write_move(item: dict[str, Any], st: "_ho.Step", now: float) -> None
     if alive:
         _ho.successor(item, st, ho_ident(st.to), now, _session_label)
     if st.via == "orphan":
-        _stall.note(item["metadata"], now, f"handed to {_session_label(st.to)}: {st.why}", width=400)      # the History line with the reason (a mover change alone shows only the names; a waiting item has no record to carry it); wide enough that the closing words (a front agent: told or not) are not cut off
+        _stall.note(item["metadata"], now, f"handed to {_session_label(st.to)}: {st.why}", width=400 if _succ.FRONT_TOLD in st.why else 240)      # the History line with the reason (a mover change alone shows only the names; a waiting item has no record to carry it); only the line that ends "it is sent the one hand-off notice" is wider, so those closing words are not cut off
 
 
 def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: "_ho.Env | None" = None,

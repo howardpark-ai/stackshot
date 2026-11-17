@@ -984,7 +984,7 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
     line = f"[stackshot] {_gh.shown(gid)} is back with you alone (handed back by {who}): {subject}" + (f"; next: {nxt}" if nxt else "") + f" → {notice_link(gid)}"
     rec = {"gid": gid, "oid": oid, "olabel": olabel, "project": project, "who": who, "wid": wid, "subject": subject, "line": line}
     hold = handback_hold_s()
-    dest = no_front(oid, project) if front_sender(oid) else oid      # a front agent mover is not handed the item by stackshot: its builder is told, else nobody
+    dest = no_front(oid, project) if front_sender(oid) else oid      # a front agent mover is not handed the item by stackshot: its builder is told, else nobody (except a front-only project: no builder to tell instead, so its front mover is told itself, below)
     if not dest and front_sender(oid) and _anc.front_only(project):
         dest = oid         # a front-only project has no builder to tell instead: the front mover is the one who can act, so it is told itself (marked, handback_send); a project that lists a builder keeps its rule
     if dest and dest != oid and h.session_id(dest) == wid:              # ... and the builder that wrote the hand-back itself needs no line about its own write
@@ -1099,7 +1099,7 @@ def handback_drop(gid: str, why: str = "") -> int:
 
 def handback_send(rec: dict[str, Any]) -> bool:
     """Deliver one hand-back line: recorded for the router when the project's is live (its hand-back rule passes it, marked), else pushed at once with the mark; a record that cannot be written is pushed (never lost).
-    for a front agent mover the line goes to the project's builder instead (tell_or_hold: it asks the builder nothing, so it rides the builder's next turn), or to nobody. → True when
+    for a front agent mover the line goes to the project's builder instead (tell_or_hold: it asks the builder nothing, so it rides the builder's next turn), or to nobody; in a front-only project (no builder to tell instead) the front mover itself is told, marked, as any mover is below. → True when
     a line was passed to someone, False when nobody was told (the board and the routing log hold it)."""
     h = _hooks()
     gid, oid, project, who, olabel = rec["gid"], rec["oid"], rec["project"], rec["who"], rec["olabel"]

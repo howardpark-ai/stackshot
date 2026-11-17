@@ -88,15 +88,15 @@ def _itemopen_lines(raw: Any) -> tuple[list[str], str]:
 
 
 def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """`client.py post item-open <marker> --project P --subject S --mover M --step "<M>: ..." --line "..." [--line ...] [--sender L]`: a script asks for ONE board item for a background agent of project P.
+    """`client.py post item-open <marker> --project P --subject S --mover M --step "<M>: ..." --line "..." [--line ...] [--sender L]`: a script asks for ONE board item for a background agent of project P (a front-only project, whose page lists none, files it under its -main agent: see below).
     body: marker (`<kind>:<what>`, the item's mark), project (an id, a page key or a bare slug), subject (the action and its object, no prefix: the server puts the project scope's prefix before it, and a
     prefix the caller wrote is replaced), description (the bullets: a list of lines or one text of lines), step (one line that starts `<mover>: `), mover (a background agent listed under `background:` on the
-    project's page, nobody else: a front agent, the owner, an unlisted name are refused), sender (the script's own label, one word; default client.py). Any other key is refused.
+    project's page, nobody else: a front agent, the owner, an unlisted name are refused; in a front-only project, where the page lists none, the name the script gives is replaced by the -main agent), sender (the script's own label, one word; default client.py). Any other key is refused.
     The item is filed through create_item (service/create.py), the create tool's own code, so the subject, description and next gates, the project page and the GitHub mirror all apply and a refusal is the tool's text (400);
     the caller picks no field the tool does not take for a script (no needs, owner, priority, ask or date). The project's front agent (its -main first) is the item's creator and the mover is named in needs, so it is
     told once at the create. The description ends with "- Opened by <sender> (a script on a client machine)": no host name reaches the item or its GitHub issue. Marked metadata.item_open = <marker>; while an item with
-    the marker is open on this project (read from the store; the marker is per project) a repeat call answers it and files nothing, and once it is closed a call files a new one. A project holds at most 10 open items filed by this route: past it a new marker is a 400 until one closes (a repeat never counts). The row owes no page, as every script route's. 404 no such project, 409 no front agent
-    to file under, 503 the project record cannot be read. -> (status, {item, marker, project, mover, owner, repeat})."""
+    the marker is open on this project (read from the store; the marker is per project) a repeat call answers it and files nothing, and once it is closed a call files a new one. A project holds at most 10 open items filed by this route: past it a new marker is a 400 until one closes (a repeat never counts). The row owes no page, as every script route's. The item is then with the -main agent (`metadata.item_open_fallback`, no needs, one more description line says so) and the answer's `fallback` is true. 404 no such project, 409 no front agent
+    to file under, 503 the project record cannot be read. -> (status, {item, marker, project, mover, owner, repeat, fallback})."""
     extra_keys = sorted(k for k in body if k not in _ITEMOPEN_KEYS)
     if extra_keys:
         return 400, {"error": f"not taken: {', '.join(str(k) for k in extra_keys)}; item-open takes {', '.join(_ITEMOPEN_KEYS)} and nothing else"}

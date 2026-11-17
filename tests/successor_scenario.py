@@ -238,8 +238,27 @@ told_102 = [t for t in TOLD if "102" in t[0]]
 check("5 server: the front agent that takes an alive item of a front-only project (102, projects/solo) is sent the one hand-off notice, once, and its History line says so; a waiting item of that project (106) sends none",
       len(told_102) == 1 and told_102[0][1] in (U["gen-main"], "gen-main") and "it came to you" in told_102[0][2] and B(102) in told_102[0][2] and "sent the one hand-off notice" in ST.log_of(m_d)[0]["text"]
       and "no notice is sent" not in ST.log_of(m_d)[0]["text"] and not any("106" in t[0] for t in TOLD), (told_102, ST.log_of(m_d)))
+check("5 server: only the told line is wider than 240 characters (400): a project with a background agent (101, 103) keeps the History line it had", len(ST.log_of(m_d)[0]["text"]) > 240 and ST.log_of(m_d)[0]["text"].endswith("hand-off notice)")
+      and all(len(ST.log_of(m_)[0]["text"]) <= 240 for m_ in (m_c, m_e)), [len(ST.log_of(m_)[0]["text"]) for m_ in (m_c, m_d, m_e)])
 check("6 server: the owner's item, his wait, a live mover's item, a closed item, a held item, a held wait and a server-labelled mover are as they were, byte for byte", all(raw(i) == before[i] for i in (104, 105, 107, 109, 113, 114, 115)),
       [i for i in (104, 105, 107, 109, 113, 114, 115) if raw(i) != before[i]])
+# 5b: a failed push of the hand-off notice. A background agent's is sent once more and a second failure sends the item down the hand-off steps (handoff_fallback); a front agent's (102, a front-only project) is
+# neither sent again nor laddered (the ladder's last rung would ask the project's -main agent, maybe the same one): the failure is a History line and the item stays with it
+FALLBACKS = []; _real_fb = handoff_svc.handoff_fallback
+handoff_svc.handoff_fallback = lambda gid, why, *a, **k: FALLBACKS.append((gid, why)) or []
+try:
+    TOLD.clear()
+    handoff_svc.handoff_pushed("a102", "gen-main", "failed", "boom"); handoff_svc.handoff_pushed("a102", "gen-main", "failed", "boom again")
+    m_102 = mt(102)
+    check("5b server: a failing push of the hand-off notice to a front holder (a front-only project) sends no second notice and starts no hand-off steps, however often it fails", TOLD == [] and FALLBACKS == [], (TOLD, FALLBACKS))
+    check("5b server: …each failure is on the item: a History line says the notice was not delivered and that a front agent is sent no second one, and the hand-off record counts the failures",
+          sum("was not delivered" in e["text"] and "no second notice" in e["text"] for e in ST.log_of(m_102)) == 2 and m_102["handoff"]["attempts"] == 2 and not m_102["handoff"].get("recovery_at"), (ST.log_of(m_102), m_102["handoff"]))
+    handoff_svc.handoff_pushed("a108", "bgp-back", "failed", "boom")
+    check("5b server: …a background agent's first failed push is sent once more, as before", [t[1] for t in TOLD if "108" in t[0]] in ([U["bgp-back"]], ["bgp-back"]) and FALLBACKS == [], (TOLD, FALLBACKS))
+    handoff_svc.handoff_pushed("a108", "bgp-back", "failed", "boom")
+    check("5b server: …and its second sends the item down the hand-off steps", [g for g, _w in FALLBACKS] == ["a108"], FALLBACKS)
+finally:
+    handoff_svc.handoff_fallback = _real_fb
 snap = {i: raw(i) for i in [*range(101, 110), 112, 113, 114, 115]}; TOLD.clear()
 again = handoff_svc.orphan_handover(apply=True, now=now0 + 60)
 check("6 server: a second call finds nothing, moves nothing, writes nothing, tells nobody (idempotent)", again["checked"] and again["found"] == 0 and again["moved"] == [] and again["left"] == [] and again["applied"]
