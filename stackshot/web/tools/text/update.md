@@ -284,8 +284,9 @@ the item over: set mover=<session> (then=<who takes it after {{OWNER}}'s answer 
 mover; on an item a session moves it is dropped with a note) and the new mover is told; a
 front agent gets no hand-off notice, so an update from another session that sets mover or then (or post_wake_mover, the old
 name of mover) to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as
-sent; with no builder it is refused, except a mover set by a front agent of the item's project to another of its front
-agents; message the front agent for a check or answer only it can give); take over another session's item only when
+sent; with no builder it is refused, except a mover set to a front agent of the item's own project when that project
+has no background agent, by any session a project page lists, which tells that front agent it is handed the item (then
+and post_wake_mover are no exception); message the front agent for a check or answer only it can give); take over another session's item only when
 asked; a session about to be retired first hands over or completes its open items. mover={{OWNER}} alone is refused on
 an item that is doing: it needs step=… or needs=decision with ask=… in the same write (the refusal says so). An update
 that leaves an open item in a state that is {{OWNER}}'s (his step, or needs holding decision) and names no mover sets

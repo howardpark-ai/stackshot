@@ -1,11 +1,14 @@
-"""Scenario test for a project with no builder: an answered step of the owner goes to the session the item's next open step names, and one front agent may hand an item to another front
-agent of the same project — fixture data (English stand-in text), no live store, no network.
+"""Scenario test for a project with no builder: an answered step of the owner goes to the session the item's next open step names, and any session some project page lists may hand an item of
+that project to one of its front agents — fixture data (English stand-in text), no live store, no network.
 
 Covers: (1) the incident: in a project whose page lists only front agents (a general -main agent and a second front agent), an item on hold with a wake, whose post_wake_mover is the -main agent,
 whose contact and next open step are the second front agent's, waits on the owner's step; once he answers it the item lands on the second front agent (the step's owner line), not on -main; with no
 such step the item's stored contact takes it; with neither, -main keeps it as before; a project that has a builder still hands the answer to its builder; a stored `then` still wins.
-(2) one front agent's `mover=` to another front agent of the same builderless project is accepted, with a note, and the target is told by a notice; the refusal stays for a front agent of
-another project, for a session no page lists, and (as a substitution by the builder) for a project that has one.
+(2) one front agent's `mover=` to another front agent of the same builderless project is accepted, with a note, and the target is told by a notice; the refusal stays for a session no page lists,
+for a target that is not a front agent of the item's own project, and (as a substitution by the builder) for a project that has one.
+(3) the sender need not belong to the project: a front agent or a background agent of another project hands an item of the builderless project to its front agent through `mover=`, the target
+is told, and the reply says so; a project with a builder still substitutes it; a target that is another project's front agent, a session no page lists as the sender, a retired sender or target,
+and `then` / `post_wake_mover` (the owner's answer or the wake makes that move, no notice would follow) are refused or substituted as before.
 
     tests/run-suite builderless_handover        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -153,8 +156,9 @@ r = call(lambda: _wt_create.stackshot_create(subject="[home] handed to the other
 check("2.5 a create does the same", r.startswith("created") and held(r.split()[1]) == SDESK, r)
 
 put(11, mover=SMAIN)
+told.clear()
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a11", sender=EMAIN, mover=SDESK, next=f"{SDESK}: take it"))
-check("2.6 a front agent of another project is still refused", msg.startswith("Refused:") and "no builder and no background agent" in msg and held(11) == SMAIN, (msg, held(11)))
+check("2.6 a front agent of another project may hand it too (the sender need only be a session a page lists), and the target is told", msg == "" and held(11) == SDESK and any(t[1] == U[SDESK] and t[3] == "handoff" for t in told), (msg, held(11), told))
 
 put(12, mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a12", sender=LONER, mover=SDESK, next=f"{SDESK}: take it"))
@@ -166,7 +170,7 @@ check("2.8 in a project with a builder the builder is substituted, as before", f
 
 put(14, project="projects/echo", mover=LONER)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a14", sender=SMAIN, mover=EMAIN, next=f"{EMAIN}: take it"))
-check("2.9 a front agent of one project handing an item of another to that project's front agent is refused too", msg.startswith("Refused:") and held(14) == LONER, (msg, held(14)))
+check("2.9 a front agent of one project may hand an item of a builderless project to that project's front agent (the item's project decides)", msg == "" and held(14) == EMAIN, (msg, held(14)))
 
 put(15, mover=SMAIN)
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a15", sender=SMAIN, mover=SMAIN, next=f"{SMAIN}: carry on"))
@@ -178,6 +182,59 @@ check("2.11 two front agents of one project may not hand an item filed under ano
 put(17, project="projects/sigma/sub", mover=SMAIN)
 r = call(lambda: _wt_update.stackshot_update(item_id="a17", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
 check("2.12 an item filed under a page of their project passes", "Refused" not in r and held(17) == SDESK, (r, held(17)))
+
+# ---- 3. the sender need not belong to the project: any session some project page lists
+put(40, mover=SMAIN)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a40", sender=DMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
+check("3.1 a front agent of another project hands an item of a builderless project to its front agent", "Refused" not in r and held(40) == SDESK and rd(40)["metadata"].get("mover") == SDESK, (r, held(40)))
+check("3.2 the reply says there is no builder and the target is told by a hand-off notice", "no builder" in r and "is told it is handed" in r and any(t[1] == U[SDESK] and t[3] == "handoff" for t in told), (r, told))
+check("3.3 nothing is substituted: no server_fixed mark", "front_mover" not in json.dumps(rd(40)["metadata"].get("server_fixed") or ""), rd(40)["metadata"].get("server_fixed"))
+put(41, mover=SDESK)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a41", sender=DBUILD, mover=SMAIN, next=f"{SMAIN}: take it from here", check="item_closed a1"))
+check("3.4 a background agent of another project does the same, and the target is told", "Refused" not in r and held(41) == SMAIN and any(t[1] == U[SMAIN] and t[3] == "handoff" for t in told), (r, held(41), told))
+told.clear()
+r = call(lambda: _wt_create.stackshot_create(subject="[home] handed from another project", description=DESC, project="projects/sigma", sender=DBUILD, mover=SDESK, next=f"{SDESK}: take it from here"))
+check("3.5 a create does the same", r.startswith("created") and held(r.split()[1]) == SDESK and any(t[1] == U[SDESK] and t[3] == "handoff" for t in told), (r, told))
+put(42, mover=DBUILD, project="projects/sigma/sub")
+r = call(lambda: _wt_update.stackshot_update(item_id="a42", sender=DBUILD, mover=SDESK, next=f"{SDESK}: take it", check="item_closed a1"))
+check("3.6 an item filed under a page of the project counts as the project's", "Refused" not in r and held(42) == SDESK, (r, held(42)))
+put(43, project="projects/delta", mover=DBUILD)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a43", sender=SMAIN, mover=DDESK, next=f"{DBUILD}: take it"))
+check("3.7 the target of a project that has a builder is still substituted by the builder, whoever sends it", f"mover={DBUILD}, the project's builder, was used instead" in r and held(43) == DBUILD and not any(t[1] in (U[DMAIN], U[DDESK]) for t in told), (r, held(43), told))
+put(44, mover=SMAIN)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a44", sender=DBUILD, mover=EMAIN, next=f"{EMAIN}: take it"))
+check("3.8 a front agent of another project than the item's is refused as the target, and the refusal names the rule", msg.startswith("Refused:") and "no builder and no background agent" in msg and "did not meet that" in msg and held(44) == SMAIN, (msg, held(44)))
+put(45, project="projects/echo", mover=EMAIN)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a45", sender=DBUILD, mover=SDESK, next=f"{SDESK}: take it"))
+check("3.9 the same from the other side: an item of one project cannot be pointed at a front agent of another", msg.startswith("Refused:") and held(45) == EMAIN, (msg, held(45)))
+put(46, project="projects/echo", mover=SMAIN)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a46", sender=LONER, mover=EMAIN, next=f"{EMAIN}: take it"))
+check("3.10 a sender no page lists is refused whatever the target", msg.startswith("Refused:") and "did not meet that" in msg and held(46) == SMAIN, (msg, held(46)))
+put(47, mover=SMAIN)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a47", sender=OWNER, mover=SDESK, next=f"{SDESK}: take it"))
+check("3.11 the owner's own name as sender is no session a page lists: refused", msg.startswith("Refused:") and held(47) == SMAIN, (msg, held(47)))
+ASK = "Decide: a or b - Recommend: a - Stakes: none - By: no date"
+put(48, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a48", sender=DBUILD, then=SDESK))
+check("3.12 then=<front agent> is not part of the relaxation: refused, and the refusal says only mover= hands it over", msg.startswith("Refused:") and "Only mover=" in msg and rd(48)["metadata"].get("then") == SMAIN, (msg, rd(48)["metadata"].get("then")))
+put(49, mover=DBUILD)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a49", sender=DBUILD, post_wake_mover=SDESK))
+check("3.13 post_wake_mover=<front agent> is refused too", msg.startswith("Refused:") and "Only mover=" in msg, msg)
+
+# the pure test (builderless.handover_allowed): rows of the session roles; a retired row is no session, a target must be a live front agent of the item's project
+from stackshot.waits import builderless as _bl
+front = lambda proj, **k: {"role": "front", "project": proj, **k}
+back = lambda proj, **k: {"role": "back", "project": proj, **k}
+keeper = lambda proj, **k: {"role": "keeper", "project": proj, **k}
+H = _bl.handover_allowed
+check("3.14 pure: a front or a background agent of any project hands an item of a front-only project to its front agent", H(front("projects/delta"), front("projects/sigma"), True, "projects/sigma") and H(back("projects/delta"), front("projects/sigma"), True, "projects/sigma"))
+check("3.15 pure: a one-session project's own session counts as a row; a retired row does not, as sender or as target", H(keeper("projects/lone"), front("projects/sigma"), True, "projects/sigma")
+      and not H(keeper("projects/lone", retired=True), front("projects/sigma"), True, "projects/sigma") and not H(front("projects/delta"), front("projects/sigma", retired=True), True, "projects/sigma"))
+check("3.16 pure: no row for the sender, a project that is not front-only, a target that is not a front agent or is another project's: no", not H(None, front("projects/sigma"), True, "projects/sigma") and not H(front("projects/delta"), front("projects/sigma"), False, "projects/sigma")
+      and not H(front("projects/delta"), back("projects/sigma"), True, "projects/sigma") and not H(front("projects/delta"), front("projects/echo"), True, "projects/sigma") and not H(front("projects/delta"), None, True, "projects/sigma"))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

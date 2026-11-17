@@ -157,10 +157,12 @@ check("6 the fixture holds both kinds of project", {a for a, _ in rows.values()}
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 nm = A.names()
 roles = A.session_roles()
-fp = lambda sender, key, project: _holders._front_pair_ok(sender, key, project)
+fp = lambda sender, key, project: _holders._front_handover_ok(sender, key, project)
 check("6 front agents of a front-only project may hand an item to each other", fp(SMAIN, SDESK, "projects/sigma") is True and fp(SDESK, SMAIN, "projects/sigma/sub") is True, roles.get(SMAIN))
 check("6 ...not in a project that has a builder", fp(DMAIN, DDESK, "projects/delta") is False and fp(DMAIN, DDESK, "projects/delta/sub") is False)
-check("6 ...not across projects, and not from a session no page lists", fp(SMAIN, DDESK, "projects/sigma") is False and fp("home-nobody", SDESK, "projects/sigma") is False)
+check("6 ...a target that is another project's front agent is no target, and a session no page lists is no sender", fp(SMAIN, DDESK, "projects/sigma") is False and fp("home-nobody", SDESK, "projects/sigma") is False)
+check("6 ...but the sender may belong to another project, as a front agent or a background agent, into a front-only project's front agent", fp(DMAIN, SDESK, "projects/sigma") is True and fp(DBUILD, SMAIN, "projects/sigma/sub") is True
+      and fp(DBUILD, DDESK, "projects/delta") is False)
 meta = lambda **k: {"owner": SMAIN, "contact": SDESK, "project": "projects/sigma", **k}
 check("6 the answer of a front-only project goes to its contact", _holders._builderless_answer_to(meta(), "projects/sigma") == SDESK, _holders._builderless_answer_to(meta(), "projects/sigma"))
 check("6 ...a project with a builder keeps the old fallback", _holders._builderless_answer_to(meta(project="projects/delta", contact=DDESK), "projects/delta") == "")
