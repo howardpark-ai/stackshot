@@ -277,7 +277,7 @@ class Env:
 
     def chase_of(self, project: str) -> tuple[str, bool]:
         """(who is told a finding its mover did not answer, and the unmoved digest; whether that session is a front agent, so the message is marked `[for <owner>]`). A front-only project (anchors.front_only: no
-        background agent on its map) has no builder to chase: its -main agent takes both. Every other project goes to `builder_of`, as before, and so does a front-only project whose -main agent cannot be
+        builder) has no builder to chase: its -main agent takes both. Every other project goes to `builder_of`, as before, and so does a front-only project whose -main agent cannot be
         named (said once on stderr), a project with no key, and a project whose registry cannot be read."""
         proj = str(project or "").strip()
         if proj:

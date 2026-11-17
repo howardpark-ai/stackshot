@@ -84,6 +84,15 @@ TWIN = {"projects/twina": page(agents={"home-twina-main": "front", "home-shared-
         "projects/twinb": page(agents={"home-twinb-main": "front", "home-shared-eng": "builds things"}, back_agents={"home-shared-eng": "builds things"})}
 check("2 a builder listed on the pages of two hubs counts for both: neither is front-only", A.front_only("projects/twina", TWIN) is False and A.front_only("projects/twinb", TWIN) is False
       and A.builder_of("projects/twina", TWIN) == ["home-shared-eng"] and A.builder_of("projects/twinb", TWIN) == ["home-shared-eng"])
+FRONTSOME = {"projects/probeh": page(agents={"home-probe-main": "front", "home-b1-eng": "builds things"}, back_agents={"home-b1-eng": "builds things"}),
+             "projects/probeg": page(agents={"home-probeg-main": "front", "home-b1-eng": "front, also answers"}),
+             "projects/probek": page(agents={"home-probek-main": "front", "home-b1-eng": "builds things"}, back_agents={"home-b1-eng": "builds things"}),
+             "projects/probek/desk": page(agents={"home-b1-eng": "front on the desk page"})}
+check("2 a name that is background on a hub but front on another hub is no builder of the hub (a front agent gets no hand-off notice); the hub that lists it as front has none either",
+      A.front_only("projects/probeh", FRONTSOME) is True and A.builder_of("projects/probeh", FRONTSOME) == [] and A.front_only("projects/probeg", FRONTSOME) is True)
+check("2 a name that is background on a hub's page but front on a sub-page of the same hub is no builder of the hub, nor of the sub-page",
+      A.front_only("projects/probek", FRONTSOME) is True and A.builder_of("projects/probek", FRONTSOME) == [] and A.front_only("projects/probek/desk", FRONTSOME) is True)
+check("2 a builder listed on any page of its hub, a sub-page's included, counts for the hub", A.front_only("projects/probem", {"projects/probem": page(agents={"home-probem-main": "front"}), "projects/probem/crew": page(agents={"home-probem-eng": "builds things"}, back_agents={"home-probem-eng": "builds things"})}) is False)
 check("2 slashes round a sub-page key do not matter (a sub-page's own map, its hub's map, its own background agent)",
       A.front_only("/projects/built/desk/", REG2) is False and A.front_only("/projects/built/notes/", REG2) is False and A.front_only("/projects/yard/crew/", REG2) is False
       and A.front_only("//projects/solo/notes//", REG2) is True)

@@ -646,19 +646,22 @@ BUILDER = re.compile(r"\b(?:build|builds|builder|building|maintain\w*|merg\w*|en
 
 def background_ranked(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[tuple[int, int, str]]:
     """(class, order, name) of the project's background agents, best first: the `back_agents` of every page whose hub (hub_of) is the project's hub, each page read as it lists them, so an agent listed on
-    the pages of two hubs counts for both; class 0 a mandate that says build, 1 one that says maintain, merge or engineer (BUILDER), 2 the rest; the order is the names' alphabetical order. The mandate is
+    the pages of two hubs counts for both, except a name session_roles marks front (front on any page: a front agent gets no hand-off notice); class 0 a mandate that says build, 1 one that says maintain, merge or engineer (BUILDER), 2 the rest; the order is the names' alphabetical order. The mandate is
     the page's own line, so an agent only the project record holds (its page line still owed, `owed_agents`) ranks in class 2 until the page lists it. `reg` = the page registry (default: the live one).
     [] when it cannot be read. The one ranking behind the hand-off machinery (service/handoff.py) and front_only."""
     from stackshot.projects import projects as _prj
     try:
         reg = _prj.with_pending(registry() if reg is None else reg, made=True)
         hub = hub_of(project, reg)
+        front = {n for n, r in session_roles(reg).items() if r.get("role") == "front"}      # front over back, as session_roles keeps one role per name
         mand: dict[str, str] = {}
         for key, e in reg.items():
             if not isinstance(e, dict) or hub_of(key, reg) != hub:
                 continue
             for n in (e.get("back_agents") or {}):
                 n = str(n)
+                if n in front:
+                    continue
                 m = "" if n in (e.get("owed_agents") or {}) else str((e.get("agents") or {}).get(n) or (e.get("back_agents") or {}).get(n) or "")
                 if n not in mand or (not mand[n] and m):
                     mand[n] = m
