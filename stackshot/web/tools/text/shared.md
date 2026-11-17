@@ -27,7 +27,7 @@ after=); decision sits beside this project's background agents only when the two
 session it is refused), and when unsure, in sequence. When decision leaves needs (he has decided), the sessions still
 named are told at once; a session whose work changes the question rewrites the ask. The server never hands an item to
 a front agent on its own motion: when the item is back with its front agent mover alone, the project's builder is told
-instead.
+instead; a project whose page lists no background agent has no builder, so there the front agent mover is told itself.
 
 ## text ANCHOR_SHAPES
 Slack channel/DM, Drive file/folder, Gmail thread, gmail:q:<query> or gmail:q@<mailbox>:<query>, Notion page or

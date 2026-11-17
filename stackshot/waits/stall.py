@@ -174,10 +174,10 @@ def log_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [x for x in ((s or {}).get("log") or []) if isinstance(x, dict)] if isinstance(s, dict) else []
 
 
-def note(meta: dict[str, Any], now: float, text: str, keep: int = 8) -> None:
-    """Write a step onto the item's metadata (History shows each new entry as a line)."""
+def note(meta: dict[str, Any], now: float, text: str, keep: int = 8, width: int = 240) -> None:
+    """Write a step onto the item's metadata (History shows each new entry as a line, cut at `width` characters)."""
     log = log_of(meta)
-    log.append({"at": now, "text": " ".join(str(text).split())[:240]})
+    log.append({"at": now, "text": " ".join(str(text).split())[:width]})
     meta["stall"] = {"log": log[-keep:]}
 
 

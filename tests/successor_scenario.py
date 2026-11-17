@@ -11,7 +11,8 @@ A project's last agent is retired, or a mover's pane is gone for good: its open 
      heartbeat check nothing
   5  server: the apply moves an alive item through the hand-off pass's write: the new mover heads `needs`, a stored mover, `then` follow, the hand-off record names the new mover (via orphan, with the
      reason), the History line (the stall log, one entry that is new to History) reads `handed to X: Y is gone (...); closest live agent: ...`; a waiting item takes the successor as its post-wake
-     mover and in `needs`, keeps no hand-off record, and gets the same History line; a background successor is told once, a front agent is not pushed to
+     mover and in `needs`, keeps no hand-off record, and gets the same History line; a background successor is told once, a front agent is not pushed to unless its project is front-only (no background
+     agent on its page: nobody else could be told), where an alive item's new holder is sent the one hand-off notice and the History line says so
   6  server: an item the owner moves, an owner's wait, and an item of a live mover are left as they were; a second call finds nothing to do and writes nothing (idempotent); a move is checked again under the
      item lock (an item written since it was found is left and counted `skipped`)
   7  server: an item with no live successor is not touched and is listed under `left` with the reason; it stays listed at the next call (and is moved once an agent is live)
@@ -105,7 +106,13 @@ check("1 pure: an alive item goes to a live background agent before any front ag
       and rows["a13"]["tier"] == "back" and rows["a13"]["front"] is False and "front agent" not in rows["a13"]["why"], (rows.get("a12"), rows.get("a13")))
 check("1 pure: …a back_of hint (the server's builder-first list) sets the order among background agents; a waiting item keeps the table's order (the -main agent first)", S.pick("projects/bgp", REG, lambda n: True, GEN, alive=True, back_of=lambda p: ["bgp-docs", "bgp-build"]).name == "bgp-docs"
       and rows["a14"]["to"] == "both-main" and rows["a14"]["front"] is False and S.FRONT_NOTE not in rows["a14"]["why"], rows.get("a14"))
-check("1 pure: a front agent takes an alive item (parent, hub, scope) only when no background agent is live, and every such line says it is a front agent", all(rows[g]["front"] and S.FRONT_NOTE in rows[g]["why"] for g in ("a1", "a2", "a10", "a11")), [rows[g]["why"] for g in ("a1", "a2", "a10", "a11")])
+check("1 pure: a front agent takes an alive item (parent, hub, scope) only when no background agent is live; when its project lists a background agent (a1) the line says no notice is sent to it", rows["a1"]["front"] and not rows["a1"]["told"]
+      and S.FRONT_NOTE in rows["a1"]["why"] and S.FRONT_TOLD not in rows["a1"]["why"], rows["a1"]["why"])
+check("1 pure: …and when its project is front-only (no background agent on its page, so no builder to hold the item: a2, a10, a11) the front agent is told once, and the line says so instead (told, not front)",
+      all(rows[g]["told"] and not rows[g]["front"] and S.FRONT_TOLD in rows[g]["why"] and S.FRONT_NOTE not in rows[g]["why"] for g in ("a2", "a10", "a11")), [rows[g]["why"] for g in ("a2", "a10", "a11")])
+check("1 pure: …a front-only project's own front agent (tier own) is told too, a waiting item's post-wake mover is not (it carries no hand-over line, a6), and a project with a background agent (a3) is as before",
+      S.pick("projects/solo", {**REG, "projects/solo": page(["solo-main", "solo-two"])}, lambda n: n == "solo-main", GEN, alive=True).told is True
+      and rows["a6"]["told"] is False and S.FRONT_TOLD not in rows["a6"]["why"] and rows["a3"]["told"] is False and rows["a3"]["front"] is True, (rows["a6"], rows["a3"]))
 check("1 pure: a hub page's agent comes before the scope's (tier hub)", rows["a10"]["to"] == "hubpage-main" and rows["a10"]["tier"] == "hub", rows.get("a10"))
 check("1 pure: a waiting item's post-wake mover that is gone is an orphan, and its row says it waits", rows["a6"]["state"] == "waiting" and rows["a6"]["from"] == "solo-main" and rows["a6"]["to"] == "gen-main", rows.get("a6"))
 check("1 pure: an item with no session named is an orphan only when its project has no live agent (solo has none: a row; a project with one is none)",
@@ -225,8 +232,12 @@ check("5 server: an alive item whose project has a live front agent AND a live b
 check("5 server: a waiting item takes the successor as its post-wake mover and in `needs`, keeps its wait and its date, and gets no hand-off record", m_f["post_wake_mover"] == "gen-main" and m_f["needs"][0] == "gen-main"
       and m_f.get("wake") == WAKE and m_f.get("wait_kind") == "time" and not m_f.get("handoff") and m_f.get("mover") in (None, ""), m_f)
 check("5 server: …and the same History line, with the reason", len(ST.log_of(m_f)) == 1 and ST.log_of(m_f)[0]["text"].startswith("handed to gen-main: solo-main is gone"), ST.log_of(m_f))
-check("5 server: the background successor is told once, in one message that names its item; the front agents are not pushed to", [t[1] for t in TOLD if "108" in t[0]] in ([U["bgp-back"]], ["bgp-back"])
-      and not any(("101" in t[0] or "102" in t[0] or "103" in t[0]) for t in TOLD), TOLD)
+check("5 server: the background successor is told once, in one message that names its item; the front agents of a project that lists a background agent are not pushed to", [t[1] for t in TOLD if "108" in t[0]] in ([U["bgp-back"]], ["bgp-back"])
+      and not any(("101" in t[0] or "103" in t[0]) for t in TOLD), TOLD)
+told_102 = [t for t in TOLD if "102" in t[0]]
+check("5 server: the front agent that takes an alive item of a front-only project (102, projects/solo) is sent the one hand-off notice, once, and its History line says so; a waiting item of that project (106) sends none",
+      len(told_102) == 1 and told_102[0][1] in (U["gen-main"], "gen-main") and "it came to you" in told_102[0][2] and B(102) in told_102[0][2] and "sent the one hand-off notice" in ST.log_of(m_d)[0]["text"]
+      and "no notice is sent" not in ST.log_of(m_d)[0]["text"] and not any("106" in t[0] for t in TOLD), (told_102, ST.log_of(m_d)))
 check("6 server: the owner's item, his wait, a live mover's item, a closed item, a held item, a held wait and a server-labelled mover are as they were, byte for byte", all(raw(i) == before[i] for i in (104, 105, 107, 109, 113, 114, 115)),
       [i for i in (104, 105, 107, 109, 113, 114, 115) if raw(i) != before[i]])
 snap = {i: raw(i) for i in [*range(101, 110), 112, 113, 114, 115]}; TOLD.clear()

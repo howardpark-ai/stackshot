@@ -16,7 +16,8 @@ to hand the item over is update(mover=<agent>). An item id cited only for contex
 since a plain-word id names the receiver on that item. A message to a front agent is refused unless its first line
 carries {{FOR_OWNER}}, and the mark is for what {{OWNER}} has to do (a decision, a go-ahead, a step only he can take):
 a build hand-back, a result, a screenshot, "it's live" or an FYI goes to the project (to=projects/<slug>), where the
-router rules it and passes on what needs the agent; a marked message that says nothing is needed from him (nothing
+router rules it and passes on what needs the agent (a front agent that wants to reach a peer front agent of its project
+sends it there with the first line For <peer>,); a marked message that says nothing is needed from him (nothing
 needed from {{OWNER}}, no action needed, FYI, for the record, no reply needed, …) is refused too. A background agent's
 message to a front agent (marked, or a project message that opens For <front agent>) that names one to three board
 items is held back, not delivered, only when it clearly reads as a plain status report: the reply then begins 'Not

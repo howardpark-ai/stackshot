@@ -541,7 +541,7 @@ def orphan_handover(apply: bool = False, now: float | None = None) -> dict[str, 
     Idempotent: the mover a hand-over names is live, so the next call finds the item whole. Each move is checked again under the item lock (the item must still be open with the mover it was found with).
     Stands still, `checked` false, while [audit] orphan_handover is "off" or the fleet's heartbeat is empty (every name would look gone), and moves nothing in "report" (the shipped default). A partial view of the fleet is not taken for gone sessions:
     a mover on a machine whose machine.json cannot be read, or with no row while a machine's session list is empty or unreadable, is not read as gone, and more orphans than ORPHAN_CEILING or than a quarter of the open items is answered with
-    `ceiling` true and the list, and nothing moved. An alive item goes to a background agent first (successor.pick: the minute pass sends a front agent no notice); a held item is not listed. → {checked, mode, applied, read, found, moved: [{id,
+    `ceiling` true and the list, and nothing moved. An alive item goes to a background agent first (successor.pick: the minute pass sends a front agent no notice, except that a front-only project's new front holder is sent the one hand-off notice, `told_front` in handoff_exec); a held item is not listed. → {checked, mode, applied, read, found, moved: [{id,
     project, from, to, tier, why}], left: [{id, project, from, why}], skipped, over_cap, note}."""
     now = time.time() if now is None else now
     mode = _cfg.audit_orphan_handover()
@@ -644,7 +644,7 @@ def handoff_write_move(item: dict[str, Any], st: "_ho.Step", now: float) -> None
     if alive:
         _ho.successor(item, st, ho_ident(st.to), now, _session_label)
     if st.via == "orphan":
-        _stall.note(item["metadata"], now, f"handed to {_session_label(st.to)}: {st.why}")      # the History line with the reason (a mover change alone shows only the names; a waiting item has no record to carry it)
+        _stall.note(item["metadata"], now, f"handed to {_session_label(st.to)}: {st.why}", width=400)      # the History line with the reason (a mover change alone shows only the names; a waiting item has no record to carry it); wide enough that the closing words (a front agent: told or not) are not cut off
 
 
 def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: "_ho.Env | None" = None,
@@ -654,6 +654,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
     checks that the item still has the mover it found)."""
     env = env or handoff_env(now)
     to_new: list[tuple[str, str, str]] = []          # (recipient, gid, the item's line)
+    told_front: set[str] = set()                     # items an orphan hand-over gave to a front agent of a front-only project: that holder is sent the notice (nothing else tells it, and no builder is)
     to_sender: list[tuple[str, str, str]] = []       # (sender, gid, the line)
     to_again: list[tuple[str, str, str]] = []        # (gid, the mover, the notice) of a hand-off sent again after a relaunch
     to_remind: list[tuple[str, str, str, str]] = []  # (gid, the session id, the item's line, the reminder alone) of a hand-off a background agent did not take
@@ -722,6 +723,8 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
                     _writes.save(st.gid, item, note=f"handed to {_session_label(st.to)}: {st.why}")
                     subject, project = str(item.get("subject") or ""), str((item.get("metadata") or {}).get("project") or "")
                     to_new.append((st.to, st.gid, f"{_gh.shown(st.gid)} {subject} ({project}): {st.why}" + ("; it comes back to you as its sender" if st.via == "return" else "")))
+                    if st.via == "orphan" and (_ho.record_of(item) or {}).get("at") == now and _anc.front_only(project):      # an alive item (this move wrote its hand-off record) of a front-only project: successor.pick says "sent the one hand-off notice" in the History line
+                        told_front.add(st.gid)
                     if st.sender and not ho_same(st.sender, st.to):
                         to_sender.append((st.sender, st.gid, f"{_gh.shown(st.gid)} {subject}: {st.why}; it went to {_session_label(st.to)}"))
                 done.append(st.gid)
@@ -745,10 +748,10 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
             _telling.tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {','.join(gs)} reminder not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for who, lines in _ho.batch(to_new).items():
-        gids = ",".join(g for w, g, _l in to_new if w == who)
-        if _telling.front_keeper(who, "")[0]:
-            continue                                 # a front agent is never pushed to unmarked: the board shows it
+    front_of: dict[str, bool] = {}
+    send_new = [(w, g, ln) for w, g, ln in to_new if not front_of.setdefault(w, _telling.front_keeper(w, "")[0]) or g in told_front]      # a front agent is never pushed to unmarked: the board shows it (except the one hand-off notice of a front-only project's orphan hand-over, told_front)
+    for who, lines in _ho.batch(send_new).items():
+        gids = ",".join(g for w, g, _l in send_new if w == who)
         tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → " + (_telling.notice_link(gids) if len(lines) == 1 else f"{_inst.BOARD_URL}")
         _telling.tell_woken(gids, _hooks().session_id(who) or who, _ho.message(lines, "[stackshot] it came to you:", "[stackshot] {n} items came to you, the sessions they were handed to did not take them:", tail),
                     tag="handoff")
