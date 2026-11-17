@@ -20,8 +20,8 @@ tool returns (accepted, or the exact refusal and the path it names) and, for con
      front agent is never clocked
 
 Everything runs through the tools' own functions (`stackshot_update`, `stackshot_create`, `stackshot_message`, the item-open route, the handover and the passes the server runs on a timer: `handoff_tick`,
-`orphan_handover`), on the in-process server module, as the other scenarios do; none reaches a live server or a live board. One piece is called below its tool: the hand-back line is sent by
-`telling.tell_handback` (what the update tool calls) with the router reported not live, because the router's own rule is what carries it where the router runs.
+`orphan_handover`), on the in-process server module, as the other scenarios do; none reaches a live server or a live board. The hand-back check (8) reports the router as not live, so it pins the decision logic and the direct-push fallback (who is told, and marked for the owner), not the path every deployment takes
+through the router; that path is covered in tests/router_live_scenario.py.
 
     tests/run-suite front_only_project        -> exit 0 / 1"""
 import json, os, re, socket, sys, pathlib, time, logging
@@ -104,6 +104,7 @@ from stackshot.fleet import client as _client
 from stackshot.waits import handoff as H
 from stackshot.service import handoff as handoff_svc, telling
 from stackshot.core import instance as _core_instance, config as _cfg
+from stackshot.router import routing as _routing, router as _router
 from stackshot.anchors import anchors as _anc
 from stackshot.web import publish as _web_publish, page_debts as _web_page_debts
 from stackshot.model import ids as _model_ids
@@ -251,7 +252,12 @@ r = call(lambda: _wt_message.stackshot_message(to=FD, text="Can you check the ve
 check("4.1 an unmarked message from a front agent to a peer is refused, naming the working form: a message to the page key whose first line is `For <peer>,`", r.startswith("Refused:") and f"{FD} is a front agent of projects/fo" in r
       and f"to reach {FD} from a front agent of the project, make the message's first line `For {FD},` and send it to='projects/fo'" in r, r)
 r = call(lambda: _wt_message.stackshot_message(to="projects/fo", text=f"For {FD}, can you check the vendor call before noon?", sender=FM))
-check("4.2 …and that form is accepted", not r.startswith("Refused"), r)
+m42 = re.match(r"held for the router \u2014 the router rules notice (\w+) within about 60 s and passes it to the agent of projects/fo it fits", r)
+rec42 = next((n for n in _routing.read("projects/fo") if m42 and n.get("id") == m42.group(1)), {})
+first42 = (rec42.get("text") or "").splitlines()[0] if rec42.get("text") else ""
+tgt42 = _router._FOR_AGENT.match(first42)
+check("4.2 …and that form is accepted: held for the router, which rules the notice and passes it to the agent of the page it fits; the recorded notice is addressed to the project page and its first line names the peer, which the router's for-agent rule reads as that front agent", bool(m42) and rec42.get("label") == "message to projects/fo"
+      and first42.startswith(f"For {FD},") and bool(tgt42) and tgt42.group(1) == FD and _anc.session_roles()[FD]["role"] == "front" and _anc.session_roles()[FD]["project"] == "projects/fo", (r, rec42))
 r = call(lambda: _wt_message.stackshot_message(to=FD, text=f"{MARK} nothing is needed from you, this is only an FYI", sender=FM))
 check("4.3 a marked message that says nothing is needed from the owner stays refused, and does not offer the `For <peer>,` form (it would route around the refusal)", r.startswith("Refused:") and "marks only what" in r and "nothing is needed from him" in r and "For " + FD not in r, r)
 r = call(lambda: _wt_message.stackshot_message(to=FM, text="Can you check the vendor call before noon?", sender=BB))
@@ -329,7 +335,8 @@ try:
     drain(); pn = len(pushes())
     r = call(lambda: upd(50, FM, needs=[FD])); drain()
     got = [x for x in pushes()[pn:] if x[0] == U[FD]]
-    check("8.1 a write by another session that leaves needs naming the front mover alone tells that mover once, marked for the owner (the presence gate does not hold it), with the writer and the next line; the reply says so", len(got) == 1 and len(pushes()) == pn + 1
+    # the router is reported not live above: this pins the direct-push fallback and the decision (who is told); the router path is covered in router_live_scenario
+    check("8.1 (direct-push fallback; the router path is in router_live_scenario) a write by another session that leaves needs naming the front mover alone tells that mover once, marked for the owner (the presence gate does not hold it), with the writer and the next line; the reply says so", len(got) == 1 and len(pushes()) == pn + 1
           and got[0][1].startswith(f"{MARK} [stackshot] a50 is back with you alone (handed back by {FM})") and f"next: {FD}: do the thing" in got[0][1] and f"{FD} is a front agent: told it is back with them alone" in r, (r[-300:], pushes()[pn:]))
     put(51, project="projects/bd", mover=BD, needs=[BB, BD], writer=BB)
     drain(); pn = len(pushes())
