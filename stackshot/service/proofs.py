@@ -192,13 +192,20 @@ def told_recent(now: float | None = None) -> dict[str, str]:
     return {g: sid for g, (sid, _at) in PROOF_TOLD_SID.items()}
 
 
-def handover_kind(name: str) -> str:
-    """What a step's opener is, for handover.decide: the owner, a front agent or a retired session or a page's keeper (never moved to by this rule), a session of the fleet (a page lists it, or the fleet knows the name), else no session."""
+def handover_kind(name: str, project: str = "") -> str:
+    """What a step's opener is, for handover.decide: the owner, a front agent or a retired session or a page's keeper (never moved to by this rule), a session of the fleet (a page lists it, or the fleet knows the name), else no session.
+    With the item's `project` given, a live front agent of that project in a front-only project (handover.peer_opener) is a session: the item moves to it (the hand-over's call; the gap check passes none)."""
     if _model.is_owner(name):
         return _hv.OWNER
     try:
         roles = _anc.session_roles()
         r = roles.get(_hooks().role_name(roles, name)) or {}
+        try:
+            peer = bool(r and project and _hv.peer_opener(r, project, _anc.front_only))      # front_only is read only for a live front agent of this project: a failed read touches that case alone
+        except Exception:  # noqa: BLE001  — the agent keeps the kind it had before peers: a front agent, never moved to
+            peer = False
+        if peer:
+            return _hv.SESSION
         if r:
             return _hv.FRONT if r.get("retired") or r.get("role") in ("front", _anc.NAME_ROLE) else _hv.SESSION
         return _hv.SESSION if name in _hooks().session_roster() or _session_label(name) in _hooks().session_roster() else _hv.OTHER
@@ -227,7 +234,7 @@ def handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[s
         row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "action": "none", "to": "", "step": "", "why": "", "told": ""}
         if (why := _live.released_skip(it, meta, mover)):
             return {**row, "action": "left", "why": why}
-        plan = _hv.decide(meta, str(meta.get("owner") or ""), mover, handover_kind, handover_down, _handoff.ho_same)
+        plan = _hv.decide(meta, str(meta.get("owner") or ""), mover, lambda n: handover_kind(n, str(meta.get("project") or "")), handover_down, _handoff.ho_same)
         step = _clip_line(_steps.first_line(plan["step"]), 140)
         row.update(to=plan["to"], step=step, why=plan["why"])
         if plan["action"] == "none" or dry:

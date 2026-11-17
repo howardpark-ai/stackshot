@@ -1258,7 +1258,7 @@ def front_step_count(hist: list[dict[str, Any]], items: dict[str, dict[str, Any]
         month = dt.datetime.fromtimestamp(now, _cfg.tz()).strftime("%Y-%m")
         if any(isinstance(h.get("front_step_count"), dict) and h["front_step_count"].get("month") == month for h in hist):
             return None, ""
-        c = {"month": month, **_fs.month_count(items, env.role_map(), now)}
+        c = {"month": month, **_fs.month_count(items, env.role_map(), now, env.is_front_only)}
         c["ids"] = [_shown(g) for g in c["ids"]]
     except Exception as e:  # noqa: BLE001  — the count is an extra: a run does not fail for it
         print(f"audit run: front-step count not made: {type(e).__name__}: {e}", file=sys.stderr, flush=True)

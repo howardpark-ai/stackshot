@@ -334,7 +334,7 @@ is who takes the item when the wait ends. A front agent (a session
 {{OWNER}} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets
 mover=<front agent> gets the project's builder instead (the reply and History say so; send it again to keep it;
 with no builder it is refused, except from a session a project page lists to a front agent of the item's own project:
-mover= tells the agent, then and post_wake_mover leave it to the answer or the wake); message the front agent for a check or answer only it can give. On an update that sets no needs, the
+mover= tells the agent, then and post_wake_mover leave it to the answer or the wake). On an update that sets no needs, the
 session needs names for the mover it replaces is swapped for the new one.
 
 ## param THEN

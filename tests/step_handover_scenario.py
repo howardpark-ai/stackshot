@@ -23,14 +23,18 @@ toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', t
 (T / "home/.claude/sessions").mkdir(parents=True)                                              # an isolated HOME: the pane registry is a folder of ours
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", HOME=str(T / "home"), STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 for d in ("store/a", "fleet/a", "state/anchor-hub", "state/releases", "brain/projects"): (T / d).mkdir(parents=True)
-NAMES = ("home-builder", "home-one", "home-two", "home-three")      # home-builder = alpha's front agent; the others are its background agents; home-gone has no heartbeat at all
+NAMES = ("home-builder", "home-one", "home-two", "home-three", "home-bfront", "home-bpeer", "home-gfront")      # home-builder = alpha's front agent; the others are its background agents; home-gone has no heartbeat at all
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1)}
 now = time.time()
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({U[n]: {"name": n, "machine": "a", "seen": now} for n in U}))
 BACK = {"home-one": "builds", "home-two": "reviews", "home-three": "checks", "home-gone": "a session that is not running"}
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project", "session": "home-builder", "status": "active",
-                                                                               "board": [], "board_open": 0, "agents": {"home-builder": "the front"}, "back_agents": BACK}}}))
+                                                                               "board": [], "board_open": 0, "agents": {"home-builder": "the front"}, "back_agents": BACK},
+                                                                   "projects/beta": {"title": "Beta", "name": "Beta", "org": "home", "tags": [], "type": "project", "session": "home-bfront", "status": "active", "board": [], "board_open": 0,
+                                                                                     "agents": {"home-bfront": "the front", "home-bpeer": "the second front"}},       # front-only: two front agents, no background agent
+                                                                   "projects/gamma": {"title": "Gamma", "name": "Gamma", "org": "home", "tags": [], "type": "project", "session": "home-gfront", "status": "active", "board": [], "board_open": 0,
+                                                                                      "agents": {"home-gfront": "the front"}}}}))
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\nagents:\n  home-builder: the front\nbackground:\n" + "".join(f"  {a}: {r}\n" for a, r in BACK.items()) + "---\n\n# Alpha\n")
 REPO = "example-owner/stackshot"
 def key(n, repo=REPO): return f"{repo}#{n}"
@@ -286,6 +290,62 @@ check("…`release PR <URL>` is a release phrase of its own (pure when it is all
       _SP.text_proofs("home-one: release PR https://github.com/o/r/pull/9") == _SP.text_proofs("home-one: release https://github.com/o/r/pull/9")
       and [(p.kind, p.url, p.pure) for p in _SP.text_proofs("release pull request https://github.com/o/r/pull/9 and restart")] == [("pr_released", "https://github.com/o/r/pull/9", False)], None)
 refused("…a bare #n tells the writer what to pass for another repository's PR", mk("home-one: release #9 and restart\nhome-two: verify the pages"), "pr_released #9", "another repository's PR: pr_merged <owner>/<repo>#<n>")
+
+# ---- 9b. a front-only project: a live front peer of the item's project is a session for the hand-over (the item moves to it and it is told); every other front agent is as before
+from stackshot.anchors import anchors as _anc
+def beta(i, nxt, mover="home-bfront", project="projects/beta"):
+    item(i, nxt, mover=mover, project=project, steps=[{"text": f"{mover}: write it", "status": "done", "by": mover, "at": now - 60}, *[{"text": t, "status": "open", "by": "", "at": 0} for t in nxt.split("\n")]])
+check("peer: handover_kind reads a live front agent of the item's front-only project as a session, and every other case as before",
+      proofs_svc.handover_kind("home-bpeer", "projects/beta") == HO.SESSION and proofs_svc.handover_kind("home-bpeer") == HO.FRONT and proofs_svc.handover_kind("home-gfront", "projects/beta") == HO.FRONT
+      and proofs_svc.handover_kind("home-builder", "projects/alpha") == HO.FRONT and proofs_svc.handover_kind("home-bpeer", "projects/alpha") == HO.FRONT and proofs_svc.handover_kind("home-two", "projects/beta") == HO.SESSION,
+      [proofs_svc.handover_kind(n, p) for n, p in (("home-bpeer", "projects/beta"), ("home-bpeer", ""), ("home-gfront", "projects/beta"), ("home-builder", "projects/alpha"), ("home-bpeer", "projects/alpha"))])
+beta(70, "home-bpeer: check it")
+p0 = len(pushes())
+r = proofs_svc.handover("a70", time.time(), ["home-bfront: write it"])
+m70 = rd(70)["metadata"]
+check("peer: the next step opens with a live front peer of the item's front-only project: the item moves to it, with the record", r and r["action"] == "moved" and mover_of(70) == "home-bpeer" and m70.get("mover") == "home-bpeer"
+      and m70.get("handover", {}).get("kind") == HO.MOVED and m70["handover"]["to"] == "home-bpeer", (r, m70.get("mover"), m70.get("handover")))
+n70 = pushes_for("a70", "home-bpeer")
+check("…and the peer is told once, by the server, with the step's text, though it is a front agent (the hand-off notice the front gate lets through)",
+      len(n70) == 1 and "is yours" in n70[0][1] and "home-bpeer: check it" in n70[0][1] and "sender='home-bfront'" in n70[0][1] and len(pushes()) == p0 + 1, (n70, pushes()[p0:]))
+r = proofs_svc.handover("a70", time.time(), ["home-bfront: write it"])
+check("…asked again it does nothing (the peer holds the item now) and tells nobody twice", r["action"] == "none" and "mover's own" in r["why"] and len(pushes_for("a70")) == 1, r)
+item(71, "home-bfront: write it\nhome-bpeer: check it", mover="home-bfront", project="projects/beta")
+out = _update_svc._update("a71", sender="home-bfront", done=[1])
+check("peer: a step marked done by hand hands the item to the peer the same way, says so in the reply and tells it", mover_of(71) == "home-bpeer" and "the next step is home-bpeer's" in out and len(pushes_for("a71", "home-bpeer")) == 1, (mover_of(71), out, pushes_for("a71")))
+beta(72, "home-gfront: check it")
+r = proofs_svc.handover("a72", time.time(), ["home-bfront: write it"])
+check("peer: a front agent of another project is not a peer: nothing moves and nobody is told", r["action"] == "none" and "front agent" in r["why"] and mover_of(72) == "home-bfront" and not pushes_for("a72"), (r, pushes_for("a72")))
+beta(73, "home-builder: check it", project="projects/alpha")
+r = proofs_svc.handover("a73", time.time(), ["home-bfront: write it"])
+check("peer: a project with a background agent is as before: its front agent's step moves nothing", r["action"] == "none" and "front agent" in r["why"] and mover_of(73) == "home-bfront" and not pushes_for("a73"), (r, pushes_for("a73")))
+beta(74, "home-bpeer: check it")
+real_roles = _anc.session_roles
+_anc.session_roles = lambda *a, **k: {**real_roles(*a, **k), "home-bpeer": {**real_roles(*a, **k)["home-bpeer"], "retired": True}}
+try:
+    r = proofs_svc.handover("a74", time.time(), ["home-bfront: write it"])
+finally:
+    _anc.session_roles = real_roles
+check("peer: a retired peer is no session: nothing moves", r["action"] == "none" and mover_of(74) == "home-bfront" and not pushes_for("a74"), (r, pushes_for("a74")))
+beta(75, "home-bpeer: check it")
+(T / "fleet/a/sessions.json").write_text(json.dumps({U[n]: {"name": n, "machine": "a", "seen": time.time()} for n in U if n != "home-bpeer"}))
+_fleet_sessions_registry._sessions_index.cache_clear() if hasattr(_fleet_sessions_registry._sessions_index, "cache_clear") else None
+r = proofs_svc.handover("a75", time.time(), ["home-bfront: write it"])
+(T / "fleet/a/sessions.json").write_text(json.dumps({U[n]: {"name": n, "machine": "a", "seen": time.time()} for n in U}))
+_fleet_sessions_registry._sessions_index.cache_clear() if hasattr(_fleet_sessions_registry._sessions_index, "cache_clear") else None
+# a failing project read touches only the live front agent of the item's own project: a background agent is still handed the item, and the front agent keeps the kind it had
+real_fo = _anc.front_only
+def fo_boom(*a, **k): raise RuntimeError("registry unreadable")
+_anc.front_only = fo_boom
+try:
+    kinds = (proofs_svc.handover_kind("home-two", "projects/alpha"), proofs_svc.handover_kind("home-bpeer", "projects/beta"))
+    item(76, "home-one: merge PR #11\nhome-two: verify it", mover="home-one", steps=[{"text": "home-one: merge PR #11", "status": "done", "by": "home-one", "at": now - 60}, {"text": "home-two: verify it", "status": "open", "by": "", "at": 0}])
+    r76 = proofs_svc.handover("a76", time.time(), ["home-one: merge PR #11"])
+finally:
+    _anc.front_only = real_fo
+check("peer: with the project read failing a background agent is still a session and still gets the item, and the front agent is not made a session (the old kind)",
+      kinds == (HO.SESSION, HO.FRONT) and r76["action"] == "moved" and mover_of(76) == "home-two", (kinds, r76))
+check("peer: a peer that is down is a fallback like any session: the item stays, the record says so", r["action"] == "fallback" and mover_of(75) == "home-bfront" and rd(75)["metadata"].get("handover", {}).get("kind") == HO.FALLBACK, r)
 
 # ---- 10. the audit: a missing proof; the page key for a front mover; a repeat only after an item write
 fixtures()

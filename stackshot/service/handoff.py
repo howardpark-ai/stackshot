@@ -192,15 +192,56 @@ def handoff_builder(project: str) -> list[str]:
 
 
 def handoff_exempt(item: dict[str, Any], who: str) -> bool:
-    """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock)."""
+    """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock), except the peer case (`handoff_peer`): a hand-off to a front agent of a front-only project by a session some page lists is told by a notice and then has nothing else watching it, so it is clocked like a builder's."""
     m = item.get("metadata") or {}
-    return _telling.front_keeper(who, str(m.get("project") or ""))[0]
+    return _telling.front_keeper(who, str(m.get("project") or ""))[0] and not handoff_peer(item, who)
 
 
-def handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
+def handoff_peer(item: dict[str, Any], who: str) -> bool:
+    """Is the open hand-off of `item` to the front agent `who` a peer's (front_handed_by_peer: a session some page lists handed the item to a live front agent of the item's own front-only project, so a project that lists a
+    background agent, another project's front agent, a sender no page lists and the owner never are), and does `who` have someone above it to ask? The project's -main agent does not (nor does a project with none): the ladder's last rung asks the -main agent, and
+    with none or with the quiet one being it the request would fall to the fleet's builder, so a hand-off there stays unclocked as before. The hander is never told anything; only `who` and, at the ladder's end, the -main agent are."""
+    try:
+        proj = str((item.get("metadata") or {}).get("project") or "")
+        r = _ho.record_of(item)
+        if not r or r.get("taken_at") or not (ho_same(r.get("to"), who) or ho_same(r.get("to_id"), who)) or not front_handed_by_peer(r, who, proj):
+            return False      # a taken hand-off is no one's to watch (the stall pass treats the item as any quiet one)
+        main = _anc.fallback_main(proj)      # the same pick the ladder's last rung makes (pane_recovery._recovery_target)
+        return bool(main) and not (ho_same(main, who) or _hooks().session_id(main) == (_hooks().session_id(who) or who))
+    except Exception:  # noqa: BLE001  — an extra: a failed read keeps the exemption
+        return False
+
+
+def handoff_peer_tried(item: dict[str, Any], quiet: str, gid: str = "", gone: bool = False) -> str:
+    """What the ladder did before it asked the -main agent about a quiet peer (the recovery request's "what the ladder tried", no final period): the cold call and the builder are never tried for a peer's item,
+    so the old words ("a fresh session's call and the sender") would be false. Built from what the record shows, not from the settings: a reminder only when `reminded_at` is set (ladder off), the ask and the look only
+    as far as the item's ladder entry got (ladder on; an entry made for a gone pane took neither), and `gone` (the pane is gone now, a request that came before the clock ran out) says so. When the -main agent is the one that
+    handed the item over, the line says so (it is the request's recipient too)."""
+    r = _ho.record_of(item) or {}
+    m = f"{handoff_minutes():g} min"
+    notice = f"the hand-off notice went to {quiet}" if r.get("delivered_at") else f"the hand-off notice was queued for {quiet}"      # a push that waits (a pane that is gone, an inbox) was not delivered
+    if not r.get("delivered_at") and int(r.get("attempts") or 0) >= 2:
+        did = f"two pushes of the hand-off notice to {quiet} failed"
+    elif _hooks().ladder_on():
+        ent = _hooks().stall_load().get(gid) or {} if gid else {}
+        step = 0 if ent.get("gone") else int(ent.get("step") or 0)      # RUNGS: ask 0, look 1; the step is the next one due, so 1 means the ask was taken and 2 the look as well
+        did = notice + ((f", was sent again after {m} with no work started, and its pane was looked at later" if step >= 2 else f" and was sent again after {m} with no work started") if step >= 1 else "")
+    else:
+        did = notice + (f" and, with no work started after {m}, one reminder" if r.get("reminded_at") else "")
+    if gone:
+        did += f"; {quiet}'s pane is gone"
+    try:
+        main = _anc.fallback_main(str((item.get("metadata") or {}).get("project") or ""))
+        self_made = bool(main) and (ho_same(main, r.get("from")) or _hooks().session_id(main) == (_hooks().session_id(str(r.get("from") or "")) or str(r.get("from") or "")))
+    except Exception:  # noqa: BLE001
+        self_made = False
+    return did + (f"; you, the project's -main agent, handed this item to {quiet} yourself" if self_made else "")
+
+
+def handoff_reminder_target(who: str, roles: dict[str, Any] | None, front: bool = False) -> str:
     """The session id a reminder goes to, or "" (fail closed): only a live session that the registry or the fleet resolves and that `roles` lists with a background role (`back`) and not
     retired. Not a front agent, a page's name-line session (the one session of a one-session project is the one the user talks to), an unknown name, and nothing at all when the roles
-    could not be read or anything here raises."""
+    could not be read or anything here raises. `front` (the peer case, `handoff_peer`) asks for a front role instead: the reminder is a `handoff` notice, which the front-agent gate lets through."""
     try:
         if not roles or not who or not _ho.is_session_name(who) or _model.is_owner(who):
             return ""
@@ -208,7 +249,7 @@ def handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
         if not (_anc.is_id(sid) or _sr.resolve(sid)):
             return ""
         entry = roles.get(_hooks().role_name(roles, who)) or {}
-        return sid if entry.get("role") == "back" and not entry.get("retired") else ""
+        return sid if entry.get("role") == ("front" if front else "back") and not entry.get("retired") else ""
     except Exception:  # noqa: BLE001
         return ""
 
@@ -216,7 +257,7 @@ def handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
 def handoff_env(now: float) -> "_ho.Env":
     idx = _sessions_index()          # read once for the pass
     cells: dict[str, Any] = {}       # read at most once per pass, and only when an item would act: the anchors, the role map
-    reminded: dict[str, str] = {}
+    reminded: dict[tuple[str, bool], str] = {}
 
     def anchored(gid: str, item: dict[str, Any]) -> bool:
         try:
@@ -231,18 +272,19 @@ def handoff_env(now: float) -> "_ho.Env":
             return False
 
     def remind(item: dict[str, Any], who: str) -> str:
-        if who not in reminded:
+        key = (who, handoff_peer(item, who))      # a peer front agent is reminded as a background agent is; any other front agent is not
+        if key not in reminded:
             if "roles" not in cells:
                 try:
                     cells["roles"] = _anc.session_roles()
                 except Exception:  # noqa: BLE001
                     cells["roles"] = None
-            reminded[who] = handoff_reminder_target(who, cells["roles"])
-        return reminded[who]
+            reminded[key] = handoff_reminder_target(who, cells["roles"], front=key[1])
+        return reminded[key]
     return _ho.Env(now=now, derive=ho_derive, same=ho_same, minutes=handoff_minutes(), idle_grace=handoff_num("handoff_idle_seconds", _ho.IDLE_GRACE),
                    gone_days=handoff_num("handoff_gone_days", _ho.GONE_DAYS), cold_call=cold_call_on(), pane=lambda w: handoff_pane(w, idx),
                    inbox_grace=handoff_num("handoff_inbox_grace_minutes", 10.0), status=lambda w: handoff_status(w, idx), started=lambda w: handoff_started(w, idx), background=handoff_builder,
-                   exempt=handoff_exempt, label=_session_label, cover_all=_hooks().switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
+                   exempt=handoff_exempt, peer=handoff_peer, label=_session_label, cover_all=_hooks().switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
                    ladder=_hooks().ladder_on(), laddered=lambda g, w, at: _hooks().laddered(g, w, now, at))
 
 
@@ -412,6 +454,10 @@ def handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool 
     nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
     by = str(r.get("from") or "a session")
     if float(r.get("reminded_at") or 0) > float(r.get("resent_at") or 0):      # the later of the two is what this notice is (a reminder's retry stays a reminder; a resend after it is a resend)
+        if handoff_peer(item, str(r.get("to") or "")):      # a front agent has no subagent to start: it takes the item by working it, or hands it back
+            return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
+                    + (f"; next: {nxt}" if nxt else "")
+                    + f". Take it by marking a step done, or by writing a work line set to in progress or done (a note does not count), or hand it back (sender={by!r}). → {_telling.notice_link(gid)}")
         return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
                 + (f"; next: {nxt}" if nxt else "")
                 + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
@@ -434,8 +480,8 @@ def handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
     """Called by tell_woken when a push to `owner` about these items is over: `outcome` is push.py's last line (delivered … | queued … | inbox …), or "failed". A delivered push
     makes the open hand-off to that session delivered now (its clock starts); one that waits (`inbox`, `queued`: the machine is away, the pane is not reachable now, a reboot's pause)
     is neither delivered nor failed: the puller's ack makes it delivered (handoff_acked), else the clock starts [model] handoff_inbox_grace_minutes after it was queued; only a
-    refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item (a front agent is neither sent it again nor laddered:
-    the failure is a History line and the item stays with it). Never raises."""
+    refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item (a front agent that is not clocked, one handed the item by the server in a step hand-over or an orphan
+    hand-over, is neither sent it again nor laddered: the failure is a History line and the item stays with it; a peer's hand-off is clocked, so it is retried once and then laddered). Never raises."""
     if not handoff_on():
         return
     for g in [x for x in re.split(r"[,\s]+", str(gids or "")) if _GID.match(x)]:
@@ -456,7 +502,7 @@ def handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
                 else:
                     act = _ho.failed(it, owner, why or outcome, now, ho_same)
                     changed = bool(act)
-                    if act and handoff_exempt(it, owner):      # a front agent (a front-only project's orphan or peer hand-off notice): no second push and no ladder, whose last rung would ask the project's -main agent (maybe this one) to recover; the failure stays on the item
+                    if act and handoff_exempt(it, owner):      # a front agent that is not clocked (the notice of a front-only project's step hand-over or orphan hand-over, the server's own record with no clock; a peer hand-off, a listed session's own move, is clocked, so it is retried and laddered): no second push and no ladder, whose last rung would ask the project's -main agent (maybe this one) to recover; the failure stays on the item
                         _stall.note(it["metadata"], now, f"the hand-off notice to {_session_label(owner)} was not delivered ({_clip_line(why or outcome, 100)}): a front agent is sent no second notice, the item shows on the board")
                         act = ""
                 if changed:
@@ -647,6 +693,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
     told_front: set[str] = set()                     # items an orphan hand-over gave to a front agent of a front-only project: that holder is sent the notice (nothing else tells it, and no builder is)
     to_sender: list[tuple[str, str, str]] = []       # (sender, gid, the line)
     to_again: list[tuple[str, str, str]] = []        # (gid, the mover, the notice) of a hand-off sent again after a relaunch
+    peer_remind: set[str] = set()                    # the gids among them whose mover is a peer front agent (reminded in words that fit it)
     to_remind: list[tuple[str, str, str, str]] = []  # (gid, the session id, the item's line, the reminder alone) of a hand-off a background agent did not take
     to_recover: list[tuple[str, dict[str, Any], str, str, str, "tuple[str, str, bool]"]] = []   # (gid, the item, the quiet session, why, what was tried, the recipient chosen once) of an item nobody could take: the fleet's builder, or a front-only project's -main agent, is asked
     entered: list[tuple[str, str, dict[str, Any]]] = []   # (gid, the mover, its entry) of an item the one ladder took: its first rung is taken after the loop
@@ -667,6 +714,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
                     st = fresh[0]
                 if st.kind == "recover":
                     # nobody is left to hand the item to: the item stays with its mover and the fleet's builder (a front-only project's -main agent) is asked once for this record (mark_recovery returns None for one asked already)
+                    peer_case = handoff_peer(item, st.frm)      # read before the record is marked: a peer's item was never put to the cold call or the builder
                     target = _hooks().recovery_target(str((item.get("metadata") or {}).get("project") or ""), st.frm)      # once, on the raw session: the record, the wording of `tried` and the send all follow it
                     r = _ho.mark_recovery(item, st, now, ho_same, _session_label, asked=_hooks().recovery_role()[target[1]])
                     if r is None:
@@ -675,6 +723,8 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
                     nobuilder = target[2]      # a front-only project has no builder to have tried, whoever is asked
                     tried = (("the stall pass sent the notice again and asked a fresh session who takes it" if nobuilder else "the stall pass sent the notice again, asked a fresh session who takes it and tried the project's builder") if r.get("stall")
                              else "the hand-off ladder tried " + ("a fresh session's call and the sender" if nobuilder else "the project's builder, a fresh session's call and the sender"))
+                    if peer_case:
+                        tried = handoff_peer_tried(item, quiet, st.gid, bool(env.pane(st.frm)))
                     _writes.save(st.gid, item, note=f"nobody could take it: recovery requested ({st.why})")      # the mark (recovery_at) is written BEFORE the send, on purpose: a failed send is not retried every pass (metadata.undelivered records it, the audit's unmoved digest is the backstop); the send writes the History line
                     to_recover.append((st.gid, dict(item), quiet, st.why, tried, target))
                 elif st.kind == "enter":
@@ -692,9 +742,12 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
                     to_again.append((st.gid, st.frm, handoff_text(st.gid, item, r, again=True)))
                 elif st.kind == "remind":
                     # a background agent that did not take it is reminded once, ahead of the ladder; the clock restarts from the reminder's delivery
+                    peer = handoff_peer(item, st.frm)
                     r = _ho.remind(item, st, now)
                     if r is None or not st.to:
                         continue
+                    if peer:
+                        peer_remind.add(st.gid)
                     _writes.save(st.gid, item, note=f"{st.why}: its mover was reminded, and the clock restarts from the reminder")
                     to_remind.append((st.gid, st.to, f"{_gh.shown(st.gid)} {item.get('subject') or ''} ({(item.get('metadata') or {}).get('project') or ''}): handed to you by {r.get('from') or 'a session'}",
                                       handoff_text(st.gid, item, r)))
@@ -733,7 +786,8 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
         gs = [g for g, w, _l, _t in to_remind if w == sid]
         text = next(t for g, w, _l, t in to_remind if g == gs[0]) if len(gs) == 1 else _ho.message(
             lines, "", f"[stackshot] reminder: {{n}} items were handed to you and nothing has been written to them in {handoff_minutes():g} min:",
-            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → {_inst.BOARD_URL}")
+            ("\nTake them by marking a step done, or by writing a work line set to in progress or done on each item (a note does not count), or hand them back. → " if any(g in peer_remind for g in gs)
+             else "\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → ") + _inst.BOARD_URL)
         try:
             _telling.tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
         except Exception as e:  # noqa: BLE001

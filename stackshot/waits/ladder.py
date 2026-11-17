@@ -7,14 +7,14 @@ sender, then the fleet's builder asked to recover it); a mover whose pane had no
 Two orders, two records (`metadata.handoff` and the stall pass's entry), and an item could be on both. With `[ladder] enabled = true` there is one record per item (the stall pass's entry,
 `<state>/stall.json`, which carries who brought the item to the ladder in `via`) and one order:
 
-    rung 0  ask      the mover is sent the notice again (a hand-off's own notice for an untaken hand-off, the stall notice for a silent pane; a front agent only gets the History line)
+    rung 0  ask      the mover is sent the notice again (a hand-off's own notice for an untaken hand-off, the stall notice for a silent pane; a front agent only gets the History line, except the new mover of a peer hand-off in a front-only project, which gets the notice again)
     rung 1  look     `LOOK` (30) minutes after the ask, and only then, the pane is looked at: a pane with no turn running is sent the notice again; a pane with a turn running is left alone. A background
                      agent's pane is never looked at (it is nearly always busy or showing a background shell): it is sent the notice again, unless a step status of the item in progress, changed within 90
                      minutes, shows it at work on it, and a live one is asked and then its silence is told to the project's -main agent, not replaced (the cold call and the builder are for a mover whose pane is not live)
     main     `minutes` after the look, for a live background mover that is still silent: a notice to the project's -main agent (one per -main agent per pass, listing every item due for it), which decides whether the item needs a nudge or a different mover; the
              same notice again every `MAIN_EVERY` (4 hours) while the silence lasts. It is no step of its own (the entry stays on its rung, so the cold call and the builder stay reachable if the pane stops
              being live): the entry's `main_at` is its clock
-    rung 2  cold     `minutes` (10) later, still no turn and no write: one `claude -p` call names who takes it, or closes the item (it never asks the owner)
+    rung 2  cold     `minutes` (10) later, still no turn and no write: one `claude -p` call names who takes it, or closes the item (it never asks the owner); a peer hand-off's item skips it and goes on to rung 3
     rung 3  builder  `minutes` later (at once when the cold call named no taker): the project's builder; when none can take it, ONE message asks the fleet's builder to recover the session (a front-only project, one with no builder, asks its -main agent instead: `_recovery_target` in `service/pane_recovery.py`). The
                      item stays with its mover and is not put to the owner
 
