@@ -8,7 +8,11 @@ such step the item's stored contact takes it; with neither, -main keeps it as be
 for a target that is not a front agent of the item's own project, and (as a substitution by the builder) for a project that has one.
 (3) the sender need not belong to the project: a front agent or a background agent of another project hands an item of the builderless project to its front agent through `mover=`, the target
 is told, and the reply says so; a project with a builder still substitutes it; a target that is another project's front agent, a session no page lists as the sender, a retired sender or target,
-and `then` / `post_wake_mover` (the owner's answer or the wake makes that move, no notice would follow) are refused or substituted as before.
+and a project with a builder substitutes it for `then` / `post_wake_mover` as before.
+(4) `then=` and `post_wake_mover=` take the same exception as `mover=`: a listed session names a front agent of a front-only project in them, nothing tells the target by a hand-off notice (the owner's answer or the wake
+moves the item), and the refusals (an unlisted sender, another project's front agent) are the same as for `mover=`.
+(5) one predicate: a project is front-only exactly when it has no builder, so a project whose only background agent does not build, and a sub-page with a map of its own under a hub that has a builder, take the
+same path as the project they belong to; the refusals of a front-only project name the working path (the page key with `For <peer>,` on the first line; mover= for a hand-over), and the needs refusal says what to do instead.
 
     tests/run-suite builderless_handover        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -27,7 +31,8 @@ toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/transcripts
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 for d in ("store/a", "fleet/a", "brain/projects"): (T / d).mkdir(parents=True)
 SMAIN, SDESK, DMAIN, DDESK, DBUILD, EMAIN, LONER = ("home-sigma-main", "home-sigma-desk", "home-delta-main", "home-delta-desk", "home-delta-builder", "home-echo-main", "home-loner")
-U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((SMAIN, SDESK, DMAIN, DDESK, DBUILD, EMAIN, LONER), 1)}
+QMAIN, QDESK, QWATCH, DSIDE = ("home-quiet-main", "home-quiet-desk", "home-quiet-watch", "home-delta-side")
+U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((SMAIN, SDESK, DMAIN, DDESK, DBUILD, EMAIN, LONER, QMAIN, QDESK, QWATCH, DSIDE), 1)}
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a", "url": "", "seen": "x"} for n, u in U.items()}))
 page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type": "project", "session": "", "status": "active", "board": [], "board_open": 0, **kw}
@@ -35,7 +40,9 @@ page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type
     "projects/sigma": page(title="Sigma", name="Sigma", agents={SMAIN: "front", SDESK: "front, answers the owner's questions"}),
     "projects/delta": page(title="Delta", name="Delta", agents={DMAIN: "front", DDESK: "front, answers questions", DBUILD: "builds it"}, back_agents={DBUILD: "builds it"}),
     "projects/sigma/sub": page(title="Sigma sub", name="Sigma sub"),
-    "projects/echo": page(title="Echo", name="Echo", agents={EMAIN: "front"})}}))
+    "projects/echo": page(title="Echo", name="Echo", agents={EMAIN: "front"}),
+    "projects/quiet": page(title="Quiet", name="Quiet", agents={QMAIN: "front", QDESK: "front, answers questions", QWATCH: "watches the clock"}, back_agents={QWATCH: "watches the clock"}),
+    "projects/delta/desk": page(title="Delta desk", name="Delta desk", agents={DSIDE: "front for the desk page"})}}))
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
@@ -148,7 +155,7 @@ check("2.2 the reply says so, and the target is told by a notice", "no builder" 
 check("2.3 nothing is substituted: no server_fixed mark for the front-mover rule", "front_mover" not in json.dumps(rd(10)["metadata"].get("server_fixed") or ""), rd(10)["metadata"].get("server_fixed"))
 
 # the target can now hold and wake the item itself (it is the mover)
-r = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SDESK, hold=True, wake=WAKE, wait_reason="waiting for the vendor's reply to arrive, due on the wake day"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SDESK, hold=True, wake=WAKE))
 check("2.4 the target, now the mover, may hold the item with a wake", "front agent does not watch" not in r, r)
 
 told.clear()
@@ -162,7 +169,7 @@ check("2.6 a front agent of another project may hand it too (the sender need onl
 
 put(12, mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a12", sender=LONER, mover=SDESK, next=f"{SDESK}: take it"))
-check("2.7 a session no page lists is still refused", msg.startswith("Refused:") and "no builder and no background agent" in msg and held(12) == SMAIN, (msg, held(12)))
+check("2.7 a session no page lists is still refused", msg.startswith("Refused:") and "has no builder to hand it to" in msg and held(12) == SMAIN, (msg, held(12)))
 
 put(13, project="projects/delta", mover=DMAIN)
 r = call(lambda: _wt_update.stackshot_update(item_id="a13", sender=DMAIN, mover=DDESK, next=f"{DBUILD}: take it"))
@@ -206,7 +213,8 @@ r = call(lambda: _wt_update.stackshot_update(item_id="a43", sender=SMAIN, mover=
 check("3.7 the target of a project that has a builder is still substituted by the builder, whoever sends it", f"mover={DBUILD}, the project's builder, was used instead" in r and held(43) == DBUILD and not any(t[1] in (U[DMAIN], U[DDESK]) for t in told), (r, held(43), told))
 put(44, mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a44", sender=DBUILD, mover=EMAIN, next=f"{EMAIN}: take it"))
-check("3.8 a front agent of another project than the item's is refused as the target, and the refusal names the rule", msg.startswith("Refused:") and "no builder and no background agent" in msg and "this call was refused because home-echo-main is not a live front agent of projects/sigma." in msg
+check("3.8 a front agent of another project than the item's is refused as the target, and the refusal names the rule", msg.startswith("Refused:") and "has no builder to hand it to" in msg and "this call was refused because home-echo-main is not a live front agent of projects/sigma." in msg
+      and 'message(to=\'projects/echo\') with the first line "For home-echo-main, ..."' in msg
       and "no hand-off notice" not in msg and "gets no notice" not in msg and held(44) == SMAIN, (msg, held(44)))
 put(45, project="projects/echo", mover=EMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a45", sender=DBUILD, mover=SDESK, next=f"{SDESK}: take it"))
@@ -230,12 +238,70 @@ put(47, mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a47", sender=OWNER, mover=SDESK, next=f"{SDESK}: take it"))
 check("3.11 the owner's own name as sender is no session a page lists: refused", msg.startswith("Refused:") and held(47) == SMAIN, (msg, held(47)))
 ASK = "Decide: a or b - Recommend: a - Stakes: none - By: no date"
+# ---- 4. then= and post_wake_mover= take the same exception as mover=
 put(48, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
-msg = refusal(lambda: _wt_update.stackshot_update(item_id="a48", sender=DBUILD, then=SDESK))
-check("3.12 then=<front agent> is not part of the relaxation: refused, and the refusal says only mover= hands it over", msg.startswith("Refused:") and "Only mover=" in msg and rd(48)["metadata"].get("then") == SMAIN, (msg, rd(48)["metadata"].get("then")))
-put(49, mover=DBUILD)
-msg = refusal(lambda: _wt_update.stackshot_update(item_id="a49", sender=DBUILD, post_wake_mover=SDESK))
-check("3.13 post_wake_mover=<front agent> is refused too", msg.startswith("Refused:") and "Only mover=" in msg, msg)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a48", sender=DBUILD, then=SDESK))
+check("4.1 then=<front agent> from a listed session of another project is accepted in a front-only project, and the note says nobody is told by this write", "Refused" not in r and rd(48)["metadata"].get("then") == SDESK
+      and "then=home-sigma-desk stays as sent" in r and "when the answer or the wake comes" in r, (r, rd(48)["metadata"].get("then")))
+check("4.2 …no hand-off notice goes to the front agent and no hand-off is recorded for it", not any(t[3] == "handoff" for t in told) and "handoff" not in rd(48)["metadata"] and rd(48)["metadata"].get("mover") == OWNER, (told, rd(48)["metadata"]))
+put(51, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
+r = call(lambda: _wt_update.stackshot_update(item_id="a51", sender=SMAIN, then=SDESK))
+check("4.3 …the same from a front agent of the item's own project", "Refused" not in r and rd(51)["metadata"].get("then") == SDESK, (r, rd(51)["metadata"].get("then")))
+put(52, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a52", sender=LONER, then=SDESK))
+check("4.4 then=<front agent> from a session no page lists is refused, naming that half and the For <peer> path", msg.startswith("Refused:") and "this call was refused because home-loner is not a session any project page lists." in msg
+      and "then=home-sigma-desk names" in msg and "For home-sigma-desk" in msg and rd(52)["metadata"].get("then") == SMAIN, (msg, rd(52)["metadata"].get("then")))
+put(53, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a53", sender=DBUILD, then=EMAIN))
+check("4.5 then=<another project's front agent> is refused, as mover= is", msg.startswith("Refused:") and "this call was refused because home-echo-main is not a live front agent of projects/sigma." in msg and rd(53)["metadata"].get("then") == SMAIN, (msg, rd(53)["metadata"].get("then")))
+put_step(54)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a54", sender=DBUILD, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
+check("4.6 post_wake_mover=<front agent> (the old name of mover) on a waiting item is accepted the same way and stored as the picker, with no hand-off notice", "Refused" not in r and "post_wake_mover=home-sigma-desk stays as sent" in r
+      and rd(54)["metadata"].get("mover") == SDESK and not any(t[3] == "handoff" for t in told), (r, rd(54)["metadata"].get("mover"), told))
+put_step(55)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a55", sender=LONER, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
+check("4.7 …and refused from a session no page lists, as mover= is", msg.startswith("Refused:") and "this call was refused because home-loner is not a session any project page lists." in msg and rd(55)["metadata"].get("post_wake_mover") == SMAIN, (msg, rd(55)["metadata"]))
+put_step(56)
+r = call(lambda: _wt_update.stackshot_update(item_id="a56", sender=DBUILD, mover=SDESK, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
+check("4.8 mover= and post_wake_mover= naming the same front agent together behave as mover= alone: one hand-over", "Refused" not in r and rd(56)["metadata"].get("mover") == SDESK, (r, rd(56)["metadata"].get("mover")))
+put(57, mover=SMAIN)
+told.clear()
+r = call(lambda: _wt_create.stackshot_create(subject="[home] then names the other front agent", description=DESC, project="projects/sigma", sender=DBUILD, mover=SMAIN, then=SDESK, next=f"{OWNER}: {STEP}"))
+check("4.9 a create takes then=<front agent> the same way", r.startswith("created") and "then=home-sigma-desk stays as sent" in r, r)
+put(58, project="projects/delta", mover=OWNER, needs=["decision"], ask=ASK, then=DBUILD, state="your-call")
+r = call(lambda: _wt_update.stackshot_update(item_id="a58", sender=SMAIN, then=DDESK))
+check("4.10 in a project that has a builder then=<front agent> is replaced by the builder, as before", f"then={DBUILD}, the project's builder, was used instead" in r and rd(58)["metadata"].get("then") == DBUILD, (r, rd(58)["metadata"].get("then")))
+put_step(59, project="projects/delta", post=DMAIN)
+r = call(lambda: _wt_update.stackshot_update(item_id="a59", sender=SMAIN, post_wake_mover=DDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
+check("4.11 …and so is post_wake_mover=<front agent>", f"post_wake_mover={DBUILD}, the project's builder, was used instead" in r and rd(59)["metadata"].get("mover") == DBUILD, (r, rd(59)["metadata"].get("mover")))
+
+# ---- 5. one predicate: front-only = no builder
+put(60, project="projects/quiet", mover=QMAIN)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a60", sender=QMAIN, mover=QDESK, next=f"{QDESK}: take it from here"))
+check("5.1 a project whose only background agent does not build is front-only: a peer's mover= passes, with no builder substituted, and the peer is told", "Refused" not in r and held(60) == QDESK and "no builder" in r
+      and "front_mover" not in json.dumps(rd(60)["metadata"].get("server_fixed") or "") and any(t[1] == U[QDESK] and t[3] == "handoff" for t in told), (r, held(60), told))
+put(61, project="projects/quiet", mover=OWNER, needs=["decision"], ask=ASK, then=QMAIN, state="your-call")
+r = call(lambda: _wt_update.stackshot_update(item_id="a61", sender=QMAIN, then=QDESK))
+check("5.2 …then= too", "Refused" not in r and rd(61)["metadata"].get("then") == QDESK, (r, rd(61)["metadata"].get("then")))
+from stackshot.anchors import anchors as _anc_p
+from stackshot.service import handoff as _handoff_p
+check("5.3 front_only is exactly 'no builder' on every project of the fixture (handoff_builder is the same answer)", all(_anc_p.front_only(k) == (not _handoff_p.handoff_builder(k)) for k in
+      ("projects/sigma", "projects/delta", "projects/delta/desk", "projects/sigma/sub", "projects/echo", "projects/quiet", "projects/ghost", "")), None)
+check("5.4 …a background agent with another mandate is no builder; a sub-page with a map of its own under a hub that has a builder has one", _anc_p.front_only("projects/quiet") is True and _anc_p.front_only("projects/delta/desk") is False
+      and _anc_p.front_only("projects/delta") is False and _anc_p.front_only("projects/sigma/sub") is True, None)
+put(62, project="projects/delta/desk", mover=DMAIN)
+r = call(lambda: _wt_update.stackshot_update(item_id="a62", sender=DMAIN, mover=DSIDE, next=f"{DBUILD}: take it"))
+check("5.5 an item under a sub-page with its own front map and a builder above it takes the builder's path: the front agent is replaced by the builder (the exception needs no builder)", f"mover={DBUILD}, the project's builder, was used instead" in r and held(62) == DBUILD, (r, held(62)))
+put(63, mover=SMAIN)
+msg = call(lambda: _wt_update.stackshot_update(item_id="a63", sender=SMAIN, needs=[SDESK]))
+check("5.6 needs=[<same-project front agent>] in a front-only project is refused with the working path: mover=<peer> to hand it over, or its own item with after=", msg.startswith("Refused:") and f"set mover={SDESK}" in msg
+      and "after=" in msg and "no background agent named" not in msg, msg)
+put(64, project="projects/delta", mover=DBUILD)
+msg = call(lambda: _wt_update.stackshot_update(item_id="a64", sender=DBUILD, needs=[DDESK]))
+check("5.7 …in a project that has a builder the refusal is the old one, naming the builder", msg.startswith("Refused:") and f"For projects/delta: {DBUILD}" in msg and "set mover=" not in msg, msg)
 
 # the pure test (builderless.handover_allowed): rows of the session roles; a retired row is no session, a target must be a live front agent of the item's project
 from stackshot.waits import builderless as _bl

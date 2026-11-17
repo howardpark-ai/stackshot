@@ -5,7 +5,7 @@ holds their pure parts (the server supplies what needs the project registry):
 
   answer_target(meta, usable, keeper)   who takes the item once the owner's step is answered and the item names no `then`: the session the item's next open step names (the step's
                                         owner line), else the item's stored contact, else "" (the caller falls back to the project's -main agent, as before)
-  handover_allowed(sender, target, front_only, item_project)  may a session hand an item to a front agent through `mover=`: the project the item is filed under is front-only and the target is a
+  handover_allowed(sender, target, front_only, item_project)  may a session name a front agent in `mover=` (a hand-over), `then=` or `post_wake_mover=`: the project the item is filed under is front-only and the target is a
                                         live front agent of it (listed on that page or a page above it); the sender is any live session some project page lists, front or background,
                                         of any project
 
@@ -53,7 +53,7 @@ def answer_target(meta: dict[str, Any], usable: Callable[[str], bool], keeper: s
 
 
 def handover_allowed(sender: dict[str, Any] | None, target: dict[str, Any] | None, front_only: bool, item_project: str) -> bool:
-    """May `sender` hand an item filed under `item_project` to `target` through `mover=` although the target is a front agent (a front agent gets no hand-off notice from another session, so the write is
+    """May `sender` name `target` in `mover=` (a hand-over), `then=` or `post_wake_mover=` of an item filed under `item_project` although the target is a front agent (a front agent gets no hand-off notice from another session, so the write is
     refused or the builder is substituted; here the target is told instead)? Only when the project is front-only (`front_only`, from anchors.front_only: it has no builder to substitute), the target is a
     live front agent of the project the item is filed under (front_of: a hand-over cannot point at an unrelated project's front agent) and the sender is any live session some project page lists: a front
     agent, a background agent or a one-session project's own session, of this project or of another. Each is a row of the session roles; None for a session no page lists, and a retired row is no session."""

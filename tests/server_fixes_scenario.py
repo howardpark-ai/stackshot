@@ -45,11 +45,11 @@ ZONE_OFFSET = 4 * HOUR                       # the instance timezone (Asia/Dubai
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a"} for n, u in U.items()}))
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
                                                                                 "session": "home-stew", "status": "active", "board": [], "board_open": 0,
-                                                                                "agents": {"home-front": "the front", "team-back": "the back", "home-other": "the other"},
-                                                                                "back_agents": {"team-back": "the back", "home-other": "the other"}},
+                                                                                "agents": {"home-front": "the front", "team-back": "builds the back", "home-other": "the other"},
+                                                                                "back_agents": {"team-back": "builds the back", "home-other": "the other"}},
                                                   "projects/echo": {"title": "Echo", "name": "Echo", "org": "home", "tags": [], "type": "project", "session": "", "status": "active", "board": [], "board_open": 0,
                                                                     "agents": {"home-echo-main": "the front"}}}}))
-(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\ndisplay-name: home-stew\nagents:\n  home-front: the front\n  background:\n    team-back: the back\n    home-other: the other\n---\n\n# Alpha\n")
+(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\ndisplay-name: home-stew\nagents:\n  home-front: the front\n  background:\n    team-back: builds the back\n    home-other: the other\n---\n\n# Alpha\n")
 (T / "store/next-id").write_text("900"); (T / "store/anchors.json").write_text("{}")
 DESC = "- A thing\n- It lives here\n- Done when done"
 def item(i, status="open", su=None, desc=None, **meta):
@@ -198,7 +198,7 @@ out = _wt_update.stackshot_update(item_id="a205", sender=FRONT, mover=OTHER)
 check("2 …a background mover set by a front agent", holder(205) == OTHER and not log(205), out[:200])
 fput(207, mover=OTHER, project="projects/echo")
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a207", sender="home-stranger", mover="home-echo-main", next=f"{OTHER}: x"))      # a session no page lists (a listed one hands it through: builderless_handover)
-check("2 a project with no builder keeps the refusal, as before (nothing to substitute)", msg.startswith("Refused:") and "no builder and no background agent" in msg and holder(207) == OTHER, (msg, mt(207)))
+check("2 a project with no builder keeps the refusal, as before (nothing to substitute)", msg.startswith("Refused:") and "has no builder to hand it to" in msg and holder(207) == OTHER, (msg, mt(207)))
 
 # ================================================================ 3. wait_reason
 item(301, needs=[BACK], next="")

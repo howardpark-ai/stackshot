@@ -41,9 +41,9 @@ ZONE_OFFSET = 4 * HOUR                       # the instance timezone (Asia/Dubai
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a"} for n, u in U.items()}))
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
                                                                                 "session": "home-stew", "status": "active", "board": [], "board_open": 0,
-                                                                                "agents": {"home-front": "the front", "team-back": "the back", "home-other": "the other"},
-                                                                                "back_agents": {"team-back": "the back", "home-other": "the other"}}}}))
-(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\ndisplay-name: home-stew\nagents:\n  home-front: the front\n  background:\n    team-back: the back\n    home-other: the other\n---\n\n# Alpha\n")
+                                                                                "agents": {"home-front": "the front", "team-back": "builds the back", "home-other": "the other"},
+                                                                                "back_agents": {"team-back": "builds the back", "home-other": "the other"}}}}))
+(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\ndisplay-name: home-stew\nagents:\n  home-front: the front\n  background:\n    team-back: builds the back\n    home-other: the other\n---\n\n# Alpha\n")
 (T / "store/next-id").write_text("900"); (T / "store/anchors.json").write_text("{}")
 DESC = "- A thing\n- It lives here\n- Done when done"
 def item(i, status="open", su=None, desc=DESC, **meta):

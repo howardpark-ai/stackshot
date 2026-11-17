@@ -640,20 +640,41 @@ def main_of(e: dict[str, Any]) -> str:
     return next((n for n in front if n.endswith("-main")), front[0] if front else "")
 
 
+# The words of a mandate that make a background agent a builder (router._BUILDER is this pattern).
+BUILDER = re.compile(r"\b(?:build|builds|builder|building|maintain\w*|merg\w*|engineer\w*)\b", re.I)
+
+
+def background_ranked(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[tuple[int, int, str]]:
+    """(class, order, name) of the project's background agents, best first: those whose page's hub is the project's hub (hub_of); class 0 a mandate that says build, 1 one that says maintain, merge or
+    engineer (BUILDER), 2 the rest. The mandate is the page's own line, so an agent only the project record holds (its page line still owed) ranks in class 2 until the page lists it. `reg` = the page
+    registry (default: the live one). [] when it cannot be read. The one ranking behind the hand-off machinery (service/handoff.py) and front_only."""
+    try:
+        reg = registry() if reg is None else reg
+        roles = session_roles(reg)
+        hub = hub_of(project, reg)
+        out = []
+        for i, (n, r) in enumerate(roles.items()):
+            if r.get("role") != "back" or hub_of(r.get("project", ""), reg) != hub:
+                continue
+            mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
+            out.append((0 if re.search(r"\bbuild", mand, re.I) else 1 if BUILDER.search(mand) else 2, i, n))
+        return sorted(out)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def builder_of(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[str]:
+    """The project's BUILDER: the first background agent of background_ranked of class 0 or 1. A list of one, or none."""
+    ranked = background_ranked(project, reg)
+    return [ranked[0][2]] if ranked and ranked[0][0] < 2 else []
+
+
 def front_only(project: str, reg: dict[str, dict[str, Any]] | None = None) -> bool:
-    """Is the project front-only: its `agents:` map lists no `background:` agent? The one test of "has this project a builder" that new rules use.
-    The map read is the page's own; a page with no map of its own (a sub-page) reads its hub's (hub_of: the nearest `hub:` line, else the top-level page). A page whose own map exists
-    decides alone, so a sub-page with a map of front agents is front-only although its hub has a background agent. No map on the page or its hub, an unknown key and an empty
-    key are front-only too: nothing there could build. Any `background:` entry, whatever its mandate says, makes the project not front-only, so adding a builder to the map is all
-    that switches it over, with no field of its own. `reg` = the page registry (default: the registry plus the agents only the project record holds, as session_roles reads it)."""
-    from stackshot.projects import projects as _prj
-    reg = _prj.with_pending(registry(), made=True) if reg is None else reg
-    key = str(project or "").strip().strip("/")
-    for k in dict.fromkeys([key, hub_of(key, reg) if key else ""]):
-        entry = reg.get(k) if k else None
-        if isinstance(entry, dict) and entry.get("agents"):
-            return not entry.get("back_agents")
-    return True
+    """Is the project front-only: it has no builder (builder_of: no background agent of its hub whose mandate says build, maintain, merge or engineer)? The one test of "has this project a builder", the
+    hand-off machinery's too (service/handoff.handoff_builder). A project whose background agents all have other mandates, an unknown or empty key and a page with no `agents:` map anywhere are front-only
+    (nothing there could build); a sub-page reads the background agents of its hub, so one with a map of its own under a hub that has a builder is not. An agent only the project record holds (its page line
+    still owed) is no builder until the page lists it. `reg` = the page registry (default: the live one)."""
+    return not builder_of(project, reg)
 
 
 def _general_value(scope: str) -> str:
