@@ -1663,7 +1663,7 @@ def handoff_notify(gid: str, item: dict[str, Any]) -> str:
         if any(g == gid and (s == tid or h.ho_same(s, to)) for g, s in told):
             return ""
         proj = str((item.get("metadata") or {}).get("project") or "")
-        if front_keeper(to, proj)[0] and not h.front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a front agent of its own project when that project is front-only
+        if front_keeper(to, proj)[0] and not h.front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a session some project page lists when the item's project is front-only
             return ""
         tell_woken(gid, tid or to, h.handoff_text(gid, item, r), tag="handoff")
         return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)})"

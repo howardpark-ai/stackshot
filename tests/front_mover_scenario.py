@@ -141,9 +141,10 @@ check("create: post_wake_mover=<front agent> by another session becomes the buil
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a9", sender=MAIN, post_wake_mover=MAIN))
 check("update: a front agent naming itself as post_wake_mover is not refused here", "no hand-off notice" not in r, r)
 
-# ---- a project with no builder and no background agent: the refusal says so once, without a placeholder
+# ---- a project with no builder and no background agent: the refusal says so once, without a placeholder (the sender is a session no page lists: a session some page lists hands it through, see builderless_handover)
+STRANGER = "home-stranger"
 put(10, mover=SIDE, project="projects/echo")
-msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=STRANGER, mover=ECHO))
 check("no builder: the refusal says there is no builder or background agent, with no placeholder", msg.startswith("Refused:") and "no builder and no background agent" in msg and "<background agent>" not in msg
       and msg.count("background agent") == 1 and "builder, " not in msg, msg)
 
@@ -152,11 +153,11 @@ from stackshot.projects import projects as _P
 _PID = _P.ensure_ids(["projects/echo"])["projects/echo"]
 (T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"},
     "pending_agents": {_PID: {"home-echo-engineer": {"mandate_line": "takes the build work", "front": False, "role": "engineer"}}}}))
-msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=STRANGER, mover=ECHO))
 check("owed background agent: the refusal says it is not on the page yet, never that there is none", msg.startswith("Refused:") and "not on its page yet" in msg and "no builder and no background agent" not in msg
       and "keep the item with its current mover" in msg and "<background agent>" not in msg, msg)
 (T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"}, "pending_agents": {}}))
-msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=STRANGER, mover=ECHO))
 check("owed agent gone: the plain refusal is back", msg.startswith("Refused:") and "no builder and no background agent" in msg, msg)
 
 # ---- a failing roles read lets the write through (one stderr line)
