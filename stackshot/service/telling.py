@@ -391,7 +391,8 @@ PRESENCE_MINUTES = 30.0
 FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
                    "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
-                   "owner": "progress", "observer": "progress"}      # news about the item: progress (named here so a new, unmapped tag is a decision the tag-coverage test catches)
+                   "owner": "progress", "observer": "progress",
+                   "stall_summary": "progress"}      # the -main summary of idle or balanced items ("Nothing is asked of you") is news; the busy-stretch and quiet-mover notices keep "stall" (they ask for action). A new, unmapped tag is a decision the tag-coverage test catches
 
 
 FRONT_HINT = threading.local()      # the kind the sender gives the gate for the one notice it is telling (see tell_kind)

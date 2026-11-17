@@ -487,6 +487,39 @@ for good in (1, 5, 30, 60, 0.5):
 check("10 presence minutes: no [presence] section says nothing", _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"keeper_currency": "keepers"}}) == [])
 set_presence()
 
+# ================================================================ 11. a stall summary to -main asks nothing: news, never a turn of its own
+# The idle hand-over's and the balancer's summary to the project's -main agent say "Nothing is asked of you and no reply is owed" (tag stall_summary); the busy-stretch notice and the notice
+# to a quiet mover ask for action (tag stall). The first is progress for the gate, the others stay exempt.
+from stackshot.service import audit_ticks as _audit_ticks, ladder as _ladder
+SUMMARY = lambda g: f"{telling._FOR_OWNER}\n[stackshot] {g} \"[home] item\" (projects/alpha): no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with home-peer.\nNothing is asked of you and no reply is owed; nothing here is for Oliver. \u2192 https://x/items/{g}"
+check("11 summary: the tag is mapped to progress in FRONT_TAG_KIND", telling.FRONT_TAG_KIND.get("stall_summary") == "progress", telling.FRONT_TAG_KIND)
+check("11 summary: …and the two tags that ask for action stay exempt (the busy-stretch and quiet-mover notices send tag stall; the cold call and the balancer's disregard line keep theirs)", telling.FRONT_TAG_KIND.get("stall") == "exempt" and telling.FRONT_TAG_KIND.get("balance") == "exempt", telling.FRONT_TAG_KIND)
+# the senders: the two -main summaries use the progress tag, the busy-stretch and quiet-mover notices the exempt one
+src_ = lambda fn: inspect.getsource(fn)
+check("11 wiring: the idle hand-over's and the balancer's -main summaries are sent as stall_summary", 'tag="stall_summary"' in src_(_audit_ticks._hand_idle_tick) and 'tag="stall_summary"' in src_(_audit_ticks._balance_tick)
+      and 'tag="stall")' not in src_(_audit_ticks._hand_idle_tick) and 'tag="stall")' not in src_(_audit_ticks._balance_tick))
+check("11 wiring: the busy-stretch notice stays tag stall (it asks the holder to look)", 'tag="stall")' in src_(_audit_ticks._busy_tell_tick) and "stall_summary" not in src_(_audit_ticks._busy_tell_tick))
+check("11 wiring: the notice to a quiet mover stays tag stall", 'tag="stall")' in src_(_ladder.ladder_main_tell) or 'tag="stall")' in src_(_ladder.ladder_enter_quiet) or 'tag="stall")' in src_(_ladder.ladder_quiet_look), None)
+# the gate: -main (a front agent) is the receiver, the owner is away: no push, no turn, a board line and a held-log line
+unstamp("home-front"); item(110, writer="home-front")
+p, h = tell("a110", "home-front", SUMMARY("a110"), tag="stall_summary")
+ql = quiet_log(110)
+check("11 absent: a stall summary to -main with the owner away starts no turn (no push) and adds no held fyi line", p == [] and h == 0, (p, h))
+check("11 absent: …the board keeps the news (a History line on the item: \"<agent> was not told (<why>): <news>\")", len(ql) == 1 and ql[0]["text"].startswith("home-front was not told (") and "not there" in ql[0]["text"] and "no builder was free" in ql[0]["text"], ql)
+check("11 absent: …and the routing log has the held line", held_log("a110") and "not there" in held_log("a110")[-1]["reason"], held_log("a110"))
+# present and touched: the summary rides his next turn as an fyi line and starts none
+stamp("home-front", 60); item(111, writer="home-front")
+p, h = tell("a111", "home-front", SUMMARY("a111"), tag="stall_summary")
+ql = quiet_log(111)
+check("11 present: a stall summary to -main, owner there and the item touched, is one held fyi line on its next turn and no push", p == [] and h == 1, (p, h))
+check("11 present: …and the board line says it hears of it on its next turn", len(ql) == 1 and ql[0]["text"].startswith("home-front hears of it on his next turn:") and "no builder was free" in ql[0]["text"], ql)
+held.take(U["home-front"])
+# the two notices that ask for action are still pushed as a turn, owner away or not
+unstamp("home-front"); item(112, writer="home-front")
+p, h = tell("a112", "home-front", f"{telling._FOR_OWNER}\n[stackshot] a112 \"[home] item\": no write on it but the hourly audit lines for about 4 hours. Please look.\nNo reply is owed to the audit; nothing here is for Oliver. \u2192 https://x/items/a112", tag="stall")
+check("11 exempt: the busy-stretch notice (tag stall) to a front agent is still pushed with the owner away, and leaves no held line", len(p) == 1 and p[0][0] == U["home-front"] and h == 0 and not quiet_log(112) and not held_log("a112"), (p, h))
+p, h = tell("a112", "home-front", f"{telling._FOR_OWNER}\n[stackshot] you have had no turn running for 10 minutes and these items are still yours: a112 \u2192 https://x/items/a112", tag="stall")
+check("11 exempt: …and so is the notice to a quiet mover (tag stall)", len(p) == 1 and p[0][0] == U["home-front"] and h == 0 and not quiet_log(112), (p, h))
 # ================================================================ end
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

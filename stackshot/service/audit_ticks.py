@@ -396,7 +396,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in lines)
             _telling.tell_woken(",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
         except Exception as e:  # noqa: BLE001
             print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return handed
@@ -563,7 +563,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items stay where they are:\n" + "\n".join("- " + x for x in lines)
             _telling.tell_woken(",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
-                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+                        + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
         except Exception as e:  # noqa: BLE001
             print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return moved
