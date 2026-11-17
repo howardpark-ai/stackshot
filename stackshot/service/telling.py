@@ -965,7 +965,8 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
     wrote it, not when [board] tell_owner is off. A project the router is live for records it for the router, whose hand-back rule
     passes it straight to the mover (router.py), marked as every delivery to a front agent is; any other project delivers it at once with
     the mark (_FOR_OWNER), as tell_close_owner does. The mover is added to `heard` and to OWNER_HEARD, so the write's other notices
-    (tell_needed, tell_decided, tell_owner_change) leave it out: it hears the write once. There is no pilot gate, on purpose: a project outside the pilot gets the marked push. → the writer's reply line, or ""."""
+    (tell_needed, tell_decided, tell_owner_change) leave it out: it hears the write once. There is no pilot gate, on purpose: a project outside the pilot gets the marked push.
+    A front-only project (anchors.front_only) lists no builder to tell instead, so there the front mover itself is told, marked (handback_send); a project that lists a builder is as above. → the writer's reply line, or ""."""
     h = _hooks()
     meta = item.get("metadata") or {}
     owner, project = holder(item), str(meta.get("project") or "")
@@ -983,7 +984,9 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
     line = f"[stackshot] {_gh.shown(gid)} is back with you alone (handed back by {who}): {subject}" + (f"; next: {nxt}" if nxt else "") + f" → {notice_link(gid)}"
     rec = {"gid": gid, "oid": oid, "olabel": olabel, "project": project, "who": who, "wid": wid, "subject": subject, "line": line}
     hold = handback_hold_s()
-    dest = no_front(oid, project) if front_sender(oid) else oid      # a front agent mover is not handed the item by stackshot: its builder is told, else nobody
+    dest = no_front(oid, project) if front_sender(oid) else oid      # a front agent mover is not handed the item by stackshot: its builder is told, else nobody (except a front-only project: no builder to tell instead, so its front mover is told itself, below)
+    if not dest and front_sender(oid) and _anc.front_only(project):
+        dest = oid         # a front-only project has no builder to tell instead: the front mover is the one who can act, so it is told itself (marked, handback_send); a project that lists a builder keeps its rule
     if dest and dest != oid and h.session_id(dest) == wid:              # ... and the builder that wrote the hand-back itself needs no line about its own write
         told = "nobody is told: a front agent is not handed an item on stackshot's own motion, so the board shows it (your own write; the project's builder is you)"
         dest = ""
@@ -1096,11 +1099,12 @@ def handback_drop(gid: str, why: str = "") -> int:
 
 def handback_send(rec: dict[str, Any]) -> bool:
     """Deliver one hand-back line: recorded for the router when the project's is live (its hand-back rule passes it, marked), else pushed at once with the mark; a record that cannot be written is pushed (never lost).
-    for a front agent mover the line goes to the project's builder instead (tell_or_hold: it asks the builder nothing, so it rides the builder's next turn), or to nobody. → True when
+    for a front agent mover the line goes to the project's builder instead (tell_or_hold: it asks the builder nothing, so it rides the builder's next turn), or to nobody; in a front-only project (no builder to tell instead) the front mover itself is told, marked, as any mover is below. → True when
     a line was passed to someone, False when nobody was told (the board and the routing log hold it)."""
     h = _hooks()
     gid, oid, project, who, olabel = rec["gid"], rec["oid"], rec["project"], rec["who"], rec["olabel"]
-    if front_sender(oid):      # "back with you alone" is stackshot handing an item to a front agent by itself: it goes to the project's builder, or nowhere (the item stays with its mover)
+    direct = front_sender(oid) and not no_front(oid, project) and _anc.front_only(project)      # a front-only project: no builder to tell instead, so the front mover is told itself (below), marked
+    if front_sender(oid) and not direct:      # "back with you alone" is stackshot handing an item to a front agent by itself: it goes to the project's builder, or nowhere (the item stays with its mover)
         dest = no_front(oid, project)
         wid = str(rec.get("wid") or "")      # a record held before this release has no writer on file: unknown, so the builder may be the writer, and is not told about its own write
         if dest and wid and h.session_id(dest) != wid:
@@ -1122,7 +1126,7 @@ def handback_send(rec: dict[str, Any]) -> bool:
         except Exception:
             pass       # not recorded: told at once below, never lost
     if not delivered:
-        tell_woken(gid, oid, f"{_FOR_OWNER} {rec['line']}", tag="owner")
+        tell_kind("exempt", gid, oid, f"{_FOR_OWNER} {rec['line']}", tag="owner")      # exempt: "it is back with you" asks its mover to act, so a front agent of a front-only project is not held by the presence gate (as a hand-off notice is not)
     return True
 
 

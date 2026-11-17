@@ -381,7 +381,22 @@ p0 = len(pushes()); telling.handback_send(rec_for("home-front", "projects/alpha"
 check("9 hand-back: …the builder that wrote the hand-back itself is told nothing, and the routing log says it was held", pushes()[p0:] == [] and held_log("a73"), (pushes()[p0:], held_log("a73")))
 item(74, project="projects/beta", writer="home-send")
 p0 = len(pushes()); telling.handback_send({**rec_for("home-beta-front", "projects/beta", "home-send"), "gid": "a74"}); drain()
-check("9 hand-back: …a project with no builder tells nobody (the item stays with its mover, the board shows it)", pushes()[p0:] == [] and any("no builder" in str(n.get("reason", "")) for n in routing.read("projects/beta") if "a74" in str(n.get("label", ""))), (pushes()[p0:], routing.read("projects/beta")[-2:]))
+check("9 hand-back: …a front-only project (no builder to tell instead) tells the front mover itself: the line is recorded for the router, whose hand-back rule passes it to the mover marked, and nothing is held for lack of a builder",
+      any(str(n.get("label", "")).startswith("hand-back a74") and n.get("target") == "for home-beta-front" and n.get("handback") for n in routing.read("projects/beta"))
+      and not any("no builder" in str(n.get("reason", "")) for n in routing.read("projects/beta") if "a74" in str(n.get("label", ""))), (pushes()[p0:], routing.read("projects/beta")[-2:]))
+
+_il = telling._router_live.is_live
+telling._router_live.is_live = lambda project: False      # the router is not live for the project: the line is pushed at once, marked
+try:
+    unstamp("home-beta-front"); item(77, project="projects/beta", writer="home-send")
+    p0 = len(pushes()); telling.handback_send({**rec_for("home-beta-front", "projects/beta", "home-send"), "gid": "a77"}); drain()
+    got = [x for x in pushes()[p0:] if x[0] == U["home-beta-front"]]
+    check("9 hand-back: …router not live, a front-only project's front mover is pushed the line at once, marked [for Oliver], though Oliver is away from its pane (a hand-back asks the mover to act, so the presence gate does not hold it)",
+          len(got) == 1 and got[0][0] == U["home-beta-front"] and got[0][1].startswith("[for Oliver] [stackshot] a73 is back with you alone"), (got, pushes()[p0:]))
+    p0 = len(pushes()); telling.handback_send({**rec_for("home-front", "projects/alpha", "home-send"), "gid": "a77"}); drain()
+    check("9 hand-back: …a project that lists a builder is as before: its front mover is not pushed to, whether or not the router is live", not [x for x in pushes()[p0:] if x[0] == U["home-front"]], pushes()[p0:])
+finally:
+    telling._router_live.is_live = _il
 
 # ================================================================ 10. the review round
 import inspect as _insp
