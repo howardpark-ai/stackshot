@@ -9,7 +9,9 @@ no model call.
   3  a mover that starts work (a work line in progress) before the clock, or after the reminder, stops it
   4  exempt as before: a project with a builder (a front-to-front record), a hand-off to another project's front agent, a hand-off to the -main agent itself, a hand-off the server made (`from` is no front agent)
   5  the pieces on their own: handoff_exempt / handoff_peer for each shape, the reminder target of a peer (a front role) against a background agent's, `Env.peer` defaulting to the old rule
-  6  the hander is the -main agent: the last rung still asks it (it is the project's escalation point), pinned
+  6  the hander is the -main agent: the last rung still asks it (it is the project's escalation point), pinned; the request says so
+  7  the rework: a peer's item is never put to the cold call (ladder off and on; a stub that would close the item proves it is not asked), a project with a background agent still is; a peer whose pane is busy gets the
+     reminder but no request to the -main agent until the turn is over; the reminder says nothing of a subagent; the request says what was tried
 
     tests/run-suite peer_handoff_clock        -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -177,12 +179,16 @@ done = tick(d1 + 11 * MIN, 1); drain()
 check("1 take minutes later ONE reminder goes to the new mover alone, worded as a reminder, and the record says so", done == ["a1"] and len(texts("home-peer2", "a1")) == 2 and texts("home-peer2", "a1")[1].startswith("[stackshot] reminder: a1 ")
       and bool(ho(1).get("reminded_at")), (ho(1), pushes()))
 d1b = float(ho(1)["delivered_at"])
+check("1 …the reminder fits a front agent: no subagent to start, take it by a step in progress or a work line, or hand it back to the hander", "subagent" not in texts("home-peer2", "a1")[1] and "marking a step in progress or writing a work line" in texts("home-peer2", "a1")[1]
+      and "hand it back (sender='home-peer')" in texts("home-peer2", "a1")[1], texts("home-peer2", "a1"))
 check("1 …the hander, the project's -main agent and the fleet's builder are told nothing", not pushes_to("home-peer") and not pushes_to("home-delta-main") and not pushes_to("home-fleet"), pushes())
 check("1 …and nothing goes down the ladder before the next take minutes", tick(d1b + 5 * MIN, 1) == [] and not ho(1).get("recovery_at"), ho(1))
 done = tick(d1b + 11 * MIN, 1); drain()
 mp = main_recovery_pushes("a1")
 check("1 after another take minutes the last rung asks the project's -main agent, once, marked for the owner, naming the item and the quiet new mover", done == ["a1"] and len(mp) == 1 and mp[0][1].startswith(f"[for {OWN}]\n[stackshot] a1 ")
       and "home-peer2" in mp[0][1] and bool(ho(1).get("recovery_at")) and ho(1).get("recovery_by") == "the project's -main agent", (done, mp, ho(1)))
+check("1 …and says what was tried (the notice and one reminder), not a fresh session's call and the sender, and does not call the -main agent the hander", "What the ladder tried: the hand-off notice went to home-peer2 and, with no work started after 10 min, one reminder." in mp[0][1]
+      and "fresh session" not in mp[0][1] and "yourself" not in mp[0][1], mp)
 check("1 …the item stays with its mover, the hander has been told nothing at any step, and the fleet's builder neither", mt(1).get("mover") == "home-peer2" and not pushes_to("home-peer") and not pushes_to("home-fleet"), (mt(1), pushes()))
 check("1 …later passes send nothing more", tick(d1b + 5 * 3600, 1) == [] and len(main_recovery_pushes("a1")) == 1, pushes())
 close(1)
@@ -218,6 +224,8 @@ t = time.time() + 11 * MIN + 31 * MIN
 stk(t); stk(t + 11 * MIN + 1); stk(t + 22 * MIN + 2)
 check("2 the look and the last rung follow: the new mover is asked once more, then the -main agent is asked once (marked for the owner)", len(main_recovery_pushes("a4")) == 1 and main_recovery_pushes("a4")[0][1].startswith(f"[for {OWN}]\n[stackshot] a4 ")
       and len(texts("home-peer2", "a4")) >= 3, (pushes(), ent, stall_svc.stall_load().get("a4")))
+check("2 …the request says what was tried with the ladder on: the notice sent again and the pane looked at", "What the ladder tried: the hand-off notice went to home-peer2, was sent again after 10 min with no work started, and its pane was looked at later." in main_recovery_pushes("a4")[0][1]
+      and "fresh session" not in main_recovery_pushes("a4")[0][1], main_recovery_pushes("a4"))
 check("2 …the hander and the fleet's builder never heard of it", not pushes_to("home-peer") and not pushes_to("home-fleet"), pushes())
 close(4)
 _cfg.CFG["ladder"] = {}
@@ -256,10 +264,64 @@ put(15, mover="home-delta-main")
 cli_row("home-peer2", "busy", now0)
 r = hand(15, "home-peer2", sender="home-delta-main"); d15 = float(r["delivered_at"])
 tick(d15 + 11 * MIN, 15); drain(); d15b = float(ho(15)["delivered_at"])
+cli_row("home-peer2", "idle", d15b + 60)      # the turn is over: a busy pane is not asked about (section 7)
 tick(d15b + 11 * MIN, 15); drain()
 check("6 the hander is the -main agent: the reminder goes to the new mover, and the last rung still asks the -main agent (the project's escalation point: a request about a quiet session, no note to the hander)",
       len(texts("home-peer2", "a15")) == 2 and len(main_recovery_pushes("a15")) == 1 and "home-peer2" in main_recovery_pushes("a15")[0][1], pushes())
+check("6 …and the request says the -main agent handed the item over itself", "you, the project's -main agent, handed this item to home-peer2 yourself" in main_recovery_pushes("a15")[0][1], main_recovery_pushes("a15"))
 close(15)
+
+# ================================================================ 7. the rework
+COLD_CALLS = []
+def cold_close(msg):
+    COLD_CALLS.append(msg)
+    return {"status": "ok", "text": json.dumps({"action": "close", "outcome": "done", "reason": "it looks finished", "outcome_text": "- The thing is done\n- It lives here"}), "duration_s": 0.1, "usage": {}, "note": "stub"}
+hcold_svc.COLD_RUNNER = cold_close
+set_cfg(cold_call=True)             # the cold call is ON from here, answering `close`: a peer's item must never reach it
+def still_theirs(i, to): return rd(i)["status"] == "open" and mt(i).get("mover") == to and "decision" not in (mt(i).get("needs") or []) and not mt(i).get("ask")
+
+# 7a. ladder off: reminder, then the -main agent, never the cold call
+cli_row("home-peer2", "idle", now0)
+put(20)
+r = hand(20, "home-peer2"); d = float(r["delivered_at"])
+tick(d + 11 * MIN, 20); drain(); d = float(ho(20)["delivered_at"])
+tick(d + 11 * MIN, 20); drain()
+check("7 ladder off: the peer's item skips the cold call: the stub was never asked, nothing closed or put to the owner, the -main agent is asked", COLD_CALLS == [] and still_theirs(20, "home-peer2") and len(main_recovery_pushes("a20")) == 1, (COLD_CALLS, mt(20), pushes()))
+close(20)
+
+# 7b. ladder on: ask, look, then the -main agent, never the cold call
+_cfg.CFG["ladder"] = {"enabled": True}
+put(21)
+r = hand(21, "home-peer2"); d = float(r["delivered_at"]); cli_row("home-peer2", "idle", d + 60)
+tick(d + 11 * MIN, 21); drain()
+t = time.time() + 11 * MIN + 31 * MIN
+stk(t); stk(t + 11 * MIN + 1); stk(t + 22 * MIN + 2); stk(t + 33 * MIN + 3)
+check("7 ladder on: the peer's item skips the cold call too: never asked, nothing closed or put to the owner, the -main agent asked once", COLD_CALLS == [] and still_theirs(21, "home-peer2") and len(main_recovery_pushes("a21")) == 1, (COLD_CALLS, mt(21), pushes_to("home-delta-main", "a21")))
+close(21)
+_cfg.CFG["ladder"] = {}
+
+# 7c. ladder off, a busy pane: the reminder goes once, no request while the turn runs, the request when it is over
+cli_row("home-peer2", "busy", now0)
+put(22)
+r = hand(22, "home-peer2"); d = float(r["delivered_at"])
+tick(d + 11 * MIN, 22); drain(); d = float(ho(22)["delivered_at"])
+check("7 a busy peer: the reminder went once", len(texts("home-peer2", "a22")) == 2 and bool(ho(22).get("reminded_at")), pushes())
+check("7 …and a pane still busy hours later gets no request to the -main agent", tick(d + 11 * MIN, 22) == [] and tick(d + 3 * 3600, 22) == [] and not main_recovery_pushes("a22") and not ho(22).get("recovery_at") and len(texts("home-peer2", "a22")) == 2, (ho(22), pushes()))
+cli_row("home-peer2", "idle", d + 12 * MIN)
+done = tick(d + 12 * MIN + 60, 22); drain()
+check("7 …the pane's turn over with nothing written: the request goes to the -main agent, once", len(main_recovery_pushes("a22")) == 1 and bool(ho(22).get("recovery_at")), (done, ho(22), pushes()))
+close(22)
+
+# 7d. a project with a background agent keeps the cold rung exactly as before
+cli_row("team-back", "idle", now0)
+hcold_svc.COLD_RUNNER = lambda msg: (COLD_CALLS.append(msg), {"status": "ok", "text": "no json at all here", "duration_s": 0.1, "usage": {}, "note": "stub"})[1]
+before = len(COLD_CALLS)
+item(23, project="projects/alpha", mover="team-back", handoff=H.new_record("team-back", U["team-back"], "home-front", now0 - 3600, **{"delivered_at": now0 - 3500}))
+tick(time.time() + 86400, 23); drain()
+d = float(ho(23).get("delivered_at") or 0) or time.time()
+tick(max(d, time.time()) + 86400 * 2, 23); drain()
+check("7 a project with a background agent: the cold rung is taken as before (the stub was asked)", len(COLD_CALLS) > before, (len(COLD_CALLS), ho(23)))
+close(23)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

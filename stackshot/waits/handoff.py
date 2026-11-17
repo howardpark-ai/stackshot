@@ -424,7 +424,7 @@ def next_step(item: dict[str, Any], r: dict[str, Any] | None, old: str, why: str
             if is_session_name(name) and not is_tried(name) and not env.pane(name):
                 return Step("move", gid, why, old, name, "redirect", sender if is_session_name(sender) else "")
         cold = (r or {}).get("cold") if isinstance((r or {}).get("cold"), dict) else None
-        if env.cold_call and cold_ok and not cold:
+        if env.cold_call and cold_ok and not cold and not env.peer(item, old):      # a peer front agent's item is never put to the cold call: its `close` and `ask_owner` answers would take the item from a mover nobody asked
             return Step("cold", gid, why, old, sender=sender if is_session_name(sender) else "")
         if allow_return and is_session_name(origin) and not is_tried(origin) and not env.is_front(origin, clean(meta.get("project"))) and not env.pane(origin):
             return Step("move", gid, why, old, origin, "return", origin)
@@ -484,7 +484,8 @@ def plan(items: dict[str, dict[str, Any]], env: Env) -> list[Step]:
         if r.get("taken_at") or r.get("no_clock") or env.exempt(item, who):
             continue
         gone = relaunched(r, env, who)
-        due = "" if gone else _due(r, env, who, clock_only=env.peer(item, who))
+        peer = env.peer(item, who)
+        due = "" if gone else _due(r, env, who, clock_only=peer)
         if not (gone or due) or env.anchored(gid, item):      # an anchor scoped to the item and added since the hand-off is a build started: taken (looked at only for an item that would act)
             continue
         start = clock_start(r, env)
@@ -501,6 +502,8 @@ def plan(items: dict[str, dict[str, Any]], env: Env) -> list[Step]:
             if sid:
                 out.append(Step("remind", gid, due, who, sid))
                 continue
+        if peer and env.status(who)[0] == "busy":
+            continue                   # a peer in a long turn that writes nothing to the board is working, not silent: the reminder went, the request to -main waits for a pane whose turn is over
         out.append(next_step(item, r, who, due, env2, gid=gid))
     return out
 

@@ -224,6 +224,8 @@ def ladder_do(act: str, gid: str, who: str, rec: dict[str, Any], now: float, min
     if act == _ladder.MAIN:
         return ladder_main(gid, who, rec, now)
     if act == "cold":
+        if _handoff.handoff_peer(_load(gid), who):      # a peer front agent's item skips the cold call (its `close` and `ask_owner` answers would take the item from a mover nobody asked): on to the -main agent's request
+            return _stallsvc.stall_builder(gid, who, now, minutes)
         return _stallsvc.stall_cold(gid, who, now, minutes)
     return _stallsvc.stall_builder(gid, who, now, minutes)
 
