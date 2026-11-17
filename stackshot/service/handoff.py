@@ -233,14 +233,15 @@ def handoff_peer_tried(item: dict[str, Any], quiet: str, gid: str = "", gone: bo
     handed the item over, the line says so (it is the request's recipient too)."""
     r = _ho.record_of(item) or {}
     m = f"{handoff_minutes():g} min"
+    notice = f"the hand-off notice went to {quiet}" if r.get("delivered_at") else f"the hand-off notice was queued for {quiet}"      # a push that waits (a pane that is gone, an inbox) was not delivered
     if not r.get("delivered_at") and int(r.get("attempts") or 0) >= 2:
         did = f"two pushes of the hand-off notice to {quiet} failed"
     elif _hooks().ladder_on():
         ent = _hooks().stall_load().get(gid) or {} if gid else {}
         step = 0 if ent.get("gone") else int(ent.get("step") or 0)      # RUNGS: ask 0, look 1; the step is the next one due, so 1 means the ask was taken and 2 the look as well
-        did = f"the hand-off notice went to {quiet}" + ((f", was sent again after {m} with no work started, and its pane was looked at later" if step >= 2 else f" and was sent again after {m} with no work started") if step >= 1 else "")
+        did = notice + ((f", was sent again after {m} with no work started, and its pane was looked at later" if step >= 2 else f" and was sent again after {m} with no work started") if step >= 1 else "")
     else:
-        did = f"the hand-off notice went to {quiet}" + (f" and, with no work started after {m}, one reminder" if r.get("reminded_at") else "")
+        did = notice + (f" and, with no work started after {m}, one reminder" if r.get("reminded_at") else "")
     if gone:
         did += f"; {quiet}'s pane is gone"
     try:
@@ -470,7 +471,7 @@ def handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool 
         if handoff_peer(item, str(r.get("to") or "")):      # a front agent has no subagent to start: it takes the item by working it, or hands it back
             return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
                     + (f"; next: {nxt}" if nxt else "")
-                    + f". Take it by marking a step in progress or done, or writing a work line on the item (a note does not count), or hand it back (sender={by!r}). → {_telling.notice_link(gid)}")
+                    + f". Take it by marking a step done, or by writing a work line set to in progress or done (a note does not count), or hand it back (sender={by!r}). → {_telling.notice_link(gid)}")
         return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
                 + (f"; next: {nxt}" if nxt else "")
                 + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
@@ -792,7 +793,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
         gs = [g for g, w, _l, _t in to_remind if w == sid]
         text = next(t for g, w, _l, t in to_remind if g == gs[0]) if len(gs) == 1 else _ho.message(
             lines, "", f"[stackshot] reminder: {{n}} items were handed to you and nothing has been written to them in {handoff_minutes():g} min:",
-            ("\nTake them by marking a step in progress or done, or writing a work line on each item (a note does not count), or hand them back. → " if any(g in peer_remind for g in gs)
+            ("\nTake them by marking a step done, or by writing a work line set to in progress or done on each item (a note does not count), or hand them back. → " if any(g in peer_remind for g in gs)
              else "\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → ") + _inst.BOARD_URL)
         try:
             _telling.tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on

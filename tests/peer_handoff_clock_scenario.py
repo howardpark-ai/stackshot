@@ -13,6 +13,8 @@ no model call.
   7  the rework: a peer's item is never put to the cold call (ladder off and on; a stub that would close the item proves it is not asked), a project with a background agent still is; a peer whose pane is busy gets the
      reminder but no request to the -main agent until the turn is over; the reminder says nothing of a subagent; the request says what was tried
 
+  8  the hander is a session that is no front agent (another project's background agent): with the ladder off the item is never returned to it; the reminder, then the -main agent's request, and the hander is told nothing
+
     tests/run-suite peer_handoff_clock        -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
@@ -183,7 +185,7 @@ done = tick(d1 + 11 * MIN, 1); drain()
 check("1 take minutes later ONE reminder goes to the new mover alone, worded as a reminder, and the record says so", done == ["a1"] and len(texts("home-peer2", "a1")) == 2 and texts("home-peer2", "a1")[1].startswith("[stackshot] reminder: a1 ")
       and bool(ho(1).get("reminded_at")), (ho(1), pushes()))
 d1b = float(ho(1)["delivered_at"])
-check("1 …the reminder fits a front agent: no subagent to start, take it by a step in progress or done or a work line, or hand it back to the hander", "subagent" not in texts("home-peer2", "a1")[1] and "marking a step in progress or done, or writing a work line on the item (a note does not count)" in texts("home-peer2", "a1")[1]
+check("1 …the reminder fits a front agent: no subagent to start, take it by a step marked done or a work line set to in progress or done, or hand it back to the hander", "subagent" not in texts("home-peer2", "a1")[1] and "marking a step done, or by writing a work line set to in progress or done (a note does not count)" in texts("home-peer2", "a1")[1]
       and "hand it back (sender='home-peer')" in texts("home-peer2", "a1")[1], texts("home-peer2", "a1"))
 check("1 …the hander, the project's -main agent and the fleet's builder are told nothing", not pushes_to("home-peer") and not pushes_to("home-delta-main") and not pushes_to("home-fleet"), pushes())
 check("1 …and nothing goes down the ladder before the next take minutes", tick(d1b + 5 * MIN, 1) == [] and not ho(1).get("recovery_at"), ho(1))
@@ -332,6 +334,12 @@ tick(max(d, time.time()) + 86400 * 2, 23); drain()
 check("7 a project with a background agent: the cold rung is taken as before (the stub was asked)", len(COLD_CALLS) > before, (len(COLD_CALLS), ho(23)))
 close(23)
 
+# what the reminder claims is what takes the item (H.started): a step marked done, a work line in progress or done; a note, or a work line only defined, does not
+bef = {"status": "open", "metadata": {"owner": "o", "next": "x: a", "steps": [{"text": "x: a", "status": "open"}]}}
+check("7 the reminder's claim is true: a work line set to in progress or to done takes the hand-off, a work line only defined and a note do not",
+      bool(H.started(bef, {**bef, "metadata": {**bef["metadata"], "work": [{"id": "1", "text": "t", "state": "in progress"}]}})) and bool(H.started(bef, {**bef, "metadata": {**bef["metadata"], "work": [{"id": "1", "text": "t", "state": "done"}]}}))
+      and not H.started(bef, {**bef, "metadata": {**bef["metadata"], "work": [{"id": "1", "text": "t", "state": "defined"}]}}) and not H.started(bef, {**bef, "metadata": {**bef["metadata"], "next": "x: queued"}}), None)
+
 # 7e. the request's "what the ladder tried" follows the record: a pane that is gone before the clock runs out was never reminded (ladder off) or asked (ladder on)
 set_cfg(cold_call=False)
 cli_row("home-peer2", "idle", now0)
@@ -365,6 +373,28 @@ mp = main_recovery_pushes("a26")
 check("7 reminded first and gone after: both are said", len(mp) == 1 and "went to home-peer2 and, with no work started after 10 min, one reminder; home-peer2's pane is gone." in mp[0][1], mp)
 close(26); set_gone("home-peer2", False)
 cli_row("home-peer2", "idle", now0)
+
+# 7f. a notice that was only queued is not said to have gone
+cli_row("home-peer2", "idle", now0)
+item(29, project="projects/delta", mover="home-peer2", handoff=H.new_record("home-peer2", U["home-peer2"], "home-peer", now0 - 3600, queued="inbox", queued_at=now0 - 3500))
+set_gone("home-peer2")
+done = tick(time.time() + 3600, 29); drain()
+mp = main_recovery_pushes("a29")
+check("7 a notice that waited in the inbox and a pane that is gone: the request says the notice was queued, not that it went", len(mp) == 1 and "What the ladder tried: the hand-off notice was queued for home-peer2; home-peer2's pane is gone." in mp[0][1], (done, mp))
+close(29); set_gone("home-peer2", False)
+
+# ================================================================ 8. a hander that is no front agent (the front-only hand-over rule lets any listed session hand over): the item is never returned to it
+cli_row("home-peer2", "idle", now0); cli_row("team-back", "idle", now0)
+set_cfg(cold_call=False)
+item(30, project="projects/delta", mover="home-peer2", handoff=H.new_record("home-peer2", U["home-peer2"], "team-back", now0 - 3600, **{"delivered_at": now0 - 3500}))
+check("8 a background agent of another project handing over to the front-only project's front agent is a peer hand-off", handoff_svc.handoff_peer({**rd(30), "gid": "a30"}, "home-peer2"), ho(30))
+tick(now0 + 11 * MIN, 30); drain(); d = float(ho(30)["delivered_at"])
+check("8 ladder off, after the first clock: the new mover is reminded (once), the hander told nothing", bool(ho(30).get("reminded_at")) and len(texts("home-peer2", "a30")) == 1 and not pushes_to("team-back", "a30"), (ho(30), pushes()))
+done = tick(d + 11 * MIN, 30); drain()
+mp = main_recovery_pushes("a30")
+check("8 …after the second clock the request goes to the -main agent and the mover is unchanged: the item does not go back to the hander", len(mp) == 1 and mt(30).get("mover") == "home-peer2" and ho(30).get("to") == "home-peer2" and bool(ho(30).get("recovery_at")), (done, mt(30), ho(30), mp))
+check("8 …and the hander got nothing at any step: no 'it came to you', no 'comes back to you', no request", not pushes_to("team-back", "a30"), pushes_to("team-back", "a30"))
+close(30)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

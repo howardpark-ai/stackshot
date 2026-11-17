@@ -27,8 +27,8 @@ the sender last): a delivered hand-off not taken within [model] handoff_minutes 
 CLI registry's busy to idle or shell, read by the caller). Section 5, in order: the project's builder (the background agent whose mandate says build, else maintain, merge or engineer: router_live.builder's pick), the cold `claude -p` call (cold_call.py), the sender (the last fallback; never the owner, a script or the server), and when none of these can take it the item is
 handed to the fleet's builder as a recovery request (`recover`: the item stays with its mover and the request is one message; the server sends it to the project's -main agent instead when the project is
 front-only, `anchors.front_only`: no background agent on its map, so the builder step found no one: `_recovery_target` in `service/pane_recovery.py`). A turn that ends in a relaunch is no answer: when the mover's pane was relaunched (a new process) after the notice was delivered and before it wrote, the notice died with the old process, so
-the ladder does not move: the notice is sent again once, to the pane that is back, and the clock restarts from the re-send (`resend`); a second loss goes down the ladder as above. A mover whose session is gone goes down the same ladder without the sender. The owner and a front agent (a session he talks to: an item notice never wakes one) are exempt from the clock and the turn-end rule, with one exception: in a front-only project (no background agent on its map) a hand-off one front agent made to
-a front agent of the same project, made by a session some page lists (`Env.peer`) is clocked, by the take minutes alone (never by the turn-end rule), unless its target is the project's -main agent: nothing above -main could be asked, so that hand-off stays exempt.
+the ladder does not move: the notice is sent again once, to the pane that is back, and the clock restarts from the re-send (`resend`); a second loss goes down the ladder as above. A mover whose session is gone goes down the same ladder without the sender. The owner and a front agent (a session he talks to: an item notice never wakes one) are exempt from the clock and the turn-end rule, with one exception: in a front-only project (no background agent on its map) a hand-off made by a session some
+page lists to a front agent of the item's own project (`Env.peer`) is clocked, by the take minutes alone (never by the turn-end rule), unless its target is the project's -main agent: nothing above -main could be asked, so that hand-off stays exempt.
 
 A hand-off to a background agent, or to a peer front agent (a session `Env.remind` resolves, fail closed) that is not taken within `handoff_minutes` of its delivery gets ONE reminder to that session first (`remind`: "start
 its subagent alongside the current work"): for such an agent the turn-end rule does not hurry the reminder, the clock alone does. Only when it is still not taken after another `handoff_minutes`
@@ -412,9 +412,9 @@ def _due(r: dict[str, Any], env: Env, who: str, clock_only: bool = False) -> str
 
 def next_step(item: dict[str, Any], r: dict[str, Any] | None, old: str, why: str, env: Env, *, gid: str = "", allow_return: bool = True, cold_ok: bool = True) -> Step:
     """Section 5, in order, for an item whose mover `old` cannot or did not take it: the project's builder when not yet tried and with a pane; the cold call, once; the sender
-    (`allow_return`, and not the owner, a script or the server); else a `recover` step. `r` is the open record (None when the item has none)."""
+    (`allow_return`, and not the owner, a script or the server, nor the hander of a peer hand-off); else a `recover` step. `r` is the open record (None when the item has none)."""
     meta = item.get("metadata") or {}
-    allow_return = allow_return and not (r or {}).get("stall") and not env.ladder      # the stall pass moves an item on from a mover with no turn; it never sends it back to a sender, and neither does the one ladder
+    allow_return = allow_return and not (r or {}).get("stall") and not env.ladder and not env.peer(item, old)      # the stall pass moves an item on from a mover with no turn; it never sends it back to a sender, and neither does the one ladder, nor a peer hand-off (the item is the new mover's, whichever session handed it: the last rung is the request to the -main agent)
     tried = [clean(x) for x in [*((r or {}).get("tried") or []), old] if clean(x)]
     is_tried = lambda n: any(env.same(n, t) for t in tried)
     sender = clean((r or {}).get("from"))
