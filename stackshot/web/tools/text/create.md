@@ -72,7 +72,7 @@ step, kept only while he is the mover: on an item a session moves it is dropped,
 post_wake_mover, the old name of mover) to a front agent gets the project's builder instead (the reply and History say so; send it again
 to keep it as sent; with no builder it is refused, except mover= from a session a project page lists to a front
 agent of the item's own project when it has no background agent: the agent is told (then and post_wake_mover stay
-refused); message the front agent for a check or answer only it can give). With no mover= an alive
+refused)). With no mover= an alive
 item is moved by the project's builder (for a page the instance maps to a builder, that one when the project lists
 it), else its -main agent, never by its creator; an item that waits on {{OWNER}}'s call (needs=decision with its ask)
 is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a
@@ -81,7 +81,8 @@ decision) has him as mover, and naming a session as mover beside that state is r
 none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name
 a session as mover and put his part in a next line that starts `{{OWNER}}:`). A step of next that opens with a front
 agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or
-message the front agent. owner is not a parameter any more: it is still accepted for a few days with a note in the
+send `For <agent>,` to its project page; with no background agent there, its front agents may take the item
+by mover= or a step behind an open step. owner is not a parameter any more: it is still accepted for a few days with a note in the
 reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 |
 p2 | p3, shown but not sorted. {{ITEM_FORM}} {{NEEDS_FORM}}
 {{SAID_FORM}}{{CHECK_FORM}}{{STEP_PROOF_FORM}}{{CAP_FORM}}{{AGENT_DUE_FORM}}{{MODEL_FORM}}{{DRAFT_FORM}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{CONTACT_FORM}}The

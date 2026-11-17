@@ -8,6 +8,7 @@ which the pass reaches through two members of audit_run.Env, so a run without th
   hours()                           [audit] front_step_move_hours (default 3; 0 = off)
   step_hash(text)                   what identifies a step for the clock: a short hash of the step as the checklist compares it (steps.key)
   front_opener(name, roles)         is the step's opener a front agent (role front or keeper) or a retired session, by the role map
+  is_peer(name, item, roles, front_only)   a live front agent of the item's own project in a front-only project: its step is no front agent's step here (the write check passes it behind an open step, the step hand-over moves the item to it, the monthly count leaves it out); the reword below does not read it
   candidates(findings, items, by_shown, roles)   the stuck-elsewhere findings the rule covers, each with its step, its hash and who it moves to
   reopen(text, name)                the step with its first line opening with `name` (the rest of the text as it was); "" when its first line has no opener
   clock(meta, h, mover), moved_before(meta, h)   the item's clock record for the step with hash h under that mover (the epoch it was first seen stuck), and whether that step moved already
@@ -34,6 +35,7 @@ from stackshot.audit import audit_checks as _ac
 from stackshot.core import config as _cfg
 from stackshot.model import model as _model
 from stackshot.model import steps as _steps
+from stackshot.waits import handover as _hv
 
 CLOCK = "stuck_since"
 MOVED = "stuck_moved"
@@ -77,10 +79,30 @@ def front_opener(name: str, roles: dict[str, dict[str, Any]], front_roles: tuple
     return bool(r) and (bool(r.get("retired")) or r.get("role") in front_roles)
 
 
+def is_peer(name: str, item: dict[str, Any], roles: dict[str, dict[str, Any]], front_only: Callable[[str], bool] | None, step: str = "") -> bool:
+    """Is `name`, the opener of one of the item's steps (`step`, its text), a live front agent of the item's own project in a front-only project (handover.peer_opener)? The write check lets such a step pass and
+    the step hand-over moves the item to it, so the monthly count does not call it refused (the reword below does not read it: it only sees a first open step, which no hand-over reaches). Not when the hand-over tried and could not reach the peer (`metadata.handover`
+    is a fallback for this very step): the item stays with its mover and nothing retries, so the step is stuck like a front agent's and the reword applies again. False without `front_only` (the project's test)
+    and when it fails: the old behavior."""
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    proj = str(meta.get("project") or "")
+    row = _role(name, roles)
+    if not (proj and front_only and row.get("role") == "front" and not row.get("retired")):
+        return False
+    if step and _hv.handled(meta, _hv.step_hash(step), _hv.FALLBACK):
+        return False
+    try:
+        return _hv.peer_opener(row, proj, front_only)
+    except Exception:  # noqa: BLE001  — a project read that fails leaves the step as it was: a front agent's
+        return False
+
+
 def candidates(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]], by_shown: dict[str, str], roles: dict[str, dict[str, Any]],
                front_roles: tuple[str, ...]) -> dict[str, dict[str, Any]]:
     """{gid: {finding, opener, mover, step, hash}} for the stuck-elsewhere findings this rule covers: the step's opener is a front agent or a retired session, and the item's mover is a session that is not
-    retired itself (the owner, nobody and an outside party have no session to move it to). A finding about a background agent's step is not covered: that agent gets the finding itself and can answer it."""
+    retired itself (the owner, nobody and an outside party have no session to move it to). A finding about a background agent's step is not covered: that agent gets the finding itself and can answer it.
+    A live front peer of the item's project in a front-only project is covered like any front agent: the finding is about the item's FIRST open step, so no open step is before it and no done step will make the
+    hand-over carry the item to the peer (a peer step waiting its turn is never the first open step, so it is never a candidate). An item whose step before the peer's was dropped, or whose hand-over fell back, is stuck there."""
     out: dict[str, dict[str, Any]] = {}
     for f in findings:
         if f.get("category") != "stuck-elsewhere":
@@ -184,10 +206,11 @@ def held(text: Any, mover: str, is_front: Callable[[str], bool], same: Callable[
     return nm
 
 
-def month_count(items: dict[str, dict[str, Any]], roles: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
+def month_count(items: dict[str, dict[str, Any]], roles: dict[str, dict[str, Any]], now: float, front_only: Callable[[str], bool] | None = None) -> dict[str, Any]:
     """The monthly number that shows whether front agents still take steps nothing can wake them for: over the last COUNT_DAYS days, `closed` = steps opening with a front agent that were closed (done or
     dropped, on an open or a closed item), `by_other` = of those, the ones a session other than the front agent closed (a server mark is no session); and `open` = the open steps the write check
-    (held) would refuse now, with `ids` the items they sit on. The front agent test is the write check's: role front, not retired."""
+    (held) would refuse now, with `ids` the items they sit on. The front agent test is the write check's: role front, not retired. A peer's step (is_peer) is no front-held step: it is left out of `closed` and `by_other`,
+    and of `open` unless it is the first open step (the write check refuses that one)."""
     isf = lambda n: (lambda r: r.get("role") == "front" and not r.get("retired"))(_role(n, roles))
     same = lambda a, b: _ac._norm(a) == _ac._norm(b)
     since = now - COUNT_DAYS * 86400
@@ -200,7 +223,7 @@ def month_count(items: dict[str, dict[str, Any]], roles: dict[str, dict[str, Any
             if s["status"] == _steps.OPEN or not isinstance(at, (int, float)) or isinstance(at, bool) or at < since:
                 continue
             nm = _steps.opener(s["text"])
-            if not nm or _model.is_owner(nm) or not isf(nm):
+            if not nm or _model.is_owner(nm) or not isf(nm) or is_peer(nm, it, roles, front_only, s["text"]):      # a peer's step is no front-held step: the hand-over moves the item to it
                 continue
             closed += 1
             by = str(s.get("by") or "").strip()
@@ -209,7 +232,10 @@ def month_count(items: dict[str, dict[str, Any]], roles: dict[str, dict[str, Any
         if it.get("status") != "open":
             continue
         mover = _ac._item_view(items, gid)[3]
-        n = sum(1 for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN and held(s["text"], mover, isf, same))
+        view = _steps.view(meta, keeper=str(meta.get("owner") or ""))
+        # the write check's own rule: a peer's step is allowed only with an open step before it (handover.open_before), so a peer's first open step is one it would refuse now
+        n = sum(1 for i, s in enumerate(view) if s["status"] == _steps.OPEN
+                and held(s["text"], mover, lambda nm: isf(nm) and not (is_peer(nm, it, roles, front_only, s["text"]) and _hv.open_before(view, i)), same))
         if n:
             n_open += n
             ids.append(gid)
