@@ -197,7 +197,7 @@ fput(205, mover=BUILD)
 out = _wt_update.stackshot_update(item_id="a205", sender=FRONT, mover=OTHER)
 check("2 …a background mover set by a front agent", holder(205) == OTHER and not log(205), out[:200])
 fput(207, mover=OTHER, project="projects/echo")
-msg = refusal(lambda: _wt_update.stackshot_update(item_id="a207", sender=OTHER, mover="home-echo-main", next=f"{OTHER}: x"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a207", sender="home-stranger", mover="home-echo-main", next=f"{OTHER}: x"))      # a session no page lists (a listed one hands it through: builderless_handover)
 check("2 a project with no builder keeps the refusal, as before (nothing to substitute)", msg.startswith("Refused:") and "no builder and no background agent" in msg and holder(207) == OTHER, (msg, mt(207)))
 
 # ================================================================ 3. wait_reason

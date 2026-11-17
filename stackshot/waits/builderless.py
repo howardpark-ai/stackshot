@@ -5,8 +5,9 @@ holds their pure parts (the server supplies what needs the project registry):
 
   answer_target(meta, usable, keeper)   who takes the item once the owner's step is answered and the item names no `then`: the session the item's next open step names (the step's
                                         owner line), else the item's stored contact, else "" (the caller falls back to the project's -main agent, as before)
-  pair_allowed(sender, target, front_only, item_project)  may one front agent hand an item to another through `mover=`: both live front agents of the project the item is filed under (or
-                                        a page above it), the project front-only
+  handover_allowed(sender, target, front_only, item_project)  may a session hand an item to a front agent through `mover=`: the project the item is filed under is front-only and the target is a
+                                        live front agent of it (listed on that page or a page above it); the sender is any live session some project page lists, front or background,
+                                        of any project
 
 A project with no agents map (a one-session page) counts as having no builder too, but it lists no front agent, so neither rule finds a session to name there and the old fallback stands.
 
@@ -41,7 +42,7 @@ def next_named_step(meta: dict[str, Any], keeper: str = "") -> str:
 
 def answer_target(meta: dict[str, Any], usable: Callable[[str], bool], keeper: str = "") -> str:
     """Who takes an item of a front-only project (anchors.front_only) when the owner's step is answered and the item stores no `then`: the session its next open step names, when `usable(name)` says it is a
-    live front agent of the item's project (the server reads the roles; the same test as pair_allowed, so a step line does no more than `mover=`); else the item's stored contact when that is usable; else "". The caller keeps the project's -main agent as the last resort."""
+    live front agent of the item's project (the server reads the roles; the same target test as handover_allowed, so a step line does no more than `mover=`); else the item's stored contact when that is usable; else "". The caller keeps the project's -main agent as the last resort."""
     nm = next_named_step(meta, keeper)
     if nm and usable(nm):
         return nm
@@ -51,9 +52,11 @@ def answer_target(meta: dict[str, Any], usable: Callable[[str], bool], keeper: s
     return ""
 
 
-def pair_allowed(sender: dict[str, Any] | None, target: dict[str, Any] | None, front_only: bool, item_project: str) -> bool:
-    """May `sender` hand an item filed under `item_project` to `target` through `mover=` although the target is a front agent? Only when the project is front-only (`front_only`, from anchors.front_only) and both
-    are live front agents of the project the item is filed under (front_of), listed on one and the same page. Each is a row of the session roles; None for a session no page lists."""
-    if not front_only or not front_of(sender, item_project) or not front_of(target, item_project):
+def handover_allowed(sender: dict[str, Any] | None, target: dict[str, Any] | None, front_only: bool, item_project: str) -> bool:
+    """May `sender` hand an item filed under `item_project` to `target` through `mover=` although the target is a front agent (a front agent gets no hand-off notice from another session, so the write is
+    refused or the builder is substituted; here the target is told instead)? Only when the project is front-only (`front_only`, from anchors.front_only: it has no builder to substitute), the target is a
+    live front agent of the project the item is filed under (front_of: a hand-over cannot point at an unrelated project's front agent) and the sender is any live session some project page lists: a front
+    agent, a background agent or a one-session project's own session, of this project or of another. Each is a row of the session roles; None for a session no page lists, and a retired row is no session."""
+    if not front_only or not front_of(target, item_project):
         return False
-    return str(sender.get("project") or "").strip().strip("/") == str(target.get("project") or "").strip().strip("/")
+    return bool(sender) and not sender.get("retired")

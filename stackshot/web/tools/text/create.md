@@ -69,9 +69,10 @@ copy, and taken unchecked while that copy cannot be read); a sub-page counts and
 own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID); the server records it as the
 item's creator (a background agent may create items too). mover: who moves the item now (and then= after his answer or
 step, kept only while he is the mover: on an item a session moves it is dropped, with a note in the reply); a front agent gets no hand-off notice, so a create from another session that sets mover or then (or
-post_wake_mover, the old name of mover) to a front agent gets the project's builder instead (the reply and History say so; send the same value
-again to keep it as sent; with no builder it is refused, except a mover set by a front agent of the item's project to
-another of its front agents; message the front agent for a check or answer only it can give). With no mover= an alive
+post_wake_mover, the old name of mover) to a front agent gets the project's builder instead (the reply and History say so; send it again
+to keep it as sent; with no builder it is refused, except mover= from a session a project page lists to a front
+agent of the item's own project when it has no background agent: the agent is told (then and post_wake_mover stay
+refused); message the front agent for a check or answer only it can give). With no mover= an alive
 item is moved by the project's builder (for a page the instance maps to a builder, that one when the project lists
 it), else its -main agent, never by its creator; an item that waits on {{OWNER}}'s call (needs=decision with its ask)
 is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a

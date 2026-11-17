@@ -49,15 +49,15 @@ def _role_of(name: str, nm: dict[str, str] | None = None) -> tuple[dict[str, Any
     return roles, _role_name(roles, name, label)
 
 
-def _front_pair_ok(sender: str, key: str, project: str) -> bool:
-    """May `sender` hand an item of `project` to the front agent `key` (builderless.pair_allowed): both are live front agents of the project the item is filed under (one page), and the project is front-only (anchors.front_only). A project with no agents map has no front agent to name."""
+def _front_handover_ok(sender: str, key: str, project: str) -> bool:
+    """May `sender` hand an item of `project` to the front agent `key` (builderless.handover_allowed): the project the item is filed under is front-only (anchors.front_only), `key` is a live front agent of it, and `sender` is any live session some project page lists (of this project or another). A project with no agents map has no front agent to name."""
     try:
         s = str(sender or "").strip()
         if not s:
             return False
         nm = _anc.names()
         roles, skey = _role_of(s, nm)
-        return _bl.pair_allowed(roles.get(skey) if skey else None, roles.get(key), _anc.front_only(project), project)
+        return _bl.handover_allowed(roles.get(skey) if skey else None, roles.get(key), _anc.front_only(project), project)
     except Exception:  # noqa: BLE001  — the relaxation is an extra: a failed read keeps the refusal
         return False
 

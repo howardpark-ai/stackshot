@@ -298,7 +298,7 @@ def install_late() -> None:
     # the recovery request, the page store, the publish and the session ids. A hook leaves this table when the area that holds it moves under service/.
     _handoff_hooks.install(_handoff_hooks.Hooks(
         after_open=_late_in(_item_read, "_after_open"),
-        front_pair_ok=_late_in(_holders, "_front_pair_ok"),
+        front_handover_ok=_late_in(_holders, "_front_handover_ok"),
         item_refs=_late_in(_agent_names, "_item_refs"),
         ladder_enter=lambda *a, **k: _laddersvc.ladder_enter(*a, **k),
         ladder_first=lambda *a, **k: _laddersvc.ladder_first(*a, **k),
@@ -498,7 +498,7 @@ def install_late() -> None:
         eff_state=_late_in(_mover_steps, "_eff_state"),
         follow_superseded=_late_in(_mover_steps, "_follow_superseded"),
         front_held=lambda *a, **k: _front_held(*a, **k),      # this module's own function, looked up at each call (it was the server's, looked up on it at each call)
-        front_pair_ok=_late_in(_holders, "_front_pair_ok"),
+        front_handover_ok=_late_in(_holders, "_front_handover_ok"),
         handoffs_in=_late_in(_agents, "_handoffs_in"),
         handover_kind=lambda *a, **k: _proofs.handover_kind(*a, **k),
         hub_sessions=_late_in(_item_read, "_hub_sessions"),
