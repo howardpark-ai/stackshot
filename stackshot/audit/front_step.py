@@ -8,7 +8,7 @@ which the pass reaches through two members of audit_run.Env, so a run without th
   hours()                           [audit] front_step_move_hours (default 3; 0 = off)
   step_hash(text)                   what identifies a step for the clock: a short hash of the step as the checklist compares it (steps.key)
   front_opener(name, roles)         is the step's opener a front agent (role front or keeper) or a retired session, by the role map
-  is_peer(name, item, roles, front_only)   a live front agent of the item's own project in a front-only project: its step is no front agent's step here (the write check passes it, the step hand-over moves the item to it, the rule below never rewords it)
+  is_peer(name, item, roles, front_only)   a live front agent of the item's own project in a front-only project: its step is no front agent's step here (the write check passes it behind an open step, the step hand-over moves the item to it, the monthly count leaves it out); the reword below does not read it
   candidates(findings, items, by_shown, roles)   the stuck-elsewhere findings the rule covers, each with its step, its hash and who it moves to
   reopen(text, name)                the step with its first line opening with `name` (the rest of the text as it was); "" when its first line has no opener
   clock(meta, h, mover), moved_before(meta, h)   the item's clock record for the step with hash h under that mover (the epoch it was first seen stuck), and whether that step moved already
@@ -81,7 +81,7 @@ def front_opener(name: str, roles: dict[str, dict[str, Any]], front_roles: tuple
 
 def is_peer(name: str, item: dict[str, Any], roles: dict[str, dict[str, Any]], front_only: Callable[[str], bool] | None, step: str = "") -> bool:
     """Is `name`, the opener of one of the item's steps (`step`, its text), a live front agent of the item's own project in a front-only project (handover.peer_opener)? The write check lets such a step pass and
-    the step hand-over moves the item to it, so the rule below does not reword it and the monthly count does not call it refused. Not when the hand-over tried and could not reach the peer (`metadata.handover`
+    the step hand-over moves the item to it, so the monthly count does not call it refused (the reword below does not read it: it only sees a first open step, which no hand-over reaches). Not when the hand-over tried and could not reach the peer (`metadata.handover`
     is a fallback for this very step): the item stays with its mover and nothing retries, so the step is stuck like a front agent's and the reword applies again. False without `front_only` (the project's test)
     and when it fails: the old behavior."""
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
@@ -98,10 +98,11 @@ def is_peer(name: str, item: dict[str, Any], roles: dict[str, dict[str, Any]], f
 
 
 def candidates(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]], by_shown: dict[str, str], roles: dict[str, dict[str, Any]],
-               front_roles: tuple[str, ...], front_only: Callable[[str], bool] | None = None) -> dict[str, dict[str, Any]]:
+               front_roles: tuple[str, ...]) -> dict[str, dict[str, Any]]:
     """{gid: {finding, opener, mover, step, hash}} for the stuck-elsewhere findings this rule covers: the step's opener is a front agent or a retired session, and the item's mover is a session that is not
     retired itself (the owner, nobody and an outside party have no session to move it to). A finding about a background agent's step is not covered: that agent gets the finding itself and can answer it.
-    Nor is a step that opens with a live front peer of the item's project in a front-only project (`front_only` given, is_peer): the step hand-over hands the item to that peer, who can act on it."""
+    A live front peer of the item's project in a front-only project is covered like any front agent: the finding is about the item's FIRST open step, so no open step is before it and no done step will make the
+    hand-over carry the item to the peer (a peer step waiting its turn is never the first open step, so it is never a candidate). An item whose step before the peer's was dropped, or whose hand-over fell back, is stuck there."""
     out: dict[str, dict[str, Any]] = {}
     for f in findings:
         if f.get("category") != "stuck-elsewhere":
@@ -114,7 +115,7 @@ def candidates(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]],
         if _ac._no_session(mover) or not front_opener(nm, roles, front_roles) or _role(mover, roles).get("retired"):
             continue
         step = _ac.first_open_step(item.get("metadata") or {})
-        if not step or _steps.opener(step) != nm or is_peer(nm, item, roles, front_only, step):
+        if not step or _steps.opener(step) != nm:
             continue
         out[gid] = {"finding": f, "opener": nm, "mover": mover, "step": step, "hash": step_hash(step)}
     return out

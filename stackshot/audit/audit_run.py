@@ -1538,7 +1538,7 @@ def front_step_pass(findings: list[dict[str, Any]], items: dict[str, dict[str, A
     roles = env.role_map()
     if hrs > 0 and not roles:
         return findings, rep          # the role map is briefly empty now and then: no one is a front agent for this pass, which must not drop the clocks
-    cands = _fs.candidates(findings, items, by_shown, roles, FRONT_ROLES, env.is_front_only) if hrs > 0 else {}      # off: no step is watched, and the sweep below drops the clocks a longer setting left, so turning it on again starts clean
+    cands = _fs.candidates(findings, items, by_shown, roles, FRONT_ROLES) if hrs > 0 else {}      # off: no step is watched, and the sweep below drops the clocks a longer setting left, so turning it on again starts clean
     cands = {g: c for g, c in cands.items() if not _fs.moved_before(items[g].get("metadata") or {}, c["hash"])}      # a step moves once
     moved: set[str] = set()
     for gid, c in cands.items():
