@@ -29,7 +29,8 @@ page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type
 (T / "store/projects.json").write_text(json.dumps({"pages": {
     "projects/delta": page(title="Delta", name="Delta", agents={MAIN: "front", SIDE: "answers questions", BUILD: "builds it", REVIEW: "reviews it"},
                            back_agents={BUILD: "builds it", REVIEW: "reviews it"}),
-    "projects/echo": page(title="Echo", name="Echo", agents={ECHO: "front"})}}))
+    "projects/echo": page(title="Echo", name="Echo", agents={ECHO: "front"}),
+    "projects/foxtrot": page(title="Foxtrot", name="Foxtrot", agents={"home-foxtrot-main": "front", "home-foxtrot-watch": "watches the clock"}, back_agents={"home-foxtrot-watch": "watches the clock"})}}))
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
@@ -147,6 +148,11 @@ put(10, mover=SIDE, project="projects/echo")
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=STRANGER, mover=ECHO))
 check("no builder: the refusal says there is no builder, names the For <peer> path, with no placeholder and no plain message(to=<agent>) advice", msg.startswith("Refused:") and "has no builder to hand it to" in msg and "<background agent>" not in msg
       and 'with the first line "For home-echo-main, ..."' in msg and f"message(to={ECHO}" not in msg and msg.count("no builder") == 1, msg)
+
+# ---- a project whose only background agent does not build has no builder: the refusal stands, nothing is substituted by that agent
+put(11, mover=SIDE, project="projects/foxtrot")
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a11", sender=STRANGER, mover="home-foxtrot-main"))
+check("a background agent that does not build is no builder: the front-only refusal, and the agent is not substituted", msg.startswith("Refused:") and "has no builder to hand it to" in msg and "home-foxtrot-watch" not in msg, msg)
 
 # ---- a background agent only the project record holds (its page line still owed) is no builder until the page lists it: the project is front-only and the refusal is the same
 from stackshot.projects import projects as _P

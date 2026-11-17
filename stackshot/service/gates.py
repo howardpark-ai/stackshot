@@ -52,6 +52,7 @@ from stackshot.projects import brains as _brains
 from stackshot.projects import pages as _pages
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry, _roles_sync_safe
+from stackshot.router import router_live as _router_live
 from stackshot.service import handoff as _handoff
 from stackshot.service import telling as _telling
 from stackshot.service import watching as _watching
@@ -158,6 +159,20 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
     return key, proj, list(builder), hub
 
 
+def _for_peer(key: str, page: str) -> str:
+    """How to ask the front agent `key`, listed on `page`, for a check or an answer only it can give: a message to the top-level page with `For <key>,` on its first line, the one a plain message to a front agent is
+    refused for. The router reads that line against the agents of the top-level page (router.for_agent_rule, router_live.agent_root), so it is named only when that page lists `key`; "" when it does not (a peer
+    listed only on a sub-page) or the read fails."""
+    try:
+        reg = _anc.registry()
+        top = _anc.pilot_root(page) or page
+        if any(str(k).lower() == key.lower() for k in ((reg.get(_router_live.agent_root(top, reg)) or {}).get("agents") or {})):
+            return f"message(to={top!r}) with the first line \"For {key}, ...\""
+    except Exception:  # noqa: BLE001  — the wording only
+        pass
+    return ""
+
+
 def _front_only_why(key: str, project: str, sender: str) -> str:
     """Why a hand-over to the front agent `key` of a front-only project was refused, as the clause that follows "this call was refused because": the half that failed (front_handover_ok), the sender
     (retired, or no session a page lists) and / or the target (not a live front agent of the item's project). A failed read names both halves."""
@@ -186,14 +201,15 @@ def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", pr
     states only the rule that applies, a live session some project page lists may name a live front agent of the item's project in `mover` (told by a hand-off notice), `then` or `post_wake_mover` (told
     by the answer or the wake), which half of that this call failed (_front_only_why), and the path to the peer for a check: the page key with `For <peer>,` first."""
     key, proj, builder, hub = case
+    via = _for_peer(key, proj)
     if not builder:
         what = project or "the project"
         return ToolError(f"Refused: {field}={key} names {key}, a front agent of {proj}, for an item of {what}, and {hub or 'The project'} has no builder to hand it to, so the item stays with its current mover. "
                          f"A live session some project page lists may name a live front agent of {what} in mover= (told by a hand-off notice), then= or post_wake_mover= (told by the owner's answer or the wake); "
-                         f"this call was refused because {_front_only_why(key, project, sender)}. To ask {key} for a check or an answer, message(to={proj!r}) with the first line \"For {key}, ...\".")
+                         f"this call was refused because {_front_only_why(key, project, sender)}." + (f" To ask {key} for a check or an answer, {via}." if via else ""))
     return ToolError(f"Refused: {key} is a user-facing agent of {proj}, and {field}={key} from another session hands it an item it gets no notice of "
-                     f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). Hand build work to the project's builder, {builder[0]} ({field}={builder[0]}); "
-                     f"for a check or an answer only {key} can give, message(to={proj!r}) with the first line \"For {key}, ...\".")
+                     f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). Hand build work to the project's builder, {builder[0]} ({field}={builder[0]})"
+                     + (f"; for a check or an answer only {key} can give, {via}." if via else "."))
 
 
 def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None") -> "tuple[str, str, list[tuple[str, str, str]]]":
@@ -216,10 +232,12 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
         if h.front_handover_ok(sender, key, project):      # a front-only project (anchors.front_only): any session a project page lists may name one of its front agents; a mover is told by a notice (handoff_notify), a then or post_wake_mover by the answer or the wake
-            return value, f"\n(note: {project} has no builder, so {field}={key} stays as sent; {key} is a front agent of the project and " + ("is told it is handed the item)" if field == "mover" else "takes the item when the answer or the wake comes, told then)"), []
+            return value, (f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is a front agent of the project and is told it is handed the item)" if field == "mover" else
+                           f"\n(note: {project} has no builder, so {field}={key} is not replaced by one; {key} is a front agent of the project, and if the item keeps it, the owner's answer or the wake hands it the item and tells it)"), []
         raise _front_mover_refusal(field, case, project, sender)
+    via = _for_peer(key, proj)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
-                        f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent; for a check or an answer only {key} can give, message(to={proj!r}) with the first line \"For {key}, ...\")"), \
+                        f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent" + (f"; for a check or an answer only {key} can give, {via}" if via else "") + ")"), \
         [(_sf.FRONT_MOVER, _sf.bind(token, by, now), f"{field} {key} → {builder[0]}: {key} is a user-facing agent and gets no hand-off notice from another session; sending {field}={key} again keeps it as sent")]
 
 
@@ -272,7 +290,7 @@ def gate_needs_session(name: str, project: str, owner: str, also: str = "") -> s
     hub, stew, back, front, keeper = h.hub_sessions(project)
     if key and roles[key]["role"] == "front":
         if _anc.front_only(project) and _bl.front_of(roles[key], project):      # no builder: the peer's part is a hand-over (mover=) or its own item
-            raise ToolError(f"Refused: {key} is a front agent of {roles[key]['project']}, and needs names a background agent or this project's keeper, which {hub or 'the project'} lacks. "
+            raise ToolError(f"Refused: {key} is a front agent of {roles[key]['project']}, and needs names a background agent or this project's keeper" + (f" ({keeper})" if keeper else f", which {hub or 'the project'} lacks") + ". "
                             f"To hand {key} the item set mover={key} (it is told); for its part of a plan open its own item and link it with after=[{key}'s item].")
         raise ToolError(f"Refused: {key} is a user-facing agent of {roles[key]['project']}, and needs names a background agent "
                         f"of any project, or this project's keeper; a user-facing agent's part is its own item, linked with after=[{key}'s item]. "

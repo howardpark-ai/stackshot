@@ -80,6 +80,10 @@ check("2 the same two levels down", A.front_only("projects/built/deep/notes", RE
 check("2 a page with a `hub:` line and no map reads that hub", A.front_only("projects/aside", REG2) is False and A.front_only("projects/aside2", REG2) is True)
 check("2 a sub-page with its own map of front agents reads its hub's builder: not front-only", A.front_only("projects/built/desk", REG2) is False)
 check("2 a sub-page with its own builder is not front-only, and neither is the hub it belongs to although the hub lists front agents only", A.front_only("projects/yard/crew", REG2) is False and A.front_only("projects/yard", REG2) is False)
+TWIN = {"projects/twina": page(agents={"home-twina-main": "front", "home-shared-eng": "builds things"}, back_agents={"home-shared-eng": "builds things"}),
+        "projects/twinb": page(agents={"home-twinb-main": "front", "home-shared-eng": "builds things"}, back_agents={"home-shared-eng": "builds things"})}
+check("2 a builder listed on the pages of two hubs counts for both: neither is front-only", A.front_only("projects/twina", TWIN) is False and A.front_only("projects/twinb", TWIN) is False
+      and A.builder_of("projects/twina", TWIN) == ["home-shared-eng"] and A.builder_of("projects/twinb", TWIN) == ["home-shared-eng"])
 check("2 slashes round a sub-page key do not matter (a sub-page's own map, its hub's map, its own background agent)",
       A.front_only("/projects/built/desk/", REG2) is False and A.front_only("/projects/built/notes/", REG2) is False and A.front_only("/projects/yard/crew/", REG2) is False
       and A.front_only("//projects/solo/notes//", REG2) is True)

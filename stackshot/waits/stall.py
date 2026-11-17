@@ -15,7 +15,7 @@ has a later `statusUpdatedAt`, so a turn starting restarts the count.
     step 1  -> `cold`     one `claude -p` call (the hand-off's cold call) names who takes it, or closes the item; it never asks the owner (an ask_owner, none or unusable answer is not written,
                           and the item goes on to the builder at once). An answer that names the session already moving the item keeps it there (`kept`): the mover is told once, the builder is not asked,
                           the owner is not asked, and the pass leaves the item alone for `KEEP` (spent)
-    step 2  -> `builder`  the project's builder; none able, the last rung: ONE message to the fleet's builder (the project's -main agent for a front-only project: no background agent on its map) naming the item and the quiet session, asking it to take the fix through its usual path (the
+    step 2  -> `builder`  the project's builder; none able, the last rung: ONE message to the fleet's builder (the project's -main agent for a front-only project: no builder) naming the item and the quiet session, asking it to take the fix through its usual path (the
                           hand-off record carries the request, so the pass sends it once per record, and a History line says so). The item stays with its mover; it does not go to the owner
 
 The cold call is made at most once per item in `KEEP` seconds (it bounds a ping-pong between two sessions that each hand the item back).

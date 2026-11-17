@@ -645,20 +645,24 @@ BUILDER = re.compile(r"\b(?:build|builds|builder|building|maintain\w*|merg\w*|en
 
 
 def background_ranked(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[tuple[int, int, str]]:
-    """(class, order, name) of the project's background agents, best first: those whose page's hub is the project's hub (hub_of); class 0 a mandate that says build, 1 one that says maintain, merge or
-    engineer (BUILDER), 2 the rest. The mandate is the page's own line, so an agent only the project record holds (its page line still owed) ranks in class 2 until the page lists it. `reg` = the page
-    registry (default: the live one). [] when it cannot be read. The one ranking behind the hand-off machinery (service/handoff.py) and front_only."""
+    """(class, order, name) of the project's background agents, best first: the `back_agents` of every page whose hub (hub_of) is the project's hub, each page read as it lists them, so an agent listed on
+    the pages of two hubs counts for both; class 0 a mandate that says build, 1 one that says maintain, merge or engineer (BUILDER), 2 the rest; the order is the names' alphabetical order. The mandate is
+    the page's own line, so an agent only the project record holds (its page line still owed, `owed_agents`) ranks in class 2 until the page lists it. `reg` = the page registry (default: the live one).
+    [] when it cannot be read. The one ranking behind the hand-off machinery (service/handoff.py) and front_only."""
+    from stackshot.projects import projects as _prj
     try:
-        reg = registry() if reg is None else reg
-        roles = session_roles(reg)
+        reg = _prj.with_pending(registry() if reg is None else reg, made=True)
         hub = hub_of(project, reg)
-        out = []
-        for i, (n, r) in enumerate(roles.items()):
-            if r.get("role") != "back" or hub_of(r.get("project", ""), reg) != hub:
+        mand: dict[str, str] = {}
+        for key, e in reg.items():
+            if not isinstance(e, dict) or hub_of(key, reg) != hub:
                 continue
-            mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
-            out.append((0 if re.search(r"\bbuild", mand, re.I) else 1 if BUILDER.search(mand) else 2, i, n))
-        return sorted(out)
+            for n in (e.get("back_agents") or {}):
+                n = str(n)
+                m = "" if n in (e.get("owed_agents") or {}) else str((e.get("agents") or {}).get(n) or (e.get("back_agents") or {}).get(n) or "")
+                if n not in mand or (not mand[n] and m):
+                    mand[n] = m
+        return sorted((0 if re.search(r"\bbuild", m, re.I) else 1 if BUILDER.search(m) else 2, i, n) for i, (n, m) in enumerate(sorted(mand.items())))
     except Exception:  # noqa: BLE001
         return []
 

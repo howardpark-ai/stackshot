@@ -1,6 +1,6 @@
-"""builderless.py: how a front-only project (no background agent on its page) routes an item that its front agents carry.
+"""builderless.py: how a front-only project (no builder: no background agent whose mandate builds) routes an item that its front agents carry.
 
-A project whose page lists only front agents (user-facing ones) has no background agent to receive build work: it is front-only (anchors.front_only, the one test; the server supplies it). Two routing decisions then fall to the front agents, and this module
+A project with no builder (no background agent of its hub whose mandate says build, maintain, merge or engineer) has no one to receive build work: it is front-only (anchors.front_only, the one test; the server supplies it). Two routing decisions then fall to the front agents, and this module
 holds their pure parts (the server supplies what needs the project registry):
 
   answer_target(meta, usable, keeper)   who takes the item once the owner's step is answered and the item names no `then`: the session the item's next open step names (the step's

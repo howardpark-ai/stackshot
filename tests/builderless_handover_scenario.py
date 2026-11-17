@@ -32,7 +32,8 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "fleet/a", "brain/projects"): (T / d).mkdir(parents=True)
 SMAIN, SDESK, DMAIN, DDESK, DBUILD, EMAIN, LONER = ("home-sigma-main", "home-sigma-desk", "home-delta-main", "home-delta-desk", "home-delta-builder", "home-echo-main", "home-loner")
 QMAIN, QDESK, QWATCH, DSIDE = ("home-quiet-main", "home-quiet-desk", "home-quiet-watch", "home-delta-side")
-U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((SMAIN, SDESK, DMAIN, DDESK, DBUILD, EMAIN, LONER, QMAIN, QDESK, QWATCH, DSIDE), 1)}
+TAMAIN, TADESK, TBMAIN, TBDESK, SHARED = ("home-twa-main", "home-twa-desk", "home-twb-main", "home-twb-desk", "home-shared-builder")
+U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((SMAIN, SDESK, DMAIN, DDESK, DBUILD, EMAIN, LONER, QMAIN, QDESK, QWATCH, DSIDE, TAMAIN, TADESK, TBMAIN, TBDESK, SHARED), 1)}
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a", "url": "", "seen": "x"} for n, u in U.items()}))
 page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type": "project", "session": "", "status": "active", "board": [], "board_open": 0, **kw}
@@ -42,7 +43,9 @@ page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type
     "projects/sigma/sub": page(title="Sigma sub", name="Sigma sub"),
     "projects/echo": page(title="Echo", name="Echo", agents={EMAIN: "front"}),
     "projects/quiet": page(title="Quiet", name="Quiet", agents={QMAIN: "front", QDESK: "front, answers questions", QWATCH: "watches the clock"}, back_agents={QWATCH: "watches the clock"}),
-    "projects/delta/desk": page(title="Delta desk", name="Delta desk", agents={DSIDE: "front for the desk page"})}}))
+    "projects/delta/desk": page(title="Delta desk", name="Delta desk", agents={DSIDE: "front for the desk page"}),
+    "projects/twa": page(title="Twa", name="Twa", agents={TAMAIN: "front", TADESK: "front, answers questions", SHARED: "builds things"}, back_agents={SHARED: "builds things"}),
+    "projects/twb": page(title="Twb", name="Twb", agents={TBMAIN: "front", TBDESK: "front, answers questions", SHARED: "builds things"}, back_agents={SHARED: "builds things"})}}))
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
@@ -243,7 +246,7 @@ put(48, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
 told.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a48", sender=DBUILD, then=SDESK))
 check("4.1 then=<front agent> from a listed session of another project is accepted in a front-only project, and the note says nobody is told by this write", "Refused" not in r and rd(48)["metadata"].get("then") == SDESK
-      and "then=home-sigma-desk stays as sent" in r and "when the answer or the wake comes" in r, (r, rd(48)["metadata"].get("then")))
+      and "then=home-sigma-desk is not replaced by one" in r and "if the item keeps it" in r and "stays as sent" not in r, (r, rd(48)["metadata"].get("then")))
 check("4.2 …no hand-off notice goes to the front agent and no hand-off is recorded for it", not any(t[3] == "handoff" for t in told) and "handoff" not in rd(48)["metadata"] and rd(48)["metadata"].get("mover") == OWNER, (told, rd(48)["metadata"]))
 put(51, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
 r = call(lambda: _wt_update.stackshot_update(item_id="a51", sender=SMAIN, then=SDESK))
@@ -258,7 +261,7 @@ check("4.5 then=<another project's front agent> is refused, as mover= is", msg.s
 put_step(54)
 told.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a54", sender=DBUILD, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
-check("4.6 post_wake_mover=<front agent> (the old name of mover) on a waiting item is accepted the same way and stored as the picker, with no hand-off notice", "Refused" not in r and "post_wake_mover=home-sigma-desk stays as sent" in r
+check("4.6 post_wake_mover=<front agent> (the old name of mover) on a waiting item is accepted the same way and stored as the picker, with no hand-off notice", "Refused" not in r and "post_wake_mover=home-sigma-desk is not replaced by one" in r and "stays as sent" not in r
       and rd(54)["metadata"].get("mover") == SDESK and not any(t[3] == "handoff" for t in told), (r, rd(54)["metadata"].get("mover"), told))
 put_step(55)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a55", sender=LONER, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
@@ -268,8 +271,11 @@ r = call(lambda: _wt_update.stackshot_update(item_id="a56", sender=DBUILD, mover
 check("4.8 mover= and post_wake_mover= naming the same front agent together behave as mover= alone: one hand-over", "Refused" not in r and rd(56)["metadata"].get("mover") == SDESK, (r, rd(56)["metadata"].get("mover")))
 put(57, mover=SMAIN)
 told.clear()
-r = call(lambda: _wt_create.stackshot_create(subject="[home] then names the other front agent", description=DESC, project="projects/sigma", sender=DBUILD, mover=SMAIN, then=SDESK, next=f"{OWNER}: {STEP}"))
-check("4.9 a create takes then=<front agent> the same way", r.startswith("created") and "then=home-sigma-desk stays as sent" in r, r)
+r = call(lambda: _wt_create.stackshot_create(subject="[home] then names the other front agent", description=DESC, project="projects/sigma", sender=DBUILD, mover=DBUILD, then=SDESK, next=f"{DBUILD}: take it"))
+check("4.9 a create with an agent as mover takes then=<front agent> through the gate, and the item then drops it: the reply says it is dropped and never also that it stays as sent", r.startswith("created") and "then dropped" in r
+      and "stays as sent" not in r and "Refused" not in r, r[-700:])
+r = call(lambda: _wt_create.stackshot_create(subject="[home] the owner moves it, then the other front agent", description=DESC, project="projects/sigma", sender=DBUILD, mover=OWNER, needs="decision", ask="Decide: whether to approve it · Recommend: yes · Stakes: none · By: no date", then=SDESK, next=f"{OWNER}: decide"))
+check("4.9b …with the owner as mover the then stands, and the note is the conditional one", r.startswith("created") and "then=home-sigma-desk is not replaced by one" in r and "then dropped" not in r and "stays as sent" not in r, r)
 put(58, project="projects/delta", mover=OWNER, needs=["decision"], ask=ASK, then=DBUILD, state="your-call")
 r = call(lambda: _wt_update.stackshot_update(item_id="a58", sender=SMAIN, then=DDESK))
 check("4.10 in a project that has a builder then=<front agent> is replaced by the builder, as before", f"then={DBUILD}, the project's builder, was used instead" in r and rd(58)["metadata"].get("then") == DBUILD, (r, rd(58)["metadata"].get("then")))
@@ -295,6 +301,12 @@ check("5.4 …a background agent with another mandate is no builder; a sub-page 
 put(62, project="projects/delta/desk", mover=DMAIN)
 r = call(lambda: _wt_update.stackshot_update(item_id="a62", sender=DMAIN, mover=DSIDE, next=f"{DBUILD}: take it"))
 check("5.5 an item under a sub-page with its own front map and a builder above it takes the builder's path: the front agent is replaced by the builder (the exception needs no builder)", f"mover={DBUILD}, the project's builder, was used instead" in r and held(62) == DBUILD, (r, held(62)))
+# a builder listed on the pages of two hubs is the builder of both: neither is front-only, and a peer's mover= on either is replaced by it, as before
+check("5.5b a builder shared by two hubs: front_only is False for both", _anc_p.front_only("projects/twa") is False and _anc_p.front_only("projects/twb") is False and _handoff_p.handoff_builder("projects/twb") == [SHARED], None)
+for n_, proj_, a_, b_ in ((65, "projects/twa", TAMAIN, TADESK), (66, "projects/twb", TBMAIN, TBDESK)):
+    put(n_, project=proj_, mover=a_)
+    r = call(lambda: _wt_update.stackshot_update(item_id=f"a{n_}", sender=a_, mover=b_, next=f"{SHARED}: take it"))
+    check(f"5.5c a peer's mover= on {proj_} is replaced by the shared builder", f"mover={SHARED}, the project's builder, was used instead" in r and held(n_) == SHARED, (r, held(n_)))
 put(63, mover=SMAIN)
 msg = call(lambda: _wt_update.stackshot_update(item_id="a63", sender=SMAIN, needs=[SDESK]))
 check("5.6 needs=[<same-project front agent>] in a front-only project is refused with the working path: mover=<peer> to hand it over, or its own item with after=", msg.startswith("Refused:") and f"set mover={SDESK}" in msg

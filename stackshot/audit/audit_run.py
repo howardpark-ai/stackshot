@@ -256,7 +256,7 @@ class Env:
             return _cfg.audit_builder()
 
     def is_front_only(self, project: str) -> bool:
-        """Is the project front-only (anchors.front_only: its `agents:` map lists no background agent)? `front_only` (a fixture's or caller's answer) when given; an environment that names the builder itself
+        """Is the project front-only (anchors.front_only: it has no builder)? `front_only` (a fixture's or caller's answer) when given; an environment that names the builder itself
         (`builder`) has said the project has one; else the registry's answer (`registry` when given). A read that fails raises: the caller keeps the old target."""
         if self.front_only_of:
             return bool(self.front_only_of(project))
