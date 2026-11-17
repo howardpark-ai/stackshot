@@ -508,6 +508,47 @@ AR.filing_pass(now=T0, env=env()); sent.clear(); AR.filing_pass(now=T0 + 30 * H,
 check("8 remind_hours 0 is the old behaviour: sent once, quiet while the item is not written", sent == [], sent)
 cfg_audit["remind_hours"] = 6
 
+# ---- 9. a live front peer of the item's own project in a front-only project is no stuck front step: the step hand-over moves the item to it, so the 3-hour reword never applies to its step
+PEER_ROLES = {**ROLES, "alpha-peer": {"role": "front", "project": "projects/alpha"}, "beta-front": {"role": "front", "project": "projects/beta"},
+              "gone-peer": {"role": "front", "project": "projects/alpha", "retired": True}}
+nine = [doing(31, "alpha-peer: look at the wording\nhome-agent: then build it"),                       # a live front agent of the item's project: a peer
+        doing(32, "beta-front: look at the wording\nhome-agent: then build it"),                       # a front agent of another project
+        doing(33, "gone-peer: look at the wording\nhome-agent: then build it"),                        # a retired agent of the project
+        doing(34, "alpha-peer: look at the wording\nhome-agent: then build it", project="projects/gamma")]      # a peer's page is not the item's project
+def nine_pass(at, front_only):
+    wipe_store(); clear_state()
+    for k, d in nine: put(k, copy.deepcopy(d))
+    run_pass(T0); r = run_pass(at, roles=PEER_ROLES, front_only=front_only)
+    return r["front_steps"]
+def nine_clocks(): return [clock_of(k) is not None for k in ("a31", "a32", "a33", "a34")]
+fo_alpha = lambda p: p == "projects/alpha"
+wipe_store(); clear_state()
+for k, d in nine: put(k, copy.deepcopy(d))
+r = run_pass(T0, roles=PEER_ROLES, front_only=fo_alpha)
+peer_line = next((l for to, t, _f in sent if to == "projects/alpha" for l in t.splitlines() if l.startswith(bid(31) + " ")), "")
+check("9 front-only project: the peer's step starts no clock; another project's front agent, a retired agent and a peer filed under another project do", nine_clocks() == [False, True, True, True] and r["front_steps"]["started"] == [bid(32), bid(33), bid(34)], (nine_clocks(), r["front_steps"]))
+r = run_pass(T0 + 3 * H, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 …at the threshold the peer's step stays as written, untouched, and the others move to the mover", opener_of("a31") == "alpha-peer" and (get("a31")["metadata"].get(FS.MOVED) is None)
+      and sorted(m["id"] for m in r["front_steps"]["moved"]) == [bid(32), bid(33), bid(34)], (opener_of("a31"), r["front_steps"]))
+check("9 …the peer's finding is still the plain one to the page key (it promises no move) and the mover is told nothing about it", "stuck-elsewhere" in peer_line and "moves to" not in peer_line
+      and not any(bid(31) in t and "is now yours" in t for _to, t, _f in sent), (peer_line, sent))
+r = run_pass(T0 + 7 * H, roles=PEER_ROLES, front_only=fo_alpha)
+check("9 …later passes do not move it either", opener_of("a31") == "alpha-peer" and clock_of("a31") is None and not any(m["id"] == bid(31) for m in r["front_steps"]["moved"]), r["front_steps"])
+wipe_store(); clear_state()
+for k, d in nine: put(k, copy.deepcopy(d))
+run_pass(T0, roles=PEER_ROLES, front_only=lambda p: False)
+check("9 a project with a background agent (front_only false): the same peer's step starts a clock and moves as before", clock_of("a31") is not None, clock_of("a31"))
+r = run_pass(T0 + 3 * H, roles=PEER_ROLES, front_only=lambda p: False)
+check("9 …at the threshold it moves to the mover", opener_of("a31") == "home-agent" and bid(31) in [m["id"] for m in r["front_steps"]["moved"]], r["front_steps"])
+def failing(p): raise RuntimeError("registry unreadable")
+wipe_store(); clear_state()
+for k, d in nine: put(k, copy.deepcopy(d))
+run_pass(T0, roles=PEER_ROLES, front_only=failing)
+check("9 a failing front-only read leaves the step as it was, a front agent's: a clock starts", clock_of("a31") is not None, clock_of("a31"))
+cnt = FS.month_count({k: v for k, v in nine[:2]}, PEER_ROLES, now, fo_alpha)
+check("9 month_count: the open steps the write check would refuse leave out the peer's step (a31) and keep the other project's (a32); without the test both count",
+      cnt["open"] == 1 and cnt["ids"] == ["a32"] and FS.month_count({k: v for k, v in nine[:2]}, PEER_ROLES, now)["open"] == 2, (cnt, FS.month_count({k: v for k, v in nine[:2]}, PEER_ROLES, now)))
+
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
 print(f"ok: front step move scenario, {len(ran)} checks")

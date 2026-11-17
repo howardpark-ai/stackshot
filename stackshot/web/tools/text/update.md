@@ -224,7 +224,10 @@ item: after=["board#N"], ask_by="2099-03-02"; description="- Goal: the export fi
 the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every line, `- ` included, at most {{DESC_LINE_MAX}} characters, at most
 {{DESC_MAX_LINES}} lines); close: the complete tool. status: open | completed (`needs` says whose move it is).
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
-open it with the mover's name, or message the front agent (a step it already holds stays). A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. {{ITEM_FORM}} {{NEXT_FORM}}
+open it with the mover's name, hand the front agent the item with mover= (front agents of one project with no
+background agent only), or ask it with a message to its project whose first line starts `For <front agent>,` (a step it
+already holds stays). In a project with no background agent a step that opens with a front agent of the item's own
+project is accepted: when the steps before it are done the item moves to that agent and it is told. A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. {{ITEM_FORM}} {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on

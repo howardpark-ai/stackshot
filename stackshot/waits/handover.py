@@ -5,6 +5,7 @@ a ticked step goes to the item's mover; the session named on the next step is to
 (`proofs.handover` (service/proofs.py), called by `proofs.proof_item` and by `update` when it marks a step done), and the audit reads the record it leaves (`audit_checks.check_step_handover`).
 
   next_open(meta, keeper)                      (text, opener) of the first open step that is not a bare sub-step: the step whose session is next
+  peer_opener(row, item_project, front_only)   is the step's opener a live front agent of the item's own project in a front-only project: the one front agent a hand-over, the write check and the audit's reword treat as a session
   decide(meta, keeper, mover, kind_of, down_of, same)   {"action": move | fallback | none, "to", "step", "hash", "why"}
   mark(meta, h, kind, to, at, why)             the record, `metadata.handover` = {"step": <hash>, "kind": moved | fallback, "to", "at"[, "why"]}; one record, the last step handled
   skip_reason(meta, mover, same, label, owner)   why the hand-over leaves an item alone: on hold, a decision wait, needs naming another session (the server and the audit share it)
@@ -14,7 +15,8 @@ a ticked step goes to the item's mover; the session named on the next step is to
 The first open step decides, in the checklist's order: several open steps are several sessions' turns, each handed over in its turn when the one before is done. The rules, in this order:
   - no open step, a step that names no one, or one that names the item's mover: nothing to do;
   - the owner (his step is his; the system never moves an item to him), a front agent or a retired session (the front-step rule of front_step.py moves its step on, and no item notice wakes a front agent),
-    a name that is no session of the fleet: nothing is moved;
+    a name that is no session of the fleet: nothing is moved. One front agent is a session here: a live front agent of the item's own project when that project is front-only (peer_opener: the pair
+    `mover=` already allows, and a hand-off notice is exempt from the front gate), so the step hands the item to it like to any other session;
   - a session that is down or unknown (no pane, its last turn ended in an error): the item stays with its mover, who is told the step and why ("fallback"); the step is never lost;
   - otherwise the mover becomes that session ("move").
 Idempotent: a step already handed over (kind "moved") is not handled again, and one that fell back is told once; it is handled again only when the session can be reached.
@@ -25,6 +27,7 @@ import hashlib
 from typing import Any, Callable
 
 from stackshot.model import steps as _steps
+from stackshot.waits import builderless as _bl
 
 KEY = "handover"
 SESSION, FRONT, OWNER, OTHER = "session", "front", "owner", "other"       # what kind_of(name) answers
@@ -78,6 +81,13 @@ def skip_reason(meta: dict[str, Any], mover: str, same: Callable[[str, str], boo
         return f"its needs name a decision: it waits on {owner}"
     others = [x for x in needs if x.lower() not in ("decision", "external") and not (mover and same(x, mover))]
     return f"its needs name {', '.join(label(x) for x in others)}, not its mover" if others else ""
+
+
+def peer_opener(row: dict[str, Any] | None, item_project: str, front_only: bool) -> bool:
+    """Is a step's opener (`row`: its session-roles row {"role", "project", "retired"}) a live front agent of the project the item is filed under, in a project with no background agent (`front_only`, from
+    anchors.front_only)? Such a peer can be handed the item by `mover=` (builderless.pair_allowed) and is told of it, so a step that opens with it is a real hand-over. A retired agent, one of another project
+    and any front agent of a project that has a builder are not: the write check and the front-step rule treat them as before. One test for the write check, the hand-over and the audit's reword."""
+    return bool(front_only) and _bl.front_of(row, item_project)
 
 
 def decide(meta: dict[str, Any], keeper: str, mover: str, kind_of: Callable[[str], str], down_of: Callable[[str], str], same: Callable[[str, str], bool]) -> dict[str, Any]:

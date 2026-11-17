@@ -27,13 +27,16 @@ toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/transcripts
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects"): (T / d).mkdir(parents=True)
 MAIN, SIDE, BUILD, REVIEW = "home-delta-main", "home-delta-desk", "home-delta-builder", "home-delta-review"
-U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((MAIN, SIDE, BUILD, REVIEW), 1)}
+ECHO, PEER, OTHER = "home-echo-main", "home-echo-desk", "home-golf-main"      # echo: a front-only project of two front agents; golf: another front-only project
+U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((MAIN, SIDE, BUILD, REVIEW, ECHO, PEER, OTHER), 1)}
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a", "url": "", "seen": "x"} for n, u in U.items()}))
 page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type": "project", "session": "", "status": "active", "board": [], "board_open": 0, **kw}
 (T / "store/projects.json").write_text(json.dumps({"pages": {
     "projects/delta": page(title="Delta", name="Delta", agents={MAIN: "front", SIDE: "answers questions", BUILD: "builds it", REVIEW: "reviews it"},
                            back_agents={BUILD: "builds it", REVIEW: "reviews it"}),
+    "projects/echo": page(title="Echo", name="Echo", agents={ECHO: "front", PEER: "answers questions"}),
+    "projects/golf": page(title="Golf", name="Golf", agents={OTHER: "front"}),
     "projects/solo": page(title="Solo", name="Solo")}}))
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
@@ -79,11 +82,11 @@ def stored_next(i): return rd(i)["metadata"].get("next") or ""
 msg = refusal(lambda: _wt_create.stackshot_create(subject="[home] waits on the handback", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, needs=[BUILD],
                                               next=f"{BUILD}: build it\n{MAIN}: after the handback, check it"))
 check("1 create: a front agent's own step on an item a background agent moves is refused", refused(msg) and f'"{MAIN}: after the handback, check it"' in msg and f"{MAIN}, a user-facing agent of projects/delta" in msg, msg)
-check("1 …the refusal names the mover and the way out: give the step to the mover or message it", f"{BUILD} moves the item" in msg and f'open it with "{BUILD}:"' in msg and f"send {BUILD} a message" in msg, msg)
+check("1 …the refusal names the mover and the way out: give the step to the mover or message it", f"{BUILD} moves the item" in msg and f'open it with "{BUILD}:"' in msg and f'message to projects/delta whose first line starts "For {MAIN},"' in msg and "send " not in msg, msg)
 check("1 …and no item is stored", not (T / "store/a/40.json").exists() and not (T / "store/a/41.json").exists(), sorted(os.listdir(T / "store/a")))
 msg = refusal(lambda: _wt_create.stackshot_create(subject="[home] the builder gives the front a step", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, needs=[BUILD],
                                               next=f"{MAIN}: confirm the wording\n{BUILD}: then build it"))
-check("1 create: the mover writing a front agent's step on its own item is refused too, told to keep the step and message the front agent", refused(msg) and f"Keep the step with {BUILD} and message {MAIN}" in msg and "send " not in msg.split("Keep the step")[-1][:20], msg)
+check("1 create: the mover writing a front agent's step on its own item is refused too, told to keep the step and message the front agent", refused(msg) and f"Keep the step with {BUILD}, hand {MAIN} the item with mover={MAIN}" in msg and f'starts "For {MAIN},"' in msg and "and message " not in msg, msg)
 msg = refusal(lambda: _wt_create.stackshot_create(subject="[home] a second front agent", description=DESC, project="projects/delta", sender=REVIEW, mover=BUILD, needs=[BUILD], next=f"{SIDE}: look at it\n{BUILD}: then build it"))
 check("1 create: another front agent's step is refused the same way", refused(msg) and SIDE in msg, msg)
 
@@ -191,6 +194,44 @@ month = time.strftime("%Y-%m", time.localtime(now0))
 check("6 front_step_count: the first run of a month returns the count with its month and the summary line", line[0] and line[0]["month"] == month and "3 of 6 closed by someone else" in line[1] and "1 open step(s)" in line[1], line)
 again = AR.front_step_count([{"front_step_count": line[0]}], items, AR.Env(roles=ROLES, fallback=lambda p: MAIN, builder=lambda p: BUILD), now0)
 check("6 …a month a record already holds one for is not counted again", again == (None, ""), again)
+
+# ---- 7. a front-only project: a step that opens with a live front peer of the item's own project passes (the step hand-over moves the item to it); every other front agent is still refused, with the working paths named
+r = _wt_create.stackshot_create(subject="[home] a peer's step", description=DESC, project="projects/echo", sender=ECHO, mover=ECHO, next=f"{ECHO}: draft it\n{PEER}: check it")
+check("7 create: in a front-only project a live front peer's step on an item another front agent moves is accepted", r.startswith("created"), r)
+put(60, project="projects/echo", owner=ECHO, mover=ECHO, needs=[], next=f"{ECHO}: draft it")
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a60", sender=ECHO, next=f"{ECHO}: draft it\n{PEER}: check it"))
+check("7 update: …and a new line of next opening with the peer is accepted too", r == "" and PEER in stored_next(60), (r, stored_next(60)))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a60", sender=ECHO, reword={"1": f"{PEER}: draft it"}))
+check("7 update: …and a reword to the peer", r == "" and stored_next(60).startswith(f"{PEER}: draft it"), (r, stored_next(60)))
+put(61, project="projects/echo", owner=ECHO, mover=ECHO, needs=[], next=f"{ECHO}: draft it")
+was = raw(61)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a61", sender=ECHO, next=f"{ECHO}: draft it\n{OTHER}: check it"))
+check("7 a front agent of another project is refused, even in a front-only project, and the item is untouched", refused(msg) and f"{OTHER}, a user-facing agent of projects/golf" in msg and raw(61) == was, msg)
+check("7 …the tail names the ways that work (the hand-over and the `For <agent>,` line to the agent's page), not a plain message to the front agent",
+      f"Keep the step with {ECHO}, hand {OTHER} the item with mover={OTHER}" in msg and f'ask {OTHER} with a message to projects/golf whose first line starts "For {OTHER},"' in msg and "and message " not in msg and "send " not in msg, msg)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a61", sender=BUILD, next=f"{ECHO}: draft it\n{OTHER}: check it", check="item_closed a1"))
+check("7 …and a sender who is not the mover is told to give the step to the mover or to ask through the page", refused(msg) and f'open it with "{ECHO}:"' in msg and f'starts "For {OTHER},"' in msg and "send " not in msg, msg)
+def retired_peer(*a, **k): return {**real_roles(*a, **k), PEER: {**real_roles(*a, **k)[PEER], "retired": True}}
+_anc.session_roles = retired_peer
+try:
+    msg = refusal(lambda: _wt_update.stackshot_update(item_id="a61", sender=ECHO, next=f"{ECHO}: draft it\n{PEER}: check it", check="item_closed a1"))
+finally:
+    _anc.session_roles = real_roles
+check("7 a retired peer is no peer: the gate does what it did before for a retired opener (it judges live front agents only, so this gate does not refuse the step)", msg == "" and f"{PEER}: check it" in stored_next(61), msg)
+put(62, project="projects/delta", owner=BUILD, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
+was = raw(62)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a62", sender=BUILD, next=f"{BUILD}: build it\n{SIDE}: check it", check="item_closed a1"))
+check("7 a project with a background agent is unchanged: a front agent of the same project is refused, with the new tail", refused(msg) and f"{SIDE}, a user-facing agent of projects/delta" in msg and f'starts "For {SIDE},"' in msg and raw(62) == was, msg)
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a62", sender=MAIN, next=f"{BUILD}: build it\n{SIDE}: check it", check="item_closed a1"))
+check("7 …whoever writes it", refused(msg) and f'open it with "{BUILD}:"' in msg and raw(62) == was, msg)
+isf7 = lambda n: n in (ECHO, PEER)
+check("7 held: the shared test still holds a front agent's step on a session-moved item; the peer exemption is the gate's and the count's own (front_step.is_peer)",
+      FS.held(f"{PEER}: x", ECHO, isf7, same) == PEER)
+rows7 = {ECHO: {"role": "front", "project": "projects/echo"}, PEER: {"role": "front", "project": "projects/echo"}, OTHER: {"role": "front", "project": "projects/golf"}, "gone": {"role": "front", "project": "projects/echo", "retired": True}}
+it7 = {"metadata": {"project": "projects/echo"}}; fo7 = lambda p: p == "projects/echo"
+check("7 is_peer: a live front agent of the item's project in a front-only project; not another project's, a retired one, a project with a builder, no test given or one that fails",
+      FS.is_peer(PEER, it7, rows7, fo7) and not FS.is_peer(OTHER, it7, rows7, fo7) and not FS.is_peer("gone", it7, rows7, fo7) and not FS.is_peer(PEER, it7, rows7, lambda p: False)
+      and not FS.is_peer(PEER, it7, rows7, None) and not FS.is_peer(PEER, {"metadata": {}}, rows7, fo7) and not FS.is_peer(PEER, it7, rows7, lambda p: 1 / 0))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

@@ -8,6 +8,7 @@ which the pass reaches through two members of audit_run.Env, so a run without th
   hours()                           [audit] front_step_move_hours (default 3; 0 = off)
   step_hash(text)                   what identifies a step for the clock: a short hash of the step as the checklist compares it (steps.key)
   front_opener(name, roles)         is the step's opener a front agent (role front or keeper) or a retired session, by the role map
+  is_peer(name, item, roles, front_only)   a live front agent of the item's own project in a front-only project: its step is no front agent's step here (the write check passes it, the step hand-over moves the item to it, the rule below never rewords it)
   candidates(findings, items, by_shown, roles)   the stuck-elsewhere findings the rule covers, each with its step, its hash and who it moves to
   reopen(text, name)                the step with its first line opening with `name` (the rest of the text as it was); "" when its first line has no opener
   clock(meta, h, mover), moved_before(meta, h)   the item's clock record for the step with hash h under that mover (the epoch it was first seen stuck), and whether that step moved already
@@ -34,6 +35,7 @@ from stackshot.audit import audit_checks as _ac
 from stackshot.core import config as _cfg
 from stackshot.model import model as _model
 from stackshot.model import steps as _steps
+from stackshot.waits import handover as _hv
 
 CLOCK = "stuck_since"
 MOVED = "stuck_moved"
@@ -77,10 +79,24 @@ def front_opener(name: str, roles: dict[str, dict[str, Any]], front_roles: tuple
     return bool(r) and (bool(r.get("retired")) or r.get("role") in front_roles)
 
 
+def is_peer(name: str, item: dict[str, Any], roles: dict[str, dict[str, Any]], front_only: Callable[[str], bool] | None) -> bool:
+    """Is `name`, the opener of one of the item's steps, a live front agent of the item's own project in a front-only project (handover.peer_opener)? The write check lets such a step pass and the step
+    hand-over moves the item to it, so the rule below does not reword it and the monthly count does not call it refused. False without `front_only` (the project's test) and when it fails: the old behavior."""
+    proj = str(((item.get("metadata") if isinstance(item.get("metadata"), dict) else None) or {}).get("project") or "")
+    row = _role(name, roles)
+    if not (proj and front_only and row.get("role") == "front" and not row.get("retired")):
+        return False
+    try:
+        return _hv.peer_opener(row, proj, bool(front_only(proj)))
+    except Exception:  # noqa: BLE001  — a project read that fails leaves the step as it was: a front agent's
+        return False
+
+
 def candidates(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]], by_shown: dict[str, str], roles: dict[str, dict[str, Any]],
-               front_roles: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+               front_roles: tuple[str, ...], front_only: Callable[[str], bool] | None = None) -> dict[str, dict[str, Any]]:
     """{gid: {finding, opener, mover, step, hash}} for the stuck-elsewhere findings this rule covers: the step's opener is a front agent or a retired session, and the item's mover is a session that is not
-    retired itself (the owner, nobody and an outside party have no session to move it to). A finding about a background agent's step is not covered: that agent gets the finding itself and can answer it."""
+    retired itself (the owner, nobody and an outside party have no session to move it to). A finding about a background agent's step is not covered: that agent gets the finding itself and can answer it.
+    Nor is a step that opens with a live front peer of the item's project in a front-only project (`front_only` given, is_peer): the step hand-over hands the item to that peer, who can act on it."""
     out: dict[str, dict[str, Any]] = {}
     for f in findings:
         if f.get("category") != "stuck-elsewhere":
@@ -93,7 +109,7 @@ def candidates(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]],
         if _ac._no_session(mover) or not front_opener(nm, roles, front_roles) or _role(mover, roles).get("retired"):
             continue
         step = _ac.first_open_step(item.get("metadata") or {})
-        if not step or _steps.opener(step) != nm:
+        if not step or _steps.opener(step) != nm or is_peer(nm, item, roles, front_only):
             continue
         out[gid] = {"finding": f, "opener": nm, "mover": mover, "step": step, "hash": step_hash(step)}
     return out
@@ -184,7 +200,7 @@ def held(text: Any, mover: str, is_front: Callable[[str], bool], same: Callable[
     return nm
 
 
-def month_count(items: dict[str, dict[str, Any]], roles: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
+def month_count(items: dict[str, dict[str, Any]], roles: dict[str, dict[str, Any]], now: float, front_only: Callable[[str], bool] | None = None) -> dict[str, Any]:
     """The monthly number that shows whether front agents still take steps nothing can wake them for: over the last COUNT_DAYS days, `closed` = steps opening with a front agent that were closed (done or
     dropped, on an open or a closed item), `by_other` = of those, the ones a session other than the front agent closed (a server mark is no session); and `open` = the open steps the write check
     (held) would refuse now, with `ids` the items they sit on. The front agent test is the write check's: role front, not retired."""
@@ -209,7 +225,7 @@ def month_count(items: dict[str, dict[str, Any]], roles: dict[str, dict[str, Any
         if it.get("status") != "open":
             continue
         mover = _ac._item_view(items, gid)[3]
-        n = sum(1 for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN and held(s["text"], mover, isf, same))
+        n = sum(1 for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN and held(s["text"], mover, lambda nm: isf(nm) and not is_peer(nm, it, roles, front_only), same))
         if n:
             n_open += n
             ids.append(gid)

@@ -204,7 +204,8 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
     """A session's create or update may not put a NEW or reworded open step that opens with a front agent on an item another session moves: a front agent gets no work notice and its own wakes are
     refused, so nothing could wake it for the step and it would sit until the owner noticed (the mover check of fix_front_mover, applied to a step line). `before` and `after` = the checklist as it stood and
     as this write leaves it (`item` = the item as the write leaves it); only an open step whose text is not among the open steps before is judged, so a step already held by a front agent stays whatever else the
-    write changes. Passes: the item's own mover (its own item), a background agent or the owner as opener, an item with no mover or a retired one (front_step.held reads the rest). A failing read lets the write through."""
+    write changes. Passes: the item's own mover (its own item), a background agent or the owner as opener, an item with no mover or a retired one (front_step.held reads the rest), and, in a front-only project, a live front agent of the item's own project (a peer: the step hand-over
+    moves the item to it, handover.peer_opener). A failing read lets the write through."""
     h = _hooks()
     if item.get("status") != "open":
         return
@@ -213,18 +214,25 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
     if not new:
         return
     try:
+        proj = str((item.get("metadata") or {}).get("project") or "")
         mover = h.item_mover({**item, "gid": gid})
         mroles, mkey = h.role_of(mover)
         if mkey and mroles[mkey].get("retired"):      # a retired mover is not running: the step cannot be given to it
             return
         for text in new:
             roles, key = h.role_of(_steps.opener(text))
-            front = h.front_held(text, mover, lambda _n: bool(key) and roles[key].get("role") == "front" and not roles[key].get("retired"), _handoff.ho_same)
+            live = bool(key) and roles[key].get("role") == "front" and not roles[key].get("retired")
+            # a live front agent of the item's own project, in a project with no background agent, is a peer: when the step comes up the step hand-over moves the item to it (handover.peer_opener,
+            # the same pair `mover=` allows), so the step can fire and passes. Every other front agent, and every front agent of a project that has a builder, is refused as before.
+            peer = live and _hv.peer_opener(roles[key], proj, _anc.front_only(proj))
+            front = h.front_held(text, mover, lambda _n: live and not peer, _handoff.ho_same)
             if not front:
                 continue
             mv = _session_label(mover) or mover
-            tail = (f"Keep the step with {mv} and message {key} for what only it can give." if _handoff.ho_same(sender, mover)
-                    else f"Give the step to {mv} (open it with \"{mv}:\") or send {mv} a message asking for it.")
+            # the tail names what works: a plain message to a front agent is refused unless marked, so it is the hand-over (`mover=`, between front agents of one front-only project) and the `For <agent>,` first line to the agent's page
+            ask = f"ask {key} with a message to {roles[key]['project']} whose first line starts \"For {key},\""
+            tail = (f"Keep the step with {mv}, hand {key} the item with mover={key} (only between front agents of one project that has no background agent), or {ask}." if _handoff.ho_same(sender, mover)
+                    else f"Give the step to {mv} (open it with \"{mv}:\"), or {ask}.")
             raise ToolError(f"Refused: the step \"{_clip_line(_steps.first_line(text), 90)}\" opens with {key}, a user-facing agent of {roles[key]['project']}: it gets no work notice and its own wakes are refused, "
                             f"so nothing would wake it for the step, and {mv} moves {_gh.shown(gid) if gid else 'the item'}. {tail}")
     except ToolError:

@@ -79,8 +79,11 @@ builder that files its own decision item is its own `then`). An item created in 
 decision) has him as mover, and naming a session as mover beside that state is refused; mover={{OWNER}} on an item in
 none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name
 a session as mover and put his part in a next line that starts `{{OWNER}}:`). A step of next that opens with a front
-agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or
-message the front agent. owner is not a parameter any more: it is still accepted for a few days with a note in the
+agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, hand
+the front agent the item with mover= (front agents of one project with no background agent only), or ask it with a
+message to its project whose first line starts `For <front agent>,`; in a project with no background agent a step that
+opens with a front agent of the item's own project is accepted, and the item moves to that agent when the steps before
+it are done. owner is not a parameter any more: it is still accepted for a few days with a note in the
 reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 |
 p2 | p3, shown but not sorted. {{ITEM_FORM}} {{NEEDS_FORM}}
 {{SAID_FORM}}{{CHECK_FORM}}{{STEP_PROOF_FORM}}{{CAP_FORM}}{{AGENT_DUE_FORM}}{{MODEL_FORM}}{{DRAFT_FORM}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{CONTACT_FORM}}The
