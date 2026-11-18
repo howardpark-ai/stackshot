@@ -152,8 +152,8 @@ def _silence_tick() -> "dict[str, Any] | None":
 def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
     """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
     the hourly audit ties to an item. A pane in a turn (`busy`) and an idle pane are read: a subagent started in the background, or a pane waiting on background tasks, reads idle between two turns while the subagent runs. For an idle
-    pane only a subagent whose transcript was written within `subagent_tie.RUNNING_S` counts (the `quiet` entries are dropped): a quiet subagent of an idle pane may be left by a recycled or killed pane, while one of a pane in a turn
-    may wait on a long CI or suite run. A pane showing a shell (the CLI is not running) and a session this box does not run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless
+    pane only a subagent whose transcript was written within `subagent_tie.RUNNING_S` counts (the `quiet` entries are dropped, and so are the `unreadable` ones whose meta file, `meta_at`, is older than that): a quiet subagent of an
+    idle pane may be left by a recycled or killed pane, while one of a pane in a turn may wait on a long CI or suite run. A pane showing a shell (the CLI is not running) and a session this box does not run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless
     session), a registry status this server does not know, a busy or idle pane whose transcript this box does not hold, or one whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown,
     never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover there must not read idle and be handed on), a sessions index that cannot be read, one that
     is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
@@ -189,7 +189,8 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
         raise _tie.Unreadable("the pane's registry row names no session")
     subs = _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
     if st == "idle":
-        subs = [s for s in subs if not s.get("quiet")]      # an idle pane's subagent counts only while its transcript is fresh (a pane that was recycled or killed leaves a quiet one behind); a quiet one waiting on a long run counts for a pane in a turn
+        t = time.time() if now is None else now
+        subs = [s for s in subs if not s.get("quiet") and not (s.get("unreadable") and s.get("meta_at") is not None and t - float(s["meta_at"]) > _tie.RUNNING_S)]      # an idle pane's subagent counts only while it is fresh: a quiet one (a pane that was recycled or killed leaves one behind) and an unreadable one whose meta file is older than that (a meta with no transcript beside it) are dropped; a pane in a turn keeps both
     return subs
 
 
@@ -198,7 +199,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, on by default), run from the ten-minute audit tick: an open item on an agent with no activity for 45 minutes (`hourly.EVERY`, so the line lands inside the hour), and no audit line in the last
     45 minutes, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
-    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff.handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
+    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff.handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py, read for a pane in a turn or an idle one; a shell pane, or a session this box does not run, has none: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it does not move the activity clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two

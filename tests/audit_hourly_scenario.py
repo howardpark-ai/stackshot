@@ -648,7 +648,7 @@ agent("badmeta", "x", f"{BID(5)}", meta_ok=False)
 agent("capped1", "Long gone", f"{BID(6)}", age=int(TIE.QUIET_CAP_S) + 60)
 got_run = {x["id"]: x for x in TIE.running(SID, [str(T / "transcripts")], now0)}
 check("17 the reader lists the running subagents of a session's transcript: no finished flag and a transcript written within the 6-hour cap, the description, the brief (a string or text blocks) and both as its text; a finished one and one past the cap are left out, a meta that cannot be read is listed running with no words (it may be running)",
-      sorted(got_run) == ["badmeta", "blocks", "run1", "stale1"] and got_run["badmeta"] == {"id": "badmeta", "text": "", "at": 0.0, "unreadable": True} and got_run["run1"]["text"] == f"Build the thing\nGoal: {BID(1)} in the worktree"
+      sorted(got_run) == ["badmeta", "blocks", "run1", "stale1"] and {k_: v_ for k_, v_ in got_run["badmeta"].items() if k_ != "meta_at"} == {"id": "badmeta", "text": "", "at": 0.0, "unreadable": True} and isinstance(got_run["badmeta"].get("meta_at"), float) and got_run["run1"]["text"] == f"Build the thing\nGoal: {BID(1)} in the worktree"
       and got_run["run1"]["description"] == "Build the thing" and got_run["run1"]["brief"] == f"Goal: {BID(1)} in the worktree" and BID(2) in got_run["blocks"]["brief"] and got_run["run1"]["at"] == now0 - 60 and "quiet" not in got_run["run1"], got_run)
 check("17 …one older than 90 minutes and younger than the cap is listed running but quiet (a builder waiting on a long run), a fresh one is not marked", got_run["stale1"].get("quiet") is True and got_run["stale1"]["description"] == "Left behind" and "capped1" not in got_run and "done1" not in got_run, got_run.get("stale1"))
 # the boundaries, with two seconds of room for the file system's time resolution
@@ -723,9 +723,13 @@ try:
         mp.write_text(json.dumps({"agentType": "general-purpose", "description": desc, **({"finished": finished} if finished is not None else {})}))
         tp.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": brief}}) + "\n" + json.dumps({"type": "assistant"}) + "\n")
         os.utime(tp, (now0 - age, now0 - age))
-    def idle_case(status, *subs):
+    def bad_meta_i(aid, age, with_jsonl=False):      # a meta file that cannot be read (not JSON), its transcript beside it or not: the entry is listed running with no words, `meta_at` its meta's own last write
+        mp = subi / f"agent-{aid}.meta.json"; mp.write_text("{not json"); os.utime(mp, (now0 - age, now0 - age))
+        if with_jsonl: (subi / f"agent-{aid}.jsonl").write_text("{}\n"); os.utime(subi / f"agent-{aid}.jsonl", (now0 - 60, now0 - 60))
+    def idle_case(status, *subs, bad=()):
         for f_ in subi.glob("agent-*"): f_.unlink()
         for a_i in subs: agent_i(*a_i)
+        for b_i in bad: bad_meta_i(*b_i)
         registry(status, sid=SIDI); clean_pane(); panes["home-peer"] = status
         for p_ in (T / "store/a").glob("*.json"): p_.unlink()
         put(1, act=90); put(2, act=90)
@@ -742,6 +746,14 @@ try:
     check("17 idle pane, a running subagent tied to no item: the mover's items read unknown (audit_unknown), not idle, as for a busy pane", k_d == ["audit_unknown", "audit_unknown"], (k_d, lines(1)))
     k_e = idle_case("idle", ("ie", f"Build {BID(1)}", "x", 10 * 60, True))
     check("17 idle pane, a finished subagent that is not parked on a task of its own (fresh, named for item 1): not counted, both items read idle", k_e == ["audit_idle", "audit_idle"] and audit_ticks_svc._mover_subagents("home-peer", {}, now0) == [], (k_e, audit_ticks_svc._mover_subagents("home-peer", {}, now0)))
+    k_f = idle_case("idle", bad=[("if", 10 * 60)])
+    check("17 idle pane, an unreadable subagent entry (a meta that is not JSON, no transcript beside it) whose meta file was written 10 minutes ago: it may be running, so the mover's items read unknown", k_f == ["audit_unknown", "audit_unknown"], (k_f, lines(1)))
+    k_g = idle_case("idle", bad=[("ig", 3 * 3600)]); k_g2 = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
+    check("17 idle pane, the same unreadable entry whose meta file is 3 hours old (a meta with no transcript is kept forever otherwise): dropped, both items read idle", k_g == ["audit_idle", "audit_idle"] and k_g2 == [], (k_g, k_g2))
+    k_h = idle_case("busy", bad=[("ih", 3 * 3600)])
+    check("17 busy pane, the same 3-hour unreadable entry: still kept (unchanged), the mover's items read unknown", k_h == ["audit_unknown", "audit_unknown"], (k_h, lines(1)))
+    k_i = idle_case("idle", bad=[("ii", 3 * 3600, True)]); k_i2 = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
+    check("17 idle pane, an unreadable meta that has a transcript beside it and is 3 hours old: dropped as well (the age is the meta file's own)", k_i == ["audit_idle", "audit_idle"] and k_i2 == [], (k_i, k_i2))
     registry("idle", sid=""); d_i1 = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
     registry("idle", sid=str(_uuid.uuid4())); d_i2 = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
     check("17 an idle pane whose registry row names no session, or whose transcript this box does not hold, is unknown (Unreadable), as for a busy pane", d_i1 and d_i2, (d_i1, d_i2))
