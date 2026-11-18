@@ -1157,10 +1157,11 @@ def _roles_moved(reg: dict, before: dict, after: dict) -> list[dict]:
         return []
 
 
-def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: Any = None, now: str | None = None, run_dir: Any = None, mirror_now: bool = True, pages: dict | None = None) -> dict:
+def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: Any = None, now: str | None = None, run_dir: Any = None, pages: dict | None = None) -> dict:
     """Move the project's keeper mark to the listed agent `agent`: the flag leaves the agent that has it and goes on this one (a project has one mark, so this moves it and never adds one; a record that
     holds two flags comes out with one). A dry run unless `apply`: it writes nothing and says the old mark, the new mark (and where each comes from: the record's flag, the page's `keeper:` line or the derivation),
-    and the sessions whose roles.json entry would move. With `apply` the record is written, and an undo file is kept the way `restore` keeps one (`restore --undo FILE --apply` takes the change back).
+    and the sessions whose roles.json entry would move. With `apply` the record is written, and an undo file is kept the way `restore` keeps one (`restore --undo FILE --apply` takes the change back). The record only: the page mirror is never run (the mark is no
+    mirrored line, and a page whose mirrored lines drifted from the record is left as it is), so `mirror` answers state "skipped".
     Refused: 404 an agent the record does not list (or a project it does not know), 409 a retired project, 400 a sub-page's key. An agent that is the mark already changes nothing.
     → {project, key, changed, dry, entry, mirror, name, old, new, old_source, new_source, roles, undo, lines}."""
     undo = {"pid": "", "run_dir": run_dir}
@@ -1213,8 +1214,9 @@ def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: A
         lines += [f"roles.json: {m['session']}: {m['from']} -> {m['to']}" for m in out["roles"]] or ["roles.json: no session's entry moves"]
         lines.append(f"undo file {undo['file']}; to undo: project.py restore --undo {undo['file']} --apply" if undo.get("file") else "nothing written (add --apply)")
     extra = {k: out[k] for k in ("name", "old", "new", "old_source", "new_source", "roles", "same")} | {"undo": undo.get("file"), "lines": lines}
-    return _finish(out["pid"], ents, changed, not apply, io, warn=out.get("warning", ""), extra=extra, by=by, mirror_now=mirror_now,
-                   timeline=(f"the keeper mark {repaired}" if repaired and old == new else f"the keeper mark moved from {old or 'none'} to {new}") if changed and apply else "", tag="keeper")
+    res = _finish(out["pid"], ents, changed, not apply, io, warn=out.get("warning", ""), extra=extra, by=by, mirror_now=False)      # the record only: the mark is no mirrored line, so no page is read or written
+    res["mirror"] = {"state": "skipped", "key": res["key"], "note": "the keeper verb writes the record only"}
+    return res
 
 
 # ---- the page moves

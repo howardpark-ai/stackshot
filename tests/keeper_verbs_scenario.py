@@ -248,7 +248,18 @@ r = pv.keeper("projects/ember2", "team-ember2-docs", apply=True, io=IO, by="lone
 check("keeper: a project whose page names another agent in its own `keeper:` line gets the record's flag and a warning that the page line is for whoever edits the page to change (the record wins)",
       flags(EMBER2) == ["team-ember2-docs"] and "keeper:" in r.get("warning", "") and fields_of("projects/ember2") == ("team-ember2-docs", "mark") and r["old"] == "team-ember2-main", (flags(EMBER2), r.get("warning"), r["old"], fields_of("projects/ember2")))
 check("keeper: the page's mirror lines are not changed by a keeper move (the page keeps its own `keeper:` line and writes none)", "keeper: team-ember2-main" in text("projects/ember2") and "keeper: true" not in text("projects/ember2"), text("projects/ember2"))
-dbt = rr.keeper_debts(ents(), reg(), R())
+# the keeper verb writes the record only: a page whose mirrored lines drifted from the record (a mandate edited by hand) is left byte for byte as it is, and no timeline line is added to it
+FP = BRAIN / "projects/forge.md"; fp_orig = FP.read_bytes()
+FP.write_text(FP.read_text(encoding="utf-8").replace("keeps the docs", "keeps the docs and the notes", 1), encoding="utf-8"); fp_drift = FP.read_bytes()
+r = pv.keeper("projects/forge", "team-forge-builder", apply=True, io=IO, by="lone-session", run_dir=undo_dir)
+check("keeper --apply writes the record only: the drifted mirrored line on the page is not rewritten, no timeline line is added, and the answer's mirror says skipped",
+      r["changed"] is True and flags(FORGE) == ["team-forge-builder"] and FP.read_bytes() == fp_drift and r["mirror"]["state"] == "skipped" and "record only" in r["mirror"]["note"], (r["mirror"], FP.read_text(encoding="utf-8")))
+r = pv.keeper("projects/forge", "team-forge-main", io=IO, by="lone-session")
+check("keeper, a dry run: the page is not touched and the mirror says skipped too", FP.read_bytes() == fp_drift and r["dry"] is True and r["mirror"]["state"] == "skipped", r["mirror"])
+rc, out, err = tool("stackshot/tools/project.py", "keeper", "projects/forge", "team-forge-docs", "--apply", "--run-dir", str(T / "undo-drift"))
+check("cli keeper --apply: the same, in a child process (the page's bytes are the drifted ones, the record has the mark)", rc == 0 and FP.read_bytes() == fp_drift and flags(FORGE) == ["team-forge-docs"], (rc, out, err))
+FP.write_bytes(fp_orig); pv.keeper("projects/forge", "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=undo_dir)      # back to the mark the sections below read
+dbt =rr.keeper_debts(ents(), reg(), R())
 check("debts: that page line and the record's flag name different agents, which the check names as keeper-two-marks", [f["line"] for f in dbt if f["page"] == "projects/ember2"] == ["keeper-two-marks"], dbt)
 
 # ---- 5. the CLI
