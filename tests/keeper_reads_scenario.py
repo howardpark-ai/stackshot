@@ -27,6 +27,7 @@ from stackshot.projects import keeper as KP
 from stackshot.anchors import anchors as ANC
 from stackshot.core import config as cfg
 
+INIT_STATE = dict(KR._STATE)       # what a fresh process starts from, taken before anything ran
 fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)
@@ -183,11 +184,11 @@ check("pages.keeper_of is not instrumented (the mark lives in the record, which 
 
 # ---- 8. the report and the command
 F.unlink(missing_ok=True); KR._SEEN.clear(); KR._PENDING.clear(); KR._LAST.clear()
-KR.gauge(["projects/a", "projects/b"])
+KR.gauge(["projects/a", "projects/b"] + [f"k{i}" for i in range(5)] + ["z"])
 for i in range(5): reader(f"k{i}")
 caller("z"); KR.flush()
 rep = KR.report()
-check("the report: the gauge, then the sites with the most keys first, each with its last read and key count", rep[0].startswith("legacy keepers: 2 registry row(s)") and "projects/a, projects/b" in rep[0] and rep[1].startswith("removal-candidate readers, since ")
+check("the report: the gauge, then the sites with the most keys first, each with its last read and key count", rep[0].startswith("legacy keepers: 8 registry row(s)") and "projects/a, projects/b" in rep[0] and rep[1].startswith("removal-candidate readers, since ")
       and rep[2].split()[0] == "5" and rep[2].endswith(RD) and rep[3].split()[0] == "1" and " last " in rep[2], rep)
 check("the report says what a quiet week does and does not show", any(l == KR.QUIET for l in rep) and "gauge at zero" in KR.QUIET and "not covered" in KR.QUIET and "old keeper forms can go" not in "\n".join(rep), rep)
 check("the report lists the readers that stay", sum(l.startswith("  stays  ") for l in rep) == len(KR.BY_DESIGN) and len(KR.BY_DESIGN) >= 1, rep)
@@ -213,7 +214,7 @@ F.unlink()
 r = subprocess.run([sys.executable, "-m", "stackshot.projects.keeper_reads"], capture_output=True, text=True, env=env, cwd=STACK)
 check("a missing file is a loud line (not a quiet week) and the report does not create it", r.returncode == 0 and r.stdout.splitlines()[0].startswith("NOT RECORDING?") and "not a week of no reads" in r.stdout.splitlines()[0] and not F.exists(), (r.stdout, r.stderr[-300:]))
 # ---- 9. the flush at exit waits for the lock: processes that exit together lose no key
-F.unlink(missing_ok=True); (T / "state" / "keeper-reads.json.lock").unlink(missing_ok=True)
+F.unlink(missing_ok=True); (T / "state" / "keeper-reads.json.lock").unlink(missing_ok=True); KR._STATE["gauge"] = None
 N = 24
 start = time.time() + 1.5
 code = "import sys, time; sys.path.insert(0, %r); from stackshot.projects import keeper_reads as KR; t = float(sys.argv[2])\nwhile time.time() < t: pass\nKR.note('exit probe', sys.argv[1], 1)" % STACK
@@ -243,6 +244,198 @@ finally:
 check("a lock error that is not a held lock (ENOLCK) fails the exit-time wait at once, not after the two seconds", r is False and time.time() - t0 < 0.5, (r, time.time() - t0))
 check("...and keeps the count for the next flush", KR.flush() is True and "enolck" in keys("exit probe <- __main__.<module>"), filed())
 check("the flush at exit is the one that waits: it is registered as the exit hook with the wait", KR.EXIT_WAIT == 2.0 and KR._at_exit.__name__ == "_at_exit")
+
+# ---- 10. a gauge on disk carries a generation that grows by one with every gauge written: a publisher writes only a gauge it computed after reading the current generation, whatever the clocks say
+class Clock:
+    def __init__(self, t): self.now = t
+    def time(self): return self.now
+    def monotonic(self): return time.monotonic()
+    def sleep(self, s): time.sleep(s)
+clock = Clock(1_000_000.0); real_time = KR.time; KR.time = clock
+class Proc:
+    """One process's counter state, swapped in for the module's own while a step of that process runs (two writers in one test process)."""
+    def __init__(self): self.b = ({}, {}, {}, {**INIT_STATE, "flushed": clock.time(), "hooked": True})
+    def __enter__(self):
+        self.out = tuple(dict(x) for x in (KR._PENDING, KR._SEEN, KR._LAST, KR._STATE))
+        for live, mine in zip((KR._PENDING, KR._SEEN, KR._LAST, KR._STATE), self.b): live.clear(); live.update(mine)
+        return self
+    def __exit__(self, *a):
+        self.b = tuple(dict(x) for x in (KR._PENDING, KR._SEEN, KR._LAST, KR._STATE))
+        for live, mine in zip((KR._PENDING, KR._SEEN, KR._LAST, KR._STATE), self.out): live.clear(); live.update(mine)
+sched = []
+class Handle:
+    def __init__(self, delay, fn): self.delay, self.fn, self.cancelled = delay, fn, False
+    def cancel(self): self.cancelled = True
+real_after = KR._after
+KR._after = lambda delay, fn: (sched.append(Handle(delay, fn)), sched[-1])[1]
+def gen(): return (filed().get("legacy") or {}).get("gen")
+def publish(keys_, at=None, fresh=True):
+    """A fresh process computes a gauge and writes it (at wall-clock time `at`)."""
+    if at is not None: clock.now = at
+    with Proc(): KR.gauge(keys_); KR.flush()
+F.unlink(missing_ok=True); clock.now = 1_000_000.0
+# the older publisher computes its zero gauge while another process holds the file's lock: its write is skipped and the gauge waits; the newer publisher then writes
+older = Proc()
+with open(str(F) + ".lock", "a") as lk:
+    fcntl.flock(lk, fcntl.LOCK_EX)
+    with older: KR.gauge([])
+    fcntl.flock(lk, fcntl.LOCK_UN)
+check("the older publisher's write was skipped (the lock was held): no file yet", not F.exists(), filed())
+publish(["projects/a"])
+check("the newer publisher's gauge is generation 1", gen() == 1 and filed()["legacy"]["count"] == 1, filed().get("legacy"))
+with older:
+    reader("k1"); ok = KR.flush()
+check("the older publisher flushes last, with the very same clock reading: its zero does not overwrite the newer gauge (it computed it before the file's generation)", ok is True and filed()["legacy"]["count"] == 1 and filed()["legacy"]["keys"] == ["projects/a"] and gen() == 1, filed().get("legacy"))
+check("...but its read is still counted", "k1" in (keys(RD) or []) and filed()["flushed"] == iso(1_000_000.0), filed())
+with older: KR.flush(); KR.flush(KR.EXIT_WAIT)
+check("...and not at its exit-time flush either", filed()["legacy"]["count"] == 1 and gen() == 1, filed().get("legacy"))
+with older: KR.gauge([]); KR.flush()
+check("a gauge it computes after reading the file's generation is written, as the next generation", filed()["legacy"]["count"] == 0 and gen() == 2, filed().get("legacy"))
+# a clock that steps back (or any writer that once stamped a later time) never freezes the gauge
+publish(["projects/x"], at=5_000_000.0)
+publish([], at=4_990_000.0)
+check("the clock stepped back by hours: a newer gauge is still written (generations, not times, decide)", filed()["legacy"]["count"] == 0 and gen() == 4, filed().get("legacy"))
+publish(["projects/y"], at=4_980_000.0)
+check("...and the next one too; the time written is for display only", filed()["legacy"]["keys"] == ["projects/y"] and gen() == 5 and filed()["legacy"]["at"] == iso(4_980_000.0), filed().get("legacy"))
+publish(["projects/y", "projects/z"], at=4_980_000.0)
+check("two gauges written at one clock reading: the later one is the newer", filed()["legacy"]["count"] == 2 and gen() == 6, filed().get("legacy"))
+# a file with a time far ahead, or an infinite one, froze the gauge in the version that compared times
+good = {"schema": 1, "since": iso(1_000_000.0), "flushed": iso(1_000_000.0), "sites": {}}
+F.write_text(json.dumps({**good, "legacy": {"count": 1, "keys": ["a"], "at": "2099-01-01T00:00:00Z", "stamp": 4_000_000_000.0}}))
+publish(["projects/n"], at=1_000_050.0)
+check("a gauge from the previous version (no generation, a time far ahead) is replaced by a gauge written now, as generation 1", filed()["legacy"]["keys"] == ["projects/n"] and gen() == 1, filed().get("legacy"))
+F.write_text(json.dumps({**good, "legacy": {"count": 1, "keys": ["a"], "at": iso(1_000_000.0), "stamp": float("inf")}}))
+d10, prob10 = KR.load()
+check("an infinite stamp is a damaged file, not a gauge that nothing can replace", prob10.startswith("unreadable") and d10 == {}, prob10)
+BAD.unlink(missing_ok=True); publish(["projects/q"], at=1_000_060.0)
+check("...and the next gauge replaces it, the old file kept as .bad", filed()["legacy"]["keys"] == ["projects/q"] and gen() == 1 and BAD.exists(), (filed().get("legacy"), BAD.exists()))
+BAD.unlink(missing_ok=True)
+
+# ---- 11. a read recorded by a process that then makes no other call is written when its minute is up, on a timer, not at its exit only
+F.unlink(missing_ok=True); sched.clear(); solo = Proc(); clock.now = 2_000_000.0
+with solo:
+    KR._STATE["flushed"] = clock.now
+    clock.now = 2_000_010.0; reader("solo")
+    check("a read within the minute of the last write is not written yet, and a timer is set for the minute's end (50 seconds on)", not F.exists() and len(sched) == 1 and abs(sched[0].delay - 50.0) < 0.01, [h.delay for h in sched])
+    clock.now = 2_000_020.0; reader("solo2")
+    check("another read before then sets no second timer", len(sched) == 1, len(sched))
+    clock.now = 2_000_060.0; sched[0].fn()
+    check("the timer's flush writes what waits, with no further call", {"solo", "solo2"} <= set(keys(RD) or []) and not KR._PENDING and KR._STATE["timer"] is None, (filed(), KR._PENDING))
+    reader("solo3")
+    check("a read after that, within the new minute, sets the next timer", len(sched) == 2 and not sched[1].cancelled, len(sched))
+    KR._path = lambda: T / "no-such-folder" / "keeper-reads.json"
+    try: sched[1].fn()
+    finally: KR._path = real
+    check("a timer's flush that fails sets the timer again, and the count waits", len(sched) == 3 and KR._PENDING and KR._STATE["timer"] is sched[2], (len(sched), KR._PENDING))
+    clock.now = 2_000_070.0
+    KR._at_exit()
+    check("the flush at exit cancels the timer and writes", sched[2].cancelled and "solo3" in keys(RD) and KR._STATE["timer"] is None, (sched[2].cancelled, filed()))
+    clock.now = 2_000_100.0; KR._STATE["flushed"] = clock.now; KR._STATE["gauge"] = ["projects/s"]
+    KR.gauge(["projects/s"])
+    check("a gauge update that is not due and changed nothing waits for a timer too (its heartbeat)", KR._STATE["timer"] is not None and not sched[-1].cancelled, KR._STATE["timer"])
+KR._after = real_after; KR.time = real_time
+EVERY0 = KR.EVERY; KR.EVERY = 0.3
+made = []
+KR._after = lambda delay, fn: (made.append(real_after(delay, fn)), made[-1])[1]
+F.unlink(missing_ok=True)
+with Proc():
+    KR._STATE["flushed"] = time.time(); reader("thr")
+    check("a real timer: one is started, on a daemon thread (a process does not wait for it at its end)", len(made) == 1 and made[0].daemon is True, made)
+    t_end = time.time() + 10.0
+    while time.time() < t_end and not ("thr" in (keys(RD) or []) and not KR._PENDING): time.sleep(0.05)       # a poll, not a fixed sleep: a slow box only waits longer
+    check("...and with no other call the read is in the file a moment after the interval", "thr" in (keys(RD) or []) and not KR._PENDING, filed())
+KR._after = real_after; KR.EVERY = EVERY0
+
+# ---- 12. a file whose nested values are malformed is a damaged file: the report does not crash, and a flush keeps it as .bad and starts again
+for label, doc in (("a site's keys that is a number", {"sites": {"reader": {"keys": 1}}}), ("a site that is a number", {"sites": {"reader": 1}}), ("keys that are not strings", {"sites": {"r": {"keys": [1, 2]}}}),
+                   ("a site's last that is a number", {"sites": {"r": {"last": 5, "keys": []}}}), ("a gauge count that is a word", {"sites": {}, "legacy": {"count": "x"}}), ("gauge keys that are a number", {"sites": {}, "legacy": {"count": 1, "keys": 3}}),
+                   ("a gauge that is a list", {"sites": {}, "legacy": [1]}), ("a heartbeat that is a number", {"sites": {}, "flushed": 5}),
+                   ("a gauge count that is NaN", {"sites": {}, "legacy": {"count": float("nan"), "keys": []}}), ("a gauge count that is Infinity", {"sites": {}, "legacy": {"count": float("inf"), "keys": []}}),
+                   ("a gauge count that is not a whole number", {"sites": {}, "legacy": {"count": 1.5, "keys": []}}), ("a gauge count that is true", {"sites": {}, "legacy": {"count": True, "keys": []}}),
+                   ("a negative gauge count", {"sites": {}, "legacy": {"count": -1, "keys": []}}), ("a gauge generation that is not a whole number", {"sites": {}, "legacy": {"count": 1, "keys": [], "gen": 1.5}}),
+                   ("a gauge generation that is Infinity", {"sites": {}, "legacy": {"count": 1, "keys": [], "gen": float("inf")}}), ("a gauge generation that is a word", {"sites": {}, "legacy": {"count": 1, "keys": [], "gen": "3"}}),
+                   ("a negative gauge generation", {"sites": {}, "legacy": {"count": 1, "keys": [], "gen": -1}}), ("a gauge stamp that is NaN", {"sites": {}, "legacy": {"count": 1, "keys": [], "stamp": float("nan")}})):
+    F.write_text(json.dumps(doc)); BAD.unlink(missing_ok=True)
+    d12, prob12 = KR.load()
+    try: rep12 = KR.report(); crashed = ""
+    except Exception as e: rep12 = []; crashed = repr(e)
+    check(f"malformed ({label}): the file reads as unreadable and the report does not crash, it says nothing can be told", d12 == {} and prob12.startswith("unreadable") and not crashed and rep12 and rep12[0].startswith("NOT RECORDING?"), (prob12, crashed, rep12[:1]))
+    F.write_text(json.dumps(doc)); KR._SEEN.clear(); KR._PENDING.clear(); KR._STATE["gauge"] = None; reader("m1"); ok12 = KR.flush()
+    check(f"malformed ({label}): a flush keeps it as .bad, replaces it, and the file then reads", ok12 is True and BAD.exists() and BAD.read_text() == json.dumps(doc) and keys(RD) == ["m1"] and KR.load()[1] == "" and bool(filed().get("restarted")), (ok12, filed()))
+for label, text in (("a file nested a hundred thousand lists deep", "[" * 100000), ("a file nested fifty thousand objects deep", '{"a":' * 50000)):
+    F.write_text(text); BAD.unlink(missing_ok=True)
+    try: d12, prob12 = KR.load(); crashed = ""
+    except BaseException as e: d12, prob12, crashed = {}, "", repr(e)[:80]
+    check(f"malformed ({label}): load() says unreadable and does not raise", not crashed and d12 == {} and prob12.startswith("unreadable"), (prob12, crashed))
+    KR._SEEN.clear(); KR._PENDING.clear(); KR._STATE["gauge"] = None; reader("m2"); ok12 = KR.flush()
+    check(f"malformed ({label}): a flush keeps it as .bad and starts again, once", ok12 is True and BAD.exists() and BAD.read_text() == text and keys(RD) == ["m2"], (ok12, F.read_text()[:100]))
+F.unlink(missing_ok=True); BAD.unlink(missing_ok=True)
+F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {"a": {"last": iso(2.0), "keys": ["x"]}, "b": {}}, "legacy": {"count": 2, "keys": ["x"], "at": iso(3.0), "gen": 4}}))
+check("a file this code writes, with a site that has no keys yet and a gauge with a generation, still reads", KR.load()[1] == "" and not KR.report()[0].startswith("NOT RECORDING"), KR.load()[1])
+
+# ---- 13. a site's keys are rows of the current gauge: a row that has since got a mark leaves the sites when the gauge is computed
+F.unlink(missing_ok=True); BAD.unlink(missing_ok=True); KR._STATE["gauge"] = None; KR._STATE["gauge_at"] = 0.0; KR._SEEN.clear(); KR._PENDING.clear()
+for k in ("p/a", "p/b", "p/c"): reader(k)
+KR.flush()
+check("fixture: three rows read at a site, no gauge yet: nothing is pruned", keys(RD) == ["p/a", "p/b", "p/c"], keys(RD))
+KR.gauge(["p/b", "p/c"]); KR.flush()
+check("a gauge without row p/a drops that row's key from the site; the site stays with its last read", keys(RD) == ["p/b", "p/c"] and filed()["sites"][RD]["last"], filed())
+reader("p/d"); KR.gauge(["p/b", "p/c"]); KR.flush()
+check("a read of a row the gauge does not list is not kept either", keys(RD) == ["p/b", "p/c"], keys(RD))
+KR.gauge([]); KR.flush()
+check("the gauge at zero leaves no key at any site: the sites are at zero with it", keys(RD) == [] and filed()["legacy"]["count"] == 0 and sites() == {RD: 0}, filed())
+rep13 = KR.report()
+check("...and the report prints the site with 0 keys, and still the quiet-week line", any(l.split()[:2] == ["0", "key(s)"] and l.endswith(RD) for l in rep13) and KR.QUIET in rep13, rep13)
+KR._SEEN.clear(); reader("p/b"); KR.gauge(["p/b"]); KR.flush()
+check("a row that is back in the gauge is counted again by the next read", keys(RD) == ["p/b"], keys(RD))
+
+# a process that both reads and publishes: a key pruned against its cached gauge is counted again when it is read again
+F.unlink(missing_ok=True); KR._STATE["gauge"] = None; KR._SEEN.clear(); KR._PENDING.clear()
+reader("r1"); reader("r2"); KR.gauge(["r1"]); KR.flush()
+check("a key pruned from the file (its row is not in the gauge) is dropped from the process's seen set too", keys(RD) == ["r1"] and "r2" not in KR._SEEN.get(RD, set()) and "r1" in KR._SEEN.get(RD, set()), (keys(RD), KR._SEEN))
+KR.gauge(["r1", "r2"]); reader("r2"); KR.flush()
+check("...so the next read of it is counted once the gauge lists the row", keys(RD) == ["r1", "r2"], keys(RD))
+
+# ---- 14. the flush at exit waits for a timer's flush that is writing, and a write that fails leaves no temporary file
+F.unlink(missing_ok=True); KR._STATE["gauge"] = None; KR._SEEN.clear(); KR._PENDING.clear()
+TMP = T / "state" / ".keeper-reads.json.tmp"
+with Proc():
+    KR._STATE["flushed"] = time.time()
+    reader("slow1")
+    started = threading.Event(); real_fsync = os.fsync
+    def slow_fsync(fd): started.set(); time.sleep(0.6); return real_fsync(fd)
+    os.fsync = slow_fsync
+    try:
+        th = threading.Thread(target=KR.flush); th.start()                  # the timer's flush: it has taken the counts and is writing
+        started.wait(5); t0 = time.time()
+        KR._at_exit()                                                        # the process ends: this must not return before that write is done
+        waited = time.time() - t0; there = "slow1" in (keys(RD) or [])
+    finally:
+        os.fsync = real_fsync
+    th.join(5)
+    check("the exit-time flush waits for a timer flush that is mid-write: the read is in the file when it returns, and no temporary file is left", there and waited >= 0.3 and not TMP.exists(), (there, waited, TMP.exists()))
+    reader("slow2")
+    real_replace = os.replace
+    def failing_replace(a, b):
+        if str(a).endswith(".tmp"): raise OSError("disk full")
+        return real_replace(a, b)
+    os.replace = failing_replace
+    try: ok14 = KR.flush(); left = TMP.exists()
+    finally: os.replace = real_replace
+    check("a write that fails after the temporary file was made removes it, and the count waits", ok14 is False and not left and "slow2" in KR._PENDING.get(RD, [0, set()])[1], (ok14, left, KR._PENDING))
+    check("...and the next flush writes it", KR.flush() is True and "slow2" in keys(RD) and not TMP.exists(), keys(RD))
+    held14 = threading.Event(); gate = threading.Event()
+    def slow_fsync2(fd): held14.set(); gate.wait(5); return real_fsync(fd)
+    os.fsync = slow_fsync2
+    try:
+        reader("slow3"); th = threading.Thread(target=KR.flush); th.start(); held14.wait(5)
+        reader("slow4"); got14 = KR.flush()
+        gate.set(); th.join(5)
+    finally:
+        os.fsync = real_fsync; gate.set()
+    check("a flush that finds another flush of the same process writing does not wait for it and does not take the counts: they are written by the next one", got14 is False and "slow4" in KR._PENDING.get(RD, [0, set()])[1] and "slow3" in keys(RD), (got14, KR._PENDING, keys(RD)))
+    KR.flush()
+KR.time = real_time
 
 from stackshot import cli
 check("the program is registered under `stackshot keeper-reads`", cli.PROGRAMS.get("keeper-reads", ("",))[0] == "stackshot.projects.keeper_reads")
