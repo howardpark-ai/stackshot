@@ -200,29 +200,36 @@ def stub(content, old, new, why):
 def body_of(content): return split_fm(content)[1].rstrip()
 
 def _record_agents(*keys):
-    """({name: mandate} of every agent, {name: mandate} of the background ones) the project record lists for the project whose page is one of `keys` ({}, {} when none does or the record cannot be read)."""
+    """({name: mandate} of every agent, {name: mandate} of the background ones) the project record lists for the project whose page is the first of `keys` that ANY entry points at ({}, {} when none does or the
+    record cannot be read). The keys are in order of who is asked: the destination first, then the old slug, which is read only when no entry at all points at the destination (a project that has not moved yet). An
+    entry at the destination decides it alone, even an archived one or one that lists no agents: the old slug's agents never stand in for a destination that has none. Among several entries for one page the
+    first (by id) that is not archived and lists agents answers, so the answer for a slug never depends on where an entry stands in the record."""
     try:
         from stackshot.projects import project_registry as _pr
-        want = {str(k) for k in keys if k}
-        for e in _pr.entries().values():
-            if _pr.page_key(e) in want and e.get("status") != "archived" and isinstance(e.get("agents"), dict) and e["agents"]:      # an archived entry or one with no agents lists nobody: the next entry for the page may
-                ag = e["agents"]
-                return ({str(n): str(a.get("mandate_line") or "") for n, a in ag.items()},
-                        {str(n): str(a.get("mandate_line") or "") for n, a in ag.items() if not a.get("front", True)})
+        ents = sorted(_pr.entries().items())
+        for k in (str(x) for x in keys if x):
+            here = [e for _pid, e in ents if _pr.page_key(e) == k]
+            if not here: continue                   # nothing points at this key: ask the next
+            for e in here:
+                if e.get("status") != "archived" and isinstance(e.get("agents"), dict) and e["agents"]:
+                    ag = e["agents"]
+                    return ({str(n): str(a.get("mandate_line") or "") for n, a in ag.items()},
+                            {str(n): str(a.get("mandate_line") or "") for n, a in ag.items() if not a.get("front", True)})
+            return {}, {}                           # an entry points here, so this key decides: it lists nobody
     except Exception: pass
     return {}, {}
 
 def agents_gap(content, new, old_content=None, old=None):
     """None when the page at `new` is fine, else (why, fix): a project with no one to take its items. `projects.agent_gap` is the one rule (the daily page agent lines check uses it too): `type: project`, active
     (not retired, done or moved), no sub-page (a key under another page of the registry, or a `hub:` line; a `parent:` line is no sub-page for the registry, so it is none here) and no front agent: on the page's
-    `agents:` map, or, when the page lists none, on the agents the project record lists for the page (`old` and `new` are the keys it may point at). A page with no frontmatter, or one that cannot be read, is no
+    `agents:` map, or, when the page lists none, on the agents the project record lists for the page (read for `new` first, and for `old` only when no entry at all points at `new`). A page with no frontmatter, or one that cannot be read, is no
     project here. `old_content` is the page at the old slug: when it was no project there the reason says the type changed."""
     from stackshot.projects import pages as _pages; from stackshot.projects import projects as _prj; from stackshot.anchors import anchors as _anc
     try:
         fm = _pages.frontmatter_text(content)
         flat, back = _pages.split_agents(fm.get("agents"))
     except Exception: return None
-    if not flat and not back: flat, back = _record_agents(old, new)
+    if not flat and not back: flat, back = _record_agents(new, old)
     entry = {"type": fm.get("type") or "", "status": fm.get("status") or "", "title": fm.get("title") or "", "hub": fm.get("hub") or "", "agents": flat, "back_agents": back}
     gap = _prj.agent_gap(new, entry, _anc.registry())
     if not gap: return None

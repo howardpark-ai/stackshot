@@ -321,5 +321,54 @@ tz13 = "\n".join(z13["lines"])
 check("an apply whose re-plan under the lock has nothing left to do says plainly that nothing needed writing, not `the plan that was written (0 changes)`",
       z13["written"] is False and z13["replanned"] is True and "nothing needed writing any more" in tz13 and "(0 changes)" not in tz13 and "nothing to change: nothing written" in tz13, tz13)
 
+# ---- 14. the plan made under the record's lock decides the role-loss refusal, not the plan read before it
+write_record(ENTRIES)
+def resolving_plan(**kw):
+    out = orig_plan(**kw); km.plan = orig_plan
+    d = json.loads(REC.read_text()); d["projects"][WI]["agents"]["team-wing"] = agent(True, "the session")       # another writer lists the session that would lose its role as a front agent
+    REC.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8"); pr._CACHE["sig"] = None
+    return out
+check("fixture: the plan read before the lock says team-wing would lose a role", orig_plan(live=set(), now=NOW9)["effects"]["lose"] == ["team-wing"])
+km.plan = resolving_plan
+try:
+    r14 = km.run(apply_=True, accept=(), live=set(), run_dir=T / "undo-resolved", now=NOW9)
+finally:
+    km.plan = orig_plan
+check("a role loss the plan before the lock saw and another writer resolved before it: the plan under the lock decides, so the apply is written, not refused",
+      r14["refused"] == "" and r14["written"] is True and r14["effects"]["lose"] == [], (r14["refused"], r14["written"], r14["effects"]["lose"]))
+check("... and what it wrote is marked on the wing's builder, with the session the other writer listed kept",
+      json.loads(REC.read_text())["projects"][WI]["agents"]["team-wing-builder"].get("keeper") is True and "team-wing" in json.loads(REC.read_text())["projects"][WI]["agents"], json.loads(REC.read_text())["projects"][WI]["agents"])
+write_record({**ENTRIES, WI: entry("projects/wing", name="team-wing", agents={"team-wing": agent(True, "the session"), "team-wing-builder": agent(False, "builds and merges")})})
+check("fixture: with the session listed as a front agent the plan before the lock loses no role", orig_plan(live=set(), now=NOW9)["effects"]["lose"] == [])
+def losing_plan(**kw):
+    out = orig_plan(**kw); km.plan = orig_plan
+    d = json.loads(REC.read_text()); d["projects"][WI]["agents"].pop("team-wing")                              # another writer takes the session off the list after the plan was read
+    REC.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8"); pr._CACHE["sig"] = None
+    return out
+km.plan = losing_plan
+try:
+    r14b = km.run(apply_=True, accept=(), live=set(), run_dir=T / "undo-lost", now=NOW9)
+    left14 = recbytes()
+finally:
+    km.plan = orig_plan
+check("a role loss that appears only under the lock is refused, nothing written, and no undo file", r14b["refused"].startswith("refused: 1 session(s) would lose a role: team-wing") and "nothing was written" in r14b["refused"]
+      and r14b["written"] is False and not (T / "undo-lost").exists() and "team-wing" not in json.loads(left14)["projects"][WI]["agents"] and not any(a.get("keeper") for a in json.loads(left14)["projects"][WI]["agents"].values()), (r14b["refused"], r14b["written"]))
+check("... and it is accepted when the session is named", (lambda r: r["written"] is True and r["refused"] == "")(km.run(apply_=True, accept=("team-wing",), live=set(), run_dir=T / "undo-accepted", now=NOW9)), None)
+
+# ---- 15. a record entry with no page (or no usable key) is never promoted, marked or cleared
+write_record(ENTRIES)
+raw15 = prj.registry_raw()
+none15 = {"x1": {"name": "lone-nopage", "status": "active"}, "x2": {"name": "team-nopage", "status": "active", "page": "", "agents": {"team-nopage-main": agent(True, "talks")}},
+          "x3": {"name": "team-link", "status": "active", "page": "https://example.invalid/team-link", "agents": {"team-link-builder": agent(False, "builds")}}, "x4": {"name": "lone-blank", "status": "active", "page": "  /  "}}
+new15, rows15 = km.build(none15, raw15, now=NOW9)
+check("entries with no page, an empty pointer, a pointer to another knowledge base and a blank pointer are skipped with the reason, and not one is changed",
+      all(r["action"] == "skip" and "no page row" in r["why"] for r in rows15) and new15 == none15 and len(rows15) == 4, rows15)
+raw15b = {**raw15, "": {"session": "lone-nopage", "role": "name", "agents": {}}}
+new15, rows15 = km.build(none15, raw15b, now=NOW9)
+check("... also when the registry has a row filed under the empty key (an empty key matches no page)", all(r["action"] == "skip" for r in rows15) and new15 == none15, rows15)
+s15 = km.summarize({**{k: v for k, v in ENTRIES.items() if k == WR}, **none15}, raw15, live=set(), now=NOW9)
+check("a pageless entry beside a real one changes nothing of the real one's plan: it is marked, its name cleared, and the pageless ones count as skipped",
+      s15["counts"]["skip"] == 4 and s15["counts"]["mark"] == 1 and s15["counts"]["names_cleared"] == 1, s15["counts"])
+
 if fails: print(f"FAILED: keeper mark migrate scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: keeper mark migrate scenario, {len(ran)} checks")

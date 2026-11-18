@@ -203,6 +203,39 @@ try:
     check("_record_agents: an archived entry lists nobody for its page", _REAL_RECORD_AGENTS("projects/rec-gone") == ({}, {}), _REAL_RECORD_AGENTS("projects/rec-gone"))
     check("_record_agents: an entry with no agents does not hide another entry for the same page", _REAL_RECORD_AGENTS("projects/rec-twice") == ({"twice-main": "talks"}, {}), _REAL_RECORD_AGENTS("projects/rec-twice"))
     check("_record_agents: an entry with no agents alone lists nobody", _REAL_RECORD_AGENTS("projects/rec-empty") == ({}, {}))
+    # two projects, one at the old slug and one at the destination: the destination's agents decide, whatever order the record lists them in
+    def two(order, new_agents, old_agents, new_status="active"):
+        ents = {"old": entry("projects/src-page", old_agents)}
+        if new_agents is not None: ents["new"] = entry("projects/dst-page", new_agents, new_status)      # None: no entry points at the destination at all
+        RECF.write_text(json.dumps({"projects_schema": 1, "projects": {pid(20 + i): ents[k] for i, k in enumerate(k for k in order if k in ents)}}), encoding="utf-8")
+        try:
+            from stackshot.projects import project_registry as _pr
+            _pr._CACHE["sig"] = None
+        except Exception: pass
+    FRONT = {"src-main": {"front": True, "mandate_line": "talks"}}; BACK = {"dst-build": {"front": False, "mandate_line": "builds"}}
+    for order in (("old", "new"), ("new", "old")):
+        two(order, BACK, FRONT)
+        check(f"_record_agents: the destination's own agents answer (background only), not the old slug's front agent, record order {'/'.join(order)}",
+              _REAL_RECORD_AGENTS("projects/dst-page", "projects/src-page") == ({"dst-build": "builds"}, {"dst-build": "builds"}), _REAL_RECORD_AGENTS("projects/dst-page", "projects/src-page"))
+        check(f"_record_agents: the source's agents answer when the source is asked first, record order {'/'.join(order)}", _REAL_RECORD_AGENTS("projects/src-page", "projects/dst-page") == ({"src-main": "talks"}, {}), _REAL_RECORD_AGENTS("projects/src-page", "projects/dst-page"))
+        rp._record_agents = _REAL_RECORD_AGENTS
+        try: g = rp.agents_gap(EX3.replace("projects/example-three", "projects/dst-page"), "projects/dst-page", None, "projects/src-page")
+        finally: rp._record_agents = lambda *keys: ({}, {})
+        check(f"agents_gap: an old project's front agent does not let a destination that lists only background agents pass, record order {'/'.join(order)}", g is not None and "only background agents" in g[0], g)
+    two(("old", "new"), None, FRONT)
+    check("_record_agents: a project that has not moved yet (no entry points at the destination at all) is read at the old slug", _REAL_RECORD_AGENTS("projects/dst-page", "projects/src-page") == ({"src-main": "talks"}, {}), _REAL_RECORD_AGENTS("projects/dst-page", "projects/src-page"))
+    # an entry that points at the destination decides it alone, whatever it lists and however it stands: the old slug's front agent never stands in for a destination that has none
+    for label, dst, status, want, why in (("lists no agents", {}, "active", ({}, {}), "no agents map"),
+                                          ("is archived", {"dst-main": {"front": True, "mandate_line": "talks"}}, "archived", ({}, {}), "no agents map"),
+                                          ("lists background agents only", BACK, "active", ({"dst-build": "builds"}, {"dst-build": "builds"}), "only background agents")):
+        for order in (("old", "new"), ("new", "old")):
+            two(order, dst, FRONT, status)
+            got = _REAL_RECORD_AGENTS("projects/dst-page", "projects/src-page")
+            check(f"_record_agents: a destination entry that {label} is the destination's answer, never the old slug's front agent, record order {'/'.join(order)}", got == want, got)
+            rp._record_agents = _REAL_RECORD_AGENTS
+            try: g = rp.agents_gap(EX3.replace("projects/example-three", "projects/dst-page"), "projects/dst-page", None, "projects/src-page")
+            finally: rp._record_agents = lambda *keys: ({}, {})
+            check(f"agents_gap: a destination entry that {label} is still a gap, record order {'/'.join(order)}", g is not None and why in g[0], g)
     RECF.write_text("{ not json", encoding="utf-8")
     check("_record_agents: a record that cannot be read lists nobody, and does not raise", _REAL_RECORD_AGENTS("projects/rec-one") == ({}, {}))
 finally:

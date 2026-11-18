@@ -18,7 +18,7 @@ registry file and sala's list of running sessions, and writes no file (it takes 
 the roles.json entries that change (anchors.file_roles read before and after), the sessions whose entry sala's load_roles would count differently ("sessions that lose a role"), the running old name-line sessions that
 would be off the map, the projects whose gating class flips (a one-session project's session becomes a front agent), the projects whose items or router passes go to a different agent (a project with background agents only, a one-session project), the notice addresses that change, and the marked agents that are not builders.
 
-`--apply` refuses (exit 1, nothing written) while a session would lose a role, unless each such session is named with `--accept-role-loss`: the usual remedy is to list that session as a front agent of its project first.
+`--apply` refuses (exit 1, nothing written) while a session would lose a role, as read from the plan made again inside the record's lock (the dry-run plan read before it never decides), unless each such session is named with `--accept-role-loss`: the usual remedy is to list that session as a front agent of its project first.
 It is idempotent: a second run finds every project marked and writes nothing. The apply plans again inside the record's lock and reports that plan (the one written), saying so when it differs from the plan read before the lock;
 its undo takes back the whole file and is refused once the record was written after the change (the printed hint names `restore --from-git` for that case).
 
@@ -287,20 +287,18 @@ def _lines(p: dict, dry: bool, accept: set) -> list[str]:
     return out
 
 
+def _refusal(names: list[str]) -> str:
+    return (f"refused: {len(names)} session(s) would lose a role: {', '.join(names)}. List each as a front agent of its project first, or name it with --accept-role-loss; nothing was written")
+
+
 def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by: str = BY, run_dir: Any = None, now: str | None = None) -> dict:
     """The pass: the plan, and with `apply_` the write. → the plan (without the entries) and {dry, written, refused, undo, replanned, lines}. A refusal (a session that loses a role and is not accepted) writes nothing.
     The write plans again inside the record's lock, and what is returned and printed after a write is that plan (the one written); `replanned` is true when it differs from the plan read before the lock."""
     p = plan(live=live, by=by, now=now or "")
     acc = set(accept)
-    lose = p["effects"]["lose"]
     res = {k: v for k, v in p.items() if k != "entries"}
     res.update({"dry": not apply_, "written": False, "refused": "", "undo": None, "replanned": False})
     lines = _lines(p, not apply_, acc)
-    unaccepted = [n for n in lose if n not in acc]
-    if apply_ and unaccepted:
-        res["refused"] = (f"refused: {len(unaccepted)} session(s) would lose a role: {', '.join(unaccepted)}. List each as a front agent of its project first, or name it with --accept-role-loss; nothing was written")
-        res["lines"] = lines + [res["refused"]]
-        return res
     if not apply_:
         res["lines"] = lines + (["nothing written (add --apply)"] if p["counts"]["changed"] else ["nothing to change: every project is marked, archived or skipped"])
         return res
@@ -311,10 +309,11 @@ def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by
     got: dict = {}
 
     def work(ctx: pv.Ctx) -> dict:
-        p2 = summarize(ctx.ents, ctx.raw, live=live, by=ctx.by or BY, now=ctx.now)       # the plan again, on the record as it stands under the lock: this one is written, and is the one that is reported
+        p2 = summarize(ctx.ents, ctx.raw, live=live, by=ctx.by or BY, now=ctx.now)       # the plan again, on the record as it stands under the lock: this one is written, is the one that is reported, and decides the refusal
+        got["plan"] = p2
         left = [n for n in p2["effects"]["lose"] if n not in acc]
         if left:
-            raise pv.VerbError(409, f"the record changed while the pass was planned: {', '.join(left)} would now lose a role; nothing was written")
+            raise pv.VerbError(409, _refusal(left))
         for pid, e in p2["entries"].items():
             ctx.ents[pid] = e
         got["plan"] = p2
@@ -323,6 +322,9 @@ def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by
         _out, _ents, changed = pv.txn(work, by=by, now=now, dry=False, undo=undo)
     except pv.VerbError as e:
         res["refused"] = e.message
+        if got.get("plan"):          # a refusal under the lock: what is reported is the plan that decided it
+            res.update({k: v for k, v in got["plan"].items() if k != "entries"})
+            lines = _lines(got["plan"], False, acc)
         res["lines"] = lines + [e.message]
         return res
     p2 = got.get("plan") or p
