@@ -205,58 +205,37 @@ js = json.loads(out) if rc == 0 else {}
 check("the CLI reads the items of the store: --json carries the same three", rc == 0 and sorted(f["page"] for f in js["findings"]) == ["projects/bgonly", "projects/example-three", "projects/touched"], (rc, out[:400], err[:300]))
 rc, out, _ = run(audit_py, "page-agents")
 check("the listing shows the line with its page, kind, count and fix", rc == 0 and "projects/example-three · no agents map · 3 open items · its items have no contact" in out and out.splitlines()[-1].startswith("Page agent lines: 3 line(s) on 3 page(s)"), out)
-# ---- 10. a one-session page is a page by design; a session named for another project is not its own (example shapes)
+# ---- 10. a page is an agentless project when no front agent is listed for it, whatever its name line says (a one-session project lists its session as its one front agent)
 def one(name, role="name", **kw): return {"session": name, "role": role, "status": kw.pop("status", "active"), "type": "project", "agents": kw.pop("agents", None), "back_agents": kw.pop("back", None), "title": kw.pop("title", "")}
 SREG = {
-    "projects/harbor": one("harbor", agents={"harbor-main": "x", "harbor-builder": "y"}, back={"harbor-builder": "y"}),    # a project other sessions are named for
-    "projects/harbor/web": one("solo"),                                             # a sub-page's name is no project's name: solo-site is not named for it
-    "projects/solo": one("solo-site"),                                                  # one session, a live one of its own name
-    "projects/solo-prefix": one("solo-lab"),                                              # the name line starts a live session's name (solo-lab-main)
-    "projects/gear": one("gear-design"),
-    "projects/lantern": one("harbor-lantern"),                                           # the example-three case: the name line's session belongs to harbor
-    "projects/gone-name": one("gone-name"),                                               # a name line no live session answers to
+    "projects/harbor": one("harbor", agents={"harbor-main": "x", "harbor-builder": "y"}, back={"harbor-builder": "y"}),    # a project with its -main agent
+    "projects/harbor/web": one("solo"),                                             # a sub-page is none
+    "projects/solo": one("solo-site", agents={"solo-site": "the session"}),            # a one-session project: its session is its one front agent
+    "projects/gear": one("gear-design"),                                                   # a name line alone lists nobody
+    "projects/lantern": one("harbor-lantern"),
+    "projects/gone-name": one("gone-name"),
     "projects/no-session": one(""),                                                       # no session of its own at all
     "projects/id-session": one("00000000-0000-4000-8000-0000000000b1"),                  # a session id on the name line is no name
-    "projects/agent-line": one("solo-site", role="agent"),                                # an agent: line is no name line
-    "projects/bg-keeper": one("bgk", agents={"bgk-builder": "builds"}, back={"bgk-builder": "builds"}),   # background agents only, its keeper a live name line
+    "projects/agent-line": one("solo-site", role="agent"),                                # an agent: line is no agent
+    "projects/bg-keeper": one("bgk", agents={"bgk-builder": "builds"}, back={"bgk-builder": "builds"}),   # background agents only
 }
 SITEMS = [it(i, k) for i, k in enumerate(SREG, 1)]
-SLIVE = lambda: ({"harbor-main", "harbor-builder", "solo-site", "solo-lab-main", "gear-design", "harbor-lantern", "bgk"}, set())
+SLIVE = lambda: ({"harbor-main", "harbor-builder", "solo-site", "gear-design", "harbor-lantern", "bgk", "bgk-builder"}, set())
 rs = PAR.read(SREG, SLIVE, SITEMS, NOW)
-sg = {f["page"]: f for f in rs["findings"] if f["line"] in ("no agents map", "no front agent", "other project's session")}
-check("one-session pages whose name line is a live session (or starts a live one) are not flagged, nor is a background-only page with a live keeper",
-      not {"projects/solo", "projects/solo-prefix", "projects/gear", "projects/bg-keeper", "projects/harbor"} & set(sg), sorted(sg))
-check("the example-three shape is flagged: a session named for another project, said so in the fix, the name is the session", sg.get("projects/lantern", {}).get("line") == "other project's session" and sg["projects/lantern"]["name"] == "harbor-lantern"
-      and "named for harbor, not for this page" in sg["projects/lantern"]["fix"] and "1 open item" in sg["projects/lantern"]["fix"] and "general -main agent" in sg["projects/lantern"]["fix"], sg.get("projects/lantern"))
-check("a name line no live session answers to, no session at all, a session id and an agent: line are flagged as no agents map", all(sg.get(k, {}).get("line") == "no agents map" for k in ("projects/gone-name", "projects/no-session", "projects/id-session", "projects/agent-line")), sorted(sg))
-check("exactly those five are flagged", sorted(sg) == ["projects/agent-line", "projects/gone-name", "projects/id-session", "projects/lantern", "projects/no-session"], sorted(sg))
-check("the example-three shape is still flagged when its session is not live", "projects/lantern" in {f["page"] for f in PAR.read(SREG, lambda: ({"harbor-main"}, set()), SITEMS, NOW)["findings"] if f["line"] == "other project's session"})
+sg = {f["page"]: f for f in rs["findings"] if f["line"] in ("no agents map", "no front agent")}
+check("a project that lists a front agent is not flagged, a sub-page neither, whatever the name lines say", not {"projects/solo", "projects/harbor", "projects/harbor/web"} & set(sg), sorted(sg))
+check("a name line alone (live or not), no session, a session id and an agent: line are flagged as no agents map", all(sg.get(k, {}).get("line") == "no agents map" for k in ("projects/gear", "projects/lantern", "projects/gone-name", "projects/no-session", "projects/id-session", "projects/agent-line")), sorted(sg))
+check("a page with background agents only is flagged as no front agent", sg.get("projects/bg-keeper", {}).get("line") == "no front agent", sg.get("projects/bg-keeper"))
+check("exactly those seven are flagged", sorted(sg) == ["projects/agent-line", "projects/bg-keeper", "projects/gear", "projects/gone-name", "projects/id-session", "projects/lantern", "projects/no-session"], sorted(sg))
+check("no finding names a session of another project any more", not [f for f in rs["findings"] if f["line"] == "other project's session"])
 SREG2 = {**SREG, "projects/lantern": one("harbor-lantern", agents={"lantern-main": "keeps it"})}
-check("…and clears when the page gets its own agents map with a -main agent", "projects/lantern" not in {f["page"] for f in PAR.read(SREG2, lambda: (SLIVE()[0] | {"lantern-main"}, set()), SITEMS, NOW)["findings"] if f["line"] != "agents line"}, None)
+check("…and a flagged page clears when it lists a front agent", "projects/lantern" not in {f["page"] for f in PAR.read(SREG2, lambda: (SLIVE()[0] | {"lantern-main"}, set()), SITEMS, NOW)["findings"] if f["line"] != "agents line"}, None)
 check("a flagged page with no items is not flagged (items are still the condition)", "projects/lantern" not in {f["page"] for f in PAR.read(SREG, SLIVE, [], NOW)["findings"]})
 check("moved and superseded pages are skipped by the one shared predicate", all(not PAR.active(one("x", status=st)) for st in ("moved", "superseded", "archived")) and not PAR.active(one("x", title="Moved to elsewhere")) and PAR.active(one("x")))
 import io, contextlib
 err = io.StringIO()
 with contextlib.redirect_stderr(err): rr = PAR.read(SREG, SLIVE, 5, NOW)
-check("items that cannot be read: one note on stderr, no such finding, the leftovers still made", "board items could not be read" in err.getvalue() and err.getvalue().count("\n") == 1 and not [f for f in rr["findings"] if f["line"] in ("no agents map", "other project's session")] and rr["checked"] is True, (err.getvalue(), rr["findings"]))
-# sibling-prefix shapes: a name that extends another project's name is its own when it is (or starts with) the page's own slug; a prefix-matched live session of a longer sibling does not cover a shorter page
-TREG = {
-    "projects/foo": one("foo", agents={"foo-main": "x"}),
-    "projects/qux": one("foo-qux-main", agents={"foo-qux-main": "k"}, back={"foo-qux-main": "k"}),     # its keeper is its own background agent: the project name comes from the agents
-    "projects/foo-bar": one("foo-bar"),                                                   # one session, named for its own slug next to a shorter project
-    "projects/foo-baz": one("foo-baz-engineer", agents={"foo-baz-builder": "b"}, back={"foo-baz-builder": "b"}),   # background only, its keeper starts with its own slug
-    "projects/harbor": one("harbor", agents={"harbor-main": "x"}),
-    "projects/harbor-lantern": one("harbor-lantern"),                                   # the example-three name on a page of that very slug: its own
-    "projects/dock": one("dock"),                                                       # a name that is a shorter project than its sibling's
-    "projects/dock-core": one("dock-core", agents={"dock-core-main": "x"}),
-    "projects/shared-a": one("zed-shared"), "projects/shared-b": one("zed-shared"),   # two pages sharing one session name
-}
-TITEMS = [it(i, k) for i, k in enumerate(TREG, 1)]
-def tg(live): return sorted(f["page"] for f in PAR.read(TREG, lambda: (set(live), set()), TITEMS, NOW)["findings"] if f["line"] in ("no agents map", "no front agent", "other project's session"))
-check("sibling prefixes: foo-bar, a background-only foo-baz with its keeper, harbor-lantern, the shared name: none is named for another project", tg(["foo-main", "foo-bar", "foo-qux-main", "foo-baz-engineer", "harbor-main", "harbor-lantern", "dock-core-main", "dock", "zed-shared"]) == [], tg(["foo-main", "foo-bar", "foo-qux-main", "foo-baz-engineer", "harbor-main", "harbor-lantern", "dock-core-main", "dock", "zed-shared"]))
-check("a page `dock` is not covered by `dock-core-engineer` (it belongs to the page `dock-core`), but an exact name or a session of no longer project covers it",
-      tg(["foo-main", "foo-bar", "foo-qux-main", "foo-baz-engineer", "harbor-main", "harbor-lantern", "dock-core-main", "dock-core-engineer", "zed-shared"]) == ["projects/dock"]
-      and tg(["foo-main", "foo-bar", "foo-qux-main", "foo-baz-engineer", "harbor-main", "harbor-lantern", "dock-core-main", "dock-other-main", "zed-shared"]) == [], tg(["dock-core-engineer"]))
+check("items that cannot be read: one note on stderr, no such finding, the leftovers still made", "board items could not be read" in err.getvalue() and err.getvalue().count("\n") == 1 and not [f for f in rr["findings"] if f["line"] in ("no agents map", "no front agent")] and rr["checked"] is True, (err.getvalue(), rr["findings"]))
 check("a parent: key on an entry makes no sub-page here, as in rename_page.py (one rule: projects.agent_gap)", PAR.agentless("projects/no-session", {**SREG["projects/no-session"], "parent": "projects/harbor"}, SREG, PAR.item_counts(SITEMS, SREG, NOW)) is not None)
 err = io.StringIO()
 with contextlib.redirect_stderr(err): PAR.read(SREG, SLIVE, SITEMS, NOW)

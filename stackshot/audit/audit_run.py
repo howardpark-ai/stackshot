@@ -852,7 +852,7 @@ def page_agent_groups(res: dict[str, Any], env: Env) -> dict[tuple[str, bool], d
         to, front = par_target(f, env)
         g = groups.setdefault((to, front), {"front": front, "lines": [], "pages": set(), "gaps": 0})
         g["lines"].append(par_line(f))
-        g["gaps"] += f.get("line") in ("no agents map", "no front agent", "other project's session", "session off the map")      # a project with items and no agent, or a session its map has no line for (tools/page_agent_report.py `agentless`, `offmap`), not a name sala has lost
+        g["gaps"] += f.get("line") in ("no agents map", "no front agent", "session off the map")      # a project with items and no agent, or a session its map has no line for (tools/page_agent_report.py `agentless`, `offmap`), not a name sala has lost
         g["pages"].add(f["page"])
     return groups
 

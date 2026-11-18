@@ -1134,12 +1134,12 @@ check("…it is on the record's page_agents and in no item category", [(f["page"
 rec_clear(); rec = go(f26, env_=env(sessions=lambda: SESS_OK, registry=lambda: {"projects/alpha": {**AXREG["projects/alpha"], "agents": {"alpha-main": "keeps it"}}}))
 check("…and with the agents map added there is no such message", not [1 for to, t, fy in sent if "no agents map" in t], sent)
 FREG = {"projects/other": {"session": "other", "role": "name", "status": "active", "type": "project", "agents": {"other-main": "x"}, "back_agents": {}, "title": ""},
-        "projects/alpha": {**AXREG["projects/alpha"], "session": "other-ax", "role": "name"}}      # the page's only session is named for another project
+        "projects/alpha": {**AXREG["projects/alpha"], "session": "other-ax", "role": "name"}}      # a name line alone lists no agent, whatever session it names
 rec_clear(); rec = go(f26, env_=env(sessions=lambda: ({"other-main", "other-ax"}, set()), registry=lambda: FREG))
 fxm = [t for to, t, fy in sent if "Page agent lines" in t and to != "projects/example"]
-check("a page whose only session is named for another project: its line and the header that names the kind", len(fxm) == 1 and "projects/alpha · other project's session · other-ax · 1 open item; named for other, not for this page" in fxm[0] and "need a fix" in fxm[0], fxm)
-rec_clear(); rec = go(f26, env_=env(sessions=lambda: ({"other-main", "alpha-solo"}, set()), registry=lambda: {**FREG, "projects/alpha": {**FREG["projects/alpha"], "session": "alpha-solo"}}))
-check("…and a one-session page with a live session of its own is not flagged", not [1 for to, t, fy in sent if "Page agent lines" in t and to != "projects/example"], sent)
+check("a page with a name line and no agents: the no agents map line, whichever session the name line names", len(fxm) == 1 and "projects/alpha · no agents map · 1 open item" in fxm[0] and "other project's session" not in fxm[0] and "need a fix" in fxm[0], fxm)
+rec_clear(); rec = go(f26, env_=env(sessions=lambda: ({"other-main", "alpha-solo"}, set()), registry=lambda: {**FREG, "projects/alpha": {**FREG["projects/alpha"], "session": "alpha-solo", "agents": {"alpha-solo": "the session"}}}))
+check("…and a one-session project that lists its session as a front agent is not flagged", not [1 for to, t, fy in sent if "Page agent lines" in t and to != "projects/example"], sent)
 rec_clear(); out = []
 res = AR.run(dry=True, now=now, items=f26, anchors={}, env=env(sessions=lambda: SESS_OK, registry=lambda: AXREG), rubric=RUBRIC_TEXT, out=out.append)
 check("the dry run lists it as a page-agents line", any("[page-agents] projects/alpha · no agents map · 1 open item" in l and "(to falcon-main)" in l for l in out), out)

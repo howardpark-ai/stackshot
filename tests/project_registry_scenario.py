@@ -118,8 +118,8 @@ check("migration, dry run with --keep-pending: both pending agents are listed as
       and "pending agent to clear" not in outc and "0 pending agents folded into their projects and 0 cleared" in errc, (outc, errc))
 rc, outh, errh = tool("--help")
 check("migration, --help: names --keep-pending as the opt-out, and no longer says to wait for the writers", "--keep-pending" in outh and "--clear-pending" not in outh and "DO NOT RUN" not in outh, outh)
-check("migration, dry run: the copy and the store are byte for byte as they were, the copy's state dir is empty", {f.name: sha(f.read_bytes()) for f in (T / "copy-store").iterdir() if f.is_file()} == copy_before
-      and REC.read_bytes() == before and not any((T / "copy-state").iterdir()))
+check("migration, dry run: the copy and the store are byte for byte as they were, the copy's state dir is empty of anything but the read counter", {f.name: sha(f.read_bytes()) for f in (T / "copy-store").iterdir() if f.is_file()} == copy_before
+      and REC.read_bytes() == before and not [f for f in (T / "copy-state").iterdir() if not f.name.startswith(("keeper-reads.json", ".keeper-reads.json"))])      # the read counter (keeper_reads.py) is the one file a read may leave in a state dir
 rc, out2, err2 = tool("--store", str(T / "copy-store"), "--state", str(T / "copy-state"), "--brain", str(T / "brain"), "--apply", "--keep-pending", "--run-dir", str(T / "copy-runs"))
 cp = json.loads((T / "copy-store/project-record.json").read_text())
 check("migration, apply on a copy: the copy gets the entries, the store the test uses does not", rc == 0 and len(cp["projects"]) == 3 and cp["projects_schema"] == 1 and "projects" not in recfile() and REC.read_bytes() == before, (rc, err2))

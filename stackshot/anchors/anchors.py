@@ -34,6 +34,7 @@ from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml; next t
 from stackshot.anchors import gmail_query as _gq  # noqa: E402  (the terms of a Gmail query anchor: the grammar an add checks)
 from stackshot.projects import project_registry as _pr  # noqa: E402  (the project record's entries: read first, the page lines are the fallback)
 from stackshot.projects import keeper as _kp  # noqa: E402  (the keeper as a mark on one agent: a marked page keeps its name line for the roles)
+from stackshot.projects import keeper_reads as _reads  # noqa: E402  (the count of reads that still answer from an old keeper form)
 from stackshot.model import item_project as _iproj  # noqa: E402  (an item's project by its permanent id: the page key it reads through the id)
 from stackshot.core import readonly as _ro  # noqa: E402  (a warm standby copy writes nothing)
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  (the permanent session ids; every lookup is None while there is no registry)
@@ -369,7 +370,11 @@ def project_of(t: dict[str, Any]) -> str:
 
 def name_line(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
     reg = registry() if reg is None else reg
-    return str((reg.get(project) or {}).get("session") or "")
+    row = reg.get(project) or {}
+    s = str(row.get("session") or "")
+    if s and row.get("keeper_source") == "legacy":      # an old form is what names this row's keeper (no mark on the row or its project): counted; a mark that answers is not
+        _reads.note("old form as the keeper", project)
+    return s
 
 
 def hub_of(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
@@ -395,6 +400,8 @@ def session_hubs(name: str, reg: dict[str, dict[str, Any]] | None = None, nm: di
     for k, e in reg.items():
         s = str(e.get("session") or "")
         if (s and (s == name or canonical(s, nm) == me)) or name in (e.get("agents") or {}):
+            if s and (s == name or canonical(s, nm) == me) and name not in (e.get("agents") or {}) and e.get("keeper_source") == "legacy":
+                _reads.note("old form as the keeper", k)        # matched by the page's own old form alone, and nothing else names its keeper
             out.add(hub_of(k, reg))
     return sorted(out)
 

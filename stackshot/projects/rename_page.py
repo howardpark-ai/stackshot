@@ -17,9 +17,8 @@ A page that lands as a top-level `type: project` page (no ancestor page of the r
 on its `agents:` map, its -main agent: the board's items and notices of a project go to it. When the destination does not, `plan` and
 `copy` print a WARN line and `stub` refuses (FAIL, exit 1, nothing changed): add the agents map with its -main agent on the destination
 page (ask the keeper or the project's -main agent), then run `stub` again. This holds for a type change too: a page that was no project
-at the old slug and is one at the new. A one-session page is left alone: its `display-name:` names a live sala session (or one that starts
-with it) and no other project's name is that session's prefix. When it is (the ax case: `<other-project>-ax` on a page of its own), or the name line's session is not live, the page is
-refused too, with a message that says so. A sub-page, a note and a destination that lists a front agent are not touched by it.
+at the old slug and is one at the new. A project that lists its agents in the project record only (the page mirror is off, so its page has no `agents:` map) is checked by the record's agents:
+a front agent there passes it, as a one-session project's one session does. A sub-page, a note and a destination that lists a front agent are not touched by it.
 
 What changes in a moved page: frontmatter gains `aliases`; references to the moved slugs ([[wikilinks]] and the notes repo mirror
 URLs) follow in the frontmatter, in the compiled truth and in the timeline's "Older entries:" pointer. Timeline bullets are
@@ -200,38 +199,40 @@ def stub(content, old, new, why):
 
 def body_of(content): return split_fm(content)[1].rstrip()
 
-def _live_sessions():
-    """The sessions sala lists now as (names, aliases), or None when sala cannot be read (no fleet store, no sala, a failing call): then a name line counts as live."""
+def _record_agents(*keys):
+    """({name: mandate} of every agent, {name: mandate} of the background ones) the project record lists for the project whose page is one of `keys` ({}, {} when none does or the record cannot be read)."""
     try:
-        from stackshot.anchors import anchors as _anc
-        got = _anc.sala_sessions()
-    except Exception: return None
-    return got if got and got[0] else None
+        from stackshot.projects import project_registry as _pr
+        want = {str(k) for k in keys if k}
+        for e in _pr.entries().values():
+            if _pr.page_key(e) in want and e.get("status") != "archived" and isinstance(e.get("agents"), dict) and e["agents"]:      # an archived entry or one with no agents lists nobody: the next entry for the page may
+                ag = e["agents"]
+                return ({str(n): str(a.get("mandate_line") or "") for n, a in ag.items()},
+                        {str(n): str(a.get("mandate_line") or "") for n, a in ag.items() if not a.get("front", True)})
+    except Exception: pass
+    return {}, {}
 
-def agents_gap(content, new, old_content=None):
+def agents_gap(content, new, old_content=None, old=None):
     """None when the page at `new` is fine, else (why, fix): a project with no one to take its items. `projects.agent_gap` is the one rule (the daily page agent lines check uses it too): `type: project`, active
-    (not retired, done or moved), no sub-page (a key under another page of the registry, or a `hub:` line; a `parent:` line is no sub-page for the registry, so it is none here), no front agent on the `agents:` map, and no
-    session of its own: a `display-name:` that names a live sala session, or one that starts with it, is a one-session page and passes, unless that name belongs to another project (it starts with that project's name,
-    not this page's). A page with no frontmatter, or one that cannot be read, is no project here. `old_content` is the page at the old slug: when it was no project there the reason says the type changed."""
+    (not retired, done or moved), no sub-page (a key under another page of the registry, or a `hub:` line; a `parent:` line is no sub-page for the registry, so it is none here) and no front agent: on the page's
+    `agents:` map, or, when the page lists none, on the agents the project record lists for the page (`old` and `new` are the keys it may point at). A page with no frontmatter, or one that cannot be read, is no
+    project here. `old_content` is the page at the old slug: when it was no project there the reason says the type changed."""
     from stackshot.projects import pages as _pages; from stackshot.projects import projects as _prj; from stackshot.anchors import anchors as _anc
     try:
         fm = _pages.frontmatter_text(content)
-        flat, back = _pages.split_agents(fm.get("agents")); who, role = _pages.keeper_of(new, {new: fm}, marks=False)
+        flat, back = _pages.split_agents(fm.get("agents"))
     except Exception: return None
-    entry = {"type": fm.get("type") or "", "status": fm.get("status") or "", "title": fm.get("title") or "", "hub": fm.get("hub") or "", "agents": flat, "back_agents": back, "session": who, "role": role}
-    live = _live_sessions()
-    gap = _prj.agent_gap(new, entry, _anc.registry(), live)
+    if not flat and not back: flat, back = _record_agents(old, new)
+    entry = {"type": fm.get("type") or "", "status": fm.get("status") or "", "title": fm.get("title") or "", "hub": fm.get("hub") or "", "agents": flat, "back_agents": back}
+    gap = _prj.agent_gap(new, entry, _anc.registry())
     if not gap: return None
     was = ""
     if old_content is not None:
         try: t = str(_pages.frontmatter_text(old_content).get("type") or "").strip().lower()
         except Exception: t = ""
         was = f" (it was type: {t or 'unset'} at the old slug)" if t != "project" else ""
-    if gap["kind"] == "foreign-name":
-        return (f"{new}'s only session {gap['name']} is named for {gap['other']}, not for this page, and no agents map lists it{was}",
-                f"give the page its own agents map and -main agent on {new} (ask the scope's general -main agent)")
     what = "only background agents" if gap["kind"] == "no-front-agent" else "no agents map"
-    return (f"{new} is a top-level type: project page{was} with {what}" + (f" and a name line session {gap['name']} that is not live" if gap["name"] else " and no session of its own") + " (no front agent, no -main agent)",
+    return (f"{new} is a top-level type: project page{was} with {what} and no session of its own (no front agent, no -main agent)",
             f"add the agents map with its -main agent on {new} (ask the keeper or the project's -main agent)")
 
 def main():
@@ -268,7 +269,7 @@ def main():
             oc, _r = get(old); nc, _r = get(new)
             if oc is None or nc is None or re.search(r"(?m)^type:[ \t]*redirect", split_fm(oc)[0]): continue      # the loop below reports an unreadable page, or skips a redirect
             if not check_on(): break
-            gap = agents_gap(nc, new, oc)
+            gap = agents_gap(nc, new, oc, old)
             if gap: refused.append(gap)
         if refused:
             for why_not, fix in refused:
@@ -285,7 +286,7 @@ def main():
             if ex is not None and body_of(ex) != body_of(out): print(f"FAIL {new}: a different page already exists there"); bad += 1; continue
             print(f"{'plan' if verb == 'plan' else 'copy'} {old} → {new}  ({len(content.encode())} B, {sum(1 for x, y in zip(content.split(chr(10)), out.split(chr(10))) if x != y) + abs(len(content.split(chr(10))) - len(out.split(chr(10))))} line(s) differ)" + ("  [already there]" if ex is not None else ""))
             if top and check_on():
-                gap = agents_gap(ex if ex is not None else out, new, content)
+                gap = agents_gap(ex if ex is not None else out, new, content, old)
                 if gap: print(f"  WARN {gap[0]}: {gap[1]} before stub (stub refuses without it; --no-agents-ok if it has none on purpose)")
             if verb == "plan":
                 open(os.path.join(STATE, new.replace("/", "__") + ".planned.md"), "w", encoding="utf-8").write(out); continue
