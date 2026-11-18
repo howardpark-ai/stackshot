@@ -68,21 +68,24 @@ F.unlink(); KR._SEEN.clear(); KR._LAST.clear()
 
 # ---- 2. the last read moves once a minute for a row already counted; at most one write a minute
 reader("k1"); KR.flush()
-KR._LAST[RD] = time.time() - KR.EVERY - 5
+reader("k1"); e0 = KR._PENDING[RD][0]; reader("k1")
+check("a row read again since the last write is one pending key, and the site's last-read time does not move within the minute", KR._PENDING[RD][1] == {"k1"} and KR._PENDING[RD][0] == e0, KR._PENDING)
+KR._LAST[RD] = time.monotonic() - KR.EVERY - 5
 reader("k1")
-check("a row already counted moves the site's last-read time once a minute, and adds no key", KR._PENDING and KR._PENDING[RD][1] == set(), KR._PENDING)
+check("...it moves once a minute (on the monotonic clock), and adds no second key", KR._PENDING and KR._PENDING[RD][1] == {"k1"} and KR._PENDING[RD][0] > e0, KR._PENDING)
 KR.flush()
-KR._STATE["flushed"] = time.time()
+check("a row read again after a write adds no second key to the file", keys(RD) == ["k1"], keys(RD))
+KR._STATE["flushed"] = time.monotonic()
 reader("zz")
 check("a read within the minute is only counted", "zz" not in (keys(RD) or []) and KR._PENDING, sites())
-KR._STATE["flushed"] = time.time() - KR.EVERY - 1
+KR._STATE["flushed"] = time.monotonic() - KR.EVERY - 1
 reader("yy")
 check("the first read after the minute writes what is waiting", {"zz", "yy"} <= set(keys(RD)) and not KR._PENDING, sites())
 hb = filed()["flushed"]
 
 # ---- 3. the flush never blocks on the lock (a due flush while another process holds it is skipped)
 import fcntl
-KR._STATE["flushed"] = time.time() - KR.EVERY - 1
+KR._STATE["flushed"] = time.monotonic() - KR.EVERY - 1
 with open(str(F) + ".lock", "a") as lk:
     fcntl.flock(lk, fcntl.LOCK_EX)         # another process holds the file's lock
     got = []; t0 = time.time()
@@ -209,10 +212,10 @@ del d["flushed"]; F.write_text(json.dumps(d))
 check("a file with no heartbeat is a loud line", KR.report()[0].startswith("NOT RECORDING?") and "no time of a last successful write" in KR.report()[0], KR.report())
 F.write_text("{ nope")
 r = subprocess.run([sys.executable, "-m", "stackshot.projects.keeper_reads"], capture_output=True, text=True, env=env, cwd=STACK)
-check("an unreadable file is a loud line and no counts, and the report leaves the file alone", r.returncode == 0 and r.stdout.splitlines()[0].startswith("NOT RECORDING?") and "unreadable" in r.stdout.splitlines()[0] and "removal-candidate" not in r.stdout and F.read_text() == "{ nope", r.stdout)
+check("an unreadable file is a loud line and no counts, the gauge is unknown (exit status 2), and the report leaves the file alone", r.returncode == 2 and r.stdout.splitlines()[0].startswith("NOT RECORDING?") and "unreadable" in r.stdout.splitlines()[0] and "removal-candidate" not in r.stdout and F.read_text() == "{ nope", r.stdout)
 F.unlink()
 r = subprocess.run([sys.executable, "-m", "stackshot.projects.keeper_reads"], capture_output=True, text=True, env=env, cwd=STACK)
-check("a missing file is a loud line (not a quiet week) and the report does not create it", r.returncode == 0 and r.stdout.splitlines()[0].startswith("NOT RECORDING?") and "not a week of no reads" in r.stdout.splitlines()[0] and not F.exists(), (r.stdout, r.stderr[-300:]))
+check("a missing file is a loud line (not a quiet week), the gauge is unknown (exit status 2), and the report does not create it", r.returncode == 2 and r.stdout.splitlines()[0].startswith("NOT RECORDING?") and "not a week of no reads" in r.stdout.splitlines()[0] and not F.exists(), (r.stdout, r.stderr[-300:]))
 # ---- 9. the flush at exit waits for the lock: processes that exit together lose no key
 F.unlink(missing_ok=True); (T / "state" / "keeper-reads.json.lock").unlink(missing_ok=True); KR._STATE["gauge"] = None
 N = 24
@@ -247,14 +250,14 @@ check("the flush at exit is the one that waits: it is registered as the exit hoo
 
 # ---- 10. a gauge on disk carries a generation that grows by one with every gauge written: a publisher writes only a gauge it computed after reading the current generation, whatever the clocks say
 class Clock:
-    def __init__(self, t): self.now = t
+    def __init__(self, t): self.now = t; self.mono = t        # the wall clock and the monotonic clock: a test steps the wall clock alone to show it does not matter
     def time(self): return self.now
-    def monotonic(self): return time.monotonic()
+    def monotonic(self): return self.mono
     def sleep(self, s): time.sleep(s)
 clock = Clock(1_000_000.0); real_time = KR.time; KR.time = clock
 class Proc:
     """One process's counter state, swapped in for the module's own while a step of that process runs (two writers in one test process)."""
-    def __init__(self): self.b = ({}, {}, {}, {**INIT_STATE, "flushed": clock.time(), "hooked": True})
+    def __init__(self): self.b = ({}, {}, {}, {**INIT_STATE, "flushed": clock.monotonic(), "hooked": True})
     def __enter__(self):
         self.out = tuple(dict(x) for x in (KR._PENDING, KR._SEEN, KR._LAST, KR._STATE))
         for live, mine in zip((KR._PENDING, KR._SEEN, KR._LAST, KR._STATE), self.b): live.clear(); live.update(mine)
@@ -312,14 +315,14 @@ check("...and the next gauge replaces it, the old file kept as .bad", filed()["l
 BAD.unlink(missing_ok=True)
 
 # ---- 11. a read recorded by a process that then makes no other call is written when its minute is up, on a timer, not at its exit only
-F.unlink(missing_ok=True); sched.clear(); solo = Proc(); clock.now = 2_000_000.0
+F.unlink(missing_ok=True); sched.clear(); solo = Proc(); clock.now = clock.mono = 2_000_000.0
 with solo:
     KR._STATE["flushed"] = clock.now
-    clock.now = 2_000_010.0; reader("solo")
+    clock.now = clock.mono = 2_000_010.0; reader("solo")
     check("a read within the minute of the last write is not written yet, and a timer is set for the minute's end (50 seconds on)", not F.exists() and len(sched) == 1 and abs(sched[0].delay - 50.0) < 0.01, [h.delay for h in sched])
-    clock.now = 2_000_020.0; reader("solo2")
+    clock.now = clock.mono = 2_000_020.0; reader("solo2")
     check("another read before then sets no second timer", len(sched) == 1, len(sched))
-    clock.now = 2_000_060.0; sched[0].fn()
+    clock.now = clock.mono = 2_000_060.0; sched[0].fn()
     check("the timer's flush writes what waits, with no further call", {"solo", "solo2"} <= set(keys(RD) or []) and not KR._PENDING and KR._STATE["timer"] is None, (filed(), KR._PENDING))
     reader("solo3")
     check("a read after that, within the new minute, sets the next timer", len(sched) == 2 and not sched[1].cancelled, len(sched))
@@ -327,10 +330,10 @@ with solo:
     try: sched[1].fn()
     finally: KR._path = real
     check("a timer's flush that fails sets the timer again, and the count waits", len(sched) == 3 and KR._PENDING and KR._STATE["timer"] is sched[2], (len(sched), KR._PENDING))
-    clock.now = 2_000_070.0
+    clock.now = clock.mono = 2_000_070.0
     KR._at_exit()
     check("the flush at exit cancels the timer and writes", sched[2].cancelled and "solo3" in keys(RD) and KR._STATE["timer"] is None, (sched[2].cancelled, filed()))
-    clock.now = 2_000_100.0; KR._STATE["flushed"] = clock.now; KR._STATE["gauge"] = ["projects/s"]
+    clock.now = clock.mono = 2_000_100.0; KR._STATE["flushed"] = clock.now; KR._STATE["gauge"] = ["projects/s"]
     KR.gauge(["projects/s"])
     check("a gauge update that is not due and changed nothing waits for a timer too (its heartbeat)", KR._STATE["timer"] is not None and not sched[-1].cancelled, KR._STATE["timer"])
 KR._after = real_after; KR.time = real_time
@@ -339,7 +342,7 @@ made = []
 KR._after = lambda delay, fn: (made.append(real_after(delay, fn)), made[-1])[1]
 F.unlink(missing_ok=True)
 with Proc():
-    KR._STATE["flushed"] = time.time(); reader("thr")
+    KR._STATE["flushed"] = time.monotonic(); reader("thr")
     check("a real timer: one is started, on a daemon thread (a process does not wait for it at its end)", len(made) == 1 and made[0].daemon is True, made)
     t_end = time.time() + 10.0
     while time.time() < t_end and not ("thr" in (keys(RD) or []) and not KR._PENDING): time.sleep(0.05)       # a poll, not a fixed sleep: a slow box only waits longer
@@ -370,7 +373,7 @@ for label, text in (("a file nested a hundred thousand lists deep", "[" * 100000
     KR._SEEN.clear(); KR._PENDING.clear(); KR._STATE["gauge"] = None; reader("m2"); ok12 = KR.flush()
     check(f"malformed ({label}): a flush keeps it as .bad and starts again, once", ok12 is True and BAD.exists() and BAD.read_text() == text and keys(RD) == ["m2"], (ok12, F.read_text()[:100]))
 F.unlink(missing_ok=True); BAD.unlink(missing_ok=True)
-F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {"a": {"last": iso(2.0), "keys": ["x"]}, "b": {}}, "legacy": {"count": 2, "keys": ["x"], "at": iso(3.0), "gen": 4}}))
+F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {"a": {"last": iso(2.0), "keys": ["x"]}, "b": {}}, "legacy": {"count": 2, "keys": ["x"], "at": iso(time.time()), "gen": 4}}))
 check("a file this code writes, with a site that has no keys yet and a gauge with a generation, still reads", KR.load()[1] == "" and not KR.report()[0].startswith("NOT RECORDING"), KR.load()[1])
 
 # ---- 13. a site's keys are rows of the current gauge: a row that has since got a mark leaves the sites when the gauge is computed
@@ -392,7 +395,7 @@ check("a row that is back in the gauge is counted again by the next read", keys(
 # a process that both reads and publishes: a key pruned against its cached gauge is counted again when it is read again
 F.unlink(missing_ok=True); KR._STATE["gauge"] = None; KR._SEEN.clear(); KR._PENDING.clear()
 reader("r1"); reader("r2"); KR.gauge(["r1"]); KR.flush()
-check("a key pruned from the file (its row is not in the gauge) is dropped from the process's seen set too", keys(RD) == ["r1"] and "r2" not in KR._SEEN.get(RD, set()) and "r1" in KR._SEEN.get(RD, set()), (keys(RD), KR._SEEN))
+check("a key pruned from the file (its row is not in the gauge) is not in the file, and the process remembers no key it has written", keys(RD) == ["r1"] and not KR._SEEN.get(RD), (keys(RD), KR._SEEN))
 KR.gauge(["r1", "r2"]); reader("r2"); KR.flush()
 check("...so the next read of it is counted once the gauge lists the row", keys(RD) == ["r1", "r2"], keys(RD))
 
@@ -436,6 +439,410 @@ with Proc():
     check("a flush that finds another flush of the same process writing does not wait for it and does not take the counts: they are written by the next one", got14 is False and "slow4" in KR._PENDING.get(RD, [0, set()])[1] and "slow3" in keys(RD), (got14, KR._PENDING, keys(RD)))
     KR.flush()
 KR.time = real_time
+
+# ---- 15-22. the gauge's guarantees: the generation is read before the rows, a refused gauge is computed again (once), an epoch rides with the generation, a key another process pruned is counted again, a temporary file is the writer's own,
+#      the wait is on the monotonic clock, a damaged gauge is unknown and never zero, and the docs say what is and is not promised.
+def attempt(name, fn):
+    """A check whose body may raise (a call that the code under test does not have yet): a raise is a failed check, not the end of the run. `fn` returns (condition, what was seen)."""
+    ran.append(name)
+    try:
+        ok, got = fn()
+    except BaseException as e:  # noqa: BLE001
+        fails.append(name); print(f"FAIL {name}: raised {e!r}"[:700]); return
+    if not ok:
+        fails.append(name); print(f"FAIL {name}: {str(got)[:700]}")
+def fresh_state():
+    """No file, no pending count, a process state as a new process has it (and no timer waiting)."""
+    for p in list((T / "state").glob("keeper-reads.json*")) + list((T / "state").glob(".keeper-reads.json*")): p.unlink()
+    for d_ in (KR._PENDING, KR._SEEN, KR._LAST): d_.clear()
+    KR._STATE.clear(); KR._STATE.update({**INIT_STATE, "flushed": 1e12, "hooked": True, "timer": None})        # not due: a read waits for an explicit flush
+    KR._after = lambda delay, fn: Handle(delay, fn)                                                            # and no real timer is started
+class Virt(Proc):
+    """Another process: its own counter state, due to write at once."""
+    def __init__(self): self.b = ({}, {}, {}, {**INIT_STATE, "flushed": 0.0, "hooked": True, "timer": None})
+def other_publishes(keys_):
+    with Virt(): KR.gauge(keys_); KR.flush()
+def legacy(): return filed().get("legacy") or {}
+KR.time = time
+PUB = T / "state" / "published.json"
+ROW = lambda src: {"session": "team-x", "role": "name", "keeper_source": src}
+ROWS_ZERO = {"projects/marked": ROW("mark"), "projects/plain": {}}
+ROWS_ONE = {"projects/legacy-one": ROW("legacy"), "projects/marked": ROW("mark")}
+real_registry = PRJ.registry
+def only_sync(fn):
+    """A registry whose build is `fn` for the publisher (the sync pass, or its retry), and the real one for anyone else that reads it (the id adoption in the same pass)."""
+    return lambda: fn() if sys._getframe(1).f_code.co_name in ("sync", "again") else real_registry()
+
+# 15. the generation is read before the rows are computed (a registry build that another process publishes during), and a refused gauge is computed again once
+def lock_is_free():
+    with open(str(F) + ".lock", "a") as lk:
+        try: fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB); fcntl.flock(lk, fcntl.LOCK_UN); return True
+        except BlockingIOError: return False
+def t15a():
+    fresh_state(); calls = []; free = []
+    def racing():
+        calls.append(1)
+        if len(calls) == 1:
+            other_publishes(["projects/legacy-one"])          # the build is slow: another process publishes a nonzero gauge while it runs
+            return ROWS_ZERO                                      # and this process's rows are the older view: no legacy row
+        free.append(lock_is_free())
+        return ROWS_ONE
+    PRJ.registry = only_sync(racing)
+    try:
+        with Virt(): PRJ.sync(path=PUB, force=True)
+    finally: PRJ.registry = real_registry
+    return legacy().get("count") == 1 and legacy().get("keys") == ["projects/legacy-one"] and len(calls) == 2 and free == [True], (legacy(), len(calls), free)
+attempt("a publisher that snapshots zero (the registry it built has no legacy row), while another process publishes a nonzero gauge: its zero is refused, and it computes again and writes what the registry holds then, outside the file's lock", t15a)
+def t15b():
+    fresh_state(); calls = []
+    def always():
+        calls.append(1); other_publishes([f"projects/r{len(calls)}"]); return ROWS_ZERO
+    PRJ.registry = only_sync(always)
+    try:
+        with Virt(): PRJ.sync(path=PUB, force=True)
+    finally: PRJ.registry = real_registry
+    return len(calls) == 2 and legacy().get("keys") == ["projects/r2"] and legacy().get("count") == 1, (len(calls), legacy())
+attempt("a gauge refused again by another publisher is not tried a third time: one retry, then the other process's gauge stays", t15b)
+def t15c():
+    fresh_state(); other_publishes(["projects/a"]); base = KR.snapshot()
+    other_publishes(["projects/a", "projects/b"])
+    with Virt(): KR.gauge([], base=base); KR.flush()
+    return legacy().get("keys") == ["projects/a", "projects/b"] and legacy().get("gen") == 2, legacy()
+attempt("a gauge computed after a snapshot that is no longer the file's (another gauge written since) is refused under the lock and the file keeps the newer one", t15c)
+
+def t15d():
+    fresh_state(); calls = []
+    def emptying():
+        calls.append(1)
+        if len(calls) == 1:
+            other_publishes(["projects/legacy-one"]); return ROWS_ZERO
+        return {}                                                # the registry reads as empty when it is asked again
+    PRJ.registry = only_sync(emptying)
+    try:
+        with Virt(): PRJ.sync(path=PUB, force=True)
+    finally: PRJ.registry = real_registry
+    return len(calls) == 2 and legacy().get("keys") == ["projects/legacy-one"] and legacy().get("count") == 1, (len(calls), legacy())
+attempt("a retry that finds the registry empty publishes nothing (an empty registry is never a zero gauge): the other process's gauge stays", t15d)
+
+# 16. an epoch rides with the generation: a file removed or replaced starts a new epoch, and an older in-memory gauge never wins over it
+def t16a():
+    fresh_state(); other_publishes(["projects/a"]); e1 = legacy().get("epoch"); calls = []
+    def removing():
+        calls.append(1)
+        if len(calls) == 1:
+            F.unlink(); other_publishes(["projects/x"])        # the file is removed and starts again: generation 1 once more, new content
+            return ROWS_ZERO
+        return {"projects/x": ROW("legacy")}
+    PRJ.registry = only_sync(removing)
+    try:
+        with Virt(): PRJ.sync(path=PUB, force=True)
+    finally: PRJ.registry = real_registry
+    return legacy().get("keys") == ["projects/x"] and isinstance(e1, str) and e1 and legacy().get("epoch") not in (None, e1) and len(calls) == 2, (e1, legacy(), len(calls))
+attempt("a file removed after the publisher took its snapshot: the older gauge (a zero) does not win by a generation that went back to 1, the file's new epoch makes it refused, and the retry writes the current rows", t16a)
+def t16b():
+    fresh_state(); other_publishes(["projects/a"]); e1 = legacy().get("epoch"); base = KR.snapshot()
+    d_ = filed(); d_["epoch"] = d_["legacy"]["epoch"] = "another-run"; d_["legacy"]["keys"] = ["projects/z"]; F.write_text(json.dumps(d_))      # the same generation as the snapshot's, another epoch: a different run of generations
+    with Virt(): KR.gauge([], base=base); KR.flush()
+    return base == (e1, 1) and legacy().get("keys") == ["projects/z"] and legacy().get("epoch") == "another-run", (base, legacy())
+attempt("the same generation under another epoch is another gauge: the older one is refused", t16b)
+def t16c():
+    fresh_state()
+    F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {}, "legacy": {"count": 1, "keys": ["a"], "at": iso(1.0), "gen": 3}}))
+    s3 = KR.snapshot(); ok3 = KR.load()[1] == ""
+    F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {}, "legacy": {"count": 1, "keys": ["a"], "at": iso(1.0)}}))
+    s0 = KR.snapshot(); ok0 = KR.load()[1] == ""
+    with Virt(): KR.gauge(["b"], base=s0); KR.flush()
+    return ok3 and ok0 and s3 == (None, 3) and s0 == (None, 0) and legacy().get("gen") == 1 and isinstance(legacy().get("epoch"), str) and legacy()["epoch"] and legacy().get("keys") == ["b"], (s3, s0, legacy())
+attempt("a file without an epoch (as the live one is) still loads and counts as epoch none, with its generation (or 0); the first gauge written to it takes an epoch", t16c)
+def t16d():
+    fresh_state(); other_publishes(["projects/a"]); e1 = legacy().get("epoch"); reader("q"); KR.flush()
+    other_publishes(["projects/a", "projects/b"])
+    return isinstance(e1, str) and legacy().get("epoch") == e1 and legacy().get("gen") == 2, legacy()
+attempt("the epoch stays through the generations of one file, and a read-only flush changes neither", t16d)
+
+# 17. a key another process pruned from the file is counted again by a long-lived process that counted it before (two real processes)
+def t17():
+    fresh_state(); env17 = {**os.environ, "PYTHONPATH": STACK}
+    code_a = ("import sys; sys.path.insert(0, %r)\nfrom stackshot.projects import keeper_reads as KR\nfor line in sys.stdin:\n    cmd, _, arg = line.strip().partition(' ')\n"
+              "    if cmd == 'read': KR.note('long lived', arg, 1); print('ok', flush=True)\n    elif cmd == 'flush': print(KR.flush(), flush=True)\n    elif cmd == 'quit': break\n" % STACK)
+    import select
+    pa = subprocess.Popen([sys.executable, "-c", code_a], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env17)
+    def ask(line):
+        pa.stdin.write(line + "\n"); pa.stdin.flush()
+        return pa.stdout.readline().strip() if select.select([pa.stdout], [], [], 30)[0] else "timeout"
+    SITE = "long lived <- __main__.<module>"
+    try:
+        r = [ask("read r1"), ask("flush")]
+        first = keys(SITE)
+        KR.gauge(["projects/other"]); KR.flush()                    # another process's gauge: r1 is not a row of it, so its key leaves the file
+        pruned = keys(SITE)
+        KR.gauge(["r1"]); KR.flush()                                # and a gauge that lists r1 again
+        r += [ask("read r1"), ask("flush")]
+        last = keys(SITE)
+    finally:
+        try: ask("quit")
+        except Exception: pass
+        try: pa.wait(10)
+        except Exception: pa.kill(); pa.wait(5)
+    return r == ["ok", "True", "ok", "True"] and first == ["r1"] and pruned == [] and last == ["r1"], (r, first, pruned, last)
+attempt("a long-lived process counted r1, another process pruned the key and wrote a gauge that lists the row again: the long-lived process's next read of r1 is counted, not suppressed by its memory", t17)
+def t17b():
+    fresh_state(); reader("q1"); before = "q1" in KR._SEEN.get(RD, set()); KR.flush(); after = "q1" in KR._SEEN.get(RD, set()); reader("q1")
+    return before and not after and KR._PENDING.get(RD, [0, set()])[1] == {"q1"}, (before, after, KR._PENDING)
+attempt("a key leaves the process's memory with the write that put it in the file, and a read after that is pending again (the file is what says a key is counted)", t17b)
+
+# 18. the temporary file is the writer's own: named by the process and a counter, removed only by the writer that made it, and a failed write never takes another writer's
+def t18a():
+    fresh_state(); seen18 = []; real_fsync = os.fsync
+    def spy(fd): seen18.append(sorted(p.name for p in (T / "state").iterdir() if p.name.endswith(".tmp"))); return real_fsync(fd)
+    os.fsync = spy
+    try: reader("t1"); KR.flush(); reader("t2"); KR.flush()
+    finally: os.fsync = real_fsync
+    left = sorted(p.name for p in (T / "state").iterdir() if p.name.endswith(".tmp"))
+    return len(seen18) == 2 and all(len(x) == 1 and str(os.getpid()) in x[0] for x in seen18) and seen18[0] != seen18[1] and left == [], (seen18, left)
+attempt("each write uses a temporary name of its own (the process id and a counter), and none is left", t18a)
+def t18b():
+    fresh_state(); env18 = {**os.environ, "PYTHONPATH": STACK}
+    code_b = ("import os, sys; sys.path.insert(0, %r)\nfrom stackshot.projects import keeper_reads as KR\nreal = os.fsync\n"
+              "def slow(fd):\n    print('writing', flush=True); sys.stdin.readline(); return real(fd)\nsys.stdin.readline()\nos.fsync = slow\n"
+              "KR.note('b probe', 'bkey', 1)\nprint('result', KR.flush(), flush=True)\n" % STACK)
+    import select
+    pb = subprocess.Popen([sys.executable, "-c", code_b], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env18)
+    def line(): return pb.stdout.readline().strip() if select.select([pb.stdout], [], [], 30)[0] else "timeout"
+    got = {}; hooked = []; real_flock = fcntl.flock; real_replace = os.replace
+    def hook(fd, how):
+        r = real_flock(fd, how)
+        if how == fcntl.LOCK_UN and not hooked:
+            hooked.append(1); pb.stdin.write("go\n"); pb.stdin.flush(); got["b"] = line()          # the lock is free: another process takes it and is mid-write
+        return r
+    def failing(a, b):
+        if str(a).endswith(".tmp"): raise OSError("disk full")
+        return real_replace(a, b)
+    fcntl.flock = hook; os.replace = failing
+    try: reader("a1"); ok_a = KR.flush()
+    finally: fcntl.flock = real_flock; os.replace = real_replace
+    try:
+        pb.stdin.write("\n"); pb.stdin.flush(); got["res"] = line()
+    finally:
+        try: pb.wait(10)
+        except Exception: pb.kill(); pb.wait(5)
+    mine = sorted(p.name for p in (T / "state").iterdir() if p.name.endswith(".tmp"))
+    return ok_a is False and got.get("b") == "writing" and got.get("res") == "result True" and "bkey" in (keys("b probe <- __main__.<module>") or []) and mine == [] and "a1" in KR._PENDING.get(RD, [0, set()])[1], (ok_a, got, mine)
+attempt("a write that fails does not remove the temporary file of another process that took the lock right after it: that process's write succeeds, and the failing writer's own file is gone", t18b)
+
+# 19. the wait before the next write is on the monotonic clock: a wall clock that steps back does not delay a flush
+class Clk:
+    def __init__(self): self.wall = 5_000_000.0; self.mono = 5_000_000.0
+    def time(self): return self.wall
+    def monotonic(self): return self.mono
+    def sleep(self, s): time.sleep(s)
+def t19a():
+    fresh_state(); clk = Clk(); sched19 = []
+    KR._after = lambda delay, fn: (sched19.append(Handle(delay, fn)), sched19[-1])[1]; KR.time = clk
+    try:
+        KR._STATE["flushed"] = clk.mono
+        clk.mono += 10; clk.wall += 10 - 7200                  # ten seconds later by the monotonic clock; the wall clock was stepped back two hours
+        reader("m1")
+    finally: KR.time = time
+    return len(sched19) == 1 and abs(sched19[0].delay - 50.0) < 0.5 and not F.exists(), [h.delay for h in sched19]
+attempt("a read ten seconds after a write, with the wall clock stepped back two hours: the timer is set for the 50 seconds left, not for hours", t19a)
+def t19b():
+    fresh_state(); clk = Clk(); sched19 = []
+    KR._after = lambda delay, fn: (sched19.append(Handle(delay, fn)), sched19[-1])[1]; KR.time = clk
+    try:
+        KR._STATE["flushed"] = clk.mono
+        clk.mono += 61; clk.wall += 61 - 7200
+        reader("m2")
+    finally: KR.time = time
+    return "m2" in (keys(RD) or []) and not KR._PENDING, (filed(), KR._PENDING, [h.delay for h in sched19])
+attempt("a read a minute after the last write is written at once even when the wall clock was stepped back meanwhile", t19b)
+
+# 20. a damaged gauge is unknown and never zero: the file is replaced as damaged, the report says "gauge unknown", and `stackshot keeper-reads` exits non-zero
+import contextlib, io
+G = {"at": iso(1.0), "gen": 2}
+SHAPES = (("a gauge with no count (its keys listed)", {"sites": {}, "legacy": {**G, "keys": ["projects/a"]}}),
+          ("a gauge with no count and no keys", {"sites": {}, "legacy": {"at": iso(1.0)}}),
+          ("a gauge with no list of keys", {"sites": {}, "legacy": {**G, "count": 0}}),
+          ("a gauge whose keys are null", {"sites": {}, "legacy": {**G, "count": 0, "keys": None}}),
+          ("a gauge that counts fewer rows than it lists", {"sites": {}, "legacy": {**G, "count": 0, "keys": ["projects/a"]}}),
+          ("an epoch that is a number", {"sites": {}, "legacy": {**G, "count": 0, "keys": [], "epoch": 5}}),
+          ("an epoch that is empty", {"sites": {}, "legacy": {**G, "count": 0, "keys": [], "epoch": ""}}),
+          ("an extra field 1e999 in the gauge", '{"sites": {}, "legacy": {"count": 1, "keys": ["a"], "at": "x", "gen": 2, "extra": 1e999}}'),
+          ("an extra field -1e999 in a site", '{"sites": {"s": {"last": "x", "keys": [], "extra": -1e999}}}'),
+          ("an extra field 1E999 at the top", '{"sites": {}, "extra": 1E999, "legacy": {"count": 0, "keys": []}}'),
+          ("an extra field Infinity in the gauge", '{"sites": {}, "legacy": {"count": 0, "keys": [], "extra": Infinity}}'))
+def run_main(*args):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf): rc = KR.main(list(args))
+    return rc, buf.getvalue()
+def unknown_line(lines): return any(l.startswith("legacy keepers: gauge unknown") for l in lines) and not any(l.startswith("legacy keepers: 0 ") for l in lines)
+for label, doc in SHAPES:
+    text = doc if isinstance(doc, str) else json.dumps(doc)
+    def t20(text=text):
+        fresh_state(); F.write_text(text); d20, p20 = KR.load(); rep20 = KR.report(); rc20, out20 = run_main()
+        return (d20 == {} and p20.startswith("unreadable") and KR.count_of(d20, p20) is None and unknown_line(rep20) and rc20 != 0 and "gauge unknown" in out20), (p20, rep20[:3], rc20)
+    attempt(f"damaged gauge ({label}): the file is unreadable, the gauge is unknown (never zero), the report says so and the command exits non-zero", t20)
+    def t20b(text=text):
+        fresh_state(); F.write_text(text); reader("m1"); ok20 = KR.flush()
+        return ok20 is True and BAD.exists() and BAD.read_text() == text and keys(RD) == ["m1"] and KR.load()[1] == "" and "Infinity" not in F.read_text(), (ok20, BAD.exists(), F.read_text()[:200])
+    attempt(f"damaged gauge ({label}): a flush keeps it as .bad and writes a file that reads", t20b)
+def t20c():
+    fresh_state(); F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {}, "legacy": {"count": 0, "keys": [], "at": iso(time.time()), "gen": 2}}))
+    rc, out = run_main(); rep = KR.report()
+    return KR.count_of(*KR.load()) == 0 and rc == 0 and rep[0].startswith("legacy keepers: 0 registry row(s)") and "gauge unknown" not in out, (rc, rep[:2])
+attempt("a gauge of zero that is well formed is zero: it reads as zero and the command exits 0", t20c)
+def t20d():
+    fresh_state(); res = []
+    res.append((KR.count_of(*KR.load()), run_main()[0]))                                                 # no file
+    F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {}}))
+    res.append((KR.count_of(*KR.load()), run_main()[0], unknown_line(KR.report())))                       # a file with no gauge yet
+    r = subprocess.run([sys.executable, "-m", "stackshot.projects.keeper_reads"], capture_output=True, text=True, env={**os.environ, "PYTHONPATH": STACK}, cwd=STACK)
+    res.append((r.returncode, "gauge unknown" in r.stdout))
+    return res[0] == (None, 2) and res[1] == (None, 2, True) and res[2][0] != 0 and res[2][1], res
+attempt("no file, and a file with no gauge yet, are unknown too: the gauge is not zero, the command exits non-zero (also as a real process)", t20d)
+
+# 22. a gauge that is not being refreshed is unknown, not its old count: the heartbeat of the file (any process's read flush) must not make an old gauge look current
+def gauge_file(at, count=0, flushed=None, keys_=None, gen=3):
+    return json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time() if flushed is None else flushed), "sites": {},
+                       "legacy": {"count": count, "keys": keys_ or [], "at": at, "gen": gen, "epoch": "e1"}})
+def stale_checks(label, text, loud_gauge=True):
+    def t():
+        fresh_state(); F.write_text(text); d_, p_ = KR.load(); rep_ = KR.report(); rc_, out_ = run_main()
+        r_ = subprocess.run([sys.executable, "-m", "stackshot.projects.keeper_reads"], capture_output=True, text=True, env={**os.environ, "PYTHONPATH": STACK}, cwd=STACK)
+        gauge_loud = any(l.startswith("NOT RECORDING?") and "gauge" in l for l in rep_)
+        return (p_ == "" and KR.count_of(d_, p_) is None and unknown_line(rep_) and rc_ == 2 and r_.returncode == 2 and (gauge_loud or not loud_gauge)), (p_, KR.count_of(d_, p_), rep_[:3], rc_, r_.returncode)
+    attempt(label, t)
+attempt("the bound on a gauge's age is a named constant of a few sync periods (above the minute between two writes, at most an hour)", lambda: (isinstance(getattr(KR, "GAUGE_STALE", None), float) and KR.EVERY < KR.GAUGE_STALE <= 3600.0, getattr(KR, "GAUGE_STALE", None)))
+stale_checks("an old file (last write and gauge weeks ago, gauge zero): the gauge is unknown, not zero, the report says so loudly, and the status is 2 (command and in process)", gauge_file(iso(time.time() - 21 * 86400), flushed=time.time() - 21 * 86400))
+stale_checks("a current heartbeat with a gauge computed a month ago (its publisher stopped): unknown, a loud line about the gauge, status 2; the heartbeat does not make it current", gauge_file(iso(time.time() - 30 * 86400)))
+stale_checks("a gauge with a count above zero and an old time reads as unknown too, not as its count", gauge_file(iso(time.time() - 3600), count=2, keys_=["projects/a", "projects/b"]))
+def t22d():
+    out = []
+    for age_, want in ((KR.GAUGE_STALE - 30, 0), (KR.GAUGE_STALE + 30, None)):
+        fresh_state(); F.write_text(gauge_file(iso(time.time() - age_))); d_, p_ = KR.load(); out.append((KR.count_of(d_, p_), run_main()[0]))
+    return out == [(0, 0), (None, 2)], out
+attempt("a gauge just inside the bound still reads (zero is zero, status 0); one just outside it is unknown (status 2)", t22d)
+def t22e():
+    fresh_state(); d_ = json.loads(gauge_file(iso(time.time()))); del d_["legacy"]["at"]; F.write_text(json.dumps(d_)); dd, pp = KR.load()
+    return pp == "" and KR.count_of(dd, pp) is None and run_main()[0] == 2, (pp, KR.count_of(dd, pp))
+attempt("a gauge with no time of its own cannot be told from an old one: unknown", t22e)
+def t22f():
+    fresh_state(); other_publishes(["projects/a"]); rep_ = KR.report(); rc_, _ = run_main()
+    return KR.count_of(*KR.load()) == 1 and rc_ == 0 and rep_[0].startswith("legacy keepers: 1 registry row(s)") and not any(l.startswith("NOT RECORDING") for l in rep_), rep_[:2]
+attempt("a gauge written just now is current: its count, no loud line, status 0", t22f)
+
+def naive(t): return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t))
+stale_checks("a gauge dated an hour ahead of the clock is unknown, not its count: a loud line about the gauge, status 2", gauge_file(iso(time.time() + 3600)))
+stale_checks("a gauge dated a year ahead of the clock is unknown too", gauge_file(iso(time.time() + 365 * 86400)))
+stale_checks("a gauge with a naive time an hour ahead (no zone: read as the writer's, UTC) is unknown", gauge_file(naive(time.time() + 3600)))
+stale_checks("a gauge dated in the year 9999 is unknown, and the report does not raise", gauge_file("9999-12-31T23:59:59Z"))
+stale_checks("a gauge dated in the year 9999 with a count above zero is unknown too", gauge_file("9999-12-31T23:59:59Z", count=1, keys_=["projects/a"]))
+def t22g():
+    out = []
+    for at_ in (iso(time.time() + 2), naive(time.time())):
+        fresh_state(); F.write_text(gauge_file(at_)); d_, p_ = KR.load(); rep_ = KR.report(); out.append((KR.count_of(d_, p_), run_main()[0], rep_[0].startswith("legacy keepers: 0 "), any(l.startswith("NOT RECORDING") for l in rep_)))
+    return out == [(0, 0, True, False)] * 2, out
+attempt("a gauge a couple of seconds ahead (the same host's rounding) and a naive time that is now both still read: zero is zero, no loud line, status 0", t22g)
+attempt("the tolerance for a time ahead is a named constant of a few seconds", lambda: (isinstance(getattr(KR, "GAUGE_AHEAD", None), float) and 0 < KR.GAUGE_AHEAD <= 10.0, getattr(KR, "GAUGE_AHEAD", None)))
+def t22h():
+    fresh_state(); d_ = json.loads(gauge_file(iso(time.time()))); d_["since"] = "9999-12-31T23:59:59Z"; d_["sites"] = {"s <- m.f": {"last": "9999-12-31T23:59:59Z", "keys": ["a"]}}; d_["flushed"] = "9999-12-31T23:59:59Z"
+    F.write_text(json.dumps(d_)); rep_ = KR.report(); return any("s <- m.f" in l for l in rep_), rep_[:2]
+attempt("a last-read, a start or a heartbeat time in the year 9999 does not crash the report", t22h)
+
+# 23. two publishers in one process: the step from the snapshot to the end of `gauge()` is one at a time, so the later snapshot's rows are the ones that stay
+def t23a():
+    fresh_state(); started = threading.Event(); release = threading.Event()
+    def build():
+        if threading.current_thread().name == "older":
+            started.set(); release.wait(5); return ROWS_ZERO          # the older view of the registry, slow to build
+        return ROWS_ONE                                                 # the newer view
+    PRJ.registry = only_sync(build); ts = []
+    try:
+        with open(str(F) + ".lock", "a") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)                              # another process holds the file's lock: no write goes through, the gauges wait in memory
+            try:
+                ts = [threading.Thread(target=lambda: PRJ.sync(path=PUB, force=True), name=n_) for n_ in ("older", "newer")]
+                ts[0].start(); started.wait(5); ts[1].start(); time.sleep(0.3); release.set()
+                for t_ in ts: t_.join(10)
+            finally: fcntl.flock(lk, fcntl.LOCK_UN)
+    finally: PRJ.registry = real_registry; release.set()
+    KR.flush()
+    return all(not t_.is_alive() for t_ in ts) and legacy().get("keys") == ["projects/legacy-one"] and legacy().get("count") == 1, (legacy(), [t_.is_alive() for t_ in ts])
+attempt("two syncs of one process share one snapshot while another process holds the file's lock: the older rows (finished last) do not overwrite the newer ones", t23a)
+def t23b():
+    fresh_state(); held = PRJ._GAUGE_STEP; held.acquire(); old_wait = PRJ.GAUGE_STEP_WAIT; PRJ.GAUGE_STEP_WAIT = 0.2; t0 = time.time()
+    PRJ.registry = only_sync(lambda: ROWS_ONE)
+    try: PRJ.sync(path=PUB, force=True, reg=None)
+    finally: held.release(); PRJ.GAUGE_STEP_WAIT = old_wait; PRJ.registry = real_registry
+    return time.time() - t0 < 3.0 and not F.exists() and KR._STATE["gauge"] is None, (time.time() - t0, F.exists(), KR._STATE["gauge"])
+attempt("a sync that cannot take the gauge step within its bound goes on without publishing a gauge (it never waits for long, and the next sync publishes)", t23b)
+
+# 24. a file has an epoch from the moment it is created, gauge or not: a file reset to no gauge is not the one a publisher snapshotted as no gauge
+def t24a():
+    fresh_state(); reader("x1"); KR.flush(); e_ = filed().get("epoch"); s_ = KR.snapshot()
+    return isinstance(e_, str) and bool(e_) and s_ == (e_, 0) and "legacy" not in filed(), (e_, s_, filed())
+attempt("a file created by a read flush, with no gauge, carries an epoch, and the snapshot takes it", t24a)
+def t24b():
+    fresh_state(); base = KR.snapshot()                                   # no file: A snapshots "no gauge"
+    other_publishes(["projects/x"]); F.unlink()                           # B publishes, then the file is reset
+    reader("r1"); KR.flush()                                              # a read flush creates the file again, with no gauge
+    with Virt(): KR.gauge([], base=base); KR.flush()                      # A's older zero arrives
+    return base == (None, 0) and legacy() == {}, (base, legacy())
+attempt("a publisher that snapshotted no gauge does not write over a file that was reset to no gauge since (the new file has an epoch of its own)", t24b)
+def t24c():
+    fresh_state(); other_publishes(["projects/a"])
+    return isinstance(filed().get("epoch"), str) and filed()["epoch"] == legacy().get("epoch") and KR.snapshot() == (filed()["epoch"], 1), (filed().get("epoch"), legacy())
+attempt("the gauge's epoch is the file's", t24c)
+def t24d():
+    fresh_state(); F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {}, "legacy": {"count": 1, "keys": ["a"], "at": iso(time.time()), "gen": 4}}))
+    s_ = KR.snapshot(); reader("q"); KR.flush()
+    return s_ == (None, 4) and KR.snapshot() == (None, 4) and "epoch" not in filed(), (s_, KR.snapshot(), filed().get("epoch"))
+attempt("a file with no epoch (as the live one is) stays so through a read flush: a publisher that snapshotted it is not refused for that; its first gauge takes an epoch", t24d)
+def t24e():
+    fresh_state(); F.write_text("{ nope"); reader("q"); KR.flush()
+    return isinstance(filed().get("epoch"), str) and BAD.exists(), (filed(), BAD.exists())
+attempt("a damaged file replaced by a flush starts a new epoch", t24e)
+
+# 25. a temporary file left by a writer that was killed is swept, under the lock, once it is more than a minute old
+def t25a():
+    fresh_state(); st = T / "state"; old_t = time.time() - 300; young = st / ".keeper-reads.json.4242.7.tmp"; old = st / ".keeper-reads.json.4243.1.tmp"; fixed = st / ".keeper-reads.json.tmp"; other = st / ".other.json.9.1.tmp"
+    for p_ in (young, old, fixed, other): p_.write_text("{}")
+    for p_ in (old, fixed, other): os.utime(p_, (old_t, old_t))
+    reader("s1"); KR.flush()
+    left = sorted(p.name for p in st.iterdir() if p.name.endswith(".tmp"))
+    return left == sorted([young.name, other.name]) and keys(RD) == ["s1"], left
+attempt("a flush removes the temporary files of the counter that a killed writer left, once they are more than a minute old; a younger one and another file's stay", t25a)
+def t25b():
+    fresh_state(); old = T / "state" / ".keeper-reads.json.4243.1.tmp"; old.write_text("{}"); os.utime(old, (time.time() - 300,) * 2)
+    with open(str(F) + ".lock", "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try: reader("s2"); r_ = KR.flush()
+        finally: fcntl.flock(lk, fcntl.LOCK_UN)
+    return r_ is False and old.exists(), (r_, old.exists())
+attempt("nothing is swept while another process holds the file's lock (the lock is what says no live writer is mid-write)", t25b)
+
+# 26. the module's own text agrees with the docs
+attempt("the module's text says a site counts a key once between two writes of a process, not once per process", lambda: (lambda src: ("once between two writes of a process" in src and "once per process" not in src, None))((pathlib.Path(STACK) / "stackshot" / "projects" / "keeper_reads.py").read_text(encoding="utf-8")))
+
+# 21. the docs say what is promised and what is not
+DOC = (pathlib.Path(STACK) / "docs" / "projects.md").read_text(encoding="utf-8")
+attempt("the docs no longer say a stale zero cannot turn up as a newer one", lambda: ("a stale zero cannot turn up as a newer one" not in DOC and "written only if no gauge has been written since it was computed" not in DOC, None))
+attempt("the docs name the compare under the lock, the epoch, the bounded retry, and the one stale gauge that is not ruled out", lambda: (all(w in DOC for w in ("epoch", "bounded", "under the lock", "one stale gauge")), None))
+attempt("the docs say a zero gauge is evidence only after a gauge written by a process that started after the last deploy", lambda: ("only counts as evidence after a gauge written by a process that started after the last deploy" in DOC, None))
+attempt("the docs say a damaged gauge is unknown, never zero", lambda: ("gauge unknown" in DOC and "never zero" in DOC, None))
+SRC = (pathlib.Path(STACK) / "stackshot" / "projects" / "keeper_reads.py").read_text(encoding="utf-8")
+attempt("the docs say the time of a gauge is never compared between publishers and that the reader compares it with now: old, unreadable or ahead of the clock by more than the tolerance is unknown", lambda: (all(w in DOC for w in ("never compared between publishers", "the reader compares it with now", "ahead of the clock by more than")) and "shown, never compared" not in DOC, None))
+attempt("the module text says the same about the time of a gauge", lambda: ("never compared between publishers" in SRC and "the reader compares it with now" in SRC and "for display only and is never compared" not in SRC, None))
+attempt("the gauge() text says the retry is outside the file's lock, not every lock", lambda: ("outside the file's lock" in SRC and "outside every lock" not in SRC, None))
+attempt("the docs say --json prints the file as it is and is not a gate (the exit status and the report are)", lambda: ("`--json` prints the file as it is" in DOC and "not a gate" in DOC, None))
+attempt("the docs say the generation and epoch compare is only as strong as the oldest writer while an older version still writes the file", lambda: ("only as strong as the oldest writer" in DOC and "older version" in DOC, None))
+attempt("the docs say a gauge computed more than five minutes ago is unknown, whatever the file's last write says", lambda: ("computed more than five minutes ago" in DOC and "whatever the file's last write says" in DOC, None))
+attempt("the docs say the gauge step of a sync is one at a time in a process, within a bound", lambda: ("one at a time" in DOC and "gauge step" in DOC, None))
+attempt("the docs say a file has an epoch from the moment it is created", lambda: ("from the moment it is created" in DOC, None))
+attempt("the docs say a leftover temporary file older than a minute is swept under the lock", lambda: ("more than a minute old" in DOC and "swept" in DOC, None))
+attempt("the docs say a `sync(reg=...)` carries the weaker promise", lambda: ("`sync(reg=...)`" in DOC and "weaker promise" in DOC, None))
+fresh_state()
+KR._after = real_after
 
 from stackshot import cli
 check("the program is registered under `stackshot keeper-reads`", cli.PROGRAMS.get("keeper-reads", ("",))[0] == "stackshot.projects.keeper_reads")

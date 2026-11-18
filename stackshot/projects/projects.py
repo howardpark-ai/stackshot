@@ -58,6 +58,8 @@ ID_RE = re.compile(r"^prj_[0-9a-f]{8}$")
 EVERY = 3 * 60                         # rewrite the published file at least this often (the promise to readers is every 5 minutes; the minute pace plus a slow round of 20 s must still fit)
 SCHEMA = 1
 _LOCK = threading.Lock()               # the published file's writers inside one process
+_GAUGE_STEP = threading.Lock()         # the gauge step of `sync` (the counter file's snapshot, the registry build, the gauge's hand-over): one at a time in a process, so the later snapshot's rows are the ones that stay
+GAUGE_STEP_WAIT = 2.0                  # seconds a sync waits for the gauge step; past it, the sync goes on without a gauge (the next sync publishes it)
 
 
 def _store() -> Path: return _cfg.path("paths", "store")
@@ -1042,9 +1044,20 @@ def sync(now: float | None = None, force: bool = False, reg: dict | None = None,
     projects. → True when written."""
     import time
     now = time.time() if now is None else now
-    reg = registry() if reg is None else reg
-    if not reg: return False
-    _reads.gauge(k for k, v in reg.items() if isinstance(v, dict) and v.get("keeper_source") == "legacy")      # the rows only an old form keeps: the gauge a removal stage gates on
+    own = reg is None
+    step = own and _GAUGE_STEP.acquire(timeout=GAUGE_STEP_WAIT)      # from the snapshot to the end of `gauge()` one sync at a time: another one in this process computes its rows after this one's gauge is handed over, so its rows are the newer
+    try:
+        base = _reads.snapshot() if (step or not own) else None       # the counter file's generation, read BEFORE the rows are computed: the gauge is written only while the file still holds it
+        reg = registry() if own else reg
+        if not reg: return False
+        def legacy_keys(r): return [k for k, v in r.items() if isinstance(v, dict) and v.get("keeper_source") == "legacy"]       # the rows only an old form keeps: the gauge a removal stage gates on
+        def again():                                    # a refused gauge is computed once more, from the registry as it is then (an empty registry publishes nothing, as above)
+            r = registry()
+            return legacy_keys(r) if r else None
+        if base is not None:                            # no gauge from a sync that could not take the gauge step in time: the next one publishes it
+            _reads.gauge(legacy_keys(reg), base, again if own else None)
+    finally:
+        if step: _GAUGE_STEP.release()
     try: prune_pending(reg)
     except ValueError: pass         # a damaged id file: nothing is pruned, and build() answers from the registry's own copy of the ids
     body = build(reg, now)

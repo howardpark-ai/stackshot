@@ -3,27 +3,27 @@
 The keeper is a mark on one agent (keeper.py). The old forms are a page's own name line (`display-name:`, the registry's `session` with the role "name"), an `agent:` line, the `legacy_session` and
 `legacy_role` a mark took the place of, and the role `keeper` of a name-line session in roles.json. Two things are kept, in one small file:
 
-    <state>/keeper-reads.json   {"schema": 1, "since": <ISO>, "flushed": <ISO of the last successful write>, "restarted": <ISO, only after a damaged file was replaced>,
-                                 "legacy": {"count": N, "keys": [<up to 50 page keys>], "at": <ISO of when it was computed, for display>, "gen": <whole number>},
+    <state>/keeper-reads.json   {"schema": 1, "epoch": <random id, made when the file is created>, "since": <ISO>, "flushed": <ISO of the last successful write>, "restarted": <ISO, only after a damaged file was replaced>,
+                                 "legacy": {"count": N, "keys": [<up to 50 page keys>], "at": <ISO of when it was computed: the reader compares it with now>, "gen": <whole number>, "epoch": <the file's epoch>},
                                  "sites": {<site>: {"last": <ISO of the last read>, "keys": [<distinct row keys read, at most 200>]}}}
     stackshot keeper-reads      prints the gauge, each instrumented site (last read in the instance's timezone, distinct keys), the readers that stay, and a loud line when nothing is being recorded
 
   * The gauge is the number of registry rows whose `keeper_source` is `legacy` (only an old form names the keeper), with their page keys; `projects.sync` refreshes it each time it runs. Zero means every
     keeper is a mark or derived.
   * A site is a reader that answers a keeper question from an old form that decides the row's keeper (`keeper_source` legacy: no mark on the row or its project), a removal candidate: the kind of read and the function
-    that made it ("old form as the keeper <- anchors.notice_name"). A site counts each distinct row key once per process, so volume (a registry build re-reads every row) cannot hide a quiet week; a read where a
-    mark answers is never counted, and each gauge written drops the keys a site holds that are not rows of it (from the process's own memory of what it has counted too, so a row that is legacy again is counted again when it is read), so right after a process writes a gauge its sites hold only rows of that gauge (none at zero). The readers of the project's name, its agent-name prefix and its scope read the name line by design and
+    that made it ("old form as the keeper <- anchors.notice_name"). A site counts each distinct row key once between two writes of a process, so volume (a registry build re-reads every row) cannot hide a quiet week; a read where a
+    mark answers is never counted, and each gauge written drops the keys a site holds that are not rows of it, so right after a process writes a gauge its sites hold only rows of that gauge (none at zero). A process remembers a key it counted only until the write that put it in the file (a key another process pruned from the file is counted again by the next read, not suppressed by a memory of an older file). The readers of the project's name, its agent-name prefix and its scope read the name line by design and
     are not instrumented (`BY_DESIGN`); they stay after the keeper moves to marks.
 
 The file is the only thing a process writes, at most once a minute (a timer on a daemon thread when the process makes no other call) and when it ends, by one atomic write under a lock on a lock file beside it, taken without waiting: a lock another process holds skips this
 write and the counts stay in memory for the next one, so a read never waits on a file; only the write at the end of the process waits for it, up to two seconds, because there is no next one. A write that fails (no state folder, a read-only standby, a full disk) is kept for the next try and never changes
-what a read answers; the file's `flushed` time says when a write last succeeded, so a counter that cannot write does not look like a week of no reads. The gauge carries a generation, a whole number that grows by one with every gauge written; a publisher notes the generation on disk when it computes its gauge and writes it only if no gauge has been written since (it
-reads the generation again under the lock), so an older publisher that flushes last never puts its gauge over a newer one, whatever the clocks say (the time in `at` is for display only and is never compared). One flush runs at a time in a process: the flush at exit waits for one the timer started
-(and a failed write removes its temporary file). A damaged file is replaced and the old one kept once as `keeper-reads.json.bad`: a malformed value at any level, a number that is not finite or not a whole number where one is due, a file nested deeper than it ever is or larger than a counter file can be. What a process had counted when it was killed (a stop signal runs no exit hook), or when the lock stayed held for more than two seconds at its exit, is lost. Stdlib only at load: the config and the standby test are imported where the file is written."""
+what a read answers; the file's `flushed` time says when a write last succeeded, so a counter that cannot write does not look like a week of no reads. The gauge carries a generation, a whole number that grows by one with every gauge written, and an epoch, a random id the file gets from the moment it is created (a file created again after it was removed, or replaced after damage, has a new epoch, with or without a gauge; a file a previous version wrote has none until its first gauge is written). A publisher reads `snapshot()`, the (epoch, generation) on disk, BEFORE it computes its rows, and its gauge is written only if the file still holds exactly that pair when the write is made, which is checked again under the lock; a refused gauge is computed again from the registry as it is then and offered once more (bounded: one retry, made outside the lock and with no sleep). So an older publisher that flushes last, a file removed or replaced since, and a process that is slow between reading and writing do not put a gauge computed from older rows over a newer one by the compare, whatever the clocks say (the time in `at` is never compared between publishers; the reader compares it with now). What is not guaranteed: a process that computed rows from an older registry and only then took its snapshot can still publish one stale gauge, which the next sync replaces. One flush runs at a time in a process: the flush at exit waits for one the timer started
+(and a failed write removes its own temporary file, named by the process and a counter, never one another writer made; a temporary file left by a writer that was killed is swept by the next write, under the lock, once it is more than a minute old). The wait before the next write is measured on the monotonic clock, so a wall clock that steps back delays nothing. A damaged file is replaced and the old one kept once as `keeper-reads.json.bad`: a malformed value at any level, a number that is not finite (an `Infinity` or a `1e999` anywhere, extra fields included) or not a whole number where one is due, a gauge with no `count` or no list of keys, or a count below the number of keys it lists, a file nested deeper than it ever is or larger than a counter file can be. A damaged gauge is unknown, never zero, and so is a gauge computed more than GAUGE_STALE seconds ago, one with no readable time, or one dated ahead of the clock by more than GAUGE_AHEAD seconds (its publisher has stopped, or the clock stepped; the file's heartbeat, which any process's read moves, does not say the gauge is current). What a process had counted when it was killed (a stop signal runs no exit hook), or when the lock stayed held for more than two seconds at its exit, is lost. Stdlib only at load: the config and the standby test are imported where the file is written."""
 from __future__ import annotations
 
 import atexit
 import datetime as dt
+import itertools
 import json
 import math
 import os
@@ -38,6 +38,10 @@ KEYS_PER_SITE = 200               # distinct row keys kept per site
 GAUGE_KEYS = 50                   # page keys listed with the gauge
 EXIT_WAIT = 2.0                   # seconds the flush at process exit waits for the lock (a write holds it a few milliseconds)
 STALE = 86400.0                   # a file written longer ago than this is reported as not recording
+GAUGE_AHEAD = 5.0                 # a gauge dated further ahead of the clock than this (seconds; the writer is the same host, and `at` has one-second resolution) is unknown, not current
+GAUGE_STALE = 300.0               # a gauge computed longer ago than this (five minutes: the publisher refreshes it about every 20 seconds and writes it at least once a minute) is unknown, not its count
+TMP_STALE = 60.0                  # a temporary file of the counter older than this, found under the lock, was left by a writer that was killed
+RETRIES = 1                       # a refused gauge is computed again and offered once more, no more
 
 # the readers that stay: they read the name line to name the project, its agent-name prefix or its scope, never to say who keeps it
 BY_DESIGN = (
@@ -57,9 +61,11 @@ QUIET = ("the gauge at zero says no row's keeper depends on an old form; a week 
 
 _LOCK = threading.Lock()
 _PENDING: dict[str, list] = {}    # site -> [last read (epoch), set of new keys]
-_SEEN: dict[str, set] = {}        # site -> the keys this process has counted
-_LAST: dict[str, float] = {}      # site -> the last read this process recorded
-_STATE: dict = {"flushed": time.time(), "hooked": False, "gauge": None, "gauge_at": 0.0, "gauge_base": 0, "fresh": False, "beat": False, "wrote": None, "timer": None}
+_SEEN: dict[str, set] = {}        # site -> the keys counted since this process's last write (a key written leaves it: the file is what says a key is counted)
+_LAST: dict[str, float] = {}      # site -> the monotonic time of the last read this process recorded
+_STATE: dict = {"flushed": time.monotonic(), "hooked": False, "gauge": None, "gauge_at": 0.0, "gauge_base": (None, 0), "fresh": False, "refused": False, "beat": False, "timer": None}
+_NAMES = itertools.count(1)       # the counter in the names of this process's temporary files
+_DEADLINE = time.monotonic        # the wait for the file's lock is timed on the real monotonic clock
 _WRITE = threading.Lock()         # one flush at a time in this process: the flush at exit waits for one the timer started
 MAX_DEPTH = 16                    # the deepest nesting a counter file has is 4; a file nested deeper is damaged
 MAX_BYTES = 4 * 1024 * 1024       # and one larger than this is not a counter file
@@ -67,24 +73,24 @@ MAX_BYTES = 4 * 1024 * 1024       # and one larger than this is not a counter fi
 
 def note(kind: str, key: str, up: int = 2) -> None:
     """Count one read that answered a keeper question from an old form: `kind` names the form, `key` the registry row (a page key) or the session it read, and the site is `kind` and the function `up` frames above
-    this call (2: the caller of the helper that notes, 1: the function that notes itself). A key already counted in this process only moves the site's last-read time, and that at most once a minute. Never raises
+    this call (2: the caller of the helper that notes, 1: the function that notes itself). A key already counted since this process's last write only moves the site's last-read time, and that at most once a minute (the minute is the monotonic clock's). Never raises
     and never waits on a file in the cases that matter: the due write is skipped when another process holds the file's lock."""
     try:
         f = sys._getframe(up)
         site = f"{kind} <- {str(f.f_globals.get('__name__') or '?').rsplit('.', 1)[-1]}.{f.f_code.co_name}"
-        now = time.time(); key = str(key or "")
+        now = time.time(); tick = time.monotonic(); key = str(key or "")
         with _LOCK:
             seen = _SEEN.setdefault(site, set())
             new = key not in seen
             if new:
                 seen.add(key)
-            if new or now - _LAST.get(site, 0.0) >= EVERY:
-                _LAST[site] = now
+            if new or tick - _LAST.get(site, -math.inf) >= EVERY:
+                _LAST[site] = tick
                 e = _PENDING.setdefault(site, [now, set()])
                 e[0] = now
                 if new:
                     e[1].add(key)
-            due = bool(_PENDING) and now - _STATE["flushed"] >= EVERY
+            due = bool(_PENDING) and tick - _STATE["flushed"] >= EVERY
             hook = not _STATE["hooked"]
             if hook:
                 _STATE["hooked"] = True
@@ -98,16 +104,26 @@ def note(kind: str, key: str, up: int = 2) -> None:
         pass
 
 
-def gauge(keys) -> None:
-    """The rows whose keeper only an old form names (`keeper_source` legacy), by page key: set by the publisher each time it runs, with the generation the file holds at that moment (a gauge is written only if no other
-    has been written since) and the time it was computed (for display). Written with the next flush, at once when the set changed. Never raises."""
+def snapshot() -> tuple:
+    """The (epoch, generation) the file holds now: the file's epoch (None for no file, an unreadable one, or one a previous version wrote and no gauge has been written to since) and the generation of its gauge (0 for none). A publisher takes this BEFORE it
+    computes the rows of its gauge and hands it to `gauge`, which is written only while the file still holds exactly this pair. Never raises."""
+    try:
+        return _stamp_of(load()[0])
+    except Exception:  # noqa: BLE001
+        return (None, 0)
+
+
+def gauge(keys, base: tuple | None = None, again=None, _tries: int = 0) -> None:
+    """The rows whose keeper only an old form names (`keeper_source` legacy), by page key: set by the publisher each time it runs. `base` is the `snapshot()` the publisher took before it computed `keys` (taken here when it is not
+    given, which is later than the rows and so a weaker promise); the gauge is written with the next flush (at once when the set changed), and only while the file still holds that (epoch, generation), checked again under the file's lock.
+    A gauge the lock check refused is computed again by `again()` (a function that reads the registry now and returns the keys, or None when it has none to give; called after a new `snapshot()` and outside the file's lock) and offered once more: at most RETRIES times. Never raises."""
     try:
         ks = sorted({str(k) for k in keys})
-        base = _disk_gen()
+        base = snapshot() if base is None else (base[0], base[1])
         with _LOCK:
             changed = _STATE["gauge"] != ks
-            _STATE["gauge"] = ks; _STATE["gauge_at"] = time.time(); _STATE["gauge_base"] = base; _STATE["fresh"] = True; _STATE["beat"] = True
-            due = changed or time.time() - _STATE["flushed"] >= EVERY
+            _STATE["gauge"] = ks; _STATE["gauge_at"] = time.time(); _STATE["gauge_base"] = base; _STATE["fresh"] = True; _STATE["refused"] = False; _STATE["beat"] = True
+            due = changed or time.monotonic() - _STATE["flushed"] >= EVERY
             hook = not _STATE["hooked"]
             if hook:
                 _STATE["hooked"] = True
@@ -117,6 +133,14 @@ def gauge(keys) -> None:
             flush()
         else:
             _arm()
+        if again is not None and _tries < RETRIES:
+            with _LOCK:
+                refused = _STATE["refused"]; _STATE["refused"] = False
+            if refused:
+                again_base = snapshot()
+                more = again()
+                if more is not None:                  # None: nothing to compute from (an empty registry), so nothing is published
+                    gauge(more, again_base, again, _tries + 1)
     except Exception:  # noqa: BLE001
         pass
 
@@ -131,12 +155,12 @@ def _gen_of(lg) -> int:
     return g if _is_int(g) else 0
 
 
-def _disk_gen() -> int:
-    """The generation of the gauge the file holds now (0 when there is none or the file cannot be read)."""
-    try:
-        return _gen_of(load()[0].get("legacy"))
-    except Exception:  # noqa: BLE001
-        return 0
+def _stamp_of(d) -> tuple:
+    """The (epoch, generation) of a document of the file: the epoch is the file's (or its gauge's, for a file a previous version wrote) and None when there is none; the generation is 0 without a gauge."""
+    lg = d.get("legacy") if isinstance(d, dict) else None
+    e = d.get("epoch") if isinstance(d, dict) else None
+    if not (isinstance(e, str) and e) and isinstance(lg, dict): e = lg.get("epoch")
+    return (e if isinstance(e, str) and e else None, _gen_of(lg))
 
 
 def _path():
@@ -158,7 +182,7 @@ def _arm() -> None:
         with _LOCK:
             if _STATE["timer"] is not None or not (_PENDING or _STATE["beat"]):
                 return
-            _STATE["timer"] = _after(EVERY - (time.time() - _STATE["flushed"]), _tick)
+            _STATE["timer"] = _after(EVERY - (time.monotonic() - _STATE["flushed"]), _tick)
     except Exception:  # noqa: BLE001
         with _LOCK:
             _STATE["timer"] = None
@@ -187,6 +211,14 @@ def _no_constant(name: str):
     raise ValueError(f"{name} is not a number")
 
 
+def _finite(text: str) -> float:
+    """A float of the file: one that does not fit (a `1e999` reads as infinity) is damage like `Infinity`, wherever it stands, extra fields included, because the next write would put `Infinity` in the file."""
+    v = float(text)
+    if not math.isfinite(v):
+        raise ValueError(f"{text[:20]} is not a finite number")
+    return v
+
+
 def _depth_ok(text: str) -> bool:
     """True when the brackets of `text` nest no deeper than MAX_DEPTH (strings skipped)."""
     depth = 0; in_str = False; esc = False
@@ -208,7 +240,7 @@ def _doc_of(text: str) -> dict:
     if len(text) > MAX_BYTES or not _depth_ok(text):
         raise ValueError("not a counter file (too large or nested too deeply)")
     try:
-        d = json.loads(text, parse_constant=_no_constant)
+        d = json.loads(text, parse_constant=_no_constant, parse_float=_finite)
     except RecursionError:
         raise ValueError("nested too deeply") from None
     if not (isinstance(d, dict) and isinstance(d.get("sites", {}), dict)):
@@ -216,13 +248,15 @@ def _doc_of(text: str) -> dict:
     for k in ("since", "flushed", "restarted"):
         if k in d and not isinstance(d[k], str):
             raise ValueError(f"{k} is not a time")
+    if "epoch" in d and not (isinstance(d["epoch"], str) and d["epoch"]):
+        raise ValueError("epoch is not an id")
     for name, v in d.get("sites", {}).items():
         if not (isinstance(v, dict) and isinstance(v.get("last", ""), str) and (v.get("keys") is None or _is_str_list(v["keys"]))):
             raise ValueError(f"site {str(name)[:60]} is malformed")
     lg = d.get("legacy")
-    if lg is not None and not (isinstance(lg, dict) and _is_int(lg.get("count", 0)) and (lg.get("keys") is None or _is_str_list(lg["keys"])) and isinstance(lg.get("at", ""), str)
-                                                  and (lg.get("gen") is None or _is_int(lg["gen"])) and (lg.get("stamp") is None or _is_num(lg["stamp"]))):
-        raise ValueError("the gauge is malformed")
+    if lg is not None and not (isinstance(lg, dict) and _is_int(lg.get("count")) and _is_str_list(lg.get("keys")) and len(lg["keys"]) <= lg["count"] and isinstance(lg.get("at", ""), str)
+                               and (lg.get("gen") is None or _is_int(lg["gen"])) and (lg.get("epoch") is None or (isinstance(lg["epoch"], str) and lg["epoch"])) and (lg.get("stamp") is None or _is_num(lg["stamp"]))):
+        raise ValueError("the gauge is malformed")      # no count, no list of keys, or a count below the keys it lists would read as zero where rows are legacy: damaged, never zero
     return d
 
 
@@ -240,7 +274,7 @@ def flush(wait: float = 0.0) -> bool:
     process runs: a read never waits on the file), or for at most `wait` seconds (the flush at exit, which has no next one). One flush runs at a time in a process: a flush that finds another one writing (the timer's)
     returns False at once and takes nothing, except at exit, which waits for it (within `wait`) so the counts it holds are in the file when the process ends. → True when written (or nothing was waiting); False when the write
     failed or another process held the lock: the counts stay for the next flush, and are lost when the process ends first. A damaged file is kept as `.bad` and started again. Never raises."""
-    deadline = time.monotonic() + wait
+    deadline = _DEADLINE() + wait
     if not (_WRITE.acquire(timeout=wait) if wait > 0 else _WRITE.acquire(blocking=False)):
         if not wait:
             _arm()
@@ -251,13 +285,27 @@ def flush(wait: float = 0.0) -> bool:
         _WRITE.release()
 
 
+def _sweep(p) -> None:
+    """Under the file's lock: remove the temporary files of the counter that are more than TMP_STALE old. The lock is what says no live writer of this file is between creating its temporary file and replacing the file with it, so what is left is a
+    writer that was killed. Never raises."""
+    try:
+        now = time.time()
+        for q in list(p.parent.glob(f".{p.name}.*.tmp")) + [p.with_name(f".{p.name}.tmp")]:
+            try:
+                if now - q.stat().st_mtime > TMP_STALE:
+                    q.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _flush(deadline: float) -> bool:
     with _LOCK:
         take = {s: [e[0], set(e[1])] for s, e in _PENDING.items()}; _PENDING.clear()
-        gauge_now = _STATE["gauge"]; gauge_at = _STATE["gauge_at"]; gauge_base = _STATE["gauge_base"]; fresh = _STATE["fresh"]; _STATE["fresh"] = False; beat = _STATE["beat"]; _STATE["beat"] = False; _STATE["flushed"] = time.time()
+        gauge_now = _STATE["gauge"]; gauge_at = _STATE["gauge_at"]; gauge_base = _STATE["gauge_base"]; fresh = _STATE["fresh"]; _STATE["fresh"] = False; beat = _STATE["beat"]; _STATE["beat"] = False; _STATE["flushed"] = time.monotonic()
     if not take and gauge_now is None and not beat:
         return True
-    tmp = None
     try:
         from stackshot.core import readonly as _ro
         if _ro.is_read_only():
@@ -272,18 +320,19 @@ def _flush(deadline: float) -> bool:
                     fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except BlockingIOError:        # the lock is held: wait for it, within the deadline; any other error cannot clear by waiting and ends the write at once
-                    if time.monotonic() >= deadline:
+                    if _DEADLINE() >= deadline:
                         raise OSError("locked by another process")
                     time.sleep(0.005)
             try:
-                d, restarted = {}, ""
+                _sweep(p)
+                d, restarted, created = {}, "", False
                 try:
                     d = _doc_of(p.read_text(encoding="utf-8"))
                 except FileNotFoundError:
-                    pass
+                    created = True
                 except ValueError:         # damaged: keep it once as .bad, start again, say so in the file
                     os.replace(p, p.with_name(p.name + ".bad"))
-                    d, restarted = {}, _iso(time.time())
+                    d, restarted, created = {}, _iso(time.time()), True
                 sites = d.get("sites") if isinstance(d.get("sites"), dict) else {}
                 for site, (last, keys) in take.items():
                     s = sites.get(site) if isinstance(sites.get(site), dict) else {}
@@ -293,35 +342,42 @@ def _flush(deadline: float) -> bool:
                 if restarted or d.get("restarted"):
                     out["restarted"] = restarted or str(d["restarted"])
                 held = d.get("legacy") if isinstance(d.get("legacy"), dict) else None
-                wrote_gen = None; dropped: dict = {}
-                if gauge_now is not None and ((fresh and _gen_of(held) <= gauge_base) or held is None):      # a gauge computed since the last write, and none written since it was computed (or no gauge in the file at all): it is the newest
-                    wrote_gen = _gen_of(held) + 1
-                    out["legacy"] = {"count": len(gauge_now), "keys": gauge_now[:GAUGE_KEYS], "at": _iso(gauge_at), "gen": wrote_gen}
-                    rows = set(gauge_now)
-                    for site, v in sites.items():        # a site's keys are rows of the gauge: the keys of rows that have since got a mark (or agents) go with them
-                        kept = [k for k in (v.get("keys") or []) if k in rows]
-                        dropped[site] = {k for k in (v.get("keys") or []) if k not in rows} | {k for k in take.get(site, [0, set()])[1] if k not in rows}
-                        v["keys"] = kept
-                elif held:                          # nothing new to publish, or another process has written a gauge since this one was computed: the file's stays
+                disk = _stamp_of(d); refused = False
+                epoch = disk[0]                        # the file's epoch: a file made now (none before, or a damaged one replaced) gets its own, whether or not a gauge is written; a file of a previous version gets one with its first gauge
+                if epoch is None and created:
+                    epoch = os.urandom(8).hex()
+                if gauge_now is not None and fresh:
+                    if disk == tuple(gauge_base):          # the file still holds the (epoch, generation) the rows were computed against: no gauge was written, and the file was not replaced, since: this one is the newest
+                        epoch = epoch or os.urandom(8).hex()
+                        out["legacy"] = {"count": len(gauge_now), "keys": gauge_now[:GAUGE_KEYS], "at": _iso(gauge_at), "gen": disk[1] + 1, "epoch": epoch}
+                        rows = set(gauge_now)
+                        for v in sites.values():        # a site's keys are rows of the gauge: the keys of rows that have since got a mark (or agents) go with them
+                            v["keys"] = [k for k in (v.get("keys") or []) if k in rows]
+                    else:
+                        refused = True                  # another gauge (or another file) since: the file's stays, and the publisher is told so it can compute again
+                if "legacy" not in out and held:        # nothing new to publish, or a refused gauge: the file's stays
                     out["legacy"] = held
-                tmp = p.with_name("." + p.name + ".tmp")
-                with open(tmp, "w", encoding="utf-8") as fh:
-                    fh.write(json.dumps(out, indent=1, sort_keys=True)); fh.flush(); os.fsync(fh.fileno())
-                os.replace(tmp, p)
-                tmp = None
+                if epoch:
+                    out["epoch"] = epoch
+                tmp = p.with_name(f".{p.name}.{os.getpid()}.{next(_NAMES)}.tmp")        # this process's own name: nobody else writes it, and only this writer removes it
+                try:
+                    with open(tmp, "w", encoding="utf-8") as fh:
+                        fh.write(json.dumps(out, indent=1, sort_keys=True)); fh.flush(); os.fsync(fh.fileno())
+                    os.replace(tmp, p)
+                except BaseException:
+                    try: tmp.unlink(missing_ok=True)       # inside the lock, before it is released
+                    except OSError: pass
+                    raise
             finally:
                 fcntl.flock(lk, fcntl.LOCK_UN)
         with _LOCK:
-            if wrote_gen is not None:
-                _STATE["gauge_base"] = max(_STATE["gauge_base"], wrote_gen)
-            for site, ks in dropped.items():          # a pruned key leaves the process's memory of what it counted too: it is counted again when it is read again under a gauge that lists the row
+            if refused:
+                _STATE["refused"] = True
+            for site, (_last, ks) in take.items():        # a key written is the file's to remember: a read after this one is counted again (a key another process pruned from the file is not suppressed by this process's memory)
                 if site in _SEEN:
                     _SEEN[site] -= ks
         return True
     except Exception:  # noqa: BLE001 — put the counts back: the next flush adds them
-        if tmp is not None:
-            try: tmp.unlink(missing_ok=True)
-            except OSError: pass
         with _LOCK:
             for site, (last, keys) in take.items():
                 e = _PENDING.setdefault(site, [last, set()])
@@ -343,6 +399,30 @@ def load() -> tuple[dict, str]:
         return {}, f"unreadable ({e})"
 
 
+def _gauge_age(lg, now: float | None = None):
+    """Seconds since the gauge was computed (its `at`; a time with no zone is the writer's, UTC), or None when it has no time that reads or is dated ahead of the clock by more than GAUGE_AHEAD (a clock that stepped back, or a wrong one at the write)."""
+    try:
+        t = dt.datetime.fromisoformat(str(lg.get("at") or "").replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=dt.timezone.utc)
+        age = (time.time() if now is None else now) - t.timestamp()
+    except (ValueError, AttributeError, OverflowError, OSError):
+        return None
+    return age if age >= -GAUGE_AHEAD else None
+
+
+def count_of(d: dict | None = None, problem: str | None = None, now: float | None = None) -> int | None:
+    """The gauge's count, or None when it is unknown: a missing or damaged file, a file with no gauge yet, or a gauge computed more than GAUGE_STALE seconds ago (or with no time that reads), because a gauge that is not being refreshed says nothing about
+    the rows now, and the file's heartbeat (any process's read moves it) does not say it is current. Unknown is never zero: a removal gate that reads the gauge treats None as not zero."""
+    if d is None:
+        d, problem = load()
+    lg = d.get("legacy") if not problem else None
+    if not (isinstance(lg, dict) and _is_int(lg.get("count")) and isinstance(lg.get("keys"), list)):
+        return None
+    age = _gauge_age(lg, now)
+    return lg["count"] if age is not None and age <= GAUGE_STALE else None
+
+
 def read() -> dict:
     """The file as it is ({} for a missing or damaged one), with nothing from this process's unwritten counts."""
     return load()[0]
@@ -359,12 +439,12 @@ def report(d: dict | None = None, problem: str | None = None, now: float | None 
     def when(s: str) -> str:
         try:
             return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(tz).strftime("%a %b %-d %H:%M")
-        except ValueError:
+        except (ValueError, OverflowError, OSError):
             return "?"
     def age(s: str):
         try:
             return now - dt.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
-        except ValueError:
+        except (ValueError, OverflowError, OSError):
             return None
     out = []
     if problem == "missing":
@@ -380,14 +460,21 @@ def report(d: dict | None = None, problem: str | None = None, now: float | None 
             out.append(f"NOT RECORDING?  the last successful write was {when(fl)}, more than a day ago: if the service ran since, its writes are failing (the counts below are old)")
         if d.get("restarted"):
             out.append(f"a damaged file was replaced {when(str(d['restarted']))}; the old one is {_path().name}.bad, and the counts below start then")
-    if not problem:
+        lg0 = d.get("legacy")
+        if isinstance(lg0, dict) and count_of(d, problem, now) is None and (_gauge_age(lg0, now) is None or _gauge_age(lg0, now) > GAUGE_STALE):
+            out.append(f"NOT RECORDING?  the gauge was computed {when(str(lg0.get('at') or ''))}, which is more than {GAUGE_STALE / 60:g} minutes ago, has no readable time, or is ahead of the clock: its publisher is not refreshing it, whatever the file's last write says")
+    if problem:
+        out.append("legacy keepers: gauge unknown (the counter file cannot be read, so the gauge cannot be): this is never zero, and no removal can rest on it")
+    else:
         lg = d.get("legacy")
-        if isinstance(lg, dict):
-            n = lg.get("count") if _is_int(lg.get("count")) else 0
+        n = count_of(d, problem, now)
+        if n is not None:
             keys = [str(k) for k in (lg.get("keys") or [])]
             out.append(f"legacy keepers: {n} registry row(s) whose keeper only an old form names (as of {when(str(lg.get('at') or ''))})" + (": " + ", ".join(keys) + (", ..." if n > len(keys) else "") if keys else ""))
+        elif isinstance(lg, dict):
+            out.append(f"legacy keepers: gauge unknown (it was computed {when(str(lg.get('at') or ''))}, which is not a current time): this is never zero, and no removal can rest on it")
         else:
-            out.append("legacy keepers: not yet known (the publisher has not written the gauge)")
+            out.append("legacy keepers: gauge unknown (the publisher has not written the gauge yet): this is never zero, and no removal can rest on it")
         sites = d.get("sites") or {}
         since = when(str(d.get("since") or "")) if d.get("since") else "?"
         out.append(f"removal-candidate readers, since {since} (last write {when(str(d.get('flushed') or ''))}): {len(sites)} site(s) read")
@@ -403,12 +490,12 @@ def report(d: dict | None = None, problem: str | None = None, now: float | None 
 
 def main(argv: list | None = None) -> int:
     import argparse
-    ap = argparse.ArgumentParser(prog="stackshot keeper-reads", description="the keepers only an old form names, and the readers that can still answer a keeper question from one (read only)")
+    ap = argparse.ArgumentParser(prog="stackshot keeper-reads", description="the keepers only an old form names, and the readers that can still answer a keeper question from one (read only; exits 2 when the gauge is unknown)")
     ap.add_argument("--json", action="store_true", help="the state file's own content")
     a = ap.parse_args(argv)
     d, problem = load()
     print(json.dumps(d, indent=1, sort_keys=True) if a.json else "\n".join(report(d, problem)))
-    return 0
+    return 0 if count_of(d, problem) is not None else 2         # an unknown gauge (a missing, damaged or gauge-less file) is not zero: the status says so to whatever reads it
 
 
 if __name__ == "__main__":

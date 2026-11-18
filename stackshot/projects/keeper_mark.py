@@ -293,7 +293,7 @@ def _refusal(names: list[str]) -> str:
 
 def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by: str = BY, run_dir: Any = None, now: str | None = None) -> dict:
     """The pass: the plan, and with `apply_` the write. → the plan (without the entries) and {dry, written, refused, undo, replanned, lines}. A refusal (a session that loses a role and is not accepted) writes nothing.
-    The write plans again inside the record's lock, and what is returned and printed after a write is that plan (the one written); `replanned` is true when it differs from the plan read before the lock."""
+    The write plans again inside the record's lock, and what is returned and printed after a write is that plan (the one written); `replanned` is true when it differs from the plan read before the lock, also when the plan under the lock is the one that refuses (the output says so)."""
     p = plan(live=live, by=by, now=now or "")
     acc = set(accept)
     res = {k: v for k, v in p.items() if k != "entries"}
@@ -324,7 +324,9 @@ def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by
         res["refused"] = e.message
         if got.get("plan"):          # a refusal under the lock: what is reported is the plan that decided it
             res.update({k: v for k, v in got["plan"].items() if k != "entries"})
-            lines = _lines(got["plan"], False, acc)
+            lines2 = _lines(got["plan"], False, acc)
+            res["replanned"] = lines2 != lines
+            lines = lines2 + ([f"the record changed between the plan and the write: the plan under the lock (above) is not the one read before it, and it refuses ({p['counts']['changed']} changes were planned before the lock, {got['plan']['counts']['changed']} now)"] if res["replanned"] else [])
         res["lines"] = lines + [e.message]
         return res
     p2 = got.get("plan") or p
