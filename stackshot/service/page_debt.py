@@ -96,17 +96,22 @@ def page_agent(key: str) -> str:
 
 def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[tuple[str, str, str]], why: str, now: float) -> str:
     """The debts the call did not settle go, in one message with the rows as today's relay writes them, to the agent that keeps the page
-    (page_agent: the page's own `agent:`, when live), else the project's builder (a background agent whose mandate builds), else its -main
+    (page_agent: the page's own `agent:`, when live), else the agent the project marks as its keeper, else the project's builder (a background agent whose mandate builds), else its -main
     agent (anchors.fallback_main: its project's, else the scope's general -main agent); with none of them the debts stay moved, for the next audit run's call.
     The [for <owner>] mark is on the message only when that agent is a front one (a -main or other top-level `agents:` entry,
     whose pane takes a peer's message only with it); a background agent gets the plain text. → who was told."""
     own = page_agent(key)
     main = _hooks().main_agent(key)
     builder = _hooks().builder_agent(key)
-    keeper = own or builder or main
+    try:
+        marked = _router_live.marked_in(key, _anc.registry())      # a project that marks its keeper: that agent keeps the page, builder or not (the gates answer it)
+    except Exception:
+        marked = ""
+    lead = own or marked
+    keeper = lead or builder or main
     if not keeper:
         return ""         # nobody can take them: they stay moved, and the next audit run's call tries again
-    front = _telling.front_keeper(own, key)[0] if own else (not builder and bool(main))      # the -main agent is front by construction; a builder and the keeper fallback are not
+    front = _telling.front_keeper(lead, key)[0] if lead else (not builder and bool(main))      # the -main agent is front by construction; a builder and the keeper fallback are not
     rows = []
     for gid, what, writer in debts:
         try:
@@ -118,13 +123,13 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
     head = ((_FOR_OWNER + " ") if front else "") + (
             f"[board] {n} page update{s} on {key} {are} yours to write: the writer{s} left {them} undone past {_hooks().grace_min()} min and the "
             f"audit's page call could not write {them} ({clean_line(why, 200)}). "
-            + ("Write the Current state: you keep this page." if own else "Write the Current state, or hand it to the agent that keeps the page."))
+            + ("Write the Current state: you keep this page." if lead else "Write the Current state, or hand it to the agent that keeps the page."))
     if keeper and rows:
         for nid in _telling.pilot_relay_many(keeper, rows, head=head):
-            if own or builder or main:      # the notices went to the page's agent, the builder or the -main agent, which has no `route`: ruled passed at once, so nothing is left unruled
+            if lead or builder or main:      # the notices went to the page's agent, the builder or the -main agent, which has no `route`: ruled passed at once, so nothing is left unruled
                 try:
                     _routing.rule(nid, "passed", to=keeper, by=_routing.AUTO_RULER,
-                                  reason="the audit's page call could not write the page update: passed to " + ("the agent that keeps the page" if own else "the builder" if builder else "the -main agent"))
+                                  reason="the audit's page call could not write the page update: passed to " + ("the agent that keeps the page" if lead else "the builder" if builder else "the -main agent"))
                 except Exception:
                     pass
     page_debt_forget(key, moved, keeper, now)

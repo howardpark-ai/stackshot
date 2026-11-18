@@ -42,6 +42,7 @@ from typing import Any, Callable
 
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg
+from stackshot.projects import keeper as _kp
 from stackshot.projects import pages as _pg
 from stackshot.projects import project_registry as pr
 from stackshot.projects import projects as prj
@@ -86,8 +87,9 @@ def derive_entry(pid: str, key: str, row: dict, reg: dict, mark: dict | None, no
                  "hub": str(row.get("hub") or ""), "former_keys": list(former), "former_names": [], "made": {"at": now, "by": by, "how": how}}
     if row.get("agents"):
         ent["agents"] = seed_agents(row)
-    if row.get("role") in prj._NAME_ROLES and str(row.get("session") or ""):
-        ent["name"] = str(row["session"])
+    nl, nr = _kp.name_line(row)                         # the page's own name line: for a marked page, the line the mark took the place of (the mark names an agent, never the project)
+    if nr in prj._NAME_ROLES and nl:
+        ent["name"] = nl
     if archived:
         ent["retired"] = {"at": now, "by": by, "how": how}
     return ent
@@ -608,7 +610,7 @@ def _name_taken(ctx: Ctx, name: str, pid: str, own: str = "") -> str:
         if p2 != pid and (str(e2.get("name") or "").casefold() == fold or any(str(x).casefold() == fold for x in e2.get("former_names") or [])):
             return f"{name} is the name of project {p2}"
     for k2, row in ctx.raw.items():
-        if isinstance(row, dict) and row.get("role") in prj._NAME_ROLES and str(row.get("session") or "").casefold() == fold and row.get("id") != pid and k2 not in ctx.ents:
+        if isinstance(row, dict) and _kp.name_line(row)[1] in prj._NAME_ROLES and _kp.name_line(row)[0].casefold() == fold and row.get("id") != pid and k2 not in ctx.ents:
             if own and (k2 == own or ctx.owner(k2) == own):
                 continue
             return f"{name} is the name line of {k2}"

@@ -66,6 +66,9 @@ page("ops/multi-new.md", "type: note\ntitle: Multi new\ndisplay-name: home-multi
 page("projects/multi-note/sub.md", "type: project\ntitle: Multi sub\ndisplay-name: home-multi\nstatus: archived")
 page("projects/gone-a.md", "type: project\ntitle: Gone a\ndisplay-name: home-gone\nstatus: retired")
 page("ops/gone-b/deep.md", "type: note\ntitle: Gone b\ndisplay-name: home-gone\nstatus: closed")
+# a project that marks its keeper (a docs agent, not the builder); the same agent is also a front agent of a project that sorts first, so its best role is on the other project
+page("projects/marked.md", "type: project\ntitle: Marked\ndisplay-name: home-marked\nkeeper: home-marked-docs\nagents:\n  home-marked-main: talks\n  home-marked-docs: keeps the docs\n  background:\n    home-marked-bg: builds\nstatus: active")
+page("projects/aaa-other.md", "type: project\ntitle: Other\ndisplay-name: home-aaa\nagents:\n  home-marked-docs: also talks here\nstatus: active")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -169,7 +172,20 @@ check("roles.json: …sala unreadable → the file is rewritten without the fiel
 # the readers in the hub repo take an entry by .get("role"), .get("project"), .get("retired"); an extra key changes none of them
 S = json.loads((sala("ok", ["home-act"]), _projects_registry._roles_sync(now=t1 + 120), RJ.read_text())[2])["sessions"]
 check("readers: an entry with `live` still has role, project and (where it applies) retired as strings/booleans of the same shape",
-      all(isinstance(e["role"], str) and isinstance(e["project"], str) and set(e) <= {"role", "project", "retired", "page_owed", "live"} for e in S.values()), S)
+      all(isinstance(e["role"], str) and isinstance(e["project"], str) and set(e) <= {"role", "project", "retired", "page_owed", "live", "keeper"} for e in S.values()), S)
+
+# a marked keeper: the entry carries `"keeper": true`, and sala's parser (lib/sessions.py load_roles: only a front or back role that is not retired, with its project) reads every entry as it does without the key
+def sala_reads(sessions):      # the rule of sala's load_roles, written out: a front or back entry that is not retired → (role, project)
+    return {n: (e["role"], e["project"] if isinstance(e.get("project"), str) and e["project"].strip() else None) for n, e in sessions.items() if isinstance(e, dict) and e.get("role") in ("front", "back") and e.get("retired") is not True}
+sala("ok", ["home-act"]); _projects_registry._roles_sync(now=t1 + 140)
+MS = json.loads(RJ.read_text())["sessions"]
+check("keeper: a marked agent's roles.json entry carries keeper true and keeps its front role; its project's name line is no entry; no other agent of the project is flagged",
+      MS["home-marked-docs"].get("keeper") is True and MS["home-marked-docs"]["role"] == "front" and "home-marked" not in MS and not any(e.get("keeper") for n, e in MS.items() if n.startswith("home-marked-") and n != "home-marked-docs"), {n: e for n, e in MS.items() if "marked" in n})
+check("keeper: an agent that is the marked keeper of one project and a front agent of another (its best role on the project that sorts first) still carries the flag, and the project stays the best one",
+      MS["home-marked-docs"]["project"] == "projects/aaa-other" and MS["home-marked-docs"].get("keeper") is True, MS["home-marked-docs"])
+check("keeper: sala's parser reads every entry the same with the key as without it (the key is ignored), and reads the marked agent as front on its project",
+      sala_reads(MS) == sala_reads({n: {k: v for k, v in e.items() if k != "keeper"} for n, e in MS.items()}) and sala_reads(MS)["home-marked-docs"] == ("front", "projects/aaa-other") and sala_reads(MS)["home-marked-bg"][0] == "back", sala_reads(MS))
+check("keeper: the keys an entry carries are the known ones (role, project, retired, page_owed, live, and keeper)", all(set(e) <= {"role", "project", "retired", "page_owed", "live", "keeper"} for e in MS.values()), MS)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

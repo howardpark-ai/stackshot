@@ -167,12 +167,15 @@ def stand_in_keeper(project: str, reg: dict[str, Any] | None = None) -> str:
 
 
 def page_keeper(project: str, reg: dict[str, Any] | None = None) -> str:
-    """The keeper an item's project answers to. A project whose page or hub lists a user-facing agent: its stand-in (builder, else -main).
+    """The keeper an item's project answers to. A project that marks its keeper: that agent. A project whose page or hub lists a user-facing agent: its stand-in (builder, else -main).
     A one-session page (a name-line session, no agents map; none on its hub either): that session, as before, not the general -main agent,
     which is for the router's passes alone (the owner); else the name line of its hub or top-level page. "" when the project has
     none (its mover then hears what a keeper would)."""
     try:
         reg = _anc.registry() if reg is None else reg
+        marked = _router_live.marked_in(project, reg)      # a project that marks its keeper answers that agent, builder or not (stand_in_keeper reads the same mark first)
+        if marked:
+            return marked
         if _anc.has_front(project, reg):
             return stand_in_keeper(project, reg)
         root = _anc.pilot_root(project)
@@ -312,7 +315,7 @@ def keeper_words(project: str, keeper: str) -> str:
         r = roles.get(keeper) or roles.get(_session_label(keeper)) or roles.get(_anc.canonical(keeper, nm)) or {}
     except Exception:
         r = {}
-    return f"the keeper of {r.get('project') or project}" if r.get("role") == _anc.NAME_ROLE else f"the keeper of its page ({project})"
+    return f"the keeper of {r.get('project') or project}" if r.get("role") == _anc.NAME_ROLE or r.get("keeper") else f"the keeper of its page ({project})"
 
 
 def notice_to(meta: dict[str, Any]) -> list[tuple[str, str]]:
@@ -349,7 +352,8 @@ def front_keeper(who: str, project: str = "", strict: bool = False, unread_front
             return True, ""        # the queue rule asks only whether the session is a front agent: the keeper of the project is one too
         root = _anc.pilot_root(project) if project else ""
         own = (_anc.name_line(root) if root else _anc.name_line(project)) if project else ""      # the page's name line only (a sub-page's own `session:` is its agent: keeper, never the project's keeper): the fallback -main agent a nameless page's notices go to is no keeper, and it is front
-        if own and h.session_id(own) == h.session_id(who):     # the keeper of this item's project is its keeper here, front elsewhere or not
+        mk = _router_live.marked_in(project, _anc.registry()) if project else ""        # the agent the project marks: a front agent of its own map though the page's name line answers it (a mark takes the line's place), so it is front and tells nobody about its own
+        if own and h.session_id(own) == h.session_id(who) and not (mk and h.session_id(mk) == h.session_id(who)):     # the keeper of this item's project is its keeper here, front elsewhere or not
             return False, ""
         for p in (project, roles[name]["project"]):
             stew = (page_keeper(p) or _anc.name_line(p)) if p else ""     # the page's keeper (page_keeper: the stand-in of a page that lists agents, a one-session page's own session), not the retired name-line session

@@ -277,6 +277,8 @@ def _overlay(cur: dict, e: dict, retired: set) -> dict:
     mark, problems = _kp.record_mark(e.get("agents")) if "agents" in e else ("", [])
     listed = e["agents"] if "agents" in e else (cur.get("agents") or {})
     page_mark = _kp.row_mark(cur)
+    if page_mark and page_mark not in listed:                    # the record removed the agent the page marks: the visible `keeper:` line is not read, and the row says why
+        problems = [*problems, f"`keeper: {page_mark}` on the page names an agent the project record does not list; the record's agents rule, so the line is ignored"]
     mark = mark or (page_mark if page_mark in listed else "")    # the record's flag first, else the mark the page's own `keeper:` line gave
     if mark:                                                     # the marked agent is the row's keeper; the old name line stays beside it
         new["session"] = mark; new["role"] = _kp.MARK
@@ -325,26 +327,35 @@ def _top(key: str) -> str:
 
 
 def _inherit_marks(out: dict, tops: set) -> None:
-    """The sub-pages under the pages of `tops` that inherit a mark take it as their `session` (role stays "inherited", `legacy_session` keeps what the page above gave them), and one that no
-    longer has a mark above it takes its old value back. Rows are copied before they change."""
+    """The sub-pages under the pages of `tops` that take a mark from above (an unnamed one: role "inherited", or no role and no session at all, which is what a project with agents and no
+    `display-name:` leaves its sub-pages) take it as their `session` with the role "inherited" (`legacy_session` and `legacy_role` keep what they were), and one that no longer has a mark
+    above it takes its old value back. Rows are copied before they change."""
     for k in sorted(out, key=lambda x: x.count("/")):
         row = out[k]
-        if _top(k) not in tops or not isinstance(row, dict) or row.get("role") != "inherited":
+        if _top(k) not in tops or not isinstance(row, dict):
+            continue
+        had = "legacy_role" in row or "legacy_session" in row
+        unnamed = row.get("role") == "inherited" or (not row.get("role") and not row.get("session"))
+        if not unnamed and not had:
             continue
         up = _kp.above(k, out); m = ""
         while up and not m:
             r = out[up]
             m = str(r.get("session") or "") if r.get("role") == _kp.MARK else ""
             up = _kp.above(up, out) if r.get("role") == "inherited" and not m else ""
-        had = "legacy_session" in row or "legacy_role" in row
+        was_role = str(row.get("legacy_role") if had else row.get("role") or "")      # the role the row had before it took a mark ("" for a row nothing kept)
         old = str((row.get("legacy_session") if had else row.get("session")) or "")
-        if m and (row.get("session") != m or not had):
-            row = out[k] = dict(row); row["session"] = m
-            row["legacy_role"] = "inherited"             # what the row was: a name-line reader (keeper.name_line) must not take its old session for a name line of its own
+        if m and unnamed and (row.get("session") != m or not had):
+            row = out[k] = dict(row); row["session"] = m; row["role"] = "inherited"
+            row["legacy_role"] = was_role                # what the row was: a name-line reader (keeper.name_line) must not take its old session for a name line of its own
             if old:
                 row["legacy_session"] = old
-        elif not m and had:
+        elif not m and had and "legacy_role" in row and row.get("role") == "inherited":
             row = out[k] = dict(row); row["session"] = old; row.pop("legacy_session", None); row.pop("legacy_role", None)
+            if was_role:
+                row["role"] = was_role
+            else:
+                row.pop("role", None)
 
 
 def apply(reg: dict) -> dict:
@@ -370,6 +381,7 @@ def apply(reg: dict) -> dict:
                 out = dict(reg)
             out[k] = new; changed.append(k)
             if (_kp.MARK in (cur.get("role"), new.get("role")) or "legacy_session" in cur or "legacy_session" in new
+                    or cur.get("status") != new.get("status") or cur.get("hub") != new.get("hub")      # a retired or re-hubbed project: the pages under it read their keeper again
                     or list((cur.get("agents") or {}).items()) != list((new.get("agents") or {}).items())
                     or list((cur.get("back_agents") or {}).items()) != list((new.get("back_agents") or {}).items())):
                 tops.add(_top(k))

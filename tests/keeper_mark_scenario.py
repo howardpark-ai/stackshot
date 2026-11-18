@@ -218,7 +218,15 @@ write_record({F: entry("projects/forge", name="team-forge2", agents={"team-forge
               L: entry("projects/loft", name="team-loft", agents={"team-loft-main": agent(True, "talks", keeper=True)})})
 check("a record mark: the sub-page keeps what it was beside the marked agent, session and role, so no name line is offered for it", prj.registry()["projects/forge/sub"]["legacy_session"] == "team-forge"
       and prj.registry()["projects/forge/sub"]["legacy_role"] == "inherited" and prj.registry()["projects/forge/sub"]["session"] == "team-forge-docs", prj.registry()["projects/forge/sub"])
-check("a mark changes no session's role: session_roles and file_roles (roles.json) are the same with the mark as without it", anchors.session_roles(prj.registry(), set()) == S_unmarked and anchors.file_roles(prj.registry(), set()) == F_unmarked)
+S_marked = anchors.session_roles(prj.registry(), set()); F_marked = anchors.file_roles(prj.registry(), set())
+def _same_but_mark(a, b, flagged):      # the maps with and without the mark: the marked pages' entries differ (the legacy name line is no session; the marked agent carries the flag), every other entry is the same
+    return {n: r for n, r in a.items() if r.get("project") not in flagged} == {n: r for n, r in b.items() if r.get("project") not in flagged}
+check("a mark changes no other session's role (stage 2: the marked page's old name line is no session, the marked agent carries `keeper: true`): session_roles and file_roles are the same with the mark as without it for every other project",
+      _same_but_mark(S_marked, S_unmarked, {"projects/forge", "projects/loft"}) and _same_but_mark(F_marked, F_unmarked, {"projects/forge", "projects/loft"}))
+check("… the marked projects: the old name line (team-forge, team-loft) offers no role, the marked agent keeps its role and carries the flag, every other agent of the project is as it was",
+      "team-forge2" not in S_marked and "team-loft" not in S_marked and S_marked["team-forge-docs"].get("keeper") is True and S_marked["team-loft-main"].get("keeper") is True
+      and {n: {k: v for k, v in r.items() if k != "keeper"} for n, r in S_marked.items() if r["project"] in ("projects/forge", "projects/loft")} == {n: r for n, r in S_unmarked.items() if r["project"] in ("projects/forge", "projects/loft") and n not in ("team-forge2", "team-loft")},
+      ({n: r for n, r in S_marked.items() if r["project"] in ("projects/forge", "projects/loft")}, {n: r for n, r in S_unmarked.items() if r["project"] in ("projects/forge", "projects/loft")}))
 check("… and the project's name: fields() reads the name line the mark took the place of (here the record's, which differs from the page's)", prj.fields("projects/forge")["display_name"] == "team-forge2" and prj.fields("projects/loft")["display_name"] == "team-loft" and prj.fields("projects/forge")["main"] == "team-forge-main")
 check("… a project's scope and the agent_gap test read the same (a marked front agent is not a gap)", prj.agent_gap("projects/forge", prj.registry()["projects/forge"], prj.registry()) is None)
 

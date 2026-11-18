@@ -523,6 +523,7 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
     reg = _prj.with_pending(registry() if reg is None else reg, made=True)
     first = _cfg.page_dirs()[0] + "/"
     best: dict[str, tuple[tuple, str, str]] = {}
+    marked: set[str] = set()                            # the agents a page or record marks as a keeper: each carries the flag, though its best role may be on another project (the project stays the best one)
     claims: dict[str, tuple[tuple, str, str]] = {}      # the owed claims, ranked among themselves the same way
     dead = lambda k: _prj.page_status(reg.get(k) or {}) in _prj.retired_statuses()
     def offer(name: str, role: str, key: str, e: dict[str, Any], owed: bool = False) -> None:
@@ -535,13 +536,17 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
         owed = {str(x) for x in (e.get("owed_agents") or {})}
         for n in [str(x) for x in (e.get("agents") or {})] + sorted(back):
             offer(n, "back" if n in back else "front", key, e, n in owed)
-        s, rl = _kp.name_line(e)                 # the page's own name line (with a mark on the page, the one the mark took the place of: a mark moves no role)
+        if e.get("role") == _kp.MARK:            # a marked page: the keeper is an agent of its map (front or back below), and the project's name line is no session, so it offers no role
+            marked.add(str(e.get("session") or ""))
+            continue
+        s, rl = _kp.name_line(e)                 # the page's own name line
         if s and rl not in ("agent", "inherited"):
             offer(s, NAME_ROLE, key, e)
     owed_won = {n for n, c in claims.items() if n not in best or dead(best[n][2])}
     best.update({n: claims[n] for n in owed_won})
     served = lambda k: any(front_agents(reg.get(x) or {}) for x in dict.fromkeys(["/".join(k.split("/")[:2]), hub_of(k, reg)]) if x)
     return {n: ({"role": r, "project": k, "retired": True} if r == NAME_ROLE and (served(k) or dead(k)) else {"role": r, "project": k})
+               | ({"keeper": True} if n in marked else {})
                | ({"page_owed": True} if n in owed_won else {})
                | ({"live": n in live} if live is not None else {})
                | ({"renamed_to": ren[n.casefold()]} if n.casefold() in ren else {})
@@ -612,12 +617,25 @@ def pilot_root(project: str, roots: list[str] | None = None) -> str:
     return top if top in (pilot_roots() if roots is None else roots) else ""
 
 
+def marked_for(root: str, reg: dict[str, dict[str, Any]]) -> str:
+    """The agent the project at pilot root `root` marks as its keeper, "" with no mark: the mark of the page whose agents serve the root (the root itself, or, for a root that lists no agent of its
+    own, the hub page its `hub:` line names when that lists agents: router_live.agent_root's rule). notice_name, stand_in and page_keeper all read the mark here."""
+    page = reg.get(root) or {}
+    if page.get("agents"):
+        return _kp.marked(root, reg)
+    hub = hub_of(root, reg)
+    return _kp.marked(hub, reg) if hub and hub != root and (reg.get(hub) or {}).get("agents") else ""
+
+
 def notice_name(project: str, reg: dict[str, dict[str, Any]] | None = None, roots: list[str] | None = None) -> str:
-    """The name a project's notices are addressed to: its top-level page's `display-name:` line (the registry's `session`), else, for a page that names none, the session its notices fall to (fallback_main). The line stays on every page
+    """The name a project's notices are addressed to: the agent its top-level page marks as its keeper, else its `display-name:` line (the registry's `session`), else, for a page that names none, the session its notices fall to (fallback_main). The line stays on every page
     and names the project; the router rules what is addressed to it (router_live.holds), so no one is sent
     to it. "" for a key that names no page, or when no session can be named."""
     r = pilot_root(project, roots)
-    return (name_line(r, reg) or fallback_main(r, reg)) if r else ""
+    if not r:
+        return ""
+    reg = registry() if reg is None else reg
+    return marked_for(r, reg) or name_line(r, reg) or fallback_main(r, reg)
 
 
 # ---------- the keeper of a page with no agents of its own ----------
