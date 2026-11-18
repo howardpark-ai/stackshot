@@ -26,7 +26,7 @@ it refuses (404) an agent the record does not list and (409) a retired project; 
 
 PROJECT is an id (prj_<8 hex>), a page key, a bare slug, the project's name or a former name. A sub-page is never a project: its key names the top-level project that owns it for rename and the agent
 verbs, and is refused (400) by archive, reopen and move-page, which act on the whole project; the id of a sub-page is refused by every verb. Every verb is one atomic change of the record under the record's own lock (safe beside the running
-server), then a write of the page's mirror through the instance's page store when the project has a page there; a mirror that fails is reported and the record is right already.
+server), then a write of the page's mirror through the instance's page store when the project has a page there (except `keeper`, which writes the record only); a mirror that fails is reported and the record is right already.
 A page edit made by hand to one of the three mirrored lines is overwritten by the next mirror write.
 
 restore is the one verb that changes nothing unless `--apply` is given, and it writes no page lines (run `mirror PROJECT` after if the page should follow). A restore that changes a project's status says so on a line of its own ("THIS UN-ARCHIVES IT"). It reads the store's git repository (the server

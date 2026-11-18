@@ -307,6 +307,19 @@ check("... and the output says the plan changed under it, and the result says so
 write_record(ENTRIES)
 r13 = km.run(apply_=True, accept=("team-wing",), live=set(), run_dir=T / "undo-calm", now=NOW9)
 check("an apply on a record nobody touched says nothing of the kind and is not marked replanned", r13["written"] is True and r13["replanned"] is False and "the record changed between" not in "\n".join(r13["lines"]), r13["lines"][-3:])
+write_record(ENTRIES)
+def racing_all(**kw):
+    out = orig_plan(**kw); km.plan = orig_plan                                                                 # somebody applies the same pass after the plan was read
+    km.run(apply_=True, accept=("team-wing",), live=set(), run_dir=T / "undo-race2", now=NOW9)
+    return out
+km.plan = racing_all
+try:
+    z13 = km.run(apply_=True, accept=("team-wing",), live=set(), run_dir=T / "undo-race3", now=NOW9)
+finally:
+    km.plan = orig_plan
+tz13 = "\n".join(z13["lines"])
+check("an apply whose re-plan under the lock has nothing left to do says plainly that nothing needed writing, not `the plan that was written (0 changes)`",
+      z13["written"] is False and z13["replanned"] is True and "nothing needed writing any more" in tz13 and "(0 changes)" not in tz13 and "nothing to change: nothing written" in tz13, tz13)
 
 if fails: print(f"FAILED: keeper mark migrate scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: keeper mark migrate scenario, {len(ran)} checks")

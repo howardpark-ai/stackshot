@@ -329,7 +329,9 @@ def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by
     res.update({k: v for k, v in p2.items() if k != "entries"})                    # what is returned and printed is the plan that was written, not the one read before the lock
     lines2 = _lines(p2, False, acc)
     res["replanned"] = lines2 != lines
-    note = ([f"the record changed between the plan and the write: the lines above are the plan that was written ({p2['counts']['changed']} changes), and they differ from the plan read before the lock ({p['counts']['changed']} changes)"]
+    n2 = p2["counts"]["changed"]
+    note = ([f"the record changed between the plan and the write: nothing needed writing any more (the plan read before the lock had {p['counts']['changed']} changes)" if not n2 else
+             f"the record changed between the plan and the write: the lines above are the plan that was written ({n2} changes), and they differ from the plan read before the lock ({p['counts']['changed']} changes)"]
             if res["replanned"] else [])
     res["written"] = bool(changed)
     res["undo"] = undo.get("file")
