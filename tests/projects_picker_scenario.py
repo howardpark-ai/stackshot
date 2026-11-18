@@ -1514,4 +1514,19 @@ else: _cfg.CFG["project_agent"] = CFG_PA_6F
 _psvc.PAGE_IO = gio
 
 
+# ---- keeper mark: the picker's rows name the keeper by the mark when the page carries one, and are as before when it does not
+ALPHA_FM = "type: project\ntitle: Alpha\norg: home\ndisplay-name: home-sparrow\nagents:\n  home-sparrow-main: talks to Oliver\n  home-sparrow-docs: keeps the docs\nstatus: active"
+def alpha_row():
+    st, d = lst("all"); return next(r for r in d["projects"] if r["key"] == "projects/alpha")
+before_row = alpha_row()
+check("keeper mark: no mark, the picker row keeps its name-line keeper and its agents carry no flag", before_row["keeper"] == "home-sparrow" and not any("keeper" in a for a in before_row["agents"].values()), before_row)
+page("projects/alpha.md", ALPHA_FM.replace("agents:", "keeper: home-sparrow-docs\nagents:", 1)); p.cmd_registry(quiet=True)
+marked_row = alpha_row()
+check("keeper mark: a `keeper:` line on the page: the picker row's keeper is the marked agent and that agent's entry is flagged, nothing else in the row moves",
+      marked_row["keeper"] == "home-sparrow-docs" and marked_row["agents"]["home-sparrow-docs"].get("keeper") is True and marked_row["main"] == before_row["main"]
+      and {k: v for k, v in marked_row.items() if k not in ("keeper", "agents")} == {k: v for k, v in before_row.items() if k not in ("keeper", "agents")}
+      and {n: {k: v for k, v in a.items() if k != "keeper"} for n, a in marked_row["agents"].items()} == before_row["agents"], marked_row)
+page("projects/alpha.md", ALPHA_FM); p.cmd_registry(quiet=True)
+check("keeper mark: the line removed, the row is exactly what it was", alpha_row() == before_row)
+
 print(("ok" if not fails else "FAILED") + f": projects picker scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

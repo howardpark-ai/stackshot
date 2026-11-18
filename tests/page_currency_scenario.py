@@ -738,6 +738,24 @@ p._cfg.CFG["board_check"] = {"mode": "block"}; check("board: config: block is re
 p._cfg.CFG["board_check"] = {"mode": "nonsense"}; check("board: config: an unknown value is off", p._cfg.board_check_mode() == "off")
 p._cfg.CFG.pop("board_check")
 
+# ---- 9. a `keeper:` line on the page names the keeper among the page's own agents (readers only: nothing writes it yet)
+fmpage("projects/mk.md", "type: project\ntitle: Mk\ndisplay-name: m-proj\nkeeper: m-proj-docs\nagents:\n  m-proj-main: talks\n  m-proj-docs: keeps the docs\n  background:\n    m-proj-eng: builds and merges\nstatus: active")
+fmpage("projects/mk/sub.md", "type: project\ntitle: Mk sub")
+fmpage("projects/mk/own.md", "type: project\ntitle: Mk own\nagent: m-proj-main")
+fmpage("projects/mk-bad.md", "type: project\ntitle: Mk bad\ndisplay-name: m-bad\nkeeper: m-bad-nobody\nagents:\n  m-bad-main: talks\n  background:\n    m-bad-eng: builds\nstatus: active")
+fmpage("projects/mk-none.md", "type: project\ntitle: Mk none\ndisplay-name: m-none\nagents:\n  m-none-main: talks\n  background:\n    m-none-eng: builds\nstatus: active")
+real_reg4 = p.REG; p.REG = str(T / "registry-test4.json"); p.cmd_registry(quiet=True); R4 = json.loads(open(p.REG).read())["pages"]; p.REG = real_reg4
+who4 = lambda k: (R4[k].get("session"), R4[k].get("role"))
+check("keeper line: a name on the page's map is the keeper, role mark, the name line kept as legacy_session", who4("projects/mk") == ("m-proj-docs", "mark") and R4["projects/mk"]["legacy_session"] == "m-proj" and R4["projects/mk"]["keeper_source"] == "mark", R4["projects/mk"])
+check("keeper line: a sub-page that names nobody inherits it; one with its own `agent:` line keeps that agent", who4("projects/mk/sub") == ("m-proj-docs", "inherited") and who4("projects/mk/own") == ("m-proj-main", "agent"), (who4("projects/mk/sub"), who4("projects/mk/own")))
+check("keeper line: a name that is no agent of the page is ignored and reported; the old name line answers", who4("projects/mk-bad") == ("m-bad", "name") and len(R4["projects/mk-bad"]["keeper_problems"]) == 1 and "legacy_session" not in R4["projects/mk-bad"], R4["projects/mk-bad"])
+check("no keeper line: the old fields answer and the derived keeper is the builder", who4("projects/mk-none") == ("m-none", "name") and R4["projects/mk-none"]["keeper_agent"] == "m-none-eng" and R4["projects/mk-none"]["keeper_source"] == "derived" and not ({"legacy_session", "keeper_problems"} & set(R4["projects/mk-none"])), R4["projects/mk-none"])
+check("keeper line: every page without one reads as before (the same session and role as the old keys alone)", all((R4[k].get("session"), R4[k].get("role")) == (R[k].get("session"), R[k].get("role")) for k in R if k in R4 and k not in ("projects/mk", "projects/mk/sub")))
+p.cmd_registry(quiet=True)    # the registry file the keeper lookups read
+check("keeper_pages / keepers_any: the marked agent keeps its page and the page's sub-pages, the old name line still does, and a derived keeper keeps nothing by it",
+      p.keeper_pages(S, "m-proj-docs") == ["projects/mk", "projects/mk/sub"] and p.keeper_pages(S, "m-proj") == ["projects/mk", "projects/mk/sub"] and p.keeper_pages(S, "m-proj-main") == ["projects/mk/own"]
+      and p.keepers_any(["m-proj-docs"]) and p.keepers_any(["m-proj"]) and not p.keepers_any(["m-none-eng"]), (p.keeper_pages(S, "m-proj-docs"), p.keeper_pages(S, "m-proj"), p.keeper_pages(S, "m-proj-main")))
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": page currency scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))
 sys.exit(1 if fails else 0)

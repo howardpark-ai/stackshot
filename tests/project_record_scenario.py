@@ -49,7 +49,7 @@ def check(name, cond, got=None):
 ID = re.compile(r"^prj_[0-9a-f]{8}$")
 def reg(): return json.loads((T / "store/projects.json").read_text())["pages"]
 def idfile(): return json.loads((T / "store/project-record.json").read_text())
-RECORD_FIELDS = {"id", "key", "keeper", "agents", "title", "name", "type", "hub", "scope", "scope_set", "listed", "listed_by", "sub_page", "items_30d", "status", "retired"}   # the four sala reads, then the picker's (tests/projects_picker_scenario.py)
+RECORD_FIELDS = {"id", "key", "keeper", "keeper_agent", "keeper_source", "agents", "title", "name", "type", "hub", "scope", "scope_set", "listed", "listed_by", "sub_page", "items_30d", "status", "retired"}   # the four sala reads, then the picker's (tests/projects_picker_scenario.py)
 
 # ---- 1. minting: the registry's pages get an id, once
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
@@ -109,7 +109,7 @@ A_ID, B_ID, G_ID, SUB_ID, TOOL_ID = (ids0[k] for k in ("projects/alpha", "projec
 
 # ---- 2. lookup: one function, id or key
 rec = prj.ref(A_ID)
-check("ref(id) → the record {id, key, keeper, agents} plus the scope and listing fields", rec and set(rec) == RECORD_FIELDS and rec["key"] == "projects/alpha" and rec["id"] == A_ID and rec["keeper"] == "home-sparrow", rec)
+check("ref(id) → the record {id, key, keeper, keeper_agent, keeper_source, agents} plus the scope and listing fields", rec and set(rec) == RECORD_FIELDS and rec["key"] == "projects/alpha" and rec["id"] == A_ID and rec["keeper"] == "home-sparrow", rec)
 check("ref(full key) → the same record", prj.ref("projects/alpha") == rec)
 check("ref(bare slug) → the same record (a bare slug names a page in the first dir)", prj.ref("alpha") == rec)
 check("project_ref is the name the design gives the lookup, in the module and in the save steps' module", prj.project_ref(A_ID) == rec and _mover_steps.project_ref("alpha") == rec and _mover_steps.project_ref(A_ID) == rec and _mover_steps.project_ref("nope") is None)
@@ -145,7 +145,7 @@ check("projects.json: written on the first call, atomically (a tmp file replaced
 check("projects.json: {schema, generated, projects, by_key} and nothing else", set(J) == {"schema", "generated", "projects", "by_key"} and J["schema"] == 1, set(J))
 check("projects.json: generated is a UTC stamp of the write (ISO, Z)", re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", J["generated"])
       and abs(datetime.datetime.fromisoformat(J["generated"].replace("Z", "+00:00")).timestamp() - t0) < 2, J["generated"])
-check("projects.json: one record per page keyed by id, each exactly {id, key, keeper, agents} plus the scope and listing fields", set(J["projects"]) == set(ids0.values()) and all(set(r) == RECORD_FIELDS and J["projects"][r["id"]] is r for r in J["projects"].values())
+check("projects.json: one record per page keyed by id, each exactly {id, key, keeper, keeper_agent, keeper_source, agents} plus the scope and listing fields", set(J["projects"]) == set(ids0.values()) and all(set(r) == RECORD_FIELDS and J["projects"][r["id"]] is r for r in J["projects"].values())
       and all(i == r["id"] for i, r in J["projects"].items()), list(J["projects"].values())[:1])
 check("projects.json: by_key maps every page key to its id", J["by_key"] == {k: i for k, i in ids0.items() if k in {r["key"] for r in J["projects"].values()}} and J["by_key"]["projects/alpha"] == A_ID, J["by_key"])
 check("projects.json: the agents are the records (front, role, mandate_line)", J["projects"][A_ID]["agents"] == ag and J["projects"][A_ID]["keeper"] == "home-sparrow" and J["projects"][B_ID]["agents"] == {})
@@ -685,5 +685,22 @@ check("display-name: page_front carries it, and no `steward` key", nf["display_n
 check("display-name: new_page writes `display-name: <value>` and no `steward:` line", "\ndisplay-name: home-dn-made" in nfm and not re.search(r"(?m)^steward:", nm), nfm)
 page("projects/dn-made.md", nfm.removeprefix("---\n")); p.cmd_registry(quiet=True)
 check("display-name: the page new_page wrote reads back as the project's keeper (role name)", (reg()["projects/dn-made"]["session"], reg()["projects/dn-made"]["role"]) == ("home-dn-made", "name"), reg()["projects/dn-made"])
+
+# ---- 10. the keeper as a mark (readers only): the record answers keeper_agent / keeper_source, and the page's `keeper:` line or the record's flag moves `keeper`
+page("projects/alpha.md", ALPHA); p.cmd_registry(quiet=True)
+ra = prj.ref(A_ID)
+check("keeper mark: no mark, a project with a builder: `keeper` is the name line as before, keeper_agent is the builder (derived), no flag on any agent",
+      ra["keeper"] == "home-sparrow" and ra["keeper_agent"] == "home-sparrow-engineer" and ra["keeper_source"] == "derived" and not any("keeper" in a for a in ra["agents"].values()) and "legacy_session" not in ra, ra)
+page("projects/alpha.md", ALPHA.replace("agents:", "keeper: home-sparrow-docs\nagents:", 1)); p.cmd_registry(quiet=True)
+ra = prj.ref(A_ID)
+check("keeper mark: a `keeper:` line on the page: `keeper` and keeper_agent are the marked agent, source mark, the agent's record is flagged and the old name is kept as legacy_session",
+      ra["keeper"] == "home-sparrow-docs" and ra["keeper_agent"] == "home-sparrow-docs" and ra["keeper_source"] == "mark" and ra["agents"]["home-sparrow-docs"].get("keeper") is True
+      and [n for n, a in ra["agents"].items() if a.get("keeper")] == ["home-sparrow-docs"] and ra["legacy_session"] == "home-sparrow", ra)
+check("keeper mark: the sub-page's record follows the mark", prj.ref(SUB_ID)["keeper"] == "home-sparrow-docs" and prj.ref(SUB_ID)["keeper_source"] == "mark")
+check("keeper mark: the project's name stays what its agents' names start with (the agent's role is cut from the name line)", prj.ref(A_ID)["agents"]["home-sparrow-engineer"]["role"] == "engineer" and prj.fields("projects/alpha")["display_name"] == "home-sparrow")
+_projects_registry._projects_sync(now=time.time() + 9000, force=True)
+check("keeper mark: the published projects.json carries the same fields as the lookup", pj()["projects"][A_ID]["keeper"] == "home-sparrow-docs" and pj()["projects"][A_ID]["keeper_source"] == "mark" and pj()["projects"][A_ID]["agents"]["home-sparrow-docs"].get("keeper") is True)
+page("projects/alpha.md", ALPHA); p.cmd_registry(quiet=True)
+check("keeper mark: the line removed, everything reads as before the mark", prj.ref(A_ID)["keeper"] == "home-sparrow" and prj.ref(A_ID)["keeper_source"] == "derived" and "legacy_session" not in prj.ref(A_ID))
 
 print(("ok" if not fails else "FAILED") + f": project record scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

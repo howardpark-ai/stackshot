@@ -175,9 +175,9 @@ def holds(project: str, session: str, stand_in_too: bool = False) -> bool:
         return False
 
 
-def _agents_of(project: str, reg: dict[str, dict[str, Any]]) -> tuple[dict[str, str], dict[str, str]]:
-    """(front, back) agents of the page whose agents serve this project (agent_root), {name: mandate} each."""
-    root = agent_root(_anc.pilot_root(project), reg)
+def _agents_of(project: str, reg: dict[str, dict[str, Any]], roots: list[str] | None = None) -> tuple[dict[str, str], dict[str, str]]:
+    """(front, back) agents of the page whose agents serve this project (agent_root), {name: mandate} each. `roots`: anchors.pilot_root's argument (given, the registry file is not read)."""
+    root = agent_root(_anc.pilot_root(project, roots) or "/".join(str(project or "").strip("/").split("/")[:2]), reg)     # a key the registry file does not hold yet reads from its top-level page
     page = reg.get(root) or {}
     agents = {str(k): str(v) for k, v in (page.get("agents") or {}).items()}
     back = {k: agents[k] for k in (page.get("back_agents") or {}) if k in agents}
@@ -190,9 +190,25 @@ def builder(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
     try:
         if not is_live(project):
             return ""
-        _front, back = _agents_of(project, _anc.registry() if reg is None else reg)
-        hits = [(0 if re.search(r"\bbuild", m, re.I) else 1, i, k) for i, (k, m) in enumerate(back.items()) if _router._BUILDER.search(m)]
-        return min(hits)[2] if hits else ""
+        return _builder_in(project, _anc.registry() if reg is None else reg)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _builder_in(project: str, reg: dict[str, dict[str, Any]], roots: list[str] | None = None) -> str:
+    """builder(), read from `reg` alone: no live-page test, no registry file."""
+    _front, back = _agents_of(project, reg, roots)
+    hits = [(0 if re.search(r"\bbuild", m, re.I) else 1, i, k) for i, (k, m) in enumerate(back.items()) if _router._BUILDER.search(m)]
+    return min(hits)[2] if hits else ""
+
+
+def stand_in_of(project: str, reg: dict[str, dict[str, Any]]) -> str:
+    """stand_in(), read from `reg` alone: the project's builder, else its -main agent (anchors.fallback_main). The same two steps in the same order; only the live-page test and the registry file are left
+    out, so a registry being built (pages.cmd_registry), or being read through the project record (project_registry.apply, which the registry file's own reader calls), can ask before the file
+    holds the page. "" when no session can be named."""
+    try:
+        roots = ["/".join(str(project or "").strip("/").split("/")[:2])]
+        return _builder_in(project, reg, roots) or _anc.fallback_main(project, reg, roots)
     except Exception:  # noqa: BLE001
         return ""
 
