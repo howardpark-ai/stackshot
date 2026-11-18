@@ -303,7 +303,7 @@ def txn(fn: Callable[[Ctx], Any], by: str = "", now: str | None = None, dry: boo
             kept = None
             if undo is not None:
                 from stackshot.projects import project_restore as _rs
-                kept = _rs.keep_undo(d, cur, undo["pid"], by=by, now=ctx.now, run_dir=undo.get("run_dir"))
+                kept = _rs.keep_undo(d, cur, undo["pid"], by=by, now=ctx.now, run_dir=undo.get("run_dir"), mode=undo.get("mode", "project"))
                 undo["file"] = str(kept.file)
             prj._write(d)
             if kept is not None:
@@ -1185,7 +1185,8 @@ def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: A
         reg0 = pr.apply(ctx.raw, before)
         f0 = _kp.fields(key, reg0) if key else {}
         flagged = [n for n, a in ag.items() if isinstance(a, dict) and a.get(_kp.KEY) is True]
-        if old == have and flagged == [have]:
+        loose = [n for n, a in ag.items() if isinstance(a, dict) and _kp.KEY in a and a[_kp.KEY] is not None and a[_kp.KEY] is not False and a[_kp.KEY] is not True and n != have]   # a flag that is neither true nor false on another agent: ignored by the reader, still repaired here
+        if old == have and flagged == [have] and not loose:
             return {"pid": pid, "name": have, "old": old, "new": have, "old_source": f0.get("keeper_source", ""), "new_source": f0.get("keeper_source", ""), "roles": [], "same": True}
         e["agents"] = copy.deepcopy(ag)
         _set_mark(e["agents"], have)
@@ -1194,9 +1195,9 @@ def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: A
         pm = _kp.row_mark(row)
         if pm and pm != have:
             ctx.warn = (ctx.warn + "; " if ctx.warn else "") + f"the page's own `keeper: {pm}` line still names another agent; the record's mark rules, and the page line is for whoever edits the page to change"
-        cleared = [n for n in flagged if n != have]
+        cleared = [n for n in flagged if n != have] + loose
         return {"pid": pid, "name": have, "old": old, "new": have, "old_source": f0.get("keeper_source", ""), "new_source": f1.get("keeper_source", ""), "roles": _roles_moved(ctx.raw, before, ctx.ents), "same": False,
-                "derived_old": f0.get("keeper_agent", ""), "repaired": len(flagged) > 1, "kept": have if have in flagged else "", "cleared": cleared}
+                "derived_old": f0.get("keeper_agent", ""), "repaired": len(flagged) > 1 or bool(loose), "kept": have if have in flagged else "", "cleared": cleared}
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=not apply, pages=pages, undo=undo if apply else None)

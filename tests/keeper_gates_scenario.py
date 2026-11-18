@@ -301,6 +301,10 @@ write_record({F: forge("team-forge-docs")})
 ls = _wts._sessions_listing("").split("\n")
 check("S3-b: the sessions tool keeps its one-project wording when the agent keeps the project its best role is on (front agent and keeper of the forge)",
       next((x for x in ls if x.startswith("- team-forge-docs — ")), "").endswith(" · front agent and keeper of projects/forge"), [x for x in ls if x.startswith("- ")])
+write_record({F: forge("team-forge-docs"), L: entry("projects/loft", name="team-loft", agents={"team-loft-main": agent(True, "talks"), "team-forge-docs": agent(True, "also keeps the loft docs", keeper=True)})})
+ls = _wts._sessions_listing("").split("\n")
+check("S4-d: an agent that keeps two projects, its best role's own among them, is said as the keeper of both (none is left out)",
+      next((x for x in ls if x.startswith("- team-forge-docs — ")), "").endswith(" · front agent and keeper of projects/forge and projects/loft"), [x for x in ls if x.startswith("- ")])
 write_record({})
 # S3-c: the entry made from a marked page, and the name check, read the page's name line (the line the mark took the place of), never the marked agent
 from stackshot.projects import project_verbs as pv
