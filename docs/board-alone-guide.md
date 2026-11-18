@@ -242,7 +242,8 @@ The verbs that exist today:
 | `archive PROJECT [--why W]` and `reopen PROJECT` | Sets the status to `archived` and back; the page's `status:` line follows. |
 | `agent-add PROJECT NAME (--front\|--back) --mandate M` | Lists an agent (a session name) on the project with a one-line mandate. On a project with a page the listed agent becomes the default mover. On a project with no page it does not: every item needs an explicit `mover`, or `create` is refused with "names no mover". |
 | `agent-mandate PROJECT NAME --mandate M` | Changes the one-line mandate of an agent already listed (`agent-add` refuses another mandate for a listed name, and a hand edit of the page's line is overwritten by the next page write). The record changes first, then the page's `agents:` block. |
-| `agent-retire PROJECT NAME`, `agent-rename PROJECT OLD NEW` | Take an agent off, or rename its entry. Retiring the last agent of a project with no open item archives it. |
+| `agent-retire PROJECT NAME`, `agent-rename PROJECT OLD NEW` | Take an agent off, or rename its entry. Retiring the last agent of a project with no open item archives it. The keeper mark follows a rename and moves on a retire of the marked agent. |
+| `keeper PROJECT AGENT [--apply]` | Moves the project's keeper mark to another listed agent. A dry run unless `--apply`; `--apply` keeps an undo file. |
 | `mirror PROJECT [--make-page]` | Writes the page's three mirror lines again. |
 | `show PROJECT` | Prints the entry. |
 | `restore (--from-git REV \| --before DATE) [PROJECT] [--apply]`, `restore --list`, `restore --undo FILE` | Puts the project record, or one project of it, back from a past revision of the store's git history. A dry run until `--apply`; it keeps the file as it was and an undo file first. It restores the record as saved at that revision, so a change made after it is not in it. See `docs/projects.md`, "Restore a lost project". |

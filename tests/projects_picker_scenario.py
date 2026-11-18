@@ -392,8 +392,8 @@ check("project-agent: a project just made takes its first agent from the label t
 check("project-agent: …the record is written under the project lock (two parallel first-agent calls cannot both pass), the page after it, outside the lock", locked_seen == [True] and out["mirror"]["state"] == "written", (locked_seen, out.get("mirror")))
 check("project-agent: …the page's agents block is written from the record (nothing is owed: page_yaml is empty)", out["page_yaml"] == "" and page_agents("projects/new-one") == ({"work-new-one-main": "the main agent"}, {}), (out.get("page_yaml"), page_agents("projects/new-one")))
 r = rec(NEW)
-check("project-agent: …it shows in the record and the list: front, role, mandate_line, no page_owed; the project is listed by agents now and its main agent is named",
-      r["agents"] == {"work-new-one-main": {"front": True, "role": "main", "mandate_line": "the main agent"}} and r["listed_by"] == "agents"
+check("project-agent: …it shows in the record and the list: front, role, mandate_line, no page_owed; the first agent carries the keeper mark, the project is listed by agents now and its main agent is named",
+      r["agents"] == {"work-new-one-main": {"front": True, "role": "main", "mandate_line": "the main agent", "keeper": True}} and r["listed_by"] == "agents"
       and [x for x in lst("work")[1]["projects"] if x["key"] == "projects/new-one"][0]["main"] == "work-new-one-main"
       and "page_owed" not in pj()["projects"][NEW]["agents"]["work-new-one-main"], r)
 st, out = pa(NEW, "work-new-one-second", "fleet-web", role="second", front=False, mandate="b: with a colon")
@@ -461,17 +461,19 @@ st, out = pam("projects/mand", "home-mand-builder", "home-mand-main")
 check("agent mandate: a name as sender proves nothing -> 403, the old line stays", st == 403 and "name" in out["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == OLD_B, (st, out))
 st, out = pam("projects/mand", "home-mand-builder", U["home-outsider"])
 check("agent mandate: a session that is neither the keeper nor a front agent -> 403 naming the rule, the old line stays", st == 403 and "keeper" in out["error"] and "front agent" in out["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == OLD_B and page_agents("projects/mand")[1]["home-mand-builder"] == OLD_B, (st, out))
-st, out = pam("projects/mand", "home-mand-builder", U["home-mand"])
+st0, out0 = pam("projects/mand", "home-mand-builder", U["home-mand"])
+check("agent mandate: the project's old name-line session is no keeper once its first agent carries the mark -> 403 naming the marked agent, the old line stays", st0 == 403 and "marked keeper: home-mand-main" in out0["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == OLD_B, (st0, out0))
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand-main"])
 check("agent mandate: the keeper's session id changes the line -> 200; the record holds it, the side and role stay, the answer carries the previous line", st == 200 and rec(MD)["agents"]["home-mand-builder"] == {"front": False, "role": "builder", "mandate_line": NEW_B}
       and out["previous"] == OLD_B and out["agent"] == {"home-mand-builder": {"front": False, "role": "builder", "mandate_line": NEW_B}}, (st, out))
 check("agent mandate: ...the page's agents block was written from the record (the new line under background:, the front agent's line untouched)", out["mirror"]["state"] == "written" and page_agents("projects/mand") == ({"home-mand-main": "the main agent", "home-mand-builder": NEW_B}, {"home-mand-builder": NEW_B}), (out["mirror"], page_agents("projects/mand")))
 st3, _o = pa("projects/mand", "home-mand-extra", U["home-mand"], role="extra", front=False, mandate="another")
 check("agent mandate: a later mirror write (the next agent added) does not undo it", st3 == 200 and page_agents("projects/mand")[1]["home-mand-builder"] == NEW_B and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == NEW_B, (st3, page_agents("projects/mand")))
 n_puts = len(gio.puts)
-st, out = pam("projects/mand", "home-mand-builder", U["home-mand"])
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand-main"])
 check("agent mandate: the same line again -> 200 'nothing changed', no page write", st == 200 and "nothing changed" in out["note"] and len(gio.puts) == n_puts, (st, out))
 gio.pages["projects/mand"] = gio.pages["projects/mand"].replace(NEW_B, "edited on the page by hand")
-st, out = pam("projects/mand", "home-mand-builder", U["home-mand"])
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand-main"])
 check("agent mandate: the same line again while the page is out of step -> 200, the page is written from the record, and the note does not say nothing changed", st == 200 and out["mirror"]["state"] == "written" and "nothing changed" not in out["note"]
       and page_agents("projects/mand")[1]["home-mand-builder"] == NEW_B, (st, out))
 st, out = pam("projects/mand", "home-mand-builder", U["home-mand-main"], mandate="  builds   the server;  reviews each change;  releases for every builder  ")
@@ -481,7 +483,7 @@ st, out = pam("projects/mand", "home-mand-builder", U["home-mand-main"], mandate
 check("agent mandate: a line with a backslash -> 400 saying to write it without; the line stays and the page still reads", st == 400 and "cannot contain a backslash" in out["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == NEW_B and page_agents("projects/mand")[1]["home-mand-builder"] == NEW_B, (st, out))
 st, out = pam("projects/mand", "home-mand-main", "00000000-0000-4000-8000-0000000000ee")
 check("agent mandate: an id that is no session of the fleet -> 403 saying it names nobody", st == 403 and "heartbeat" in out["error"], (st, out))
-st, out = pam("projects/mand", "home-mand-ghost", U["home-mand"])
+st, out = pam("projects/mand", "home-mand-ghost", U["home-mand-main"])
 check("agent mandate: an agent that is not listed -> 404 naming it and pointing at agent_add; nothing written", st == 404 and "home-mand-ghost is not listed" in out["error"] and "agent_add" in out["error"] and "home-mand-ghost" not in rec(MD)["agents"], (st, out))
 for bad_ in ("", "   ", "a\nb", "x" * 601):
     st, out = pam("projects/mand", "home-mand-builder", U["home-mand"], mandate=bad_)

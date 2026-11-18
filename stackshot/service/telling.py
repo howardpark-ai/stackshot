@@ -315,7 +315,9 @@ def keeper_words(project: str, keeper: str) -> str:
         r = roles.get(keeper) or roles.get(_session_label(keeper)) or roles.get(_anc.canonical(keeper, nm)) or {}
     except Exception:
         r = {}
-    return f"the keeper of {r.get('project') or project}" if r.get("role") == _anc.NAME_ROLE or r.get("keeper") else f"the keeper of its page ({project})"
+    if r.get("keeper"):                              # a marked agent keeps the project(s) that mark it, which may not be the project it has its best role on
+        return f"the keeper of {' and '.join(_anc.keeper_pages(keeper) or [r.get('project') or project])}"
+    return f"the keeper of {r.get('project') or project}" if r.get("role") == _anc.NAME_ROLE else f"the keeper of its page ({project})"
 
 
 def notice_to(meta: dict[str, Any]) -> list[tuple[str, str]]:

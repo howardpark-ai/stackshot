@@ -10,6 +10,7 @@
     tools/project.py agent-mandate PROJECT NAME --mandate "one line"                      the mandate line of an agent already on the map changed (record first, then the page's agents: block)
     tools/project.py agent-retire PROJECT NAME                                            the agent off the map; the archive rule is applied (no agent and no open item archives)
     tools/project.py agent-rename PROJECT OLD NEW                                         the entry renamed in place
+    tools/project.py keeper PROJECT AGENT [--apply]                                       moves the project's keeper mark to a listed agent: a dry run unless --apply (old mark, new mark, the sessions whose roles move); --apply keeps an undo file
     tools/project.py mirror PROJECT [--make-page]                                         writes the page's three mirror lines (display-name:, agents:, status:) from the record again; state "retired" and nothing written when the
                                                                                           page is in a brain marked shared or [pages] copy_project_lines is false (`stackshot projects fields PROJECT` reads the record instead);
                                                                                           --make-page is not tied to that switch: a missing page is made from the template on a brain not marked shared (state "written", no copied lines), never on a shared one
@@ -17,6 +18,11 @@
     tools/project.py restore --list [--limit N]                                           the last revisions of the record file in the store's history: date and what changed in the project count
     tools/project.py restore (--from-git REV | --before DATE) [PROJECT] [--apply]         the record, or one project of it, put back from a past revision (a dry run unless --apply; an undo file is kept first)
     tools/project.py restore --undo FILE [--apply]                                        takes a restore back through the undo file it kept (a dry run unless --apply)
+
+The keeper is a mark on one agent of the project's map (docs/projects.md). agent-add marks a project's first agent (a later one is never marked, and a project with a mark never gets a second), agent-rename makes
+the mark follow the new name, and agent-retire of the marked agent moves the mark to the project's builder, else its -main agent, else clears it (said in the answer, never left naming a retired agent). `keeper` moves it on purpose:
+it refuses (404) an agent the record does not list and (409) a retired project; it moves the one mark and never adds a second. Its --apply writes the record only (the page's mirror lines do not carry the mark), and prints the
+`restore --undo FILE --apply` command that takes the change back.
 
 PROJECT is an id (prj_<8 hex>), a page key, a bare slug, the project's name or a former name. A sub-page is never a project: its key names the top-level project that owns it for rename and the agent
 verbs, and is refused (400) by archive, reopen and move-page, which act on the whole project; the id of a sub-page is refused by every verb. Every verb is one atomic change of the record under the record's own lock (safe beside the running
@@ -70,6 +76,9 @@ def _parser() -> argparse.ArgumentParser:
     am = sub.add_parser("agent-mandate"); am.add_argument("project"); am.add_argument("name"); am.add_argument("--mandate", required=True)
     ar = sub.add_parser("agent-retire"); ar.add_argument("project"); ar.add_argument("name")
     an = sub.add_parser("agent-rename"); an.add_argument("project"); an.add_argument("old"); an.add_argument("new")
+    kp = sub.add_parser("keeper", description="move the project's keeper mark to another listed agent (a dry run unless --apply)"); kp.add_argument("project"); kp.add_argument("agent")
+    kp.add_argument("--apply", action="store_true", help="write the record (keeps an undo file); without it the answer only says what would change")
+    kp.add_argument("--run-dir", metavar="DIR", default="", help="where --apply keeps its undo copy (default ~/.local/share/stackshot-runs/project-restore)")
     mi = sub.add_parser("mirror"); mi.add_argument("project"); mi.add_argument("--make-page", action="store_true")
     sh = sub.add_parser("show"); sh.add_argument("project")
     global _RESTORE
@@ -115,7 +124,7 @@ def run(a: argparse.Namespace) -> dict:
     from stackshot.projects import project_verbs as pv
     from stackshot.router import page_debt
     io = None
-    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-mandate", "agent-retire", "agent-rename", "mirror", "move-page"):
+    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-mandate", "agent-retire", "agent-rename", "keeper", "mirror", "move-page"):
         io = page_debt.page_io()
     kw = {"by": a.by, "io": io}
     dry = {"dry": a.dry_run}
@@ -150,6 +159,8 @@ def run(a: argparse.Namespace) -> dict:
         return res
     if a.cmd == "agent-rename":
         return pv.agent_rename(a.project, a.old, a.new, **kw, **dry)
+    if a.cmd == "keeper":
+        return pv.keeper(a.project, a.agent, apply=a.apply and not a.dry_run, run_dir=a.run_dir or None, **kw)
     if a.cmd == "mirror":
         pid = pv.one(a.project)
         if not pid:
@@ -178,6 +189,9 @@ def main(argv: list[str]) -> int:
         a = ap.parse_args(argv)
     except SystemExit as e:
         return 2 if e.code else 0
+    if a.cmd == "keeper" and a.apply and a.dry_run:
+        print("project keeper: --apply and --dry-run contradict each other (keeper is a dry run unless --apply)", file=sys.stderr)
+        return 2
     if a.cmd == "restore":
         bad = _restore_usage(a)
         if bad:
@@ -207,7 +221,7 @@ def main(argv: list[str]) -> int:
         print(f"project {a.cmd}: the record is right, but the page was not written: {m.get('note')}", file=sys.stderr)
     if a.json:
         print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
-    elif a.cmd == "restore":
+    elif a.cmd in ("restore", "keeper"):
         print("\n".join(res["lines"]))
     elif a.cmd == "show":
         v, rec = res.get("entry") or {}, res.get("record") or {}
@@ -222,6 +236,8 @@ def main(argv: list[str]) -> int:
         if m:
             head += f"; page {m.get('key') or '-'}: {m.get('state')}" + (f" ({m['note']})" if m.get("note") else "")
         print(head)
+        if res.get("lines"):                  # agent-add and agent-retire that move the keeper mark say who moves and what each roles.json entry does, as `keeper` does
+            print("\n".join(res["lines"]))
     return 0
 
 

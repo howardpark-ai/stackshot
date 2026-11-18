@@ -51,7 +51,7 @@ runs on every box.
                                 Exit 0 · 1 no token or not reached.
   client.py post project-agent <project> <name> --role <role> (--front | --back) --mandate "<one line>" [--sender <session id>]
                                 ask to list a new agent of a project (<project> = its id, page key or bare slug). The server
-                                accepts it only when the asking session, by its id, resolves through the fleet to the project's keeper
+                                accepts it only when the asking session, by its id, resolves through the fleet to the agent marked as the project's keeper
                                 or to a front agent its page lists: the id is $CLAUDE_CODE_SESSION_ID (Claude Code sets it in every Bash
                                 command) or --sender <transcript id | cse_ id>; a bare name is refused. That id is the session's own
                                 word, as every client call's sender is: the machine token proves the machine, nothing proves the session.
@@ -105,13 +105,13 @@ runs on every box.
                                 the project's agents map in the project record, then writes the page's `agents:` block from the record, so the page and
                                 the record agree and the line stays. The agent keeps its side (front or background), its place in the map and who
                                 listed it. Same gate as `post project-agent`: the asking session's id ($CLAUDE_CODE_SESSION_ID, or --sender
-                                <transcript id | cse_ id>; a bare name is refused) must resolve to the project's keeper or a front agent its page lists;
+                                <transcript id | cse_ id>; a bare name is refused) must resolve to the agent marked as the project's keeper or a front agent its page lists;
                                 the New session form's label does not apply. Prints the server's JSON, exit 0: {"project", "key", "agent": {name:
                                 {front, role, mandate_line}}, "previous", "mirror" {state, key, note}, "note"}; the same line again is 200 "nothing
                                 changed". "mirror" state "failed" = the page was not written (the record is right; the project's next change writes it); "retired" = the page is in a brain marked shared (or [pages] copy_project_lines is false) and gets no copy: read the record with `projects fields`.
                                 Refused, reason on stderr, exit 1, nothing changed: 400 a missing field, a bad name, an empty line (to remove the agent use
                                 post project-agent-retire), a line over 600 characters or with a control character or a backslash, an ambiguous slug, a page that is not
-                                a hub · 403 a name as --sender, or a session that is neither the keeper nor a front agent · 404 unknown project, or <name>
+                                a hub · 403 a name as --sender, or a session that is neither the keeper mark's agent nor a front agent · 404 unknown project, or <name>
                                 not listed (list it first with post project-agent) · 503 the record cannot be written.
   client.py post project-agent-rename <project> <OLD> <NEW> [--sender <label>]
                                 rename an agent's entry in the project's agents map in the project record (<project> = its id, page key or bare
@@ -633,7 +633,7 @@ PROJECT_AGENT_USAGE = 'usage: client.py post project-agent <project> <name> --ro
 
 def project_agent(argv: list[str], timeout: float = 30.0) -> int:
     """List a new agent of a project → exit 0 recorded, 1 refused, not reached or misused. The server allows the
-    project's keeper and its front agents, told by the asking session's id: --sender, else $CLAUDE_CODE_SESSION_ID. Also allowed: the fleet tool's New
+    the agent marked as the project's keeper and its front agents, told by the asking session's id: --sender, else $CLAUDE_CODE_SESSION_ID. Also allowed: the fleet tool's New
     session form (a --sender label in the server's [project_agent] form_senders, sent from a machine in form_machines), on any listed project."""
     a, opt = list(argv), {}
     for k in ("role", "mandate", "sender"):
@@ -718,7 +718,7 @@ PROJECT_AGENT_MANDATE_USAGE = 'usage: client.py post project-agent-mandate <proj
 
 def project_agent_mandate(argv: list[str]) -> int:
     """`post project-agent-mandate <project> <name> --mandate "…" [--sender ID]`: change the mandate line of a listed agent in the project record (the page follows) → the server's JSON on
-    stdout, exit 0; 1 and the reason on stderr when refused, not reached or misused. The server allows the project's keeper and its front agents, told by the asking session's id: --sender,
+    stdout, exit 0; 1 and the reason on stderr when refused, not reached or misused. The server allows the agent marked as the project's keeper and its front agents, told by the asking session's id: --sender,
     else $CLAUDE_CODE_SESSION_ID."""
     a, opt = list(argv), {}
     for k in ("mandate", "sender"):
