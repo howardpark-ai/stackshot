@@ -8,13 +8,13 @@ the same sort of claim about the mover, not about an item. The audit therefore a
 
 `running(session, roots, now)` lists a session's subagents that are running: no `finished` flag and the transcript written within `RUNNING_S`, or a `finished` flag that only says the subagent is PARKED (see `running`). A subagent whose pane was recycled or killed leaves
 neither a flag nor a later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). The caller (`service/audit_ticks.py` `_mover_subagents`) asks
-only for a pane that is busy now, since a subagent keeps its pane in a turn.
+for a pane that is busy or idle (a subagent started in the background runs while its pane reads idle between turns), and for an idle pane keeps only the subagents written within `RUNNING_S`, not the quiet ones.
 
 `tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request
 anchored to the item (`keys`, "owner/repo#n", by its URL or by `PR n` / `#n`, as merge_tie names a pull request for an item that speaks of its repository). A subagent that names neither is on no item the
 audit can tell. What that means for an item (audit/hourly.py): a subagent tied to another item leaves this one idle (part F, audit/hand_idle.py, hands it on); a running subagent tied to NONE of the mover's
 items (a brief that names no item and no pull request yet, "Build part D") leaves the mover's items UNKNOWN, not idle, since any of them may be what it builds. So does anything that cannot be read: a pane in a turn
-whose transcript this box does not hold, a subagents folder that cannot be listed (`Unreadable`), a subagent whose files cannot be read (listed with no words). A mover whose pane is not on this box, or not in a turn,
+whose transcript this box does not hold, a subagents folder that cannot be listed (`Unreadable`), a subagent whose files cannot be read (listed with no words). A mover whose pane is not on this box, or shows a shell (the CLI is not running),
 has no subagent to read: nothing is claimed for it.
 
 Stdlib plus the repo's modules; reads files only."""
@@ -48,7 +48,7 @@ RESUME_KEYS = ("resumedAgentId", "revivedAgentId")      # `revivedAgentId` on Cl
 
 
 class Unreadable(Exception):
-    """The mover's subagents cannot be told from what this box holds (no transcript for a pane that is in a turn, the subagents folder cannot be read). The audit reads it as UNKNOWN, never as nothing running."""
+    """The mover's subagents cannot be told from what this box holds (no transcript for a pane that is busy or idle, the subagents folder cannot be read). The audit reads it as UNKNOWN, never as nothing running."""
 
 
 def _brief(path: Path) -> str:
@@ -225,7 +225,7 @@ def interrupted(tp: Path) -> bool:
 def running(session: str, roots: Any, now: float) -> list[dict[str, Any]]:
     """The running subagents of the session (a transcript uuid) as this box holds them: [{"id", "description", "brief", "text", "at"}], `text` the two together, `at` the transcript's last write. A subagent with no
     `finished` flag is running when its transcript was written within `RUNNING_S`, and running but quiet (`"quiet": True`) when it is older than that and no older than `QUIET_CAP_S`: a builder waiting on a long CI or suite
-    run writes nothing for a while, and the caller asks only for a pane that is in a turn, so such a subagent is not dropped and the mover's items it is not tied to read unknown, not idle. Past the cap it is dropped.
+    run writes nothing for a while, and the caller keeps a quiet one for a pane in a turn only (for an idle pane it drops it: a recycled or killed pane leaves one behind), so such a subagent is not dropped there and the mover's items it is not tied to read unknown, not idle. Past the cap it is dropped.
     [] when the session has no subagents folder or none of them is running. Raises `Unreadable` when the transcript of the session is not on this box or its subagents folder cannot be listed: nothing can be said, and the audit reads that as
     unknown. A subagent whose files cannot be read (a meta that is not JSON, a transcript that cannot be statted or read) is listed as running with no words (`"unreadable": True`) unless its transcript is known to be
     old: it may be running, so it ties to no item and the audit reads the mover as unknown.

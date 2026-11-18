@@ -151,10 +151,12 @@ def _silence_tick() -> "dict[str, Any] | None":
 
 def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
     """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
-    the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
-    run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless session), a registry status this server does not know, a pane in a turn whose transcript this box does not hold, or one
-    whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover
-    there must not read idle and be handed on), a sessions index that cannot be read, one that is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
+    the hourly audit ties to an item. A pane in a turn (`busy`) and an idle pane are read: a subagent started in the background, or a pane waiting on background tasks, reads idle between two turns while the subagent runs. For an idle
+    pane only a subagent whose transcript was written within `subagent_tie.RUNNING_S` counts (the `quiet` entries are dropped): a quiet subagent of an idle pane may be left by a recycled or killed pane, while one of a pane in a turn
+    may wait on a long CI or suite run. A pane showing a shell (the CLI is not running) and a session this box does not run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless
+    session), a registry status this server does not know, a busy or idle pane whose transcript this box does not hold, or one whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown,
+    never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover there must not read idle and be handed on), a sessions index that cannot be read, one that
+    is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
     _tie = _hooks().audit_mod("subagent_tie")
     try:
         idx = _sr._sessions_index() if idx is None else idx
@@ -178,14 +180,17 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
             raise _tie.Unreadable(f"the fleet's sessions index is partial (machine {', '.join(str(x) for x in idx.unreadable)} not read)")
         return []      # no row of a live process anywhere in a whole index (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
     st = str(row[1].get("status") or "")
-    if st in ("idle", "shell"):
-        return []      # a pane that is not in a turn has no subagent running (a subagent keeps its pane busy)
-    if st != "busy":
+    if st == "shell":
+        return []      # the CLI is not running in the pane: no subagent of it is running
+    if st not in ("busy", "idle"):
         raise _tie.Unreadable(f"the pane's registry status is {st or 'missing'}, not one this server knows")
     sid = str(row[1].get("sessionId") or "")
     if not sid:
         raise _tie.Unreadable("the pane's registry row names no session")
-    return _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
+    subs = _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
+    if st == "idle":
+        subs = [s for s in subs if not s.get("quiet")]      # an idle pane's subagent counts only while its transcript is fresh (a pane that was recycled or killed leaves a quiet one behind); a quiet one waiting on a long run counts for a pane in a turn
+    return subs
 
 
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,

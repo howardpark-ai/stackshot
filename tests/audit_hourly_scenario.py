@@ -694,7 +694,8 @@ try:
     check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in audit_ticks_svc._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1", "stale1"], audit_ticks_svc._mover_subagents("home-peer", {}, now0))
     registry("idle"); a_ = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
     registry("shell"); b_ = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
-    check("17 …and none when the pane is idle or showing a shell, or the mover has no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built)", a_ == [] and b_ == [] and audit_ticks_svc._mover_subagents("home-front", OTHER_ROW, now0) == [], (a_, b_))
+    check("17 …an idle pane is read like a busy one (a subagent started in the background runs while its pane reads idle between turns), but only the subagents written within 90 minutes count: the quiet one is dropped (a recycled or killed pane may have left it); a pane showing a shell (the CLI is not running) and a mover with no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built) have none",
+          sorted(x["id"] for x in a_) == ["blocks", "run1"] and not any(x.get("quiet") for x in a_) and b_ == [] and audit_ticks_svc._mover_subagents("home-front", OTHER_ROW, now0) == [], (a_, b_))
     import subprocess as _sp
     dead_ = _sp.Popen(["true"]); dead_.wait()
     row_path.write_text(json.dumps({"pid": dead_.pid, "sessionId": SID, "kind": "interactive", "name": "home-peer", "status": "busy"}))
@@ -714,6 +715,36 @@ try:
     tick(subagents=None)
     check("17 a tick that is given no subagent view reads the transcripts itself: items 1 and 2, named in the briefs of two running subagents, are verified; item 3 is named by none and a quiet subagent (90 minutes to 6 hours old) names an item that is not the mover's, so it may be what item 3 is: unknown, not idle",
           [lines(i)[0]["kind"] for i in (1, 2, 3)] == ["audit", "audit", "audit_unknown"], [lines(i) for i in (1, 2, 3)])
+
+    # an idle pane (a subagent started in the background, or a pane waiting on background tasks, reads idle between two turns) is read like a busy one, with the quiet subagents dropped
+    SIDI = str(_uuid.UUID("00000000-0000-4000-8000-0000000000dd")); subi = proj / SIDI / "subagents"; subi.mkdir(parents=True); (proj / f"{SIDI}.jsonl").write_text("{}\n")
+    def agent_i(aid, desc, brief, age, finished=None):
+        mp, tp = subi / f"agent-{aid}.meta.json", subi / f"agent-{aid}.jsonl"
+        mp.write_text(json.dumps({"agentType": "general-purpose", "description": desc, **({"finished": finished} if finished is not None else {})}))
+        tp.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": brief}}) + "\n" + json.dumps({"type": "assistant"}) + "\n")
+        os.utime(tp, (now0 - age, now0 - age))
+    def idle_case(status, *subs):
+        for f_ in subi.glob("agent-*"): f_.unlink()
+        for a_i in subs: agent_i(*a_i)
+        registry(status, sid=SIDI); clean_pane(); panes["home-peer"] = status
+        for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+        put(1, act=90); put(2, act=90)
+        tick(subagents=None)
+        return [lines(i)[0]["kind"] if lines(i) else None for i in (1, 2)]
+    k_a = idle_case("idle", ("ia", f"Build {BID(1)}", "x", 10 * 60))
+    check("17 idle pane, a running subagent named for item 1 written 10 minutes ago: item 1 is verified (`a subagent is running on it`), not idle, and the mover's other item, tied to none, reads idle",
+          k_a == ["audit", "audit_idle"] and "a subagent is running on it" in lines(1)[0]["text"] and lines(2)[0]["text"].endswith("idle, nothing verified"), (k_a, lines(1), lines(2)))
+    k_b = idle_case("idle", ("ib", f"Build {BID(1)}", "x", 120 * 60))
+    check("17 idle pane, the same subagent written 120 minutes ago (quiet): not counted, both items read idle as before (the quiet subagent may be left by a recycled or killed pane)", k_b == ["audit_idle", "audit_idle"], (k_b, lines(1)))
+    k_c = idle_case("shell", ("ic", f"Build {BID(1)}", "x", 10 * 60))
+    check("17 shell pane (the CLI is not running), a fresh subagent named for item 1: still none, both items read idle", k_c == ["audit_idle", "audit_idle"] and audit_ticks_svc._mover_subagents("home-peer", {}, now0) == [], (k_c, audit_ticks_svc._mover_subagents("home-peer", {}, now0)))
+    k_d = idle_case("idle", ("id", "Build part D", "x", 10 * 60))
+    check("17 idle pane, a running subagent tied to no item: the mover's items read unknown (audit_unknown), not idle, as for a busy pane", k_d == ["audit_unknown", "audit_unknown"], (k_d, lines(1)))
+    k_e = idle_case("idle", ("ie", f"Build {BID(1)}", "x", 10 * 60, True))
+    check("17 idle pane, a finished subagent that is not parked on a task of its own (fresh, named for item 1): not counted, both items read idle", k_e == ["audit_idle", "audit_idle"] and audit_ticks_svc._mover_subagents("home-peer", {}, now0) == [], (k_e, audit_ticks_svc._mover_subagents("home-peer", {}, now0)))
+    registry("idle", sid=""); d_i1 = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry("idle", sid=str(_uuid.uuid4())); d_i2 = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    check("17 an idle pane whose registry row names no session, or whose transcript this box does not hold, is unknown (Unreadable), as for a busy pane", d_i1 and d_i2, (d_i1, d_i2))
 finally:
     row_path.unlink(missing_ok=True)
 
