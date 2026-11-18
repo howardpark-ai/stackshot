@@ -553,6 +553,16 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
             for n, (_rank, r, k) in sorted(best.items())}
 
 
+def keeper_pages(name: str, reg: dict[str, dict[str, Any]] | None = None) -> list[str]:
+    """The pages that mark the agent `name` as their keeper (a row whose role is "mark" and whose `session` is the agent), sorted: the project(s) it keeps, which are not always the one its roles entry names
+    (that entry's `project` is the one it has its best role on). [] when nothing marks it. Never raises."""
+    try:
+        reg = registry() if reg is None else reg
+        return sorted(k for k, e in reg.items() if isinstance(e, dict) and e.get("role") == _kp.MARK and str(e.get("session") or "") == name)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def file_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | None = None, renames: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
     """The roles as roles.json carries them: session_roles(), except that a pane-named name-line session of an active page, and of no
     page with user-facing agents (an `agents:` entry outside `background:`), is "front", on the same project. The only session of a one-session project is a session he talks to directly, so it is a front session; it
@@ -619,10 +629,12 @@ def pilot_root(project: str, roots: list[str] | None = None) -> str:
 
 def marked_for(root: str, reg: dict[str, dict[str, Any]]) -> str:
     """The agent the project at pilot root `root` marks as its keeper, "" with no mark: the mark of the page whose agents serve the root (the root itself, or, for a root that lists no agent of its
-    own, the hub page its `hub:` line names when that lists agents: router_live.agent_root's rule). notice_name, stand_in and page_keeper all read the mark here."""
+    own and names no keeper of its own (no `display-name:` line), the hub page its `hub:` line names when that lists agents: router_live.agent_root's rule). notice_name, stand_in and page_keeper all read the mark here."""
     page = reg.get(root) or {}
     if page.get("agents"):
         return _kp.marked(root, reg)
+    if page.get("role") == "name" and str(page.get("session") or ""):      # its own `display-name:` line and no agents: the page names itself, as keeper.fields reads it, and the hub's mark does not take it over
+        return ""
     hub = hub_of(root, reg)
     return _kp.marked(hub, reg) if hub and hub != root and (reg.get(hub) or {}).get("agents") else ""
 

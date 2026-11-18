@@ -358,14 +358,14 @@ def _inherit_marks(out: dict, tops: set) -> None:
                 row.pop("role", None)
 
 
-def apply(reg: dict) -> dict:
+def apply(reg: dict, ents: dict | None = None) -> dict:
     """The page registry with the project entries laid over it: for each entry whose page pointer is a key of `reg`, the entry's fields replace the page's (see
     the module text), a field the entry does not hold stays the page's. `reg` itself is never changed; with no entries (or none that differs) it is returned as it is.
     A project with no page has no row in a registry keyed by page: it is reached by resolve(). The keeper follows the entry: a flagged agent is the row's keeper and the
     sub-pages under it inherit it; `keeper_agent` and `keeper_source` are read again for the pages an entry changes (and, when it changes a project's agents or marks one,
-    for the whole project). Never raises."""
+    for the whole project). `ents` = the entries to lay (default: the record's own, `entries()`): a verb's dry run lays the entries a change would write, to read what it would do. Never raises."""
     try:
-        ents = entries()
+        ents = entries() if ents is None else ents
         if not ents or not isinstance(reg, dict) or not reg:
             return reg
         retired = _retired_words()

@@ -553,6 +553,40 @@ def restore(project: str = "", *, rev: str = "", before: str = "", apply: bool =
     return res
 
 
+class Kept:
+    """The undo file of a change a verb makes to one project's entry (keep_undo): `file` is written before the record is, `finish()` notes the hash of the record as written."""
+
+    def __init__(self, meta: dict, file: Path):
+        self.meta, self.file = meta, file
+
+    def finish(self) -> None:
+        try:
+            _record_after(self.meta, self.file)
+        except OSError:                                       # the record is right; the undo file keeps the planned fingerprint, which `restore --undo` reads in place of the hash
+            pass
+
+
+def keep_undo(d: dict, cur_ents: dict, pid: str, *, by: str = "", now: str | None = None, run_dir: Path | str | None = None) -> Kept:
+    """Write the undo file of a change a verb is about to make to project `pid`'s entry, in the same format `restore` writes and `restore --undo FILE --apply` takes back: the record file as it is now
+    (whole), and the entry before and after. Call it inside the record's lock, with `d` = the parts the verb is about to write (projects._read's shape, entries already laid) and `cur_ents` = the
+    entries as they are now, before the write; then write the record, then `finish()`. The id rows and marks are the verb's own business and a keeper change touches none."""
+    stamp = (now or dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")).replace("-", "").replace(":", "")
+    base = (Path(run_dir).expanduser() if run_dir else default_run_dir()) / stamp
+    n = 1
+    while base.exists():                                      # two changes in one second keep two undo copies
+        n += 1; base = base.with_name(f"{stamp}-{n}")
+    text = _read_bytes(prj.record_path())
+    before_file = base / "project-record.before.json"
+    if text is not None:
+        _write_bytes(before_file, text)
+    meta: dict = {"schema": 1, "made": stamp, "by": by or "cli", "record": str(prj.record_path()), "before": str(before_file) if text is not None else "", "before_sha256": _sha(text),
+                  "after_sha256": "", "planned_fingerprint": fingerprint(d), "rev": "", "mode": "project", "project": pid,
+                  "restored": {"entry": _ents(d).get(pid), "ids": {}, "marks": {}}, "prior": {"entry": cur_ents.get(pid), "ids": {}, "marks": {}}}
+    file = base / "undo.json"
+    prj.write_atomic(file, json.dumps(meta, indent=1, ensure_ascii=False) + "\n")
+    return Kept(meta, file)
+
+
 # ----------------------------------------------------------------------------- --list
 def _count_line(doc_new: dict | None, doc_old: dict | None) -> str:
     n = len(_ents(doc_new))

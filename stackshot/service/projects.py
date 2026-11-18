@@ -148,10 +148,10 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
 def _project_agent_mandate(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """`client.py post project-agent-mandate <project> <name> --mandate "…" [--sender <session id>]`: change the mandate line of an agent already on the project's agents map (the record,
     project_verbs.agent_mandate), then the page's `agents:` block is written from it (the mirror, after _PROJECT_LOCK is released), so a later mirror write keeps the new line: the record is the
-    authority and a page edit to the line is not read. Who: the project's keeper and its front agents, as `post project-agent` (`sender` is the asking session's id, never a name; no label
+    authority and a page edit to the line is not read. Who: the agent marked as the project's keeper and its front agents, as `post project-agent` (`sender` is the asking session's id, never a name; no label
     path: the New session form lists agents, it does not rewrite their lines). The agent keeps its side (front or background), its place in the map and who listed it.
     Answers: 200 {project, key, agent: {name: {front, role, mandate_line}}, previous, mirror, note} (the same line again: 200, "nothing changed") · 400 a missing field, a bad name, a backslash in the line, an empty
-    or over-long mandate, a control character or a backslash in it, an ambiguous slug, a page that is not a hub · 403 a name as sender, or a session that is neither the keeper nor a front agent · 404 unknown
+    or over-long mandate, a control character or a backslash in it, an ambiguous slug, a page that is not a hub · 403 a name as sender, or a session that is neither the keeper mark's agent nor a front agent · 404 unknown
     project, or `name` not listed on it (list it first with `post project-agent`) · 503 the record cannot be written. A mirror that cannot be written is told in the answer: the record is right."""
     fields, bad = _verbs.mandate_fields(body)
     if bad: return bad

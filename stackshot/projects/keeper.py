@@ -1,4 +1,4 @@
-"""keeper.py — a project's keeper as a mark on one of its agents (readers only: nothing here writes a mark).
+"""keeper.py — a project's keeper as a mark on one of its agents (the readers, and the pure helpers the verbs and the audit's keeper debts use: nothing here writes a mark).
 
 The keeper is the agent that keeps a project's pages current and hears the notices that fall to the project. It is a duty of one agent of the project, not
 a separate name. Two places can mark it:
@@ -23,9 +23,13 @@ What a registry row gains (pages.cmd_registry; project_registry.apply lays the r
 
 An unnamed sub-page inherits the keeper of the nearest page above it, as it always did.
 
+The verbs (project_verbs.py) write the mark: `agent_add` marks a project's first agent, `agent_retire` and `agent_rename` move it, `keeper` moves it on purpose. `successor` names the agent a
+retired keeper's mark moves to, and `problems_of` reads what is wrong with a mark (registry_report.keeper_debts turns it into the four debts the registry check carries).
+
 Stdlib only at load; router_live and anchors (and projects, for the retired words) are imported lazily inside the functions that derive or read the status, never at load."""
 from __future__ import annotations
 
+import re
 import sys
 
 KEY = "keeper"                  # the page's flat line, and the record's flag on an agent entry
@@ -181,3 +185,66 @@ def fields(key: str, reg: dict, _seen: tuple = ()) -> dict:
     if who:
         return {"keeper_agent": who, "keeper_source": "legacy"}
     return {"keeper_agent": "", "keeper_source": ""}
+
+
+# ----------------------------------------------------------------------------- what the verbs and the debts need
+def successor(agents) -> str:
+    """The agent a keeper mark moves to when its agent leaves `agents` ({name: {front, mandate_line}}, the record's map as it is without the leaver): the project's builder (the first background agent whose mandate says
+    it builds, anchors.BUILDER, class 0 "build" before class 1), else its -main agent (the front agent whose name ends in -main, else the first front agent: anchors.main_of); "" when neither exists (no agent, or
+    background agents that build nothing). The same two steps, in the same order, as the derivation of an unmarked project (derive), read from the entry's own map. Never raises."""
+    try:
+        if not isinstance(agents, dict):
+            return ""
+        from stackshot.anchors import anchors as _anc
+        back = {str(n): str(a.get("mandate_line") or "") for n, a in agents.items() if isinstance(a, dict) and not a.get("front", True)}
+        hits = [(0 if re.search(r"\bbuild", m, re.I) else 1, i, k) for i, (k, m) in enumerate(back.items()) if _anc.BUILDER.search(m)]
+        if hits:
+            return min(hits)[2]
+        front = [str(n) for n, a in agents.items() if isinstance(a, dict) and a.get("front", True)]
+        return next((n for n in front if n.endswith("-main")), front[0] if front else "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def effective_mark(agents, page_row=None) -> str:
+    """The agent a project marks as its keeper, as the overlay lays it: the record's flagged agent, else the agent the page's own `keeper:` line names when that agent is on `agents` ("" when none). `page_row` = the
+    project's raw page row (a page-only registry row, with role "mark" when the line names a listed agent of the page)."""
+    got, _p = record_mark(agents)
+    if got:
+        return got
+    pm = row_mark(page_row)
+    return pm if pm and isinstance(agents, dict) and pm in agents else ""
+
+
+def unlisted_lines(problems) -> list:
+    """The lines of a page row's `keeper_problems` that say a `keeper:` line names an agent the page does not list (page_mark's own words)."""
+    return [str(x) for x in (problems or []) if "names no agent" in str(x)]
+
+
+def problems_of(agents, page_row=None, former=()) -> list:
+    """(kind, text) for each way the mark of one project is wrong, kinds as registry_report names them:
+      keeper-not-listed   a mark names an agent the record does not list (a page `keeper:` line the record's map lacks, or the page's own map lacks), or a flag that is neither true nor false
+      keeper-two-marks    two agents flagged in the record, or the page's `keeper:` line and the record's flag name different agents
+      keeper-retired      the mark (a page's line the record no longer lists, or a flag) names an agent in the entry's `former_agents`: it was taken off the map on purpose, and the mark still names it
+    `agents` = the record's map, `page_row` = the project's raw page row, `former` = the entry's `former_agents`. [] for a project with no mark and no problem. Never raises."""
+    out: list = []
+    try:
+        former_l = {str(x).casefold() for x in (former or ())}
+        got, probs = record_mark(agents)
+        for t in probs:
+            out.append(("keeper-two-marks" if "also flagged" in t else "keeper-not-listed", t))
+        pm = row_mark(page_row)
+        listed = agents if isinstance(agents, dict) else {}
+        if pm and pm not in listed:
+            kind = "keeper-retired" if pm.casefold() in former_l else "keeper-not-listed"
+            out.append((kind, f"the page's `keeper: {pm}` names an agent the project record does not list"))
+        for t in unlisted_lines((page_row or {}).get("keeper_problems") if isinstance(page_row, dict) else None):
+            m = re.search(r"`keeper: (.+?)` names no agent", t)
+            out.append(("keeper-retired" if m and m.group(1).strip().casefold() in former_l else "keeper-not-listed", t))
+        if got and pm and pm in listed and pm != got:
+            out.append(("keeper-two-marks", f"the record flags {got} as the keeper, and the page's `keeper:` line names {pm}; the record's flag rules"))
+        if got and got.casefold() in former_l:
+            out.append(("keeper-retired", f"{got} is flagged as the keeper, and the record says it was retired from the project's agents"))
+    except Exception:  # noqa: BLE001
+        pass
+    return out

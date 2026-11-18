@@ -17,6 +17,12 @@ What it flags (one finding is {"page", "line", "name", "fix", "project"}; the li
                                 open items whose `project` names no project (no entry points at it, owns it as a sub-page or knew it as a former key). Fix: re-file them, or adopt the page when it is a project's
   two projects on one page      two or more live (not archived) entries that point at one page. Fix: archive the stray, or give it a page of its own with `move-page`
 
+The four keeper debts (only with `[registry_audit] keeper_debts = true`, off by default: nobody is told of a mark's problem before marks are set on purpose; the keeper is a mark on one agent, keeper.py):
+  keeper-not-listed             a mark names an agent the record does not list: the page's `keeper:` line, or a flag that is not true or false. Fix: `tools/project.py keeper <project> <agent>` (the page's own line is for whoever edits the page to change)
+  keeper-two-marks              two agents flagged in the record, or the record's flag and the page's `keeper:` line name different agents. Fix: `tools/project.py keeper <project> <agent>` leaves one flag
+  keeper-retired                the mark names an agent the record says was retired from the project. Fix: `tools/project.py keeper <project> <agent>`
+  keeper-not-derived            a live project that lists agents, has no mark, and has no builder or -main agent to derive a keeper from. Fix: mark one: `tools/project.py keeper <project> <agent>`
+
 A `parent:` line is not checked: nothing in the project registry reads it (projects.py: it makes no sub-page), so a line off the key tree is no error of the record.
 
 Not checked when the record has no projects (an instance that has not made its record: every page would read as "no project"), or when it cannot be read. Each check that needs a source (sala's session list, the page store,
@@ -55,6 +61,10 @@ LINE_AGENT = "agent on no live session"
 LINE_ID = "item id names no project"
 LINE_KEY = "open items on a key no project owns"
 LINE_TWO = "two projects on one page"
+LINE_KEEPER_NOT_LISTED = "keeper-not-listed"
+LINE_KEEPER_TWO = "keeper-two-marks"
+LINE_KEEPER_RETIRED = "keeper-retired"
+LINE_KEEPER_NOT_DERIVED = "keeper-not-derived"
 SHOWN = 6                # items or ids named on one line; the rest are counted
 
 
@@ -125,6 +135,32 @@ def two_on_one_page(ents: dict) -> list[dict[str, str]]:
             who = ", ".join(f"{p} ({ents[p].get('name') or 'no name'}, {ents[p].get('status') or 'active'})" for p in pids)
             out.append(_f(k, LINE_TWO, who, f"a page belongs to one project: archive the one that is not this page's (`tools/project.py archive <id>`), or give it a page of its own (`tools/project.py move-page <id> <new key>`); {len(pids)} entries point here",
                           pids[0]))
+    return out
+
+
+def keeper_debts(ents: dict, reg: dict, ov: dict | None = None) -> list[dict[str, str]]:
+    """The four keeper debts of every live project with a page: keeper-not-listed, keeper-two-marks, keeper-retired (keeper.problems_of, read from the entry's agents map, the project's raw page row and
+    the entry's `former_agents`) and keeper-not-derived (no mark, agents listed, and the overlaid registry `ov` derives no keeper for the page). One finding per project and kind. Read only."""
+    from stackshot.projects import keeper as _kp  # noqa: PLC0415
+    fix = "run `tools/project.py keeper {p} <agent>` (a dry run first: it names the old mark, the new one and the sessions whose roles move; add --apply to write it)"
+    out: list[dict[str, str]] = []
+    for pid, e in sorted(ents.items()):
+        k = _pr.page_key(e)
+        if not k or (e.get("status") or "active") == "archived":
+            continue
+        row = reg.get(k) if isinstance(reg.get(k), dict) else None
+        ag = e["agents"] if isinstance(e.get("agents"), dict) else {n: {} for n in ((row or {}).get("agents") or {})}     # an entry with no agents field reads the page's own map
+        seen: set[str] = set()
+        for kind, text in _kp.problems_of(ag, row, e.get("former_agents") or ()):
+            if kind in seen:
+                continue
+            seen.add(kind)
+            out.append(_f(k, kind, text, fix.format(p=pid), pid))
+        if ag and not _kp.effective_mark(ag, row):
+            got = (ov or {}).get(k) or {}
+            if isinstance(got, dict) and got and not got.get("keeper_agent"):      # a page the overlaid registry does not hold says nothing
+                out.append(_f(k, LINE_KEEPER_NOT_DERIVED, "no mark, and no builder or -main agent to take the keeper from",
+                              f"the project lists agents but names none as its keeper: {fix.format(p=pid)}", pid))
     return out
 
 
@@ -243,9 +279,10 @@ def _items(shown: list[str]) -> str:
 
 # ---------------------------------------------------------------------------- the whole check
 def scan(*, ents: dict, reg: dict, sessions: tuple[set[str], set[str]] | None, items: Any, pending: dict,
-         page_get: Callable[[str], tuple[str | None, str | None]] | None) -> dict[str, Any]:
+         page_get: Callable[[str], tuple[str | None, str | None]] | None, debts: bool | None = None, ov: dict | None = None) -> dict[str, Any]:
     """The problems of the record `ents` against the page registry `reg` (key → row, pages alone; an empty one is a registry that was not published, which checks no page as gone), the page store `page_get` (None: no
-    page is read; it raises when a read fails and answers (None, None) only for a page that is not there), sala's `sessions`, the board `items` and the pending agents. → {"checked", "note", "projects", "pages", "findings"}; each finding lacks `to` (see `route`)."""
+    page is read; it raises when a read fails and answers (None, None) only for a page that is not there), sala's `sessions`, the board `items` and the pending agents. `debts` = whether the four keeper debts
+    are checked (None: `[registry_audit] keeper_debts`, off by default), read from `ov` (the registry with the record laid over it: what the keeper fields say). → {"checked", "note", "projects", "pages", "findings"}; each finding lacks `to` (see `route`)."""
     if not ents:
         return {"checked": False, "note": "the project record has no projects", "silent": True, "projects": 0, "pages": len(reg), "findings": []}
     notes: list[str] = []
@@ -253,6 +290,9 @@ def scan(*, ents: dict, reg: dict, sessions: tuple[set[str], set[str]] | None, i
     npp = no_project(ents, reg)
     found += npp
     found += two_on_one_page(ents)
+    from stackshot.core import config as _cfg  # noqa: PLC0415
+    if _cfg.registry_keeper_debts() if debts is None else debts:
+        found += keeper_debts(ents, reg, ov)
     if page_get is not None:
         reader = _Reader(page_get)
         gone, drift = pages_and_drift(ents, reg, reader)
@@ -324,7 +364,7 @@ def read(*, ents: dict | None = None, reg: dict | None = None, ov: dict | None =
             page_get = getattr(io, "get_strict", io.get)
         except Exception as ex:  # noqa: BLE001
             print(f"registry_report: the page store could not be opened ({type(ex).__name__}: {ex})", file=sys.stderr)
-    return route(scan(ents=ents, reg=reg, sessions=got, items=items, pending=pending, page_get=page_get), ents, ov, got)
+    return route(scan(ents=ents, reg=reg, sessions=got, items=items, pending=pending, page_get=page_get, ov=ov), ents, ov, got)
 
 
 def line_of(f: dict[str, Any]) -> str:

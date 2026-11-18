@@ -63,8 +63,15 @@ def _sessions_listing(q: str = "", now: float | None = None) -> str:
     except Exception:
         roles = {}
     def role(*keys: str) -> str:
-        r = next((roles[k] for k in keys if k in roles), None)
-        return f" · {_ROLE_LABEL.get(r['role'], r['role'])}{' and keeper' if r.get('keeper') else ''} of {r['project']}" if r else ""      # a marked keeper agent: front or background, and the project's keeper
+        k = next((k for k in keys if k in roles), None)
+        r = roles[k] if k else None
+        if not r:
+            return ""
+        label = _ROLE_LABEL.get(r['role'], r['role'])
+        kept = _anc.keeper_pages(k) if r.get('keeper') else []
+        if kept and r['project'] not in kept:       # a marked agent whose best role is on another project than the one it keeps: both are said
+            return f" · {label} of {r['project']}, and keeper of {' and '.join(kept)}"
+        return f" · {label}{' and keeper' if r.get('keeper') else ''} of {r['project']}"      # a marked keeper agent: front or background, and the project's keeper
     rows = []
     seen = set(); owners = set()                     # cloud movers of open items are listed; pane movers of open items keep a gone session listed
     for t in _anc.items():

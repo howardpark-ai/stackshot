@@ -8,7 +8,10 @@ record is always the one that is right and the page is a copy stackshot writes f
     rename       the project's name: the id stays, the old name goes to `former_names`, the pending agents under the old name are dropped
     move_page    the project's page moves to another key (rename_page.py does the page half): the old key goes to `former_keys`
     archive      status archived, with who, when and how; reopen puts it back to active
-    agent_add / agent_mandate / agent_retire / agent_rename   the project's agents map, with its mandate lines (agent_mandate changes the line of an agent already listed)
+    agent_add / agent_mandate / agent_retire / agent_rename   the project's agents map, with its mandate lines (agent_mandate changes the line of an agent already listed). The keeper is a mark
+                 on one agent of the map (keeper.py): agent_add marks a project's first agent, agent_retire moves the mark of the agent that leaves (to the builder, else the -main agent, else nobody, said in
+                 the answer), agent_rename makes it follow the new name
+    keeper       moves the mark to another listed agent: a dry run unless asked to apply, and the apply keeps an undo file (project_restore.py's, taken back with `restore --undo`)
     restore      the record, or one project of it, put back from a past revision of the store's history in its repository (project_restore.py): a dry run unless asked to apply, with an undo file
 
 Each verb is one atomic change of the record under the record's own lock (projects.locked: the same flock every writer of the file takes), then a write of the page mirror if
@@ -277,9 +280,11 @@ def _state(ctx: Ctx) -> str:
     return json.dumps([ctx.d["ids"], ctx.d["pending_agents"], ctx.d["marks"], ctx.ents], sort_keys=False, default=str)
 
 
-def txn(fn: Callable[[Ctx], Any], by: str = "", now: str | None = None, dry: bool = False, pages: dict | None = None) -> tuple[Any, dict, bool]:
+def txn(fn: Callable[[Ctx], Any], by: str = "", now: str | None = None, dry: bool = False, pages: dict | None = None, undo: dict | None = None) -> tuple[Any, dict, bool]:
     """Run `fn(ctx)` on the record under its lock and write the result in one atomic write → (fn's answer, the entries now, whether anything changed). A dry run runs `fn` and writes nothing.
-    ValueError (a damaged record) and VerbError leave the file as it was. `pages` = the page texts the verb read before this call (`preread`): nothing inside the lock reads the page store."""
+    ValueError (a damaged record) and VerbError leave the file as it was. `pages` = the page texts the verb read before this call (`preread`): nothing inside the lock reads the page store.
+    `undo` = {"pid": the project's id, "run_dir": a folder or None}: when the record is written, project_restore's undo file for the project's entry is written first (the record file as it was, kept whole) and
+    completed after the write; `undo["file"]` then names it (`restore --undo FILE --apply` takes the change back)."""
     with prj.locked():
         d = prj._read()
         cur = pr.parse({pr.SECTION: d["extra"].get(pr.SECTION, {}), pr.VERSION: d["extra"].get(pr.VERSION, pr.SCHEMA)})
@@ -295,7 +300,14 @@ def txn(fn: Callable[[Ctx], Any], by: str = "", now: str | None = None, dry: boo
                 d["extra"][pr.SECTION] = ctx.ents; d["extra"][pr.VERSION] = pr.SCHEMA
             else:
                 d["extra"].pop(pr.SECTION, None); d["extra"].pop(pr.VERSION, None)
+            kept = None
+            if undo is not None:
+                from stackshot.projects import project_restore as _rs
+                kept = _rs.keep_undo(d, cur, undo["pid"], by=by, now=ctx.now, run_dir=undo.get("run_dir"))
+                undo["file"] = str(kept.file)
             prj._write(d)
+            if kept is not None:
+                kept.finish()
         return out, ctx.ents, changed
 
 
@@ -910,6 +922,51 @@ def _former_agent(e: dict, name: str, add: bool) -> None:
         e.pop("former_agents", None)
 
 
+def _page_row(ctx: Ctx, e: dict) -> dict | None:
+    """The project's raw page row (the pages-only registry: a `keeper:` line on the page shows as role "mark"), None when it has no page."""
+    k = pr.page_key(e)
+    row = ctx.raw.get(k) if k else None
+    return row if isinstance(row, dict) else None
+
+
+def _set_mark(ag: dict, name: str | None) -> None:
+    """The map `ag` (changed in place) marks `name` as the keeper and no one else (`name` None or "": no mark at all). Every other entry loses a flag it had: one mark per project."""
+    for n in list(ag):
+        a = {k: v for k, v in ag[n].items() if k != _kp.KEY}
+        if name and n == name:
+            a[_kp.KEY] = True
+        ag[n] = a
+
+
+_SRC_WORDS = {"mark": "the mark", "derived": "derived", "legacy": "the name line"}
+
+
+def _keeper_fields(ctx: Ctx, e: dict, ents: dict) -> dict:
+    """{keeper_agent, keeper_source} of the project's page with the entries `ents` laid over the page registry ({} for a project with no page)."""
+    key = pr.page_key(e)
+    return _kp.fields(key, pr.apply(ctx.raw, ents)) if key else {}
+
+
+def _move_lines(pid: str, old: str, old_src: str, new: str, new_src: str, roles: list[dict]) -> list[str]:
+    """The lines a verb that moves a project's keeper prints, as the `keeper` verb prints them: the old keeper and the new one (with where each comes from), then each roles.json entry that moves."""
+    shown = lambda who, src: f"{who} ({_SRC_WORDS.get(src, src)})" if who and src else (who or "none")
+    return [f"keeper of {pid}: {shown(old, old_src)} -> {shown(new, new_src)}"] + ([f"roles.json: {m['session']}: {m['from']} -> {m['to']}" for m in roles] or ["roles.json: no session's entry moves"])
+
+
+def _retired_line(key: str) -> str:
+    """The line a verb answers with when the project is retired and its keeper mark is therefore left as it is (the `keeper` verb refuses the same project with this wording)."""
+    return f"{key} is a retired project: its keeper is not moved (reopen it first)"
+
+
+def _demoted_note(key: str, old: str, old_src: str, new: str, roles: list[dict]) -> str:
+    """What a session loses when the mark takes the keeper's place over it (the project's name line, the first agent being added): said in the answer of the verb that does it."""
+    mine = next((m for m in roles if m["session"] == old), None)
+    entry = (f"its roles.json entry goes from {mine['from']} to {mine['to'] or 'nothing'}" if mine else "its roles.json entry does not change")
+    return (f"{old} stops being the keeper of {key} ({_SRC_WORDS.get(old_src, old_src)} was the keeper): {entry}; notices for the project are addressed to {new} from now on, not held for {old}; "
+            f"and {old} is refused (403, the agent marked keeper: {new}) when it lists an agent or changes a mandate line on {key}, unless it is a front agent of the project. "
+            f"To give it the standing back, list it as an agent and move the mark (`project.py keeper {key} {old}`)")
+
+
 def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, mirror_now: bool = True, pages: dict | None = None) -> dict:
     """List an agent on the project's agents map with its mandate line (`front` False = a background agent), at the end of the map. The record first, then the page's `agents:` block (mirror): there
     is no state in which the page owes a line. A name already listed with the same front flag and mandate changes nothing; with another, it is a 409. A pending entry of the same name is dropped.
@@ -927,20 +984,37 @@ def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "
             cur = ag[have]
             if bool(cur.get("front")) == bool(front) and _norm_m(cur.get("mandate_line", "")) == _norm_m(mandate):
                 e["agents"] = ag
-                return {"pid": pid, "name": have}
+                return {"pid": pid, "name": have, "marked": ""}
             raise VerbError(409, f"{have} is already listed on the project as {'front' if cur.get('front') else 'background'}: {str(cur.get('mandate_line', ''))[:120]!r}; "
                                  "to change its mandate line use agent_mandate; to change its side, retire it or rename it, then list it again")
-        ag[name] = {"front": bool(front), "mandate_line": mandate, **({"by": by} if by else {}), "at": ctx.now}
+        first = not ag and not _kp.effective_mark(ag, _page_row(ctx, e))        # the project's first agent, and nobody marked: it is the keeper (a later agent never is, and a project with a mark never gets a second)
+        retired = e.get("status") == "archived"                                 # a retired project's mark is not moved by a verb (the `keeper` verb refuses it): the agent is listed and nothing is marked
+        mark = first and not retired
+        before = copy.deepcopy(ctx.ents) if mark else {}
+        f0 = _keeper_fields(ctx, e, before) if mark else {}
+        ag[name] = {"front": bool(front), "mandate_line": mandate, **({"by": by} if by else {}), "at": ctx.now, **({_kp.KEY: True} if mark else {})}
         e["agents"] = ag
         _former_agent(e, name, False)
         pend = ctx.d["pending_agents"].get(pid) or {}
         for n in [n for n in pend if str(n).casefold() == name.casefold()]:
             del pend[n]
-        return {"pid": pid, "name": name}
+        res = {"pid": pid, "name": name, "marked": name if mark else ""}
+        if first and retired:
+            ctx.warn = (ctx.warn + "; " if ctx.warn else "") + _retired_line(pr.page_key(e) or pid)
+        if mark:
+            roles = _roles_moved(ctx.raw, before, ctx.ents)
+            old, old_src = f0.get("keeper_agent", ""), f0.get("keeper_source", "")
+            res["lines"] = _move_lines(pid, old, old_src, name, "mark", roles)
+            if old and old.casefold() != name.casefold():
+                note = _demoted_note(pr.page_key(e) or pid, old, old_src, name, roles)
+                res["lines"].append(note)
+                ctx.warn = (ctx.warn + "; " if ctx.warn else "") + note
+        return res
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": bool(front), "mandate": mandate}, by=by, mirror_now=mirror_now)
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": bool(front), "mandate": mandate, **({"keeper_marked": out["marked"], "lines": out["lines"]} if out.get("marked") else {})}, by=by,
+                   mirror_now=mirror_now)
 
 
 def agent_mandate(project: str, name: str, mandate: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, mirror_now: bool = True, pages: dict | None = None) -> dict:
@@ -997,16 +1071,42 @@ def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: 
                 return {"pid": pid, "result": "line removed", "name": e["name"], "front": True, "left": 0, "own": True}
             return {"pid": pid, "result": "not listed", "name": name, "front": True, "left": len(ag), "own": False}
         front = bool(ag[have].get("front"))
+        was = _kp.effective_mark(ag, _page_row(ctx, e))            # the mark as the readers see it (the record's flag, else the page's `keeper:` line), read before the agent leaves
+        retired = e.get("status") == "archived"                    # a retired project's mark is not moved by a verb (the `keeper` verb refuses it): the agent leaves and the mark is left as it is
+        moving = was == have and not retired
+        before = copy.deepcopy(ctx.ents) if moving else {}
+        f0 = _keeper_fields(ctx, e, before) if moving else {}
         del ag[have]
+        keeper: dict = {}
+        lines: list[str] = []
+        if was == have and retired:
+            ctx.warn = (ctx.warn + "; " if ctx.warn else "") + _retired_line(pr.page_key(e) or pid)
+        if moving:                                                 # the keeper leaves: the mark goes to the builder, else the -main agent, else nobody (never left naming a retired agent)
+            to = _kp.successor(ag)
+            _set_mark(ag, to)
+            keeper = {"from": have, "to": to}
+            if _kp.row_mark(_page_row(ctx, e)) == have:
+                ctx.warn = (ctx.warn + "; " if ctx.warn else "") + f"the page's own `keeper: {have}` line still names the retired agent; the record's mark rules, and the page line is for whoever edits the page to change"
         e["agents"] = ag
         _former_agent(e, have, True)
-        return {"pid": pid, "result": "line removed", "name": have, "front": front, "left": len(ag), "own": False}
+        if moving:
+            f1 = _keeper_fields(ctx, e, ctx.ents)
+            lines = _move_lines(pid, f0.get("keeper_agent", ""), f0.get("keeper_source", ""), f1.get("keeper_agent", ""), f1.get("keeper_source", ""), _roles_moved(ctx.raw, before, ctx.ents))
+            if not to:
+                back = f1.get("keeper_agent", "")
+                keeper["problem"] = (f"{have} was the keeper and no agent is left to take the mark (no builder and no front agent): "
+                                     + (f"the project's name line {back} is its keeper again (the old rule), until an agent is listed and marked (`project keeper`)" if back
+                                        else "the project has no keeper agent until one is listed and marked (`project keeper`)"))
+        return {"pid": pid, "result": "line removed", "name": have, "front": front, "left": len(ag), "own": False, **({"keeper": keeper} if keeper else {}), **({"lines": lines} if lines else {})}
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
     removed = out["result"] == "line removed"
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "name", "front", "left", "own") if k in out}, by=by, drop=(out["name"],),
-                   timeline=(f"{out['name']} retired; the project's own session, so its agents map is now empty" if out.get("own") else f"{out['name']} retired; its line removed from the agents map") if removed else "",
+    kp = out.get("keeper") or {}
+    moved = (f"; the keeper mark moved to {kp['to']}" if kp.get("to") else "; the keeper mark was cleared: no agent is left to take it") if kp else ""
+    warn = "; ".join(w for w in (out.get("warning", ""), kp.get("problem", "")) if w)
+    return _finish(out["pid"], ents, changed, dry, io, warn=warn, extra={k: out[k] for k in ("result", "name", "front", "left", "own", "keeper", "lines") if k in out}, by=by, drop=(out["name"],),
+                   timeline=(f"{out['name']} retired; the project's own session, so its agents map is now empty" if out.get("own") else f"{out['name']} retired; its line removed from the agents map{moved}") if removed else "",
                    tag=f"retire-{out['name']}")
 
 
@@ -1026,16 +1126,94 @@ def agent_rename(project: str, old: str, new: str, *, by: str = "", io: Any = No
             raise VerbError(404, f"{old} is not listed on {pr.page_key(e) or pid}")
         if n is not None:
             raise VerbError(409, f"{new} is already listed on {pr.page_key(e) or pid}")
+        was = _kp.effective_mark(ag, _page_row(ctx, e))            # the mark as the readers see it: a flag in the record, or only the page's `keeper:` line
+        retired = e.get("status") == "archived"                    # a retired project's mark is not moved by a verb (the `keeper` verb refuses it): a flag on the entry stays with it, a page-only mark is not written
         e["agents"] = {(new if k == o else k): v for k, v in ag.items()}
+        if was == o and retired:
+            ctx.warn = (ctx.warn + "; " if ctx.warn else "") + _retired_line(pr.page_key(e) or pid)
+        if was == o and not retired:                               # the mark follows the new name (a record flag travels with the entry; a page-only mark is written into the record now)
+            _set_mark(e["agents"], new)
+            if _kp.row_mark(_page_row(ctx, e)) == o:
+                ctx.warn = (ctx.warn + "; " if ctx.warn else "") + f"the page's own `keeper: {o}` line still names the old name; the record's mark rules, and the page line is for whoever edits the page to change to {new}"
         _former_agent(e, o, True); _former_agent(e, new, False)
         pend = ctx.d["pending_agents"].get(pid) or {}
         for x in [x for x in pend if str(x).casefold() == o.casefold()]:
             del pend[x]
-        return {"pid": pid, "result": "renamed", "old": o, "new": new, "front": bool(ag[o].get("front")), "mandate": ag[o].get("mandate_line", "")}
+        return {"pid": pid, "result": "renamed", "old": o, "new": new, "front": bool(ag[o].get("front")), "mandate": ag[o].get("mandate_line", ""), **({"keeper": {"from": o, "to": new}} if was == o and not retired else {})}
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "old", "new", "front", "mandate")}, by=by, drop=(out["old"],))
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "old", "new", "front", "mandate", "keeper") if k in out}, by=by, drop=(out["old"],))
+
+
+def _roles_moved(reg: dict, before: dict, after: dict) -> list[dict]:
+    """The sessions whose roles.json entry differs between the project entries `before` and `after` laid over the page registry `reg`: [{session, from, to}] (a missing entry is None), sorted by name.
+    Reads the same function the roles file is written from (anchors.file_roles); [] when it cannot be read."""
+    try:
+        from stackshot.anchors import anchors as _anc
+        a = _anc.file_roles(pr.apply(reg, before)); b = _anc.file_roles(pr.apply(reg, after))
+        return [{"session": n, "from": a.get(n), "to": b.get(n)} for n in sorted(set(a) | set(b)) if a.get(n) != b.get(n)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: Any = None, now: str | None = None, run_dir: Any = None, mirror_now: bool = True, pages: dict | None = None) -> dict:
+    """Move the project's keeper mark to the listed agent `agent`: the flag leaves the agent that has it and goes on this one (a project has one mark, so this moves it and never adds one; a record that
+    holds two flags comes out with one). A dry run unless `apply`: it writes nothing and says the old mark, the new mark (and where each comes from: the record's flag, the page's `keeper:` line or the derivation),
+    and the sessions whose roles.json entry would move. With `apply` the record is written, and an undo file is kept the way `restore` keeps one (`restore --undo FILE --apply` takes the change back).
+    Refused: 404 an agent the record does not list (or a project it does not know), 409 a retired project, 400 a sub-page's key. An agent that is the mark already changes nothing.
+    → {project, key, changed, dry, entry, mirror, name, old, new, old_source, new_source, roles, undo, lines}."""
+    undo = {"pid": "", "run_dir": run_dir}
+
+    def work(ctx: Ctx) -> dict:
+        ctx.refuse_sub_key(project)
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        undo["pid"] = pid
+        e = ctx.entry(pid)
+        key = pr.page_key(e)
+        if e.get("status") == "archived":
+            raise VerbError(409, f"{key or pid} is a retired project: its keeper is not moved (reopen it first)")
+        ag = ctx.agents(pid)
+        have = _find(ag, agent)
+        if have is None:
+            raise VerbError(404, f"{agent} is not listed on {key or pid}: the keeper mark goes on an agent the record lists ({', '.join(ag) or 'none listed'})")
+        row = _page_row(ctx, e)
+        old = _kp.effective_mark(ag, row)
+        before = copy.deepcopy(ctx.ents)
+        reg0 = pr.apply(ctx.raw, before)
+        f0 = _kp.fields(key, reg0) if key else {}
+        flagged = [n for n, a in ag.items() if isinstance(a, dict) and a.get(_kp.KEY) is True]
+        if old == have and flagged == [have]:
+            return {"pid": pid, "name": have, "old": old, "new": have, "old_source": f0.get("keeper_source", ""), "new_source": f0.get("keeper_source", ""), "roles": [], "same": True}
+        e["agents"] = copy.deepcopy(ag)
+        _set_mark(e["agents"], have)
+        reg1 = pr.apply(ctx.raw, ctx.ents)
+        f1 = _kp.fields(key, reg1) if key else {}
+        pm = _kp.row_mark(row)
+        if pm and pm != have:
+            ctx.warn = (ctx.warn + "; " if ctx.warn else "") + f"the page's own `keeper: {pm}` line still names another agent; the record's mark rules, and the page line is for whoever edits the page to change"
+        cleared = [n for n in flagged if n != have]
+        return {"pid": pid, "name": have, "old": old, "new": have, "old_source": f0.get("keeper_source", ""), "new_source": f1.get("keeper_source", ""), "roles": _roles_moved(ctx.raw, before, ctx.ents), "same": False,
+                "derived_old": f0.get("keeper_agent", ""), "repaired": len(flagged) > 1, "kept": have if have in flagged else "", "cleared": cleared}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=not apply, pages=pages, undo=undo if apply else None)
+    old, new = out["old"], out["new"]
+    shown = lambda who, src: f"{who} ({src})" if who and src else (who or "none")
+    lines = [("" if apply else "dry run: ") + f"keeper of {out['pid']}: {shown(old or out.get('derived_old') or '', 'the mark' if old else ('derived' if out.get('derived_old') else ''))} -> {shown(new, 'the mark')}"]
+    repaired = "" if out["same"] or not out.get("repaired") else (f"repaired {len(out['cleared']) + (1 if out['kept'] else 0)} marks to one ({'kept' if out['kept'] else 'marked'} {new}, cleared {', '.join(out['cleared'])})")
+    if out["same"]:
+        lines = [f"{new} is the keeper of {out['pid']} already; nothing to change"]
+    else:
+        if repaired:
+            lines[0] = ("" if apply else "dry run: ") + f"keeper of {out['pid']}: {repaired}"
+        lines += [f"roles.json: {m['session']}: {m['from']} -> {m['to']}" for m in out["roles"]] or ["roles.json: no session's entry moves"]
+        lines.append(f"undo file {undo['file']}; to undo: project.py restore --undo {undo['file']} --apply" if undo.get("file") else "nothing written (add --apply)")
+    extra = {k: out[k] for k in ("name", "old", "new", "old_source", "new_source", "roles", "same")} | {"undo": undo.get("file"), "lines": lines}
+    return _finish(out["pid"], ents, changed, not apply, io, warn=out.get("warning", ""), extra=extra, by=by, mirror_now=mirror_now,
+                   timeline=(f"the keeper mark {repaired}" if repaired and old == new else f"the keeper mark moved from {old or 'none'} to {new}") if changed and apply else "", tag="keeper")
 
 
 # ---- the page moves
@@ -1343,8 +1521,8 @@ def label_paths(rec: dict[str, Any], mark: dict[str, Any], owed: dict[str, Any],
 
 
 def front_caller_refusal(sender: str, is_id: bool, names_get: Callable[[str, str], str], rec: dict[str, Any], named: str, action: str) -> _Refusal | None:
-    """A caller that is a session, not a label: `sender` must be a session id that resolves (`names_get`, the fleet's heartbeat names) to the keeper or a listed front agent of the project (`named` is
-    how an answer names it); `action` is what only they may do ("lists a new agent")."""
+    """A caller that is a session, not a label: `sender` must be a session id that resolves (`names_get`, the fleet's heartbeat names) to the project's keeper (the agent it marks as its keeper, else the
+    keeper its page names) or a listed front agent of the project (`named` is how an answer names it); `action` is what only they may do ("lists a new agent")."""
     if not is_id:
         return 403, {"error": _SESSION_ID_TEXT.format(sender=sender)}
     sname = names_get(sender, "")
@@ -1354,7 +1532,8 @@ def front_caller_refusal(sender: str, is_id: bool, names_get: Callable[[str, str
     if not sname and sender not in allowed:
         return 403, {"error": f"refused: {sender!r} is not a session in the fleet's heartbeat, so it names nobody; run this from the keeper's or a front agent's own session"}
     if not ({sender, sname} & allowed):
-        return 403, {"error": f"refused: session {sname or sender!r} is neither the keeper ({rec['keeper'] or 'none'}) nor a front agent of {named} "
+        kp = f"the agent marked keeper: {rec['keeper']}" if rec.get("keeper_source") == "mark" and rec["keeper"] else (rec["keeper"] or "none")
+        return 403, {"error": f"refused: session {sname or sender!r} is neither the keeper ({kp}) nor a front agent of {named} "
                               f"({', '.join(listed_front) or 'none'}); one of them {action}"}
     return None
 

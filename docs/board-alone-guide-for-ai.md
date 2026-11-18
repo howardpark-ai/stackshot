@@ -455,7 +455,8 @@ A project is an entry in `project-record.json` (store folder), keyed by an id `p
 | `archive PROJECT [--why W]` / `reopen PROJECT` | status `archived` and back; the page's `status:` follows | `--dry-run archive` run; archive run on a project with a page: its `status:` line changed |
 | `agent-add PROJECT NAME (--front\|--back) --mandate M` | Lists an agent; on a project with a page writes the `agents:` block | Run on a project with no page and on one with a page. On the page-less project it did NOT give a default mover: `create` with `project=prj_...` and no `mover` was refused ("names no mover"), and worked with `mover=<name>`. On the project with a page (agent listed in its `agents:` block, after the registry refreshed) `create` with no `mover` worked |
 | `agent-mandate PROJECT NAME --mandate M` | Changes the mandate line of a listed agent in the record, then writes the `agents:` block | `agent-add` with another mandate for a listed name is refused; use this verb. A hand edit of the page line does not stick (the record wins) |
-| `agent-retire PROJECT NAME`, `agent-rename PROJECT OLD NEW` | Takes an agent off the map, or renames it; retiring the last agent of a project with no open item archives it | Not run |
+| `agent-retire PROJECT NAME`, `agent-rename PROJECT OLD NEW` | Takes an agent off the map, or renames it; retiring the last agent of a project with no open item archives it; the keeper mark follows a rename and moves on a retire of the marked agent | Not run |
+| `keeper PROJECT AGENT [--apply]` | Moves the project's keeper mark to a listed agent (a dry run unless `--apply`; keeps an undo file) | Not run |
 | `mirror PROJECT [--make-page]` | Writes the three mirror lines again | Not run |
 | `show PROJECT` | The entry and what the registry reads | Run |
 

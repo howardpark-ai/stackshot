@@ -389,6 +389,13 @@ def registry_audit_send() -> bool:
     return get("registry_audit", "send") is True
 
 
+def registry_keeper_debts() -> bool:
+    """[registry_audit] keeper_debts: whether the project registry check also reports the four keeper-mark debts (keeper-not-listed, keeper-two-marks, keeper-retired, keeper-not-derived:
+    tools/registry_report.py). False (the default, and the reading of any value that is not the boolean true): the check reports none of them, so nobody who edits a page is told of a mark's problem
+    before the mark is put on projects on purpose (the stage that sets marks turns it on)."""
+    return get("registry_audit", "keeper_debts") is True
+
+
 def audit_builder() -> str:
     """[audit] builder: the session a tripped threshold, and an unmoved finding or the unmoved digest of a project with no builder of its own, is sent to. A front-only project (anchors.front_only) is the exception: its -main agent takes those (audit_run.Env.chase_of), and this session only when that agent cannot be named. Default "my-engineer"."""
     return str(get("audit", "builder") or "").strip() or AUDIT_BUILDER

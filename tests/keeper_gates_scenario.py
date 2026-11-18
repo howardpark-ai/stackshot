@@ -40,6 +40,7 @@ page("projects/forge/own.md", "type: project\ntitle: Forge own\ndisplay-name: te
 page("projects/forge/owned.md", "type: project\ntitle: Forge owned\nagent: team-forge-docs")
 page("projects/satellite.md", "type: project\ntitle: Satellite\nhub: projects/forge")
 page("projects/satellite/note.md", "type: note\ntitle: Satellite note")
+page("projects/named-sat.md", "type: project\ntitle: Named satellite\ndisplay-name: lone-satellite\nhub: projects/forge")
 page("projects/loft.md", "type: project\ntitle: Loft\ndisplay-name: team-loft\nagents:\n  team-loft-main: talks\nstatus: active")
 page("projects/lone-page.md", "type: project\ntitle: Lone\ndisplay-name: lone-session\nstatus: active")
 page("projects/lone-page/sub.md", "type: note\ntitle: Lone sub")
@@ -270,6 +271,48 @@ import types
 check("a name-line reader (project_verbs: the name an entry made from a marked page gets) reads the line the mark took the place of",
       prj.name_line(R()["projects/forge"]) == "team-forge" and anchors.name_line("projects/forge", R()) == "team-forge-docs")
 write_record({})
+
+# ---- 15. carried from the stage 2 reviews (S3-a, S3-b, S3-c)
+# S3-a: a hub-linked page with its OWN display-name and no agents keeps its own line as its keeper (as keeper.fields reads it); the hub's mark does not take it over, and the unnamed satellite still follows the hub
+write_record({F: forge("team-forge-docs")})
+rg = R()
+check("S3-a: a named satellite of a marked hub: the notices go to its own name line and the registry agrees (legacy, its own line), where an unnamed satellite follows the hub's mark",
+      anchors.notice_name("projects/named-sat", rg) == "lone-satellite" and (rg["projects/named-sat"]["keeper_agent"], rg["projects/named-sat"]["keeper_source"]) == ("lone-satellite", "legacy")
+      and anchors.notice_name("projects/satellite", rg) == "team-forge-docs", (anchors.notice_name("projects/named-sat", rg), rg["projects/named-sat"].get("keeper_agent"), anchors.notice_name("projects/satellite", rg)))
+write_record({})
+rg = R()
+check("S3-a: with no mark the named satellite answers as it did (its own line)", anchors.notice_name("projects/named-sat", rg) == "lone-satellite", anchors.notice_name("projects/named-sat", rg))
+# S3-b: an agent marked by one project alone is described as the keeper of that project, not of the project where its best role is
+write_record({F: forge(), L: entry("projects/loft", name="team-loft", agents={"team-loft-main": agent(True, "talks"), "team-forge-docs": agent(True, "also keeps the loft docs", keeper=True)})})
+rg = R()
+check("S3-b: the pages that mark an agent are named by keeper_pages (the loft, though the agent's best role is on the forge)",
+      anchors.keeper_pages("team-forge-docs", rg) == ["projects/loft"] and anchors.session_roles(rg, set())["team-forge-docs"]["project"] == "projects/forge", (anchors.keeper_pages("team-forge-docs", rg), anchors.session_roles(rg, set())["team-forge-docs"]))
+check("S3-b: telling.keeper_words names the loft for it, not the forge where its best role is",
+      telling.keeper_words("projects/forge", "team-forge-docs") == "the keeper of projects/loft", telling.keeper_words("projects/forge", "team-forge-docs"))
+# ... and the sessions tool's own label says both: the project of its best role and the project it keeps
+from stackshot.web.tools import sessions as _wts
+(T / "fleet/a/sessions.json").write_text(json.dumps({"00000000-0000-4000-8000-000000000001": {"name": "team-forge-docs", "machine": "a"}, "00000000-0000-4000-8000-000000000002": {"name": "team-loft-main", "machine": "a"},
+                                                     "00000000-0000-4000-8000-000000000003": {"name": "team-forge-main", "machine": "a"}}))
+if _wts._fleet_names is None: _wts._fleet_names = lambda: {"a": "testbox"}
+ls = _wts._sessions_listing("").split("\n"); rowof = lambda n: next((x for x in ls if x.startswith(f"- {n} — ")), "")
+check("S3-b: the sessions tool says front agent of the forge, and keeper of the loft, for an agent marked on another project than its best role; a plain agent reads as before",
+      rowof("team-forge-docs").endswith(" · front agent of projects/forge, and keeper of projects/loft") and rowof("team-forge-main").endswith(" · front agent of projects/forge"), [x for x in ls if x.startswith("- ")])
+write_record({F: forge("team-forge-docs")})
+ls = _wts._sessions_listing("").split("\n")
+check("S3-b: the sessions tool keeps its one-project wording when the agent keeps the project its best role is on (front agent and keeper of the forge)",
+      next((x for x in ls if x.startswith("- team-forge-docs — ")), "").endswith(" · front agent and keeper of projects/forge"), [x for x in ls if x.startswith("- ")])
+write_record({})
+# S3-c: the entry made from a marked page, and the name check, read the page's name line (the line the mark took the place of), never the marked agent
+from stackshot.projects import project_verbs as pv
+orow = prj.registry_raw()["projects/orchard"]
+check("S3-c: a page that marks an agent in its own `keeper:` line has role mark, the marked agent as its session and its old name line as legacy_session",
+      orow["role"] == "mark" and orow["session"] == "team-orchard-docs" and orow["legacy_session"] == "team-orchard", orow)
+ent_o = pv.derive_entry(ids["projects/orchard"], "projects/orchard", orow, prj.registry_raw(), None, "2026-11-01T00:00:00Z")
+check("S3-c: derive_entry names the project by the page's name line, not by the marked agent", ent_o.get("name") == "team-orchard", ent_o)
+ctx = pv.Ctx(json.loads(REC.read_text()) if REC.exists() else {}, {}, "2026-11-01T00:00:00Z", "")
+nt = pv._name_taken(ctx, "team-orchard", ids["projects/loft"]); nt2 = pv._name_taken(ctx, "team-orchard-docs", ids["projects/loft"])
+check("S3-c: the name check treats a marked page's name line as taken by that page, and the marked agent's name as no name line",
+      "name line of projects/orchard" in nt and nt2 == "", (nt, nt2))
 
 if fails: print(f"FAILED: keeper gates scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: keeper gates scenario, {len(ran)} checks")
