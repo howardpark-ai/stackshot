@@ -33,6 +33,7 @@ from typing import Any
 from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml; next to this module)
 from stackshot.anchors import gmail_query as _gq  # noqa: E402  (the terms of a Gmail query anchor: the grammar an add checks)
 from stackshot.projects import project_registry as _pr  # noqa: E402  (the project record's entries: read first, the page lines are the fallback)
+from stackshot.projects import keeper as _kp  # noqa: E402  (the keeper as a mark on one agent: a marked page keeps its name line for the roles)
 from stackshot.model import item_project as _iproj  # noqa: E402  (an item's project by its permanent id: the page key it reads through the id)
 from stackshot.core import readonly as _ro  # noqa: E402  (a warm standby copy writes nothing)
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  (the permanent session ids; every lookup is None while there is no registry)
@@ -534,8 +535,8 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
         owed = {str(x) for x in (e.get("owed_agents") or {})}
         for n in [str(x) for x in (e.get("agents") or {})] + sorted(back):
             offer(n, "back" if n in back else "front", key, e, n in owed)
-        s = str(e.get("session") or "")
-        if s and e.get("role") not in ("agent", "inherited"):
+        s, rl = _kp.name_line(e)                 # the page's own name line (with a mark on the page, the one the mark took the place of: a mark moves no role)
+        if s and rl not in ("agent", "inherited"):
             offer(s, NAME_ROLE, key, e)
     owed_won = {n for n, c in claims.items() if n not in best or dead(best[n][2])}
     best.update({n: claims[n] for n in owed_won})
@@ -561,8 +562,8 @@ def file_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | No
     reg = _prj.with_pending(registry() if reg is None else reg, made=True)   # an owed agent is a user-facing agent of its page too (session_roles)
     real, active = set(), set()                      # name-line sessions with user-facing agents on their page; name-line sessions of an active page
     for e in reg.values():
-        s = str(e.get("session") or "")
-        if not s or e.get("role") in ("agent", "inherited"):
+        s, rl = _kp.name_line(e)
+        if not s or rl in ("agent", "inherited"):
             continue
         if set(e.get("agents") or {}) - set(e.get("back_agents") or {}):
             real.add(s)
@@ -705,13 +706,13 @@ def _general_resolve(value: str, reg: dict[str, dict[str, Any]]) -> tuple[str, s
     return (value, hits[0][2]) if hits else ("", "")
 
 
-def general_main(project: str, reg: dict[str, dict[str, Any]] | None = None) -> tuple[str, str]:
+def general_main(project: str, reg: dict[str, dict[str, Any]] | None = None, roots: list[str] | None = None) -> tuple[str, str]:
     """The general -main agent a page with no agent of its own falls to, and the page that lists it → (agent, page), ("", "") when the scope
     has none. The scope is the one the project picker shows (projects.derive_scope: the key's prefix, the page's org and tags, the names of
-    its agents); a scope with no general agent falls back to the default scope's."""
+    its agents); a scope with no general agent falls back to the default scope's. `roots`: the pilot roots to read the page's root from (pilot_root's argument; given, the registry file is not read for them)."""
     from stackshot.projects import projects as _prj
     reg = registry() if reg is None else reg
-    root = pilot_root(project) or "/".join(str(project or "").strip("/").split("/")[:2])
+    root = pilot_root(project, roots) or "/".join(str(project or "").strip("/").split("/")[:2])
     scope = _prj.derive_scope(root, reg.get(root) or {}, reg)
     for sc in dict.fromkeys([scope, _prj.default_scope()]):
         got = _general_resolve(_general_value(sc), reg)
@@ -728,16 +729,16 @@ def has_front(project: str, reg: dict[str, dict[str, Any]] | None = None) -> boo
     return any(main_of(reg.get(k) or {}) for k in dict.fromkeys([root, hub_of(root, reg)]))
 
 
-def fallback_main(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
+def fallback_main(project: str, reg: dict[str, dict[str, Any]] | None = None, roots: list[str] | None = None) -> str:
     """The -main agent a project's notices fall to when its page names no session: its own page's, its hub's, else the scope's general one
-    (general_main). "" when none can be named."""
+    (general_main). "" when none can be named. `roots`: as in general_main."""
     reg = registry() if reg is None else reg
-    root = pilot_root(project) or "/".join(str(project or "").strip("/").split("/")[:2])
+    root = pilot_root(project, roots) or "/".join(str(project or "").strip("/").split("/")[:2])
     for k in dict.fromkeys([root, hub_of(root, reg)]):
         m = main_of(reg.get(k) or {})
         if m:
             return m
-    return general_main(root, reg)[0]
+    return general_main(root, reg, roots)[0]
 
 
 # ---------- derived sessions + bindings ----------

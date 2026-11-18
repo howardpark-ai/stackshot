@@ -49,6 +49,7 @@ from pathlib import Path
 
 from stackshot.core import config as _cfg
 from stackshot.projects import project_registry as _pr      # the project entries of the record: the registry reads them first, the page lines are the fallback
+from stackshot.projects import keeper as _kp      # the keeper as a mark on one agent (readers only: nothing here writes a mark)
 from stackshot.model import item_project as _iproj      # an item's project by its permanent id: the page key read through the id
 from stackshot.core import readonly as _ro      # a warm standby copy writes nothing
 
@@ -274,13 +275,15 @@ _NAME_ROLES = ("name", "steward")      # the registry role of a page's own `disp
 
 def _name_prefixes(key: str, entry: dict, reg: dict) -> list:
     """The project's name, the prefix of its agents' names (`<project>-<role>`): the `display-name:` line of the page, and of its hub's;
-    a name line naming one of the page's own agents is a session, so the name comes from its `-main` agent (else that name minus its last part)."""
+    a name line naming one of the page's own agents is a session, so the name comes from its `-main` agent (else that name minus its last part).
+    The prefix is the name line, never the keeper agent a page marks: a one-session project's session need not start with the page's slug."""
     out = []
     parts = key.split("/")
     for k in dict.fromkeys([key, str(entry.get("hub") or ""), "/".join(parts[:2])]):
         e = reg.get(k) if k != key else entry
-        if isinstance(e, dict) and e.get("session") and e.get("role") in _NAME_ROLES:
-            name = str(e["session"]); agents = [str(a) for a in (e.get("agents") if isinstance(e.get("agents"), dict) else {})]
+        sess, rl = _kp.name_line(e)                 # the page's own name line: with a mark on the page, the line the mark took the place of
+        if sess and rl in _NAME_ROLES:
+            name = str(sess); agents = [str(a) for a in (e.get("agents") if isinstance(e.get("agents"), dict) else {})]
             if name.casefold() in {a.casefold() for a in agents}:
                 base = next((a[:-5] for a in agents if a.casefold().endswith("-main") and len(a) > 5 and name.casefold().startswith(a[:-5].casefold() + "-")), "")
                 name = base or name.rsplit("-", 1)[0]
@@ -296,17 +299,19 @@ def role_of(name: str, prefixes) -> str:
 
 
 def agent_records(key: str, entry: dict, reg: dict) -> dict:
-    """A page's `agents:` map as {name: {front, role, mandate_line}}: a top-level entry is front, a `background:` entry is not.
+    """A page's `agents:` map as {name: {front, role, mandate_line}} (plus `keeper: true` on the one agent marked as the project's keeper): a top-level entry is front, a `background:` entry is not.
     The registry keeps both: `agents` (flat, every agent) and `back_agents` (the background subset)."""
     flat = entry.get("agents") if isinstance(entry.get("agents"), dict) else {}
     back = set(entry.get("back_agents") or {})
     pre = _name_prefixes(key, entry, reg)
-    return {str(n): {"front": str(n) not in back, "role": role_of(n, pre), "mandate_line": str(m)} for n, m in flat.items()}
+    marked = _kp.row_mark(entry)                    # `keeper: true` on the one agent the page or the record marks; with no mark no record has the field
+    return {str(n): {"front": str(n) not in back, "role": role_of(n, pre), "mandate_line": str(m), **({"keeper": True} if str(n) == marked else {})} for n, m in flat.items()}
 
 
 def registry_fields(key: str, entry: dict, reg: dict, pid: str) -> dict:
-    """What the page registry gains for one page beside its old fields (pages.cmd_registry)."""
-    return {"id": pid, "key": key, "agent_records": agent_records(key, entry, reg)}
+    """What the page registry gains for one page beside its old fields (pages.cmd_registry): the id, the key, the agents as records, and the keeper
+    (`keeper_agent`, `keeper_source`: keeper.fields)."""
+    return {"id": pid, "key": key, "agent_records": agent_records(key, entry, reg), **_kp.fields(key, reg)}
 
 
 def _pending_all() -> dict:
@@ -323,7 +328,10 @@ def _record(key: str, entry: dict, reg: dict, pid: str, pending: dict, mark: dic
     for n, a in sorted((pending or {}).items()):
         if n not in agents:       # the page wins: a name the page lists is the page's
             agents[n] = {"front": bool(a.get("front")), "role": str(a.get("role") or ""), "mandate_line": str(a.get("mandate_line") or ""), "page_owed": True}
-    rec = {"id": pid, "key": key, "keeper": str(entry.get("session") or ""), "agents": agents}
+    kf = {k: entry[k] for k in ("keeper_agent", "keeper_source") if k in entry} if "keeper_source" in entry else _kp.fields(key, reg)     # a made project the registry has no row for yet: read now
+    rec = {"id": pid, "key": key, "keeper": str(entry.get("session") or ""), **kf, "agents": agents}
+    if entry.get("keeper_problems"): rec["keeper_problems"] = list(entry["keeper_problems"])
+    if entry.get("legacy_session"): rec["legacy_session"] = str(entry["legacy_session"])
     rec.update(listing_fields(key, entry, reg, agents, mark, recent_items(reg, now) if recent is None else recent))
     return rec
 
@@ -377,7 +385,8 @@ def _owner_key(key: str, reg: dict) -> str:
     chain = [key, str(row.get("hub") or "").strip(), *["/".join(parts[:n]) for n in range(len(parts) - 1, 1, -1)]]
     for k in dict.fromkeys(c for c in chain if c):
         e = reg.get(k)
-        if isinstance(e, dict) and e.get("role") in _NAME_ROLES and str(e.get("session") or "").strip():
+        sess, rl = _kp.name_line(e)
+        if isinstance(e, dict) and rl in _NAME_ROLES and sess.strip():
             return k
     return ""
 
@@ -387,7 +396,8 @@ def _fields_row(key: str, rec: dict, reg: dict, entry: dict | None) -> dict:
     field, "page" when the page's own line answers, "" when neither has it."""
     row = reg.get(key) if isinstance(reg.get(key), dict) else {}
     entry = entry or {}
-    name = str(row.get("session") or "") if row.get("role") in _NAME_ROLES else ""
+    sess, rl = _kp.name_line(row)                  # the project's name: with a mark on the page, the name line the mark took the place of
+    name = sess if rl in _NAME_ROLES else ""
     agents = rec.get("agents") or {}
     src = lambda in_record, have: "record" if in_record else ("page" if have else "")
     return {"id": rec["id"], "key": key, "owner_key": _owner_key(key, reg), "sub_page": is_sub_page(key, reg, row),
@@ -414,9 +424,12 @@ def fields(x, reg: dict | None = None) -> dict | None:
     e = _pr.entries().get(v["id"]) or {}
     pre = [str(v["name"])] if v.get("name") else []
     agents = {n: {"front": bool(a.get("front")), "role": role_of(n, pre), "mandate_line": str(a.get("mandate_line", ""))} for n, a in (v.get("agents") or {}).items()}
-    return {"id": v["id"], "key": "", "owner_key": "", "sub_page": False, "source": "record", "display_name": str(v.get("name") or ""), "status": v.get("status") or "active",
-            "retired": bool(v.get("archived")), "hub": str(v.get("hub") or ""), "agents": agents, "main": main_of(agents),
-            "from": {"display_name": "record" if v.get("name") else "", "status": "record", "agents": "record" if "agents" in e else ""}}
+    out = {"id": v["id"], "key": "", "owner_key": "", "sub_page": False, "source": "record", "display_name": str(v.get("name") or ""), "status": v.get("status") or "active",
+           "retired": bool(v.get("archived")), "hub": str(v.get("hub") or ""), "agents": agents, "main": main_of(agents),
+           "from": {"display_name": "record" if v.get("name") else "", "status": "record", "agents": "record" if "agents" in e else ""}}
+    if _kp.record_mark(e.get("agents"))[0]:
+        out["keeper_problems"] = ["a `keeper` flag on a project with no page is not read: the mark needs a page; ignored"]
+    return out
 
 
 def all_fields(reg: dict | None = None) -> list:
@@ -426,7 +439,7 @@ def all_fields(reg: dict | None = None) -> list:
     by = _ids_for(list(reg), reg); pend = _pending_all(); mk = marks(); recent = recent_items(reg)
     ents = _pr.entries(); out = []
     for key, row in sorted(reg.items()):
-        if not isinstance(row, dict) or not (row.get("agents") or row.get("role") in _NAME_ROLES):
+        if not isinstance(row, dict) or not (row.get("agents") or _kp.name_line(row)[1] in _NAME_ROLES):
             continue
         rec = _record(key, row, reg, by[key], pend.get(by[key], {}), mk.get(by[key]), recent)
         out.append(_fields_row(key, rec, reg, ents.get(rec["id"])))
@@ -493,12 +506,13 @@ def _entry_scope(e: dict) -> str:
     `work-…` one work), then the `org` and tags as `_own_scope` reads them, then the prefix of the agents' names for a page with no keeper."""
     org = str(e.get("org") or "").strip().lower()
     if org in scopes() and org != default_scope(): return org
-    s = _name_scope(e.get("session"))
+    line = _kp.name_line(e)[0]                  # the name line, never the marked agent: a mark moves no scope
+    s = _name_scope(line)
     if s: return s
     s = _own_scope(e)
     if s: return s
     agents = e.get("agents") if isinstance(e.get("agents"), dict) else {}
-    if not e.get("session"):
+    if not line:
         found = {_name_scope(n) for n in agents} - {""}
         if len(found) == 1: return found.pop()
     return ""
@@ -583,8 +597,8 @@ def named_for(name: str, prefixes) -> str:
 
 def name_line(entry: dict) -> str:
     """The session a page's own `display-name:` line names ("" when the page has none, when the registry role is another (an `agent:` line, one inherited from the page above) or when the value is a session id)."""
-    s = str(entry.get("session") or "").strip()
-    return s if s and entry.get("role") in _NAME_ROLES and not SESSION_ID_RX.match(s) else ""
+    s, rl = _kp.name_line(entry); s = s.strip()
+    return s if s and rl in _NAME_ROLES and not SESSION_ID_RX.match(s) else ""
 
 
 def _other_claim(key: str, entry: dict, reg: dict, name: str, longer: int) -> str:

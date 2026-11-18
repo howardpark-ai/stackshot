@@ -10,7 +10,8 @@ An entry (every field optional unless said):
     title, type    what the registry shows ("project")
     scope          one of [project_scopes] order
     status         "active" | "archived" (default active)
-    agents         {agent name: {"front": bool, "mandate_line": str}} in the order the project lists them (the first builder listed is the builder)
+    agents         {agent name: {"front": bool, "mandate_line": str, "keeper": true}} in the order the project lists them (the first builder listed is the builder). `keeper: true` marks the
+                   project's keeper: at most one agent of the entry carries it (a second flag is ignored and reported, never an error); with none the keeper is derived (keeper.py)
     hub            the page key of the project this one belongs to ("" = none)
     page           the pointer to the project's knowledge-base page: a page key of this instance's page store, or any link to another knowledge base; absent = the project has none
     former_keys    page keys the project's page had before ("projects/old-name"), so a stored key still finds the project
@@ -35,7 +36,8 @@ The registry as the server reads it, and the two files it keeps (the helpers tha
     _roles_sync()         <state>/roles.json, every session's role, rewritten when the roles changed or the file is ROLES_EVERY old (`_roles_sync_safe` also keeps projects.json)
     _projects_sync()      <state>/projects.json, the project record's published file
 
-Stdlib only; config.py, readonly.py and store.py (core/) are its imports at load (projects.py, anchors.py and renamed_agents.py are imported inside the functions that need them, since they import this module)."""
+Stdlib only at load: config.py, readonly.py, store.py (core/) and keeper.py (itself stdlib only at load) are its imports. projects.py, anchors.py and renamed_agents.py are imported inside the functions that need them, since they import this module;
+so is the router (router_live, with the anchors and routing modules it reads): keeper.derive imports it lazily, the first time a row's keeper is derived (apply, for the rows an entry changes), never at load."""
 from __future__ import annotations
 
 import copy
@@ -52,6 +54,7 @@ from typing import Any, Callable
 from stackshot.core import config as _cfg
 from stackshot.core import readonly as _ro
 from stackshot.core import store as _store
+from stackshot.projects import keeper as _kp         # the keeper as a mark on one agent: stdlib only at load (its router import is lazy, in keeper.derive)
 
 SCHEMA = 1
 SECTION = "projects"                  # the top-level field of project-record.json that holds the entries
@@ -268,8 +271,33 @@ def _overlay(cur: dict, e: dict, retired: set) -> dict:
     for f in ("title", "type", "scope"):
         if e.get(f):
             new[f] = e[f]
+    under = _kp.name_line(cur)                                   # what the page's own lines give the row (with a page mark on it, what the mark took the place of)
     if e.get("name"):
-        new["session"] = e["name"]; new["role"] = "name"
+        under = (e["name"], "name")
+    mark, problems = _kp.record_mark(e.get("agents")) if "agents" in e else ("", [])
+    listed = e["agents"] if "agents" in e else (cur.get("agents") or {})
+    page_mark = _kp.row_mark(cur)
+    mark = mark or (page_mark if page_mark in listed else "")    # the record's flag first, else the mark the page's own `keeper:` line gave
+    if mark:                                                     # the marked agent is the row's keeper; the old name line stays beside it
+        new["session"] = mark; new["role"] = _kp.MARK
+        for k, v in (("legacy_session", under[0]), ("legacy_role", under[1])):
+            if v:
+                new[k] = v
+            else:
+                new.pop(k, None)
+    else:
+        if e.get("name"):
+            new["session"] = e["name"]; new["role"] = "name"
+        elif cur.get("role") == _kp.MARK:                        # a page mark whose agent the record no longer lists: the old lines answer again
+            new["session"] = under[0]
+            if under[1]:
+                new["role"] = under[1]
+            else:
+                new.pop("role", None)
+        if e.get("name") or cur.get("role") == _kp.MARK:
+            new.pop("legacy_session", None); new.pop("legacy_role", None)
+    if problems:
+        new["keeper_problems"] = [*(cur.get("keeper_problems") or []), *problems]
     if "status" in e:
         new["status"] = _status_word(cur.get("status", ""), e["status"], retired)
     if "hub" in e:
@@ -292,16 +320,45 @@ def _differs(a: dict, b: dict) -> bool:
     return a != b or any(list(a.get(k) or {}) != list(b.get(k) or {}) for k in ("agents", "back_agents"))
 
 
+def _top(key: str) -> str:
+    return "/".join(key.split("/")[:2])
+
+
+def _inherit_marks(out: dict, tops: set) -> None:
+    """The sub-pages under the pages of `tops` that inherit a mark take it as their `session` (role stays "inherited", `legacy_session` keeps what the page above gave them), and one that no
+    longer has a mark above it takes its old value back. Rows are copied before they change."""
+    for k in sorted(out, key=lambda x: x.count("/")):
+        row = out[k]
+        if _top(k) not in tops or not isinstance(row, dict) or row.get("role") != "inherited":
+            continue
+        up = _kp.above(k, out); m = ""
+        while up and not m:
+            r = out[up]
+            m = str(r.get("session") or "") if r.get("role") == _kp.MARK else ""
+            up = _kp.above(up, out) if r.get("role") == "inherited" and not m else ""
+        had = "legacy_session" in row or "legacy_role" in row
+        old = str((row.get("legacy_session") if had else row.get("session")) or "")
+        if m and (row.get("session") != m or not had):
+            row = out[k] = dict(row); row["session"] = m
+            row["legacy_role"] = "inherited"             # what the row was: a name-line reader (keeper.name_line) must not take its old session for a name line of its own
+            if old:
+                row["legacy_session"] = old
+        elif not m and had:
+            row = out[k] = dict(row); row["session"] = old; row.pop("legacy_session", None); row.pop("legacy_role", None)
+
+
 def apply(reg: dict) -> dict:
     """The page registry with the project entries laid over it: for each entry whose page pointer is a key of `reg`, the entry's fields replace the page's (see
     the module text), a field the entry does not hold stays the page's. `reg` itself is never changed; with no entries (or none that differs) it is returned as it is.
-    A project with no page has no row in a registry keyed by page: it is reached by resolve(). Never raises."""
+    A project with no page has no row in a registry keyed by page: it is reached by resolve(). The keeper follows the entry: a flagged agent is the row's keeper and the
+    sub-pages under it inherit it; `keeper_agent` and `keeper_source` are read again for the pages an entry changes (and, when it changes a project's agents or marks one,
+    for the whole project). Never raises."""
     try:
         ents = entries()
         if not ents or not isinstance(reg, dict) or not reg:
             return reg
         retired = _retired_words()
-        out: dict | None = None; changed = []
+        out: dict | None = None; changed = []; tops = set()
         for pid, e in sorted(ents.items()):
             k = page_key(e); cur = reg.get(k) if k else None
             if not isinstance(cur, dict):
@@ -312,12 +369,24 @@ def apply(reg: dict) -> dict:
             if out is None:
                 out = dict(reg)
             out[k] = new; changed.append(k)
+            if (_kp.MARK in (cur.get("role"), new.get("role")) or "legacy_session" in cur or "legacy_session" in new
+                    or list((cur.get("agents") or {}).items()) != list((new.get("agents") or {}).items())
+                    or list((cur.get("back_agents") or {}).items()) != list((new.get("back_agents") or {}).items())):
+                tops.add(_top(k))
         if out is None:
             return reg
         from stackshot.projects import projects as _p
+        _inherit_marks(out, tops)
         for k in changed:
             if "agent_records" in out[k]:                  # the records name each agent's role from the project's name: after every entry is laid
                 out[k]["agent_records"] = _p.agent_records(k, out[k], out)
+        hubbed = [x for x in out if _top(x) not in tops and x not in changed and isinstance(out.get(_top(x)), dict)       # a page that names no agents and falls to its hub's: its derived keeper follows the hub's agents
+                  and _top(str(out[_top(x)].get("hub") or "")) in tops]
+        for k in [*changed, *(x for x in out if _top(x) in tops and x not in changed), *hubbed]:
+            if "keeper_source" in out[k]:                  # a registry file written before the keeper fields has none to refresh: the published record reads them itself
+                if out[k] is reg.get(k):
+                    out[k] = dict(out[k])
+                out[k].update(_kp.fields(k, out))
         return out
     except Exception as e:  # noqa: BLE001
         print(f"project record: the entries are not laid over the registry ({type(e).__name__}: {e})", file=sys.stderr, flush=True)

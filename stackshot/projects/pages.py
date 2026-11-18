@@ -65,6 +65,7 @@ HERE = str(_paths.ROOT)      # the checkout: the commands this module prints for
 from stackshot.core import config as _cfg   # stackshot.toml through the repo checkout: the same paths on every machine (stdlib tomllib)
 from stackshot.core.lines import newline_lines
 from stackshot.projects import project_registry as _pr   # the project record's entries, laid over the registry's page lines (stdlib only)
+from stackshot.projects import keeper as _kp   # the keeper as a mark on one agent: the page's `keeper:` line, the record's flag, the derived keeper
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id
 from stackshot.projects import brains as _brains   # which brain holds a page: [paths] brain, or a second brain's own copy ([[brains]])
 REPO = str(_cfg.path("paths", "repo"))
@@ -401,30 +402,39 @@ def remove_agent(content, name):
     return out, ""
 
 NAME = "name"   # keeper_of's role for the session a page's own `display-name:` line names (the registry's `role`)
+MARK = _kp.MARK   # ... and for the agent a page's own `keeper:` line marks
 
-def keeper_of(key, fms):
-    """Who keeps a page, from its frontmatter → (session name, role). `display-name:` on a hub page (the project's name; role
-    "name"), `agent:` on a sub-page an agent keeps as its own working document; `session:` is the key both replaced and is
-    still read. A sub-page that names nobody belongs to the name-line session of the nearest page above it (role
-    "inherited")."""
+def keeper_of(key, fms, marks=True):
+    """Who keeps a page, from its frontmatter → (session name, role). The page's `keeper:` line first, when it names an agent of the page's own `agents:` map (the mark; role "mark"); then
+    the old keys: `display-name:` on a hub page (the project's name; role "name"), `agent:` on a sub-page an agent keeps as its own working document; `session:` is the key both replaced and is
+    still read. A sub-page that names nobody belongs to the keeper of the nearest page above it (role "inherited"), a mark included. `marks=False` reads the old keys alone: the answer
+    before a page could carry a mark (the project's name line, which the mark does not replace)."""
     fm = fms.get(key) or {}
+    if marks:
+        m, _ = _kp.page_mark(fm, split_agents(fm.get("agents"))[0])
+        if m: return m, MARK
     for k, role in (("display-name", NAME), ("agent", "agent"), ("session", "")):
         v = fm.get(k)
         if isinstance(v, str) and v.strip():
             if role: return v.strip(), role
-            up = _hub_keeper(key, fms)              # the old key: a sub-page kept by someone other than its hub's name-line session is an agent's
+            up = _hub_keeper(key, fms, marks)       # the old key: a sub-page kept by someone other than its hub's name-line session is an agent's
             return v.strip(), ("agent" if up and up != v.strip() else NAME)
-    up = _hub_keeper(key, fms)
+    up = _hub_keeper(key, fms, marks)
     return (up, "inherited") if up else ("", "")
 
-def _hub_keeper(key, fms):
+def _hub_keeper(key, fms, marks=True):
     parts = key.split("/")
     for i in range(len(parts) - 1, 1, -1):
         p = "/".join(parts[:i])
         if p in fms:
-            s, role = keeper_of(p, fms)
+            s, role = keeper_of(p, fms, marks)
             if s and role != "agent": return s
     return ""
+
+def keeper_problems(key, fms):
+    """The marks of this page that are ignored, one line each (`keeper:` naming no agent of its map, or not one name): [] for a page with none."""
+    fm = fms.get(key) or {}
+    return _kp.page_mark(fm, split_agents(fm.get("agents"))[0])[1]
 
 def git_ts(path, base=None):
     try:
@@ -530,7 +540,7 @@ def agent_listed(name, fms=None):
     if fms is None: fms = read_pages()[0]
     hubs = {}                                       # project name → the active pages whose name line it is
     for key, fm in fms.items():
-        who, role = keeper_of(key, fms)
+        who, role = keeper_of(key, fms, marks=False)     # the project's name line: a mark names an agent, never the project
         if who and role == NAME and _active(fm): hubs.setdefault(who, []).append(key)
     if name in hubs: return 0, f"the name of {', '.join(sorted(hubs[name]))}: not an agent"
     over = [s for s in hubs if name.startswith(s + "-") and len(name) > len(s) + 1]
@@ -577,14 +587,23 @@ def cmd_registry(quiet=False):
         gt = gts[b.name]
         board = fm.get("board") or []
         if isinstance(board, str): board = [board] if board else []
-        who, role = keeper_of(key, fms)             # `session` stays the registry's name for the page's keeper: every reader uses it
+        who, role = keeper_of(key, fms)             # `session` stays the registry's name for the page's keeper: every reader uses it (a page's `keeper:` mark, when it has one, else its old lines)
+        old = keeper_of(key, fms, marks=False)      # what the old lines give: kept as `legacy_session` and `legacy_role` where a mark took their place
         agents, back = split_agents(fm.get("agents"))
         pages[key] = {"title": fm.get("title") or key, "name": fm.get("name") or "", "org": fm.get("org") or "", "tags": fm.get("tags") or [], "type": fm.get("type") or "", "session": who,
                       "status": fm.get("status") or "", "board": board,
                       "board_row": str(fm.get("board_row") or "").strip().lower() in ("true", "yes", "row"),   # a sub-page that earns its own board row
                       "updated": gt.get(rel) or git_ts(rel, base) or int(os.path.getmtime(f)),
                       "mirror": (b.mirror_url if not b.default else _mirror()).format(key=key)}
-        if role: pages[key]["role"] = role          # name · agent · inherited
+        if role: pages[key]["role"] = role          # name · agent · inherited · mark
+        if (who, role) != old:                      # only where a mark applies: with none, every field is what it always was
+            if old[0]: pages[key]["legacy_session"] = old[0]
+            if old[1]: pages[key]["legacy_role"] = old[1]
+        problems = keeper_problems(key, fms)
+        if problems:
+            pages[key]["keeper_problems"] = problems
+            if not quiet:
+                for pr in problems: print(f"  ! {key}: {pr}", file=sys.stderr)
         hub = hub_line(key, fm, fms, quiet)         # the project this page's tree belongs to on the board (anchors.hub_of)
         if hub: pages[key]["hub"] = hub
         # `agents` = every agent of the hub, front and background, flat {name: mandate}, as its keeper wrote them: every reader
@@ -1020,10 +1039,10 @@ def _active(v):
     return str(v.get("status") or "").lower() not in DONE and not str(v.get("title") or "").lower().startswith("moved")
 
 def keepers_any(names):
-    """True when one of these names or ids keeps an active page: its registry `session`, which is the page's `display-name:` or a
-    sub-page's `agent:` (keeper_of)."""
+    """True when one of these names or ids keeps an active page: its registry `session` (the page's `keeper:` mark, its `display-name:`, or a sub-page's `agent:`: keeper_of), or the
+    `legacy_session` a mark took the place of: a session keeps a page by any of the three rules."""
     ns = {str(x) for x in names if x}
-    return bool(ns) and any(str(v.get("session") or "") in ns and _active(v) for v in (load_registry() or {}).values())
+    return bool(ns) and any(_kp.names_of(v) & ns and _active(v) for v in (load_registry() or {}).values())
 
 def session_name(sid):
     """This session's name: the live fleet store first (transcript UUID -> name), then the CLI's own registry."""
@@ -1047,9 +1066,10 @@ def in_currency(sid, name=None):
     return keepers_any((sid, nm)) if c == "keepers" else (nm in c or sid in c)
 
 def keeper_pages(sid, name):
-    """Registry keys whose `session:` names this session, pages with open board items first."""
+    """Registry keys this session keeps (keepers_any's rule: the mark, the old lines, a sub-page's `agent:`), pages with open board items first."""
     reg = load_registry() or {}
-    keys = [k for k, v in reg.items() if str(v.get("session") or "") in {x for x in (name, sid) if x} and _active(v)]
+    me = {x for x in (name, sid) if x}
+    keys = [k for k, v in reg.items() if _kp.names_of(v) & me and _active(v)]
     open_n = {}
     for f in glob.glob(os.path.join(STORE, "*", "*.json")):
         try: t = json.load(open(f, encoding="utf-8"))

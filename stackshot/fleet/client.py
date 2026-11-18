@@ -17,9 +17,14 @@ runs on every box.
                                 roles = every session's role, {"generated": <UTC>, "sessions": {name: {role, project}}}; an agent
                                 the project record holds whose page line is still owed is listed under its project like a page's, front
                                 or back by its flag, with page_owed: true in its entry (no such key for a page's own agents);
-                                project = one project's record, {id, key, keeper, agents: {name: {front, role, mandate_line}}}: its permanent
-                                id (prj_<8 hex>), the page key it has now, the page's keeper and its agents (a name the page does not list
-                                yet carries page_owed: true). Every API entry that takes a project takes the id or the key.
+                                project = one project's record, {id, key, keeper, keeper_agent, keeper_source, agents: {name: {front, role,
+                                mandate_line, keeper?}}}: its permanent id (prj_<8 hex>), the page key it has now, the page's keeper and its
+                                agents (a name the page does not list yet carries page_owed: true). The keeper is a mark on one agent:
+                                `keeper: true` on that agent, set in the project record or by a `keeper: <agent>` line on the page. keeper_agent
+                                is that agent, else the project's builder, else its -main agent (a one-session page: its own session), and
+                                keeper_source says which: mark, derived (no mark) or legacy (no mark, and the page's old name line or `agent:` names
+                                the keeper; a sub-page or hub-linked page with a name line of its own stays legacy). Both are empty for a retired
+                                project with no mark. With a mark, `keeper` is the marked agent too. Every API entry that takes a project takes the id or the key.
   client.py get answer <board#N>
                                 {OWNER}'s answer on a board item, as one line: <kind> TAB <chosen option's label> TAB <his text> TAB <when>.
                                 It is his newest decision on the item (kind decision: he answered it), even if he commented after it;

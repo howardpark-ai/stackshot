@@ -216,7 +216,7 @@ def agents_gap(content, new, old_content=None):
     from stackshot.projects import pages as _pages; from stackshot.projects import projects as _prj; from stackshot.anchors import anchors as _anc
     try:
         fm = _pages.frontmatter_text(content)
-        flat, back = _pages.split_agents(fm.get("agents")); who, role = _pages.keeper_of(new, {new: fm})
+        flat, back = _pages.split_agents(fm.get("agents")); who, role = _pages.keeper_of(new, {new: fm}, marks=False)
     except Exception: return None
     entry = {"type": fm.get("type") or "", "status": fm.get("status") or "", "title": fm.get("title") or "", "hub": fm.get("hub") or "", "agents": flat, "back_agents": back, "session": who, "role": role}
     live = _live_sessions()
