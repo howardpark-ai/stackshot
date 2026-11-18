@@ -19,7 +19,8 @@ the roles.json entries that change (anchors.file_roles read before and after), t
 would be off the map, the projects whose gating class flips (a one-session project's session becomes a front agent), the projects whose items or router passes go to a different agent (a project with background agents only, a one-session project), the notice addresses that change, and the marked agents that are not builders.
 
 `--apply` refuses (exit 1, nothing written) while a session would lose a role, unless each such session is named with `--accept-role-loss`: the usual remedy is to list that session as a front agent of its project first.
-It is idempotent: a second run finds every project marked and writes nothing.
+It is idempotent: a second run finds every project marked and writes nothing. The apply plans again inside the record's lock and reports that plan (the one written), saying so when it differs from the plan read before the lock;
+its undo takes back the whole file and is refused once the record was written after the change (the printed hint names `restore --from-git` for that case).
 
     stackshot keeper-mark [--apply] [--accept-role-loss SESSION …] [--run-dir DIR] [--by WHO] [--json]"""
 from __future__ import annotations
@@ -55,9 +56,9 @@ def _name_line(e: dict, row: dict | None) -> str:
     return str(s) if s and rl in prj._NAME_ROLES else ""
 
 
-def _stale(name: str, ag: dict, ents: dict, e: dict, key: str, row: dict | None) -> bool:
+def _stale(name: str, ag: dict, ents: dict, e: dict, key: str, row: dict | None, raw: dict | None = None) -> bool:
     """Does the entry's `name` serve nothing once the mark replaced it as the keeper: no agent of the project is it or starts with it, no other project is its hub or has its page below it (their agents
-    may be named from it), and the page's own name line, when there is one, says the same?"""
+    may be named from it), no page of the registry `raw` (a sub-page with no entry of its own too) is below the project or has it as its hub, and the page's own name line, when there is one, says the same?"""
     n = name.casefold()
     if any(str(a).casefold() == n or str(a).casefold().startswith(n + "-") for a in ag):
         return False
@@ -66,6 +67,9 @@ def _stale(name: str, ag: dict, ents: dict, e: dict, key: str, row: dict | None)
             continue
         ok = pr.page_key(o)
         if pr._norm_key(o.get("hub")) == key or (ok and ok.startswith(key + "/")):
+            return False
+    for k2, o2 in (raw or {}).items():
+        if k2 != key and isinstance(o2, dict) and (k2.startswith(key + "/") or pr._norm_key(o2.get("hub")) == key):
             return False
     s, rl = _kp.name_line(row or {})
     return not (s and rl in prj._NAME_ROLES and str(s).casefold() != n)
@@ -102,15 +106,18 @@ def _decide(pid: str, e: dict, ents: dict, raw: dict, taken: set, by: str, now: 
         who = _name_line(e, row)
         if not who:
             return {**out, "action": "skip", "why": "it lists no agent and its page names no session: nothing to list or mark"}
+        if "agents" in e or e.get("former_agents"):       # agents were listed once (an empty map, or every agent retired): the name is the project's name and the prefix of those agents, not a live session
+            return {**out, "action": "skip", "why": f"it lists no agent now but had some (an empty or fully retired agents map), so its name {who} is the project's name, not a session: list the session by hand (`project.py agent-add`) and mark it"}
         if who.startswith("cse_") or re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", who):
             return {**out, "action": "skip", "why": f"its name line {who} is a session id, not a name: list its session by hand (`project.py agent-add`) and mark it"}
         if who.casefold() in taken:
             return {**out, "action": "skip", "why": f"its name line {who} is an agent of another project already: list the session where it belongs, then mark it"}
+        taken.add(who.casefold())                           # at once: the next project of this pass with the same name is refused, not promoted a second time
         e["agents"] = {who: {"front": True, "mandate_line": MANDATE, "by": by, "at": now, _kp.KEY: True}}
         out.update(action="promote", agent=who, kind="one-session", front=True, why="a one-session project: its name-line session is listed as its one front agent, keeps its name and is marked")
         ag = e["agents"]
     nm = str(e.get("name") or "")
-    if nm and _stale(nm, ag, ents, e, key, row):
+    if nm and _stale(nm, ag, ents, e, key, row, raw):
         e.pop("name", None)
         out["cleared"] = nm
     return out
@@ -120,11 +127,11 @@ def build(ents: dict, raw: dict, *, by: str = BY, now: str = "") -> tuple[dict, 
     """(the entries as the pass leaves them, one plan line per entry) for the entries `ents` and the page registry `raw` (the pages alone, `projects.registry_raw`). `ents` is not changed. The entries are read in the
     order of their page keys, so two runs read the same record the same way."""
     new = copy.deepcopy(ents)
-    taken = {str(n).casefold() for e in new.values() for n in (e.get("agents") or {})}
+    taken: set = set()
+    for e in new.values():          # every agent name some project lists, as the readers see the lists: the record's map, else the project's own page's map (an entry with no agents field)
+        k = pr.page_key(e)
+        taken.update(str(n).casefold() for n in (e["agents"] if isinstance(e.get("agents"), dict) else pv.seed_agents(raw.get(k) if k else None)))
     rows = [_decide(pid, e, new, raw, taken, by, now) for pid, e in sorted(new.items(), key=lambda kv: (pr.page_key(kv[1]), kv[0]))]
-    for r in rows:
-        if r["action"] == "promote":
-            taken.add(r["agent"].casefold())
     return new, rows
 
 
@@ -213,16 +220,17 @@ def effects(raw: dict, before: dict, after: dict, rows: list[dict], live: set | 
     return {"roles": roles, "lose": lose, "off_map": off, "off_map_assumed": live is None, "gating": gating, "notices": notices, "derived_moved": derived_moved, "non_builders": non_builders}
 
 
-def sub_page_lines(raw: dict, rows: list[dict]) -> dict:
+def sub_page_lines(raw: dict, rows: list[dict], after: dict | None = None) -> dict:
     """The sub-pages of the projects the pass marks whose own `display-name:` line still names the project's old name line (a session the mark replaced, and no agent of the project): the page lines that go
-    stale. A sub-page's `agent:` line is its own keeper, still true, and is not counted. Page lines are never written by this pass: they are listed so someone can edit them by hand, where it matters."""
+    stale. A session that is an agent of the project after the pass (`after`: page key → the agents map the pass leaves; the page's own map for a project that is not in it) is no stale line: the session a
+    promoted one-session project lists is not counted. A sub-page's `agent:` line is its own keeper, still true, and is not counted. Page lines are never written by this pass: they are listed so someone can edit them by hand, where it matters."""
     old = {r["key"]: (r["name"] or _kp.name_line(raw.get(r["key"]) or {})[0]) for r in rows if r["action"] in ("mark", "promote")}
     own = []
     for k, row in sorted(raw.items()):
         t = "/".join(k.split("/")[:2])
         if t not in old or k == t or not isinstance(row, dict):
             continue
-        if row.get("role") == "name" and row.get("session") and row["session"] == old[t] and row["session"] not in ((raw.get(t) or {}).get("agents") or {}):
+        if row.get("role") == "name" and row.get("session") and row["session"] == old[t] and row["session"] not in ((after or {}).get(t) if t in (after or {}) else ((raw.get(t) or {}).get("agents") or {})):
             own.append(k)
     return {"count": len(own), "keys": own}
 
@@ -243,7 +251,7 @@ def summarize(ents: dict, raw: dict, *, live: set | None = None, by: str = BY, n
     counts["main"] = sum(1 for r in rows if r["action"] == "mark" and r["kind"] == "main")
     counts["names_cleared"] = sum(1 for r in rows if r["cleared"])
     counts["changed"] = counts["mark"] + counts["promote"]
-    return {"entries": new, "projects": rows, "counts": counts, "effects": eff, "sub_pages": sub_page_lines(raw, rows)}
+    return {"entries": new, "projects": rows, "counts": counts, "effects": eff, "sub_pages": sub_page_lines(raw, rows, {pr.page_key(e): e["agents"] for e in new.values() if pr.page_key(e) and isinstance(e.get("agents"), dict)})}
 
 
 def _lines(p: dict, dry: bool, accept: set) -> list[str]:
@@ -280,12 +288,13 @@ def _lines(p: dict, dry: bool, accept: set) -> list[str]:
 
 
 def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by: str = BY, run_dir: Any = None, now: str | None = None) -> dict:
-    """The pass: the plan, and with `apply_` the write. → the plan (without the entries) and {dry, written, refused, undo, lines}. A refusal (a session that loses a role and is not accepted) writes nothing."""
+    """The pass: the plan, and with `apply_` the write. → the plan (without the entries) and {dry, written, refused, undo, replanned, lines}. A refusal (a session that loses a role and is not accepted) writes nothing.
+    The write plans again inside the record's lock, and what is returned and printed after a write is that plan (the one written); `replanned` is true when it differs from the plan read before the lock."""
     p = plan(live=live, by=by, now=now or "")
     acc = set(accept)
     lose = p["effects"]["lose"]
     res = {k: v for k, v in p.items() if k != "entries"}
-    res.update({"dry": not apply_, "written": False, "refused": "", "undo": None})
+    res.update({"dry": not apply_, "written": False, "refused": "", "undo": None, "replanned": False})
     lines = _lines(p, not apply_, acc)
     unaccepted = [n for n in lose if n not in acc]
     if apply_ and unaccepted:
@@ -302,14 +311,13 @@ def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by
     got: dict = {}
 
     def work(ctx: pv.Ctx) -> dict:
-        new, rows = build(ctx.ents, ctx.raw, by=ctx.by or BY, now=ctx.now)
-        eff = effects(ctx.raw, ctx.ents, new, rows, live)
-        left = [n for n in eff["lose"] if n not in acc]
+        p2 = summarize(ctx.ents, ctx.raw, live=live, by=ctx.by or BY, now=ctx.now)       # the plan again, on the record as it stands under the lock: this one is written, and is the one that is reported
+        left = [n for n in p2["effects"]["lose"] if n not in acc]
         if left:
             raise pv.VerbError(409, f"the record changed while the pass was planned: {', '.join(left)} would now lose a role; nothing was written")
-        for pid, e in new.items():
+        for pid, e in p2["entries"].items():
             ctx.ents[pid] = e
-        got["rows"] = rows
+        got["plan"] = p2
         return {}
     try:
         _out, _ents, changed = pv.txn(work, by=by, now=now, dry=False, undo=undo)
@@ -317,9 +325,17 @@ def run(*, apply_: bool = False, accept: tuple = (), live: set | None = None, by
         res["refused"] = e.message
         res["lines"] = lines + [e.message]
         return res
+    p2 = got.get("plan") or p
+    res.update({k: v for k, v in p2.items() if k != "entries"})                    # what is returned and printed is the plan that was written, not the one read before the lock
+    lines2 = _lines(p2, False, acc)
+    res["replanned"] = lines2 != lines
+    note = ([f"the record changed between the plan and the write: the lines above are the plan that was written ({p2['counts']['changed']} changes), and they differ from the plan read before the lock ({p['counts']['changed']} changes)"]
+            if res["replanned"] else [])
     res["written"] = bool(changed)
     res["undo"] = undo.get("file")
-    res["lines"] = lines + ([f"written. undo file {undo['file']}", f"to undo: project.py restore --undo {undo['file']} --apply"] if undo.get("file") else ["nothing to change: nothing written"])
+    res["lines"] = lines2 + note + ([f"written. undo file {undo['file']}", f"to undo: project.py restore --undo {undo['file']} --apply"
+                                     f" (it puts the whole record file back and is refused, 409, once the record was written after this change; after a later write use `project.py restore --from-git REV --apply`, REV from `project.py restore --list`)"]
+                                    if undo.get("file") else ["nothing to change: nothing written"])
     return res
 
 

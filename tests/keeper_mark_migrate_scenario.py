@@ -231,5 +231,82 @@ write_record({**ENTRIES, LP: entry("projects/lone-page", name="cse_abc")})
 r = km.run(live=set(), run_dir=RUN)
 check("a one-session project whose name line is a session id is skipped with the reason, not promoted", {x["key"]: x["action"] for x in r["projects"]}["projects/lone-page"] == "skip" and "list its session by hand" in "\n".join(r["lines"]), r["lines"])
 
+# ---- 9. the printed undo hint says what the undo is and is not
+hint = " ".join(l for l in ok["lines"] if l.startswith("to undo:"))
+check("the undo hint says the undo puts the whole file back, is refused (409) after a later record write, and names `restore --from-git` as the way after one",
+      "restore --undo" in hint and "whole record file" in hint and "409" in hint and "later write" in hint and "restore --from-git" in hint, hint)
+
+# ---- 10. new pages for the fixtures below (their projects live in memory only: the record on disk is not touched by sections 10 to 13)
+page("projects/twin-a.md", "type: project\ntitle: Twin a\nstatus: active")
+page("projects/twin-b.md", "type: project\ntitle: Twin b\nstatus: active")
+page("projects/twin-c.md", "type: project\ntitle: Twin c\nstatus: active")
+page("projects/held.md", "type: project\ntitle: Held\ndisplay-name: team-held\nagents:\n  lone-held: talks\nstatus: active")
+page("projects/emptied.md", "type: project\ntitle: Emptied\ndisplay-name: team-emptied\nstatus: active")
+page("projects/emptied2.md", "type: project\ntitle: Emptied two\ndisplay-name: team-emptied2\nstatus: active")
+page("projects/marsh.md", "type: project\ntitle: Marsh\ndisplay-name: team-marsh\nagents:\n  marsh-main: talks\nstatus: active")
+page("projects/marsh/notes.md", "type: note\ntitle: Marsh notes")
+page("projects/dune.md", "type: project\ntitle: Dune\ndisplay-name: lone-dune\nstatus: active")
+page("projects/dune/own.md", "type: project\ntitle: Dune own\ndisplay-name: lone-dune\nstatus: active")
+p.cmd_registry(quiet=True)
+ids9 = {k: e["id"] for k, e in reg().items()}; raw9 = prj.registry_raw()
+TA, TB, TC, HE, EM1, EM2, MA, DU = (ids9[f"projects/{k}"] for k in ("twin-a", "twin-b", "twin-c", "held", "emptied", "emptied2", "marsh", "dune"))
+NOW9 = "2026-11-01T00:00:00Z"
+
+# one-session names that collide: one promotion, the other refused
+_, rows9 = km.build({TA: entry("projects/twin-a", name="lone-twin"), TB: entry("projects/twin-b", name="lone-twin")}, raw9, now=NOW9)
+act = {r["key"]: r for r in rows9}
+check("two one-session projects with the same name: the first (by page key) is promoted, the second is skipped with the reason that another project has the agent already",
+      act["projects/twin-a"]["action"] == "promote" and act["projects/twin-b"]["action"] == "skip" and "an agent of another project already" in act["projects/twin-b"]["why"], rows9)
+new9, rows9 = km.build({TA: entry("projects/twin-a", name="lone-twin"), TB: entry("projects/twin-b", name="LONE-TWIN"), TC: entry("projects/twin-c", name="lone-twin")}, raw9, now=NOW9)
+check("... three of them, one of the names in another case: still one promotion, and only one entry lists the session",
+      sum(1 for r in rows9 if r["action"] == "promote") == 1 and sum(1 for e in new9.values() if any(str(n).casefold() == "lone-twin" for n in (e.get("agents") or {}))) == 1, rows9)
+# a name an agent of another project has through that project's page (an entry with no agents field reads the page's map)
+_, rows9 = km.build({HE: entry("projects/held"), TC: entry("projects/twin-c", name="lone-held")}, raw9, now=NOW9)
+act = {r["key"]: r for r in rows9}
+check("a one-session name that an agent listed only on another project's page already has is refused (the names taken are read from the effective lists, not only the record's)",
+      act["projects/held"]["action"] == "mark" and act["projects/held"]["agent"] == "lone-held" and act["projects/twin-c"]["action"] == "skip" and "an agent of another project already" in act["projects/twin-c"]["why"], rows9)
+
+# ---- 11. an entry that had agents (an empty map, or every agent retired) is not a one-session project: its name is the project's name
+new9, rows9 = km.build({EM1: entry("projects/emptied", name="team-emptied", agents={}, former_agents=["team-emptied-main"]), EM2: entry("projects/emptied2", name="team-emptied2", former_agents=["team-emptied2-main"])}, raw9, now=NOW9)
+act = {r["key"]: r for r in rows9}
+check("an entry with an empty agents map (all retired), or with only former agents, and a name that is a prefix of them: skipped with a reason line, nothing promoted, the entry unchanged",
+      all(act[k]["action"] == "skip" and "list the session by hand" in act[k]["why"] and "had some" in act[k]["why"] for k in ("projects/emptied", "projects/emptied2"))
+      and new9[EM1] == entry("projects/emptied", name="team-emptied", agents={}, former_agents=["team-emptied-main"]), rows9)
+check("... and the summary prints the skip", any("projects/emptied: skipped" in l for l in km._lines(km.summarize({EM1: entry("projects/emptied", name="team-emptied", agents={}, former_agents=["x"])}, raw9, live=set(), now=NOW9), True, set())), None)
+
+# ---- 12. name clearing: a sub-page that only the page registry has counts; a promoted project's own session on a sub-page is no stale line
+new9, rows9 = km.build({MA: entry("projects/marsh", name="team-marsh", agents={"marsh-main": agent(True, "talks")})}, raw9, now=NOW9)
+check("a name that serves nothing is kept while a page of the registry that has no entry of its own hangs below the project (a sub-page may use it)",
+      rows9[0]["cleared"] == "" and new9[MA].get("name") == "team-marsh", rows9)
+new9, rows9 = km.build({MA: entry("projects/marsh", name="team-marsh", agents={"marsh-main": agent(True, "talks")})}, {k: v for k, v in raw9.items() if k != "projects/marsh/notes"}, now=NOW9)
+check("... and cleared when nothing hangs below it (the same project without that sub-page in the registry)", rows9[0]["cleared"] == "team-marsh" and "name" not in new9[MA], rows9)
+s9 = km.summarize({DU: entry("projects/dune", name="lone-dune")}, raw9, live=set(), now=NOW9)
+check("a promoted one-session project's own session on its sub-page is no stale line (the session is an agent of the project now)", s9["counts"]["promote"] == 1 and s9["sub_pages"] == {"count": 0, "keys": []}, s9["sub_pages"])
+s9 = km.summarize({DU: entry("projects/dune", name="lone-dune", agents={"dune-main": agent(True, "talks")})}, raw9, live=set(), now=NOW9)
+check("... while a project marked on other agents still counts a sub-page that names its old session (unchanged)", s9["counts"]["mark"] == 1 and s9["sub_pages"]["keys"] == ["projects/dune/own"], s9["sub_pages"])
+
+# ---- 13. the record changes between the plan and the write: what is printed and returned is the plan that was written
+write_record(ENTRIES); ORIG13 = recbytes()
+orig_plan = km.plan
+def racing_plan(**kw):
+    out = orig_plan(**kw)
+    d = json.loads(REC.read_text()); d["projects"][F]["agents"]["team-forge-docs"]["keeper"] = True       # somebody marks the forge after the plan was read
+    REC.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8"); pr._CACHE["sig"] = None
+    return out
+km.plan = racing_plan
+try:
+    rr13 = km.run(apply_=True, accept=("team-wing",), live=set(), run_dir=T / "undo-race", now=NOW9)
+finally:
+    km.plan = orig_plan
+text13 = "\n".join(rr13["lines"]); rec13 = json.loads(REC.read_text())["projects"]
+check("apply on a record that changed after the plan: written, and the forge is not marked a second time (the flag somebody put there stays the one)",
+      rr13["written"] is True and [n for n, a in rec13[F]["agents"].items() if a.get("keeper") is True] == ["team-forge-docs"], rec13[F]["agents"])
+check("... the printed lines and the returned counts are the plan that was written (4 changes, no line for the forge), not the one read before the lock (5)",
+      rr13["counts"]["changed"] == 4 and "projects/forge: mark" not in text13 and "projects/wing: mark team-wing-builder" in text13 and "marked already" in text13, text13)
+check("... and the output says the plan changed under it, and the result says so too", rr13["replanned"] is True and "the record changed between the plan and the write" in text13 and "5 changes" in text13, text13)
+write_record(ENTRIES)
+r13 = km.run(apply_=True, accept=("team-wing",), live=set(), run_dir=T / "undo-calm", now=NOW9)
+check("an apply on a record nobody touched says nothing of the kind and is not marked replanned", r13["written"] is True and r13["replanned"] is False and "the record changed between" not in "\n".join(r13["lines"]), r13["lines"][-3:])
+
 if fails: print(f"FAILED: keeper mark migrate scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: keeper mark migrate scenario, {len(ran)} checks")
