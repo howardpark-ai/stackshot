@@ -44,6 +44,7 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _GID, _item_url
 from stackshot.model.needs import _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_of, _needs_sessions, _observers_of
 from stackshot.model.said import _owner_words
+from stackshot.projects import keeper_reads as _reads
 from stackshot.router import router_live as _router_live, routing as _routing
 from stackshot.service import foryou as _fy, foryou_events as _fyev, writes as _writes
 from stackshot.service.store import _load, _path
@@ -317,6 +318,7 @@ def keeper_words(project: str, keeper: str) -> str:
         r = {}
     if r.get("keeper"):                              # a marked agent keeps the project(s) that mark it, which may not be the project it has its best role on
         return f"the keeper of {' and '.join(_anc.keeper_pages(keeper) or [r.get('project') or project])}"
+    if r.get("role") == _anc.NAME_ROLE and not r.get("retired"): _reads.note("role keeper", str(r.get("project") or project), 1)
     return f"the keeper of {r.get('project') or project}" if r.get("role") == _anc.NAME_ROLE else f"the keeper of its page ({project})"
 
 

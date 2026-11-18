@@ -49,6 +49,7 @@ from pathlib import Path
 
 from stackshot.core import config as _cfg
 from stackshot.projects import project_registry as _pr      # the project entries of the record: the registry reads them first, the page lines are the fallback
+from stackshot.projects import keeper_reads as _reads      # the gauge of the keepers only an old form names
 from stackshot.projects import keeper as _kp      # the keeper as a mark on one agent (readers only: nothing here writes a mark)
 from stackshot.model import item_project as _iproj      # an item's project by its permanent id: the page key read through the id
 from stackshot.core import readonly as _ro      # a warm standby copy writes nothing
@@ -601,53 +602,19 @@ def name_line(entry: dict) -> str:
     return s if s and rl in _NAME_ROLES and not SESSION_ID_RX.match(s) else ""
 
 
-def _other_claim(key: str, entry: dict, reg: dict, name: str, longer: int) -> str:
-    """The longest project name (`_name_prefixes` of a top-level, active `type: project` page other than `key` and its hub) that `name` starts with as `<project>-<role>`, when it is longer than `longer`; "" when none.
-    A page that carries `name` itself as its project name (two pages sharing one session name) claims nothing: it is no prefix of it."""
-    hub = str(entry.get("hub") or ""); best = ""
-    for k in sorted(reg):
-        e = reg[k]
-        if k == key or k == hub or not isinstance(e, dict) or str(e.get("type") or "").strip().lower() != "project" or not page_active(e) or is_sub_page(k, reg, e): continue
-        for p in _name_prefixes(k, e, reg):
-            if name.startswith(p + "-") and len(p) > max(longer, len(best)): best = p
-    return best
-
-
 def _own_names(key: str, entry: dict, reg: dict, name: str) -> list:
     """The project names that are this page's own: its slug, and the project name of its agents (`_name_prefixes`, without the name line's own value, which is the very session being asked about)."""
     return [key.rsplit("/", 1)[-1]] + [p for p in _name_prefixes(key, entry, reg) if p != name]
 
 
-def other_project_for(key: str, entry: dict, reg: dict, name: str) -> str:
-    """The name of another project that `name` is named for ("" when none): the longest match of `name` over the top-level pages, this one included, is another page's project name and is longer than this page's own
-    (`_own_names`: a name equal to the page's slug, or starting with it, is the page's own; so is a tie). A one-session page `foo-bar` next to a project `foo` is its own; the ax session, `<other>-ax` on a page `ax`, is not.
-    The other page's name is the one `name` starts with `<project>-` (a name equal to it, two pages sharing one session, claims nothing)."""
-    own = max((len(p) for p in _own_names(key, entry, reg, name) if name == p or name.startswith(p + "-")), default=-1)
-    return _other_claim(key, entry, reg, name, own)
-
-
-def session_covers(key: str, entry: dict, reg: dict, name: str, live) -> bool:
-    """Does a live session answer to the name line `name`: the name or an alias of it is live (`live` = (names, aliases)), or a live session starts with `<name>-` and does not belong to a longer project name of another
-    top-level page (page `foo` is not covered by the live `foo-bar-main` when `foo-bar` is a page of its own)."""
-    names, aliases = live
-    if name in names or name in aliases: return True
-    return any(n.startswith(name + "-") and not _other_claim(key, entry, reg, n, len(name)) for n in names)
-
-
-def agent_gap(key: str, entry: dict, reg: dict, live=None) -> dict | None:
-    """Is this page a project with no one to take its items: `type: project`, active, no sub-page, and no front agent on its `agents:` map (agent_records)? → None when it has one, when it is something else, or when its
-    one session is its own: the name line (`name_line`) names a session `session_covers` finds live in `live` = (names, aliases) of the live sessions (None = cannot tell: counts as live) and not named for another project
-    (a one-session page is a page by design: a name line and no agents map). Otherwise {"kind": "no-agents-map" | "no-front-agent" | "foreign-name", "name": the name line's session or "", "other": the other project's name
-    (foreign-name)}. Sub-pages are the registry's: a key under another page, or a `hub:` line (`is_sub_page`); a `parent:` line is not read by anything else here, so it makes no sub-page. One rule for the daily check and for rename_page.py."""
+def agent_gap(key: str, entry: dict, reg: dict) -> dict | None:
+    """Is this page a project with no one to take its items: `type: project`, active, no sub-page, and no front agent on its `agents:` map (agent_records)? → None when it has one, or when it is something else. Otherwise
+    {"kind": "no-agents-map" | "no-front-agent"}: a project lists its agents, a one-session project lists its one session as its one front agent, and a page with none has no one to take its items. Sub-pages are the registry's:
+    a key under another page, or a `hub:` line (`is_sub_page`); a `parent:` line is not read by anything else here, so it makes no sub-page. One rule for the daily check and for rename_page.py."""
     if str(entry.get("type") or "").strip().lower() != "project" or not page_active(entry) or is_sub_page(key, reg, entry): return None
     recs = agent_records(key, entry, reg)
     if any(a["front"] for a in recs.values()): return None
-    s = name_line(entry)
-    if s:
-        other = other_project_for(key, entry, reg, s)
-        if other: return {"kind": "foreign-name", "name": s, "other": other}
-        if live is None or session_covers(key, entry, reg, s, live): return None
-    return {"kind": "no-front-agent" if recs else "no-agents-map", "name": s, "other": ""}
+    return {"kind": "no-front-agent" if recs else "no-agents-map"}
 
 
 def marks() -> dict:
@@ -1077,6 +1044,7 @@ def sync(now: float | None = None, force: bool = False, reg: dict | None = None,
     now = time.time() if now is None else now
     reg = registry() if reg is None else reg
     if not reg: return False
+    _reads.gauge(k for k, v in reg.items() if isinstance(v, dict) and v.get("keeper_source") == "legacy")      # the rows only an old form keeps: the gauge a removal stage gates on
     try: prune_pending(reg)
     except ValueError: pass         # a damaged id file: nothing is pruned, and build() answers from the registry's own copy of the ids
     body = build(reg, now)

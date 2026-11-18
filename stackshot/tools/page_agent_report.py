@@ -11,12 +11,9 @@ What counts as a leftover (a page that is retired, done or moved is skipped; so 
   display-name     the `display-name:` line names the project, and its agents are named `<display-name>-<suffix>`. It is a leftover when no live session is named exactly that and no live session's own name
                    starts with `<display-name>-`. An alias does not excuse it: `<display-name>-` as the start of an alias only says the old name of a session outlives the project's own name (the page was not
                    renamed when its sessions were)
-  no agents        a page that is `type: project`, not a sub-page and not retired, done or moved, with no front agent on its `agents:` map (no map at all, or only `background:` entries), and no session of its own
-                   (`projects.agent_gap`: a page whose `display-name:` names a live session, or one that starts with it, is a one-session page by design and is left alone), and with board items
+  no agents        a page that is `type: project`, not a sub-page and not retired, done or moved, with no front agent on its `agents:` map (no map at all, or only `background:` entries), (`projects.agent_gap`), and with board items
                    open or touched in the last `projects.LISTED_DAYS` days (a sub-page's items count for the page above it): its items have no contact and nobody takes its notices. The line is `no agents map` or
-                   `no front agent`, the name is the item count. A page whose only session (its name line) is named for another project (it starts with that project's name, not with the page's own) is the same gap
-                   however live the session is: the line is `other project's session`, the name the session. The check reads the session list for the name line, so it is made only when the session check is
-                   (a run that says "not checked" carries none). When the board items cannot be read it says so on stderr and makes none
+                   `no front agent`, the name is the item count. A one-session project lists its one session as its one front agent: a name line is no agent. When the board items cannot be read it says so on stderr and makes none
 
   session off the map   a live session that created, moves or is the contact of an open item of a project, while the page's agents map (the page, its parent, its hub) has no line for it, and it is listed on no page
                    or is named for this project (`anchors.off_map`, the rule the write note uses too). One line for each project page: the name lists the sessions with their item counts. A session listed on another
@@ -59,7 +56,6 @@ FIX_AGENTS = "write the session's new name on the line, or take the line off the
 FIX_DISPLAY = "write the project's name that its live sessions start with, or retire the name"
 LINE_NO_AGENTS = "no agents map"
 LINE_NO_FRONT = "no front agent"
-LINE_FOREIGN = "other project's session"
 LINE_OFFMAP = "session off the map"
 OFFMAP_SHOWN = 4         # sessions named on a page's line; the rest are counted
 FIX_OFFMAP = "the page's agents map has no line for it, so no agent knows it works here: add its line (ask the -main agent) or move its items to a session on the map"
@@ -117,10 +113,10 @@ def item_counts(items: Any, reg: dict[str, dict[str, Any]], now: float | None = 
     return out
 
 
-def agentless(key: str, e: dict[str, Any], reg: dict[str, dict[str, Any]], counts: dict[str, dict[str, int]] | None, live: Sessions | None = None) -> dict[str, str] | None:
-    """The finding for a `type: project` page that `projects.agent_gap` says has no one to take its items (no front agent, and no live session of its own on its name line) and that has open or recently touched
-    items; None for any other page. `live` = (names, aliases) of the live sessions (None: cannot tell, a name line counts as live)."""
-    gap = _prj.agent_gap(key, e, reg, live)
+def agentless(key: str, e: dict[str, Any], reg: dict[str, dict[str, Any]], counts: dict[str, dict[str, int]] | None) -> dict[str, str] | None:
+    """The finding for a `type: project` page that `projects.agent_gap` says has no one to take its items (no front agent on its agents map: a one-session project lists its one session as a front agent) and that has open
+    or recently touched items; None for any other page."""
+    gap = _prj.agent_gap(key, e, reg)
     if not gap:
         return None
     c = (counts or {}).get(key) or {}
@@ -130,8 +126,6 @@ def agentless(key: str, e: dict[str, Any], reg: dict[str, dict[str, Any]], count
         n = f"{c['open']} open item{'' if c['open'] == 1 else 's'}"
     else:
         n = f"{c['recent']} item{'' if c['recent'] == 1 else 's'} touched in {_prj.LISTED_DAYS} days"
-    if gap["kind"] == "foreign-name":
-        return {"page": key, "line": LINE_FOREIGN, "name": gap["name"], "fix": f"{n}; named for {gap['other']}, not for this page, and on no agents map: give the page its own agents map and -main agent (ask the scope's general -main agent)"}
     return {"page": key, "line": LINE_NO_FRONT if gap["kind"] == "no-front-agent" else LINE_NO_AGENTS, "name": n, "fix": FIX_NO_AGENTS}
 
 
@@ -189,7 +183,7 @@ def scan(reg: dict[str, dict[str, Any]], sessions: Sessions | None, counts: dict
         if not active(e):
             continue
         seen_pages += 1
-        gap = agentless(key, e, reg, counts, (names, aliases))
+        gap = agentless(key, e, reg, counts)
         if gap:
             gaps.append(gap)
         for n in dict.fromkeys(str(x) for x in (e.get("agents") or {})):

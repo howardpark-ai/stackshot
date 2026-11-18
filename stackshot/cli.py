@@ -982,6 +982,7 @@ PROGRAMS = {
     "pages": ("stackshot.projects.pages", "the project-page half of the board"),
     "page-keeper": ("stackshot.projects.page_keeper", "the one-time pass that renames a page's session line"),
     "keeper-mark": ("stackshot.projects.keeper_mark", "the one-time pass that puts the keeper mark on every live project of the record"),
+    "keeper-reads": ("stackshot.projects.keeper_reads", "the count of reads that still answer from an old keeper form: per site, the count and the time of the last read"),
     "projects": ("stackshot.projects.projects", "the project record"),
     "rename-page": ("stackshot.projects.rename_page", "move gbrain pages to new slugs (server box only)"),
     "anchors": ("stackshot.anchors.anchors", "project anchors"),

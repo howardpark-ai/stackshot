@@ -24,6 +24,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
+from stackshot.projects import keeper_reads as _reads
 from stackshot.core import ghbudget as _gb
 from stackshot.core.instance import NAME, OWNER
 from stackshot.core.store import _item_files
@@ -207,6 +208,7 @@ def handover_kind(name: str, project: str = "") -> str:
         if peer:
             return _hv.SESSION
         if r:
+            if r.get("role") == _anc.NAME_ROLE and not r.get("retired"): _reads.note("role keeper", str(r.get("project") or name), 1)
             return _hv.FRONT if r.get("retired") or r.get("role") in ("front", _anc.NAME_ROLE) else _hv.SESSION
         return _hv.SESSION if name in _hooks().session_roster() or _session_label(name) in _hooks().session_roster() else _hv.OTHER
     except Exception:  # noqa: BLE001  — a role map that cannot be read names no session to move to

@@ -71,7 +71,8 @@ AGENTS = "agents:\n  example-three-main: keeps the project\n"
 def gap(text, new="projects/example-three", old=None):
     g = rp.agents_gap(text, new, old)
     return "" if g is None else g[0] + " | " + g[1]
-rp._live_sessions = lambda: None            # sala unreadable (the suite has no fleet store): a name line counts as live until a check says otherwise
+_REAL_RECORD_AGENTS = rp._record_agents
+rp._record_agents = lambda *keys: ({}, {})     # no project record here: only the page's own agents count until a check says otherwise
 check("agents_gap: a top-level project page with no agents map is a gap", "no agents map" in gap(EX3), gap(EX3))
 check("agents_gap: …a page with only background agents too", "only background agents" in gap(EX3.replace("---\n\n#", "agents:\n  background:\n    example-three-builder: builds\n---\n\n#", 1)), gap(EX3.replace("---\n\n#", "agents:\n  background:\n    example-three-builder: builds\n---\n\n#", 1)))
 check("agents_gap: a front agent (a -main one) clears it", gap(EX3.replace("---\n\n#", AGENTS + "---\n\n#", 1)) == "", gap(EX3.replace("---\n\n#", AGENTS + "---\n\n#", 1)))
@@ -81,44 +82,20 @@ check("agents_gap: the type is read case-insensitively", "no agents map" in gap(
 check("agents_gap: a sub-page (an ancestor page in the registry, or a hub: line) is no gap", gap(EX3, "projects/harbor/example-three") == "" and gap(EX3.replace("---\n\n#", "hub: projects/harbor\n---\n\n#", 1)) == "")
 check("agents_gap: a parent: line makes no sub-page (the registry does not read it, so neither does the daily check)", "no agents map" in gap(EX3.replace("---\n\n#", "parent: projects/harbor\n---\n\n#", 1)))
 check("agents_gap: moved and superseded pages are skipped like retired ones", gap(EX3.replace("type: project", "type: project\nstatus: moved")) == "" and gap(EX3.replace("type: project", "type: project\nstatus: superseded")) == "" and gap(EX3.replace("title: example-three", "title: moved to elsewhere")) == "")
-# a one-session page: a name line, no agents map
+# a one-session page: its session is listed as its one front agent (on the page or in the project record); a name line alone lists nobody
 SOLO = EX3.replace("---\n\n#", "display-name: example-three-solo\n---\n\n#", 1)
-def live(*names): rp._live_sessions = lambda: (set(names), set())
-live("example-three-solo")
-check("agents_gap: a one-session page whose name line is a live session is no gap", gap(SOLO) == "", gap(SOLO))
-live("example-three-solo-builder")
-check("agents_gap: …a live session that starts with the name line counts too", gap(SOLO) == "", gap(SOLO))
-live("someone-else")
-check("agents_gap: a name line that names no live session is a gap, and says the session is not live", "example-three-solo that is not live" in gap(SOLO) and "add the agents map" in gap(SOLO), gap(SOLO))
-rp._live_sessions = lambda: None
-check("agents_gap: sala unreadable: the name line counts as live", gap(SOLO) == "")
-check("agents_gap: a session id on the name line is no name: not a one-session page even with liveness unknown", "no agents map" in gap(EX3.replace("---\n\n#", "display-name: 00000000-0000-4000-8000-000000000051\n---\n\n#", 1)))
-check("agents_gap: an agent: line is no name line (that page is not a one-session page)", "no agents map" in gap(EX3.replace("---\n\n#", "agent: example-three-solo\n---\n\n#", 1)))
-# the example-three case: the name line's session belongs to another project (ibis-meadow), whatever its liveness
-FOREIGN = EX3.replace("---\n\n#", "display-name: ibis-meadow-example-three\n---\n\n#", 1)
-live("ibis-meadow-example-three")
-check("agents_gap: a live session named for another project is a gap: the example-three case, said in the words of the finding", "projects/example-three's only session ibis-meadow-example-three is named for ibis-meadow, not for this page, and no agents map lists it" in gap(FOREIGN) and "its own agents map and -main agent" in gap(FOREIGN) and "general -main agent" in gap(FOREIGN), gap(FOREIGN))
-rp._live_sessions = lambda: None
-check("agents_gap: …also when liveness is unknown", "named for ibis-meadow" in gap(FOREIGN), gap(FOREIGN))
-check("agents_gap: …but not when the page has a front agent of its own", gap(FOREIGN.replace("---\n\n#", AGENTS + "---\n\n#", 1)) == "")
-check("agents_gap: a name line that is the other project's own name is not named for it", gap(EX3.replace("---\n\n#", "display-name: ibis-meadow\n---\n\n#", 1)) == "")
-# sibling-prefix shapes: a one-session page whose name extends another project's name is its own when the name is (or starts with) its own slug; a prefix-matched session of a longer sibling covers nothing
-def named(name, new, extra=""): return EX3.replace("---\n\n#", f"display-name: {name}\n{extra}---\n\n#", 1)
-live("foo-bar")
-check("agents_gap: a one-session page `foo-bar` next to a project `foo` is its own, not named for it", gap(named("foo-bar", "projects/foo-bar"), "projects/foo-bar") == "", gap(named("foo-bar", "projects/foo-bar"), "projects/foo-bar"))
-live("ibis-meadow-example-three")
-check("agents_gap: …a page `ibis-meadow-example-three` with that name next to `ibis-meadow` too (the own-slug case of the example-three shape)", gap(named("ibis-meadow-example-three", "projects/ibis-meadow-example-three"), "projects/ibis-meadow-example-three") == "", gap(named("ibis-meadow-example-three", "projects/ibis-meadow-example-three"), "projects/ibis-meadow-example-three"))
-live("foo-bar-engineer")
-check("agents_gap: a background-only page `foo-bar` whose keeper is `foo-bar-engineer` is its own", gap(named("foo-bar-engineer", "projects/foo-bar", "agents:\n  background:\n    foo-bar-builder: builds\n"), "projects/foo-bar") == "", gap(named("foo-bar-engineer", "projects/foo-bar", "agents:\n  background:\n    foo-bar-builder: builds\n"), "projects/foo-bar"))
-live("quartz-shared")
-check("agents_gap: two pages sharing one session name do not flag each other", gap(named("quartz-shared", "projects/shared-b"), "projects/shared-b") == "", gap(named("quartz-shared", "projects/shared-b"), "projects/shared-b"))
-live("quarry-core-engineer")
-check("agents_gap: a page `quarry` is not covered by the live `quarry-core-engineer` when `quarry-core` is a page of its own", "name line session quarry that is not live" in gap(named("quarry", "projects/quarry"), "projects/quarry"), gap(named("quarry", "projects/quarry"), "projects/quarry"))
-live("quarry")
-check("agents_gap: …an exact live name still covers it", gap(named("quarry", "projects/quarry"), "projects/quarry") == "")
-live("quarry-other-main")
-check("agents_gap: …and so does a live session that belongs to no longer project name", gap(named("quarry", "projects/quarry"), "projects/quarry") == "")
-rp._live_sessions = lambda: None
+check("agents_gap: a name line alone is no agent: a page with a `display-name:` and no agents map is a gap", "no agents map" in gap(SOLO), gap(SOLO))
+check("agents_gap: a session id on the name line is no agent either", "no agents map" in gap(EX3.replace("---\n\n#", "display-name: 00000000-0000-4000-8000-000000000051\n---\n\n#", 1)))
+check("agents_gap: an agent: line is no agent (that page lists none)", "no agents map" in gap(EX3.replace("---\n\n#", "agent: example-three-solo\n---\n\n#", 1)))
+check("agents_gap: a one-session project lists its session as its one front agent: no gap", gap(SOLO.replace("---\n\n#", "agents:\n  example-three-solo: the session\n---\n\n#", 1)) == "")
+check("agents_gap: a background-only page with a name line is a gap too", "only background agents" in gap(SOLO.replace("---\n\n#", "agents:\n  background:\n    example-three-builder: builds\n---\n\n#", 1)))
+# a project whose agents only the record lists (the page mirror is off: its page has no agents map)
+rp._record_agents = lambda *keys: ({"example-three-solo": "the session"}, {}) if "projects/example-three" in keys else ({}, {})
+check("agents_gap: the project record's front agent clears it, as one on the page does", gap(SOLO) == "" and gap(EX3) == "", (gap(SOLO), gap(EX3)))
+check("agents_gap: …for the page it belongs to only", "no agents map" in gap(EX3, "projects/elsewhere"), gap(EX3, "projects/elsewhere"))
+rp._record_agents = lambda *keys: ({"example-three-builder": "builds"}, {"example-three-builder": "builds"})
+check("agents_gap: …a background agent in the record clears nothing", "only background agents" in gap(EX3), gap(EX3))
+rp._record_agents = lambda *keys: ({}, {})
 check("agents_gap: a page that was no project at the old slug says the type changed", "type: note at the old slug" in gap(EX3, old=EX3.replace("type: project", "type: note")), gap(EX3, old=EX3.replace("type: project", "type: note")))
 check("agents_gap: a page with no frontmatter is no gap, not an error", gap("no frontmatter here") == "")
 
@@ -159,24 +136,17 @@ mk("projects/example/staffed", agents=AGENTS)
 rc, out = mv("copy", "projects/example/staffed=projects/staffed"); rc2, out2 = mv("stub", "projects/example/staffed=projects/staffed")
 check("a project page that lists a front agent moves as before", rc == 0 and rc2 == 0 and "WARN" not in out and is_redirect("projects/example/staffed"), (out, out2))
 
-# a one-session page (a name line naming a live session, no agents map) moves as before; the example-three shape (its name line belongs to another project) is warned about and refused
-live("example-three-solo")
-mk("projects/example/solo2", extra="display-name: example-three-solo\n")
+# a one-session page lists its session as a front agent: it moves as any project that lists one; a name line alone lists nobody
+mk("projects/example/solo2", extra="display-name: example-three-solo\n", agents="agents:\n  example-three-solo: the session\n")
 rc, out = mv("copy", "projects/example/solo2=projects/solo2"); rc2, out2 = mv("stub", "projects/example/solo2=projects/solo2")
-check("a one-session page with a live session of its own name moves as before: no WARN, stub goes through", rc == 0 and rc2 == 0 and "WARN" not in out and is_redirect("projects/example/solo2"), (out, out2))
-mk("projects/example/example-three2", extra="display-name: ibis-meadow-example-three\n")
-live("ibis-meadow-example-three")
-rc, out = mv("copy", "projects/example/example-three2=projects/work-example-three"); puts = len(PUTS)
-rc2, out2 = mv("stub", "projects/example/example-three2=projects/work-example-three")
-check("the example-three shape: copy warns that the page's only session is named for another project", rc == 0 and "WARN" in out and "ibis-meadow-example-three is named for ibis-meadow, not for this page" in out, out)
-check("…stub is refused with that message, naming the fix, and changes nothing", rc2 == 1 and "FAIL stub" in out2 and "named for ibis-meadow" in out2 and "its own agents map and -main agent" in out2 and len(PUTS) == puts and not is_redirect("projects/example/example-three2"), (rc2, out2))
-rc3, out3 = mv("stub", "projects/example/example-three2=projects/work-example-three", "--no-agents-ok")
-check("…--no-agents-ok lets it through", rc3 == 0 and is_redirect("projects/example/example-three2"), (rc3, out3))
-live("someone-else")
+check("a one-session project that lists its session moves as before: no WARN, stub goes through", rc == 0 and rc2 == 0 and "WARN" not in out and is_redirect("projects/example/solo2"), (out, out2))
 mk("projects/example/lone", extra="display-name: lone-name\n")
-rc, out = mv("copy", "projects/example/lone=projects/lone"); rc2, out2 = mv("stub", "projects/example/lone=projects/lone")
-check("a name line that names no live session: WARN at copy, stub refused (no session of its own)", rc == 0 and "WARN" in out and "lone-name that is not live" in out and rc2 == 1 and not is_redirect("projects/example/lone"), (out, out2))
-rp._live_sessions = lambda: None
+rc, out = mv("copy", "projects/example/lone=projects/lone"); puts = len(PUTS); rc2, out2 = mv("stub", "projects/example/lone=projects/lone")
+check("a name line and no agents: WARN at copy, stub refused", rc == 0 and "WARN" in out and "no agents map" in out and rc2 == 1 and not is_redirect("projects/example/lone") and len(PUTS) == puts, (out, out2))
+rp._record_agents = lambda *keys: ({"lone-name": "the session"}, {}) if "projects/lone" in keys else ({}, {})
+rc2, out2 = mv("stub", "projects/example/lone=projects/lone")
+check("…the project record listing its session lets stub through", rc2 == 0 and is_redirect("projects/example/lone"), (rc2, out2))
+rp._record_agents = lambda *keys: ({}, {})
 
 # a type change: a note at the old slug that is a project by the time of stub
 mk("projects/example/promo", typ="note")
@@ -213,6 +183,31 @@ REGF.write_text(saved)
 mk("projects/example/nreg")
 rc, out = mv("copy", "projects/example/nreg=projects/nreg")
 check("with the registry back the same page is warned about, with no note", "WARN" in out and "note: the page registry" not in out, out)
+
+# the project record's own agents, read through the real function (every check above replaces it): a record file in the store
+def entry(page_key, agents, status="active"):
+    return {"name": "home-rec-" + page_key.rsplit("/", 1)[-1], "title": "R", "type": "project", "scope": "home", "status": status, "agents": agents, "hub": "", "page": page_key,
+            "made": {"at": "2026-11-05T00:00:00Z", "by": "migration", "how": "migrated"}}
+def pid(n): return "prj" + "_" + format(n, "08x")      # a project id, made at run time: the shape is the record's, no id is written as a literal
+rec = {"projects_schema": 1, "projects": {
+    pid(10): entry("projects/rec-one", {"rec-main": {"front": True, "mandate_line": "talks"}, "rec-build": {"front": False, "mandate_line": "builds"}}),
+    pid(11): entry("projects/rec-gone", {"gone-main": {"front": True, "mandate_line": "talks"}}, "archived"),
+    pid(12): entry("projects/rec-empty", {}),
+    pid(13): entry("projects/rec-twice", {}),
+    pid(14): entry("projects/rec-twice", {"twice-main": {"front": True, "mandate_line": "talks"}})}}
+RECF = T / "store" / "project-record.json"; had = RECF.read_text() if RECF.exists() else None
+RECF.write_text(json.dumps(rec), encoding="utf-8")
+try:
+    check("_record_agents: the real record's agents for the page (all of them, and the background subset)", _REAL_RECORD_AGENTS("projects/old-key", "projects/rec-one") == ({"rec-main": "talks", "rec-build": "builds"}, {"rec-build": "builds"}), _REAL_RECORD_AGENTS("projects/rec-one"))
+    check("_record_agents: a page no entry points at lists nobody", _REAL_RECORD_AGENTS("projects/nowhere") == ({}, {}) and _REAL_RECORD_AGENTS() == ({}, {}))
+    check("_record_agents: an archived entry lists nobody for its page", _REAL_RECORD_AGENTS("projects/rec-gone") == ({}, {}), _REAL_RECORD_AGENTS("projects/rec-gone"))
+    check("_record_agents: an entry with no agents does not hide another entry for the same page", _REAL_RECORD_AGENTS("projects/rec-twice") == ({"twice-main": "talks"}, {}), _REAL_RECORD_AGENTS("projects/rec-twice"))
+    check("_record_agents: an entry with no agents alone lists nobody", _REAL_RECORD_AGENTS("projects/rec-empty") == ({}, {}))
+    RECF.write_text("{ not json", encoding="utf-8")
+    check("_record_agents: a record that cannot be read lists nobody, and does not raise", _REAL_RECORD_AGENTS("projects/rec-one") == ({}, {}))
+finally:
+    if had is None: RECF.unlink()
+    else: RECF.write_text(had, encoding="utf-8")
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": rename scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))

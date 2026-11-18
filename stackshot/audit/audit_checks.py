@@ -34,6 +34,7 @@ from stackshot.audit import audit as _audit  # noqa: E402
 from stackshot.model import bullet_text as _bt  # noqa: E402
 from stackshot.waits import dated_wait as _dw  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.projects import keeper_reads as _reads  # noqa: E402  (the count of reads that answer from an old keeper form)
 from stackshot.waits import event_waits as _ew  # noqa: E402
 from stackshot.waits import handover as _hv  # noqa: E402
 from stackshot.model import model as _model  # noqa: E402
@@ -246,6 +247,7 @@ def check_step_handover(item: dict[str, Any], meta: dict[str, Any], mover: str, 
     if not text or not nm or _model.is_owner(nm) or _norm(nm) == _norm(mover) or _norm(nm) not in known:
         return ""
     r = next((v for k, v in roles.items() if _norm(k) == _norm(nm)), {}) or {}
+    if r.get("role") == "keeper" and not r.get("retired"): _reads.note("role keeper", str(r.get("project") or nm), 1)
     if r.get("retired") or r.get("role") in ("front", "keeper"):
         return ""
     done = [x for x in cl if x["status"] == _steps.DONE and isinstance(x.get("at"), (int, float)) and x["at"] > 0]
