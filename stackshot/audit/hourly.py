@@ -32,7 +32,7 @@ What the pass verifies, from data the server already holds, and says in the line
     mover works, not on which item: with one subagent running, only the item it is tied to reads verified for it; the mover's other items read idle unless something else verifies them. Two exceptions. A
     front agent's busy pane still verifies each of its items (its items are never handed on, and a stream of idle lines for a session the owner talks to says nothing true). And when the audit cannot tell, the
     item is UNKNOWN, not idle: the mover has a running subagent that is tied to none of its items (a brief that names no item and no pull request, a Build subagent started before its pull request exists), or the
-    mover's subagents could not be read at all (an error, a transcript this box does not hold for a pane in a turn or an idle one: a shell pane, or none on this box, has none). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
+    mover's subagents could not be read at all (an error, a transcript this box does not hold for a pane in a turn, an idle one or one showing `shell`; a session this box does not run has none). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
     verified`, kind `audit_unknown`) stamps nothing and is not `audit_idle`, so the row stays as it is and audit/hand_idle.py does not hand the item on while a subagent may be building it;
   - a pull request tied to the item had a CI result, a review, a comment by a person, a merge or a new head commit in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
 

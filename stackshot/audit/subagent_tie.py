@@ -8,13 +8,13 @@ the same sort of claim about the mover, not about an item. The audit therefore a
 
 `running(session, roots, now)` lists a session's subagents that are running: no `finished` flag and the transcript written within `RUNNING_S`, or a `finished` flag that only says the subagent is PARKED (see `running`). A subagent whose pane was recycled or killed leaves
 neither a flag nor a later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). The caller (`service/audit_ticks.py` `_mover_subagents`) asks
-for a pane that is busy or idle (a subagent started in the background runs while its pane reads idle between turns), and for an idle pane keeps only the subagents written within `RUNNING_S`, not the quiet ones.
+for a pane that is busy, idle or showing `shell` (a subagent started in the background runs while its pane reads idle or shell between turns), and for an idle or shell pane keeps only the subagents written within `RUNNING_S`, not the quiet ones.
 
 `tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request
 anchored to the item (`keys`, "owner/repo#n", by its URL or by `PR n` / `#n`, as merge_tie names a pull request for an item that speaks of its repository). A subagent that names neither is on no item the
 audit can tell. What that means for an item (audit/hourly.py): a subagent tied to another item leaves this one idle (part F, audit/hand_idle.py, hands it on); a running subagent tied to NONE of the mover's
-items (a brief that names no item and no pull request yet, "Build part D") leaves the mover's items UNKNOWN, not idle, since any of them may be what it builds. So does anything that cannot be read: a pane in a turn or idle
-whose transcript this box does not hold, a subagents folder that cannot be listed (`Unreadable`), a subagent whose files cannot be read (listed with no words). A mover whose pane is not on this box, or shows a shell (the CLI is not running),
+items (a brief that names no item and no pull request yet, "Build part D") leaves the mover's items UNKNOWN, not idle, since any of them may be what it builds. So does anything that cannot be read: a pane in a turn, idle or showing a shell
+whose transcript this box does not hold, a subagents folder that cannot be listed (`Unreadable`), a subagent whose files cannot be read (listed with no words). A mover whose pane is not on this box
 has no subagent to read: nothing is claimed for it.
 
 Stdlib plus the repo's modules; reads files only."""
@@ -48,7 +48,7 @@ RESUME_KEYS = ("resumedAgentId", "revivedAgentId")      # `revivedAgentId` on Cl
 
 
 class Unreadable(Exception):
-    """The mover's subagents cannot be told from what this box holds (no transcript for a pane that is busy or idle, the subagents folder cannot be read). The audit reads it as UNKNOWN, never as nothing running."""
+    """The mover's subagents cannot be told from what this box holds (no transcript for a pane that is busy, idle or showing a shell, the subagents folder cannot be read). The audit reads it as UNKNOWN, never as nothing running."""
 
 
 def _brief(path: Path) -> str:
@@ -225,10 +225,10 @@ def interrupted(tp: Path) -> bool:
 def running(session: str, roots: Any, now: float) -> list[dict[str, Any]]:
     """The running subagents of the session (a transcript uuid) as this box holds them: [{"id", "description", "brief", "text", "at"}], `text` the two together, `at` the transcript's last write. A subagent with no
     `finished` flag is running when its transcript was written within `RUNNING_S`, and running but quiet (`"quiet": True`) when it is older than that and no older than `QUIET_CAP_S`: a builder waiting on a long CI or suite
-    run writes nothing for a while, and the caller keeps a quiet one for a pane in a turn only (for an idle pane it drops it: a recycled or killed pane leaves one behind), so such a subagent is not dropped there and the mover's items it is not tied to read unknown, not idle. Past the cap it is dropped.
+    run writes nothing for a while, and the caller keeps a quiet one for a pane in a turn only (for an idle or shell pane it drops it: a recycled or killed pane leaves one behind), so such a subagent is not dropped there and the mover's items it is not tied to read unknown, not idle. Past the cap it is dropped.
     [] when the session has no subagents folder or none of them is running. Raises `Unreadable` when the transcript of the session is not on this box or its subagents folder cannot be listed: nothing can be said, and the audit reads that as
     unknown. A subagent whose files cannot be read (a meta that is not JSON, a transcript that cannot be statted or read) is listed as running with no words (`"unreadable": True`) unless its transcript is known to be
-    old: it may be running, so it ties to no item and the audit reads the mover as unknown. Such an entry carries `"meta_at"`, the meta file's own last write, when that can be read: the caller drops it for an idle pane once it is older than `RUNNING_S` (a meta with no transcript beside it would otherwise keep the mover unknown for good).
+    old: it may be running, so it ties to no item and the audit reads the mover as unknown. Such an entry carries `"meta_at"`, the meta file's own last write, when that can be read: the caller drops it for an idle or shell pane once it is older than `RUNNING_S` (a meta with no transcript beside it would otherwise keep the mover unknown for good).
 
     A `finished` flag is not proof that a subagent is done. Claude Code writes `finished: true` into the meta at the end of EVERY turn of a subagent, also when it ends the turn waiting for a background task of its own (a Bash in
     the background, a Monitor), and drops it only when that task's notice, or a SendMessage, wakes the subagent again: a reviewer can end its turn a dozen times in ten hours while it works. A subagent flagged `finished` therefore
@@ -276,7 +276,7 @@ def running(session: str, roots: Any, now: float) -> list[dict[str, Any]]:
         except (Exception, RecursionError):  # noqa: BLE001  — any failure on one subagent's files: it may be running, and nothing can be tied to it
             entry: dict[str, Any] = {"id": aid, "text": "", "at": 0.0, "unreadable": True}
             try:
-                entry["meta_at"] = mp.stat().st_mtime      # when its meta file was last written: how an idle pane's caller tells an old leftover from a fresh one (no key when the meta cannot be statted: kept)
+                entry["meta_at"] = mp.stat().st_mtime      # when its meta file was last written: how an idle or shell pane's caller tells an old leftover from a fresh one (no key when the meta cannot be statted: kept)
             except Exception:  # noqa: BLE001
                 pass
             out.append(entry)

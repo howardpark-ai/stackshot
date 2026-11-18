@@ -694,8 +694,8 @@ try:
     check("17 the server's reader gives the running subagents of a mover whose pane is in a turn", [x["id"] for x in audit_ticks_svc._mover_subagents("home-peer", {}, now0)] == ["blocks", "run1", "stale1"], audit_ticks_svc._mover_subagents("home-peer", {}, now0))
     registry("idle"); a_ = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
     registry("shell"); b_ = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
-    check("17 …an idle pane is read like a busy one (a subagent started in the background runs while its pane reads idle between turns), but only the subagents written within 90 minutes count: the quiet one is dropped (a recycled or killed pane may have left it); a pane showing a shell (the CLI is not running) and a mover with no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built) have none",
-          sorted(x["id"] for x in a_) == ["blocks", "run1"] and not any(x.get("quiet") for x in a_) and b_ == [] and audit_ticks_svc._mover_subagents("home-front", OTHER_ROW, now0) == [], (a_, b_))
+    check("17 …an idle pane is read like a busy one (a subagent started in the background runs while its pane reads idle between turns), but only the subagents written within 90 minutes count: the quiet one is dropped (a recycled or killed pane may have left it); a pane showing `shell` is read the same way (the CLI writes it for a live pane whose turn is over while a background Bash task runs); a mover with no registry row on this box at all (the session is gone, or runs elsewhere: nothing is claimed, so its items read idle as built) has none",
+          sorted(x["id"] for x in a_) == ["blocks", "run1"] and not any(x.get("quiet") for x in a_) and sorted(x["id"] for x in b_) == ["blocks", "run1"] and audit_ticks_svc._mover_subagents("home-front", OTHER_ROW, now0) == [], (a_, b_))
     import subprocess as _sp
     dead_ = _sp.Popen(["true"]); dead_.wait()
     row_path.write_text(json.dumps({"pid": dead_.pid, "sessionId": SID, "kind": "interactive", "name": "home-peer", "status": "busy"}))
@@ -741,7 +741,14 @@ try:
     k_b = idle_case("idle", ("ib", f"Build {BID(1)}", "x", 120 * 60))
     check("17 idle pane, the same subagent written 120 minutes ago (quiet): not counted, both items read idle as before (the quiet subagent may be left by a recycled or killed pane)", k_b == ["audit_idle", "audit_idle"], (k_b, lines(1)))
     k_c = idle_case("shell", ("ic", f"Build {BID(1)}", "x", 10 * 60))
-    check("17 shell pane (the CLI is not running), a fresh subagent named for item 1: still none, both items read idle", k_c == ["audit_idle", "audit_idle"] and audit_ticks_svc._mover_subagents("home-peer", {}, now0) == [], (k_c, audit_ticks_svc._mover_subagents("home-peer", {}, now0)))
+    check("17 shell pane (a live pane whose turn is over while a background Bash task runs: a watch loop, a release wait), a subagent named for item 1 written 10 minutes ago: item 1 is verified, the mover's other item reads idle (the old rule read no subagents for a shell pane)",
+          k_c == ["audit", "audit_idle"] and "a subagent is running on it" in lines(1)[0]["text"], (k_c, lines(1), lines(2)))
+    k_c2 = idle_case("shell", ("ic2", f"Build {BID(1)}", "x", 120 * 60))
+    check("17 shell pane, the same subagent written 120 minutes ago (quiet): not counted, both items read idle", k_c2 == ["audit_idle", "audit_idle"], (k_c2, lines(1)))
+    k_c3 = idle_case("shell", ("ic3", "Build part D", "x", 10 * 60))
+    check("17 shell pane, a running subagent tied to no item: the mover's items read unknown (audit_unknown), as for an idle or busy pane", k_c3 == ["audit_unknown", "audit_unknown"], (k_c3, lines(1)))
+    k_c4 = idle_case("shell", bad=[("ic4", 3 * 3600)]); k_c5 = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
+    check("17 shell pane, an unreadable entry whose meta file is 3 hours old: dropped, both items read idle (the same filter as an idle pane)", k_c4 == ["audit_idle", "audit_idle"] and k_c5 == [], (k_c4, k_c5))
     k_d = idle_case("idle", ("id", "Build part D", "x", 10 * 60))
     check("17 idle pane, a running subagent tied to no item: the mover's items read unknown (audit_unknown), not idle, as for a busy pane", k_d == ["audit_unknown", "audit_unknown"], (k_d, lines(1)))
     k_e = idle_case("idle", ("ie", f"Build {BID(1)}", "x", 10 * 60, True))
@@ -755,8 +762,9 @@ try:
     k_i = idle_case("idle", bad=[("ii", 3 * 3600, True)]); k_i2 = audit_ticks_svc._mover_subagents("home-peer", {}, now0)
     check("17 idle pane, an unreadable meta that has a transcript beside it and is 3 hours old: dropped as well (the age is the meta file's own)", k_i == ["audit_idle", "audit_idle"] and k_i2 == [], (k_i, k_i2))
     registry("idle", sid=""); d_i1 = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
+    registry("shell", sid=""); d_s1 = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
     registry("idle", sid=str(_uuid.uuid4())); d_i2 = raises(lambda: audit_ticks_svc._mover_subagents("home-peer", {}, now0), TIE.Unreadable)
-    check("17 an idle pane whose registry row names no session, or whose transcript this box does not hold, is unknown (Unreadable), as for a busy pane", d_i1 and d_i2, (d_i1, d_i2))
+    check("17 an idle or shell pane whose registry row names no session, or whose transcript this box does not hold, is unknown (Unreadable), as for a busy pane", d_i1 and d_s1 and d_i2, (d_i1, d_s1, d_i2))
 finally:
     row_path.unlink(missing_ok=True)
 
