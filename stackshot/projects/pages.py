@@ -417,7 +417,7 @@ def keeper_of(key, fms, marks=True):
         v = fm.get(k)
         if isinstance(v, str) and v.strip():
             if role: return v.strip(), role
-            up = _hub_keeper(key, fms, marks)       # the old key: a sub-page kept by someone other than its hub's name-line session is an agent's
+            up = _hub_keeper(key, fms, False)       # the old key: a sub-page kept by someone other than its hub's name-line session is an agent's (read by the old lines alone: a mark above does not reclassify the line)
             return v.strip(), ("agent" if up and up != v.strip() else NAME)
     up = _hub_keeper(key, fms, marks)
     return (up, "inherited") if up else ("", "")

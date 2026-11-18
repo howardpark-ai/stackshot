@@ -76,6 +76,22 @@ def row_mark(row) -> str:
     return s if s and s in (row.get("agents") or {}) else ""
 
 
+def marked(key: str, reg: dict, _seen: tuple = ()) -> str:
+    """The agent the page `key` marks as its keeper, or inherits as a mark from the page above it ("" when no mark reaches it): a row whose role is "mark", or a sub-page that only inherits one.
+    Reads the rows' own fields and nothing else, so it can run while the registry is being built (router_live.stand_in_of calls it)."""
+    row = reg.get(key) if isinstance(reg, dict) else None
+    if not isinstance(row, dict):
+        return ""
+    who = str(row.get("session") or "")
+    if row.get("role") == MARK and who:
+        return who
+    if row.get("role") == "inherited" and key not in _seen:
+        up = above(key, reg)
+        if up:
+            return marked(up, reg, _seen + (key,))
+    return ""
+
+
 def names_of(row) -> set:
     """Every session name a registry row counts as its keeper by an old or a new rule: the `session` (the mark, else the page's own name line or `agent:`), and the `legacy_session` a mark
     took the place of. What a session keeps (pages.keeper_pages, keepers_any) is read from this."""
@@ -147,12 +163,14 @@ def fields(key: str, reg: dict, _seen: tuple = ()) -> dict:
     role = str(row.get("role") or ""); who = str(row.get("session") or "")
     if role == MARK and who:
         return {"keeper_agent": who, "keeper_source": "mark"}
+    up = above(key, reg) if role == "inherited" and key not in _seen else ""
+    above_got = fields(up, reg, _seen + (key,)) if up else None      # an unnamed sub-page takes the mark above it, in a retired project too (a mark is read even there)
+    if above_got and above_got["keeper_source"] == "mark":
+        return above_got
     if retired(key, reg):
         return {"keeper_agent": "", "keeper_source": ""}
-    if role == "inherited" and key not in _seen:
-        up = above(key, reg)
-        if up:
-            return fields(up, reg, _seen + (key,))
+    if above_got:
+        return above_got
     if role == "agent" and who:                        # a sub-page an agent keeps as its own working document: that agent, as before
         return {"keeper_agent": who, "keeper_source": "legacy"}
     if role == "name" and who and not row.get("agents"):     # its own name line and no agents of its own: the old line stays (the page does not fall to its hub's builder)

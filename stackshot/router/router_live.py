@@ -202,25 +202,35 @@ def _builder_in(project: str, reg: dict[str, dict[str, Any]], roots: list[str] |
     return min(hits)[2] if hits else ""
 
 
+def marked_in(project: str, reg: dict[str, dict[str, Any]], roots: list[str] | None = None) -> str:
+    """The agent the project marks as its keeper ("" with no mark): the mark of the page whose agents serve the project (agent_root: its top-level page, or the hub that page falls to). A mark names an
+    agent of its own page's map, so a project that has one lists agents."""
+    root = _anc.pilot_root(project, roots) or "/".join(str(project or "").strip("/").split("/")[:2])
+    return _anc.marked_for(root, reg)
+
+
 def stand_in_of(project: str, reg: dict[str, dict[str, Any]]) -> str:
-    """stand_in(), read from `reg` alone: the project's builder, else its -main agent (anchors.fallback_main). The same two steps in the same order; only the live-page test and the registry file are left
+    """stand_in(), read from `reg` alone: the project's marked keeper, else its builder, else its -main agent (anchors.fallback_main). The same steps in the same order; only the live-page test and the registry file are left
     out, so a registry being built (pages.cmd_registry), or being read through the project record (project_registry.apply, which the registry file's own reader calls), can ask before the file
     holds the page. "" when no session can be named."""
     try:
         roots = ["/".join(str(project or "").strip("/").split("/")[:2])]
-        return _builder_in(project, reg, roots) or _anc.fallback_main(project, reg, roots)
+        return marked_in(project, reg, roots) or _builder_in(project, reg, roots) or _anc.fallback_main(project, reg, roots)
     except Exception:  # noqa: BLE001
         return ""
 
 
 def stand_in(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
-    """The project's STAND-IN, the agent the router's passes go to for it: its builder (builder()), else its -main agent (its own page's, else
+    """The project's STAND-IN, the agent the router's passes go to for it: the agent its page marks as its keeper (keeper.py), else its builder (builder()), else its -main agent (its own page's, else
     its hub's, else the scope's general one: anchors.fallback_main). "" for a key that names no page, and when no session can be named. The
     page's name line decides nothing here; a one-session page's items keep their keeper (telling.project_keeper), not this agent."""
     try:
         reg = _anc.registry() if reg is None else reg
         if not is_live(project):
             return ""
+        m = marked_in(project, reg)
+        if m:
+            return m
         b = builder(project, reg)
         if b:
             return b
