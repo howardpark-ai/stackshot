@@ -18,7 +18,7 @@ What it flags (one finding is {"page", "line", "name", "fix", "project"}; the li
   two projects on one page      two or more live (not archived) entries that point at one page. Fix: archive the stray, or give it a page of its own with `move-page`
 
 The four keeper debts (only with `[registry_audit] keeper_debts = true`, off by default: nobody is told of a mark's problem before marks are set on purpose; the keeper is a mark on one agent, keeper.py):
-  keeper-not-listed             a mark names an agent the record does not list: the page's `keeper:` line, or a flag that is not true or false. Fix: `tools/project.py keeper <project> <agent>` (the page's own line is for whoever edits the page to change)
+  keeper-not-listed             a mark names an agent the record does not list: the page's `keeper:` line, or a flag that is not true or false. Fix: `tools/project.py keeper <project> <agent>` for a flag; for a stale page line, edit or remove the line (no verb writes it)
   keeper-two-marks              two agents flagged in the record, or the record's flag and the page's `keeper:` line name different agents. Fix: `tools/project.py keeper <project> <agent>` leaves one flag
   keeper-retired                the mark names an agent the record says was retired from the project. Fix: `tools/project.py keeper <project> <agent>`
   keeper-not-derived            a live project that lists agents, has no mark, and has no builder or -main agent to derive a keeper from. Fix: mark one: `tools/project.py keeper <project> <agent>`
@@ -143,6 +143,7 @@ def keeper_debts(ents: dict, reg: dict, ov: dict | None = None) -> list[dict[str
     the entry's `former_agents`) and keeper-not-derived (no mark, agents listed, and the overlaid registry `ov` derives no keeper for the page). One finding per project and kind. Read only."""
     from stackshot.projects import keeper as _kp  # noqa: PLC0415
     fix = "run `tools/project.py keeper {p} <agent>` (a dry run first: it names the old mark, the new one and the sessions whose roles move; add --apply to write it)"
+    page_fix = "edit the page's `keeper:` line to name a listed agent, or remove the line (no verb writes it: `tools/project.py keeper` moves the record's mark only)"
     out: list[dict[str, str]] = []
     for pid, e in sorted(ents.items()):
         k = _pr.page_key(e)
@@ -155,7 +156,7 @@ def keeper_debts(ents: dict, reg: dict, ov: dict | None = None) -> list[dict[str
             if kind in seen:
                 continue
             seen.add(kind)
-            out.append(_f(k, kind, text, fix.format(p=pid), pid))
+            out.append(_f(k, kind, text, page_fix if re.match(r"(the page's )?`keeper: ", text) else fix.format(p=pid), pid))
         if ag and not _kp.effective_mark(ag, row):
             got = (ov or {}).get(k) or {}
             if isinstance(got, dict) and got and not got.get("keeper_agent"):      # a page the overlaid registry does not hold says nothing

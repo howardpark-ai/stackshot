@@ -232,6 +232,18 @@ check("keeper, a record with two flags, asked for the agent that is the effectiv
       r["lines"][0] == f"dry run: keeper of {FORGE}: repaired 2 marks to one (kept team-forge-main, cleared team-forge-docs)" and "-> team-forge-main (the mark)" not in r["lines"][0], r["lines"])
 r = pv.keeper("projects/forge", "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=undo_dir)
 check("... applied: one flag is left, on the agent kept, and the line says so", flags(FORGE) == ["team-forge-main"] and r["lines"][0] == f"keeper of {FORGE}: repaired 2 marks to one (kept team-forge-main, cleared team-forge-docs)" and r["changed"] is True, (flags(FORGE), r["lines"]))
+# a malformed flag on ANOTHER agent (not true, not false) is no mark to the reader, and the verb still repairs it: asked for the agent that is the mark already, it must not answer `already the keeper`
+d = recfile(); ag = d["projects"][FORGE]["agents"]
+for n in ag: ag[n].pop("keeper", None)
+ag["team-forge-main"]["keeper"] = True; ag["team-forge-docs"]["keeper"] = "yes"; REC.write_text(json.dumps(d), encoding="utf-8"); pr._CACHE["sig"] = None
+r = pv.keeper("projects/forge", "team-forge-main", io=IO, by="lone-session")
+check("keeper, a malformed flag on another agent, asked for the agent that is the mark: not `already the keeper`; a dry run says it repairs the flag (kept X, cleared Y) and writes nothing",
+      r["same"] is False and r["lines"][0] == f"dry run: keeper of {FORGE}: repaired 2 marks to one (kept team-forge-main, cleared team-forge-docs)" and recfile()["projects"][FORGE]["agents"]["team-forge-docs"]["keeper"] == "yes", r["lines"])
+r = pv.keeper("projects/forge", "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=undo_dir)
+check("... applied: the malformed flag is gone, one flag is left on the mark, and the registry reads no problem line any more",
+      flags(FORGE) == ["team-forge-main"] and "keeper" not in recfile()["projects"][FORGE]["agents"]["team-forge-docs"] and r["changed"] is True and "keeper_problems" not in (refresh() or R()["projects/forge"]), (flags(FORGE), r["lines"]))
+r = pv.keeper("projects/forge", "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=undo_dir)
+check("... and a second ask is the plain `already the keeper`, nothing written", r["same"] is True and r["changed"] is False and r["lines"] == [f"team-forge-main is the keeper of {FORGE} already; nothing to change"], r["lines"])
 r = pv.keeper("projects/ember2", "team-ember2-docs", apply=True, io=IO, by="lone-session", run_dir=undo_dir)
 check("keeper: a project whose page names another agent in its own `keeper:` line gets the record's flag and a warning that the page line is for whoever edits the page to change (the record wins)",
       flags(EMBER2) == ["team-ember2-docs"] and "keeper:" in r.get("warning", "") and fields_of("projects/ember2") == ("team-ember2-docs", "mark") and r["old"] == "team-ember2-main", (flags(EMBER2), r.get("warning"), r["old"], fields_of("projects/ember2")))
@@ -267,10 +279,13 @@ two_b = rr.keeper_debts({"prj_debtx": ent(ag("team-debtx-main", "team-debtx-docs
 check("keeper-two-marks: the record's flag and the page's `keeper:` line name different agents", [f["line"] for f in two_b] == ["keeper-two-marks"], two_b)
 nl = rr.keeper_debts({"prj_debtx": ent(ag("team-debtx-main"))}, {"projects/debtx": row(role="mark", session="team-debtx-docs", agents={"team-debtx-main": ""}, keeper_problems=["`keeper: team-debtx-docs` names no agent on the page's `agents:` map; ignored"])}, R())
 check("keeper-not-listed: the page's `keeper:` line names an agent the record does not list", [f["line"] for f in nl if f["line"] == "keeper-not-listed"] == ["keeper-not-listed"], nl)
+check("keeper-not-listed: a stale page `keeper:` line is fixed by editing or removing the line, never by the keeper verb (which writes the record's flag only)",
+      "edit the page's `keeper:` line" in nl[0]["fix"] and "remove the line" in nl[0]["fix"] and "tools/project.py keeper prj_debtx" not in nl[0]["fix"], nl)
 bad = rr.keeper_debts({"prj_debtx": ent({"team-debtx-main": {"front": True, "mandate_line": "talks", "keeper": "yes"}})}, {"projects/debtx": row(agents={"team-debtx-main": ""})}, R())
 check("keeper-not-listed: a flag that is neither true nor false is reported (and is no mark)", [f["line"] for f in bad if f["line"] == "keeper-not-listed"] == ["keeper-not-listed"], bad)
 rt = rr.keeper_debts({"prj_debtx": ent(ag("team-debtx-docs", "team-debtx-gone", mark=["team-debtx-gone"]), former=["team-debtx-gone"])}, {"projects/debtx": row(agents={"team-debtx-docs": "", "team-debtx-gone": ""})}, R())
 check("keeper-retired: a flag on an agent the entry lists as retired", [f["line"] for f in rt] == ["keeper-retired"], rt)
+check("... a flag (a malformed one, a retired one) keeps the verb as its fix: only a page's own line is edited by hand", "tools/project.py keeper prj_debtx" in bad[0]["fix"] and "tools/project.py keeper prj_debtx" in rt[0]["fix"], (bad[0]["fix"], rt[0]["fix"]))
 rt2 = rr.keeper_debts({"prj_debtx": ent(ag("team-debtx-docs"), former=["team-debtx-gone"])}, {"projects/debtx": row(agents={"team-debtx-docs": ""}, keeper_problems=["`keeper: team-debtx-gone` names no agent on the page's `agents:` map; ignored"])}, R())
 check("keeper-retired: the page's `keeper:` line names an agent the record retired", [f["line"] for f in rt2] == ["keeper-retired"], rt2)
 nd = rr.keeper_debts({"prj_debtx": ent(ag("team-debtx-w", back=["team-debtx-w"]))}, {"projects/debtx": row(agents={"team-debtx-w": "watches"}, back_agents={"team-debtx-w": ""})}, {"projects/debtx": {"keeper_agent": "", "keeper_source": ""}})
