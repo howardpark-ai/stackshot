@@ -354,6 +354,10 @@ finally:
 check("a role loss that appears only under the lock is refused, nothing written, and no undo file", r14b["refused"].startswith("refused: 1 session(s) would lose a role: team-wing") and "nothing was written" in r14b["refused"]
       and r14b["written"] is False and not (T / "undo-lost").exists() and "team-wing" not in json.loads(left14)["projects"][WI]["agents"] and not any(a.get("keeper") for a in json.loads(left14)["projects"][WI]["agents"].values()), (r14b["refused"], r14b["written"]))
 check("... and it is accepted when the session is named", (lambda r: r["written"] is True and r["refused"] == "")(km.run(apply_=True, accept=("team-wing",), live=set(), run_dir=T / "undo-accepted", now=NOW9)), None)
+check("a refusal caused by the plan under the lock says the plan changed under it: `replanned` is true, and the output says why, ahead of the refusal",
+      r14b["replanned"] is True and any("the record changed between the plan and the write" in l and "refuses" in l for l in r14b["lines"]) and r14b["lines"][-1] == r14b["refused"], (r14b["replanned"], r14b["lines"][-3:]))
+check("a refusal the plan read before the lock already had (nothing changed under it) is not marked replanned and carries no such line",
+      refused["replanned"] is False and not any("the record changed between" in l for l in refused["lines"]), (refused["replanned"], refused["lines"][-3:]))
 
 # ---- 15. a record entry with no page (or no usable key) is never promoted, marked or cleared
 write_record(ENTRIES)
