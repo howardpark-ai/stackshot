@@ -441,7 +441,9 @@ def message(to: str, text: str, sender: str, timeout: float = 130.0, release: st
     """Send a message through the server with this machine's token → (HTTP status, the server's answer or its refusal).
     0 = the server could not be reached. The server delivers before it answers, which can take seconds. `release` = green
     (release.sh's result after a clean deploy; `pr` its PR's URL): the server logs it in the project's routing log and rules it
-    itself instead of delivering it (it stays on the routing page); any other value is delivered as before."""
+    itself instead of delivering it (it stays on the routing page); any other value is delivered as before. `fyi` = the message asks nothing: a background or a front agent gets it with its next turn
+    and no turn of its own (a front agent needs no mark on the first line for it, as for a session's fyi). A front agent whose hook cannot fetch held lines does not get it:
+    the server refuses (status 400), so the answer is a failure, never a delivery."""
     body = {"to": to, "text": text, "sender": sender}
     if release: body["release"] = release
     if pr: body["pr"] = pr
@@ -1114,7 +1116,9 @@ def main(argv: list[str]) -> int:
             a = [x for x in a if x != f]
         sender = opt["--sender"]
         if len(a) != 2 or not sender or opt["--release"] not in ("", "green", "red"):
-            print("usage: client.py message <to> <text | -> --sender <label> [--fyi] [--release green|red --pr <PR url>]"); return 1
+            print("usage: client.py message <to> <text | -> --sender <label> [--fyi] [--release green|red --pr <PR url>]\n"
+                  "  --fyi: the message asks nothing of its receiver (news, a result). A background agent or a front agent gets it with its next turn, not a turn of its own, "
+                  "and a front agent needs no mark on the first line for it; a front agent whose hook cannot fetch held lines does not get it, and the call fails (exit 1); without --fyi a front agent takes only a message marked for the person."); return 1
         text = sys.stdin.read() if a[1] == "-" else a[1]
         status, body = message(a[0], text, sender, release=opt["--release"], pr=opt["--pr"], fyi=fyi)
         print(body if status == 200 else f"[{status}] {body}"); return 0 if status == 200 else 1

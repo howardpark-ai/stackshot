@@ -14,7 +14,7 @@ Covers (held.py is the store and the decision; telling.hold_notice and router_li
   5. The router: a pass to a background agent of a notice recorded with `hold` (page-owed, fyi) is held and ruled held with the reason (the audit's batch is not: the board item, a finding is a task and wakes its mover); the same
      pass to a front agent of a notice held for another reason (page-owed), a notice with Oliver's words, a ruling for Oliver, and a notice with no hold mark are delivered as before; the pass of an fyi to a front agent goes through the front gate.
   6. The message tool's `fyi`: to a background agent held (the reply says so; the agent is named in no item's needs), to a project recorded with the mark, to a front
-     agent held for its next turn through the front gate (it starts no turn; a router pass of one the same); a marked or a plain message to a front agent, a retired or unknown name unchanged; the parameter is on the tool and the text says what it does.
+     agent held for its next turn through the front gate (it starts no turn; a router pass of one the same, and a script's, through client.py or POST /client/message, the same); a script's marked or plain message, one that says needs: decision, and one in the person's name unchanged; a marked or a plain message to a front agent, a retired or unknown name unchanged; the parameter is on the tool and the text says what it does.
   7. The hand-over at a turn start: the client endpoint (POST /client/held) returns the text once, a waking notice does not take the held lines with it, the lines wait
      until a turn start, a front agent's session gets nothing, and client.held_for reads the endpoint.
 
@@ -409,6 +409,8 @@ try:
     check("6r: an fyi to a retired name is refused as before, nothing held or pushed", out.startswith("Refused: 'work-osprey-old' cannot receive this") and pushes()[n0:] == [] and held.count(A) == 0 and held.count(X) == 0, out)
     out = why(lambda: _messaging._message("work-osprey-ghost", "the PR is merged", "home-beta", fyi=True))
     check("6s: an fyi to an unknown name is refused as before", out.startswith("Refused: no session 'work-osprey-ghost'") and pushes()[n0:] == [] and held.count(A) == 0, out)
+    out = why(lambda: _messaging._message("work-osprey-old", "the PR is merged", "home-beta", origin=MACH, fyi=True))
+    check("6s2: a script's fyi to a retired name is refused as before, nothing held or pushed", out.startswith("Refused: 'work-osprey-old' cannot receive this") and pushes()[n0:] == [] and held.count(A) == 0 and held.count(X) == 0, out)
 finally:
     FJ.write_text(FJ0); MJ.write_text(MJ0)
 fresh(); n0 = len(pushes()); out = _messaging._message(KEY, "the release is live", "home-beta", fyi=True)
@@ -441,10 +443,59 @@ check("6l: a message to a project without fyi carries no mark", "hold" not in nn
 # ---- 6c. follow-ups to the fyi to a front agent
 item(20); item(21); item(22); item(23, status="done"); item(24)
 held.mark_client(A, "work-osprey-main")
+fresh(); n0 = len(pushes()); nlog = len(_messaging.MSG_LOG.read_text().splitlines()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", origin=MACH, fyi=True); settle()
+check("6v: a script's unmarked fyi (origin set) to a front agent starts no turn: nothing is pushed, one line is held, the reply says so", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:], held.count(A)))
+got = held.take(A, "work-osprey-main")
+check("6v1: …it is handed over with the agent's next turn, once, and the line says a script sent it (not a session, no reply)", "the PR is merged" in got and "home-beta (a script on home-test)" in got and held.take(A, "work-osprey-main") == "", got)
+check("6v2: …and the message log records it, as one new line: an fyi held, not delivered", [(json.loads(l).get("fyi"), json.loads(l)["to"], json.loads(l)["from"], "held" in json.loads(l)["outcome"]) for l in _messaging.MSG_LOG.read_text().splitlines()[nlog:]] == [(True, "work-osprey-main", "home-beta", True)])
+fresh(); n0 = len(pushes()); r0 = len(routing.read(KEY))
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": "work-osprey-main", "text": "the PR is merged, nothing for you to do", "sender": "home-beta", "fyi": True}); settle()
+check("6v3: the same fyi through POST /client/message is held for the next turn and starts none; the router is given nothing to rule, and the gate's own log line is the only new one (held once, not twice)", st_ == 200 and str(body_.get("result", "")).startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1 and [(x.get("ruling"), x.get("ruled_by")) for x in routing.read(KEY)[r0:]] == [("held", "stackshot (auto)")], (st_, body_, pushes()[n0:], routing.read(KEY)[r0:]))
+st_, body_ = _rt_client._client_post(MACH, "held", {"uuid": A, "name": "work-osprey-main"})
+check("6v4: …and the turn-start hook hands it over through POST /client/held, with the script's label", st_ == 200 and "the PR is merged" in body_.get("text", "") and "a script on home-test" in body_.get("text", "") and len(body_.get("ids", [])) == 1, (st_, body_))
+held.ack(A, ids=body_.get("ids"))
+fresh(); n0 = len(pushes()); b10 = len(fq_log(10)); out = msg("work-osprey-main", "a10 is merged, nothing for you to do", "home-beta", origin=MACH, fyi=True); settle()
+check("6v5: a script's fyi that names an open item gives it the board line, like a session's", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1 and len(fq_log(10)) == b10 + 1 and "merged" in fq_log(10)[-1], (out, fq_log(10)))
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "[for Oliver] pick a or b", "home-beta", origin=MACH, fyi=True); settle()
+check("6v6 control: a script's MARKED message to a front agent is delivered as before (it asks something): a labeled script turn, nothing held", out.startswith("delivered") and len(reach(A, n0)) == 1 and "a script on home-test" in json.dumps(reach(A, n0)) and "cannot be replied to" in json.dumps(reach(A, n0)) and held.count(A) == 0, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged", "home-beta", origin=MACH); settle()
+check("6v7 control: a script's message without fyi and without the mark is still refused, nothing held or pushed", out.startswith("Refused") and "front agent" in out and reach(A, n0) == [] and held.count(A) == 0, out)
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "it now needs: decision", "home-beta", origin=MACH, fyi=True); settle()
+check("6v8 control: a script's fyi that says needs: decision is no fyi: refused without the mark, nothing held", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "Oliver", origin=MACH, fyi=True); settle()
+check("6v9 control: a message in the person's own name from a script is no fyi: refused without the mark, nothing held", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
+fresh(); n0 = len(pushes()); out = msg("work-osprey-x", "the PR is merged, nothing to do", "home-beta", origin=MACH, fyi=True); settle()
+check("6v10 control: a script's fyi to a background agent is held as before", out.startswith("held for work-osprey-x's next turn") and reach(X, n0) == [] and held.count(X) == 1 and held.count(A) == 0, out)
+fresh(); n0 = len(pushes()); out = msg("work-osprey-ghost", "the PR is merged", "home-beta", origin=MACH, fyi=True)
+check("6v11 control: a script's fyi to an unknown name is refused as before, nothing held or pushed", out.startswith("Refused: no session") and pushes()[n0:] == [] and held.count(A) == 0 and held.count(X) == 0, out)
+_cfg.CFG["router"]["hold_notices"] = False
+try:
+    fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", origin=MACH, fyi=True); settle()
+    check("6v12 control: with the hold switch off a script's fyi to a front agent is refused as before, nothing held or pushed", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
+finally:
+    _cfg.CFG["router"].pop("hold_notices", None)
+os.unlink(held.clients_file()); gate_open()
 fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", origin=MACH, fyi=True); settle()
-check("6v: a script's fyi (origin set) to a front agent is refused as without the flag, as docs/router.md now says: nothing held or pushed", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
-st_, body_ = _rt_client._client_post(MACH, "message", {"to": "work-osprey-main", "text": "the PR is merged, nothing for you to do", "sender": "home-beta", "fyi": True})
-check("…and so is the same fyi through POST /client/message", "Refused" in str(body_) and held.count(A) == 0, (st_, body_))
+check("6v13: a front agent whose hook does not fetch held lines is not given a turn by a script either, and the script is refused, not told 'not passed on': nothing pushed or held", out.startswith("Refused") and "cannot fetch held lines" in out and "update, complete" not in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": "work-osprey-main", "text": "the PR is merged, nothing for you to do", "sender": "home-beta", "fyi": True}); settle()
+check("6v14: …through POST /client/message the status is 400 (a script reads the status: the client, refusal_report and audit_run count a 200 as sent)", st_ == 400 and "cannot fetch held lines" in str(body_.get("error", "")) and held.count(A) == 0 and reach(A, n0) == [], (st_, body_))
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", fyi=True); settle()
+check("6v15 control: a session's fyi in the same state still gets the reply 'not passed on' (the session path is unchanged)", out.startswith("not passed on") and reach(A, n0) == [] and held.count(A) == 0, out)
+held.mark_client(A, "work-osprey-main")
+fresh(); n0 = len(pushes()); long_s = "work-osprey-x " + "p" * 280
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": "work-osprey-main", "text": "the PR is merged, nothing for you to do", "sender": long_s, "fyi": True}); settle()
+got = held.take(A, "work-osprey-main")
+check("6v16: a 280-character sender does not push the script label out of the 260-character held line", st_ == 200 and "(a script on home-test)" in got and "the PR is merged" in got and "p" * 100 not in got, (st_, body_, got))
+fresh(); long_sess = "work-osprey-x " + "s" * 47
+check("6v16 length", len(long_sess) == 61)
+msg("work-osprey-main", "the PR is merged, nothing for you to do", long_sess, fyi=True); settle(); got = held.take(A, "work-osprey-main")
+check("6v18: a SESSION sender of 61 characters is held for a front agent whole, with no script label and no cut (the line is as on main)", f"from {long_sess}: the PR is merged" in got and "script" not in got and "…" not in got, got)
+msg("work-osprey-x", "the PR is merged, nothing to do", long_sess, fyi=True); settle(); got = held.take(X, "work-osprey-x")
+check("6v19: …and for a background agent", f"from {long_sess}: the PR is merged" in got and "script" not in got and "…" not in got, got)
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "Release 4.2 is live. " + "details " * 60 + "END-MARKER", "home-beta", origin=MACH, fyi=True); settle()
+check("6v17: a script told its fyi was cut is not pointed at session tools (update, complete)", out.startswith("held for work-osprey-main's next turn") and "cut" in out and "update, complete" not in out and "page" in out, out)
+held.take(A, "work-osprey-main")
+held.mark_client(A, "work-osprey-main")
 fresh(); n0 = len(pushes()); b20, b21 = len(fq_log(20)), len(fq_log(21))
 n = rec("a20 and a21 are merged, nothing for you", hold="fyi"); res = act(n, "work-osprey-main", rule="message-item"); settle()
 check("6w: a routed fyi that names items in its text, with none on the ruling, gives each open item its board line (as the tool path does) and is held for the next turn",
