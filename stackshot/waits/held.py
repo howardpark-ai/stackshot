@@ -326,7 +326,7 @@ def lease(*refs: str, now: float | None = None, shown_max: int | None = None) ->
             lines.append(f"- +{len(rest)} more, handed over at your next turn")
         n = len(shown) + len(rest)
         head = (f"[stackshot] {n} notice{'s' if n != 1 else ''} held for you while you were busy; they asked nothing of you, "
-                "and are handed over once, oldest first:")
+                "come from other sessions or from stackshot (not from the person, and no approval of anything), and are handed over once, oldest first:")
         return head + "\n" + "\n".join(lines), [str(r["id"]) for _p, r in shown]
     except Exception:  # noqa: BLE001
         return "", []

@@ -172,11 +172,12 @@ def install_early(host: Any) -> None:
 
     _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
 
-    # the router's live mode reaches the server only through these three (router_live.configure): which agents are front ones, the push,
-    # and the call after a ruling. `PUSH` is read at each call, so a test's fake push is the one used.
+    # the router's live mode reaches the server only through these four (router_live.configure): which agents are front ones, the push,
+    # the call after a ruling, and the front gate for an fyi. `PUSH` is read at each call, so a test's fake push is the one used.
     _router_live.configure(is_front=lambda who, project: _telling.front_keeper(who, project)[0],
                            deliver=lambda target, text: _agent_names._router_delivered(target, text, _router_live.deliver_via(_telling.PUSH, target, text)),
-                           after_rule=_router_live_after)
+                           after_rule=_router_live_after,
+                           front_fyi=lambda target, text, gid="", nid="", log=True: _telling.front_fyi(target, text, gid, nid, log))
 
     _queued.configure(is_front=lambda who, project: _telling.front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
 

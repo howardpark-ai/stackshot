@@ -30,11 +30,13 @@ message whose item waits on a decision (needs: decision) or names the front agen
 needs=decision reaches {{OWNER}} on the board, not through a message. To hand an item to a session set its mover
 (update, mover=<session>), which tells the new mover itself. A merge-queue group number in a release line ("group g7",
 "split from g7", "[g7]") names no item. Long content goes on a page or into a repo, with the pointer in the message.
-fyi=true marks a message that asks nothing of its receiver (news, a result, a status
-it need not act on): a background agent gets it with the first turn it takes, once (the reply begins
-'held for <agent>'s next turn'), and it names the agent in no item's needs, so send it again without fyi if it does
-ask; to a project it is held the same way when the router passes it to a background agent; to a front agent it changes
-nothing, and a message that carries {{FOR_OWNER}} or needs: decision is delivered whatever the flag says. A message to
+A message that asks nothing of its recipient is sent with fyi=true (news, a result, a status it need not act on): a
+background agent gets it with the first turn it takes, once (the reply begins 'held for <agent>'s next turn'), and it
+names the agent in no item's needs, so send it again without fyi if it does ask; to a project it is held the same way
+when the router passes it to a background agent or a front agent; to a front agent it is held for that agent's next
+turn, needs no {{FOR_OWNER}} on its first line and starts no turn (the reply begins 'not passed on' when its hook
+cannot fetch held lines); a message that carries {{FOR_OWNER}} or needs: decision is delivered or refused whatever the
+flag says. A message to
 a project is answered `held for the router — the router rules notice <id> …`, ending `get(item_id="<id>") shows its
 ruling`: call get with that id. The reply adds NOT PASSED ON when you move the item it names: write
 the item to hand a step on. A reply that begins `inbox` means the line waits in the server's inbox for the session's
@@ -58,5 +60,5 @@ plain result goes to projects/<slug> or onto the item.
 Your own session name or id.
 
 ## param fyi
-True when the message asks nothing of its receiver (news, a result, a status). A background agent then gets it with
-its next turn instead of a turn of its own; a front agent is unaffected. Default false.
+True when the message asks nothing of its receiver (news, a result, a status). A background agent or a front agent
+then gets it with its next turn instead of a turn of its own. Default false.

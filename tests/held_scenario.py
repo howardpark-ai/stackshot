@@ -10,16 +10,16 @@ Covers (held.py is the store and the decision; telling.hold_notice and router_li
      (queue), a page-owed notice and a batch of them (page-owed). And what still wakes it, pushed as before: a completion with Oliver's words, a reopen, a change
      to an item it moves or is named on, a wake that puts the item back in its lane, a hand-off, a naming in needs, a page-debt fallback, a message not marked
      fyi, an fyi that carries [for Oliver], an fyi from Oliver.
-  4. A front agent is unchanged: the same senders deliver to it (or tell nobody) as before, and an fyi to a front agent is refused or delivered by the same rules.
+  4. A front agent is unchanged: the same senders deliver to it (or tell nobody) as before, and a message that asks something of it (its first line carries the mark) is delivered by the same rules.
   5. The router: a pass to a background agent of a notice recorded with `hold` (page-owed, fyi) is held and ruled held with the reason (the audit's batch is not: the board item, a finding is a task and wakes its mover); the same
-     pass to a front agent, a notice with Oliver's words, a ruling for Oliver, and a notice with no hold mark are delivered as before.
+     pass to a front agent of a notice held for another reason (page-owed), a notice with Oliver's words, a ruling for Oliver, and a notice with no hold mark are delivered as before; the pass of an fyi to a front agent goes through the front gate.
   6. The message tool's `fyi`: to a background agent held (the reply says so; the agent is named in no item's needs), to a project recorded with the mark, to a front
-     agent unchanged; the parameter is on the tool and the text says what it does.
+     agent held for its next turn through the front gate (it starts no turn; a router pass of one the same); a marked or a plain message to a front agent, a retired or unknown name unchanged; the parameter is on the tool and the text says what it does.
   7. The hand-over at a turn start: the client endpoint (POST /client/held) returns the text once, a waking notice does not take the held lines with it, the lines wait
      until a turn start, a front agent's session gets nothing, and client.held_for reads the endpoint.
 
     tests/run-suite held        → exit 0 / 1"""
-import importlib, inspect, json, logging, os, pathlib, re, sys, threading, time
+import asyncio, datetime, importlib, inspect, json, logging, os, pathlib, re, sys, threading, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
@@ -120,6 +120,7 @@ text = held.take(X, "work-osprey-x", now=t0 + 20)
 lines = text.splitlines()
 check("1a: twelve lines held, the first hand-over shows eight, oldest first, and the tail says how many wait for the next turn", len(lines) == 1 + 8 + 1 and "line 0" in lines[1] and "line 7" in lines[8] and "+4 more" in lines[-1], text)
 check("1b: the header counts all twelve and says they asked nothing and come once", lines[0].startswith("[stackshot] 12 notices held for you") and "once" in lines[0], lines[0])
+check("1b2: …and says they come from other sessions or stackshot, not from the person, and are no approval of anything", "other sessions" in lines[0] and "not from the person" in lines[0] and "approval" in lines[0], lines[0])
 text2 = held.take(X, "work-osprey-x", now=t0 + 21)
 check("1c: the next turn start gets the other four, with no tail, and nothing is repeated", "line 8" in text2 and "line 11" in text2 and "line 7" not in text2 and "more" not in text2.splitlines()[-1], text2)
 check("1d: and the turn after that gets nothing", held.take(X, "work-osprey-x") == "" and held.count(X, "work-osprey-x") == 0)
@@ -339,8 +340,8 @@ if ln:
 # ---- 6. the message tool's fyi
 check("6a: the message tool takes fyi (default false) and its text says what it does", "fyi" in inspect.signature(_wt_message.stackshot_message).parameters
       and inspect.signature(_wt_message.stackshot_message).parameters["fyi"].default is False)
-desc = next(t for t in server.mcp._tool_manager._tools.values() if t.name == "message").description if hasattr(server.mcp, "_tool_manager") else ""
-check("…the description names fyi and its effect on a background agent, a project and a front agent", not desc or ("fyi=true" in desc and "next turn" in desc and "front agent it changes nothing" in desc), desc[-400:])
+desc = next(t for t in asyncio.run(server.mcp.list_tools()) if t.name == "message").description or ""
+check("…the description names fyi and its effect on a background agent, a project and a front agent", bool(desc) and ("fyi=true" in desc and "next turn" in desc and "to a front agent it is held for that agent's next turn" in desc and "asks nothing of its recipient is sent with fyi" in desc), desc[-600:])
 fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
 check("6b: an fyi to a background agent is held: the reply says so, nothing is pushed, the line waits", out.startswith("held for work-osprey-x's next turn") and reach(X, n0) == [] and held.count(X) == 1 and len(logged("fyi")) == 1, (out, pushes()[n0:]))
 check("…and the message log records it as an fyi that was not delivered", any(json.loads(l).get("fyi") and "held" in json.loads(l)["outcome"] for l in _messaging.MSG_LOG.read_text().splitlines()))
@@ -354,17 +355,85 @@ item(11); fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x"
 check("6f: an fyi names the builder in no item's needs (it asked nothing), where the same words without fyi do", out.startswith("held") and "work-osprey-x" not in str(rd(11)["metadata"].get("needs")) and "named" not in out, out)
 fresh(); out = _messaging._message("work-osprey-x", "done with a11", "home-beta"); settle()
 check("…(the control: without fyi the plain item id names it)", "work-osprey-x" in str(rd(11)["metadata"].get("needs")), rd(11)["metadata"])
-fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-main", "the PR is merged", "home-beta", fyi=True))
-check("6g: an fyi to a FRONT agent without the mark is refused by the same gate as without the flag", out.startswith("Refused") and "front agent" in out and reach(A, n0) == [], out)
+fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-main", "the PR is merged", "home-beta"))
+check("6g: a plain message to a FRONT agent without the mark is refused by the gate (no flag)", out.startswith("Refused") and "front agent" in out and reach(A, n0) == [], out)
 fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "[for Oliver] pick a or b", "home-beta", fyi=True); settle()
-check("6h: …and a marked one is delivered to it as it would be without the flag", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, out)
+check("6h: a marked message to it is delivered as it would be without the flag (it asks something)", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, out)
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "[for Oliver] pick a or b", "home-beta"); settle()
+check("6h2 control: …and without the flag the same", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, out)
+fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-main", "it now needs: decision", "home-beta", fyi=True))
+check("6h3: an fyi that says needs: decision is no fyi: refused without the mark, as without the flag", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
+
+# ---- 6b. an fyi to a FRONT agent goes through the front gate: held for its next turn, no turn of its own
+def msg(*a, **k):
+    try: return _messaging._message(*a, **k)
+    except ToolError as e: return str(e)
+def fq_log(i): return [x.get("text", "") for x in ((rd(i)["metadata"].get("front_quiet") or {}).get("log") or [])]
+held.mark_client(A, "work-osprey-main")
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", fyi=True); settle()
+check("6m: a peer's fyi to a front agent (no mark) starts no turn: nothing is pushed, one line is held, the reply says so", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1 and "cut" not in out, (out, pushes()[n0:], held.count(A)))
+got = held.take(A, "work-osprey-main")
+check("6n: …it is handed over with the agent's next turn, once, with the sender and the words", "the PR is merged" in got and "home-beta" in got and held.take(A, "work-osprey-main") == "", got)
+check("6n2: …and the message log records it as an fyi held, not delivered", any(json.loads(l).get("fyi") and json.loads(l)["to"] == "work-osprey-main" and "held" in json.loads(l)["outcome"] for l in _messaging.MSG_LOG.read_text().splitlines()))
+fresh(); n0 = len(pushes()); before_log = fq_log(10); out = msg("work-osprey-main", "a10 is merged, nothing for you to do", "home-beta", fyi=True); settle()
+check("6o: an fyi that names an item the board carries: held for the next turn, and the item gets its board line", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1
+      and len(fq_log(10)) == len(before_log) + 1 and "hears of it on his next turn" in fq_log(10)[-1] and "merged" in fq_log(10)[-1], (out, fq_log(10)))
+os.unlink(held.clients_file()); gate_open()
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", fyi=True); settle()
+check("6p: a front agent whose hook does not fetch held lines is not given a turn either: not passed on, nothing pushed or held, the reply says what to do", out.startswith("not passed on") and reach(A, n0) == [] and held.count(A) == 0 and "without fyi" in out, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "a10 is merged, nothing for you to do", "home-beta", fyi=True); settle()
+check("6p2: …the reply does not say that nothing was written: the item it names carries the words, and the reply says so", "Nothing was sent" not in out and "History" in out and "pane" in out, out)
+held.mark_client(A, "work-osprey-main")
+fresh(); n0 = len(pushes()); long_ = "Release 4.2 is live. " + "details " * 60 + "END-MARKER"
+out = msg("work-osprey-main", long_, "home-beta", fyi=True); settle(); got = held.take(A, "work-osprey-main")
+check("6t: an fyi too long for a held line says so: the reply names the cut and where the full words are (the held line ends before the last word)", out.startswith("held for work-osprey-main's next turn") and "cut" in out and "message log" in out and "END-MARKER" not in got and "Release 4.2" in got, (out, got))
+check("…and the message log holds the full words", any("END-MARKER" in json.loads(l).get("text", "") for l in _messaging.MSG_LOG.read_text().splitlines()))
+fresh(); out = msg("work-osprey-x", long_, "home-beta", fyi=True); settle()
+check("6t2: the same for a background agent's fyi (the reply named no cut before)", out.startswith("held for work-osprey-x's next turn") and "cut" in out and "message log" in out, out)
+_cfg.CFG["router"]["hold_notices"] = False
+try:
+    fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", fyi=True); settle()
+    check("6u: with the hold switch off an fyi to a front agent is refused as without the flag, not 'not passed on' for a reason that is false", out.startswith("Refused") and "hook cannot fetch" not in out and reach(A, n0) == [] and held.count(A) == 0, out)
+finally:
+    _cfg.CFG["router"].pop("hold_notices", None)
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
+check("6q control: an fyi to a background agent is held as before (the reply, the line, no push)", out.startswith("held for work-osprey-x's next turn") and reach(X, n0) == [] and held.count(X) == 1 and held.count(A) == 0, out)
+# an unknown name and a retired one: refused as before, nothing held
+FJ = T / "fleet/a/sessions.json"; FJ0 = FJ.read_text(); rows_ = json.loads(FJ0)
+MJ = T / "fleet/a/machine.json"; MJ0 = MJ.read_text()
+rows_["55555555-5555-4555-8555-555555555555"] = {"name": "work-osprey-old", "machine": "a", "url": "", "seen": "x", "gone": datetime.datetime.fromtimestamp(time.time() - 7200, datetime.timezone.utc).isoformat().replace("+00:00", "Z")}
+FJ.write_text(json.dumps(rows_)); MJ.write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": datetime.datetime.fromtimestamp(time.time() - 48, datetime.timezone.utc).isoformat().replace("+00:00", "Z")}}))      # its machine is online: a pane gone for two hours is gone
+try:
+    fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-old", "the PR is merged", "home-beta", fyi=True))
+    check("6r: an fyi to a retired name is refused as before, nothing held or pushed", out.startswith("Refused: 'work-osprey-old' cannot receive this") and pushes()[n0:] == [] and held.count(A) == 0 and held.count(X) == 0, out)
+    out = why(lambda: _messaging._message("work-osprey-ghost", "the PR is merged", "home-beta", fyi=True))
+    check("6s: an fyi to an unknown name is refused as before", out.startswith("Refused: no session 'work-osprey-ghost'") and pushes()[n0:] == [] and held.count(A) == 0, out)
+finally:
+    FJ.write_text(FJ0); MJ.write_text(MJ0)
 fresh(); n0 = len(pushes()); out = _messaging._message(KEY, "the release is live", "home-beta", fyi=True)
 nn = [x for x in routing.read(KEY) if x.get("kind") == "message" and x.get("text", "").endswith("the release is live")]
 check("6i: an fyi to a project is recorded with the mark for the router (and is held for the router as any message to a project)", out.startswith("held for the router") and nn and nn[-1].get("hold") == "fyi" and reach(X, n0) == [], (out, nn))
 res = act(nn[-1], "work-osprey-x", rule="message-item")
 check("6j: the router, passing it to a background agent, holds it (fyi)", res["ruling"] == "held" and held.count(X) == 1 and len(logged("fyi")) >= 1, res)
-fresh(); n0 = len(pushes()); res = act(nn[-1], "work-osprey-main", rule="message-item")
-check("6k negative: …and passing it to a front agent delivers it as today", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, res)
+fresh(); n0 = len(pushes()); c0 = len([x for x in routing.read(KEY) if x.get("label") == "message"]); res = act(nn[-1], "work-osprey-main", rule="message-item")
+rr = next(x for x in routing.read(KEY) if x["id"] == nn[-1]["id"])
+check("6k: the router, passing an fyi to a FRONT agent, sends it through the front gate: held for its next turn, no turn, ruled held", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1 and rr.get("ruling") == "held" and "fyi" in str(rr.get("reason")), (res, rr, pushes()[n0:]))
+check("6k2: …the held line is the message's own words", "the release is live" in held.take(A, "work-osprey-main"))
+check("6k2b: …and the router's own ruling is the one routing-log line for it: the gate writes no second one", len([x for x in routing.read(KEY) if x.get("label") == "message"]) == c0, [x for x in routing.read(KEY) if x.get("label") == "message"][c0:])
+os.unlink(held.clients_file()); gate_open()
+fresh(); n0 = len(pushes()); nid_f = routing.record(KEY, kind="message", to="", label="message to projects/alpha", who="home-beta", text="the release is live", target="project-wide", pilot=True, live=True, hold="fyi")
+res = act(next(x for x in routing.read(KEY) if x["id"] == nid_f), "work-osprey-main", rule="message-item")
+check("6k3: …a front agent whose hook does not fetch held lines is not given a turn: ruled held with the reason, nothing pushed", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 0 and "front agent" in str(res.get("reason")), (res, pushes()[n0:]))
+held.mark_client(A, "work-osprey-main")
+fresh(); n0 = len(pushes()); n = rec("[home-beta] the release is live — [for Oliver] pick a or b", hold="fyi"); res = act(n, "work-osprey-main", rule="message-item")
+check("6k4 negative: an fyi pass to a front agent that carries Oliver's mark is delivered, marked, as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec("the release is live", hold="fyi"); res = act(n, "work-osprey-main", for_owner=True)
+check("6k5 negative: …and a ruling marked for Oliver, whatever the hold says", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec("the release is live", hold="page-owed"); res = act(n, "work-osprey-main", rule="message-item")
+check("6k6 negative: a pass to a front agent held for another reason than fyi (page-owed) is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec("the release is live"); res = act(n, "work-osprey-main", rule="message-item")
+check("6k7 negative: a message to a project without fyi, passed to a front agent, is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+os.unlink(held.clients_file()); gate_open()
 fresh(); out = _messaging._message(KEY, "the release is live", "home-beta"); nn2 = [x for x in routing.read(KEY) if x.get("kind") == "message" and x.get("text", "").endswith("the release is live")][-1]
 check("6l: a message to a project without fyi carries no mark", "hold" not in nn2, nn2)
 

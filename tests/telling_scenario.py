@@ -65,7 +65,7 @@ MOVED = {      # the telling's name here -> the name it had on server.py (a func
     "_handback_file": "_handback_file", "_handback_hold": "_handback_hold", "_handback_minutes": "_handback_minutes", "_ho_told": "_ho_told",
     "_hold_project": "_hold_project", "_mentions_ref": "_mentions_ref", "_owner_is_session": "_owner_is_session", "_relay_push": "_relay_push",
     "_stamped_at": "_stamped_at", "auto_mover": "_auto_mover", "close_owner_notice": "_close_owner_notice", "fallback_mover": "_fallback_mover",
-    "front_gate": "_front_gate", "front_keeper": "_front_keeper", "front_sender": "_front_sender", "front_verdict": "_front_verdict", "gate_result": "_gate_result",
+    "front_fyi": "front_fyi", "front_gate": "_front_gate", "front_keeper": "_front_keeper", "front_sender": "_front_sender", "front_verdict": "_front_verdict", "gate_result": "_gate_result",
     "handback_drop": "_handback_drop", "handback_hold_s": "_handback_hold_s", "handback_read": "_handback_read", "handback_send": "_handback_send",
     "handback_tick": "_handback_tick", "handback_write": "_handback_write", "handoff_notify": "_handoff_notify", "held_by": "_held_by", "hold_notice": "_hold_notice",
     "holder": "_holder", "keeper_words": "_keeper_words", "live_pass": "_live_pass", "mentions_reply": "_mentions_reply", "next_head": "_next_head",

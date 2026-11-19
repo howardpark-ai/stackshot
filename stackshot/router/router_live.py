@@ -104,9 +104,9 @@ DIGEST_SHOWN = 25                   # a digest lists this many notices, one line
 DIGEST_TRIES = 3                    # pushes of one digest in a day; then its notices wait for the next day's
 _LOCK = threading.Lock()
 
-# What the server wires in (configure): the front-agent test (telling.front_keeper), the push, and the call made after a ruling
-# (the release of a hold that waited on the notice's anchor, the board's republish). The defaults stand alone, for the tests and the CLI.
-_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None}
+# What the server wires in (configure): the front-agent test (telling.front_keeper), the push, the call made after a ruling
+# (the release of a hold that waited on the notice's anchor, the board's republish), and the front gate for an fyi (telling.front_fyi). The defaults stand alone, for the tests and the CLI.
+_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None}
 
 
 def configure(**kw: Any) -> None:
@@ -310,6 +310,27 @@ def _is_front(who: str, root: str, cx: "_router.Context") -> bool:
     return who in cx.agents(root)[0]
 
 
+def _person_words(n: dict[str, Any], ln: dict[str, Any], body: str) -> bool:
+    """Does this notice carry the person's words or mark: a ruling for him, his words, a hand-back, a strong mention in the text?"""
+    return bool(_router.line_for_owner(ln) or n.get("words") or n.get("handback") or _router.strong_owner(body) or _router.strong_owner(n.get("text")))
+
+
+def _front_fyi(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx: "_router.Context") -> tuple[str, str]:
+    """A pass of an fyi (the sender's word that it asks nothing) to a FRONT agent goes through the front gate, as a notice about an item does: -> ("fyi", "") held for the agent's next turn,
+    ("held", why) held because its hook cannot fetch held lines (nobody is told), ("", "") delivered as before (not an fyi, a notice with the person's words or mark, a ruling for him, an audit finding,
+    a recipient that is no front agent, the switch off). A pass to a background agent is _hold_kind's. Never raises."""
+    try:
+        fn = _HOOKS["front_fyi"]
+        if not fn or str(n.get("hold") or "") != "fyi" or not target or ln.get("rule") == "audit-owners" or not _held.enabled():
+            return "", ""
+        body = _body(n)
+        if _person_words(n, ln, body) or _held._owner_mark().search(body) or not _is_front(target, root, cx):
+            return "", ""
+        return fn(target, body, str(ln.get("item") or ""), n["id"], False) or ("", "")      # log=False: the router's own ruling is the routing-log line
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+
 def _hold_kind(n: dict[str, Any], ln: dict[str, Any], target: str, cx: "_router.Context") -> str:
     """The one decision of the router's hold: is this pass to `target` held for its next turn? -> the held kind, "" to deliver as
     before. Only a background agent holds; a notice with the owner's words, a hand-back or a ruling marked for the owner is delivered; anything unsure is
@@ -321,7 +342,7 @@ def _hold_kind(n: dict[str, Any], ln: dict[str, Any], target: str, cx: "_router.
         if not kind or not target:
             return ""
         body = _body(n)
-        to_owner = bool(_router.line_for_owner(ln) or n.get("words") or n.get("handback") or _router.strong_owner(body) or _router.strong_owner(n.get("text")))
+        to_owner = _person_words(n, ln, body)
         return _held.decide(kind, is_background=bool(cx.background(target)), text=body, owner_words=to_owner, target=target)
     except Exception:  # noqa: BLE001
         return ""
@@ -546,6 +567,13 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 held_for = target
                 ruling, target, reason = "held", "", _held.reason(hk)
                 base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hk)
+            else:
+                verdict, why = _front_fyi(n, ln, target, aroot, cx)      # an fyi for a front agent: the front gate files it for his next turn, or holds it
+                if verdict:
+                    held_for = target if verdict == "fyi" else ""
+                    ruling, target = "held", ""
+                    reason = _held.reason("fyi") if verdict == "fyi" else f"held: front agent, {why} (fyi)"
+                    base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="fyi")
         if ruling == "passed":
             mark = _is_front(target, aroot, cx)       # a front pane takes a peer's message only with the mark: every delivery to one carries it, whatever for_owner says
             base["marked"] = mark
