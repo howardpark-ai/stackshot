@@ -12,10 +12,12 @@ bound to that anchor. The rest of a receiver's contract is what it registers on 
 An anchor in [anchor_hub] direct (anchor id → one session; read at each event, so a config reload applies it) skips all of
 the routing below: each event goes at once, whole, to that session alone (the direct lane). The value "none" makes the
 anchor log only: each event is written to the routing log and delivered to nobody.
+An anchor in [anchor_hub] direct_answer (anchor id → the command that answers there, e.g. `sala dm <app> -`) has one last line
+on its direct notice, "answer with: <command>" (read at each event, like direct).
 A summary may carry `etype`, the event's type at its source (GH_TYPES for GitHub): a routine event on the fleet's own pull
 request ([pilot] own_repos; routine_own) is logged for a pilot project, ruled by stackshot (auto), not delivered.
 Delivery goes through push.py (inbox socket; queued when the session is not live or the hub is paused for a reboot)."""
-import json, os, sys, glob, time, math, random, threading, subprocess, logging, queue, tempfile
+import json, os, sys, glob, time, math, random, threading, subprocess, logging, queue, tempfile, unicodedata
 import urllib.error
 from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -60,6 +62,19 @@ def direct() -> dict[str, str]:
     v = _cfg.get("anchor_hub", "direct") or {}
     if not isinstance(v, dict): return {}
     return {(_anc.anchor_id(str(k).strip()) or str(k).strip()): str(x).strip() for k, x in v.items() if str(k).strip() and str(x).strip()}   # a GitHub key by its current name ([github.moved]), as the events are keyed
+ANSWER_MAX = 200       # chars: the longest answer command a direct notice carries
+def answer_ok(x) -> bool:
+    """A usable answer command: a string with no line break or other control character (checked before any trimming, so nothing is altered into
+    shape), at most ANSWER_MAX chars once its ends are trimmed, and not empty. So the notice gains one line, never two."""
+    return isinstance(x, str) and bool(x.strip()) and len(x.strip()) <= ANSWER_MAX and not any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in x)
+def direct_answer() -> dict[str, str]:
+    """[anchor_hub] direct_answer: anchor id (the form of the `direct` keys) → the short command that answers in that anchor, e.g.
+    `sala dm <app> -`. A direct notice ends with a line that names it (direct_notice). Read at each event, so a reload applies it.
+    A value that is not a table, an entry whose command is not a string, is empty, holds a line break or other control character, or is longer than
+    ANSWER_MAX chars, and an empty key are ignored, never raised."""
+    v = _cfg.get("anchor_hub", "direct_answer") or {}
+    if not isinstance(v, dict): return {}
+    return {(_anc.anchor_id(str(k).strip()) or str(k).strip()): x.strip() for k, x in v.items() if str(k).strip() and answer_ok(x)}
 # The fleet's own PR events (the turn rule's third build): on a repository listed
 # in [pilot] own_repos (by owner/repo, owner/*, or the repository's numeric ID, Event.repo_id), a pull request opened, merged, closed or given new commits, and CI passing again after a failure, is routine. For a
 # project in the pilot it is logged and not delivered: a routing-log line with no recipient, marked log_only and ruled
@@ -230,15 +245,29 @@ def follow_up(p: dict) -> str:
 def direct_notice(ev: Event) -> str:
     """The notice of a direct anchor: the usual header with the source's ids, then the whole text on the lines below,
     clipped at DIRECT_CLIP chars with the one-line notices' marker. An event with no full text or ids (a receiver that
-    sets neither) gets the one-line notice."""
+    sets neither) gets the one-line notice. An anchor with an entry in [anchor_hub] direct_answer gets one last line after the text
+    (answer_line), outside the clip."""
     m = {k: v for k, v in (ev.meta or {}).items() if k != "refs"}      # `refs` (the board ids a merged pull request's body names) is for the merge log, not a source's id: an event with only that gets the one-line notice
-    if not ev.full and not m: return notice(ev)
+    if not ev.full and not m: return notice(ev) + answer_line(ev)
     ids = " · ".join(f"{k} {m[k]}" for k in ("ts", "thread_ts") if m.get(k))
     head = f"[anchor] {ev.label}: {_LEAD[ev.kind]}{ev.who}" + (" (caught up)" if m.get("caught_up") else "") + (f" ({ids})" if ids else "") + f" → {ev.url}"
     t = ev.full or ""
     if len(t) > DIRECT_CLIP:
         t = t[:DIRECT_CLIP] + f" [… truncated, {len(t):,} chars" + (f" — fetch message ts {m['ts']}]" if m.get("ts") else "]")
-    return head + ("\n" + t if t else "")
+    return head + ("\n" + t if t else "") + answer_line(ev)
+def answer_line(ev: Event) -> str:
+    """The last line of a direct notice for an anchor in [anchor_hub] direct_answer, newline first: "answer with: <command>". For a
+    `sala dm <app> …` command with no --thread of its own, when the event carries a ts, a second line gives the command with `--thread <ts>`
+    right after the app name (an option comes before the text), the ts being the thread the message is in (thread_ts) or else its own.
+    "" for an anchor with no entry."""
+    cmd = direct_answer().get(ev.anchor)
+    if not cmd: return ""
+    out = f"\nanswer with: {cmd}"
+    m = ev.meta or {}; ts = str(m.get("thread_ts") or m.get("ts") or "")
+    w = cmd.split(None, 3)
+    if ts and w[:2] == ["sala", "dm"] and len(w) >= 3 and not w[2].startswith("-") and not any(x == "--thread" or x.startswith("--thread=") for x in cmd.split()):
+        out += f"\nto reply in the thread: sala dm {w[2]} --thread {ts}" + (f" {w[3]}" if len(w) > 3 else "")
+    return out
 
 
 _FILTERS: dict[tuple[str, str], str] = {}   # (anchor, session) → text that must appear in the event (URL fragment #mention=…)

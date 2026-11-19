@@ -449,6 +449,10 @@ direct = {}                                         # anchor id → one session:
                                                     # bots' Slack posts are dropped there. e.g. { "slack:C0123ABCD" = "my-session" }. The value "none"
                                                     # makes the anchor log only: each event goes in the routing log ("direct: log only") and to nobody,
                                                     # nothing held for later. e.g. { "github:owner/repo@releases" = "none" }
+# direct_answer = { "slack:D0123ABCD" = "sala dm my-app -" }   # anchor id → how to answer there: the anchor's direct notice ends with the line
+                                                    # "answer with: <command>" and, for a `sala dm <app> ...` command, a second line with the same command plus `--thread <ts>`
+                                                    # after the app name, after the text and outside the 4,000-char clip. An anchor with no entry, and an empty, over-200-char or
+                                                    # malformed value (a line break or control character included), change nothing.
 quiet = { drive = 1800 }                            # per event kind: after the first notice, hold the rest until the anchor has been quiet this long (s) — one notice per
                                                     # editing session; other kinds: 60 s from the first
 quiet_max_hold = 10800                              # s: a burst that never goes quiet still reports this often
