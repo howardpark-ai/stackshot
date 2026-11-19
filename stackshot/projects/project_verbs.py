@@ -1089,6 +1089,16 @@ def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: 
                 ctx.warn = (ctx.warn + "; " if ctx.warn else "") + f"the page's own `keeper: {have}` line still names the retired agent; the record's mark rules, and the page line is for whoever edits the page to change"
         e["agents"] = ag
         _former_agent(e, have, True)
+        page_marks: dict = {}
+        if pr.page_marks_naming(ctx.ents, have) and pr.agent_gone(ctx.raw, ctx.ents, have):       # a sub-page mark is never left naming a retired agent: it goes where the project mark goes (the builder, else the -main agent), else it is removed
+            to_p = _kp.successor(ag)
+            named = [k for _p, k in pr.page_marks_naming(ctx.ents, have)]
+            if to_p:
+                pr.rename_page_marks(ctx.ents, have, to_p)
+                page_marks = {"moved": named, "to": to_p}
+            else:
+                pr.clear_page_marks(ctx.ents, have)
+                page_marks = {"cleared": named, "problem": f"{have} kept {len(named)} sub-page(s) by a mark and no agent is left to take them: the marks are removed, and each page is read from its own `agent:` line again"}
         if moving:
             f1 = _keeper_fields(ctx, e, ctx.ents)
             lines = _move_lines(pid, f0.get("keeper_agent", ""), f0.get("keeper_source", ""), f1.get("keeper_agent", ""), f1.get("keeper_source", ""), _roles_moved(ctx.raw, before, ctx.ents))
@@ -1097,15 +1107,17 @@ def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: 
                 keeper["problem"] = (f"{have} was the keeper and no agent is left to take the mark (no builder and no front agent): "
                                      + (f"the project's name line {back} is its keeper again (the old rule), until an agent is listed and marked (`project keeper`)" if back
                                         else "the project has no keeper agent until one is listed and marked (`project keeper`)"))
-        return {"pid": pid, "result": "line removed", "name": have, "front": front, "left": len(ag), "own": False, **({"keeper": keeper} if keeper else {}), **({"lines": lines} if lines else {})}
+        return {"pid": pid, "result": "line removed", "name": have, "front": front, "left": len(ag), "own": False, **({"keeper": keeper} if keeper else {}), **({"lines": lines} if lines else {}), **({"page_marks": page_marks} if page_marks else {})}
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
     removed = out["result"] == "line removed"
     kp = out.get("keeper") or {}
+    pm = out.get("page_marks") or {}
     moved = (f"; the keeper mark moved to {kp['to']}" if kp.get("to") else "; the keeper mark was cleared: no agent is left to take it") if kp else ""
-    warn = "; ".join(w for w in (out.get("warning", ""), kp.get("problem", "")) if w)
-    return _finish(out["pid"], ents, changed, dry, io, warn=warn, extra={k: out[k] for k in ("result", "name", "front", "left", "own", "keeper", "lines") if k in out}, by=by, drop=(out["name"],),
+    moved += (f"; {len(pm.get('moved') or [])} sub-page mark(s) moved to {pm['to']}" if pm.get("to") else f"; {len(pm.get('cleared') or [])} sub-page mark(s) removed" if pm else "")
+    warn = "; ".join(w for w in (out.get("warning", ""), kp.get("problem", ""), pm.get("problem", "")) if w)
+    return _finish(out["pid"], ents, changed, dry, io, warn=warn, extra={k: out[k] for k in ("result", "name", "front", "left", "own", "keeper", "lines", "page_marks") if k in out}, by=by, drop=(out["name"],),
                    timeline=(f"{out['name']} retired; the project's own session, so its agents map is now empty" if out.get("own") else f"{out['name']} retired; its line removed from the agents map{moved}") if removed else "",
                    tag=f"retire-{out['name']}")
 
@@ -1139,11 +1151,13 @@ def agent_rename(project: str, old: str, new: str, *, by: str = "", io: Any = No
         pend = ctx.d["pending_agents"].get(pid) or {}
         for x in [x for x in pend if str(x).casefold() == o.casefold()]:
             del pend[x]
-        return {"pid": pid, "result": "renamed", "old": o, "new": new, "front": bool(ag[o].get("front")), "mandate": ag[o].get("mandate_line", ""), **({"keeper": {"from": o, "to": new}} if was == o and not retired else {})}
+        marks = pr.rename_page_marks(ctx.ents, o, new) if pr.agent_gone(ctx.raw, ctx.ents, o) else []     # the sub-page marks that name the old name follow the agent, wherever they are held
+        return {"pid": pid, "result": "renamed", "old": o, "new": new, "front": bool(ag[o].get("front")), "mandate": ag[o].get("mandate_line", ""), **({"keeper": {"from": o, "to": new}} if was == o and not retired else {}),
+                **({"page_marks": {"renamed": marks}} if marks else {})}
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "old", "new", "front", "mandate", "keeper") if k in out}, by=by, drop=(out["old"],))
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "old", "new", "front", "mandate", "keeper", "page_marks") if k in out}, by=by, drop=(out["old"],))
 
 
 def _roles_moved(reg: dict, before: dict, after: dict) -> list[dict]:
@@ -1317,6 +1331,7 @@ def move_page(project: str, new_key: str, *, by: str = "", phases: tuple = ("cop
         if old not in fk:
             fk.append(old)
         e["former_keys"] = fk
+        pr.rekey_page_marks(e, old, new_key)           # the sub-page marks of the entry follow the pages to their new keys
         if ctx.d["ids"].get(pid) != new_key:
             ctx.d["ids"][pid] = new_key
         return {"pid": pid}

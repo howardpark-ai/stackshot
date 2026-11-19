@@ -390,7 +390,7 @@ def registry_audit_send() -> bool:
 
 
 def registry_keeper_debts() -> bool:
-    """[registry_audit] keeper_debts: whether the project registry check also reports the four keeper-mark debts (keeper-not-listed, keeper-two-marks, keeper-retired, keeper-not-derived:
+    """[registry_audit] keeper_debts: whether the project registry check also reports the keeper-mark debts (keeper-not-listed, keeper-two-marks, keeper-retired, keeper-not-derived, keeper-page-ignored for a sub-page mark:
     tools/registry_report.py). False (the default, and the reading of any value that is not the boolean true): the check reports none of them, so nobody who edits a page is told of a mark's problem
     before the mark is put on projects on purpose (the stage that sets marks turns it on)."""
     return get("registry_audit", "keeper_debts") is True
