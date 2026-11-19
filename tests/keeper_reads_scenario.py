@@ -787,7 +787,7 @@ def t24b():
     other_publishes(["projects/x"]); F.unlink()                           # B publishes, then the file is reset
     reader("r1"); KR.flush()                                              # a read flush creates the file again, with no gauge
     with Virt(): KR.gauge([], base=base); KR.flush()                      # A's older zero arrives
-    return base == (None, 0) and legacy() == {}, (base, legacy())
+    return base == KR.ABSENT and legacy() == {}, (base, legacy())
 attempt("a publisher that snapshotted no gauge does not write over a file that was reset to no gauge since (the new file has an epoch of its own)", t24b)
 def t24c():
     fresh_state(); other_publishes(["projects/a"])
@@ -841,6 +841,132 @@ attempt("the docs say the gauge step of a sync is one at a time in a process, wi
 attempt("the docs say a file has an epoch from the moment it is created", lambda: ("from the moment it is created" in DOC, None))
 attempt("the docs say a leftover temporary file older than a minute is swept under the lock", lambda: ("more than a minute old" in DOC and "swept" in DOC, None))
 attempt("the docs say a `sync(reg=...)` carries the weaker promise", lambda: ("`sync(reg=...)`" in DOC and "weaker promise" in DOC, None))
+
+# 27. four small findings of the gauge: a refusal in a timer or exit flush is recorded (the file's gauge stays, the report says so), a file made again never matches what a publisher saw as no file, a gauge a caller hands over is checked like the file's,
+#     and the report and the exit status read one clock
+def t27a():
+    fresh_state(); other_publishes(["projects/a"]); base = KR.snapshot(); other_publishes(["projects/a", "projects/b"])
+    with Virt():
+        KR._STATE["flushed"] = 1e12; KR._STATE["gauge"] = []     # not due (an unchanged gauge, a recent write): the gauge waits for the timer
+        KR.gauge([], base=base); armed = KR._STATE["timer"] is not None; KR._tick()
+    rep_ = KR.report()
+    line = [l for l in rep_ if "refused" in l and l.startswith("NOT RECORDING?")]
+    return armed and legacy().get("keys") == ["projects/a", "projects/b"] and legacy().get("gen") == 2 and re.match(ISO, str(filed().get("refused"))) and len(line) == 1 and line[0].startswith("NOT RECORDING?") and "older rows" in line[0], (armed, legacy(), filed().get("refused"), rep_[:3])
+attempt("a gauge refused in the timer's flush (nothing else called it again) leaves the file's gauge as it is and records the refusal, and the report says so, loudly, and that the gauge may be from older rows", t27a)
+def refused_timer(older, mine, remove=False):
+    """The file holds `older` (another publisher wrote it first, from older rows); this process computed `mine` against the stamp before that, and its timer's flush is refused."""
+    fresh_state(); other_publishes(mine); base = KR.snapshot(); other_publishes(older)
+    if remove: F.unlink()
+    with Virt():
+        KR._STATE["flushed"] = 1e12; KR._STATE["gauge"] = sorted(mine)
+        KR.gauge(mine, base=base); KR._tick()
+    return KR.load()
+def t27m():
+    d_, p_ = refused_timer([], ["projects/a"]); rc_, out_ = run_main(); rep_ = KR.report()
+    return p_ == "" and legacy().get("count") == 0 and re.match(ISO, str(d_.get("refused"))) and KR.count_of(d_, p_) is None and KR.count_of() is None and rc_ == 2 and unknown_line(rep_) and any(l.startswith("NOT RECORDING?") and "refused" in l for l in rep_), (KR.count_of(d_, p_), rc_, rep_[:3])
+attempt("a refused timer flush whose file gauge is zero (the other publisher's, maybe the older rows): the gauge reads unknown, never zero, with a loud line, and the status is 2", t27m)
+def t27n():
+    d_, p_ = refused_timer([], ["projects/a"]); other_publishes(["projects/a"]); d2, p2 = KR.load()
+    return "refused" not in d2 and KR.count_of(d2, p2) == 1 and run_main()[0] == 0, (d2, run_main()[0])
+attempt("the next gauge written clears the refusal and the gauge reads again", t27n)
+def t27o():
+    d_, p_ = refused_timer([], ["projects/a"], remove=True); rep_ = KR.report(); loud = [l for l in rep_ if l.startswith("NOT RECORDING?") and "refused" in l]
+    return "legacy" not in d_ and re.match(ISO, str(d_.get("refused"))) and KR.count_of(d_, p_) is None and run_main()[0] == 2 and len(loud) == 1 and "no gauge" in loud[0] and "older rows" not in loud[0] and "stays as it is" not in loud[0], (d_, loud)
+attempt("a refusal that came from a file removed since is worded for it: there is no gauge in the file (not 'the gauge above stays'), the gauge is unknown and the status is 2", t27o)
+def t27p():
+    fresh_state(); other_publishes(["projects/x"]); calls = []
+    def racing():
+        calls.append(1)
+        if len(calls) == 1: other_publishes([])                           # another publisher, from older rows, writes a zero while this build runs
+        return ROWS_ONE
+    PRJ.registry = only_sync(racing)
+    try:
+        with Virt(): PRJ.sync(path=PUB, force=True)
+    finally: PRJ.registry = real_registry
+    d_, p_ = KR.load()
+    return len(calls) == 2 and legacy().get("keys") == ["projects/legacy-one"] and "refused" not in d_ and KR.count_of(d_, p_) == 1, (len(calls), legacy(), d_.get("refused"))
+attempt("a sync whose gauge is refused, and whose second computing gives the same rows: the corrected gauge is written at once (the retry is not held back by the minute between two writes)", t27p)
+def t27b():
+    fresh_state(); other_publishes(["projects/a"]); base = KR.snapshot(); other_publishes(["projects/a", "projects/b"])
+    with Virt():
+        KR._STATE["flushed"] = 1e12; KR._STATE["gauge"] = []
+        KR.gauge([], base=base); KR._at_exit()
+    first = (re.match(ISO, str(filed().get("refused"))) is not None, legacy().get("keys"))
+    reader("q"); KR.flush()
+    kept = re.match(ISO, str(filed().get("refused"))) is not None                    # a read flush does not clear it: only a gauge written does
+    other_publishes(["projects/c"])
+    return first == (True, ["projects/a", "projects/b"]) and kept and "refused" not in filed() and legacy().get("keys") == ["projects/c"], (first, kept, filed())
+attempt("a gauge refused at the exit flush is recorded too; a read flush keeps the record and the next gauge written clears it", t27b)
+def t27c():
+    fresh_state(); reader("q"); KR.flush()
+    return "refused" not in filed() and not any("refused" in l for l in KR.report()), (filed(), KR.report()[:3])
+attempt("a flush that offers no gauge records no refusal", t27c)
+def t27d():
+    fresh_state(); other_publishes(["projects/a"]); F.write_text(json.dumps({**filed(), "refused": 5}))
+    return KR.load()[1].startswith("unreadable"), KR.load()[1]
+attempt("a refusal record that is not a time is damage like any other value of the file", t27d)
+
+# a file that exists never matches what a publisher saw when there was no file
+def t27e():
+    fresh_state(); base = KR.snapshot()                                                  # no file
+    F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {"s <- m.f": {"last": iso(1.0), "keys": ["a"]}}}))       # a file made again with no epoch and no gauge (a previous version's writer)
+    with Virt(): KR.gauge([], base=base); KR.flush()
+    return base == KR.ABSENT and legacy() == {} and KR.snapshot() != KR.ABSENT, (base, legacy(), KR.snapshot())
+attempt("a publisher that snapshotted no file, then a file with no epoch and no gauge appears: no file is not the same stamp as a file without an epoch, so the older zero is refused", t27e)
+def t27f():
+    fresh_state(); base = KR.snapshot()                                                  # no file: A computes zero
+    other_publishes(["projects/x"]); F.unlink()                                          # another process publishes a row, then the file is removed
+    reader("r1"); KR.flush()                                                             # and a read flush creates it again
+    with Virt(): KR.gauge([], base=base); KR.flush()
+    return legacy() == {} and isinstance(filed().get("epoch"), str), (legacy(), filed())
+attempt("a publisher snapshots no file and computes zero, another publishes a row, the file is removed and created again by a read flush: the first publisher's zero is refused", t27f)
+def t27g():
+    fresh_state(); F.write_text(json.dumps({"schema": 1, "since": iso(1.0), "flushed": iso(time.time()), "sites": {}})); base = KR.snapshot(); F.unlink()          # a file without an epoch, then it is removed
+    with Virt(): KR.gauge([], base=base); KR.flush()
+    return base == (None, 0) and base != KR.ABSENT and legacy() == {}, (base, legacy())
+attempt("a publisher that snapshotted a file without an epoch, which is then removed: its gauge is refused, not taken as the first one", t27g)
+def t27h():
+    fresh_state(); base = KR.snapshot(); F.write_text("{ nope"); s_bad = KR.snapshot()
+    with Virt(): KR.gauge(["projects/a"], base=s_bad); KR.flush()
+    return base == KR.ABSENT and s_bad == KR.ABSENT and legacy().get("gen") == 1 and legacy().get("keys") == ["projects/a"] and BAD.exists(), (base, s_bad, legacy())
+attempt("the first gauge of a file that is missing or damaged is written as generation 1 against the stamp that says no file", t27h)
+
+# a gauge a caller hands to count_of is checked like the file's
+def damaged_docs():
+    now_ = iso(time.time()); out = []
+    for label, doc in SHAPES:
+        d_ = json.loads(doc) if isinstance(doc, str) else json.loads(json.dumps(doc))
+        if isinstance(d_.get("legacy"), dict) and "at" in d_["legacy"]: d_["legacy"]["at"] = now_
+        out.append((label, d_))
+    return out
+for label, d_ in damaged_docs():
+    def t27i(d_=d_):
+        return KR.count_of(d_, "") is None, KR.count_of(d_, "")
+    attempt(f"a damaged gauge handed to count_of ({label}) is unknown, not zero, even with a current time", t27i)
+def t27j():
+    ok_ = {"sites": {}, "legacy": {"count": 0, "keys": [], "at": iso(time.time()), "gen": 2}}
+    loop_ = {"sites": {}, "legacy": {"count": 0, "keys": [], "at": iso(time.time())}}; loop_["legacy"]["self"] = loop_
+    return KR.count_of(ok_, "") == 0 and KR.count_of(loop_, "") is None and KR.count_of({"legacy": "x"}, "") is None and KR.count_of(["x"], "") is None, None
+attempt("a well formed gauge handed to count_of reads as itself, and a self-referring or wrongly typed one is unknown, without a raise", t27j)
+
+# one timestamp per report: a gauge at the edge of the bound prints a count and exits 0, or says unknown and exits 2, never one of each
+class Ticking:
+    def __init__(self, t): self.t = t
+    def time(self): self.t += 2.0; return self.t - 2.0                                  # every reading of the clock is two seconds later than the one before
+    def monotonic(self): return self.t
+def t27k():
+    fresh_state(); t0 = time.time(); F.write_text(gauge_file(iso(t0 - KR.GAUGE_STALE + 1.0), flushed=t0)); KR.time = Ticking(t0)
+    try: rc_, out_ = run_main()
+    finally: KR.time = time
+    return rc_ == 0 and "legacy keepers: 0 registry row(s)" in out_, (rc_, out_[:200])
+attempt("a gauge just inside the bound, read by a clock that runs on between readings: the report and the exit status agree (one reading of the clock: the count, and status 0)", t27k)
+def t27l():
+    fresh_state(); t0 = time.time(); F.write_text(gauge_file(iso(t0 - KR.GAUGE_STALE - 1.0), flushed=t0)); KR.time = Ticking(t0)
+    try: rc_, out_ = run_main()
+    finally: KR.time = time
+    return rc_ == 2 and "legacy keepers: gauge unknown" in out_ and "legacy keepers: 0 " not in out_, (rc_, out_[:200])
+attempt("a gauge just outside the bound is unknown in both the report and the status", t27l)
+attempt("the docs say a refused gauge in a timer or exit flush is recorded, and that a file made again never matches no file", lambda: ("refused" in DOC and "a timer or exit flush" in DOC and "never matches" in DOC, None))
 fresh_state()
 KR._after = real_after
 
