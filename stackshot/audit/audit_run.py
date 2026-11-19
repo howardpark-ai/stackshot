@@ -171,6 +171,7 @@ class Env:
         self.orphans = kw.get("orphans")            # (apply) -> the server's answer to its orphan hand-over ({"checked", "applied", "found", "moved", "left", ...}); None here asks the server (client.orphan_handover)
         self.step_mark = kw.get("step_mark")        # (gid, step hash or None, now, mover) -> whether the item's stuck_since clock was written (None hash: dropped); the server's, None = the front-step rule does nothing (front_step.py)
         self.step_move = kw.get("step_move")        # (gid, step hash, opener, mover, hours, now) -> {"moved": bool, "why": str, "line": str}: the server rewords the step to the mover and writes the History line (front_step.py)
+        self.item_of = kw.get("item_of")            # (gid) -> the item as the store holds it right now, or None when it cannot be read; None here reads the item's file in the store (the send-time recheck, `recheck_fresh`)
         self.wait_end = kw.get("wait_end")          # (gid, plan, now) -> {"fixed": bool, "what": str, "why": str}: the server sets the wait a next line names, with a History line (wait_end.py, server_fixes.py); None = the pass only asks the mover
         self.wait_facts = kw.get("wait_facts")      # () -> wait_end.Facts: the machines, the pull requests and the links the wait-end rule reads; None = the rule reads only the items themselves
         self.wake_park = kw.get("wake_park")        # (gid, now) -> {"parked": bool, "wake": str, "line": str}: the server parks a wake that is the whole of the mover's wait, with a History line (server_fixes.py); None = the pass only reports it
@@ -575,6 +576,25 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
     return out, skipped
 
 
+def stored_wait_text(item: dict[str, Any]) -> str:
+    """The wait an item stores in its own fields, in plain words, for the model's message: the date it ends on, the kind of wait, the wake and the hold. The steps may say "park this until a date" in words while the
+    fields already carry that wait; a reader who sees only the steps takes the item to lack it. "none" when the item stores no wait."""
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    until, kind = _clip(_wt.until_of(meta), 40), _wt.kind_of(meta)
+    wake = _clip(" ".join(str(meta.get("wake") or "").split()), 40)
+    hold = meta.get("hold")
+    parts: list[str] = []
+    if until:
+        parts.append(f"ends on {until}")
+    if kind:
+        parts.append(f"kind {kind}")
+    if wake and wake != until:
+        parts.append(f"wake {wake}")
+    if hold:
+        parts.append("on hold" + (f" ({_clip(hold, 80)})" if isinstance(hold, str) and hold.strip() else ""))
+    return " · ".join(parts) if parts else "none"
+
+
 def prompt(item: dict[str, Any], sus: dict[str, Any], mover: str, now: float) -> str:
     """The message of one call: the item's facts and the candidate checks with their evidence. The rubric is the system prompt."""
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
@@ -582,6 +602,7 @@ def prompt(item: dict[str, Any], sus: dict[str, Any], mover: str, now: float) ->
     lines = [f"Item {sus['id']}: {_clip(item.get('subject'), 160)}",
              f"Project: {meta.get('project') or '-'}",
              f"State: {meta.get('state') or '-'} · needs: {', '.join(_wt.needs_of(meta)) or '-'} · mover: {mover or '-'}",
+             f"Stored wait (in the item's own fields, whatever the steps say): {stored_wait_text(item)}",
              f"Ask: {_clip(meta.get('ask'), 300) or '(none)'}",
              f"Last write: {_stamp(last) if last else 'unknown'}" + (f" ({_hours(now - last)} ago)" if last else ""),
              f"Description: {_clip(item.get('description'), 700) or '(none)'}", "Steps:"]
@@ -876,6 +897,114 @@ def start_record(now: float) -> dict[str, Any]:
     rec = {"started": now, "finished": None, "items_read": 0, "findings": [], "by_session": {}, "by_category": {}, "mode": "script"}
     write_record(rec, now)
     return rec
+
+
+# ---------- the send-time recheck ----------
+# A finding is decided from the item as the run read it, and a run's model calls take minutes: by the time it is told, the item may already hold what the finding asks for. So just before a finding of one of the
+# kinds below is told, the item is read again, and a finding the live item already satisfies is dropped, not told (`recheck_fresh`). The kinds are the ones whose claim is a comparison of fields the audit can
+# repeat; nothing is applied or written, and who a finding goes to is not touched.
+RECHECK_KINDS = ("older-than-page", "next-done")
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_DATE_ISO = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
+_DATE_NAMED = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b", re.I)
+_DATE_SLASH = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})(?![\d/])")
+_WAIT_WORDS = re.compile(r"\b(park(?:ed|s|ing)?|wait(?:s|ing|ed)?|until|wake|hold|held)\b", re.I)
+_CHANGE_WORDS = re.compile(r"\b(done|finish\w*|complete\w*|clos\w*|merg\w*|ship\w*|releas\w*|land\w*|mover|moved|hand\w*|reassign\w*|cancel\w*|drop\w*|obsolete|overtaken|replac\w*|answer\w*|approv\w*|decid\w*|decision|unpark\w*|off|instead|not|no longer|remov\w*|chang\w*|wrong|stale|ends?|lift\w*|start\w*)\b", re.I)      # the words of a finding that is about something else, or says the stored wait is wrong
+
+
+def dates_in(text: Any) -> set[tuple[int | None, int, int]]:
+    """The calendar dates a text names, as (year or None, month, day): an ISO date, "Jan 5th", "1/5". A name that is no date (a month or day out of range) is left out."""
+    t = str(text or "")
+    out: set[tuple[int | None, int, int]] = set()
+    for y, m, d in _DATE_ISO.findall(t):
+        out.add((int(y), int(m), int(d)))
+    for m, d in _DATE_NAMED.findall(t):
+        out.add((None, _MONTHS[m.lower()[:3]], int(d)))
+    for m, d in _DATE_SLASH.findall(t):
+        out.add((None, int(m), int(d)))
+    return {x for x in out if 1 <= x[1] <= 12 and 1 <= x[2] <= 31}
+
+
+def _same_day(a: tuple[int | None, int, int], b: tuple[int | None, int, int]) -> bool:
+    return a[1:] == b[1:] and (a[0] is None or b[0] is None or a[0] == b[0])
+
+
+def _is_stored_day(d: tuple[int | None, int, int], stored: tuple[int | None, int, int], year: int) -> bool:
+    """Does the date a finding names mean the stored day? One that names its year must match it. One that names none means the next time that day comes round, so it matches a stored day only in this year or the next."""
+    if d[0] is not None:
+        return d == stored
+    return d[1:] == stored[1:] and stored[0] in (year, year + 1)
+
+
+def read_item(gid: str, store: Path | None = None) -> dict[str, Any] | None:
+    """One item as the store holds it now (its file), None when it cannot be read."""
+    m = re.fullmatch(r"([a-z])(\d+)", str(gid or ""))
+    if not m:
+        return None
+    try:
+        d = json.loads(((store or _cfg.path("paths", "store")) / m[1] / f"{m[2]}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def already_satisfied(f: dict[str, Any], live: dict[str, Any], seen: dict[str, Any] | None, year: int | None = None) -> str:
+    """Why the live item already satisfies finding `f`, "" when it does not (or when the fields cannot tell). `seen` is the item as the run read it. For both kinds: the item is no longer open.
+    next-done: no open step of the live item cites an item by number any more. older-than-page, a finding about a wait: the live item stores a wait that ends on the date the finding asks for. The
+    finding is read as a wait finding when its words name a wait and none of the words of another change (done, moved to someone else, dropped, answered). The date it asks for is the one it names that the
+    item, as the run read it, did not already say in its steps or description; when it names none such, the date it names is the stored one or there is no date, and nothing is dropped. A date named
+    without a year is the stored day only when the stored year is `year` (default: this one) or the next. An item with no status key is neither open nor closed: its finding is kept."""
+    status = live.get("status")
+    if status is None:
+        return ""
+    if status != "open":
+        return "the item is closed now"
+    year = year or dt.datetime.now(dt.timezone.utc).year
+    meta = live.get("metadata") if isinstance(live.get("metadata"), dict) else {}
+    cat = f.get("category")
+    if cat == "next-done":
+        for s in _steps.view(meta):
+            if s["status"] == _steps.OPEN and _BOARD_RX.search(_steps.first_line(s["text"])):
+                return ""
+        return "no open step cites an item any more"
+    if cat == "older-than-page":
+        text = f"{f.get('detail') or ''} {f.get('fix') or ''}"
+        if not _WAIT_WORDS.search(text) or _CHANGE_WORDS.search(text):
+            return ""
+        stored = dates_in(_wt.until_of(meta))
+        if not stored or not _wt.kind_of(meta):
+            return ""
+        old_meta = (seen or {}).get("metadata") if isinstance((seen or {}).get("metadata"), dict) else {}
+        said = dates_in((seen or {}).get("description"))
+        for s in _steps.view(old_meta):
+            said |= dates_in(_steps.first_line(s["text"]))
+        named = dates_in(text)
+        asked = {d for d in named if not any(_same_day(d, x) for x in said)}
+        if asked and all(any(_is_stored_day(d, x, year) for x in stored) for d in asked):
+            return f"the item already stores a {_wt.kind_of(meta)} wait that ends on {_clip(_wt.until_of(meta), 40)}"
+    return ""
+
+
+def recheck_fresh(env: Env, items: dict[str, dict[str, Any]], by_shown: dict[str, str], fresh: list[dict[str, Any]], store: Path | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Just before `fresh` is told: each finding of a `RECHECK_KINDS` kind is checked against its item read again (`Env.item_of`, else the store's file). → (the findings still to tell, the dropped ones as
+    {"id", "category", "why"}). An item that cannot be read leaves its finding to be told, as does any kind not listed; one finding's failure is no other's."""
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for f in fresh:
+        why = ""
+        gid = by_shown.get(f.get("id") or "")
+        if f.get("category") in RECHECK_KINDS and gid:
+            try:
+                live = env.item_of(gid) if env.item_of else read_item(gid, store)
+                why = already_satisfied(f, live, items.get(gid), dt.datetime.fromtimestamp(env.clock(), dt.timezone.utc).year) if isinstance(live, dict) else ""
+            except Exception as e:  # noqa: BLE001  — a recheck that fails tells the finding, as before
+                print(f"audit run: recheck of {f.get('id')} failed ({type(e).__name__}: {e}); its finding is told", file=sys.stderr, flush=True)
+                why = ""
+        if why:
+            dropped.append({"id": f["id"], "category": f["category"], "why": why})
+        else:
+            kept.append(f)
+    return kept, dropped
 
 
 def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
@@ -1401,6 +1530,14 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
         findings = [f for f in findings if id(f) not in drop]
         pw["capped"] = len(over_cap)
 
+    # the send-time recheck, before the pattern review: a finding whose item already holds what it asks for is dropped from the run, not told (it goes on the record as `rechecked`), and the review and the findings log
+    # never see it
+    told_before = fresh
+    fresh, rechecked = recheck_fresh(env, items, by_shown, fresh, store)
+    if rechecked:
+        gone = {id(f) for f in told_before} - {id(f) for f in fresh}
+        findings = [f for f in findings if id(f) not in gone]
+
     # the pattern review, the last stage: the findings since the review before it, grouped, one guardrail drafted for each pattern; in shadow it only goes onto the record. Before the messages, so it holds nothing back between the
     # sends and the record's end time, and so its text is in the summary line
     pr = pattern_stage(env, t0, hist, fresh, calls["made"])
@@ -1483,7 +1620,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
             ok, said = _send(env, builder, text)
         sent.append({"to": builder, "lines": len(tripped) + len(trips), "delivered": bool(ok), "said": _clip(said, 120), "kind": "threshold", "checks": sorted(tripped)})
     summary = (f"[stackshot] Board audit {label} (script): {n_open} open items · {len({f['id'] for f in findings})} flagged ({len(findings)} findings) · "
-               + (" · ".join(f"{c} {n}" for c, n in sorted(by_cat.items(), key=lambda kv: -kv[1])) or "no findings") + f" · {calls['made'] + pr['called']} model call(s) of {cap}" +(f" · stopped at the {_cfg.audit_max_minutes()}-minute limit" if calls.get("timed_out") else "") + orphan_text(orph) + proof_text(pw) + pages_text(pg) + pattern_text(pr) + (f" · unmoved: {', '.join(s['id'] for s in stuck)}" if stuck else "") + (f" · {len(repeats)} unchanged since sent, not sent again" if repeats else "")
+               + (" · ".join(f"{c} {n}" for c, n in sorted(by_cat.items(), key=lambda kv: -kv[1])) or "no findings") + f" · {calls['made'] + pr['called']} model call(s) of {cap}" +(f" · stopped at the {_cfg.audit_max_minutes()}-minute limit" if calls.get("timed_out") else "") + orphan_text(orph) + proof_text(pw) + pages_text(pg) + pattern_text(pr) + (f" · unmoved: {', '.join(s['id'] for s in stuck)}" if stuck else "") + (f" · {len(repeats)} unchanged since sent, not sent again" if repeats else "") + (f" · {len(rechecked)} dropped at send time, the item already holds what they ask" if rechecked else "")
                + (f" · page agent lines {len(pa['findings'])}" if pa["checked"] else f" · page agent lines not checked ({pa['note']})")
                + ("" if rg.get("silent") else f" · registry problems {len(rg['findings'])}" if rg["checked"] else f" · registry not checked ({rg['note']})"))
     fsc, fsc_line = front_step_count(hist, items, env, t0)       # once a calendar month: front agents' steps closed by someone else, and the open ones the write check would refuse now
@@ -1504,6 +1641,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
            "by_session": by_ses, "by_category": by_cat, "stuck": stuck, "idle_pass": passes, "judged": judged, "goal_judged": goal_judged,
            "calls": {"made": calls["made"], "failed": calls["failed"], "cap": cap, "max_minutes": _cfg.audit_max_minutes(), "timed_out": bool(calls.get("timed_out")), "suspects": len(sus), "unchanged": skipped, "notes": calls["notes"]},
            "pages": pg, "proof_waits": pw, **({"orphans": orph} if orph["mode"] != "off" else {}), **({"pattern_review": pr} if pr["mode"] != "off" else {}), **({"front_step_count": fsc} if fsc else {}),
+           **({"rechecked": rechecked} if rechecked else {}),
            "messages": sent, "mode": "script",
            "page_agents": {"checked": pa["checked"], "note": pa["note"], "sessions": pa["sessions"], "pages": pa["pages"], "findings": [{k: f.get(k, "") for k in ("page", "line", "name", "to")} for f in pa["findings"]]},
            "registry": {"checked": rg["checked"], "note": rg["note"], "projects": rg["projects"], "pages": rg["pages"], "send": _cfg.registry_audit_send(), "told_earlier_today": registry_told, "findings": [{k: f.get(k, "") for k in ("page", "line", "name", "project", "to")} for f in rg["findings"]]}}
