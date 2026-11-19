@@ -264,8 +264,8 @@ else:
     check("cli, sala unreadable, --apply: exit 1, the reason on stderr, no plan on stdout, nothing written, no undo folder", rc == 1 and "cannot be read" in err and out.strip() == "" and recbytes() == ORIG and not (T / "undo-cli").exists(), (rc, out[-200:], err[-300:]))
 
     # ---- 6b. the command line with a readable sala list (in this process, the list put in place of sala's)
-    _live0 = anchors.sala_live
-    anchors.sala_live = lambda: set(LIVE)
+    _rows0 = anchors.sala_rows
+    anchors.sala_rows = lambda *a, **k: [{"name": n, "aliases": []} for n in sorted(LIVE)]
     try:
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -280,7 +280,7 @@ else:
         if got.get("undo"):
             rs.restore_undo(got["undo"], apply=True)
     finally:
-        anchors.sala_live = _live0
+        anchors.sala_rows = _rows0
     check("cli: the record is back as it was after the undo", recbytes() == ORIG)
     check("cli: the program is listed (`stackshot keeper-subpages`)", cli.PROGRAMS.get("keeper-subpages", ("",))[0] == "stackshot.projects.keeper_subpages", None)
 
@@ -402,6 +402,139 @@ else:
     check("move-page: the sub-page marks name the pages under the new key", marks(MV) == {"projects/mover2/a": "mover-main"} and r["moved"] is True, (marks(MV), r.get("moved")))
     m2 = R().get("projects/mover2/a") or {}
     check("move-page: the moved page reads as marked, and no problem line says a mark is ignored", (m2.get("keeper_source"), m2.get("session")) == ("mark", "mover-main") and probs("projects/mover2") == [], (m2, probs("projects/mover2")))
+
+    # ---- 9. a session sala renamed: the page's `agent:` line names the old name; the pass maps it through the rename log and marks the page with the new name
+    from stackshot.fleet import renamed_agents as ra
+    def attempt(fn, *a, **k):
+        """A call the code under test may not take yet (a keyword it does not know): the TypeError becomes a failing check, not a crash of the whole suite."""
+        try:
+            return fn(*a, **k)
+        except TypeError as e:
+            return {"typeerror": str(e), "pages": [], "counts": {}, "effects": {}, "lines": [], "written": False, "refused": "", "undo": None, "entries": {}}
+    page("projects/rn.md", "type: project\ntitle: Rn\nagents:\n  new-ax: talks\n  new-plat: builds\n  new-eng: keeps the docs\n  new-1: talks\n  kept-old: talks\n  kept-new: talks\n  rn-main: talks\nstatus: active")
+    page("projects/rn2.md", "type: project\ntitle: Rn two\nagents:\n  new-qa: talks\n  rn2-main: talks\nstatus: active")
+    for k, a in (("a", "old-ax"), ("b", "old-qa"), ("c", "old-plat"), ("d", "old-eng"), ("e", "old-1"), ("f", "loop-a"), ("g", "old-nm"), ("h", "kept-old"), ("i", "plain-dead"), ("j", "rn-main")):
+        page(f"projects/rn/{k}.md", f"type: note\ntitle: Rn {k}\nagent: {a}")
+    p.cmd_registry(quiet=True)
+    ids = {k: e["id"] for k, e in raw().items()}
+    RN, RN2 = ids["projects/rn"], ids["projects/rn2"]
+    write_record({**ENTRIES, RN: entry("projects/rn", agents={n: agent(True, "talks") for n in ("new-ax", "new-plat", "new-eng", "new-1", "kept-old", "kept-new", "rn-main")}),
+                  RN2: entry("projects/rn2", agents={"new-qa": agent(True, "talks"), "rn2-main": agent(True, "talks")})})
+    ORIG9 = recbytes()
+    # sala's rows: four renames (the old name is an alias of the session that has the new one, and the `agent:` line still holds it), a name renamed that a map still lists (kept-old), and a rename onto
+    # a name on no map (old-nm -> new-nm); the other sessions are listed under their names alone
+    ROWS = [{"name": "new-ax", "aliases": ["old-ax"]}, {"name": "new-qa", "aliases": ["old-qa"]}, {"name": "new-plat", "aliases": ["old-plat"]}, {"name": "new-eng", "aliases": ["old-eng"]},
+            {"name": "kept-new", "aliases": ["kept-old"]}, {"name": "new-nm", "aliases": ["old-nm"]}, {"name": "rn-main"}, {"name": "rn2-main"}, *({"name": n} for n in sorted(LIVE))]
+    LIVE9 = set().union(*anchors.sessions_of(ROWS))
+    REN = ra.renames_of(ROWS)
+    check("fixture: the rename log of the rows holds the six renames, the old names being aliases and no session's name",
+          REN == {"old-ax": "new-ax", "old-qa": "new-qa", "old-plat": "new-plat", "old-eng": "new-eng", "kept-old": "kept-new", "old-nm": "new-nm"}, REN)
+    def rows9(r): return {x["key"]: x for x in r["pages"]}
+    before = tree(*SPACE)
+    d9 = attempt(ks.run, live=LIVE9, renames=REN, run_dir=RUN)
+    b9 = rows9(d9)
+    check("renames: the dry run writes nothing (the record, the pages, the state)", tree(*SPACE) == before and recbytes() == ORIG9, d9.get("typeerror"))
+    for k, old, new, where in (("a", "old-ax", "new-ax", "own map"), ("c", "old-plat", "new-plat", "own map"), ("d", "old-eng", "new-eng", "own map"), ("b", "old-qa", "new-qa", "map of projects/rn2")):
+        r = b9.get(f"projects/rn/{k}", {})
+        check(f"renames: a page naming {old} is marked with {new} ({where}), and the table says it was renamed",
+              r.get("action") == "mark" and r.get("agent") == new and r.get("where") == f"renamed from {old}: {where}", r or d9.get("typeerror"))
+    check("renames: the table line carries the new name, the action and the old name", any(re.search(r"projects/rn/a\s+new-ax\s+mark\s+renamed from old-ax: own map", l) for l in d9["lines"]), d9["lines"])
+    plan9 = attempt(ks.plan, live=LIVE9, renames=REN)
+    pk9 = (plan9["entries"].get(RN) or {}).get("page_keepers") or {}
+    check("renames: the plan's marks hold the new names only", pk9.get("projects/rn/a") == "new-ax" and (plan9["entries"].get(RN2) or {}).get("page_keepers") is None and "old-ax" not in json.dumps(plan9["entries"])
+          and (plan9["entries"].get(RN) or {}).get("page_keepers", {}).get("projects/rn/b") == "new-qa", plan9.get("typeerror") or pk9)
+    ch = rows9(attempt(ks.run, live=LIVE9 | {"mid-1"}, renames={**REN, "old-1": "mid-1", "mid-1": "new-1"}, run_dir=RUN)).get("projects/rn/e", {})
+    check("renames: a chain of two renames (old-1, then mid-1) marks with the newest name and says where it started", ch.get("action") == "mark" and ch.get("agent") == "new-1" and ch.get("where") == "renamed from old-1: own map", ch)
+    lp = rows9(attempt(ks.run, live=LIVE9 | {"loop-b"}, renames={**REN, "loop-a": "loop-b", "loop-b": "loop-a"}, run_dir=RUN)).get("projects/rn/f", {})
+    check("renames: a loop in the log ends, and the page is left (never marked, never handed back), the reason naming the loop", lp.get("action") == "leave" and "loop" in lp.get("where", "") + lp.get("why", ""), lp)
+    nm = b9.get("projects/rn/g", {})
+    check("renames: a rename onto a name on no map leaves the page and names both the old and the new name", nm.get("action") == "leave" and "old-nm" in nm.get("where", "") + nm.get("why", "") and "new-nm" in nm.get("where", "") + nm.get("why", ""), nm)
+    kp9 = b9.get("projects/rn/h", {})
+    check("renames: a name that is a rename source and is still on a map needs no mapping: the page is marked with the name it names, as before", kp9.get("action") == "mark" and kp9.get("agent") == "kept-old" and kp9.get("where") == "own map", kp9)
+    pd = b9.get("projects/rn/i", {})
+    check("renames: a name that is neither on a map nor a rename source is a dead name, handed back as before", pd.get("action") == "inherit" and pd.get("where") == "nowhere", pd)
+    check("renames: a page naming an agent of the map is marked as before", b9.get("projects/rn/j", {}).get("action") == "mark" and b9["projects/rn/j"]["where"] == "own map", b9.get("projects/rn/j"))
+    rn_marks = [r for r in d9["pages"] if r["key"].startswith("projects/rn/") and r["action"] == "mark"]
+    check("renames: the dry run counts the renamed pages as marks (four), one of them under another project's map",
+          d9["counts"].get("renamed") == 4 and len(rn_marks) == 6 and sum(1 for r in rn_marks if r["where"] != "own map" and not r["where"].endswith(": own map")) == 1, (d9["counts"], [(r["key"], r["where"]) for r in rn_marks]))
+    check("renames: a rename moves no page from one session to another: no running session loses a page and no old name is counted as one that loses",
+          d9["effects"].get("live_lose") == [] and not {"old-ax", "old-qa", "old-plat", "old-eng"} & set(d9["effects"].get("lose", {})), d9["effects"] or d9.get("typeerror"))
+    check("renames: the text says how many pages name a renamed session and that the `agent:` lines stay", any("renamed" in l and "agent:" in l and "stay" in l for l in d9["lines"]), d9["lines"])
+    GAIN = {"new-ax": ["projects/rn/a"], "new-qa": ["projects/rn/b"], "new-plat": ["projects/rn/c"], "new-eng": ["projects/rn/d"]}
+    check("renames: the new names of the renamed sessions are listed as gaining the pages they are now the agent of (the readers ask the name on the row)",
+          all(d9["effects"]["gain_pages"].get(n) == pg and d9["effects"]["gain"].get(n) == 1 for n, pg in GAIN.items())
+          and all(re.search(rf"names that gain pages:.*{n} \(1: {pg[0]}\)", "\n".join(d9["lines"])) for n, pg in GAIN.items()), (d9["effects"]["gain_pages"], [l for l in d9["lines"] if "gain pages" in l]))
+
+    # the rename log cannot be read: no plan and nothing written, as with an unreadable list of sessions
+    for apply_ in (False, True):
+        r = attempt(ks.run, apply_=apply_, live=LIVE9, renames=None, run_dir=RUN)
+        check(f"renames unreadable, {'apply' if apply_ else 'dry run'}: refused naming the rename log, no row, nothing written, no undo file",
+              "rename" in r.get("refused", "") and r["pages"] == [] and r["written"] is False and r["undo"] is None and recbytes() == ORIG9 and tree(*SPACE) == before, r)
+    try:
+        ks.build(pr.entries(), prj.registry_raw(), LIVE9, None); raised = False
+    except ValueError as e:
+        raised = "rename" in str(e)
+    except TypeError:
+        raised = False
+    check("renames unreadable: building the plan refuses with a ValueError naming the rename log", raised)
+    _rows1, _ren1 = anchors.sala_rows, ra.renames_of
+    anchors.sala_rows = lambda *a, **k: [dict(x) for x in ROWS]
+    def _damaged(rows): raise RuntimeError("the rename log is damaged")
+    ra.renames_of = _damaged
+    try:
+        for args in (["--run-dir", str(T / "undo-cli9")], ["--apply", "--run-dir", str(T / "undo-cli9"), "--json"]):
+            buf, ebuf = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(ebuf):
+                rc = ks.main(args)
+            check(f"cli, rename log unreadable ({args[0]}): exit 1, the reason on stderr, no table on stdout, nothing written, no undo folder",
+                  rc == 1 and "rename" in ebuf.getvalue() and buf.getvalue().strip() == "" and recbytes() == ORIG9 and not (T / "undo-cli9").exists(), (rc, buf.getvalue()[-200:], ebuf.getvalue()[-300:]))
+    finally:
+        anchors.sala_rows, ra.renames_of = _rows1, _ren1
+    # sala lists sessions and no row carries an `aliases` field (an old or stripped sala): nothing could be told renamed, so the pass refuses; an empty list is read as it was
+    check("rename_log: rows without any `aliases` field are no readable log; rows with the field, or no rows at all, are", ks.rename_log([{"name": "a"}, {"name": "b"}], ra.renames_of) is None
+          and ks.rename_log(None, ra.renames_of) is None and ks.rename_log([], ra.renames_of) == {} and ks.rename_log([{"name": "a", "aliases": []}], ra.renames_of) == {}
+          and ks.rename_log(ROWS, ra.renames_of) == REN and ks.rename_log(ROWS, _damaged) is None)
+    for what, rows_, want in (("no row has an aliases field", [{"name": n} for n in sorted(LIVE9)], 1), ("an empty list", [], 0)):
+        anchors.sala_rows = lambda *a, _r=rows_, **k: list(_r)
+        try:
+            buf, ebuf = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(ebuf):
+                rc = ks.main(["--run-dir", str(T / "undo-cli9")])
+        finally:
+            anchors.sala_rows = _rows1
+        check(f"cli, {what}: " + ("exit 1, the rename log named on stderr, no table, nothing written" if want else "read as it was: exit 0, a plan, nothing written"),
+              rc == want and recbytes() == ORIG9 and ((("rename" in ebuf.getvalue()) and buf.getvalue().strip() == "") if want else "agent named" in buf.getvalue()), (rc, buf.getvalue()[-200:], ebuf.getvalue()[-300:]))
+
+    # the apply: the new names are written and nothing else, the page's `agent:` line is not touched, the gauge falls by the right count, a second apply changes nothing
+    leg_before = legacy(R())
+    pages_before = {f"projects/rn/{x}": (BRAIN / f"projects/rn/{x}.md").read_bytes() for x in "abcdefghij"}
+    ap9 = attempt(ks.run, apply_=True, live=LIVE9, renames=REN, run_dir=RUN, now="2026-11-01T00:00:00Z")
+    check("renames: apply writes, with an undo file", ap9["written"] is True and ap9["refused"] == "" and ap9["undo"] and pathlib.Path(ap9["undo"]).is_file(), ap9.get("typeerror") or ap9["lines"][-3:])
+    pk = (json.loads(recbytes())["projects"][RN].get("page_keepers") or {})
+    check("renames: the record holds the new names, never an old one; the name a map still lists as it was; the dead name handed back with an empty name",
+          (pk.get("projects/rn/a"), pk.get("projects/rn/b"), pk.get("projects/rn/c"), pk.get("projects/rn/d"), pk.get("projects/rn/h"), pk.get("projects/rn/i")) == ("new-ax", "new-qa", "new-plat", "new-eng", "kept-old", "")
+          and not {"old-ax", "old-qa", "old-plat", "old-eng", "old-nm"} & set(pk.values()), pk)
+    check("renames: not a page changed (the `agent:` lines keep the old names)", all((BRAIN / f"{k}.md").read_bytes() == v for k, v in pages_before.items()), None)
+    leg_after = legacy(R())
+    gone = {k for k in leg_before if k not in leg_after}
+    check("renames: the gauge falls by exactly the pages marked and handed back, each renamed page is no longer legacy, and the forecast was right",
+          len(leg_before) - len(leg_after) == ap9["counts"].get("mark", -1) + ap9["counts"].get("inherit", -1) > 0 and {"projects/rn/a", "projects/rn/b", "projects/rn/c", "projects/rn/d"} <= gone
+          and ap9["effects"].get("gauge") == {"before": len(leg_before), "after": len(leg_after)}, (len(leg_before), len(leg_after), ap9["counts"]))
+    rgr = R()
+    check("renames: a renamed page reads as marked by the new name", all((rgr[f"projects/rn/{k}"]["session"], rgr[f"projects/rn/{k}"]["keeper_source"], rgr[f"projects/rn/{k}"]["role"]) == (n, "mark", "agent")
+          for k, n in (("a", "new-ax"), ("b", "new-qa"), ("c", "new-plat"), ("d", "new-eng"))), {k: rgr[k] for k in rgr if k.startswith("projects/rn/")})
+    check("renames: the apply's own text lists the new names that gain pages, and the readers agree: the new name keeps the page by its row, the old name no longer reads it",
+          all(re.search(rf"names that gain pages:.*{n} \(1: {pg[0]}\)", "\n".join(ap9["lines"])) for n, pg in GAIN.items())
+          and all(p.keeper_pages("", n) == pg for n, pg in GAIN.items()) and not any(p.keeper_pages("", o) for o in ("old-ax", "old-qa", "old-plat", "old-eng")),
+          ([p.keeper_pages("", n) for n in GAIN], [p.keeper_pages("", o) for o in ("old-ax", "old-qa", "old-plat", "old-eng")]))
+    check("renames: the page whose rename leads to no map stays legacy (left)", "projects/rn/g" in leg_after, leg_after)
+    mid9 = tree(*SPACE); dirs9 = sorted(RUN.iterdir())
+    again9 = attempt(ks.run, apply_=True, live=LIVE9, renames=REN, run_dir=RUN)
+    check("renames: a second apply changes nothing: nothing to change, not a byte differs, no second undo folder", again9["written"] is False and again9["counts"].get("changed") == 0 and tree(*SPACE) == mid9 and sorted(RUN.iterdir()) == dirs9,
+          again9.get("typeerror") or again9["lines"][-3:])
+    if ap9["undo"]:
+        rs.restore_undo(ap9["undo"], apply=True)
+    check("renames: the undo puts the record back byte for byte", recbytes() == ORIG9)
 
 if fails: print(f"FAILED: keeper subpage scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: keeper subpage scenario, {len(ran)} checks")

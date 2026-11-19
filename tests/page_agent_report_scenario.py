@@ -83,6 +83,13 @@ check("a retired page, a moved one and a line that holds an id are skipped", not
 check("the counts: live sessions and active pages read", res["sessions"] == len(LIVE) and res["pages"] == len(REG) - 2, (res["sessions"], res["pages"]))
 check("an alias keeps an agents: line alive (eta-main is an alias of eta-front)", ("projects/eta", "agents line", "eta-main") not in key(res), key(res))
 check("every finding says what fixes it", all(f["fix"] for f in res["findings"]), res["findings"])
+HB = {**REG, "projects/zeta/handed": {**page("zeta-main", role="inherited"), "legacy_session": "zeta-gone-two", "legacy_role": "agent"},
+       "projects/zeta/handed-live": {**page("zeta-main", role="inherited"), "legacy_session": "zeta-main", "legacy_role": "agent"},
+       "projects/zeta/handed-name": {**page("zeta-main", role="inherited"), "legacy_session": "zeta-gone-three", "legacy_role": ""}}
+hb = PAR.scan(HB, A.sala_sessions())
+check("a page handed back to the keeper above it (role inherited) still has its old `agent:` line read: a name sala does not know is a finding, as it was before the hand-back",
+      key(hb) == sorted([*want, ("projects/zeta/handed", "agent line", "zeta-gone-two")]), key(hb))
+check("... a handed-back page whose old line names a live session is no finding, and an inherited row whose old role was no `agent:` line is not read", not {"projects/zeta/handed-live", "projects/zeta/handed-name"} & {f["page"] for f in hb["findings"]}, key(hb))
 
 # ---- 3. whom it goes to
 to = {(f["page"], f["name"]): f["to"] for f in res["findings"]}
