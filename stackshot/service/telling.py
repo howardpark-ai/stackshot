@@ -392,7 +392,7 @@ def front_sender(who: str) -> bool:
 # The owner or a session sets explicitly (a mover, a `then`) is left as written. (2) A notice about an item reaches a front agent only when the owner is there for that pane (he typed in
 # it within [presence] minutes: a stamp file the prompt hook writes) AND the agent touched the item in its current conversation; a progress notice then rides his next turn (fyi),
 # a close or a stuck item is told as a turn (the [for <owner>] mark on one stackshot sends itself exempts nothing), everything else is held and logged. Messages a session sends on
-# purpose through the message tool are not touched.
+# purpose through the message tool are not touched, except an fyi to a front agent (front_fyi): it rides the agent's next turn and starts none.
 PRESENCE_MINUTES = 30.0
 
 
@@ -400,7 +400,8 @@ FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt"
                    "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
                    "owner": "progress", "observer": "progress",
-                   "stall_summary": "progress"}      # the -main summary of idle or balanced items ("Nothing is asked of you") is news; the busy-stretch and quiet-mover notices keep "stall" (they ask for action). A new, unmapped tag is a decision the tag-coverage test catches
+                   "stall_summary": "progress",
+                   "message": "message"}      # an fyi sent to a front agent (the message tool's, or the router passing one): it asks nothing, so it rides his next turn (front_fyi). The -main summary of idle or balanced items ("Nothing is asked of you") is news; the busy-stretch and quiet-mover notices keep "stall" (they ask for action). A new, unmapped tag is a decision the tag-coverage test catches
 
 
 FRONT_HINT = threading.local()      # the kind the sender gives the gate for the one notice it is telling (see tell_kind)
@@ -549,7 +550,10 @@ def touched(gid: str, who: str, since: float) -> bool:
 
 
 def front_verdict(gid: str, owner: str, kind: str) -> tuple[str, str]:
-    """what a notice about an item does when it is for a front agent: ("send", "") as ever, ("fyi", "") rides its next turn, ("hold", why) nobody is told (logged)."""
+    """what a notice about an item does when it is for a front agent: ("send", "") as ever, ("fyi", "") rides its next turn, ("hold", why) nobody is told (logged).
+    A `message` (a peer's fyi, sent on purpose to this agent) always rides its next turn: it needs no presence stamp and no touch of an item, since it starts no turn and was addressed to it."""
+    if kind == "message":
+        return "fyi", ""
     h = _hooks()
     idx = _sessions_index()
     row = h.handoff_pane_row(owner, idx)
@@ -604,12 +608,14 @@ def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str) -> 
         print(f"front gate: {gid} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def front_gate(gid: str, owner: str, note: str, tag: str, kind: str) -> bool:
+def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True) -> bool:
     """the one gate every item notice passes in tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
     Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act). The [for <owner>]
     mark does not exempt a notice: a close or a stuck notice stackshot itself sends carries it, and takes a turn of its own only under presence plus touched. A message a session sends
-    on purpose goes through the message tool, which does not pass here.
-    A tag the map does not know is a progress notice (held when he is away); tests/front_quiet_scenario.py fails on a tag passed to the gate that the map lacks."""
+    on purpose goes through the message tool, which passes here only when it is an fyi to a front agent (kind `message`, front_fyi); one that asks something does not.
+    A tag the map does not know is a progress notice (held when he is away); tests/front_quiet_scenario.py fails on a tag passed to the gate that the map lacks.
+    `nid`: the router notice this is the pass of, so a pass retried after its ruling failed to write holds the line once (held.add is idempotent on it).
+    `log`: False when the caller writes the routing-log line itself (the router's own ruling), so one notice leaves one line there."""
     kind = kind or FRONT_TAG_KIND.get(tag, "progress")
     FRONT_HINT.result = ("", "")
     if kind == "exempt" or not front_sender(owner):
@@ -620,18 +626,29 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str) -> bool:
             return False
         fyi_ok = verdict == "fyi" and _held.enabled() and _held.can_fetch(owner)
         if fyi_ok:
-            fyi_ok = _held.add(_held.key_of(owner), "fyi", note, sender=NAME, gid=gid)
+            fyi_ok = _held.add(_held.key_of(owner), "fyi", note, sender=NAME, gid=gid, nid=nid)
         if verdict == "fyi" and not fyi_ok:
             why = "its hook cannot fetch held lines, and a new turn is not worth it"
         reason = f"held: front agent, rides {OWNER}'s next turn (fyi, {kind})" if fyi_ok else f"held: front agent, {why} ({kind})"
         FRONT_HINT.result = ("fyi", "") if fyi_ok else ("held", why)
-        if kind == "progress":
+        if kind in ("progress", "message"):
             _front_board_line(gid, owner, fyi_ok, why, note)      # the board keeps the news whether or not the pane hears it
-        _front_held_log(gid, owner, kind, reason, note)
+        if log:
+            _front_held_log(gid, owner, kind, reason, note)
         return True
     except Exception as e:  # noqa: BLE001  — the gate is an extra: a failure in it sends the notice as before
         print(f"front gate: {gid} notice to {owner} sent as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return False
+
+
+def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True) -> tuple[str, str]:
+    """An fyi for a front agent (a message its sender marked as asking nothing, sent through the message tool or passed by the router) through the front gate, the one path a notice
+    for a front agent takes: it rides the agent's next turn and starts none, or is held when its hook cannot fetch held lines. `gid`: the items the message names (comma-separated), each
+    of which gets its board line. → ("fyi", "") filed for its next turn, ("held", why) nobody is told (logged), ("", "") the gate did not handle it (a recipient that is no front agent, or the
+    gate failed): the caller does what it did before."""
+    if not front_gate(gid, agent, note, "message", "message", nid, log):
+        return "", ""
+    return gate_result()
 
 
 def notice_link(gid: str) -> str:
