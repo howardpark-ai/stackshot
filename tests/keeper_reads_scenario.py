@@ -966,6 +966,95 @@ def t27l():
     finally: KR.time = time
     return rc_ == 2 and "legacy keepers: gauge unknown" in out_ and "legacy keepers: 0 " not in out_, (rc_, out_[:200])
 attempt("a gauge just outside the bound is unknown in both the report and the status", t27l)
+
+# 28. follow-ups of the refusal record: the unknown ends at the next sync, the report words it for every writer and shows a text that is not a time, a record counts by its presence, a document handed to count_of is checked as it stands,
+#     and a stale gauge after a refusal is the documented limit, replaced by the next sync
+def refusal_in_this_process():
+    """A process (a Virt) offers a gauge computed against a stamp another publisher has moved: its timer's flush is refused and the refusal is recorded. Returns with the Virt closed and the file holding the record."""
+    fresh_state(); other_publishes(["projects/a"]); base = KR.snapshot(); other_publishes(["projects/a", "projects/b"])
+    with Virt():
+        KR._STATE["flushed"] = 1e12; KR._STATE["gauge"] = ["projects/a"]
+        KR.gauge(["projects/a"], base=base); KR._tick()
+def t28a():
+    fresh_state(); other_publishes(["projects/a"]); base = KR.snapshot(); other_publishes(["projects/a", "projects/b"])
+    with Virt():                                                                                 # one process: it records the refusal, and it is the one that publishes next
+        KR._STATE["flushed"] = 1e12; KR._STATE["gauge"] = ["projects/a"]
+        KR.gauge(["projects/a"], base=base); KR._tick()                                          # the timer's flush is refused and the refusal is recorded
+        held = "refused" in filed() and KR.count_of() is None; flag = KR._STATE.get("recorded")
+        KR.gauge(["projects/a"])                                                                 # the next sync, the same rows, the minute since its last write not up
+        flag_after = KR._STATE.get("recorded")
+    return held and flag and "refused" not in filed() and legacy().get("keys") == ["projects/a"] and legacy().get("gen") == 3 and KR.count_of() is not None and not flag_after, (held, flag, filed(), flag_after)
+attempt("a refusal this process recorded ends at its next gauge, written at once even with the same rows and the minute not up (the unknown ends at the next sync, not a minute after it)", t28a)
+def t28b():
+    fresh_state(); other_publishes(["projects/a"]); base = KR.snapshot(); other_publishes(["projects/a", "projects/b"])
+    with Virt():
+        KR._STATE["gauge"] = None
+        KR.gauge(["projects/a"], base=base, again=lambda: None)              # refused, and there is nothing to compute again from
+        flag = KR._STATE["recorded"]; held = "refused" in filed()
+        KR.gauge(["projects/a"], again=lambda: None)                         # the next sync, the same rows, the minute not up
+        flag_after = KR._STATE["recorded"]
+    return flag and held and "refused" not in filed() and legacy().get("keys") == ["projects/a"] and not flag_after, (flag, held, filed(), flag_after)
+attempt("a sync whose gauge was refused and had no registry to compute again from: the record stands until the next sync's gauge, which is written at once and clears it", t28b)
+def t28c():
+    refusal_in_this_process(); rep_ = KR.report(); loud = [l for l in rep_ if l.startswith("NOT RECORDING?") and "refused" in l]
+    return len(loud) == 1 and "an earlier flush (possibly this process's, possibly another's)" in loud[0] and "could not compute the rows again" in loud[0] and "other publisher" not in loud[0] and "at the end of a process or from the timer" not in loud[0], loud
+attempt("the report words a refusal for every writer: an earlier flush that may be this process's own, and any flush that could not compute the rows again (not only a timer or exit flush)", t28c)
+def t28d():
+    out = []
+    for text, want in (("yesterday", '"yesterday" (not a time)'), ("a" * 100 + "\nsecond line", '"' + "a" * 40 + '..." (not a time)'), ("\x1b[31mred\x1b[0m\r\nx", '"[31mred[0m x" (not a time)')):
+        fresh_state(); other_publishes(["projects/a"]); F.write_text(json.dumps({**filed(), "refused": text})); d_, p_ = KR.load()
+        rep_ = KR.report(); loud = [l for l in rep_ if l.startswith("NOT RECORDING?") and "refused" in l]
+        out.append(p_ == "" and KR.count_of(d_, p_) is None and run_main()[0] == 2 and len(loud) == 1 and want in loud[0] and "offered ?" not in loud[0] and "\n" not in loud[0] and "\x1b" not in loud[0] and unknown_line(rep_))
+        other_publishes(["projects/a"]); out.append("refused" not in filed() and KR.count_of() == 1)             # the next gauge written clears it
+    return all(out), (out, loud)
+attempt("a refusal record that is a string but not a time is printed as it stands (one line, cut, no control characters), the gauge is unknown, the status is 2, and the next gauge clears it", t28d)
+def t28e():
+    fresh_state(); other_publishes(["projects/a"]); F.write_text(json.dumps({**filed(), "refused": ""})); d_, p_ = KR.load()
+    rep_ = KR.report(); rc_ = run_main()[0]; loud = [l for l in rep_ if l.startswith("NOT RECORDING?") and "refused" in l]
+    first = (p_ == "" and KR.count_of(d_, p_) is None and KR.count_of() is None and rc_ == 2 and len(loud) == 1 and unknown_line(rep_))
+    reader("q"); KR.flush(); kept = filed().get("refused") == ""                                    # a read flush keeps the record
+    other_publishes(["projects/a"])
+    return first and kept and "refused" not in filed() and KR.count_of() == 1 and run_main()[0] == 0, (first, kept, filed())
+attempt("an empty refusal record is a record: the gauge is unknown, the status is 2, a read flush keeps it, and the next gauge written clears it", t28e)
+def good_doc(**over):
+    return {"sites": {}, "legacy": {"count": 0, "keys": [], "at": iso(time.time()), "gen": 1, "epoch": "e1"}, **over}
+def with_legacy(**over):
+    d_ = good_doc(); d_["legacy"] = {**d_["legacy"], **over}; return d_
+def t28f():
+    cases = {"a tuple of keys in the gauge": with_legacy(count=1, keys=("projects/a",)),
+             "a tuple of keys in a site": good_doc(sites={"s <- m.f": {"last": iso(1.0), "keys": ("a",)}}),
+             "a tuple of sites": good_doc(sites=({"last": iso(1.0), "keys": []},)),
+             "a site name that is not a string": good_doc(sites={1: {"last": iso(1.0), "keys": []}}),
+             "a key that is not a string at the top": {**good_doc(), 7: "x"},
+             "a key that is not a string in the gauge": (lambda d_: (d_["legacy"].__setitem__(5, "x"), d_)[1])(good_doc()),
+             "a set in an extra field": good_doc(extra={"a"}),
+             "a tuple in an extra field": good_doc(extra=("a",)),
+             "a count of 0.0": with_legacy(count=0.0),
+             "a count of True": with_legacy(count=True),
+             "a count of False": with_legacy(count=False)}
+    got = {k: KR.count_of(v, "") for k, v in cases.items()}
+    return all(v is None for v in got.values()) and KR.count_of(good_doc(), "") == 0 and KR.count_of(with_legacy(count=1, keys=["projects/a"]), "") == 1, got
+attempt("a document handed to count_of is checked as it stands, not as JSON would convert it: a tuple, a set, a key that is not a string, a float or a boolean count is unknown, never zero (a good one still reads)", t28f)
+def t28g():
+    fresh_state(); other_publishes([]); base_a = KR.snapshot()                       # the file holds a zero; publisher A reads it, then computes rows that hold a legacy row
+    other_publishes([])                                                              # another publisher, from older rows, writes a zero (the next generation)
+    with Virt():                                                                     # A's flush is the timer's: refused, and the refusal is recorded; the stamp stays
+        KR._STATE["flushed"] = 1e12; KR._STATE["gauge"] = ["projects/new"]
+        KR.gauge(["projects/new"], base=base_a); KR._tick()
+    after_refusal = ("refused" in filed(), KR.count_of(), KR.snapshot()[1])
+    with Virt(): KR.gauge([], base=base_a); KR.flush()                               # publisher B took its snapshot before the refusal (as the rule says, before its rows): refused too
+    still = ("refused" in filed(), KR.count_of(), KR.snapshot()[1])
+    with Virt(): KR.gauge([], base=KR.snapshot()); KR.flush()                        # publisher C computed its rows before the row appeared and took its snapshot only now (the documented limit): accepted
+    stale = (KR.count_of(), legacy().get("gen"), "refused" in filed())
+    with Virt(): KR.gauge(["projects/new"], base=KR.snapshot()); KR.flush()          # the next sync, from the live registry
+    replaced = (KR.count_of(), legacy().get("keys"), "refused" in filed(), run_main()[0])
+    return after_refusal == (True, None, 2) and still == (True, None, 2) and stale == (0, 3, False) and replaced == (1, ["projects/new"], False, 0), (after_refusal, still, stale, replaced)
+attempt("a refusal leaves the stamp as it is: a publisher that snapshotted before it is refused, one that snapshotted after it (its rows older) is accepted (the documented single stale gauge), and the next sync replaces that gauge", t28g)
+attempt("the docs say a stale gauge can follow a refusal too, that a later stage recomputes the legacy rows from the live record instead of trusting the gauge, and that a gauge handed to count_of is checked as it stands",
+        lambda: (all(w in DOC for w in ("A refusal on record does not change this", "recomputes the legacy rows from the live record", "a tuple, a set or a key that is not a string")), None))
+attempt("the docs say any flush of an older version drops the record, a refusal for any flush that could not compute the rows again, the unknown ends at the next sync, and a text that is not a time is printed as it is",
+        lambda: (all(w in DOC for w in ("any flush of an older version", "a flush that could not compute the rows again", "so the unknown ends at the next sync", "cut to 40 characters", "an empty string included")) and "a read flush of an older version" not in DOC, None))
+attempt("the module's text says the publisher syncs about once a minute from the end of a round, not every 20 seconds", lambda: ("about every 20 seconds" not in SRC and "about once a minute, counted from the end of a round" in SRC, None))
 attempt("the docs say a refused gauge in a timer or exit flush is recorded, and that a file made again never matches no file", lambda: ("refused" in DOC and "a timer or exit flush" in DOC and "never matches" in DOC, None))
 fresh_state()
 KR._after = real_after
