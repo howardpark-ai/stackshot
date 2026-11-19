@@ -42,6 +42,7 @@ from stackshot.service import watching as _watching
 from stackshot.service import writes as _writes
 from stackshot.service.store import _legacy_hold, _load
 from stackshot.service.wake_hooks import hooks as _hooks
+from stackshot.waits import held as _held
 from stackshot.waits import until_write as _uw
 from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
@@ -254,13 +255,28 @@ def wake_notify(gid: str, it: dict[str, Any], what: str, out: dict[str, list[tup
     return told
 
 
-def _hold_queue_row(sid: str, row: "tuple[str, dict[str, Any], str, str, bool]") -> bool:
-    """A woken row whose item is still after an open item (not a reminder): held for a background session as a queue-place notice. True when held."""
+def _queue_line(row: "tuple[str, dict[str, Any], str, str, bool]") -> str:
+    """The line of a woken row whose item is still after an open item (not a reminder): its place in the queue, which asks nothing yet. "" for any other row."""
     gid, it, what, _why, rem = row
     meta = it.get("metadata") or {}
     if rem or not _hooks().after_open(meta):
+        return ""
+    return f"[stackshot] {_gh.shown(gid)} {what}: {it.get('subject') or ''} ({meta.get('project') or ''}) — {back_words(meta, _gh.shown)} → {_telling.notice_link(gid)}"
+
+
+def _hold_queue_row(sid: str, row: "tuple[str, dict[str, Any], str, str, bool]") -> bool:
+    """A woken row whose item is still after an open item (not a reminder): held for a background session as a queue-place notice. True when held."""
+    line = _queue_line(row)
+    return bool(line) and _telling.hold_notice(sid, line, "queue", gid=row[0])
+
+
+def _front_queue_row(sid: str, row: "tuple[str, dict[str, Any], str, str, bool]") -> bool:
+    """The same queue-place line for a FRONT agent goes through the front gate as an fyi: it rides the agent's next turn and starts none (held when its hook cannot fetch held lines; the board
+    line on the item keeps the news either way). A background agent's is _hold_queue_row's. True when the gate took it, so it is not told as a wake."""
+    line = _queue_line(row)
+    if not line or not _held.enabled() or not _telling.front_sender(sid):      # [router] hold_notices = false: delivered as before
         return False
-    return _telling.hold_notice(sid, f"[stackshot] {_gh.shown(gid)} {what}: {it.get('subject') or ''} ({meta.get('project') or ''}) — {back_words(meta, _gh.shown)} → {_telling.notice_link(gid)}", "queue", gid=gid)
+    return _telling.front_fyi(sid, line, gid=row[0], held_kind="queue")[0] in ("fyi", "held")
 
 
 def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], extra: tuple[str, str, list[str]] | None = None) -> None:
@@ -269,13 +285,16 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
     then what to do. A notice (a wake on an item not on hold) says the item is still active and asks to
     close it, refresh its next or set an until date, where a woken item asks to refresh its ask. A pilot notice is recorded for
     each item that is not the session's own, the lines of one message sharing a `batch` id. A row whose project the router is live for,
-    and whose recipient is that project's keeper, is not told: it is recorded for the router to rule (router_live.holds)."""
+    and whose recipient is that project's keeper, is not told: it is recorded for the router to rule (router_live.holds). The one exception is a front agent's place in the queue (a wake that only leaves the item
+    after an open item): it asks nothing, so it is filed as an fyi for the agent's next turn before the router is asked (`_front_queue_row`; a background agent's is `_hold_queue_row`'s)."""
     xtext, xmark, xgids = extra or ("", "", [])         # the watchers' rows for this session in the same pass, appended: one message
     keep = []
     for row in rows:
         gid, it, what, _why, rem = row
         meta = it.get("metadata") or {}
         project, owner = str(meta.get("project") or ""), _telling.holder(it)
+        if _front_queue_row(sid, row):      # a front agent's place in the queue asks nothing: filed for its next turn, whether or not the router holds the project
+            continue
         if not _router_live.holds(project, sid):      # the recipient is the item's mover, so there is no "its own item" to tell directly
             keep.append(row); continue
         thn, subject = _telling.then_part(it, to=sid), str(it.get("subject") or "")

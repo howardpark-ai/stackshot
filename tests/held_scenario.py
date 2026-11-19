@@ -17,6 +17,9 @@ Covers (held.py is the store and the decision; telling.hold_notice and router_li
      agent held for its next turn through the front gate (it starts no turn; a router pass of one the same, and a script's, through client.py or POST /client/message, the same); a script's marked or plain message, one that says needs: decision, and one in the person's name unchanged; a marked or a plain message to a front agent, a retired or unknown name unchanged; the parameter is on the tool and the text says what it does.
   6b. A page-owed notice passed to a front agent: held for its next turn through the front gate (the line names the page, the item, who changed it and what is owed, within the cap; held once; the owed list and the write refusal unchanged);
      with the person's words or mark, a hand-back, a hook that cannot fetch, a gate that declines or fails, or the switch off, delivered as before; a background agent's, held as before.
+  6c. A wake that only leaves a front agent's item after an open item (its place in the queue) asks nothing: filed for its next turn through the front gate (no turn), a wake that puts the item back in its lane and a reminder
+     still pushed, a background agent's held as before (queue), a hook that cannot fetch held lines not given a turn either; and the router's pass of a peer's message addressed to a front agent on its first line: delivered
+     unless its sender set the fyi flag (6k8, 6k9).
   7. The hand-over at a turn start: the client endpoint (POST /client/held) returns the text once, a waking notice does not take the held lines with it, the lines wait
      until a turn start, a front agent's session gets nothing, and client.held_for reads the endpoint.
 
@@ -61,6 +64,7 @@ def item(i, owner=X, status="open", desc=DESC, **meta):
 item(1); item(2, desc=DESC + '\n- Oliver: "ship it"'); item(3); item(4, mover="work-osprey-x"); item(5, needs=["work-osprey-x"]); item(6, observers=[X], owner=A)
 item(7, owner=A); item(8, after=["a9"]); item(9)
 item(10, owner=A); item(11)
+item(12, owner=A, after=["a9"]); item(13, owner=A)
 (T / "store/next-id").write_text("100")
 push_log = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(push_log)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
@@ -381,6 +385,26 @@ check("6n2: …and the message log records it as an fyi held, not delivered", an
 fresh(); n0 = len(pushes()); before_log = fq_log(10); out = msg("work-osprey-main", "a10 is merged, nothing for you to do", "home-beta", fyi=True); settle()
 check("6o: an fyi that names an item the board carries: held for the next turn, and the item gets its board line", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1
       and len(fq_log(10)) == len(before_log) + 1 and "hears of it on his next turn" in fq_log(10)[-1] and "merged" in fq_log(10)[-1], (out, fq_log(10)))
+# ---- 6c. a wake that leaves a front agent's item still after an open item is its place in the queue: nothing to do yet, so it rides the next turn and starts none
+fresh(); n0 = len(pushes()); it = _service_store._load("a12"); b0 = len(fq_log(12))
+wakes_svc.wake_tell(A, [("a12", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
+check("6c1: a wake that leaves a front agent's item still after an open item starts no turn: nothing pushed, one line held for its next turn", reach(A, n0) == [] and held.count(A) == 1, (pushes()[n0:], held.count(A)))
+check("6c2: …the held line says where the item stands, and the item gets its board line", "still after" in held.take(A, "work-osprey-main") and len(fq_log(12)) == b0 + 1 and "hears of it on his next turn" in fq_log(12)[-1], fq_log(12))
+fresh(); n0 = len(pushes()); it = _service_store._load("a13")
+wakes_svc.wake_tell(A, [("a13", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
+check("6c3 negative: a wake that puts a front agent's item back in its lane asks it to act: pushed as before, nothing held", len(reach(A, n0)) == 1 and held.count(A) == 0, (pushes()[n0:], held.count(A)))
+fresh(); n0 = len(pushes()); it = _service_store._load("a12")
+wakes_svc.wake_tell(A, [("a12", it, "reminder", "as its keeper of record", True)]); settle()
+check("6c4 negative: a reminder to a front agent (an active item it is asked to close or refresh) is pushed even when the item has an after", len(reach(A, n0)) == 1 and held.count(A) == 0, (pushes()[n0:], held.count(A)))
+fresh(); n0 = len(pushes()); it = _service_store._load("a8")
+wakes_svc.wake_tell(X, [("a8", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
+check("6c5: a background agent is unchanged: its queue-place wake is held as before (queue), no board line", reach(X, n0) == [] and held.count(X) == 1 and len(logged("queue")) >= 1, (pushes()[n0:], held.count(X)))
+os.unlink(held.clients_file()); gate_open()
+fresh(); n0 = len(pushes()); it = _service_store._load("a12")
+wakes_svc.wake_tell(A, [("a12", it, "woke (wake 10-29)", "as its keeper of record", False)]); settle()
+check("6c6: a front agent whose hook does not fetch held lines is not given a turn for it either: nothing pushed or held (the board line keeps the news)", reach(A, n0) == [] and held.count(A) == 0, (pushes()[n0:], held.count(A)))
+held.mark_client(A, "work-osprey-main")
+
 os.unlink(held.clients_file()); gate_open()
 fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", fyi=True); settle()
 check("6p: a front agent whose hook does not fetch held lines is not given a turn either: not passed on, nothing pushed or held, the reply says what to do", out.startswith("not passed on") and reach(A, n0) == [] and held.count(A) == 0 and "without fyi" in out, (out, pushes()[n0:]))
@@ -438,6 +462,11 @@ fresh(); n0 = len(pushes()); n = rec("the release is live", hold="closed"); res 
 check("6k6 negative: a pass to a front agent of a notice with another hold kind than fyi or page-owed (closed) is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = rec("the release is live"); res = act(n, "work-osprey-main", rule="message-item")
 check("6k7 negative: a message to a project without fyi, passed to a front agent, is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec("FYI: the release is live, nothing is asked of Oliver"); res = act(n, "work-osprey-main", rule="for-agent", reason="addressed to work-osprey-main on its first line")
+check("6k8: a peer's message addressed to a front agent on its first line, that says FYI in its words but was sent without the fyi flag, is delivered (the sender's flag is what holds a pass, never the text)", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec("FYI: the release is live, nothing is asked of Oliver", hold="fyi"); res = act(n, "work-osprey-main", rule="for-agent", reason="addressed to work-osprey-main on its first line")
+check("6k9: …and the same message sent with the flag is held for the next turn, through the same rule", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1, (res, pushes()[n0:]))
+held.take(A, "work-osprey-main")
 
 # ---- 6b. a page-owed notice passed to a front agent goes through the same front gate: held for its next turn, no turn
 ANCHOR_TAIL = "no page update is owed by you (home-beta writes it); this notice is for the anchors scoped to a1"      # a1: how the fixture shows item 1

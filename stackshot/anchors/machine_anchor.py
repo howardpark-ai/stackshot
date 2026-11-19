@@ -191,6 +191,18 @@ def notice(machine: str, at: str, rows: list[tuple[str, str, str]]) -> str:
     return head + body + f"\nA machine anchor told you: the step that needs {machine} can go ahead. The anchor stays (anchors(project=…, remove=[\"{shown(machine)}\"]) drops it)."
 
 
+def news_notice(machine: str, at: str, ref: str, subject: str, link: str, limit: int = 240) -> str:
+    """The message about a machine's check-in for one item that is waiting (on a wake, another item, an outside party or an event): no step can go ahead on it yet, so it asks nothing. One item
+    to a message, and short: the subject is cut so the whole line, its link and the sentence that says nothing is asked included, stays within `limit` characters (a held line is cut at its own cap)."""
+    head = f"[stackshot] {machine} checked in{(' at ' + at) if at else ''}: it is online again. Nothing is asked of you now: {ref} is waiting on something else and the step that needs {machine} follows when it ends \u2192 {link}"
+    room = limit - len(head) - 3
+    subj = " ".join(str(subject or "").split())
+    if room < 12:
+        return head
+    subj = subj if len(subj) <= room else subj[:room - 1].rstrip() + "\u2026"
+    return head.replace(" \u2192 ", f" ({subj}) \u2192 ", 1)
+
+
 def missing_note(gid_ref: str, project: str, machines: list[str], info: dict[str, str]) -> str:
     """The reply line of a write whose open step names offline machines that no machine anchor of the item covers. `info`: machine → "last checked in <when>" or "has not checked in yet"."""
     if not machines:
