@@ -1,11 +1,13 @@
 """keeper.py — a project's keeper as a mark on one of its agents (the readers, and the pure helpers the verbs and the audit's keeper debts use: nothing here writes a mark).
 
 The keeper is the agent that keeps a project's pages current and hears the notices that fall to the project. It is a duty of one agent of the project, not
-a separate name. Two places can mark it:
+a separate name. Three places can mark it:
 
     the project record      an agent entry of a project's `agents` may carry `"keeper": true` (at most one per project: a second flag is ignored and reported)
     the page                one optional flat frontmatter line `keeper: <agent name>`, beside `display-name:` (never inside the `agents:` map, so `split_agents`
                             is unchanged). It counts only when the name is an agent on that page's own `agents:` map; otherwise it is ignored and reported
+    a sub-page's own mark   the entry of the project the sub-page sits under may hold `"page_keepers": {<sub-page key>: <agent name>}` (project_registry.apply lays it). The agent need not be on
+                            that project's map: any agent a project lists will do (a mark naming nobody listed is ignored and reported). An empty name hands the page back to the keeper above it
 
 With no mark, the keeper is derived by the rule the router already uses for a project's notices (router_live.stand_in): the project's builder (a background agent whose
 mandate says it builds), else its -main agent (anchors.fallback_main). A page that lists no agent of its own, or of its hub, has no derived keeper: the session its
@@ -21,7 +23,9 @@ What a registry row gains (pages.cmd_registry; project_registry.apply lays the r
     session, role     with a mark: the marked agent and the role "mark" (a sub-page under it: the same agent, role "inherited"); `legacy_session` and `legacy_role`
                       then hold what they were. With no mark both keep exactly the value the page's old fields give
 
-An unnamed sub-page inherits the keeper of the nearest page above it, as it always did.
+An unnamed sub-page inherits the keeper of the nearest page above it, as it always did. A sub-page with its own mark keeps the registry role it had ("agent": a page an agent keeps as its own working
+document, which is the role every reader of such a page reads) and its row says `page_mark: true`, so `fields` answers "mark" for it; the sub-pages under it do not inherit from it, as they never did
+from an `agent:` page.
 
 The verbs (project_verbs.py) write the mark: `agent_add` marks a project's first agent, `agent_retire` and `agent_rename` move it, `keeper` moves it on purpose. `successor` names the agent a
 retired keeper's mark moves to, and `problems_of` reads what is wrong with a mark (registry_report.keeper_debts turns it into the four debts the registry check carries).
@@ -33,6 +37,8 @@ import re
 import sys
 
 KEY = "keeper"                  # the page's flat line, and the record's flag on an agent entry
+PAGES = "page_keepers"          # the record entry's map of the sub-pages under it that carry a mark of their own: {sub-page key: agent name, or "" for "follows the keeper above"}
+PAGE_MARK = "page_mark"         # the registry row's flag: its keeper (`session`, role "agent") was named by such a mark, not by the page's `agent:` line
 MARK = "mark"                   # the registry role of a row whose `session` is the agent its page (or its record entry) marks
 SOURCES = ("mark", "derived", "legacy")
 _UNMARKED = ("agent", "inherited")      # registry roles that are not a page's own name line
@@ -156,7 +162,7 @@ def retired(key: str, reg: dict) -> bool:
 
 def fields(key: str, reg: dict, _seen: tuple = ()) -> dict:
     """{"keeper_agent", "keeper_source"} of the page `key` of the registry `reg` (rows as pages.cmd_registry and project_registry.apply leave them), by the order:
-      1. a mark (the row's own, or the one a sub-page inherits): "mark";
+      1. a mark (the row's own, the one a sub-page inherits, or a sub-page's own mark of the record: `page_mark`): "mark";
       2. a retired project with no mark: no keeper, two empty strings (it has no agent to derive and its name line is no keeper any more);
       3. an unnamed sub-page: the keeper of the page above it; a sub-page an agent keeps (`agent:`): that agent, "legacy";
       4. a page that has its own name line (`display-name:`) and lists no agent of its own (a sub-page or a hub-linked page that names itself): that name, "legacy". Such a page
@@ -165,7 +171,7 @@ def fields(key: str, reg: dict, _seen: tuple = ()) -> dict:
       6. otherwise the session the old fields name: "legacy". A row with none has two empty strings."""
     row = reg.get(key) if isinstance(reg.get(key), dict) else {}
     role = str(row.get("role") or ""); who = str(row.get("session") or "")
-    if role == MARK and who:
+    if (role == MARK or row.get(PAGE_MARK) is True) and who:
         return {"keeper_agent": who, "keeper_source": "mark"}
     up = above(key, reg) if role == "inherited" and key not in _seen else ""
     above_got = fields(up, reg, _seen + (key,)) if up else None      # an unnamed sub-page takes the mark above it, in a retired project too (a mark is read even there)

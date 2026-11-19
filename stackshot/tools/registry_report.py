@@ -17,11 +17,13 @@ What it flags (one finding is {"page", "line", "name", "fix", "project"}; the li
                                 open items whose `project` names no project (no entry points at it, owns it as a sub-page or knew it as a former key). Fix: re-file them, or adopt the page when it is a project's
   two projects on one page      two or more live (not archived) entries that point at one page. Fix: archive the stray, or give it a page of its own with `move-page`
 
-The four keeper debts (only with `[registry_audit] keeper_debts = true`, off by default: nobody is told of a mark's problem before marks are set on purpose; the keeper is a mark on one agent, keeper.py):
+The keeper debts, four for the mark of a project and a fifth for a sub-page mark (only with `[registry_audit] keeper_debts = true`, off by default: nobody is told of a mark's problem before marks are set on purpose; the keeper is a mark on one agent, keeper.py):
   keeper-not-listed             a mark names an agent the record does not list: the page's `keeper:` line, or a flag that is not true or false. Fix: `tools/project.py keeper <project> <agent>` for a flag; for a stale page line, edit or remove the line (no verb writes it)
   keeper-two-marks              two agents flagged in the record, or the record's flag and the page's `keeper:` line name different agents. Fix: `tools/project.py keeper <project> <agent>` leaves one flag
   keeper-retired                the mark names an agent the record says was retired from the project. Fix: `tools/project.py keeper <project> <agent>`
   keeper-not-derived            a live project that lists agents, has no mark, and has no builder or -main agent to derive a keeper from. Fix: mark one: `tools/project.py keeper <project> <agent>`
+  keeper-page-ignored           a sub-page mark (`page_keepers` on the project's record entry) that is not read: a key that is no page under the project, an agent no project lists, a page with a line of its own, a mark held
+                                on an entry that is not the nearest above the page, or a page marked twice; the page's own lines answer meanwhile. Fix: correct the key or the agent in the record, or list the agent
 
 A `parent:` line is not checked: nothing in the project registry reads it (projects.py: it makes no sub-page), so a line off the key tree is no error of the record.
 
@@ -65,6 +67,7 @@ LINE_KEEPER_NOT_LISTED = "keeper-not-listed"
 LINE_KEEPER_TWO = "keeper-two-marks"
 LINE_KEEPER_RETIRED = "keeper-retired"
 LINE_KEEPER_NOT_DERIVED = "keeper-not-derived"
+LINE_KEEPER_PAGE = "keeper-page-ignored"
 SHOWN = 6                # items or ids named on one line; the rest are counted
 
 
@@ -139,8 +142,9 @@ def two_on_one_page(ents: dict) -> list[dict[str, str]]:
 
 
 def keeper_debts(ents: dict, reg: dict, ov: dict | None = None) -> list[dict[str, str]]:
-    """The four keeper debts of every live project with a page: keeper-not-listed, keeper-two-marks, keeper-retired (keeper.problems_of, read from the entry's agents map, the project's raw page row and
-    the entry's `former_agents`) and keeper-not-derived (no mark, agents listed, and the overlaid registry `ov` derives no keeper for the page). One finding per project and kind. Read only."""
+    """The five keeper debts of every live project with a page: keeper-not-listed, keeper-two-marks, keeper-retired (keeper.problems_of, read from the entry's agents map, the project's raw page row and
+    the entry's `former_agents`), keeper-not-derived (no mark, agents listed, and the overlaid registry `ov` derives no keeper for the page) and keeper-page-ignored (a sub-page mark of the entry that the overlaid
+    registry did not read, from the project row's `keeper_problems` lines of a page keeper). One finding per project and kind. Read only."""
     from stackshot.projects import keeper as _kp  # noqa: PLC0415
     fix = "run `tools/project.py keeper {p} <agent>` (a dry run first: it names the old mark, the new one and the sessions whose roles move; add --apply to write it)"
     page_fix = "edit the page's `keeper:` line to name a listed agent, or remove the line (no verb writes it: `tools/project.py keeper` moves the record's mark only)"
@@ -157,6 +161,10 @@ def keeper_debts(ents: dict, reg: dict, ov: dict | None = None) -> list[dict[str
                 continue
             seen.add(kind)
             out.append(_f(k, kind, text, page_fix if re.match(r"(the page's )?`keeper: ", text) else fix.format(p=pid), pid))
+        lost = [str(x) for x in (((ov or {}).get(k) or {}).get("keeper_problems") or []) if str(x).startswith("page keeper of ")]
+        if lost:                                                       # a sub-page mark that was ignored (keeper.PAGES): one finding per project, the first line and how many more
+            out.append(_f(k, LINE_KEEPER_PAGE, lost[0] + (f" (and {len(lost) - 1} more)" if len(lost) > 1 else ""),
+                          f"the page's own lines answer meanwhile; correct the key or the agent of the mark (`page_keepers` on the project's record entry; `tools/project.py agent-add {pid} <agent>` lists an agent first), or remove it", pid))
         if ag and not _kp.effective_mark(ag, row):
             got = (ov or {}).get(k) or {}
             if isinstance(got, dict) and got and not got.get("keeper_agent"):      # a page the overlaid registry does not hold says nothing

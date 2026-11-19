@@ -20,7 +20,8 @@ runs on every box.
                                 project = one project's record, {id, key, keeper, keeper_agent, keeper_source, agents: {name: {front, role,
                                 mandate_line, keeper?}}}: its permanent id (prj_<8 hex>), the page key it has now, the page's keeper and its
                                 agents (a name the page does not list yet carries page_owed: true). The keeper is a mark on one agent:
-                                `keeper: true` on that agent, set in the project record or by a `keeper: <agent>` line on the page. keeper_agent
+                                `keeper: true` on that agent, set in the project record or by a `keeper: <agent>` line on the page (a sub-page can
+                                carry a mark of its own, `page_keepers` on the record entry above it). keeper_agent
                                 is that agent, else the project's builder, else its -main agent (a one-session page: its own session), and
                                 keeper_source says which: mark, derived (no mark) or legacy (no mark, and the page's old name line or `agent:` names
                                 the keeper; a sub-page or hub-linked page with a name line of its own stays legacy). Both are empty for a retired

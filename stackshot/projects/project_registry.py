@@ -12,6 +12,9 @@ An entry (every field optional unless said):
     status         "active" | "archived" (default active)
     agents         {agent name: {"front": bool, "mandate_line": str, "keeper": true}} in the order the project lists them (the first builder listed is the builder). `keeper: true` marks the
                    project's keeper: at most one agent of the entry carries it (a second flag is ignored and reported, never an error); with none the keeper is derived (keeper.py)
+    page_keepers   {sub-page key: agent name}: the sub-pages under this project's page that carry a keeper mark of their own (keeper.py). The agent need not be on this project's map, only listed by some
+                   project; a name nobody lists, or a key that is no page under the project, is ignored and reported on this project's row (`keeper_problems`), never an error. An empty name hands the
+                   page back to the page above it (its keeper follows that page's)
     hub            the page key of the project this one belongs to ("" = none)
     page           the pointer to the project's knowledge-base page: a page key of this instance's page store, or any link to another knowledge base; absent = the project has none
     former_keys    page keys the project's page had before ("projects/old-name"), so a stored key still finds the project
@@ -101,6 +104,8 @@ def parse(doc: Any) -> dict:
         for f in ("former_keys", "former_names", "former_agents"):
             if f in e and not (isinstance(e[f], list) and all(isinstance(x, str) and x for x in e[f])):
                 raise bad(f"{f} is not a list of strings")
+        if _kp.PAGES in e and not (isinstance(e[_kp.PAGES], dict) and all(isinstance(k, str) and k and isinstance(v, str) for k, v in e[_kp.PAGES].items())):
+            raise bad(f"{_kp.PAGES} is not a map of page keys to agent names")
         for f in ("made", "retired"):
             if f in e:
                 m = e[f]
@@ -358,6 +363,114 @@ def _inherit_marks(out: dict, tops: set) -> None:
                 row.pop("role", None)
 
 
+def _listed_agents(rows: dict, ents: dict) -> set:
+    """Every agent name some project lists: on the agents map of a row of `rows` (the entries are laid over it) or of an entry of `ents`."""
+    out: set = set()
+    for src in (*rows.values(), *ents.values()):
+        if isinstance(src, dict) and isinstance(src.get("agents"), dict):
+            out.update(str(n) for n in src["agents"])
+    return out
+
+
+def _lay_page_keepers(base: dict, ents: dict) -> dict:
+    """The registry `base` with the sub-page marks of the entries laid over it (`page_keepers`, keeper.py). A sub-page whose name is an agent some project lists keeps the role it had and gets
+    `session` = that agent and `page_mark: true`: a reader of `session` and `role` answers as it did for the page's `agent:` line, and `keeper.fields` says "mark". The sub-pages under it do
+    not inherit from it (a page an agent keeps never passed its keeper down). An empty name makes the page follow the keeper above it: role "inherited", `session` that keeper's, the old
+    `agent:` line kept as `legacy_session` and `legacy_role`. A mark that cannot be read (a key that is no page under the project, a page with a name line or a `keeper:` line of its own, a name no
+    project lists) is ignored and said on the project's row (`keeper_problems`): the page's own lines answer, as before. Rows are copied before they change; `base` itself is never changed."""
+    jobs = [(e, page_key(e)) for _pid, e in sorted(ents.items()) if isinstance(e.get(_kp.PAGES), dict) and e[_kp.PAGES] and page_key(e) in base]
+    if not jobs:
+        return base
+    out = dict(base); said: dict = {}; marked: list = []; handed: list = []; known: set | None = None; claimed: dict = {}
+    tops = sorted({page_key(x) for x in ents.values() if page_key(x)})
+    for e, top in jobs:
+        for raw_key, who in sorted(e[_kp.PAGES].items()):
+            k = _norm_key(raw_key); row = out.get(k); why = ""
+            near = max((t for t in tops if k.startswith(t + "/")), key=len, default="")
+            if not k.startswith(top + "/") or not isinstance(row, dict):
+                why = "is no page under the project"
+            elif near != top:
+                why = f"is held on the entry of {top}, but the nearest project above it is {near} (a page's mark lives on that entry)"
+            elif k in claimed:
+                why = f"is marked twice (the entry of {claimed[k]} holds a mark for it too, and that one rules)"
+            elif row.get("role") == "name":
+                why = "has a project name line (`display-name:`) of its own, which a keeper mark does not replace"
+            elif row.get("role") == _kp.MARK:
+                why = "has a `keeper:` line of its own, which rules"
+            elif who:
+                known = _listed_agents(out, ents) if known is None else known
+                if who not in known:
+                    why = f"{who} is not an agent any project lists"
+            elif row.get("role") != "agent":
+                continue                                   # nothing to hand back: the page follows the page above it already
+            if why:
+                said.setdefault(top, []).append(f"page keeper of {k}: {why}; ignored, the page's own lines answer")
+                continue
+            new = out[k] = dict(row); claimed[k] = top
+            if who:
+                new["session"] = who; new["role"] = "agent"; new[_kp.PAGE_MARK] = True
+                new.pop("legacy_session", None); new.pop("legacy_role", None)
+                marked.append(k)
+            else:
+                new["legacy_session"] = str(row.get("session") or ""); new["legacy_role"] = "agent"; new["role"] = "inherited"
+                handed.append(k)
+    for k in sorted(handed, key=lambda x: x.count("/")):    # the nearest page above that keeps its own keeper, read after the marks and the pages handed back above it
+        up = _kp.above(k, out); s = str((out[up].get("session") if up else "") or "")
+        if s:
+            out[k]["session"] = s
+        else:
+            out[k].pop("session", None); out[k].pop("role", None)
+    for top, lines in said.items():
+        out[top] = dict(out[top]); out[top]["keeper_problems"] = [*(out[top].get("keeper_problems") or []), *lines]
+    for k in [*marked, *handed]:
+        if "keeper_source" in out[k]:
+            out[k].update(_kp.fields(k, out))
+    return out
+
+
+def page_marks_naming(ents: dict, name: str) -> list:
+    """[(entry id, page key)] of every sub-page mark in `ents` that names the agent `name` (case-folded), sorted."""
+    n = str(name or "").casefold()
+    return sorted((pid, k) for pid, e in ents.items() if isinstance(e.get(_kp.PAGES), dict) for k, v in e[_kp.PAGES].items() if n and str(v).casefold() == n)
+
+
+def rename_page_marks(ents: dict, old: str, new: str) -> list:
+    """Rewrite every sub-page mark of `ents` that names the agent `old` so that it names `new`, in place; → the page keys. The caller decides that `old` is gone (see agent_gone)."""
+    done = []
+    for pid, k in page_marks_naming(ents, old):
+        ents[pid][_kp.PAGES][k] = new; done.append(k)
+    return done
+
+
+def clear_page_marks(ents: dict, name: str) -> list:
+    """Remove every sub-page mark of `ents` that names the agent `name`, in place; → the page keys (those pages are read from their own `agent:` lines again)."""
+    done = []
+    for pid, k in page_marks_naming(ents, name):
+        del ents[pid][_kp.PAGES][k]; done.append(k)
+        if not ents[pid][_kp.PAGES]:
+            del ents[pid][_kp.PAGES]
+    return done
+
+
+def rekey_page_marks(e: dict, old: str, new: str) -> list:
+    """The project's page moved from `old` to `new`: the marks of the entry `e` for the pages under `old` now name the same pages under `new`, in place; → the new keys."""
+    m = e.get(_kp.PAGES)
+    if not isinstance(m, dict):
+        return []
+    done = []
+    for k in sorted(m):
+        nk = _norm_key(k)
+        if nk.startswith(old + "/"):
+            m[new + nk[len(old):]] = m.pop(k); done.append(new + nk[len(old):])
+    return done
+
+
+def agent_gone(raw: dict, ents: dict, name: str) -> bool:
+    """Whether no project lists the agent `name` any more, read from the pages `raw` with the entries `ents` laid over them (the page lines of a project with an entry are the entry's)."""
+    n = str(name or "").casefold()
+    return n not in {x.casefold() for x in _listed_agents(apply(raw, ents), ents)}
+
+
 def apply(reg: dict, ents: dict | None = None) -> dict:
     """The page registry with the project entries laid over it: for each entry whose page pointer is a key of `reg`, the entry's fields replace the page's (see
     the module text), a field the entry does not hold stays the page's. `reg` itself is never changed; with no entries (or none that differs) it is returned as it is.
@@ -386,7 +499,7 @@ def apply(reg: dict, ents: dict | None = None) -> dict:
                     or list((cur.get("back_agents") or {}).items()) != list((new.get("back_agents") or {}).items())):
                 tops.add(_top(k))
         if out is None:
-            return reg
+            return _lay_page_keepers(reg, ents)
         from stackshot.projects import projects as _p
         _inherit_marks(out, tops)
         for k in changed:
@@ -399,7 +512,7 @@ def apply(reg: dict, ents: dict | None = None) -> dict:
                 if out[k] is reg.get(k):
                     out[k] = dict(out[k])
                 out[k].update(_kp.fields(k, out))
-        return out
+        return _lay_page_keepers(out, ents)
     except Exception as e:  # noqa: BLE001
         print(f"project record: the entries are not laid over the registry ({type(e).__name__}: {e})", file=sys.stderr, flush=True)
         return reg

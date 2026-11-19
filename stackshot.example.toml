@@ -211,7 +211,7 @@ pattern_review = "shadow"                           # mode "script": the pattern
 [registry_audit]                                    # the project registry check of the daily audit (stackshot/tools/registry_report.py, `stackshot/audit/audit.py registry`): what is wrong with the project record and the pages it points at
 send = false                                        # false (the default): the findings go on the run record and `stackshot/audit/audit.py registry` prints them; nobody is messaged. true: each run also sends every agent
                                                     # its project's findings in one message, at most once a day per agent (a second run the same day sends nothing the first sent)
-keeper_debts = false                                # false (the default): the check does not report the four keeper-mark debts (keeper-not-listed, keeper-two-marks, keeper-retired, keeper-not-derived). true: it does, and
+keeper_debts = false                                # false (the default): the check does not report the keeper-mark debts (keeper-not-listed, keeper-two-marks, keeper-retired, keeper-not-derived, and keeper-page-ignored for a sub-page mark). true: it does, and
                                                     # they go to the project's -main agent with the rest when `send` is true. Leave it false until the projects carry a mark on purpose
 
 [wait_guard]                                        # a wait a session sets on its own item (stackshot/waits/self_wait.py): a wake, or a line of its own next whose step is dated later than today, must carry
