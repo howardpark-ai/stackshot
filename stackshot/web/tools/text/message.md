@@ -14,7 +14,7 @@ then names that agent in the item's needs, unless that would leave the item with
 already moves it, or it waits on a decision): the agent is then not named, the reply says so in one line, and the way
 to hand the item over is update(mover=<agent>). An item id cited only for context, not handed over, goes in backticks,
 since a plain-word id names the receiver on that item. A message to a front agent is refused unless its first line
-carries {{FOR_OWNER}}, and the mark is for what {{OWNER}} has to do (a decision, a go-ahead, a step only he can take):
+carries {{FOR_OWNER}} (except fyi=true, below), and the mark is for what {{OWNER}} has to do (a decision, a go-ahead, a step only he can take):
 a build hand-back, a result, a screenshot, "it's live" or an FYI goes to the project (to=projects/<slug>), where the
 router rules it and passes on what needs the agent (front peer: first line For <peer>,); a marked message that says nothing is needed from him (nothing
 needed from {{OWNER}}, no action needed, FYI, for the record, no reply needed, …) is refused too. A background agent's
