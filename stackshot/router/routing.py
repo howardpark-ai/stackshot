@@ -61,7 +61,7 @@ def record(project: str, *, kind: str, to: str, label: str = "", who: str = "", 
     `etype` (anchor-hub's event type at its source, `ci_failed`, `ci_passed`, `ci_activity`, `comment`, several joined with "+"): the router's
     anchor-ci rule passes a CI notice to the project's builder; a notice recorded without it is read by its `who` ("CI").
     `hold` (held.KINDS): the sender's word that this notice asks nothing of a background agent (a page-owed notice, a message marked fyi).
-    The router, when it passes the notice to a background agent, holds it for that agent's next turn instead (router_live._hold_kind); a front agent is unaffected."""
+    The router, when it passes the notice to a background agent, holds it for that agent's next turn instead (router_live._hold_kind); a front agent too, for an fyi and a page-owed notice, through the front gate (router_live._front_fyi, _front_page_owed)."""
     nid = secrets.token_hex(3)
     line = {"id": nid, "ts": float(ts if ts is not None else time.time()), "kind": kind, "to": to, "label": label, "who": who,
             "text": " ".join(str(text).split())[:300], "url": url, "target": target, "pilot": bool(pilot), "anchor": anchor}

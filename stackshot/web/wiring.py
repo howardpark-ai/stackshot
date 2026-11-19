@@ -177,8 +177,8 @@ def install_early(host: Any) -> None:
     _router_live.configure(is_front=lambda who, project: _telling.front_keeper(who, project)[0],
                            deliver=lambda target, text: _agent_names._router_delivered(target, text, _router_live.deliver_via(_telling.PUSH, target, text)),
                            after_rule=_router_live_after,
-                           front_fyi=lambda target, text, gid="", nid="", log=True: _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)
-                               target, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *_agent_names._item_refs(text)])), nid, log))
+                           front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi": _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)
+                               target, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *([] if kind == "page-owed" else _agent_names._item_refs(text))])), nid, log, kind))      # a page-owed line names no item to write a board line on: the owed list is the board's record of it
 
     _queued.configure(is_front=lambda who, project: _telling.front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
 

@@ -608,14 +608,15 @@ def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str) -> 
         print(f"front gate: {gid} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True) -> bool:
+def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True, held_kind: str = "fyi") -> bool:
     """the one gate every item notice passes in tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
     Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act). The [for <owner>]
     mark does not exempt a notice: a close or a stuck notice stackshot itself sends carries it, and takes a turn of its own only under presence plus touched. A message a session sends
     on purpose goes through the message tool, which passes here only when it is an fyi to a front agent (kind `message`, front_fyi); one that asks something does not.
     A tag the map does not know is a progress notice (held when he is away); tests/front_quiet_scenario.py fails on a tag passed to the gate that the map lacks.
     `nid`: the router notice this is the pass of, so a pass retried after its ruling failed to write holds the line once (held.add is idempotent on it).
-    `log`: False when the caller writes the routing-log line itself (the router's own ruling), so one notice leaves one line there."""
+    `log`: False when the caller writes the routing-log line itself (the router's own ruling), so one notice leaves one line there.
+    `held_kind`: the kind the held line is filed under (held.KINDS): an fyi, or a page-owed notice the router passes."""
     kind = kind or FRONT_TAG_KIND.get(tag, "progress")
     FRONT_HINT.result = ("", "")
     if kind == "exempt" or not front_sender(owner):
@@ -626,7 +627,7 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
             return False
         fyi_ok = verdict == "fyi" and _held.enabled() and _held.can_fetch(owner)
         if fyi_ok:
-            fyi_ok = _held.add(_held.key_of(owner), "fyi", note, sender=NAME, gid=gid, nid=nid)
+            fyi_ok = _held.add(_held.key_of(owner), held_kind, note, sender=NAME, gid=gid, nid=nid)
         if verdict == "fyi" and not fyi_ok:
             why = "its hook cannot fetch held lines, and a new turn is not worth it"
         reason = f"held: front agent, rides {OWNER}'s next turn (fyi, {kind})" if fyi_ok else f"held: front agent, {why} ({kind})"
@@ -641,12 +642,12 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
         return False
 
 
-def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True) -> tuple[str, str]:
+def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True, held_kind: str = "fyi") -> tuple[str, str]:
     """An fyi for a front agent (a message its sender marked as asking nothing, sent through the message tool or passed by the router) through the front gate, the one path a notice
     for a front agent takes: it rides the agent's next turn and starts none, or is held when its hook cannot fetch held lines. `gid`: the items the message names (comma-separated), each
     of which gets its board line. → ("fyi", "") filed for its next turn, ("held", why) nobody is told (logged), ("", "") the gate did not handle it (a recipient that is no front agent, or the
-    gate failed): the caller does what it did before."""
-    if not front_gate(gid, agent, note, "message", "message", nid, log):
+    gate failed): the caller does what it did before. `held_kind`: "page-owed" for a page-owed notice the router passes (same gate, same path; the line is filed under that kind)."""
+    if not front_gate(gid, agent, note, "message", "message", nid, log, held_kind):
         return "", ""
     return gate_result()
 

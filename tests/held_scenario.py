@@ -12,9 +12,11 @@ Covers (held.py is the store and the decision; telling.hold_notice and router_li
      fyi, an fyi that carries [for Oliver], an fyi from Oliver.
   4. A front agent is unchanged: the same senders deliver to it (or tell nobody) as before, and a message that asks something of it (its first line carries the mark) is delivered by the same rules.
   5. The router: a pass to a background agent of a notice recorded with `hold` (page-owed, fyi) is held and ruled held with the reason (the audit's batch is not: the board item, a finding is a task and wakes its mover); the same
-     pass to a front agent of a notice held for another reason (page-owed), a notice with Oliver's words, a ruling for Oliver, and a notice with no hold mark are delivered as before; the pass of an fyi to a front agent goes through the front gate.
+     pass to a front agent of a notice with Oliver's words, a ruling for Oliver, and a notice with no hold mark are delivered as before; the pass of an fyi or a page-owed notice to a front agent goes through the front gate (6 and 6b).
   6. The message tool's `fyi`: to a background agent held (the reply says so; the agent is named in no item's needs), to a project recorded with the mark, to a front
      agent held for its next turn through the front gate (it starts no turn; a router pass of one the same, and a script's, through client.py or POST /client/message, the same); a script's marked or plain message, one that says needs: decision, and one in the person's name unchanged; a marked or a plain message to a front agent, a retired or unknown name unchanged; the parameter is on the tool and the text says what it does.
+  6b. A page-owed notice passed to a front agent: held for its next turn through the front gate (the line names the page, the item, who changed it and what is owed, within the cap; held once; the owed list and the write refusal unchanged);
+     with the person's words or mark, a hand-back, a hook that cannot fetch, a gate that declines or fails, or the switch off, delivered as before; a background agent's, held as before.
   7. The hand-over at a turn start: the client endpoint (POST /client/held) returns the text once, a waking notice does not take the held lines with it, the lines wait
      until a turn start, a front agent's session gets nothing, and client.held_for reads the endpoint.
 
@@ -89,7 +91,7 @@ from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import message as _wt_message
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_real_refuse = _web_page_debts._refuse_if_owing; _web_page_debts._refuse_if_owing = lambda debtor: None
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 KEY = "projects/alpha"
 MACH = "home-test"
@@ -432,10 +434,99 @@ fresh(); n0 = len(pushes()); n = rec("[home-beta] the release is live — [for O
 check("6k4 negative: an fyi pass to a front agent that carries Oliver's mark is delivered, marked, as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = rec("the release is live", hold="fyi"); res = act(n, "work-osprey-main", for_owner=True)
 check("6k5 negative: …and a ruling marked for Oliver, whatever the hold says", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
-fresh(); n0 = len(pushes()); n = rec("the release is live", hold="page-owed"); res = act(n, "work-osprey-main", rule="message-item")
-check("6k6 negative: a pass to a front agent held for another reason than fyi (page-owed) is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec("the release is live", hold="closed"); res = act(n, "work-osprey-main", rule="message-item")
+check("6k6 negative: a pass to a front agent of a notice with another hold kind than fyi or page-owed (closed) is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = rec("the release is live"); res = act(n, "work-osprey-main", rule="message-item")
 check("6k7 negative: a message to a project without fyi, passed to a front agent, is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+
+# ---- 6b. a page-owed notice passed to a front agent goes through the same front gate: held for its next turn, no turn
+ANCHOR_TAIL = "no page update is owed by you (home-beta writes it); this notice is for the anchors scoped to a1"      # a1: how the fixture shows item 1
+def rec_po(subject="", tail=ANCHOR_TAIL, extra="", stash=True, **kw):
+    """A page-owed notice from its real producer, telling.pilot_relay (the anchors notice for a completed item, sent to the router's address): the gist in the routing log, the full words stashed for the router.
+    `extra`: words added to the stashed text; `kw`: marks set on the notice (handback, words); `stash=False`: the stashed text is gone."""
+    it = _service_store._load("a1")
+    if subject: it = {**it, "subject": subject}
+    seen = {x["id"] for x in routing.read(KEY)}
+    telling.pilot_relay(KEY, "a1", it, "completed (done)", B, "work-osprey", "name", tail=tail); settle()
+    n = next(x for x in routing.read(KEY) if x["id"] not in seen)
+    if extra: _live.stash(n["id"], _live.stashed(n["id"]) + extra)
+    if not stash: (_live.held_dir() / f"{n['id']}.json").unlink(missing_ok=True)
+    return {**n, **kw}
+def line_of(nid): return next(x for x in routing.read(KEY) if x["id"] == nid)
+def last_row(session): return (held._read(held._file(held.key_of(session))) or [{}])[-1]
+fresh(); n0 = len(pushes()); q0 = json.dumps(rd(1)["metadata"].get("front_quiet")); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed", reason="the page update is owed"); rr = line_of(n["id"])
+check("6b1b: …and it writes no board line on the item (the owed list is the board's record of an owed page)", json.dumps(rd(1)["metadata"].get("front_quiet")) == q0, (q0, rd(1)["metadata"].get("front_quiet")))
+check("6b1: a page-owed notice passed to a front agent (its hook fetches held lines) starts no turn: held for its next turn, ruled held", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1
+      and rr.get("ruling") == "held" and rr.get("reason") == "held: asks nothing (page-owed)" and res.get("hold") == "page-owed" and res.get("held_for") == "work-osprey-main", (res, rr, pushes()[n0:]))
+row = last_row(A)
+check("6b2: the held line is a page-owed line that names the page, the item, who changed it and what it says is owed, in one line within the cap",
+      row.get("kind") == "page-owed" and KEY in row.get("text", "") and "a1" in row.get("text", "") and "home-beta" in row.get("text", "") and row.get("text", "").endswith(ANCHOR_TAIL) and "\n" not in row.get("text", "") and 0 < len(row.get("text", "")) <= held.LINE_MAX, row)
+text_ = held.take(A, "work-osprey-main")
+check("6b3: …and it is handed over with the agent's next turn, once", "page-owed" in text_ and ANCHOR_TAIL in text_ and held.take(A, "work-osprey-main") == "", text_)
+fresh(); n = rec_po(subject="a very long subject " * 15); res = act(n, "work-osprey-main", rule="page-owed"); row = last_row(A)
+check("6b4: a long subject is cut, never the part that says what is owed: the line is within the cap, ends with it and still names the page", res["ruling"] == "held" and 0 < len(row.get("text", "")) <= held.LINE_MAX
+      and row.get("text", "").endswith(ANCHOR_TAIL) and KEY in row.get("text", "") and "a1" in row.get("text", ""), row)
+fresh(); n = rec_po(stash=False); res = act(n, "work-osprey-main", rule="page-owed"); row = last_row(A)
+check("6b5: a notice whose stashed words are gone still says what is true of it (the writer owes the page update; the notice is for the anchors scoped to the item), and never that the page update is owed by the agent",
+      res["ruling"] == "held" and "the writer owes the page update" in row.get("text", "") and "anchors scoped to a1" in row.get("text", "") and KEY in row.get("text", "") and "owed by you" not in row.get("text", "") and "is owed" not in row.get("text", ""), (res, row))
+fresh(); n = rec_po(subject="[hp] Short", stash=False); n["url"] = BOARD + "/items/" + "x" * 120; res = act(n, "work-osprey-main", rule="page-owed"); row = last_row(A)
+check("6b5b: when the line does not fit even without a subject, the subject is kept and the link goes (the line stays within the cap and names the page and the item)", res["ruling"] == "held" and len(row.get("text", "")) <= held.LINE_MAX and "[hp] Short" in row.get("text", "") and "https://" not in row.get("text", "") and KEY in row.get("text", "") and "a1" in row.get("text", ""), (res, row))
+fresh(); n = rec_po(); c0 = len(routing.read(KEY)); act(n, "work-osprey-main", rule="page-owed")
+check("6b6: the router's own ruling is the one routing-log line for it: the gate writes no second one", len(routing.read(KEY)) == c0, routing.read(KEY)[c0:])
+fresh(); n0 = len(pushes()); n = rec_po(); act(n, "work-osprey-main", rule="page-owed"); act(n, "work-osprey-main", rule="page-owed")
+check("6b7: a pass retried after its ruling failed to write is held once, never twice", held.count(A) == 1 and reach(A, n0) == [], (held.count(A), pushes()[n0:]))
+# what still starts a turn
+fresh(); n0 = len(pushes()); n = rec_po(extra=" [for Oliver] pick a or b"); res = act(n, "work-osprey-main", rule="page-owed")
+check("6b8 negative: a page-owed notice that carries Oliver's mark still starts a turn, marked, as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec_po(extra=" needs: decision"); res = act(n, "work-osprey-main", rule="page-owed")
+check("6b9 negative: …so does one that says needs: decision", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed", for_owner=True)
+check("6b10 negative: …and a ruling marked for Oliver", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec_po(handback=True); res = act(n, "work-osprey-main", rule="page-owed")
+check("6b11 negative: …and a hand-back to the same agent", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec_po(words="a said entry"); res = act(n, "work-osprey-main", rule="page-owed")
+check("6b12 negative: …and a notice with the person's words recorded on it", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = rec_po(); res = act(n, "work-osprey-x", rule="page-owed"); row = last_row(X)
+check("6b13: a background agent's page-owed notice is held as before (no turn, ruled held) and its line says what is owed", res["ruling"] == "held" and reach(X, n0) == [] and held.count(X) == 1 and ANCHOR_TAIL in row.get("text", ""), (res, row))
+fresh(); n0 = len(pushes()); n = rec_po(); res = act(n, "work-osprey-x", rule="page-owed", for_owner=True)
+check("6b14 negative: …and its notice with the person's mark is delivered as before", res["ruling"] == "passed" and len(reach(X, n0)) == 1, res)
+# the gate declining or failing, no gate wired, the switch off, a hook that cannot fetch: delivered as before
+_hook0 = _live._HOOKS["front_fyi"]
+def _boom(*a, **k): raise RuntimeError("gate down")
+try:
+    for hook_, name_ in ((lambda *a, **k: ("", ""), "declining"), (_boom, "failing"), (None, "not wired (the CLI alone)")):
+        _live._HOOKS["front_fyi"] = hook_
+        fresh(); n0 = len(pushes()); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed")
+        check(f"6b15 negative: the gate {name_} delivers as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+finally:
+    _live._HOOKS["front_fyi"] = _hook0
+_cfg.CFG["router"]["hold_notices"] = False
+fresh(); n0 = len(pushes()); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed")
+_cfg.CFG["router"].pop("hold_notices")
+check("6b16 negative: with [router] hold_notices = false the notice is delivered as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+os.unlink(held.clients_file()); gate_open()
+fresh(); n0 = len(pushes()); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed")
+check("6b17 negative: a front agent whose hook does not fetch held lines is given the notice as before: an owed page is never dropped for want of a place to hold it", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
+held.mark_client(A, "work-osprey-main")
+# the owed list is the page's own record: a held notice neither settles it nor hides it, and the write refusal still works
+_owed0 = _web_page_debts._owed_load(); _mode0 = _cfg.CFG["page_rule"].get("mode")
+_page = T / "brain/projects/alpha.md"; _page_st = _page.stat(); os.utime(_page, (time.time() - 86400, time.time() - 86400))      # the page is a day old, so a debt charged now is not settled by it
+try:
+    _web_page_debts._owed_save({}); _web_page_debts._owed_mark(KEY, B, "a1")
+    fresh(); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed"); d_ = _web_page_debts._owed_load()
+    check("6b18: the owed list still shows the page after its notice was held for the front agent", res["ruling"] == "held" and KEY in d_ and any(e.get("item") == "a1" for e in d_[KEY].values()), (res, d_))
+    check("6b19: …and the line of pages owed that a reply carries still names it", "pages owed" in _web_page_debts._nag(A) and KEY in _web_page_debts._nag(A), _web_page_debts._nag(A))
+    _web_page_debts._owed_save({KEY: {o: {**e, "ts": time.time() - 7200} for o, e in d_[KEY].items()}}); _cfg.CFG["page_rule"]["mode"] = "refuse"
+    refused_ = ""
+    try:
+        _real_refuse(B)
+    except ToolError as e:
+        refused_ = str(e)
+    check("6b20: …and the writer who owes it past the grace is still refused ('you owe a project-page update'), whatever the front agent was told", "you owe a project-page update" in refused_ and KEY in refused_, refused_)
+finally:
+    _web_page_debts._owed_save(_owed0); os.utime(_page, ns=(_page_st.st_atime_ns, _page_st.st_mtime_ns))
+    if _mode0 is None: _cfg.CFG["page_rule"].pop("mode", None)
+    else: _cfg.CFG["page_rule"]["mode"] = _mode0
 os.unlink(held.clients_file()); gate_open()
 fresh(); out = _messaging._message(KEY, "the release is live", "home-beta"); nn2 = [x for x in routing.read(KEY) if x.get("kind") == "message" and x.get("text", "").endswith("the release is live")][-1]
 check("6l: a message to a project without fyi carries no mark", "hold" not in nn2, nn2)
@@ -632,6 +723,10 @@ lnB = {**resB, "id": nB["id"], "project": KEY, "key": KEY, "ts": time.time()}
 rows_, _q, _pp = _live._digest_items(KEY, time.time(), {nA["id"]: lnA, nB["id"]: lnB}, {"sent": {}})
 check("7v: the digest lists a notice the router held for itself and leaves out one held for an agent's next turn (held_for), which would reach the agent twice",
       [r[1]["id"] for r in rows_] == [nA["id"]] and lnB.get("held_for") == "work-osprey-docs", ([r[1]["id"] for r in rows_], lnB))
+held.mark_client(A, "work-osprey-main"); fresh()
+nF = rec_po(); resF = act(nF, "work-osprey-main", rule="page-owed"); lnF = {**resF, "id": nF["id"], "project": KEY, "key": KEY, "ts": time.time()}
+rowsF, _q, _pp = _live._digest_items(KEY, time.time(), {nF["id"]: lnF}, {"sent": {}})
+check("7v2: a page-owed notice held for a front agent's next turn is left out of the digest too (held_for), so it is not sent to the agent a second time", resF.get("ruling") == "held" and lnF.get("held_for") == "work-osprey-main" and rowsF == [], (resF, rowsF))
 fresh(); nid3 = routing.record(KEY, kind="message", to="", label="message to projects/alpha", who="falcon-audit", text=body, target="project-wide", pilot=True, live=True); _live.stash(nid3, body)
 n3 = next(x for x in routing.read(KEY) if x["id"] == nid3)
 res3 = _live._act(n3, KEY, KEY, {**ln, "id": nid3, "target": "work-osprey-x", "split": {"work-osprey-x": ["a1"]}}, cx, {})
