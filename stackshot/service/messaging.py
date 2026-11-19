@@ -258,15 +258,15 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     return (_builder_report(name, text, sender, idx, roles) if sender.strip() else "") or None
 
 
-def _cut_note(line: str, routed: bool = False) -> str:
+def _cut_note(line: str, routed: bool = False, script: bool = False) -> str:
     """The sentence a reply adds when a held line is shorter than the message: a held line holds `held.LINE_MAX` characters, and the sender's reply must not promise the whole text.
-    `routed`: the message goes to a project, so the line is held only if the router passes it on as an fyi (it may deliver it whole instead)."""
+    `routed`: the message goes to a project, so the line is held only if the router passes it on as an fyi (it may deliver it whole instead). `script`: the sender is a script, which has no item tools: it is told of a page."""
     if len(" ".join(str(line).split())) <= _held.LINE_MAX:
         return ""
     lead = (f". If the router holds it for an agent's next turn, the held line is cut to {_held.LINE_MAX} characters, the sender's label included" if routed
             else f" Its text was cut to {_held.LINE_MAX} characters in the held line")
-    return (f"{lead} (the words after the cut are in the message log only): put a long result on the item "
-            "(update, complete) or on a page and send the pointer.")
+    where = "on a page or in a repo" if script else "on the item (update, complete) or on a page"
+    return (f"{lead} (the words after the cut are in the message log only): put a long result {where} and send the pointer.")
 
 
 def _front_fyi_name(to: str, raw: str, idx: dict[str, dict[str, Any]]) -> str:
@@ -290,8 +290,9 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     says so, and that it cannot be answered. `fyi`: the sender marks a message that asks nothing. To a background agent it is held and
     handed over with the agent's next turn (hold_notice, kind fyi) instead of starting one; to a project it is recorded with the mark, so the router holds it
     when it passes it to a background agent; to a front agent (no mark on its first line) it goes through the front gate (telling.front_fyi): held for the agent's next turn, or, when its
-    hook cannot fetch held lines, not passed on; it starts no turn either way. The sender being
-    the person the instance works for, or the text carrying the mark or needs: decision, makes it an ordinary message (to a front agent: delivered or refused exactly as without the flag)."""
+    hook cannot fetch held lines, not passed on; it starts no turn either way. A script's fyi (`origin` set) takes the same way: the held line names it as a script on that machine (a script's message cannot be
+    answered), and where a session gets the reply "not passed on" a script gets a refusal (HTTP 400), since it reads the status and not the sentence. The sender being the person the instance works for, or the text carrying the mark or needs: decision, makes it an ordinary message (to a front agent: delivered or
+    refused exactly as without the flag, a script's included)."""
     # g7 → for what is delivered and logged only: the gates, the length cap and the handover's naming
     # read the text as the sender wrote it (`raw`), so a message is refused, passed and names items exactly as it did before
     to, raw, sender = to.strip(), text.strip(), sender.strip()
@@ -309,7 +310,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         raise ToolError(f"Refused: message longer than {_hooks().msg_max()} characters — put the long form somewhere both sessions can read (a gbrain page, a file in the repo) and send the pointer")
     idx = _sr._sessions_index()
     fyi = bool(fyi) and not _model.is_owner(sender)
-    front_fyi = bool(fyi) and not origin and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
+    front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
     if not re.match(_cfg.page_dirs_re() + "/", to):
         reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent takes only what is for the person: a builder's report on an item goes onto it, not to the pane
         if reported:
@@ -324,6 +325,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 if reported:
                     return reported
     who = f"{sender} (a script on {origin})" if origin else _msg_label(sender, idx)
+    held_who = f"{sender[:60]}… (a script on {origin})" if origin and len(sender) > 60 else who      # a held line holds 260 characters: a long script sender must not push the script's label out of it (a session's label is never cut)
     tag = ""
     held = False            # a message to a project: recorded for the router to rule, delivered to nobody here (router_live)
     is_key = bool(re.match(_cfg.page_dirs_re() + "/", to))       # a page key is never refused for its keeper's pane; `to` is rewritten to the keeper below
@@ -373,12 +375,12 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                             f"ever ran on {_fleetev.fleet_names().get(_pub_letter(), 'the server box')}. If it is the id in a claude.ai/chat/… link: a Cowork or cloud session is addressed by its cse_… id, "
                             "which it shows as the sender of its own messages and as the creator of its board items (the sessions tool lists those); until it has done either, "
                             "stackshot cannot reach it. A pane started in the last few minutes on another machine appears at that machine's next heartbeat: address it by name then.")
-    if fyi and not held and not origin and (front_fyi or _front_fyi_name(to, raw, idx)):         # an fyi to a front agent starts no turn: the front gate files it for his next turn, or holds it
-        held_text = f"[stackshot message] from {who}: {text}"
+    if fyi and not held and (front_fyi or _front_fyi_name(to, raw, idx)):         # an fyi to a front agent starts no turn, from a session or a script: the front gate files it for his next turn, or holds it
+        held_text = f"[stackshot message] from {held_who}: {text}"
         verdict, why_ = _telling.front_fyi(to, held_text, ",".join(_agent_names._item_refs(raw)))
         if not verdict:
             if front_fyi:
-                _gate_front(to, raw, idx, sender)           # the gate did not take it: what it did before (refused without the mark)
+                _gate_front(to, raw, idx, "" if origin else sender)           # the gate did not take it: what it did before (refused without the mark)
         else:
             filed = verdict == "fyi"
             outcome_ = "held for its next turn (fyi)" if filed else f"not passed on (fyi, front agent: {why_})"
@@ -391,12 +393,16 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 pass
             if filed:
                 return (f"held for {to}'s next turn (fyi: it asks nothing, so it starts no turn) — it is handed over with the first turn {to} takes, whatever causes it, once, "
-                        f"oldest first; an open item it names gets a History line. If it does ask something, send it again without fyi, its first line carrying {_FOR_OWNER}." + _cut_note(held_text))
+                        f"oldest first; an open item it names gets a History line. If it does ask something, send it again without fyi, its first line carrying {_FOR_OWNER}." + _cut_note(held_text, script=bool(origin)))
+            if origin:          # a script reads the status, not the sentence: an fyi that could not be held is a failure to it, as it was before the gate took a script's fyi
+                raise ToolError(f"Refused: {to} is a front agent whose hook cannot fetch held lines, so an fyi cannot be held for its next turn and nothing was sent to its pane. "
+                                f"An open item the text names has it on its History, and the message log has it. Send it to the project's page key (to=projects/<slug>), which the router rules, "
+                                f"or, when it asks something of {OWNER}, send it without fyi with {_FOR_OWNER} on its first line.")
             return (f"not passed on — {to} is a front agent, an fyi starts no turn there, and the message could not be held for its next turn ({why_}). {to}'s pane was not given it; "
                     f"an open item it names has it on its History, and the message log has it. If {to} must have it, put it on an item (update, complete), or send it again without fyi, "
                     f"its first line carrying {_FOR_OWNER}, when it asks something of {OWNER}.")
     if fyi and not held and _agent_names._back_agent(to, idx):         # an fyi to a background agent starts no turn; it is handed over with the next one (it names the agent in no item's needs: it asked nothing)
-        if _telling.hold_notice(to, f"[stackshot message] from {who}: {text}", "fyi", sender=who):
+        if _telling.hold_notice(to, f"[stackshot message] from {held_who}: {text}", "fyi", sender=who):
             try:
                 MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
                 with open(MSG_LOG, "a", encoding="utf-8") as f:
@@ -405,7 +411,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
             except Exception:  # noqa: BLE001
                 pass
             return (f"held for {to}'s next turn (fyi: it asks nothing, so it starts no turn) — it is handed over with the first turn {to} takes, whatever causes it, once, "
-                    "oldest first; it names no item in its needs. If it does ask something, send it again without fyi." + _cut_note(f"[stackshot message] from {who}: {text}"))
+                    "oldest first; it names no item in its needs. If it does ask something, send it again without fyi." + _cut_note(f"[stackshot message] from {held_who}: {text}", script=bool(origin)))
     now = dt.datetime.now(_hooks().zone()).strftime("%Y-%m-%d %H:%M %Z")
     envelope = (
         f"[stackshot message] from {who} · {now}{tag}\n"
@@ -452,7 +458,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 "a reply, if any, comes back through the message tool to " + repr(sender) + ". "
                 + (f"NOT PASSED ON: you move {own} yourself, so this reaches no one; to hand the step on, write the item (update: reword the step to its session, or set mover). " if own else "")
                 + (f"A script reads the ruling with client.py get notice {nid}; " if origin else "") + f'get(item_id="{nid}") shows its ruling'
-                + (_cut_note(f"[stackshot message] from {who} · {now}{tag}\n{text}", True) if fyi else ""))
+                + (_cut_note(f"[stackshot message] from {who} · {now}{tag}\n{text}", True, bool(origin)) if fyi else ""))
     if outcome.startswith("delivered"):
         return f"{outcome} — arrives as a labelled [stackshot message] turn" + ("" if origin else f"; the reply, if any, comes back through the message tool to {sender!r}") + named
     if outcome.startswith("queued (paused"):
