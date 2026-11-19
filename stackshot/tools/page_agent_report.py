@@ -194,8 +194,13 @@ def scan(reg: dict[str, dict[str, Any]], sessions: Sessions | None, counts: dict
         s = str(e.get("session") or "").strip()
         if s and not _ID_RX.match(s) and (e.get("role") == "agent" or is_display_name(e)):
             read_names.add(s)
-        if e.get("role") == "agent" and s and not _ID_RX.match(s) and s not in known:
-            found.append({"page": key, "line": LINE_AGENT, "name": s, "fix": FIX_AGENTS})
+        line = s if e.get("role") == "agent" else ""            # the name of the page's `agent:` line; a page handed back to the keeper above it (role inherited) still carries it as `legacy_session`
+        if e.get("role") == "inherited" and e.get("legacy_role") == "agent":
+            line = str(e.get("legacy_session") or "").strip()
+            if line and not _ID_RX.match(line):
+                read_names.add(line)
+        if line and not _ID_RX.match(line) and line not in known:
+            found.append({"page": key, "line": LINE_AGENT, "name": line, "fix": FIX_AGENTS})
         if is_display_name(e) and not _ID_RX.match(s) and not display_ok(s, names, aliases):
             found.append({"page": key, "line": LINE_DISPLAY, "name": s, "fix": FIX_DISPLAY})
     unknown = {f["name"] for f in found}
