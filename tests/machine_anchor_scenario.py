@@ -87,7 +87,8 @@ from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
-telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
+HINTS: list[str] = []          # the kind the sender hinted the front gate for each notice (telling.tell_kind), aligned with SENT
+telling.tell_woken = lambda gid, owner, note, tag="wake": (SENT.append((gid, owner, note, tag)), HINTS.append(getattr(telling.FRONT_HINT, "kind", "")))
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 56 * DAY, "seen": {}, "reported": []}))
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
@@ -96,7 +97,7 @@ BACK, FRONT = "team-back", "home-front"
 UB = U["team-back"]
 CFG = _cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, watchers=True, pause=False)
-def reset(): SENT.clear()
+def reset(): SENT.clear(); HINTS.clear()
 R = _gh.shown
 def anchors(**kw): return _wt_anchors._anchors("projects/alpha", who=BACK, **kw)
 def tick(): return evwaits_svc.evwait_poll(time.time())
@@ -242,6 +243,49 @@ check("waiting item: one whose post-wake mover is the owner gets no notice, thou
       "a60" not in told_gids and "a61" in told_gids, (SENT, mt(60)))
 check("waiting item: ...and the owner's item stays as it was (nothing turned, nothing saved)", mt(60).get("post_wake_mover") and mt(60).get("wait_kind") == "event", mt(60))
 check("waiting item: one the owner picks up by its mover (no post_wake_mover) gets no notice either, and stays as it was", "a63" not in told_gids and mt(63).get("mover") == _core_instance.OWNER and mt(63).get("wait_kind") == "event", (SENT, mt(63)))
+
+# an item that is waiting (on a wake, another item, an outside party or an event) has no step that can go ahead: for a FRONT agent its machine notice is news. It goes to the front gate as a progress notice, one
+# message per item (so an item's board line carries only its own line, and the line is short enough to keep its link), while an item that is its mover's to do now keeps the notice that asks it to go on.
+# A background agent's notice is unchanged: one message for all its items, with the old words. A failed reading of an item is unsure, and unsure is told as asking.
+reset()
+for i in (70, 71, 72, 73, 74, 75):
+    (T / f"store/a/{i}.json").unlink(missing_ok=True)
+LONG = "run the nightly copy of the database dump from host-b to the archive, check its size against the last one and note both in the log file kept for it"
+item(70, mover=FRONT, subject="[home] on hold until its wake, step on box-b", next="home-front: run the sync on box-b", hold=True, wake=day(9), wait_basis="the nightly run ends then")
+item(71, mover=FRONT, subject="[home] its mover's to do now, step on box-b", next="home-front: run the sync on box-b")
+item(72, mover=FRONT, subject="[home] on hold, a long step on box-b", next="home-front: " + LONG + " on host-b", hold=True, wake=day(9), wait_basis="the nightly run ends then")
+item(73, mover=BACK, subject="[home] a background agent's item on hold, step on box-b", next="team-back: run the sync on box-b", hold=True, wake=day(9), wait_basis="the nightly run ends then")
+item(74, mover=FRONT, subject="[home] its mover's to do now, its reading fails", next="home-front: run the sync on box-b")
+item(75, mover=BACK, subject="[home] a background agent's item to do now, step on box-b", next="team-back: run the sync on box-b")
+anchors(add=["machine:box-b"], items=["a70", "a71", "a72", "a73", "a74", "a75"])
+go_offline("host-b"); tick(); reset()
+from stackshot.service import item_read as _item_read
+_model_of0 = _item_read._model_of
+def _model_of_fail(it, *a, **k):
+    if str(it.get("gid") or it.get("id")) == "a74": raise RuntimeError("the reading fails")
+    return _model_of0(it, *a, **k)
+_item_read._model_of = _model_of_fail
+try:
+    checkin("host-b"); tick()
+finally:
+    _item_read._model_of = _model_of0
+kinds = {g: HINTS[i] for i, x in enumerate(SENT) if x[3] == "watch" for g in x[0].split(",")}
+by_gid = lambda g: [x for x in SENT if g in x[0].split(",")]
+check("waiting: a front agent's waiting items (70, 72) are told as progress notices, one message each; the ones to do now (71, 74) are not hinted (they ask it to go on); never mixed",
+      kinds.get("a70") == "progress" and kinds.get("a72") == "progress" and kinds.get("a71") == "" and kinds.get("a74") == "" and by_gid("a70")[0][0] == "a70" and by_gid("a72")[0][0] == "a72"
+      and not any({"a70", "a71"} <= set(x[0].split(",")) for x in SENT), (kinds, [x[0] for x in SENT], HINTS))
+b70, b72 = by_gid("a70")[0][2], by_gid("a72")[0][2]
+check("waiting: …each says nothing is asked now, names the machine and the item, keeps its link, never says a step can go ahead, and fits a held line whole (the long step is left out, not cut into the link)",
+      all("box-b checked in" in b and "Nothing is asked of you now" in b and "can go ahead" not in b and len(b) <= 260 for b in (b70, b72)) and b70.endswith("/items/a70") and b72.endswith("/items/a72"), (b70, b72, len(b72)))
+check("waiting: …the live items' notice keeps the words that ask, one message for 71 and 74", any({"a71", "a74"} <= set(x[0].split(",")) and "can go ahead" in x[2] for x in SENT), SENT)
+check("waiting: a failed reading of an item (74) is unsure: told as asking, as before the change", kinds.get("a74") == "" and any("a74" in x[0].split(",") and "can go ahead" in x[2] for x in SENT), (kinds, SENT))
+check("waiting: a background agent's items (73 waiting, 75 to do now) are unchanged: one message with the old words and no hint, the waiting one included",
+      by_gid("a73") == by_gid("a75") and len(by_gid("a73")) == 1 and kinds.get("a73") == "" and kinds.get("a75") == "" and "can go ahead" in by_gid("a73")[0][2] and "Nothing is asked of you now" not in by_gid("a73")[0][2], by_gid("a73"))
+check("waiting: the tag stays watch for all of them", all(x[3] == "watch" for x in SENT if any(g in x[0] for g in ("a70", "a71", "a72", "a73", "a74", "a75"))), SENT)
+check("words: the news notice is one item, within the cap whatever the subject, and its sentence and link survive",
+      all(len(MA.news_notice("box-b", "10:00 +04", "a12", "s" * n, "https://link.test/n/a12", 245)) <= 245 for n in (0, 5, 80, 400))
+      and MA.news_notice("box-b", "", "a12", "s" * 400, "https://link.test/n/a12", 245).endswith("/n/a12") and "Nothing is asked of you now" in MA.news_notice("box-b", "", "a12", "s" * 400, "https://link.test/n/a12", 245), None)
+
 
 # a box_online wait on machine A that turns an item and an anchor on machine B for it: A is told by the wait only, B is still told
 reset()

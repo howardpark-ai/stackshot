@@ -4,6 +4,10 @@ A write that changes an item is told to the sessions it concerns: the mover (`te
 (`tell_needed`, `tell_decided`), the front agent a hand-back or a close reaches (`tell_handback`, `tell_close_owner`), the sessions that named a closed item (`tell_close_mentions`) and the keeper of the page when a
 page update is owed (`pilot_relay`, `pilot_relay_many`, `writer_charge`). Every one of them ends in `tell_woken`, the one sender: it runs the front gate (`front_gate`: a front agent hears a notice only when the owner is there
 for its pane and it touched the item), holds a notice that asks nothing of a background agent (`hold_notice`, waits/held.py), pushes the rest through the delivery script (`PUSH`) and records what came back undelivered.
+Notices of stackshot's own that ask a front agent nothing never start its turn. Through the gate as an fyi line or a board line: the stall summaries to -main (tag `stall_summary`), the anchors notice of a completed
+item, a script's fyi (the audit's run summary, the server's parked-wait and moved-step lines), a peer's fyi, a machine's check-in told to a front agent for an item that is waiting (on a wake, another item or an outside party:
+`event_waits.machine_anchor_poll` sends it as a `progress` notice, one for each item) and a wake that only leaves a front agent's item in its place in the queue (`wakes._front_queue_row`, held kind `queue`). What asks stays a turn:
+the audit's findings, the page-agent and registry lines, a wake that puts an item back in its lane, "is yours now", a machine's check-in for an item that is its mover's to do now, a stall or balance notice.
 They moved out of server.py as they were: the same texts, the same sessions told, the same order of events. A name that service/create.py, service/update.py, service/gates.py or server.py calls on this module has lost
 its leading underscore (`_tell_woken` is `tell_woken`); the helpers beside it keep theirs.
 

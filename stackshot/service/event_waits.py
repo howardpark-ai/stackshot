@@ -35,6 +35,7 @@ from stackshot.service import watching as _watching
 from stackshot.service.store import _legacy_hold, _load
 from stackshot.service.wake_hooks import hooks as _hooks
 from stackshot.waits import event_waits as _ew
+from stackshot.waits import held as _held
 from stackshot.waits import wait_list as _wl
 from stackshot.waits import watchers as _watch
 
@@ -317,7 +318,7 @@ def machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
                 _ma.seen_save(marks)
         if not news:
             return []
-        out: dict[str, list[tuple[str, str, str, str]]] = {}      # session id → [(machine, gid, subject, step)]
+        out: dict[str, list[tuple[str, str, str, str, bool]]] = {}      # session id → [(machine, gid, subject, step, the item is its mover's to do now)]
         for gid, _p in _item_files():
             try:
                 it = _load(gid)
@@ -327,7 +328,7 @@ def machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
                 hits = [(k, scoped) for k, (_n, scoped) in _ma.counts(store, gid, str(meta.get("project") or "")).items() if k in news and (gid, k) not in skip]
                 if not hits:
                     continue
-                who, _alive = _hooks().item_mover_model(it)
+                who, alive = _hooks().item_mover_model(it)
                 sid = _hooks().session_id(_telling.holder(it))
                 if _model.is_owner(who) or not sid:
                     continue                  # the owner moves it now (alive) or takes it when its wait ends (waiting): an agent-facing notice never stands in for his queue
@@ -339,17 +340,27 @@ def machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
                         continue                  # its own box_online wait on this machine tells its mover when the wait ends
                     step = next((t for t in steps if _ma.names_in(t, machine_state(fleet, boxes)[3])), "")
                     if scoped or step:
-                        out.setdefault(sid, []).append((fleet, gid, str(it.get("subject") or ""), step or (steps[0] if steps else "")))
+                        out.setdefault(sid, []).append((fleet, gid, str(it.get("subject") or ""), step or (steps[0] if steps else ""), bool(alive) or not who))      # a failed reading of the item (no mover) is unsure: told as asking, as before
             except Exception as e:  # noqa: BLE001  — one item never stops the others
                 print(f"machine anchor: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         told: list[str] = []
         for sid, rows in out.items():
             for fleet in dict.fromkeys(r[0] for r in rows):
-                mine = [r for r in rows if r[0] == fleet]
                 at = dt.datetime.fromtimestamp(news[fleet.lower()][1], _hooks().zone()).strftime("%H:%M %Z") if news[fleet.lower()][1] else ""
-                _telling.tell_woken(",".join(r[1] for r in mine), sid, _ma.notice(fleet, at, [(_gh.shown(g), subj + (f" (step: {step})" if step else ""), _telling.notice_link(g)) for _f, g, subj, step in mine]), tag="watch")
-                told += [r[1] for r in mine]
-                print(f"machine anchor: {fleet} checked in: {', '.join(r[1] for r in mine)} told to {sid}", file=sys.stderr, flush=True)
+                front = _telling.front_sender(sid)
+                for live in (True, False):       # for a front agent: an item that is its mover's to do now is asked to go on; one that is waiting has no step to take yet and is news, one message per item, for the gate a progress notice. A background agent's message is unchanged
+                    mine = [r for r in rows if r[0] == fleet and (r[4] is live or not front)]
+                    if not mine or (not live and not front):
+                        continue
+                    gids = ",".join(r[1] for r in mine)
+                    if live:
+                        shown = [(_gh.shown(g), subj + (f" (step: {step})" if step else ""), _telling.notice_link(g)) for _f, g, subj, step, _l in mine]
+                        _telling.tell_woken(gids, sid, _ma.notice(fleet, at, shown), tag="watch")
+                    else:
+                        for _f, g, subj, _step, _l in mine:
+                            _telling.tell_kind("progress", g, sid, _ma.news_notice(fleet, at, _gh.shown(g), subj, _telling.notice_link(g), _held.LINE_MAX - 15), tag="watch")
+                    told += [r[1] for r in mine]
+                    print(f"machine anchor: {fleet} checked in: {', '.join(r[1] for r in mine)} told to {sid}" + ("" if live else " (waiting: news)"), file=sys.stderr, flush=True)
         return told
     except Exception as e:  # noqa: BLE001  — a pass that fails never stops the event waits' pass
         print(f"machine anchor: pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

@@ -15,6 +15,10 @@ and the agent touched the item in its current conversation. Fixture data, no liv
      (a progress notice: a History line; a close: the item's close revision; a stuck notice: the wait_failed mark, past due)
   11 a stall summary to -main (the idle hand-over's and the balancer's, tag stall_summary) asks nothing: progress for the gate, so no turn of its own (held or an fyi line), one board line per item
      with that item's own line and no owner mark; the busy-stretch and quiet-mover notices (tag stall) are still pushed
+  12 notices that ask nothing and used to start a turn: a machine's check-in told for an item that is waiting (on a wake, another item or an outside party) and a wake that only
+     leaves a front agent's item in its place in the queue are held for its next turn (a held line, or a board line), the real machine pass and the real wake pass staged; the check-in for an item that is its
+     mover's to do now, a wake that puts an item back in its lane, and a background agent's are unchanged; one check-in for several waiting items is one message each (each board line its own, each held line keeps
+     its link), an item waiting on an outside party is waiting too, a failed reading is told as asking, a project the router rules and [router] hold_notices = false are covered
 
     tests/run-suite front_quiet        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, subprocess
@@ -24,7 +28,7 @@ tmp = _scratch.mkdtemp(prefix="frontquiet-"); T = pathlib.Path(tmp)
 toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
-                 ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
+                 ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai"), ("fleet_names", f"{tmp}/names.tsv")):
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
 toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', toml); assert n == 1
 toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/no-such-root", "{tmp}/transcripts"]', toml); assert n == 1   # never the host's transcripts
@@ -34,7 +38,7 @@ toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); 
 (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 os.environ.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")      # the git case below commits into the temp store only
-for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x", "cli"): (T / d).mkdir(parents=True)
+for d in ("store/a", "fleet/a", "state/anchor-hub", "state/clients", "brain/projects", "transcripts/-home-x", "cli"): (T / d).mkdir(parents=True)
 NAMES = ("home-front", "team-back", "home-docs", "home-peer", "home-send", "home-beta-front", "home-stew", "home-beta-stew")
 U = {n: f"00000000-0000-4000-8000-0000000000{i:02d}" for i, n in enumerate(NAMES, 1)}
 now0 = time.time()
@@ -556,6 +560,122 @@ check("11 untouched: …and the routing log has a held line with the reason", an
 unstamp("home-front"); item(123, writer="home-front")
 p, h = tell("a123", "home-front", SUMMARY("a123"), tag="stall_summary")
 check("11 plain: a notice told without per-item lines writes its own text on the item, with no owner mark", len(quiet_log(123)) == 1 and "[for " not in quiet_log(123)[0]["text"] and "no builder was free" in quiet_log(123)[0]["text"], quiet_log(123))
+
+# ================================================================ 12. notices that ask nothing: a machine's check-in for a waiting item, a wake that only leaves a place in the queue
+# The machine pass (event_waits.machine_anchor_poll) and the wake pass (wakes.wake_tell) are staged for real, as the server runs them. A front agent's item that is waiting has no step to take yet, so the
+# check-in for it is news (progress for the gate); one that is its mover's to do now still asks it to go on. A wake that leaves the item after an open item is its place in the queue: nothing to do yet.
+from stackshot.service import event_waits as _evw
+from stackshot.service import wakes as _wakes
+from stackshot.anchors import machine_anchor as _ma
+(T / "names.tsv").write_text("host-b\tbox-b\tb\n")
+def _iso(ts): return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+_BOX = {"letter": "b", "fleet": "box-b", "first": _iso(now0 - 9 * 86400)}
+def _box(since): (T / "state/clients/state.json").write_text(json.dumps({"machines": {"host-b": {**_BOX, "puller": _iso(time.time() - 30), "online_since": _iso(since)}}, "sessions": {}}))
+_day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * 86400 + 4 * 3600))
+def _check_in(mover, i, **meta):
+    """A machine anchor for item i, the machine seen once (its mark set), then checking in again: the pass runs for real -> (pushes, held lines added, the notice's hint kinds)."""
+    item(i, mover=mover, writer=mover, next=f"{mover}: run the sync on host-b", **meta)
+    _ma.save({"projects/alpha": [{"machine": "box-b", "items": [f"a{i}"], "added": time.time(), "by": "x"}]}); _ma.seen_save({})
+    _box(now0 - 4 * 3600); _evw.machine_anchor_poll(time.time(), set()); drain()
+    p0, h0 = len(pushes()), held.count(U[mover])
+    _box(time.time() - 1); _evw.machine_anchor_poll(time.time(), set()); drain()
+    return pushes()[p0:], held.count(U[mover]) - h0
+set_presence(); unstamp("home-front")
+p, h = _check_in("home-front", 130, hold=True, wake=_day(9), wait_basis="the nightly run ends then")
+check("12 machine: a check-in for a front agent's item on hold (Oliver away) starts no turn: nothing pushed, no held line", p == [] and h == 0, (p, h))
+check("12 machine: …the board keeps the news (a History line saying it was not told, and why), and the routing log has the held line", quiet_log(130) and "was not told (" in quiet_log(130)[-1]["text"] and "box-b checked in" in quiet_log(130)[-1]["text"] and held_log("a130"), (quiet_log(130), held_log("a130")))
+stamp("home-front", 60)
+p, h = _check_in("home-front", 131, hold=True, wake=_day(9), wait_basis="the nightly run ends then")
+check("12 machine: …Oliver there and the item touched: one held line for its next turn, no push, and the board line says it hears of it then", p == [] and h == 1 and quiet_log(131) and "hears of it on his next turn" in quiet_log(131)[-1]["text"], (p, h, quiet_log(131)))
+check("12 machine: …the held line says nothing is asked and never that a step can go ahead", "Nothing is asked of you now" in held.take(U["home-front"]) , None)
+item(133)
+p, h = _check_in("home-front", 134, after=["a133"])
+check("12 machine: an item that waits after an open item is news too: no push, one held line", p == [] and h == 1, (p, h))
+held.take(U["home-front"])
+unstamp("home-front")
+p, h = _check_in("home-front", 135)
+check("12 machine: unchanged: a check-in for a front agent's item that is its mover's to do now still asks it to go on (pushed with Oliver away, nothing held)", len(p) == 1 and p[0][0] == U["home-front"] and "can go ahead" in p[0][1] and h == 0, (p, h))
+p, h = _check_in("team-back", 136, hold=True, wake=_day(9), wait_basis="the nightly run ends then")
+check("12 machine: unchanged: a background agent's check-in for a waiting item is pushed as before (the gate never holds it)", len(p) == 1 and p[0][0] == U["team-back"] and h == 0, (p, h))
+# one check-in for several waiting items of one front agent: one message each, so each item's board line carries only its own line, and each held line keeps its link and the sentence that says nothing is asked,
+# also for an item with a long subject (the line is cut at a fixed length; the notice is built to fit it)
+def _check_in_many(mover, ids, patch=None, **meta):
+    for i in ids: item(i, mover=mover, writer=mover, next=f"{mover}: run the sync on host-b", **meta)
+    if patch: patch()
+    _ma.save({"projects/alpha": [{"machine": "box-b", "items": [f"a{i}" for i in ids], "added": time.time(), "by": "x"}]}); _ma.seen_save({})
+    _box(now0 - 4 * 3600); _evw.machine_anchor_poll(time.time(), set()); drain()
+    p0, h0 = len(pushes()), held.count(U[mover])
+    _box(time.time() - 1); _evw.machine_anchor_poll(time.time(), set()); drain()
+    return pushes()[p0:], held.count(U[mover]) - h0
+def _long_subject(i):
+    d = rd(i); d["subject"] = "[home] " + "a very long subject for the copy of the nightly dump " * 8; (T / f"store/a/{i}.json").write_text(json.dumps(d))
+stamp("home-front", 60)
+for i in (150, 151): item(i, mover="home-front", writer="home-front")
+_long_subject(151)
+p, h = _check_in_many("home-front", (150, 151), hold=True, wake=_day(9), wait_basis="the nightly run ends then")
+held_text = held.take(U["home-front"]); held_lines = [l for l in held_text.splitlines() if "box-b checked in" in l]
+check("12 machine many: two waiting items of one front agent, one check-in: nothing pushed, one held line for each", p == [] and h == 2 and len(held_lines) == 2, (p, h, held_text))
+check("12 machine many: …each held line keeps its item's link and the sentence that says nothing is asked (the long subject is shortened, not the end of the line)",
+      all("Nothing is asked of you now" in l and re.search(r"/items/a15[01]\S*$", l) for l in held_lines) and {re.search(r"/items/(a15[01])", l).group(1) for l in held_lines} == {"a150", "a151"}, held_lines)
+check("12 machine many: …each item's board line carries only its own line, not the other item's",
+      quiet_log(150) and quiet_log(151) and "a150" in quiet_log(150)[-1]["text"] and "a151" not in quiet_log(150)[-1]["text"] and "a151" in quiet_log(151)[-1]["text"] and "a150" not in quiet_log(151)[-1]["text"], (quiet_log(150), quiet_log(151)))
+# an item that waits on an outside party (not a wake, not another item) is waiting too
+p, h = _check_in_many("home-front", (152,), needs="external", party="Acme Ltd", chase=_day(7), wait_basis="Acme sends the access")
+held_text = held.take(U["home-front"])
+check("12 machine many: an item waiting on an outside party is news too: no push, a held line that says nothing is asked and never that a step can go ahead", p == [] and h == 1 and "can go ahead" not in held_text and "Nothing is asked of you now" in held_text, (p, h, held_text))
+# a failed reading of the item is unsure: told as asking, as before
+from stackshot.service import item_read as _item_read
+_m0 = _item_read._model_of
+def _fail(it, *a, **k): raise RuntimeError("the reading fails")
+_item_read._model_of = _fail
+try:
+    p, h = _check_in_many("home-front", (153,))
+finally:
+    _item_read._model_of = _m0
+check("12 machine unsure: a failed reading of an item that is its mover's to do now is told as asking (pushed, nothing held), as before", len(p) == 1 and "can go ahead" in p[0][1] and h == 0, (p, h))
+# a background agent's check-in for a waiting item keeps the old words and starts its turn
+p, h = _check_in("team-back", 154, hold=True, wake=_day(9), wait_basis="the nightly run ends then")
+check("12 machine back: a background agent's check-in for a waiting item is unchanged: pushed, with the words that ask it to go on, none of the news wording", len(p) == 1 and p[0][0] == U["team-back"] and "can go ahead" in p[0][1] and "Nothing is asked of you now" not in p[0][1] and h == 0, (p, h))
+held.take(U["home-front"]); unstamp("home-front")
+_ma.save({}); _ma.seen_save({})
+
+# a wake that leaves a front agent's item in its place in the queue
+item(140, mover="home-front", writer="home-front", after=["a141"]); item(141)
+p0, h0 = len(pushes()), held.count(U["home-front"]); unstamp("home-front")
+_wakes.wake_tell(U["home-front"], [("a140", rd(140) | {"gid": "a140"}, "woke (wake 11-30)", "as its keeper of record", False)]); drain()
+check("12 wake: a wake that only leaves a front agent's item after an open item starts no turn, Oliver there or not (an fyi needs no presence): nothing pushed, one held line for its next turn, and the board has its line", pushes()[p0:] == [] and held.count(U["home-front"]) - h0 == 1 and quiet_log(140) and "hears of it on his next turn" in quiet_log(140)[-1]["text"], (pushes()[p0:], held.count(U["home-front"]) - h0, quiet_log(140)))
+held.take(U["home-front"])
+stamp("home-front", 60); item(142, mover="home-front", writer="home-front", after=["a141"])
+p0, h0 = len(pushes()), held.count(U["home-front"])
+_wakes.wake_tell(U["home-front"], [("a142", rd(142) | {"gid": "a142"}, "woke (wake 11-30)", "as its keeper of record", False)]); drain()
+check("12 wake: …the same with the item touched and the Oliver there: one held line, no push", pushes()[p0:] == [] and held.count(U["home-front"]) - h0 == 1, (pushes()[p0:], held.count(U["home-front"]) - h0))
+held.take(U["home-front"]); unstamp("home-front"); item(143, mover="home-front", writer="home-front")
+p0 = len(pushes())
+_wakes.wake_tell(U["home-front"], [("a143", rd(143) | {"gid": "a143"}, "woke (wake 11-30)", "as its keeper of record", False)]); drain()
+check("12 wake: unchanged: a wake that puts a front agent's item back in its lane asks it to act: pushed with Oliver away", len(pushes()[p0:]) == 1 and pushes()[p0][0] == U["home-front"], pushes()[p0:])
+
+# a front agent's place in the queue is filed for its next turn also in a project the router rules (the router is not asked: nothing for it to pass), and with [router] hold_notices = false it is delivered as before
+_h0 = _wakes._router_live.holds; _st0 = _wakes._router_live.stash; stashed = []
+_wakes._router_live.holds = lambda project, session, *a, **k: True; _wakes._router_live.stash = lambda *a, **k: stashed.append(a)
+try:
+    item(144, mover="home-front", writer="home-front", after=["a141"]); held.take(U["home-front"]); unstamp("home-front")
+    p0, h0 = len(pushes()), held.count(U["home-front"])
+    _wakes.wake_tell(U["home-front"], [("a144", rd(144) | {"gid": "a144"}, "woke (wake 11-30)", "as its keeper of record", False)]); drain()
+    check("12 wake router: in a project the router rules, a front agent's place in the queue is held for its next turn: no push, one held line, nothing recorded for the router", pushes()[p0:] == [] and held.count(U["home-front"]) - h0 == 1 and stashed == [], (pushes()[p0:], held.count(U["home-front"]) - h0, stashed))
+    item(145, mover="home-front", writer="home-front"); p0 = len(pushes())
+    _wakes.wake_tell(U["home-front"], [("a145", rd(145) | {"gid": "a145"}, "woke (wake 11-30)", "as its keeper of record", False)]); drain()
+    check("12 wake router: …a wake that puts the item back in its lane is still the router's to rule there (recorded for it, not pushed)", len(stashed) == 1 and pushes()[p0:] == [], (stashed, pushes()[p0:]))
+finally:
+    _wakes._router_live.holds = _h0; _wakes._router_live.stash = _st0
+held.take(U["home-front"])
+_config.CFG.setdefault("router", {})["hold_notices"] = False
+try:
+    item(146, mover="home-front", writer="home-front", after=["a141"]); unstamp("home-front")
+    p0, h0 = len(pushes()), held.count(U["home-front"])
+    _wakes.wake_tell(U["home-front"], [("a146", rd(146) | {"gid": "a146"}, "woke (wake 11-30)", "as its keeper of record", False)]); drain()
+    check("12 wake switch: with [router] hold_notices = false a front agent's place in the queue is delivered as before (pushed, nothing held)", len(pushes()[p0:]) == 1 and pushes()[p0][0] == U["home-front"] and held.count(U["home-front"]) - h0 == 0, (pushes()[p0:], held.count(U["home-front"]) - h0))
+finally:
+    _config.CFG["router"].pop("hold_notices", None)
 
 # ================================================================ end
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
