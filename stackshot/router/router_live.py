@@ -62,7 +62,8 @@ delivered as a turn: _hold_kind is the one decision (held.decide), and the notic
 handed over by the UserPromptSubmit hook), ruled `held` in the routing log with the reason "held: asks nothing (kind)". The kinds the router sees:
 a notice recorded with `hold` (routing.record: a page-owed notice, a message its sender marked fyi) and a batch finding of the audit (rule
 audit-owners, kind audit). A notice that carries the owner's words ([for <owner>], needs: decision, a `words` or `handback` mark, for_owner on the
-ruling), or goes to a front agent, is passed as before. [router] hold_notices = false turns the hold off.
+ruling), or goes to a front agent, is passed as before, except an fyi and a page-owed notice for a front agent: they go through the front gate and are held for its next turn
+(_front_fyi, _front_page_owed; the router rules them `held` too). [router] hold_notices = false turns the hold off.
 
 CAP. A ruling that cannot be written to the routing log (routing.rule raised) is tried again at the next ticks, three times in all.
 After that the notice is logged with status "stuck", never judged again, and listed in the next digest as "could not be ruled".
@@ -105,7 +106,7 @@ DIGEST_TRIES = 3                    # pushes of one digest in a day; then its no
 _LOCK = threading.Lock()
 
 # What the server wires in (configure): the front-agent test (telling.front_keeper), the push, the call made after a ruling
-# (the release of a hold that waited on the notice's anchor, the board's republish), and the front gate for an fyi (telling.front_fyi). The defaults stand alone, for the tests and the CLI.
+# (the release of a hold that waited on the notice's anchor, the board's republish), and the front gate for an fyi or a page-owed notice (telling.front_fyi). The defaults stand alone, for the tests and the CLI.
 _HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None}
 
 
@@ -327,6 +328,46 @@ def _front_fyi(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx
         if _person_words(n, ln, body) or _held._owner_mark().search(body) or not _is_front(target, root, cx):
             return "", ""
         return fn(target, body, str(ln.get("item") or ""), n["id"], False) or ("", "")      # log=False: the router's own ruling is the routing-log line
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+
+def _page_owed_line(n: dict[str, Any], body: str, project: str) -> str:
+    """The held line of a page-owed notice for a front agent: the page, the item, what changed and who changed it, then the notice's own closing words (what is owed, and by whom), which give way last:
+    the long parts go first (the subject cut to fit, then the link, then the subject). The closing words are the last " — " part of its stashed text; with the stash gone, words that are true of the
+    notice stand in: the writer owes the page update, and the notice is for the anchors scoped to the item."""
+    parts = str(n.get("label") or "").split()
+    ref, who = (parts[-1] if parts else ""), str(n.get("who") or "") or "a session"
+    what, _, subject = " ".join(str(n.get("text") or "").split()).partition(": ")
+    url = str(n.get("url") or "")
+    tail = body.rsplit(" — ", 1)[1].strip() if body.startswith("[board]") and " — " in body else ""
+    tail = _held.one_line(tail or f"the writer owes the page update; this notice is for the anchors scoped to {ref or 'the item'}", 140)
+
+    def build(subj: str, link: str) -> str:
+        return f"[board] {ref + ' ' if ref else ''}{what} by {who}" + (f" — {subj}" if subj else "") + f" ({project})" + (f" → {link}" if link else "") + f" — {tail}"
+
+    def cut(link: str) -> str:
+        room = _held.LINE_MAX - len(build("", link)) - 3
+        return build(subject[:room - 1].rstrip() + "…", link) if subject and room >= 12 else ""
+    for line in (build(subject, url), cut(url), build("", url), cut(""), build("", "")):
+        if line and len(line) <= _held.LINE_MAX:
+            return line
+    return _held.one_line(build("", ""))
+
+
+def _front_page_owed(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, project: str, cx: "_router.Context") -> tuple[str, str]:
+    """A pass of a page-owed notice (the code's `hold` kind `page-owed`: it asks nothing of the person) to a FRONT agent goes through the same front gate as an fyi does -> ("fyi", "") held for the agent's
+    next turn (it starts none), ("", "") delivered as before: not a page-owed notice, a notice with the person's words or mark, a ruling for him, an audit finding, a hand-back, a recipient that is no front
+    agent, the switch off, no gate wired, a gate that declined or failed, or a hook that cannot fetch held lines (an owed page is not dropped for want of a place to hold it). Never raises."""
+    try:
+        fn = _HOOKS["front_fyi"]
+        if not fn or str(n.get("hold") or "") != "page-owed" or not target or ln.get("rule") == "audit-owners" or not _held.enabled():
+            return "", ""
+        body = _body(n)
+        if _person_words(n, ln, body) or _held._owner_mark().search(body) or not _is_front(target, root, cx):
+            return "", ""
+        verdict, _why = fn(target, _page_owed_line(n, body, project), "", n["id"], False, kind="page-owed") or ("", "")      # no item is named: the owed list is the board's record of it; log=False: the router's own ruling is the routing-log line
+        return ("fyi", "") if verdict == "fyi" else ("", "")
     except Exception:  # noqa: BLE001
         return "", ""
 
@@ -569,11 +610,15 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hk)
             else:
                 verdict, why = _front_fyi(n, ln, target, aroot, cx)      # an fyi for a front agent: the front gate files it for his next turn, or holds it
+                hold_as = "fyi"
+                if not verdict:
+                    verdict, why = _front_page_owed(n, ln, target, aroot, key, cx)      # a page-owed notice for a front agent: the same gate
+                    hold_as = "page-owed"
                 if verdict:
                     held_for = target if verdict == "fyi" else ""
                     ruling, target = "held", ""
-                    reason = _held.reason("fyi") if verdict == "fyi" else f"held: front agent, {why} (fyi)"
-                    base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="fyi")
+                    reason = _held.reason(hold_as) if verdict == "fyi" else f"held: front agent, {why} ({hold_as})"
+                    base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hold_as)
         if ruling == "passed":
             mark = _is_front(target, aroot, cx)       # a front pane takes a peer's message only with the mark: every delivery to one carries it, whatever for_owner says
             base["marked"] = mark

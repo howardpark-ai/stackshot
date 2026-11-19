@@ -5,7 +5,7 @@ held here and handed over with the agent's next turn, whatever caused that turn.
   closed      an item the agent moves or observes was closed or completed by another session (telling.tell_owner, tell_observers, tell_owner_change)
   changed     another session changed an item the agent neither moves nor is named on: its next, needs, check or after (tell_owner_change)
   queue       a wake that leaves an item still after an open item: its place in the queue, nothing to do yet (wake_tell in service/wakes.py)
-  page-owed   the keeper's "the page update is owed" notice (pilot_relay, pilot_relay_many; also what the router passes of such a notice)
+  page-owed   the keeper's "the page update is owed" notice (pilot_relay, pilot_relay_many; also what the router passes of such a notice, to a front agent too: through the front gate)
   fyi         a message its sender marked fyi (the message tool's `fyi`)
 Everything else wakes the agent as before: a notice that names it in needs, hands it an item (mover, hand-off), ends its wait, carries
 the owner's words or asks something; so does the audit's finding for an item's mover (router.py audit-owners): it is a task. When the code is unsure it delivers (decide() answers "" for any kind it does not know).
