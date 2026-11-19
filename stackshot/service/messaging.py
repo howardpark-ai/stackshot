@@ -258,11 +258,14 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     return (_builder_report(name, text, sender, idx, roles) if sender.strip() else "") or None
 
 
-def _cut_note(line: str) -> str:
-    """The sentence a reply adds when a held line is shorter than the message: a held line holds `held.LINE_MAX` characters, and the sender's reply must not promise the whole text."""
+def _cut_note(line: str, routed: bool = False) -> str:
+    """The sentence a reply adds when a held line is shorter than the message: a held line holds `held.LINE_MAX` characters, and the sender's reply must not promise the whole text.
+    `routed`: the message goes to a project, so the line is held only if the router passes it on as an fyi (it may deliver it whole instead)."""
     if len(" ".join(str(line).split())) <= _held.LINE_MAX:
         return ""
-    return (f" Its text was cut to {_held.LINE_MAX} characters in the held line (the words after the cut are in the message log only): put a long result on the item "
+    lead = (f". If the router holds it for an agent's next turn, the held line is cut to {_held.LINE_MAX} characters, the sender's label included" if routed
+            else f" Its text was cut to {_held.LINE_MAX} characters in the held line")
+    return (f"{lead} (the words after the cut are in the message log only): put a long result on the item "
             "(update, complete) or on a page and send the pointer.")
 
 
@@ -388,9 +391,9 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 pass
             if filed:
                 return (f"held for {to}'s next turn (fyi: it asks nothing, so it starts no turn) — it is handed over with the first turn {to} takes, whatever causes it, once, "
-                        f"oldest first; an item it names gets a History line. If it does ask something, send it again without fyi, its first line carrying {_FOR_OWNER}." + _cut_note(held_text))
+                        f"oldest first; an open item it names gets a History line. If it does ask something, send it again without fyi, its first line carrying {_FOR_OWNER}." + _cut_note(held_text))
             return (f"not passed on — {to} is a front agent, an fyi starts no turn there, and the message could not be held for its next turn ({why_}). {to}'s pane was not given it; "
-                    f"an item it names has it on its History, and the message log has it. If {to} must have it, put it on an item (update, complete), or send it again without fyi, "
+                    f"an open item it names has it on its History, and the message log has it. If {to} must have it, put it on an item (update, complete), or send it again without fyi, "
                     f"its first line carrying {_FOR_OWNER}, when it asks something of {OWNER}.")
     if fyi and not held and _agent_names._back_agent(to, idx):         # an fyi to a background agent starts no turn; it is handed over with the next one (it names the agent in no item's needs: it asked nothing)
         if _telling.hold_notice(to, f"[stackshot message] from {who}: {text}", "fyi", sender=who):
@@ -448,7 +451,8 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         return (f"{outcome} — the router rules notice {nid} within about {int(_router_live.tick_s())} s and passes it to the agent of {key} it fits; "
                 "a reply, if any, comes back through the message tool to " + repr(sender) + ". "
                 + (f"NOT PASSED ON: you move {own} yourself, so this reaches no one; to hand the step on, write the item (update: reword the step to its session, or set mover). " if own else "")
-                + (f"A script reads the ruling with client.py get notice {nid}; " if origin else "") + f'get(item_id="{nid}") shows its ruling')
+                + (f"A script reads the ruling with client.py get notice {nid}; " if origin else "") + f'get(item_id="{nid}") shows its ruling'
+                + (_cut_note(f"[stackshot message] from {who} · {now}{tag}\n{text}", True) if fyi else ""))
     if outcome.startswith("delivered"):
         return f"{outcome} — arrives as a labelled [stackshot message] turn" + ("" if origin else f"; the reply, if any, comes back through the message tool to {sender!r}") + named
     if outcome.startswith("queued (paused"):
