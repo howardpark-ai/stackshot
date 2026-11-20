@@ -52,6 +52,7 @@ from stackshot.service import checks as _checks
 from stackshot.service import gates as _gates
 from stackshot.service import handoff as _handoff
 from stackshot.service import proofs as _proofs
+from stackshot.service import step_settle as _settle
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.save_hooks import hooks as _save_hooks
@@ -1229,7 +1230,11 @@ def update_unlocked(
         h.anchor_wait_gate(item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first
             if not _writes.terminal_row():      # the terminal prompt's repair path (a script's own row, orphan case) is exempt as on create
-                _gates.gate_owner_step(item_now, gid, sender=next_writer, keeper=keeper_was)
+                try:
+                    _gates.gate_owner_step(item_now, gid, sender=next_writer, keeper=keeper_was)
+                except _gates.HisStepRefusal as e_step:
+                    e_step.said = tuple(said_l)      # what this write stores as said: step_settle.py marks his step done only for a checked Acked-by among it
+                    raise
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft:      # the draft guard reads a write that sets the state, the step, the mover or the draft, never an unrelated one
             _gates.gate_draft(item_now, gid)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft or description.strip():      # the step guards read the same writes, and a new description
@@ -1433,7 +1438,10 @@ def update_item(*args: Any, **kwargs: Any) -> str:
         h.evwait_preread("event", phrase_)
     with _writes.ITEM_LOCK:
         try:
-            return update_unlocked(*args, **kwargs)
+            try:
+                return update_unlocked(*args, **kwargs)
+            except _gates.HisStepRefusal as e:      # his step left first in next under an agent's state: the write itself may say what became of it (step_settle.py)
+                return _settle.run(e, args, kwargs, update_unlocked)
         finally:
             _telling.CLOSE_WAS.item = None
 

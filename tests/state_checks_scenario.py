@@ -176,7 +176,7 @@ check("3: the note names the fix: pass step, or needs=decision with an ask", "pa
 item(200, needs=[BACK], state="doing", expected_by=hrs(2), next="Oliver: x")      # the line's writer is the keeper of record, U["home-front"] (no writer stored)
 refused_nw("3: another session's Oliver line first under a stored doing: a write of needs by a different session is refused, naming the line's writer and the exits", 200,
            lambda: upd(200, sender="home-stew", needs=[BACK, "home-other"]),
-           "Refused", "state is doing", "was written by", U["home-front"], "Drop the step (dropped=[its number])", "clear_next=true", "pass step=<his step in one line>", "Mark it done only when")
+           "Refused", "state is doing", "was written by", U["home-front"], "Drop the step (dropped=[its number], or step='none')", "clear_next=true", "pass step=<his step in one line>", "Mark it done only when")
 try: upd(200, sender="home-stew", needs=[BACK, "home-other"]); _x_msg = ""
 except Exception as e_: _x_msg = str(e_)
 check("3: …and it does not advise opening next with an agent", _x_msg and "open next with" not in _x_msg, _x_msg)

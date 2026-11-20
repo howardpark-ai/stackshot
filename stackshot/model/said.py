@@ -128,6 +128,40 @@ def parse(spec: Any) -> list[dict[str, str]]:
     return out
 
 
+def plain_quote(spec: Any) -> str:
+    """The quote of a `said` sent as plain text rather than the structured form: the text itself (a JSON string holding text counts as text) → "" for anything else (a list or object, JSON that does not open
+    with text, an empty argument), which parse() judges as before. Text that opens with [ or { is broken JSON, not a quote: it keeps parse()'s refusal."""
+    if not isinstance(spec, str):
+        return ""
+    s = spec.strip()
+    if not s or s[0] in "[{":
+        return ""
+    try:
+        v = json.loads(s)
+    except ValueError:
+        return s
+    return v.strip() if isinstance(v, str) else ""
+
+
+def find_by_quote(path: Path, quote: str, prefixes: tuple[str, ...] | list[str] = DEFAULT_PREFIXES, phrases: tuple[str, ...] | list[str] = DEFAULT_PHRASES, marker: str = "") -> str:
+    """The uuid of his latest message in the transcript at `path` that holds `quote` (whitespace aside) and passes check() as his own typed words, "" when none does. The file is read once, line by line; only a user
+    entry that carries the quote's longest word is parsed. OSError when the file cannot be read."""
+    q = norm_ws(quote)
+    words = sorted(set(re.findall(r"[A-Za-z0-9]{4,}", q)), key=len, reverse=True)[:1]
+    found = ""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if '"user"' not in line or any(w not in line for w in words):
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(e, dict) and e.get("uuid") and check(e, q, prefixes, phrases, marker)[0] == "ok":
+                found = str(e["uuid"]).lower()
+    return found
+
+
 def is_uuid(value: Any) -> bool:
     return bool(_UUID.match(str(value or "").strip()))
 
