@@ -671,8 +671,10 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
     try:
         ruling, target, reason = ln["ruling"], ln.get("target", ""), ln.get("reason", "")
         if ruling == "passed":
-            if not target or (int(prior.get("tries", 0)) >= MAX_TRIES and main and target != main):
-                why = f"delivery to {target} failed {MAX_TRIES} times" if target else "no target"
+            tried = str(prior.get("target") or "")        # where the failed tries went: a pass to the -main agent that was rerouted to the background agent logged that agent, not the ruling's target
+            rerouted = bool(tried) and tried != main and not ln.get("split")
+            if not target or (int(prior.get("tries", 0)) >= MAX_TRIES and main and (target != main or rerouted)):
+                why = f"delivery to {tried if rerouted else target} failed {MAX_TRIES} times" if target else "no target"
                 target, reason = main, f"passed to {main}: {why} ({reason})"
                 base["source"] = "fallback"
             if not target:                                    # no -main agent anywhere (the page, its hub and the scope's general agent list none): held, with the reason, never dropped and never handed to a session that is gone

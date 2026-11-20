@@ -252,6 +252,18 @@ fresh(); n0 = len(pushes()); n = recp("yes, the export is ready", kind="message"
 check("4h: a message from a sender the agent never wrote to is no answer: it goes to the background agent", res["ruling"] == "passed" and res["target"] == BACK and len(reach(X, n0)) == 1 and reach(A, n0) == [], (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = recp("the release is live"); res = act2(n, BACK)
 check("4i: a pass to a background agent is unmarked and delivered, as before", res["ruling"] == "passed" and res["marked"] is False and len(reach(X, n0)) == 1 and not reach(X, n0)[0][1].startswith(mark()), res)
+# a pass rerouted to the background agent whose delivery keeps failing: the log names the builder, and after MAX_TRIES it falls back to the -main agent, marked (nothing is lost)
+_real_deliver = _live._HOOKS["deliver"]
+_live._HOOKS["deliver"] = lambda t, x: "failed: no such session" if t == BACK else _live.deliver_via([sys.executable, str(T / "fakepush.py")], t, x)
+fresh(); n0 = len(pushes()); n = recp("the release is live"); prior = {}
+for tries in range(_live.MAX_TRIES):
+    res = _live._act(n, KEY, KEY, {"id": n["id"], "ruling": "passed", "target": FRONT, "reason": "it fits", "for_owner": False, "source": "code", "rule": "test", "item": ""}, _router.Context(), {**prior, "tries": tries})
+    check(f"4m: try {tries + 1} to a failing background agent is an error that names it, and nothing reaches the front agent", res["status"] == "error" and res["target"] == BACK and reach(A, n0) == [], res)
+    prior = {"status": res["status"], "target": res["target"]}
+res = _live._act(n, KEY, KEY, {"id": n["id"], "ruling": "passed", "target": FRONT, "reason": "it fits", "for_owner": False, "source": "code", "rule": "test", "item": ""}, _router.Context(), {**prior, "tries": _live.MAX_TRIES})
+check("4n: …after MAX_TRIES it falls back to the -main agent, marked, the reason naming the builder", res["status"] == "ruled" and res["target"] == FRONT and res["marked"] is True and res["source"] == "fallback"
+      and len(reach(A, n0)) == 1 and reach(A, n0)[0][1].startswith(mark()) and BACK in res["reason"], (res, pushes()[n0:]))
+_live._HOOKS["deliver"] = _real_deliver
 fresh(); n0 = len(pushes()); n = recp("the release is live"); res = act2(n, "projects/alpha")
 check("4j: a pass to a page key is delivered as before, unmarked", res["ruling"] == "passed" and res["marked"] is False and any(x[0] == "projects/alpha" for x in pushes()[n0:]), (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = recp("the release is live", hold="fyi"); res = act2(n, FRONT)
