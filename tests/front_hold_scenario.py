@@ -4,8 +4,8 @@
 Covers (messaging._gate_front / answer_route / asked_by / router_answer, router_live._must_see / _front_route / _act, held.py the store):
   1. The message tool, to a front agent: a marked message that needs the person is delivered; a message that is no answer to the agent's question is refused naming the project's background agent
      (a project with none: held for the next turn, no turn); a done, taken or no-action note is refused in one line, marked or not; the person's own unmarked message is refused without the mark.
-  2. An answer to a question the front agent (or its project) wrote to the sender: delivered unmarked while the person's last message to that agent is 30 minutes old or less, and at 31 minutes written onto
-     the item it names, else held through the front gate. The signal for "was written to" is the message log (one row per message through the tool, `from` the agent or its project, `to` the sender, within a day).
+  2. An answer to a question the front agent itself wrote to the sender: delivered unmarked while the person's last message to that agent is 30 minutes old or less, and at 31 minutes written onto
+     the item it names, else held through the front gate. The signal for "was written to" is the message log (one row per message through the tool, `from` the agent, `to` the sender, within a day).
   3. fyi=true and a message to a project page or a background agent are as before.
   4. The router: a pass to a front agent with no need of the person (no ruling for him, no words of his, no hand-back, no mark or needs: decision in the text, no named item waiting on a decision) goes to the
      project's background agent, unmarked, text intact, the routing log naming the new target; a project with none holds it through the front gate, unmarked, starting no turn; with each need signal it stays
@@ -206,12 +206,23 @@ check("2g: a sender the agent never wrote to is no answer, whatever the conversa
 no_log(); log_row(FRONT, "work-osprey-docs", 25 * 60); n0 = len(pushes()); out = msg(FRONT, "the docs page looks fine to me", "work-osprey-docs"); settle()
 check("2h: …a question put to the sender more than a day ago is no signal either", out.startswith("Refused") and reach(A, n0) == [], out)
 no_log(); log_row("work-osprey-docs", "home-beta", 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "home-beta"); settle()
-check("2i: a question put by another agent of the front agent's project counts: delivered unmarked in the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() not in reach(A, n0)[0][1], (out, pushes()[n0:]))
+check("2i: a question put by another agent of the front agent's project is not the front agent's own: no answer, whatever the conversation: refused naming the background agent", out.startswith("Refused") and "message(to='work-osprey-x'" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+fresh(); no_log(); log_row("work-osprey-docs", BACK, 300); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", BACK); settle()
+check("2i2: …the background agent's unmarked note after another project agent's question to it is not delivered while the person is present: held for the next turn", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+stamp(A, 31); fresh(); n0 = len(pushes()); out = msg(FRONT, "a1: the docs page reads fine", BACK); settle()
+check("2i3: …and with the person away it is held too, not written onto the item it names (it answers no question of the front agent)", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, out)
+no_log(); fresh(); log_row(FRONT, BACK, 23 * 60 + 50); log_row("work-osprey-docs", BACK, 5); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
+check("2i4: the front agent's own question inside the lookback still counts when another agent asked later: delivered unmarked in the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() not in reach(A, n0)[0][1], (out, pushes()[n0:]))
+no_log(); fresh(); log_row(FRONT, BACK, 24 * 60 + 10); log_row("work-osprey-docs", BACK, 5); n0 = len(pushes()); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
+check("2i5: …and one put just past the lookback does not, the other agent's later question making no difference: held", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); log_row("home-beta", "work-osprey-docs", 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
 check("2j: a question put by an agent of another project does not count", out.startswith("Refused") and reach(A, n0) == [], out)
 for name, kw in (("a handover from an agent of the project that asks nothing", {"text": "please take the export task and tell me when it is done"}), ("a question whose delivery failed", {"outcome": "failed: no such session"})):
     no_log(); fresh(); log_row(FRONT, "work-osprey-docs", 5, **kw); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
     check(f"2l: {name} is no question, so the reply is no answer: refused naming the background agent, no turn", out.startswith("Refused") and "message(to='work-osprey-x'" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+for name, kw in (("with no question mark in its text", {"text": "the export is on your list"}), ("whose delivery failed", {"outcome": "failed: no such session"})):
+    no_log(); fresh(); log_row(FRONT, BACK, 5, **kw); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", BACK); settle()
+    check(f"2l2: the front agent's own message {name} is no question: the background agent's later note is held, not delivered", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); fresh(); log_row("work-osprey-x", "work-osprey-docs", 5, text="please take the export task and tell me when it is done"); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
 check("2m: a message from the project's builder that asks nothing makes the sender's later note no answer (the staged test of a plain note to the front agent)", out.startswith("Refused") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); log_row(FRONT, BACK, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", BACK); settle()
@@ -255,6 +266,9 @@ fresh(); n0 = len(pushes()); n = recp("yes, the export is ready", kind="message"
 check("4g: …and one that names none is held through the front gate for the agent's next turn", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1 and "the export is ready" in held.take(A, FRONT), res)
 fresh(); n0 = len(pushes()); n = recp("yes, the export is ready", kind="message", who="home-beta (44444444…)"); res = act2(n, FRONT)
 check("4h: a message from a sender the agent never wrote to is no answer: it goes to the background agent", res["ruling"] == "passed" and res["target"] == BACK and len(reach(X, n0)) == 1 and reach(A, n0) == [], (res, pushes()[n0:]))
+no_log(); fresh(); log_row("work-osprey-docs", BACK, 300); stamp(A, 5); n0 = len(pushes()); n = recp("the docs page reads fine, a1", kind="message", who="work-osprey-x (33333333…)"); res = act2(n, FRONT)
+check("4h2: a question another agent of the project put to the sender is no answer for the router either: the background agent's own word is held, nothing delivered or written onto the item", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1
+      and not any("written onto" in str(x.get("outcome")) for x in mlog()), (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = recp("the release is live"); res = act2(n, BACK)
 check("4i: a pass to a background agent is unmarked and delivered, as before", res["ruling"] == "passed" and res["marked"] is False and len(reach(X, n0)) == 1 and not reach(X, n0)[0][1].startswith(mark()), res)
 # a pass rerouted to the background agent whose delivery keeps failing: the log names the builder, and after MAX_TRIES it falls back to the -main agent, marked (nothing is lost)

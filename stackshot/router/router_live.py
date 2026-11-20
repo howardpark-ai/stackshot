@@ -435,7 +435,7 @@ def _must_see(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Con
 
 def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx: "_router.Context") -> tuple[str, str]:
     """What a pass to a FRONT agent with no need of the person becomes (_must_see is false; an fyi and a page-owed notice have their own paths above). -> ("", "") as before: marked, delivered (a need, no gate
-    wired, the switch off, a recipient that is no front agent); ("deliver", "") an answer to a question of the agent's while the person is in that conversation (a message notice from a session the agent or its project wrote to: the
+    wired, the switch off, a recipient that is no front agent); ("deliver", "") an answer to a question of the agent's while the person is in that conversation (a message notice from a session the agent itself wrote to: the
     answer hook): delivered to the agent, unmarked; ("items", reply) such an answer while he is not: written onto the item it names, nothing delivered; ("background", name) the project's background agent (its builder,
     else the first listed) takes it, unmarked; ("hold", why) held for the agent's next turn through the front gate (an answer outside the conversation that names no item, or a project with no background agent). Never raises."""
     try:
