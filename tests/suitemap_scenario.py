@@ -859,6 +859,55 @@ out, err, _ = sel_after(lambda: write("tests/d_scenario.py", "print('d')\n"), "n
 check("a new suite runs (it has no measurement yet)", out.split() == ["d"], (out, err))
 out, err, _ = sel_after(lambda: write("newmod.py", "def x(): return 1\n"), "new module")
 check("a new module no suite imports reaches no suite by itself", out == "", (out, err))
+# a suite that globs a directory (reads every .py file of it as text) reads a file added to it, which no earlier measurement could name
+_root_py = [p for p in git("ls-tree", "--name-only", base).split() if p.endswith(".py")]
+def glob_map(name, whole):
+    g = json.loads(MAP.read_text()); g["suites"]["z"]["whole"] = whole; (T / name).write_text(json.dumps(g)); return T / name
+def sel_with(mp, edit, msg, frm=base):
+    git("checkout", "-q", "-B", f"t{len(ran)}", frm); edit(); head = commit(msg)
+    r = tool("select", "--map", str(mp), "--to", head); return r.stdout.strip(), r.stderr
+def ls_py(*args): return [p for p in git("ls-tree", "--name-only", *args).split() if p.endswith(".py")]
+_tests_py, _all_py = ls_py(base, "tests/"), ls_py("-r", base)   # the .py files of the nested directory tests/, and of the whole checkout
+out, err = sel_with(glob_map("glob_all.json", _root_py), lambda: write("newmod.py", "def x(): return 1\n"), "new module, a globbing reader")
+check("a new .py file reaches the suite that read every .py file of its directory as text (z globs the checkout)", out == "z" and "→ 1 suite(s)" in err, (out, err))
+out, err = sel_with(glob_map("glob_most.json", _root_py[1:]), lambda: write("newmod.py", "def x(): return 1\n"), "new module, a partial reader")
+check("...but not a suite that read all but one of them (it names its files, it does not glob)", out == "", (out, err))
+out, err = sel_with(glob_map("glob_all2.json", _root_py), lambda: write("docs/extra.md", "x\n"), "new doc, a globbing reader")
+check("...nor for a file that is not Python: the listers of the directory are the rule there (c lists docs/)", out == "c", (out, err))
+# a nested directory (the listing of `tests/`, not of the top), which is the case the rule is for (service/)
+out, err = sel_with(glob_map("glob_tests.json", _tests_py), lambda: write("tests/extra_mod.py", "def x(): return 1\n"), "new module in a nested directory")
+check("a new .py file in a nested directory reaches the suite that read every .py file of that directory (z globs tests/)", out == "z" and "→ 1 suite(s)" in err, (out, err))
+out, err = sel_with(glob_map("glob_tests_most.json", _tests_py[1:]), lambda: write("tests/extra_mod.py", "def x(): return 1\n"), "new module in a nested directory, a partial reader")
+check("...but not a suite that read all but one .py file of it", out == "", (out, err))
+out, err = sel_with(glob_map("glob_root_only.json", _root_py), lambda: write("tests/extra_mod.py", "def x(): return 1\n"), "new module in a nested directory, a reader of the top only")
+check("...nor one that read the .py files of the top only (not those of tests/)", out == "", (out, err))
+out, err = sel_with(glob_map("glob_tests_rename.json", _tests_py), lambda: git("mv", "tmod.py", "tests/tmod_moved.py"), "module moved to a nested directory")
+check("a rename's new path in a nested directory is chosen like an added one (z globs tests/; tmod.py was no file of it)", "z" in out.split(), (out, err))
+out, err = sel_with(glob_map("glob_modify.json", [p for p in _root_py if p != "tmod.py"]), lambda: sub("tmod.py", "Tag = int", "Tag = int  # a note"), "edit of a module")
+check("a modified .py file is not chosen by the siblings that were read (z read every .py file of the top but this one)", "z" not in out.split(), (out, err))
+# a directory that held no .py file (docs/, a folder of notes): the suites that read every .py file of the checkout, and the suites that listed it (c lists docs/)
+out, err = sel_with(glob_map("glob_checkout.json", _all_py), lambda: write("docs/extra.py", "def x(): return 1\n"), "new module in a folder of docs")
+check("a new .py file in a directory that held none reaches the suite that read every .py file of the checkout (z) and the suite that listed it (c)", out.split() == ["c", "z"], (out, err))
+out, err = sel_with(glob_map("glob_checkout_most.json", _all_py[1:]), lambda: write("docs/extra.py", "def x(): return 1\n"), "new module in a folder of docs, a partial reader")
+check("...but not a suite that read all but one of them (only its lister, c)", out.split() == ["c"], (out, err))
+out, err = sel_with(glob_map("glob_root_only2.json", _root_py), lambda: write("docs/extra.py", "def x(): return 1\n"), "new module in a folder of docs, a reader of the top only")
+check("...nor one that read the .py files of the top only (the whole checkout is the set, not its top)", out.split() == ["c"], (out, err))
+# a checkout with folders that hold no .py (client/hooks/, stackshot/web/tools/text/) and one folder that holds a subfolder with a .py file (pkg/)
+git("checkout", "-q", "-B", "fx", base)
+write("client/hooks/README.md", "hooks\n"); write("stackshot/web/tools/text/update.md", "text\n"); write("pkg/a.py", "A = 1\n"); write("pkg/sub/b.py", "B = 1\n")
+_fx = commit("folders with no .py file, and a folder with a subfolder")
+def fx_map(name, whole, dirs):
+    g = json.loads(MAP.read_text()); g["commit"] = _fx; z = g["suites"]["z"]; z["whole"] = whole; z["dirs"] = sorted(set(z.get("dirs", [])) | set(dirs)); (T / name).write_text(json.dumps(g)); return T / name
+for _d, _n in (("client/hooks", "newhook"), ("stackshot/web/tools/text", "newmod")):
+    out, err = sel_with(fx_map(f"fx_{_n}.json", _root_py, [_d]), lambda: write(f"{_d}/{_n}.py", "MSG = 1\n"), f"new module in {_d}", frm=_fx)
+    check(f"a new .py file in {_d}/ (no .py there) reaches the suite that listed it and reads the .py files of only a part of the checkout (z)", out.split() == ["z"], (out, err))
+out, err = sel_with(fx_map("fx_pkg.json", ["pkg/a.py"], ["pkg"]), lambda: write("pkg/new.py", "N = 1\n"), "new module in a folder with a subfolder", frm=_fx)
+check("a new .py file in a nested folder reaches the suite that read every .py file of that folder, not those of its subfolders (z reads pkg/a.py, not pkg/sub/b.py)", out.split() == ["z"], (out, err))
+# the top of a checkout that holds no .py file (the map's commit is one without them): every suite, a new root .py is rare and any glob of the root may read it
+git("checkout", "-q", "-B", "nopy", base); git("rm", "-q", *_root_py); _nopy = commit("a checkout with no .py file at the top")
+_g = json.loads(MAP.read_text()); _g["commit"] = _nopy; _g["suites"]["z"]["whole"] = ls_py("-r", _nopy); (T / "glob_nopy.json").write_text(json.dumps(_g))
+out, err = sel_with(T / "glob_nopy.json", lambda: write("newroot.py", "def x(): return 1\n"), "new module at the top of a checkout with none", frm=_nopy)
+check("a new .py file at a top that held none reaches every suite", out == "all" and "every glob of the root" in err, (out, err))
 out, err, _ = sel_after(lambda: write("json.py", "x = 1\n"), "shadowing module")
 check("a new module named like one the suites import (json) runs all", out == "all" and "'json'" in err, (out, err))
 out, err, _ = sel_after(lambda: sub("tests/run-suite", "exec", "exec "), "harness")
