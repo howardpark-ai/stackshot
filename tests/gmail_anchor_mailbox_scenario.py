@@ -321,6 +321,99 @@ refuse("wait gate: a query the matcher cannot evaluate is refused with the reaso
 refuse("wait gate: a good query that is not on the list still gets the add-first refusal", lambda: gate("gmail:q:from:pat OR from:amy"), "is not on projects/alpha's anchors list")
 check("tool text: the description teaches the grammar and the refusal", all(s in _wt_anchors._ANCHORS_DESC for s in ("AND", "OR", "key:(a OR b)", "in capitals", "no negation", "is refused when added")), _wt_anchors._ANCHORS_DESC[:200])
 
+# ---- a thread link in either form the Workspace connector and the browser give is one anchor
+TID = "1a2b3c4d5e6f7a8b"
+FORM_A = f"https://mail.google.com/mail/u/0/#inbox/{TID}"
+FORM_B = f"https://mail.google.com/mail/u/demo@example.com/#all/{TID}"
+check("thread link: the browser's form gives the thread's anchor id", anc.anchor_id(FORM_A) == f"gmail:{TID}", anc.anchor_id(FORM_A))
+check("thread link: the form with an address after /u/ gives the same id", anc.anchor_id(FORM_B) == anc.anchor_id(FORM_A), anc.anchor_id(FORM_B))
+check("thread link: any view of the thread (all, inbox, sent, a label, a search) and an encoded address give the same id",
+      all(anc.anchor_id(f"https://mail.google.com/mail/u/demo@example.com/#{v}/{TID}") == f"gmail:{TID}" for v in ("all", "inbox", "sent", "starred", "label/Team-A", "label/Team%20A/sub", "search/from%3Ademo"))
+      and anc.anchor_id(f"https://mail.google.com/mail/u/demo%40example.com/#all/{TID}") == f"gmail:{TID}"
+      and anc.anchor_id(f"https://mail.google.com/mail/#inbox/{TID}") == f"gmail:{TID}", [anc.anchor_id(f"https://mail.google.com/mail/u/demo@example.com/#{v}/{TID}") for v in ("all", "label/Team-A")])
+BAD = [f"https://mail.google.com/mail/u/demo@example.com/{TID}", f"https://mail.google.com/mail/u/demo@example.com/#all/{TID[:-1]}", f"https://mail.google.com/mail/u/demo@example.com/#all/{TID}x",
+       f"https://mail.google.com/mail/u/demo/#all/{TID}", f"https://mail.google.com/mail/u//#all/{TID}", f"https://mail.google.com/mail/u/de mo@example.com/#all/{TID}",
+       f"https://mail.google.com/mail/u/demo@example.com/#all/{TID.upper()}", f"https://mail.google.com/mail/u/demo@example.com/#{TID}", f"https://mail.google.com/mail/u/demo@example.com/all/{TID}",
+       f"https://example.com/mail/u/demo@example.com/#all/{TID}"]
+check("thread link: a malformed one is still no anchor shape", all(anc.anchor_id(u) is None for u in BAD), [u for u in BAD if anc.anchor_id(u) is not None])
+(T / "store/anchors.json").write_text("{}")
+anchors(add=[FORM_B])
+check("thread link: the tool accepts the connector's form and stores it", stored() == [FORM_B], stored())
+anchors(add=[FORM_A])
+check("thread link: the browser's form after it is the same anchor, not a second one", len(stored()) == 1, stored())
+refuse("thread link: the tool still refuses a malformed one, naming the Gmail thread among the shapes", lambda: anchors(add=[BAD[0]]), "is not an anchor shape", "Gmail thread")
+anchors(remove=[FORM_A])
+check("thread link: removing it by the other form removes the one anchor", stored() == [], stored())
+
+# the account part is one local part and one dotted domain (no more than the docs say), and the rest of the shape holds
+ACC_OK = ["demo@example.com", "demo%40example.com", "demo%2Btag%40example.com", "demo%2btag@example.com", "demo+tag@example.com", "Demo.Name_1-x@Example.co.org", "7", "0"]
+check("thread link: an address (a plus raw or as %2B, dots, capitals, %40 for the at sign) or a number after /u/ is accepted",
+      all(anc.anchor_id(f"https://mail.google.com/mail/u/{a}/#all/{TID}") == f"gmail:{TID}" for a in ACC_OK), [a for a in ACC_OK if anc.anchor_id(f"https://mail.google.com/mail/u/{a}/#all/{TID}") is None])
+ACC_BAD = ["a@b@c", "a@%40", "a@b:80", "a@b", "a\\b@c.d", "@example.com", "%40example.com", "a@", "a%40", "a@.example.com", "a@example..com", "a@example.com.", "a b@example.com",
+           "\u1112\u1161@example.com", "a%2F@example.com", "a%zz@example.com", "a@exa%6Dple.com", "a@b/c.d", "a@b#c.d", "a@b?c.d", "demo", "", "0x", "-1"]
+check("thread link: an account that is no number and no address of one local part and a dotted domain is refused",
+      all(anc.anchor_id(f"https://mail.google.com/mail/u/{a}/#all/{TID}") is None for a in ACC_BAD), [a for a in ACC_BAD if anc.anchor_id(f"https://mail.google.com/mail/u/{a}/#all/{TID}") is not None])
+check("thread link: a local part empty, a domain empty, and a domain that runs on into a path or a fragment are each refused",
+      all(anc.anchor_id(u) is None for u in (f"https://mail.google.com/mail/u/@example.com/#all/{TID}", f"https://mail.google.com/mail/u/a@/#all/{TID}",
+                                             f"https://mail.google.com/mail/u/a@b/c.d/#all/{TID}", f"https://mail.google.com/mail/u/a@b#c.d/#all/{TID}")))
+check("thread link: an empty part in the view (a slash with nothing between, or nothing before it) is refused, a plain view is not",
+      all(anc.anchor_id(u) is None for u in (f"https://mail.google.com/mail/u/0/#inbox//{TID}", f"https://mail.google.com/mail/u/0/#//{TID}", f"https://mail.google.com/mail/u/0/#/{TID}", f"https://mail.google.com/mail/u/0/#label//x/{TID}"))
+      and anc.anchor_id(f"https://mail.google.com/mail/u/0/#label/x/{TID}") == f"gmail:{TID}")
+check("thread link: the scheme is https or http, in lower case (ftp, a capital scheme, a longer word and no scheme are refused; http is accepted)",
+      all(anc.anchor_id(u) is None for u in (f"ftp://mail.google.com/mail/u/0/#inbox/{TID}", f"HTTPS://mail.google.com/mail/u/0/#inbox/{TID}", f"httpss://mail.google.com/mail/u/0/#inbox/{TID}",
+                                             f"file://mail.google.com/mail/u/0/#inbox/{TID}", f"mail.google.com/mail/u/0/#inbox/{TID}", f"//mail.google.com/mail/u/0/#inbox/{TID}"))
+      and anc.anchor_id(f"http://mail.google.com/mail/u/0/#inbox/{TID}") == f"gmail:{TID}")
+check("thread link: a host that only starts with or contains the Gmail one is refused",
+      all(anc.anchor_id(u) is None for u in (f"https://mail.google.com.example.org/mail/u/0/#inbox/{TID}", f"https://mail.google.com@example.org/mail/u/0/#inbox/{TID}", f"https://notmail.google.com/mail/u/0/#inbox/{TID}",
+                                             f"https://example.org/https://mail.google.com/mail/u/0/#inbox/{TID}", f"https://mail.google.com:8443/mail/u/0/#inbox/{TID}")))
+check("thread link: a host whose dots are other characters, and a path root that is not /mail/, are refused",
+      all(anc.anchor_id(u) is None and anc.same_url_key(u) == u for u in (f"https://mailXgoogleXcom/mail/u/0/#inbox/{TID}", f"https://mail-google-com/mail/u/0/#inbox/{TID}", f"https://mail.googleXcom/mail/u/0/#inbox/{TID}",
+                                                                          f"https://mail.google.com/other/u/0/#inbox/{TID}", f"https://mail.google.com/mailx/u/0/#inbox/{TID}")))
+check("thread link: a thread id is exactly 16 hex digits (17 and 32 are refused)",
+      all(anc.anchor_id(f"https://mail.google.com/mail/u/0/#inbox/{i}") is None and anc.same_url_key(f"https://mail.google.com/mail/u/0/#inbox/{i}") == f"https://mail.google.com/mail/u/0/#inbox/{i}" for i in (TID + "c", TID + TID)))
+check("thread link: an account that has a dotted name but no @ is refused, and a domain label that holds a slash after a dot is refused",
+      all(anc.anchor_id(u) is None for u in (f"https://mail.google.com/mail/u/demo.example.com/#all/{TID}", f"https://mail.google.com/mail/u/demoexample.com/#all/{TID}", f"https://mail.google.com/mail/u/a@b.c/d/#all/{TID}",
+                                             f"https://mail.google.com/mail/u/a@b.c.d/e/#all/{TID}")))
+check("thread link: a plus in a search view is part of it (the id is read), a link with text before it or inside a query is no thread link",
+      anc.anchor_id(f"https://mail.google.com/mail/u/0/#search/a+b/{TID}") == f"gmail:{TID}" and anc.same_url_key(f"https://mail.google.com/mail/u/0/#search/a+b/{TID}") == f"gmail:{TID}"
+      and all(anc.anchor_id(u) is None and anc.same_url_key(u) == u.strip() for u in (f"see {FORM_A}", f"https://example.org/?u={FORM_A}", f"{FORM_A} and more", f"x {FORM_B}")))
+check("thread link: the identity check strips the text around a link before it reads it",
+      anc.same_url_key(f"  {FORM_B}\n") == f"gmail:{TID}" and anc.same_url_key(f"\t{FORM_A} ") == f"gmail:{TID}", [anc.same_url_key(f"  {FORM_B}\n"), anc.same_url_key(f"\t{FORM_A} ")])
+anchors(add=[f"https://mail.google.com/mail/u/demo%2Btag%40example.com/#all/{TID}"])
+check("thread link: the tool accepts an address whose plus is encoded", stored() == [f"https://mail.google.com/mail/u/demo%2Btag%40example.com/#all/{TID}"], stored())
+for _bad in ("a@b@c", "a@b:80", "a@b"):
+    refuse(f"thread link: the tool refuses the account {_bad}", lambda _bad=_bad: anchors(add=[f"https://mail.google.com/mail/u/{_bad}/#all/{TID}"]), "is not an anchor shape")
+(T / "store/anchors.json").write_text("{}")
+
+# two entries stored for one thread on one page (as an older store may hold them, one per form) behave as one anchor
+from stackshot.anchors import anchor_scope as ascope
+PAGE = "projects/alpha"
+URL_I, URL_A, URL_U1 = f"https://mail.google.com/mail/u/0/#inbox/{TID}", f"https://mail.google.com/mail/u/0/#all/{TID}", f"https://mail.google.com/mail/u/1/#all/{TID}"
+def pair(first, second, i1=("a1",), i2=("a2",)):
+    return {PAGE: [{"url": first, "items": list(i1) if i1 else None, "added": 1.0, "by": "x"}, {"url": second, "items": list(i2) if i2 else None, "added": 2.0, "by": "x"}]}
+for _lbl, _a, _b in (("#inbox and #all", URL_I, URL_A), ("/u/0/ and /u/1/", URL_A, URL_U1), ("a link and the raw id", URL_I, f"gmail:{TID}"), ("a link and the connector's form", URL_I, FORM_B)):
+    st = pair(_a, _b)
+    check(f"stored pair ({_lbl}): both entries are the one anchor key", anc.same_url_key(_a) == anc.same_url_key(_b) == f"gmail:{TID}", [anc.same_url_key(_a), anc.same_url_key(_b)])
+    check(f"stored pair ({_lbl}): each item's list reads the thread once, with the URL of the entry that names it", ascope.scoped_map(st) == {"a1": [_a], "a2": [_b]}, ascope.scoped_map(st))
+    check(f"stored pair ({_lbl}): an item's anchors are the thread once, with its own entry's items",
+          [(e["url"], e["items"]) for e in ascope.anchor_scope(st, "a1", PAGE)] == [(_a, ["a1"])] and [(e["url"], e["items"]) for e in ascope.anchor_scope(st, "a2", PAGE)] == [(_b, ["a2"])],
+          [ascope.anchor_scope(st, "a1", PAGE), ascope.anchor_scope(st, "a2", PAGE)])
+    check(f"stored pair ({_lbl}): the page is found by either form", ascope.holders(st, _a) == [PAGE] and ascope.holders(st, _b) == [PAGE], [ascope.holders(st, _a), ascope.holders(st, _b)])
+    st = pair(_a, _b)
+    out = anc.remove(st, PAGE, [_b])
+    check(f"stored pair ({_lbl}): removing one form removes both entries, the page's list and the store included", out == [] and PAGE not in st, [out, st])
+    st = pair(_a, _b)
+    anc.add(st, PAGE, [_b], ["a3"], by="x")
+    check(f"stored pair ({_lbl}): adding the URL of one entry with another item widens that entry and adds no third", [(e["url"], e["items"]) for e in st[PAGE]] == [(_a, ["a1"]), (_b, ["a2", "a3"])], st[PAGE])
+    st = pair(_a, _b)
+    anc.add(st, PAGE, [f"https://mail.google.com/mail/u/2/#sent/{TID}"], ["a3"], by="x")
+    check(f"stored pair ({_lbl}): adding a third form with another item widens the first entry and adds no third", [(e["url"], e["items"]) for e in st[PAGE]] == [(_a, ["a1", "a3"]), (_b, ["a2"])], st[PAGE])
+st = pair(URL_I, URL_A, i1=("a1",), i2=("a1", "a2"))
+check("stored pair (one item in both): the item's list has the thread once, the first URL added, and its anchors merge the items",
+      ascope.scoped_map(st)["a1"] == [URL_I] and [(e["url"], e["items"]) for e in ascope.anchor_scope(st, "a1", PAGE)] == [(URL_I, ["a1", "a2"])], [ascope.scoped_map(st), ascope.anchor_scope(st, "a1", PAGE)])
+st = {PAGE: [{"url": URL_I, "items": ["a1"], "added": 1.0, "by": "x"}, {"url": "https://example.org/other", "items": ["a1"], "added": 2.0, "by": "x"}]}
+check("stored pair: another anchor on the page is not touched by the removal of a thread link", [e["url"] for e in anc.remove(st, PAGE, [FORM_B])] == ["https://example.org/other"], st)
+
 # ---- a scope is a set: the same mailboxes in another order are one anchor
 (T / "store/anchors.json").write_text("{}")
 anchors(add=["gmail:q@work,home:from:pat"]); anchors(add=["gmail:q@home,work:from:pat"]); anchors(add=["gmail:q@WORK,Home:from:pat"])
