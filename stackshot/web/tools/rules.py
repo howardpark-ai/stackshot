@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path as _Path
 
 from stackshot.core import config as _cfg
 from stackshot.core.instance import NAME, OWNER
@@ -38,17 +39,62 @@ _DATED = re.compile(r"\s?\((?:Adapted |Promoted |" + re.escape(OWNER) + r", |" +
 _IMPORT = re.compile(r"^@(\S+\.md)$")
 
 
+_IMPORT_DEPTH_MAX = 4                                     # how many levels of imports below the first file are followed
+_IMPORT_FILES_MAX = 64                                    # how many imported files one render opens in all, an unreadable or refused one included
+_IMPORT_TOTAL_MAX = 512 * 1024                            # how many characters of imported text one render adds in all
+_IMPORT_FILE_MAX = 256 * 1024                             # the longest imported file, in characters (a longer one is not read past this and its line stays)
+
+
 def _rules_source(p) -> str:
     """The rulebook's text with its imports in place: a line that is exactly `@<path>.md` (how a CLAUDE.md pulls in another
-    file) is replaced by that file's text, the path taken from the directory of the file that holds the line. One level; a
-    file that cannot be read leaves the line as it is (the rulebook is about to be two files, and a cloud or
-    Cowork session must not get half of it)."""
+    file) is replaced by that file's text, the path taken from the directory of the file that holds the line. An import line
+    inside an imported file is replaced the same way, down to `_IMPORT_DEPTH_MAX` levels below the first file, with two
+    differences from the first file's lines: the path may not start with `~` or be absolute, and the file it names (after
+    symlinks are followed) must lie inside the directory that holds the first file. One render opens at most
+    `_IMPORT_FILES_MAX` imported files (a refused or unreadable one counts too) and adds at most `_IMPORT_TOTAL_MAX` characters, and a file longer than
+    `_IMPORT_FILE_MAX` characters is not imported. A line is left as it is (a visible `@<path>.md` line) when its file cannot
+    be read, is outside the tree, is already being expanded (a cycle: nothing is repeated), would pass the depth cap or a
+    size cap; a cloud or Cowork session must not get half of the rulebook without a sign, and the render never fails on it."""
+    p = _Path(p)
+    return _expand(p.read_text(encoding="utf-8"), p, p.parent.resolve(), (p.resolve(),), {"files": 0, "chars": 0, "refused": set()})
+
+
+def _read_import(target) -> str | None:
+    """The text of an imported file, or None when it is longer than _IMPORT_FILE_MAX characters (only that much is read)."""
+    with open(target, encoding="utf-8") as f:
+        text = f.read(_IMPORT_FILE_MAX + 1)
+    return text if len(text) <= _IMPORT_FILE_MAX else None
+
+
+def _expand(text: str, p, root, stack: tuple, budget: dict) -> str:
+    """`text` (the file `p`, whose resolved path is stack[-1]) with its import lines expanded; `root` is the resolved directory of the first file."""
+    nested = len(stack) > 1
     out = []
-    for ln in p.read_text(encoding="utf-8").split("\n"):
+    for ln in text.split("\n"):
         m = _IMPORT.match(ln)
         if m:
+            raw = m.group(1)
+            spelled = (str(p.parent), raw)
             try:
-                out.append((p.parent / os.path.expanduser(m.group(1))).read_text(encoding="utf-8").rstrip("\n"))
+                if len(stack) - 1 >= _IMPORT_DEPTH_MAX or budget["files"] >= _IMPORT_FILES_MAX or spelled in budget["refused"]:
+                    raise RecursionError(ln)
+                if nested and (raw.startswith("~") or os.path.isabs(raw)):
+                    raise PermissionError(ln)
+                target = (p.parent / (raw if nested else os.path.expanduser(raw))).resolve(strict=True)
+                if (nested and not target.is_relative_to(root)) or target in stack:
+                    raise PermissionError(ln)
+                if target in budget["refused"]:
+                    raise RecursionError(ln)
+                budget["files"] += 1                        # every read attempt counts, a refused or unreadable file too
+                try:
+                    body = _read_import(target)
+                    if body is None or budget["chars"] + len(body) > _IMPORT_TOTAL_MAX:
+                        raise RecursionError(ln)
+                except Exception:
+                    budget["refused"].update((target, spelled))   # a repeat of this line, or another line naming the file, costs no read
+                    raise
+                budget["chars"] += len(body)
+                out.append(_expand(body, target, root, (*stack, target), budget).rstrip("\n"))
                 continue
             except Exception:
                 pass

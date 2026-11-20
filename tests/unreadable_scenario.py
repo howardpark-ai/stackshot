@@ -141,16 +141,179 @@ from stackshot.web.tools import rules as _wt_rules
 R = T / "rules"; R.mkdir()
 (R / "A.md").write_text("<!-- header -->\n# Rules\n\n## One\n\n- a rule\n\n@B.md\n@missing.md\nnot an @import.md line\n", encoding="utf-8")
 (R / "B.md").write_text("# Agent rules\n\nOne sentence.\n\n<!-- surface: cli -->\n## CLI only\n\n- hidden from Cowork\n\n## Two\n\n- another rule\n- a cli bullet <!-- cli -->\n@C.md\n", encoding="utf-8")
-(R / "C.md").write_text("never reached\n", encoding="utf-8")
+(R / "C.md").write_text("third level text\n", encoding="utf-8")
 src = _wt_rules._rules_source(R / "A.md")
 check("rules: an import line is replaced by the file next to it", "## Two\n\n- another rule" in src and "@B.md" not in src, src)
-check("rules: a missing file leaves its line, other text is untouched, one level only", "@missing.md\nnot an @import.md line\n" in src and "@C.md" in src and "never reached" not in src and src.endswith("line\n"), src)
+check("rules: a missing file leaves its line, other text is untouched, an import inside an imported file is expanded too", "@missing.md\nnot an @import.md line\n" in src and "@C.md" not in src and "- a cli bullet <!-- cli -->\nthird level text\n@missing.md" in src and src.endswith("line\n"), src)
 (R / "plain.md").write_text("# Rules\n\n- a rule\n", encoding="utf-8")
 check("rules: a file with no import reads back byte for byte", _wt_rules._rules_source(R / "plain.md") == "# Rules\n\n- a rule\n")
 _real_cfg_path = _cfg.path; _cfg.path = lambda *k: (R / "A.md") if k == ("paths", "rules") else _real_cfg_path(*k)
 cw = _wt_rules._rules_text("cowork"); full = _wt_rules._rules_text("full")
 check("rules: the Cowork filter runs on the expanded text", "- another rule" in cw and "hidden from Cowork" not in cw and "a cli bullet" not in cw and "<!-- header -->" not in cw, cw[-400:])
 check("rules: profile full is the whole expanded text", "hidden from Cowork" in full and "- another rule" in full and "@B.md" not in full, full)
+# nested imports: followed from the importing file's directory, up to _IMPORT_DEPTH_MAX levels, a file already being expanded is not expanded again
+def _old_source(p):                                       # the one-level reading the first-level-only case must still match byte for byte
+    out = []
+    for ln in p.read_text(encoding="utf-8").split("\n"):
+        m = _wt_rules._IMPORT.match(ln)
+        if m:
+            try:
+                out.append((p.parent / os.path.expanduser(m.group(1))).read_text(encoding="utf-8").rstrip("\n")); continue
+            except Exception:
+                pass
+        out.append(ln)
+    return "\n".join(out)
+N = R / "nest"; (N / "sub").mkdir(parents=True)
+(N / "demo-rules.md").write_text("# Demo\n\n## Top\n\n- top rule\n\n@demo-two.md\n\n## End\n\n- end rule\n", encoding="utf-8")
+(N / "demo-two.md").write_text("## Two\n\n- two rule\n@sub/demo-three.md\n", encoding="utf-8")
+(N / "sub" / "demo-three.md").write_text("<!-- host: machines -->\n## Three\n\n- three rule, machines only\n@demo-four.md\n", encoding="utf-8")   # relative to sub/, not to the first file
+(N / "sub" / "demo-four.md").write_text("## Four\n\n- four rule\n", encoding="utf-8")
+n2 = _wt_rules._rules_source(N / "demo-two.md")
+check("rules nested: a two-level chain is fully expanded", "- three rule, machines only" in n2 and "@sub/demo-three.md" not in n2 and "- four rule" in n2 and "@demo-four.md" not in n2, n2)
+n3 = _wt_rules._rules_source(N / "demo-rules.md")
+check("rules nested: a three-level chain is fully expanded, each path from its importing file's directory, order kept",
+      all(x in n3 for x in ("- top rule", "- two rule", "- three rule, machines only", "- four rule", "- end rule")) and not re.search(r"^@", n3, re.M)
+      and n3.index("- top rule") < n3.index("- two rule") < n3.index("- three rule") < n3.index("- four rule") < n3.index("- end rule"), n3)
+_cfg.path = lambda *k: (N / "demo-rules.md") if k == ("paths", "rules") else _real_cfg_path(*k)
+ncw = _wt_rules._rules_text("cowork"); nfull = _wt_rules._rules_text("full")
+check("rules nested: a section marker in a nested file filters its section on Cowork, as in a first-level file (the sections around it stay)",
+      "## Three" not in ncw and "three rule" not in ncw and "- two rule" in ncw and "## End" in ncw
+      and "## Three" in nfull and "<!-- host: machines -->" in nfull, ncw[-300:])
+(N / "demo-a.md").write_text("# A\n\n- rule a\n@demo-b.md\n", encoding="utf-8")
+(N / "demo-b.md").write_text("- rule b\n@demo-a.md\n@demo-self.md\n", encoding="utf-8")
+(N / "demo-self.md").write_text("- rule self\n@demo-self.md\n", encoding="utf-8")
+nc = _wt_rules._rules_source(N / "demo-a.md")
+check("rules nested: a cycle ends, each file once, the line that would loop stays as a plain line", nc.count("- rule a") == 1 and nc.count("- rule b") == 1 and nc.count("- rule self") == 1
+      and nc.count("@demo-a.md") == 1 and nc.count("@demo-self.md") == 1, nc)
+(N / "demo-twice.md").write_text("@demo-leaf.md\n@demo-leaf.md\n", encoding="utf-8"); (N / "demo-leaf.md").write_text("- leaf rule\n", encoding="utf-8")
+check("rules nested: the same file imported twice (not a cycle) is expanded both times", _wt_rules._rules_source(N / "demo-twice.md").count("- leaf rule") == 2, _wt_rules._rules_source(N / "demo-twice.md"))
+D = _wt_rules._IMPORT_DEPTH_MAX
+for i in range(D + 3): (N / f"demo-d{i}.md").write_text(f"- level {i}\n" + (f"@demo-d{i + 1}.md\n" if i < D + 2 else ""), encoding="utf-8")
+nd = _wt_rules._rules_source(N / "demo-d0.md")
+check("rules nested: a chain deeper than the cap stops at the cap without error, the next import line stays",
+      isinstance(D, int) and 2 <= D <= 6 and all(f"- level {i}\n" in nd for i in range(D + 1)) and f"- level {D + 1}" not in nd and f"@demo-d{D + 1}.md" in nd, (D, nd))
+(N / "demo-m1.md").write_text("- m1\n@demo-m2.md\n", encoding="utf-8"); (N / "demo-m2.md").write_text("- m2\n@demo-gone.md\n- m2 after\n", encoding="utf-8")
+nm = _wt_rules._rules_source(N / "demo-m1.md")
+check("rules nested: a missing nested file leaves its line, as a missing first-level file does", nm == "- m1\n- m2\n@demo-gone.md\n- m2 after\n", repr(nm))
+(N / "demo-flat.md").write_text("# F\n\n- f rule\n@demo-leaf.md\n@demo-gone.md\n\n## G\n", encoding="utf-8")
+check("rules nested: a rulebook whose imports import nothing renders byte for byte as the one-level reading did", _wt_rules._rules_source(N / "demo-flat.md") == _old_source(N / "demo-flat.md")
+      and _wt_rules._rules_source(R / "plain.md") == _old_source(R / "plain.md"), _wt_rules._rules_source(N / "demo-flat.md"))
+# nested imports stay inside the first file's tree (after symlinks), and one render has a budget (files, characters, one file's size)
+G = R / "guard"; (G / "tree" / "sub" / "deep").mkdir(parents=True); (G / "outside").mkdir(); (G / "home").mkdir()
+(G / "outside" / "demo-secret.md").write_text("SECRET OUTSIDE\n", encoding="utf-8"); (G / "demo-parent.md").write_text("SECRET PARENT\n", encoding="utf-8")
+(G / "home" / "demo-home.md").write_text("SECRET HOME\n", encoding="utf-8")
+(G / "tree" / "demo-inside.md").write_text("INSIDE OK\n", encoding="utf-8")
+def _gsrc(top_lines, **files):                            # a first file importing mid.md, which holds top_lines (depth 2); returns the expanded text
+    for n in ("demo-mid.md", "demo-top.md"): (G / "tree" / n).unlink(missing_ok=True)
+    (G / "tree" / "demo-mid.md").write_text(top_lines, encoding="utf-8"); (G / "tree" / "demo-top.md").write_text("TOP\n@demo-mid.md\n", encoding="utf-8")
+    return _wt_rules._rules_source(G / "tree" / "demo-top.md")
+x = _gsrc("@../outside/demo-secret.md\n@../demo-parent.md\n@demo-inside.md\n")
+check("rules guard: a nested import with .. out of the tree stays a plain line (one inside the tree still expands)", "SECRET" not in x and "@../outside/demo-secret.md" in x and "@../demo-parent.md" in x and "INSIDE OK" in x, x)
+(G / "tree" / "sub" / "demo-b.md").write_text("B\n@deep/demo-c.md\n", encoding="utf-8"); (G / "tree" / "sub" / "demo-sib.md").write_text("SIB OK\n", encoding="utf-8")
+(G / "tree" / "sub" / "deep" / "demo-c.md").write_text("C\n@../demo-sib.md\n@../../../outside/demo-secret.md\n", encoding="utf-8")
+(G / "tree" / "demo-top.md").write_text("TOP\n@sub/demo-b.md\n", encoding="utf-8")
+x = _wt_rules._rules_source(G / "tree" / "demo-top.md")
+check("rules guard: a .. that climbs out of the tree only at depth 3 stays plain, one that stays inside expands", "SECRET" not in x and "@../../../outside/demo-secret.md" in x and "SIB OK" in x, x)
+x = _gsrc(f"@{G}/outside/demo-secret.md\n@{G}/tree/demo-inside.md\n")
+check("rules guard: a nested absolute path stays plain, even one inside the tree", "SECRET" not in x and "INSIDE OK" not in x and f"@{G}/tree/demo-inside.md" in x, x)
+_home = os.environ.get("HOME")
+try:
+    os.environ["HOME"] = str(G / "home")
+    x = _gsrc("@~/demo-home.md\n")
+    check("rules guard: a nested ~ path stays plain", "SECRET HOME" not in x and "@~/demo-home.md" in x, x)
+    (G / "tree" / "demo-top.md").write_text("TOP\n@~/demo-home.md\n", encoding="utf-8")
+    check("rules guard: a first-file ~ path still expands, as before", "SECRET HOME" in _wt_rules._rules_source(G / "tree" / "demo-top.md"))
+finally:
+    if _home is None: os.environ.pop("HOME", None)
+    else: os.environ["HOME"] = _home
+(G / "tree" / "demo-top.md").write_text("TOP\n@../outside/demo-secret.md\n", encoding="utf-8")
+check("rules guard: a first-file .. path still expands, as before", "SECRET OUTSIDE" in _wt_rules._rules_source(G / "tree" / "demo-top.md"))
+(G / "tree" / "demo-link-out.md").symlink_to(G / "outside" / "demo-secret.md"); (G / "tree" / "demo-linkdir").symlink_to(G / "outside", target_is_directory=True)
+(G / "tree" / "demo-link-in.md").symlink_to(G / "tree" / "demo-inside.md")
+x = _gsrc("@demo-link-out.md\n@demo-linkdir/demo-secret.md\n@demo-link-in.md\n")
+check("rules guard: a symlinked file or directory pointing outside stays plain, a symlink pointing inside expands", "SECRET" not in x and "@demo-link-out.md" in x and "@demo-linkdir/demo-secret.md" in x and "INSIDE OK" in x, x)
+# the budget
+F = R / "fan"; F.mkdir()
+for lvl in range(1, 5):
+    for i in range(20): (F / f"demo-f{lvl}-{i}.md").write_text(f"- f{lvl}-{i}\n" + ("".join(f"@demo-f{lvl + 1}-{j}.md\n" for j in range(20)) if lvl < 4 else ""), encoding="utf-8")
+(F / "demo-top.md").write_text("# Fan\n" + "".join(f"@demo-f1-{j}.md\n" for j in range(20)), encoding="utf-8")
+_opened = []; _real_open = open
+_wt_rules.open = lambda f, *a, **k: (_opened.append(str(f)), _real_open(f, *a, **k))[1]
+try:
+    fx = _wt_rules._rules_source(F / "demo-top.md")
+finally:
+    del _wt_rules.open
+check("rules budget: a 20-by-20 fan-out at depth 4 reads at most 64 files and returns a bounded text", 20 < len(_opened) <= 64 and len(fx) < _wt_rules._IMPORT_TOTAL_MAX + len((F / "demo-top.md").read_text()), (len(_opened), len(fx)))
+check("rules budget: the three limits are named constants", (_wt_rules._IMPORT_FILES_MAX, _wt_rules._IMPORT_TOTAL_MAX, _wt_rules._IMPORT_FILE_MAX) == (64, 512 * 1024, 256 * 1024))
+(F / "demo-big.md").write_text("- big\n" + "x" * (_wt_rules._IMPORT_FILE_MAX + 10), encoding="utf-8"); (F / "demo-fits.md").write_text("- fits\n" + "x" * (_wt_rules._IMPORT_FILE_MAX - 10), encoding="utf-8")
+(F / "demo-sizes.md").write_text("@demo-big.md\n@demo-fits.md\n", encoding="utf-8")
+x = _wt_rules._rules_source(F / "demo-sizes.md")
+check("rules budget: a file over the per-file limit stays a plain line, one under it expands", x.startswith("@demo-big.md\n- fits\n") and "- big" not in x, x[:60])
+for i in range(10): (F / f"demo-h{i}.md").write_text(f"- h{i}\n" + "y" * 100_000, encoding="utf-8")
+(F / "demo-total.md").write_text("".join(f"@demo-h{i}.md\n" for i in range(10)), encoding="utf-8")
+x = _wt_rules._rules_source(F / "demo-total.md")
+check("rules budget: the characters of imported text in all are bounded, the rest stay plain lines", 3 <= x.count("- h") <= 5 and len(x) < _wt_rules._IMPORT_TOTAL_MAX + 200 and x.count("@demo-h") == 10 - x.count("- h"), (len(x), x.count("- h")))
+for lvl in range(1, 5): (F / f"demo-e{lvl}.md").write_text((f"@demo-e{lvl + 1}.md\n@demo-e{lvl + 1}.md\n" if lvl < 4 else "- leaf\n"), encoding="utf-8")
+(F / "demo-dia.md").write_text("@demo-e1.md\n@demo-e1.md\n", encoding="utf-8")
+x = _wt_rules._rules_source(F / "demo-dia.md")
+check("rules budget: a 4-level binary diamond still expands in full", x.count("- leaf") == 16 and "@" not in x, x)
+(F / "demo-fence.md").write_text("```\n@demo-leaf-fence.md\n```\n", encoding="utf-8"); (F / "demo-leaf-fence.md").write_text("FENCED IMPORT\n", encoding="utf-8")
+(F / "demo-fence-top.md").write_text("@demo-fence.md\n", encoding="utf-8")
+check("rules: an import line inside a code fence is expanded like any other (at the first level and nested)", "FENCED IMPORT" in _wt_rules._rules_source(F / "demo-fence.md") and "FENCED IMPORT" in _wt_rules._rules_source(F / "demo-fence-top.md"))
+# a rejected file costs one read attempt, once; a sibling directory that shares the rulebook directory's name prefix is outside it; sizes count characters; the exact edges of each limit
+import time as _time
+def _wr(path, text): path.write_text(text, encoding="utf-8")
+def _opens(fn):                                           # (result, the files the render opened)
+    got = []; real = open
+    _wt_rules.open = lambda f, *a, **k: (got.append(str(f)), real(f, *a, **k))[1]
+    try: return fn(), got
+    finally: del _wt_rules.open
+H = R / "hot"; H.mkdir()
+_wr(H / "demo-big.md", "z" * (_wt_rules._IMPORT_FILE_MAX + 1))
+for n in ("demo-mid1.md", "demo-mid2.md"): _wr(H / n, "@demo-big.md\n" * (_wt_rules._IMPORT_FILE_MAX // 13) + "@demo-big.md\n"[: _wt_rules._IMPORT_FILE_MAX % 13])
+_mid = (H / "demo-mid1.md").read_text(); assert len(_mid) == _wt_rules._IMPORT_FILE_MAX, len(_mid)
+_wr(H / "demo-top.md", "@demo-mid1.md\n@demo-mid2.md\n")
+_t0 = _time.monotonic(); (hx, hopen) = _opens(lambda: _wt_rules._rules_source(H / "demo-top.md")); _dt = _time.monotonic() - _t0
+check("rules budget: lines naming one over-limit file read it once, not once per line (65k such lines finish in seconds, output unchanged)",
+      _dt < 3 and len(hopen) <= 4 and hx == _mid.rstrip("\n") + "\n" + _mid.rstrip("\n") + "\n", (_dt, len(hopen)))
+for i in range(64):
+    os.link(H / "demo-big.md", H / f"demo-bigl{i}.md")
+_wr(H / "demo-good.md", "- good rule\n")
+_wr(H / "demo-att.md", "".join(f"@demo-bigl{i}.md\n" for i in range(64)) + "@demo-good.md\n")
+(ax, aopen) = _opens(lambda: _wt_rules._rules_source(H / "demo-att.md"))
+check("rules budget: every read attempt counts toward the file limit, a refused file too (the 65th attempt is not made)", len(aopen) == 64 and "- good rule" not in ax and ax.endswith("@demo-good.md\n"), (len(aopen), ax[-30:]))
+# a sibling directory with the same name prefix
+PX = R / "prefix"; (PX / "claude").mkdir(parents=True); (PX / "claude-evil").mkdir(); (PX / "claude" / "sub").mkdir()
+_wr(PX / "claude-evil" / "demo-x.md", "EVIL SIBLING\n")
+(PX / "claude" / "demo-link-evil.md").symlink_to(PX / "claude-evil" / "demo-x.md")
+_wr(PX / "claude" / "demo-top.md", "TOP\n@demo-mid.md\n")
+_wr(PX / "claude" / "demo-mid.md", "@../claude-evil/demo-x.md\n@sub/../../claude-evil/demo-x.md\n@demo-link-evil.md\n@demo-deep.md\n")
+_wr(PX / "claude" / "demo-deep.md", "@sub/../../claude-evil/demo-x.md\n@sub/../demo-ok.md\n"); _wr(PX / "claude" / "demo-ok.md", "STAYS INSIDE\n")
+px = _wt_rules._rules_source(PX / "claude" / "demo-top.md")
+check("rules guard: a sibling directory sharing the rulebook directory's name prefix is outside it (.., a .. at depth 3, a symlink)", "EVIL" not in px and px.count("claude-evil/demo-x.md") == 3 and "@demo-link-evil.md" in px and "STAYS INSIDE" in px, px)
+# characters, not bytes
+K = "\ud55c"; assert len(K.encode()) == 3
+_wr(H / "demo-kfit.md", K * _wt_rules._IMPORT_FILE_MAX); _wr(H / "demo-kover.md", K * (_wt_rules._IMPORT_FILE_MAX + 1))
+_wr(H / "demo-ktop.md", "@demo-kfit.md\n@demo-kover.md\n")
+kx = _wt_rules._rules_source(H / "demo-ktop.md")
+check("rules budget: the limits count characters, not bytes (a file of 262144 three-byte characters expands, 262145 does not)", kx.startswith(K * 10) and kx.count(K) == _wt_rules._IMPORT_FILE_MAX and kx.endswith("\n@demo-kover.md\n"), (len(kx), kx[-20:]))
+# edges: the per-file limit, the total, the count of files
+E = R / "edge"; E.mkdir()
+def _sized(name, n, tag): _wr(E / name, tag + "x" * (n - len(tag)))
+_F, _T = _wt_rules._IMPORT_FILE_MAX, _wt_rules._IMPORT_TOTAL_MAX
+_sized("demo-fe.md", _F, "QE"); _sized("demo-fo.md", _F + 1, "QO"); _wr(E / "demo-fu.md", "QU" + "x" * (_F - 3))
+_wr(E / "demo-ftop.md", "@demo-fu.md\n@demo-fe.md\n@demo-fo.md\n")
+fx = _wt_rules._rules_source(E / "demo-ftop.md")
+check("rules budget: per-file edge: one under and exactly at the limit expand, one over does not", fx.startswith("QU") and "\nQE" in fx and "QO" not in fx and fx.endswith("\n@demo-fo.md\n"), (len(fx), fx[-20:]))
+_sized("demo-ta.md", _F, "QA"); _sized("demo-tb.md", _F - 1, "QB"); _sized("demo-tc.md", _F, "QC"); _sized("demo-td.md", 1, "Q")
+_wr(E / "demo-t1.md", "@demo-ta.md\n@demo-tb.md\n"); _wr(E / "demo-t2.md", "@demo-ta.md\n@demo-tc.md\n"); _wr(E / "demo-t3.md", "@demo-ta.md\n@demo-tc.md\n@demo-td.md\n")
+t1, t2, t3 = (_wt_rules._rules_source(E / f"demo-t{i}.md") for i in (1, 2, 3))
+check("rules budget: total edge: one character under and exactly at the limit expand, one over does not",
+      "QB" in t1 and "@demo-tb.md" not in t1 and "QC" in t2 and "@demo-tc.md" not in t2 and "QC" in t3 and t3.endswith("@demo-td.md\n") and _F * 2 == _T, (len(t1), len(t2), t3[-20:]))
+for i in range(65): _wr(E / f"demo-c{i}.md", f"- c{i}\n")
+_wr(E / "demo-ctop.md", "".join(f"@demo-c{i}.md\n" for i in range(65)))
+cx = _wt_rules._rules_source(E / "demo-ctop.md")
+check("rules budget: file-count edge: the 64th file expands, the 65th stays a plain line", "- c63\n" in cx and "- c64" not in cx and cx.endswith("@demo-c64.md\n"), cx[-40:])
 # a second person's RULES.md: plain markdown, no surface markers, no import, no header comment: served whole, both profiles
 body = "# Our rules\n\n## Board\n\n- one item per deliverable\n- a page per project\n\n## Pages\n\n- edit the file, commit and push\n"
 (R / "nomarkers.md").write_text(body, encoding="utf-8")
