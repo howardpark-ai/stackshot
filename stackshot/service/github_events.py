@@ -17,6 +17,7 @@ from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
+from stackshot.service import answer as _answer
 from stackshot.service import handoff as _handoff
 from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
@@ -57,8 +58,9 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
         answers = [a for a in meta["answers"] if isinstance(a, dict)] if isinstance(meta.get("answers"), list) else []
         if any(a.get("comment_id") == c.get("id") for a in answers):
             return True
-        answers.append({"ts": float(c.get("ts") or time.time()), "kind": "comment", "text": str(c.get("text") or ""), "via": "github",
-                        "url": str(c.get("url") or ""), "comment_id": c.get("id")})
+        rec = {"ts": float(c.get("ts") or time.time()), "kind": "comment", "text": str(c.get("text") or ""), "via": "github",
+               "url": str(c.get("url") or ""), "comment_id": c.get("id")}
+        answers.append(rec)
         meta["answers"] = answers
         try:
             r_ = _ho.pending_his(item)
@@ -68,5 +70,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
             print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         _writes.save(gid, item, activity=_activity.ANSWER, activity_at=float(c.get("ts") or 0) or None)      # the owner's comment is an answer: real activity though the save is the server's, stamped at the comment's own time (a backlog read after a restart is not activity now)
     _hooks().publish()
-    _telling.tell_comment(gid, item, str(c.get("text") or ""))
+    told = _telling.tell_comment(gid, item, str(c.get("text") or ""))
+    with _writes.ITEM_LOCK:      # the sessions told are kept on the comment's record, as for an answer on the board: none of them is told it again in the reply to its next write
+        _answer._record_told(gid, rec, told)
     return True
