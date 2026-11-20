@@ -458,7 +458,8 @@ check("pause off: …the recipient with three watched items and a plain wake get
 mo = next(x for x in w if x[1] == UO)
 check("pause off: …one item alone is one line", "\n" not in mo[2] and "a73" in mo[2], mo[2])
 mf = next(x for x in w if x[1] == UF)
-check("pause off: …a front agent gets the mark a front agent takes", mf[2].startswith(_wt_text._FOR_OWNER), mf[2])
+check("pause off: …a front agent of a project with no builder (its other background agents have no builder's mandate) keeps the item and is told without the mark: the wake asks him nothing", not mf[2].startswith(_wt_text._FOR_OWNER) and "a74" in mf[2] and mt(74).get("mover") == "home-front"
+      and not [x for x in w if x[1] == U["home-gone"]], (mf[2], mt(74)))
 check("pause off: …the messages that carry only watched items are tagged watch, the merged one is the wake pass's", [x[3] for x in w if x[1] == UO] == ["watch"] and [x[3] for x in w if x[1] == UB] == ["wake"], [(x[1], x[3]) for x in w])
 check("pause off: today's wake pass released the plain hold in the same pass", "hold" not in mt(75) and "a75" in woke, mt(75))
 SENT_COUNT = len(SENT); wakes_svc.wake_pass()
