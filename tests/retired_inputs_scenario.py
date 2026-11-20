@@ -170,7 +170,8 @@ upd(13, step="Click the link and say done", mover=OWN, next=f"{OWN}: click the l
 err, text = upd(13, step="none")
 check("withdraw: step=\"none\" drops his step and the your-step state, says so, and the mover is no longer him", not err and "step" not in mt(13) and "state" not in mt(13) and "step withdrawn" in text and mt(13).get("mover") != OWN, (text, mt(13)))
 check("withdraw: …and his open step line leaves the checklist", not any(ln.startswith(f"{OWN}:") for ln in str(mt(13).get("next") or "").splitlines()) or "dropped" in json.dumps(mt(13).get("steps")), mt(13))
-refused("withdraw: step=\"none\" on an item that stores no step is refused", upd(13, step="none"), "stores none")
+err, text = upd(13, step="none")
+check("withdraw: step=\"none\" on an item that stores no step goes through, changes nothing and says so in one line", not err and "(fixed for you: step=\"none\" changed nothing: this item stores no step" in text and "send it again" not in text, text)
 refused("withdraw: step=\"none\" with supplies is refused (one of them)", upd(13, step="none", supplies="x", after=["a12"]), "pass one of them")
 item(14, state="doing", needs=[BACK], mover=BACK)
 err, text = upd(14, after=["a12"], supplies="the build artifact", ask_by=day(5))
@@ -227,6 +228,22 @@ check("route: …and its usage text no longer lists --state", "--state <doing" n
 check("no_chase: watchers.add_chase and states.hint are gone", not hasattr(watchers, "add_chase") and not hasattr(states, "hint"), None)
 check("no_chase: a chase an older write stored still counts (two of them, on a relay wait)", watchers.chased_out({"wait_kind": "relay", "chases": [{"at": 1, "by": "x", "note": "a"}, {"at": 2, "by": "x", "note": "b"}]})
       and not watchers.chased_out({"wait_kind": "relay", "chases": [{"at": 1, "by": "x", "note": "a"}]}), None)
+
+# ---- a fix the server made through the real tool path, and the writer's next write on the item undoing it: logged as a bounce-back (call_log.bounces), counted beside the fix
+item(41)
+long_desc = "- Goal: " + "a" * 55 + ". " + "b" * 60 + "."
+err, text = upd(41, description=long_desc)
+check("bounce: a description bullet over the limit is split, the write goes through, one line says so", not err and "description bullet over 120 characters was split" in text and "send it again" not in text, text)
+check("bounce: …stored as two bullets", rd(41)["description"] == "- Goal: " + "a" * 55 + ".\n- " + "b" * 60 + ".", rd(41)["description"])
+err, text = upd(41, description=long_desc)
+calls_rows = [json.loads(l) for p_ in sorted((T / "state/calls").glob("*.jsonl")) for l in p_.read_text(encoding="utf-8").splitlines() if l.strip()]
+check("resend: the same long description sent again is no new fix and no bounce-back: no reply line, one fix row of that kind, no bounce row, one History line, the text as stored",
+      not err and "fixed for you" not in text and [r.get("fix") for r in calls_rows].count(["description-bullet"]) == 1 and not [r for r in calls_rows if r.get("bounce")]
+      and len([x for x in ((rd(41).get("metadata") or {}).get("stall") or {}).get("log") or [] if "split by the server" in str(x.get("text"))]) == 1, (text, calls_rows[-3:]))
+err, text = upd(41, description="- Goal: something else entirely")
+calls_rows = [json.loads(l) for p_ in sorted((T / "state/calls").glob("*.jsonl")) for l in p_.read_text(encoding="utf-8").splitlines() if l.strip()]
+check("bounce: the same writer rewriting that description on that item is logged as a bounce-back of description-bullet, the fix before it as a fix of that kind, and the reply carries no extra line",
+      not err and "fixed for you" not in text and ["description-bullet"] in [r.get("fix") for r in calls_rows] and [r.get("bounce") for r in calls_rows if r.get("bounce")] == [["description-bullet"]], (text, calls_rows[-3:]))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": retired inputs scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from typing import Any
 
 from fastmcp.exceptions import ToolError
@@ -19,7 +20,7 @@ from stackshot.core import readonly as _ro
 from stackshot.core import retired_inputs as _retired
 from stackshot.core.instance import OWNER
 from stackshot.github import ghsync as _gh
-from stackshot.model.ids import _item_url
+from stackshot.model.ids import _item_url, _norm_id
 from stackshot.service.store import _path
 
 REFUSAL_LOG_MAX = 300      # characters of a refusal's reason kept in the log line
@@ -37,6 +38,19 @@ def _refusal_line(tool: str, args: Any, err: BaseException) -> str:
     return f"refused: {tool} item={item or '-'} sender={sender or '-'}: {reason}"
 
 
+def _written_item(tool: str, args: dict[str, Any], result: Any) -> str:
+    """The store id of the item a counted write was about: its item_id argument, or for a create the id the reply names ("created board#N …"); "" when there is none."""
+    try:
+        raw = str(args.get("item_id") or "")
+        if not raw and tool == "create":
+            text = next((c.text for c in getattr(result, "content", None) or [] if getattr(c, "type", "") == "text" and isinstance(getattr(c, "text", None), str)), "")
+            m = re.match(r"created (\S+)", text)
+            raw = m.group(1) if m else ""
+        return _norm_id(raw, bare=True) if raw.strip() else ""
+    except Exception:  # noqa: BLE001 — an id that does not read is no item
+        return ""
+
+
 class _RefusalLog(_MW):
     """a write refused inside a Code Mode script shows its reason only if the script returns it, so the server keeps it too: one stderr line (the journal)
     for every ToolError a tool call ends in, innermost of the middleware so the reason is the tool's own text, before _LinkIds rewrites its ids. The same
@@ -47,6 +61,7 @@ class _RefusalLog(_MW):
         name = str(getattr(msg, "name", "") or "?")
         counted = name in _calls.COUNTED
         token = _calls.begin() if counted else None
+        began = time.time()          # when this call began: a fix made after it is none this call could have read
         try:
             result = await call_next(context)
         except ToolError as e:
@@ -56,7 +71,8 @@ class _RefusalLog(_MW):
                 args = getattr(msg, "arguments", None)
                 print(_refusal_line(name, args, e), file=sys.stderr, flush=True)
                 a = args if isinstance(args, dict) else {}
-                _calls.record(name, False, item=a.get("item_id"), sender=a.get("sender"), why=str(e))
+                item_ = a.get("item_id")
+                _calls.record(name, False, item=item_, sender=a.get("sender"), why=str(e), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "")
             except Exception as le:  # noqa: BLE001  — a log line is never worth losing the refusal
                 print(f"mcp refusal log failed: {le}", file=sys.stderr, flush=True)
             raise
@@ -65,8 +81,15 @@ class _RefusalLog(_MW):
                 _calls.end(token)
             raise
         if token is not None:
-            fixes = _calls.end(token)
+            fixes, detail = _calls.end_detail(token)
             try:
+                a = getattr(msg, "arguments", None)
+                a = a if isinstance(a, dict) else {}
+                gid, who = _written_item(name, a, result), re.sub(r"\s+", " ", str(a.get("sender") or "")).strip()[:80]
+                made = {k for k, _ in fixes}
+                back = dict.fromkeys(_calls.bounces(gid, who, a, since=began))          # a fix this writer left open on this item, made before this call began, that this write undoes or redoes: each kind once, even where the store holds two of it
+                fixes = fixes + [(_calls.BOUNCE + k, "") for k in back if _calls.BOUNCE + k not in made]      # …and not again when the call already counted it itself
+                _calls.remember(gid, who, detail)
                 note = _calls.reply_note(fixes)
                 if note:
                     for c in getattr(result, "content", None) or []:
@@ -76,7 +99,7 @@ class _RefusalLog(_MW):
                     sc = getattr(result, "structured_content", None)
                     if isinstance(sc, dict) and isinstance(sc.get("result"), str):
                         sc["result"] += note
-                _calls.record(name, True, fixes=fixes)
+                _calls.record(name, True, item=gid, sender=who, fixes=fixes)
             except Exception as le:  # noqa: BLE001
                 print(f"mcp call log failed: {le}", file=sys.stderr, flush=True)
         return result

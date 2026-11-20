@@ -564,4 +564,151 @@ check("create and update: the tool text states the 80-character subject limit", 
 check("complete and update: …and the 120-character reason limit", all("at most 120 characters (longer is refused" in TOOLS[t] for t in ("complete", "update")), TOOLS["complete"][:300])
 check("the connector's instructions state them", "`- ` bullets" in server.mcp.instructions and "120 characters" in server.mcp.instructions)
 
+# ---- 5. a bullet over the limit is split at the end of its sentences: the write goes through as meant and the reply says so
+from stackshot.core import call_log as _CL
+def with_fixes(f):
+    tok = _CL.begin()
+    try:
+        out = f()
+    except BaseException:
+        _CL.end(tok)
+        raise
+    return out, _CL.end(tok)
+S1, S2 = "Goal: " + "a" * 55 + ".", "b" * 60 + "."
+r, fx = with_fixes(lambda: create(f"- {S1} {S2}"))
+g = r[1]
+check("5 a bullet over 120 made of two sentences is split in two bullets and the item is made", _service_store._load(g)["description"] == f"- {S1}\n- {S2}", _service_store._load(g)["description"])
+check("5 …the fix is counted once, as description-bullet, and its line names the limit and says no word changed", [k for k, _ in fx] == ["description-bullet"] and "over 120 characters" in fx[0][1] and "no word changed" in fx[0][1], fx)
+note = _CL.reply_note(fx)
+check("5 …the reply line does not invite a resend: the same bullet sent again would be refused", note.startswith("\n(fixed for you: 1 description bullet") and note.endswith(".)") and "send it again" not in note, note)
+r, fx = with_fixes(lambda: create(f"- Goal: " + "c" * 50 + "; " + "d" * 50 + "; " + "e" * 40 + "\n- Second bullet"))
+d = _service_store._load(r[1])["description"].splitlines()
+check("5 a semicolon ends a clause too: the clauses that fit together stay together, every semicolon stays, the other bullets stay", d == ["- Goal: " + "c" * 50 + "; " + "d" * 50 + ";", "- " + "e" * 40, "- Second bullet"], d)
+check("5 …the words and the semicolons are all there", " ".join(" ".join(d).replace("- ", "").split()) == "Goal: " + "c" * 50 + "; " + "d" * 50 + "; " + "e" * 40 + " Second bullet", d)
+refused("5 one long sentence has no end to split at: still refused with its length and the fix", lambda: create(bullet(121)), "description bullet is 121 characters", "limit is 120")
+refused("5 a clause of its own over the limit: still refused", lambda: create("- Goal: ok. " + "z" * 130), "description bullet is")
+refused("5 an end of sentence inside a link is no place to cut: still refused", lambda: create("- Goal: " + "x" * 100 + " [one. two](https://example.com/a) " + "y" * 30), "description bullet is")
+refused("5 a split that would pass the line cap is no fix: still refused", lambda: create("\n".join(["- Goal: " + "p" * 60 + ". " + "q" * 60] + [f"- fact {i}" for i in range(7)])), "description bullet is")
+refused("5 a long quoted line (his words) is never split: still refused", lambda: create("- Goal: ok\n> " + "w" * 70 + ". " + "v" * 70), "description bullet is")
+refused("5 a prose line is still no bullet: refused", lambda: create("- Goal: ok. " + "k" * 50 + "\nplain " + "m" * 130), "not a `- ` bullet")
+r, fx = with_fixes(lambda: create("- Goal: ok\n- fits"))
+check("5 a description within the form is no fix and no line", fx == [] and _CL.reply_note(fx) == "", fx)
+g2 = create()[1]
+_, fx = with_fixes(lambda: _update_svc._update(g2, description=f"- {S1} {S2}", sender=MAIN))
+check("5 update: the same split on a description written by an update, counted and told", _service_store._load(g2)["description"] == f"- {S1}\n- {S2}" and [k for k, _ in fx] == ["description-bullet"], (_service_store._load(g2)["description"], fx))
+refused("5 update: a bullet with nothing to split is refused as before", lambda: _update_svc._update(g2, description=bullet(125), sender=MAIN), "description bullet is 125 characters")
+check("5 split_long: None for a text with no long bullet, and the same for a line_max of 0", BT.split_long("- a\n- b", 8, 120) is None and BT.split_long(f"- {S1} {S2}", 8, 0) is None, None)
+check("5 split_long: a link and a code span are never cut, a fenced block and a quote are left", BT.split_long("- " + "x" * 60 + ". `a. b` " + "y" * 60, 8, 120) is None or "`a. b`" in BT.split_long("- " + "x" * 60 + ". `a. b` " + "y" * 60, 8, 120)[0], None)
+
+# ---- 5b. the review of the split: children, the History line, the 120 boundary, where a cut is not made, line ends
+def hist(gid):
+    return [x.get("text") for x in ((_service_store._load(gid).get("metadata") or {}).get("stall") or {}).get("log") or []]
+LONG2 = "- Goal: " + "a" * 55 + ". " + "b" * 60 + "."
+check("5b children: a long bullet that has an indented bullet under it is not split (the children would end up under the last piece): split_long gives none", BT.split_long(LONG2 + "\n  - child one\n  - child two", 8, 120) is None, None)
+refused("5b children: …so the write is refused as before, with the length and the limit", lambda: create(LONG2 + "\n  - child one"), "description bullet is", "limit is 120")
+r, fx = with_fixes(lambda: create(f"- Goal: ok\n  - {S1} child\n- {S1} {S2}"))
+check("5b children: a long bullet with no children is still split when another bullet has them (the children stay under their own parent)", _service_store._load(r[1])["description"] == f"- Goal: ok\n  - {S1} child\n- {S1}\n- {S2}", (_service_store._load(r[1])["description"], fx))
+sp = BT.split_long(f"- {S1} {S2}\n- tail", 8, 120)
+check("5b idempotent: the split text keeps the form, and a second split finds nothing to do", sp is not None and BT.judge(sp[0], 8, 120) is None and BT.split_long(sp[0], 8, 120) is None, sp)
+check("5b history: a created item records the split in History (the stored text is not the text sent)", any("long bullet" in (t or "") and "split by the server" in (t or "") for t in hist(g)), hist(g))
+g3 = create()[1]
+before3 = hist(g3)
+_update_svc._update(g3, description=f"- {S1} {S2}", sender=MAIN)
+check("5b history: an update that is split records it in History, once", [t for t in hist(g3) if t not in before3 and "split by the server" in t] and len([t for t in hist(g3) if "split by the server" in t]) == 1, hist(g3))
+g4 = create()[1]
+_update_svc._update(g4, description="- Goal: A thing\n- fits", sender=MAIN)
+check("5b history: a description that needed no split adds no such line", not any("split by the server" in (t or "") for t in hist(g4)), hist(g4))
+# the 120 boundary: a clause of exactly 120 stands, one of 121 is no fix; two clauses that merge to exactly 120 stay one bullet
+A117 = "a" * 117 + "."                            # "- " + A117 reads 120
+check("5b boundary: a clause that reads exactly 120 is kept (the split is made)", BT.split_long(f"- {A117} " + "c" * 10 + ".", 8, 120) is not None and BT.split_long(f"- {A117} " + "c" * 10 + ".", 8, 120)[0].splitlines()[0] == "- " + A117, None)
+check("5b boundary: a clause that reads 121 is no fix", BT.split_long("- " + "a" * 118 + ". " + "c" * 10 + ".", 8, 120) is None, None)
+k120 = "- " + "a" * 56 + ". " + "b" * 59 + "."          # two clauses that read 120 together: one bullet; 121 together: two
+check("5b boundary: two clauses that together read exactly 120 stay one bullet, one more character and they are two",
+      BT.split_long(k120 + " " + "z" * 20 + ".", 8, 120)[0].splitlines()[0] == k120 and BT.split_long("- " + "a" * 56 + ". " + "b" * 60 + ". " + "z" * 60 + ".", 8, 120)[0].splitlines()[:2] == ["- " + "a" * 56 + ".", "- " + "b" * 60 + "."], BT.split_long(k120 + " " + "z" * 20 + ".", 8, 120))
+# quotes are left as they are
+q = "> " + "w" * 70 + ". " + "v" * 70
+res_q = BT.split_long(f"- {S1} {S2}\n{q}", 8, 120)
+check("5b quote: a long quoted line stays as written while a long bullet beside it is split", res_q is not None and res_q[0].splitlines()[-1] == q and res_q[0].count("\n") == 2, res_q)
+check("5b quote: a text whose only long line is a quote has nothing to split", BT.split_long(q, 8, 120) is None, None)
+# where a cut is not made: the guard shows where the only cut there is would be the forbidden one (the pieces would merge back otherwise), so the text is no fix
+def pieces(t):
+    got = BT.split_long(t, 8, 120)
+    return None if got is None else got[0].splitlines()
+for w in ("e.g.", "i.e.", "Mr.", "Dr.", "vs."):
+    check(f"5b no cut: after {w} (the one cut there is): no fix", pieces("- " + "x" * 60 + f" {w} " + "y" * 60 + ".") is None, pieces("- " + "x" * 60 + f" {w} " + "y" * 60 + "."))
+check("5b no cut: after a numbered item like 3.", pieces("- " + "x" * 60 + " step 3. " + "y" * 60 + ".") is None, None)
+check("5b no cut: inside parentheses", pieces("- " + "x" * 50 + " (first part. second part " + "y" * 60 + ")") is None, None)
+check("5b no cut: after an entity (the semicolon of &amp; is no clause end, the text never comes out as '&amp')", pieces("- " + "x" * 60 + " fish &amp; " + "y" * 60 + ".") is None, None)
+check("5b no cut: …and one more spelled with a number, &#38;", pieces("- " + "x" * 60 + " fish &#38; " + "y" * 60 + ".") is None, None)
+check("5b no cut: a real sentence end beside them is still a cut (an abbreviation in the text does not stop the split)", pieces("- Use e.g. " + "x" * 10 + ", then " + "y" * 60 + ". " + "z" * 40 + ".") is not None and len(pieces("- Use e.g. " + "x" * 10 + ", then " + "y" * 60 + ". " + "z" * 40 + ".")) == 2, None)
+check("5b no cut: …a parenthesis that closes before the full stop is no bar", pieces("- " + "x" * 50 + " (a note) " + "y" * 20 + ". " + "z" * 60 + ".") is not None, None)
+check("5b no cut: …and a semicolon after a word still ends a clause", pieces("- " + "x" * 60 + "; " + "y" * 60 + ".") == ["- " + "x" * 60 + ";", "- " + "y" * 60 + "."], pieces("- " + "x" * 60 + "; " + "y" * 60 + "."))
+# the re-check of the split: a text whose split would still break the form (a prose line elsewhere) is left as written, and nothing is counted or noted
+(got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(LONG2 + "\nplain prose that is no bullet"))
+check("5b re-check: a split text that still breaks the form (a later line that is no bullet) is no fix: the text comes back as written, no note, nothing counted", got_t == LONG2 + "\nplain prose that is no bullet" and got_n == "" and fx_d == [], (got_t, got_n, fx_d))
+(got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(LONG2))
+check("5b fix_long_bullets: the text split, the History line for the item (the count, by the server), and the one counted fix", got_t.count("\n") == 1 and got_n == "description: 1 long bullet split by the server at the end of a sentence" and [k for k, _ in fx_d] == ["description-bullet"], (got_t, got_n, fx_d))
+(got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets("- Goal: ok\n- fits"))
+check("5b fix_long_bullets: a description that fits comes back as it is with no note", got_t == "- Goal: ok\n- fits" and got_n == "" and fx_d == [], (got_t, got_n, fx_d))
+
+# line ends
+crlf = f"- {S1} {S2}\r\n- tail\r\n"
+res_c = BT.split_long(crlf, 8, 120)
+check("5b line ends: a CRLF text is split with CRLF line ends and the same trailing end (nothing but the cut changes)", res_c is not None and res_c[0] == f"- {S1}\r\n- {S2}\r\n- tail\r\n" and "\n" not in res_c[0].replace("\r\n", ""), res_c)
+check("5b line ends: an LF text stays LF", BT.split_long(f"- {S1} {S2}\n", 8, 120)[0] == f"- {S1}\n- {S2}\n", None)
+
+# ---- 5c. the second review: the splitter changes the text at the cut and nowhere else; it is linear and refuses a wall of text at once; a resend is no new fix
+check("5c exact: a semicolon that ends a piece stays, in the stored text and in the splitter", pieces("- " + "x" * 60 + "; " + "y" * 60 + "; " + "z" * 20) == ["- " + "x" * 60 + ";", "- " + "y" * 60 + "; " + "z" * 20], pieces("- " + "x" * 60 + "; " + "y" * 60 + "; " + "z" * 20))
+mixed = f"- {S1} {S2}\r\n- k2\n- k3\r"
+check("5c exact: mixed line ends are kept as they were (CRLF, LF and a lone CR), the cut takes its own line's end", BT.split_long(mixed, 8, 120)[0] == f"- {S1}\r\n- {S2}\r\n- k2\n- k3\r", BT.split_long(mixed, 8, 120))
+check("5c exact: a line break of another kind (NEL, form feed, U+2028) is kept too, and a last line with no end is cut with the first end the text has",
+      BT.split_long(f"- {S1} {S2}\x85- k\x0c- {S1} {S2}", 8, 120)[0] == f"- {S1}\x85- {S2}\x85- k\x0c- {S1}\x85- {S2}" and BT.split_long(f"- k\u2028- {S1} {S2}", 8, 120)[0] == f"- k\u2028- {S1}\u2028- {S2}", BT.split_long(f"- {S1} {S2}\x85- k\x0c- {S1} {S2}", 8, 120))
+sp3 = "- " + "a" * 30 + ".   " + "b" * 30 + ".  " + "c" * 60 + "."
+check("5c exact: the spaces between two clauses that stay together stay as written (a run of three), the cut drops only the gap it is made at", pieces(sp3) == ["- " + "a" * 30 + ".   " + "b" * 30 + ".", "- " + "c" * 60 + "."], pieces(sp3))
+check("5c exact: a golden split: three sentences with an indent, a link and a code span, as the splitter has always cut them",
+      pieces("  - " + "a" * 40 + " [one. two](https://example.com/a) `x. y`. " + "b" * 50 + ". " + "c" * 30 + ".") == ["  - " + "a" * 40 + " [one. two](https://example.com/a) `x. y`. " + "b" * 50 + ".", "  - " + "c" * 30 + "."], pieces("  - " + "a" * 40 + " [one. two](https://example.com/a) `x. y`. " + "b" * 50 + ". " + "c" * 30 + "."))
+# more abbreviations and emphasis
+for w in ("etc.", "U.S.", "No.", "a.m.", "St.", "Inc.", "Jr."):
+    check(f"5c no cut: after {w} (the one cut there is): no fix", pieces("- " + "x" * 60 + f" {w} " + "y" * 60 + ".") is None, pieces("- " + "x" * 60 + f" {w} " + "y" * 60 + "."))
+check("5c no cut: inside **emphasis** (the stars would be left open on both bullets): no fix", pieces("- **" + "x" * 60 + ". " + "y" * 60 + "** and " + "z" * 30) is None, pieces("- **" + "x" * 60 + ". " + "y" * 60 + "** and " + "z" * 30))
+check("5c no cut: …a closed emphasis before the cut is no bar", pieces("- **bold** " + "x" * 60 + ". " + "y" * 60 + ".") == ["- **bold** " + "x" * 60 + ".", "- " + "y" * 60 + "."], pieces("- **bold** " + "x" * 60 + ". " + "y" * 60 + "."))
+check("5c no cut: a word that only ends like an abbreviation (Nora.) is a sentence end and is cut", pieces("- " + "x" * 60 + " Nora. " + "y" * 60 + ".") is not None, None)
+# the boundary: a bullet that reads exactly line_max is left alone (a `>=` for the test of a long bullet would split it and merge it back, and refuse the whole text)
+k120b = "- " + "a" * 58 + ". " + "b" * 57 + "."
+long_b = "- " + "c" * 60 + ". " + "d" * 63 + "."
+check("5c boundary: a two-sentence bullet that reads exactly 120 stays one bullet beside a longer one that is split", len(k120b) == 120 and pieces(k120b + "\n" + long_b) == [k120b, "- " + "c" * 60 + ".", "- " + "d" * 63 + "."], pieces(k120b + "\n" + long_b))
+r, fx = with_fixes(lambda: create("- Goal: ok\n" + k120b + "\n" + long_b))
+check("5c boundary: …and the write is made, not refused", _service_store._load(r[1])["description"].splitlines()[-3:] == [k120b, "- " + "c" * 60 + ".", "- " + "d" * 63 + "."], fx)
+# a wall of text: refused at once, before any bullet is scanned, and in linear time
+class _CountRx:
+    def __init__(self, rx): self.rx, self.calls = rx, 0
+    def finditer(self, *a, **k): self.calls += 1; return self.rx.finditer(*a, **k)
+for label, wall in (("70-character sentences", ("s" * 69 + ". ") * 2900), ("short clauses", "ab. " * 50000), ("links", "[a. b](http://x.y/z) q. " * 8000)):
+    wall_t = "- " + wall.strip()
+    probe = _CountRx(BT._RX_CLAUSE_END); real_rx = BT._RX_CLAUSE_END; BT._RX_CLAUSE_END = probe
+    try:
+        t0 = time.time(); got_w = BT.split_long(wall_t, 8, 120); dt_w = time.time() - t0
+    finally:
+        BT._RX_CLAUSE_END = real_rx
+    check(f"5c wall: a {len(wall_t) // 1000} KB bullet of {label} that cannot fit 8 lines of 120 is refused at once (none), without one gap scanned", got_w is None and probe.calls == 0, (got_w is None, probe.calls))
+    check(f"5c wall: …in well under a second (bound 2 s; it was 2.6 s for 100 KB and 10 s for 200 KB before)", dt_w < 2.0, dt_w)
+t0 = time.time(); (got_t, got_n) = _fg.fix_long_bullets("- " + ("s" * 69 + ". ") * 2900); dt_f = time.time() - t0
+check("5c wall: the write gate leaves it as written for its own refusal, also fast", got_n == "" and dt_f < 2.0, dt_f)
+# the scan itself is linear: a bullet that passes the guard (a few thousand clauses of links, only spaces count out) is cut in time proportional to its size
+many = "- " + " ".join("[w. v](http://x.y/z) q." for _ in range(40))        # about 960 characters read: it may pass the guard and is then scanned for 40 gaps
+t0 = time.time(); got_m = BT.split_long(many, 40, 120); dt_m = time.time() - t0
+check("5c wall: a bullet within the guard is scanned and split as before, and fast", got_m is not None and BT.judge(got_m[0], 40, 120) is None and dt_m < 2.0, (got_m and got_m[1], dt_m))
+
+# a resend of the same long description is no new fix: the stored text is the split text, nothing changes, nothing is counted, told or noted, and the History keeps its one line
+g5 = create()[1]
+_update_svc._update(g5, description=f"- {S1} {S2}", sender=MAIN)
+n_hist = len([t for t in hist(g5) if "split by the server" in t])
+_, fx_r = with_fixes(lambda: _update_svc._update(g5, description=f"- {S1} {S2}", sender=MAIN))
+check("5c resend: the same long description sent again to the item that stores it as split counts no fix and adds no line to the reply", fx_r == [] and _CL.reply_note(fx_r) == "", fx_r)
+check("5c resend: …and no second History line, and the stored text is as it was", n_hist == 1 and len([t for t in hist(g5) if "split by the server" in t]) == 1 and _service_store._load(g5)["description"] == f"- {S1}\n- {S2}", hist(g5))
+(_, n_r), fx_r2 = with_fixes(lambda: _fg.fix_long_bullets(f"- {S1} {S2}", f"- {S1}\n- {S2}"))
+check("5c resend: fix_long_bullets with the stored text equal to the split gives the split text, no note and no fix; with another stored text it is a fix again", n_r == "" and fx_r2 == [] and [k for k, _ in with_fixes(lambda: _fg.fix_long_bullets(f"- {S1} {S2}", "- other"))[1]] == ["description-bullet"], fx_r2)
+tok_ = _CL.begin(); _fg.fix_long_bullets(f"- {S1} {S2}"); _, det_ = _CL.end_detail(tok_)
+check("5c resend: the fix keeps a digest of what the writer sent (the detail of the fix, never the text), so the same text again undoes nothing, and other text does", det_.get("description-bullet", {}).get("sent") and not _CL.undone("description-bullet", det_["description-bullet"], {"description": f"- {S1}  {S2}"}) and _CL.undone("description-bullet", det_["description-bullet"], {"description": "- other"}), det_)
+
 print(("ok" if not fails else "FAILED") + f": bullets scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -48,6 +48,7 @@ from stackshot.service import proofs as _proofs
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path, _shown_ids
+from stackshot.waits import stall as _stall
 from stackshot.waits import until_write as _uw
 from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
@@ -214,9 +215,10 @@ def create_item(
         pfx_ = _gates.project_subject_prefix(project)        # a subject with no scope prefix takes its project's (a pure fact; the reply says so)
         if pfx_:
             subject = pfx_ + subject.lstrip()
-            _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it")
+            _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it", fields=["subject"], stored=subject)
     _fg._gate_subject(subject)
     _fg._gate_recycle_item(subject)
+    description, split_note = _fg.fix_long_bullets(description)       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
     _fg._gate_description(description)
     if _writes.session_next() and not by:      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
         _fg._gate_goal(description)
@@ -323,6 +325,8 @@ def create_item(
     if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
         h.refuse_if_owing(owner)
     h.record_fixes(meta, fixes)             # what the server fixed in this create (server_fixes.py): the mark and a History line
+    if split_note:
+        _stall.note(meta, time.time(), split_note)          # the server split long description bullets: a History line says the stored text is not as sent
     item = {
         "id": "",
         "subject": subject,

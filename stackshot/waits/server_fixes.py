@@ -20,13 +20,15 @@ A mover who disagrees sends that fix back and the server leaves the field alone:
 and neither the write nor the pass parks that wake again; for front_mover the same mover value sent again by the session whose write was fixed, less than a day after, goes through as sent
 (`metadata.server_fixed` holds the value it substituted, bound to that sender and the time, until it is sent or a day passes; another session sending the value is substituted as a new case);
 for wait_reason the mover's own wait_basis in the call is used as given, and for settled_pick nothing is sent back (it is a reading, not a write). A fix is bound to a token (the wake, the
-field=value), so a changed value is a new fact. Both keys are the server's bookkeeping and move no clock of the item.
+field=value), so a changed value is a new fact. Both keys are the server's bookkeeping and move no clock of the item. Each fix made while a write runs is counted in the call log (`call_log.counted`), and the same writer's next write on the item within an hour that sends it back is counted there as a bounce-back
+(`call_log.undone`), for the weekly report; a fix a pass makes (no writer) is not counted, and its send-back stays in `fix_declined` alone.
 Stdlib plus the repo's stall module."""
 from __future__ import annotations
 
 import re
 from typing import Any
 
+from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.waits import stall as _stall
 
@@ -107,6 +109,11 @@ def record(meta: dict[str, Any], fix: str, token: str, history: str, now: float)
     """The fix on the item: marked for its token, and a History line (the stall log: "stackshot: ...")."""
     mark(meta, fix, token)
     _stall.note(meta, now, history)
+    detail: dict[str, Any] = {"stored": token}          # what the bounce-back check compares a later write with (kept as a digest): the wake of a park; for a front agent the value written, in its field
+    if fix == FRONT_MOVER:
+        field, _, value = str(token).partition("|")[0].partition("=")
+        detail = {"fields": [field], "stored": value.lower()}
+    _calls.counted(fix, **detail)          # counted in the call log when a write is running (a pass has no call: nothing)
 
 
 # ---- the settled pick: words that quote or record an answer already given are no wait on its giver

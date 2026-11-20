@@ -27,6 +27,7 @@ from typing import Any, Callable
 from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
+from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core import store as _store
 from stackshot.core.instance import OWNER
