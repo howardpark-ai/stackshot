@@ -24,7 +24,8 @@ from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model.bullet_text import _clip_line
-from stackshot.model.needs import _after_of
+from stackshot.model import steps as _steps
+from stackshot.model.needs import _after_of, _waits_decision
 from stackshot.router import routing as _routing
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
@@ -70,6 +71,23 @@ def watch_label(who: str) -> str:
     return OWNER if _model.is_owner(who) else (_session_label(who) or who)
 
 
+def _own_step(meta: dict[str, Any], who: str) -> bool:
+    """Is the item's open step (the first one that names someone: a step with no `<name>:` opener is skipped) or its ask addressed to `who`, a session's name or id, in any letter case (anchors.same_session)?
+    Then the step is only that session's to take."""
+    named = [s["text"] for s in _steps.view(meta) if s["status"] == _steps.OPEN and _steps.opener(s["text"])]
+    return any((nm := _steps.opener(t)) and _anc.same_session(nm, who) for t in named[:1] + [meta.get("ask")])
+
+
+def _front_to_background(post: str, meta: dict[str, Any]) -> str:
+    """When a wait ends on a front agent (a session he talks to), the item goes to the project's builder instead: the front agent is not told by the wake and hears of the item only on a turn he gives it
+    (the History line names it). → the builder's name, or "" when the item stays with `post`: `post` is not a front agent, the project has no builder (the ended wait's fallback stays, as for the answers
+    and fallbacks in handoffs.md), or an open step or the ask names `post` itself to act."""
+    project = str(meta.get("project") or "")
+    if not post or not _telling.front_keeper(post, project)[0] or _own_step(meta, post):
+        return ""
+    return (_anc.builder_of(project) or [""])[0]
+
+
 def watch_ask(gid: str, meta: dict[str, Any], what: str) -> tuple[str, list[dict[str, Any]]]:
     """The question the owner gets when HE is the post-wake mover of a time, item or anchor wait: the ask and options the item already carries when they are valid, else one in the
     ask's shape with two buttons (take it up, drop it)."""
@@ -110,7 +128,7 @@ def watch_failed(gid: str, now: float) -> None:
 
 
 def _ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
-    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker). With `external` in needs only the old post_wake_mover key turns it (waits/watchers.py `ends_on_the_date`, which the migration pass reads too)."""
+    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored, unless the item passes to the builder) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker). With `external` in needs only the old post_wake_mover key turns it (waits/watchers.py `ends_on_the_date`, which the migration pass reads too)."""
     return _watch.ends_on_the_date(meta, mod)
 
 
@@ -161,6 +179,7 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             what = _watch.what_item_backstop(date, [_gh.shown(g) for g in _hooks().after_open(meta)])
         else:
             what = f"its ask-by day {_watch.relay_day(meta)} came"
+        passed = ""                                     # the front agent whose wait ended and whose item went to the project's builder instead (_front_to_background)
         chased = _watch.chased_out(meta)
         list_relay = kind == _wl.LIST and cause == "backstop" and bool(_wl.lines_by_kind(meta, "relay"))      # the backstop day with a relay line still open asks the owner, as a relay's ask-by day does
         ask_him = (cause == "relay" and kind != _wl.LIST) or (cause == "backstop" and chased) or list_relay      # a relay LINE that arrived (the owner relayed it) is an arrival, not a question
@@ -177,9 +196,18 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             _watch.turn_to_owner(meta, mod.then, ask, opts, what, now)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
         elif cause == "time" and _ends_on_the_date(meta, mod):
+            back = _front_to_background(post, meta)      # (an item that waits on his decision with no stored front mover has him as `post`: it never gets here)
+            if back:                                     # the builder is the mover now, and the one session in needs as on every other path; an item that goes back to others (`external`) stays so: only its mover changes
+                meta["mover"] = back
+                if "external" not in [str(n).strip().lower() for n in _wt.needs_of(meta)]:
+                    meta["needs"] = [back]
+                passed, post = post, back
             _watch.end_date(meta, what, post, now)       # a wait on the date alone ends with the date: needs, the open after link and the mover stay as stored
             mover = post
         else:
+            back = _front_to_background(post, meta)
+            if back:
+                passed, post = post, back
             _watch.turn_alive(meta, post, what, now)
             mover = post
         _hooks().state_end(meta)                                # a stored state of the old wait is over with it: the item reads from its fields
@@ -187,20 +215,24 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             it["confirmed"] = _hooks().rmod_confirmed_at(it)
         it["metadata"] = meta
         it["updated"] = it["state_updated"] = now
-        _writes.save(gid, it, note=(f"woke: {what} → {watch_label(mover)}" if mover != OWNER else f"the wait ended: {what}; asks {OWNER}: {meta.get('ask')}"))
-        print(f"watch: {gid} {kind} wait over ({cause}) → {mover} — {it.get('subject')}", file=sys.stderr, flush=True)
+        by_front = f" ({watch_label(passed)} is a front agent: the item passes to the project's builder, and it is not told)" if passed else ""
+        _writes.save(gid, it, note=(f"woke: {what} → {watch_label(mover)}{by_front}" if mover != OWNER else f"the wait ended: {what}; asks {OWNER}: {meta.get('ask')}"))
+        print(f"watch: {gid} {kind} wait over ({cause}) → {mover}{' (passed over ' + passed + ')' if passed else ''} — {it.get('subject')}", file=sys.stderr, flush=True)
         if mover != OWNER:
-            out.setdefault(_hooks().session_id(mover), []).append((gid, it, what))
+            out.setdefault(_hooks().session_id(mover), []).append((gid, it, what + (f"; it was {watch_label(passed)}'s, a front agent's, and passes to you" if passed else "")))
         return True
 
 
 def watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[str, str, list[str]] | None:
-    """The message to one session about the items whose wait ended and are now its move: (the text, the mark a front agent takes or "", the item ids), None for no rows."""
+    """The message to one session about the items whose wait ended and are now its move: (the text, the mark a front agent takes or "", the item ids), None for no rows. The mark goes only on a front
+    agent's message about an item that waits on his decision or whose open step is its own: a wait that ends on a front agent otherwise passes the item to the project's builder (watch_fire), and in a
+    project with none the front agent is told without the mark."""
     if not rows:
         return None
     msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
     project = str((rows[0][1].get("metadata") or {}).get("project") or "")
-    return _watch.message(msg_rows), (_FOR_OWNER if _telling.front_keeper(sid, project)[0] else ""), [g for g, *_ in rows]
+    marked = _telling.front_keeper(sid, project)[0] and any(_waits_decision(m := it.get("metadata") or {}) or _own_step(m, sid) for _g, it, _w in rows)      # a front agent takes what is his to do: a wake that asks him nothing is not marked for him
+    return _watch.message(msg_rows), (_FOR_OWNER if marked else ""), [g for g, *_ in rows]
 
 
 def watch_tell(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> None:

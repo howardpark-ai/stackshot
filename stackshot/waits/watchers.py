@@ -314,7 +314,7 @@ def was_picker(was: dict[str, Any] | None) -> str:
 
 
 def ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
-    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker).
+    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored, except when the item passes to the builder, watching.py `watch_fire`) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker).
     With `external` in needs the item goes back to others at its date, as it always did, whichever mover is stored: only the old post_wake_mover key turns it. Without `external`, a picker stored under
     either key (`mod.wait.mover_explicit`) turns it, the one place a stored mover alone now ends a wait the way the old key did. The one reader of this: the migration pass (waits/mover_pass.py) and the
     watchers' wake (service/watching.py `watch_fire`) cannot read it two ways."""
@@ -403,7 +403,7 @@ DATE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", 
 
 
 def end_date(meta: dict[str, Any], what: str, to: str, now: float) -> None:
-    """A wait on a date alone (no wait_kind) ends: the date and what stood on it go and the arrival is recorded; `needs`, an open `after` link, a pane recycle and the mover stay as stored, so an
+    """A wait on a date alone (no wait_kind) ends: the date and what stood on it go and the arrival is recorded; `needs`, an open `after` link, a pane recycle and the mover stay as stored (the caller sets mover and needs first when the item passes to the builder), so an
     item that waited with needs=external goes back to others, and no date passing takes a link the item still waits on."""
     for k in DATE_DROP:
         meta.pop(k, None)
