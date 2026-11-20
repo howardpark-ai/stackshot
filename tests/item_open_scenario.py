@@ -10,6 +10,11 @@ does not start with the mover, a key the route does not take (needs, owner, prio
 no one; an unknown project a 404, a project with no front agent a 409; a cap of 10 open items per project (the eleventh marker is refused, a repeat at the cap is still answered, a closed item frees a place, the cap is per project); a long sender and a doubled caller prefix; the unknown-write 404 lists the route; eight threads calling at once file one item; over HTTP (401 without a token) and through client.py (the id alone on stdout,
 usage on misuse, the server's refusal on stderr, a server that is not reached).
 
+Also covers `client.py post item-sync <marker> open|refresh|close` (POST /client/item-sync), the route that keeps one item for the person in step with a condition a script checks: open files an item whose mover is the person,
+whose then is an agent of the project and whose one step is his; a repeat open while it is open is a refresh and files nothing; refresh changes the description alone; close completes it as done, ticks his step and says the script saw the
+condition gone; refresh and close with none open are no-ops; an open after a close files a new item; misshaped input is refused with the board's text; an item the route did not open (an item-open item with the same marker text) is out of its reach; a cap of 10 open items per project; eight threads, one item; over HTTP and
+through client.py (one line on stdout, usage on misuse).
+
     tests/run-suite item_open        → exit 0 / 1"""
 import contextlib, io, json, os, re, socket, sys, pathlib, logging, threading, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
@@ -304,6 +309,322 @@ ths = [threading.Thread(target=lambda: res.append(io_(marker="test_trim:race")))
 check("eight threads calling with one marker at once file one item and all get its id", len(items()) == n7 + 1 and len({r[1]["item"] for r in res}) == 1 and all(r[0] == 200 for r in res) and sum(1 for r in res if not r[1]["repeat"]) == 1, res[:3])
 close(res[0][1]["item"]); settle()
 
+# ---- 8b. item-sync: a script keeps one item for the person in step with a condition (open, refresh, close by its marker)
+def isy(action, marker="plugin_sync:alpha", **kw):
+    b = {"action": action, "marker": marker}
+    if action == "open":
+        b.update(project="projects/alpha", subject="Press Sync on the plugin page", mover="Oliver", then="home-sparrow-builder", step="open the plugin page and press Sync",
+                 description=["- The plugin is 2 versions behind", "- Pressing Sync brings it up to date"], sender="demo-timer")
+    elif action == "refresh":
+        b.update(description=["- The plugin is 3 versions behind"], sender="demo-timer")
+    b.update(kw)
+    return _rt_client._client_post(me, "item-sync", {k: v for k, v in b.items() if v is not None})
+def sync_open(marker="plugin_sync:alpha"):
+    out = []
+    for g, p_ in _item_files_():
+        try:
+            if '"item_sync"' not in p_.read_text(encoding="utf-8"): continue
+            it_ = _service_store._load(g)
+        except (OSError, ValueError): continue
+        if it_.get("status") == "open" and it_["metadata"].get("item_sync") == marker: out.append(g)
+    return out
+from stackshot.core.store import _item_files as _item_files_
+from stackshot.model import steps as _steps_mod
+def shape(gid):
+    """what refresh must leave alone: everything of the item but its description"""
+    i_ = item(gid); m_ = i_["metadata"]
+    return {"subject": i_["subject"], "status": i_["status"], "mover": m_.get("mover"), "then": m_.get("then"), "step": m_.get("step"), "state": m_.get("state"), "next": m_.get("next"), "needs": m_.get("needs"),
+            "steps": [(x["text"], x["status"]) for x in _steps_mod.view(m_)], "project": m_.get("project"), "owner": m_.get("owner"), "item_sync": m_.get("item_sync"), "filed_by": i_.get("filed_by")}
+
+ns0 = len(items()); pushed.clear(); owed0 = json.dumps(_pdebts._owed_load(), sort_keys=True)
+st, so = isy("open")
+check("item-sync open: 200, opened, the item as shown, the project, the person as mover, the agent as then, the project's -main agent as creator, repeat false", st == 200 and so["action"] == "opened" and so["marker"] == "plugin_sync:alpha"
+      and so["project"] == "projects/alpha" and so["mover"] == "Oliver" and so["then"] == "home-sparrow-builder" and so["owner"] == "home-sparrow-main" and so["repeat"] is False and len(items()) == ns0 + 1
+      and so["item"] == _gh.shown(_model_ids._norm_id(so["item"])), (st, so))
+sit = item(so["item"]); sm = sit["metadata"]
+check("…the item is open, marked item_sync, filed under the project, with the subject under the scope's prefix", sit["status"] == "open" and sm["item_sync"] == "plugin_sync:alpha" and sm["project"] == "projects/alpha"
+      and sit["subject"] == "[home] Press Sync on the plugin page", (sit["status"], sm, sit["subject"]))
+check("…the mover is the person and the then is the agent; the state is your-step with his step", sm.get("mover") == "Oliver" and sr._session_label(sm.get("then")) == "home-sparrow-builder" and sm.get("state") == "your-step"
+      and sm.get("step") == "open the plugin page and press Sync" and M.derive(sit).mover == "Oliver", (sm, M.derive(sit).mover))
+check("…his step is the only step, open, and it opens with his name (the caller's words are not doubled)", [(x["text"], x["status"]) for x in _steps_mod.view(sm)] == [("Oliver: open the plugin page and press Sync", "open")], _steps_mod.view(sm))
+check("…the description is the caller's bullets, then who opened it, and the script is recorded as the writer; no host name anywhere", sit["description"].splitlines() == ["- The plugin is 2 versions behind", "- Pressing Sync brings it up to date",
+      "- Opened by demo-timer (a script on a client machine)"] and sit["filed_by"] == "demo-timer (a script on a client machine)" and me not in json.dumps(sit) and me not in json.dumps(so), sit)
+settle()
+check("…the row tells no one and owes no page (the debts are as they were before it)", pushed == [] and json.dumps(_pdebts._owed_load(), sort_keys=True) == owed0, (pushed, _pdebts._owed_load()))
+sgid = so["item"]; shape0 = shape(sgid)
+
+# a second open of a marker whose item is open is a refresh: no duplicate, only the description changes
+st, so2 = isy("open", subject="Another subject", step="something else", then="home-sparrow-notes", description=["- Now 4 versions behind"])
+settle()
+check("a second open with the same marker: 200, the same item, refreshed, repeat true, nothing filed, no one told", st == 200 and so2["item"] == sgid and so2["action"] == "refreshed" and so2["repeat"] is True and len(items()) == ns0 + 1 and pushed == [], (st, so2, pushed))
+check("…only the description changed: the subject, step, mover, then and checklist are as they were", item(sgid)["description"].splitlines() == ["- Now 4 versions behind", "- Opened by demo-timer (a script on a client machine)"] and shape(sgid) == shape0, (item(sgid)["description"], shape(sgid), shape0))
+st, e = isy("open", project="projects/beta", then="home-beta-main")
+check("…the marker open on another project is refused, naming the project it is open on; nothing changed", st == 400 and "already open on projects/alpha" in e["error"] and shape(sgid) == shape0 and len(items()) == ns0 + 1, (st, e))
+
+# refresh: the description alone
+st, rf = isy("refresh")
+check("refresh: 200, refreshed, the same item, nothing filed", st == 200 and rf["action"] == "refreshed" and rf["item"] == sgid and len(items()) == ns0 + 1, (st, rf))
+check("…the description is the new bullets and the attribution; everything else of the item is as it was", item(sgid)["description"].splitlines() == ["- The plugin is 3 versions behind", "- Opened by demo-timer (a script on a client machine)"] and shape(sgid) == shape0, (item(sgid)["description"], shape(sgid)))
+st, e = isy("refresh", description=["- " + "x" * 200])
+check("…a misshaped description is refused with the board's text (a line over the limit), the item unchanged", st == 400 and "line 1" in e["error"] and item(sgid)["description"].splitlines()[0] == "- The plugin is 3 versions behind", (st, e))
+st, e = isy("refresh", description=[f"- fact {i}" for i in range(9)])
+check("…too many lines are refused, never cut", st == 400 and "lines" in e["error"] and item(sgid)["description"].splitlines()[0] == "- The plugin is 3 versions behind", (st, e))
+st, e = isy("refresh", description=None)
+check("…no description is refused", st == 400 and "no line of words" in e["error"], (st, e))
+st, e = isy("refresh", step="a new step")
+check("…refresh takes no step (nor project, subject, mover or then): refused and named", st == 400 and "step" in e["error"] and "does not take" in e["error"] and shape(sgid) == shape0, (st, e))
+st, e = isy("refresh", marker="plugin_sync:none-open")
+check("refresh with no open item for the marker: 200, a no-op that says so, no item, nothing filed or changed", st == 200 and e["action"] == "none" and e["item"] == "" and "no open item" in e["note"] and len(items()) == ns0 + 1 and shape(sgid) == shape0, (st, e))
+
+# an item the route did not open is out of its reach: refresh and close find an item by the mark this route puts on it, and no other
+st, other = io_(marker="plugin_sync:other")
+before_o = (item(other["item"])["description"], item(other["item"])["status"], item(other["item"])["metadata"].get("next"))
+st1, r1 = isy("refresh", marker="plugin_sync:other", description=["- overwritten"]); st2, c1 = isy("close", marker="plugin_sync:other")
+check("the route cannot refresh or close an item it did not open: an item-open item under the same marker text is found by neither (both are no-ops) and is as it was", st1 == 200 and st2 == 200 and r1["action"] == "none" and c1["action"] == "none"
+      and (item(other["item"])["description"], item(other["item"])["status"], item(other["item"])["metadata"].get("next")) == before_o, (r1, c1))
+st5, o5_ = isy("open", marker="plugin_sync:other")
+check("…and an open for that marker files its own item beside it, leaving the item-open item alone", st5 == 200 and o5_["action"] == "opened" and o5_["item"] != other["item"] and item(other["item"])["status"] == "open", (st5, o5_))
+isy("close", marker="plugin_sync:other"); close(other["item"])
+check("…the item-open item's marker is not the route's: no open item of the route is found for a marker only item-open used", sync_open("plugin_sync:never") == [] and isy("close", marker="plugin_sync:never")[1]["action"] == "none")
+
+# close: done, with outcome, reason and outcome text; his step ticked; the reason says the script saw the condition gone
+st, cl = isy("close")
+cit = item(sgid); cm = cit["metadata"]
+check("close: 200, closed, the same item", st == 200 and cl["action"] == "closed" and cl["item"] == sgid and cl["repeat"] is False, (st, cl))
+check("…the item is completed as done, with the reason that says the script saw the condition gone, and the end state in outcome_text", cit["status"] == "completed" and cm.get("outcome") == "done"
+      and "the script saw the condition (plugin_sync:alpha) is gone" in str(cm.get("reason") or cit.get("reason") or ""), (cit["status"], {k: cm.get(k) for k in ("outcome", "reason", "outcome_text")}, cit.get("reason")))
+check("…his open step is ticked by the close (done, not left open), and no step stays open", [(x["text"], x["status"]) for x in _steps_mod.view(cm, closed=True)] == [("Oliver: open the plugin page and press Sync", "done")]
+      and not [x for x in _steps_mod.view(cm, closed=True) if x["status"] == "open"], _steps_mod.view(cm, closed=True))
+check("…the description is unchanged by the close", cit["description"].splitlines()[0] == "- The plugin is 3 versions behind", cit["description"])
+check("…and the marker has no open item", sync_open() == [], sync_open())
+n_cl = len(items())
+st, cl2 = isy("close")
+check("close with no open item: 200, a no-op that says so, nothing filed, the closed item unchanged", st == 200 and cl2["action"] == "none" and cl2["item"] == "" and "no open item" in cl2["note"] and len(items()) == n_cl and item(sgid)["status"] == "completed", (st, cl2))
+
+# reopen after a close: the sync recurs, a new item
+st, so3 = isy("open")
+check("an open after the close files a new item (the sync recurs): a new id, opened, repeat false, the old one stays closed", st == 200 and so3["action"] == "opened" and so3["item"] != sgid and so3["repeat"] is False and item(sgid)["status"] == "completed"
+      and item(so3["item"])["status"] == "open" and len(items()) == n_cl + 1, (st, so3))
+st, cl4 = isy("close", reason="the plugin is in sync again")
+check("a close with the caller's reason: the reason is stored as given", st == 200 and cl4["action"] == "closed" and item(so3["item"])["metadata"].get("reason", item(so3["item"]).get("reason")) == "the plugin is in sync again", (st, cl4, item(so3["item"])))
+
+# misshaped input is refused with the board's text, nothing filed
+ns1 = len(items())
+for name, kw, needle in (("no marker", dict(marker=""), "marker is required"), ("a marker with no kind", dict(marker="alpha"), "marker ="), ("a marker with a space", dict(marker="a:b c"), "marker ="), ("a marker that is not text", dict(marker=7), "marker is text"),
+                         ("no project", dict(project=""), "project is required"), ("no subject", dict(subject=""), "subject is required"),
+                         ("no step", dict(step=""), "step is required"), ("no mover", dict(mover=""), "mover is required"), ("no then", dict(then=""), "then is required"),
+                         ("a mover that is an agent", dict(mover="home-sparrow-builder"), "mover is Oliver"), ("a then that is not listed", dict(then="no-such-agent"), "not an agent listed"),
+                         ("a then of another project", dict(then="heron-engineer"), "not an agent listed"), ("a step with a line break", dict(step="a\nb"), "one line"), ("a step that is only his name", dict(step="Oliver: "), "step is empty"),
+                         ("a subject with a line break", dict(subject="a\nb"), "one line"), ("a subject that is only a prefix", dict(subject="[work] "), "only an instance prefix"),
+                         ("a sender with a space", dict(sender="a b"), "sender ="), ("a sender that is the person", dict(sender="Oliver"), "Only the board writes as"),
+                         ("a description of too many lines", dict(description=[f"- fact {i}" for i in range(9)]), "lines"), ("a description line over the limit", dict(description=["- " + "x" * 200]), "line 1"),
+                         ("no description", dict(description=None), "no line of words"), ("a description with a control character", dict(description=["- a\x01b"]), "control character")):
+    st, e = isy("open", marker=kw.pop("marker", "plugin_sync:bad"), **kw)
+    check(f"item-sync open, {name}: 400 and the reason, nothing filed", st == 400 and needle in e["error"] and len(items()) == ns1 and sync_open("plugin_sync:bad") == [], (st, e))
+st, e = _rt_client._client_post(me, "item-sync", {"action": "drop", "marker": "plugin_sync:bad"})
+check("item-sync: an unknown action is refused naming the three", st == 400 and "action = open | refresh | close" in e["error"] and len(items()) == ns1, (st, e))
+for key, val in (("needs", ["decision"]), ("owner", "Oliver"), ("priority", "p0"), ("ask", "Decide: x"), ("until", "2030-01-01"), ("project_key", "x")):
+    st, e = isy("open", marker="plugin_sync:bad", **{key: val})
+    check(f"item-sync: a key the route does not take ({key}): 400 that names it, nothing filed", st == 400 and key in e["error"] and "takes" in e["error"] and len(items()) == ns1, (st, e))
+st, e = isy("close", step="x")
+check("item-sync close takes no step: refused and named", st == 400 and "does not take" in e["error"], (st, e))
+st, e = isy("open", marker="plugin_sync:ghost", project="projects/ghost")
+check("an unknown project: 404, nothing filed", st == 404 and "no project" in e["error"] and len(items()) == ns1, (st, e))
+st, e = isy("open", marker="plugin_sync:gamma", project="projects/gamma")
+check("a project with no front agent to keep the item: 409, nothing filed", st == 409 and "front agent" in e["error"] and len(items()) == ns1, (st, e))
+st, e = isy("open", marker="plugin_sync:longsubj", subject="x" * 90)
+check("a subject over the limit is refused by the create tool's own gate, nothing filed", st == 400 and "Refused" in e["error"] and sync_open("plugin_sync:longsubj") == [] and len(items()) == ns1, (st, e))
+st, e = isy("open", marker="plugin_sync:longstep", step="y" * 400)
+check("a step over the limit is refused with the board's text and nothing is left half made: no open item, nothing filed", st == 400 and "Refused" in e["error"] and sync_open("plugin_sync:longstep") == [] and len(items()) == ns1, (st, e))
+st, o_ = isy("open", marker="plugin_sync:front", then="home-sparrow-main")
+check("a front agent is taken as then as a background agent is", st == 200 and sr._session_label(item(o_["item"])["metadata"]["then"]) == "home-sparrow-main", (st, o_)); isy("close", marker="plugin_sync:front")
+st, o_ = isy("open", marker="plugin_sync:namestep", step="Oliver: press Sync")
+check("a step that already opens with his name is not doubled", st == 200 and [x["text"] for x in _steps_mod.view(item(o_["item"])["metadata"])] == ["Oliver: press Sync"], (st, o_)); isy("close", marker="plugin_sync:namestep")
+st, o_ = isy("open", marker="plugin_sync:slug", project="alpha", sender=None)
+check("a bare slug names the project; no sender is client.py", st == 200 and o_["project"] == "projects/alpha" and "- Opened by client.py (a script on a client machine)" in item(o_["item"])["description"], (st, o_)); isy("close", marker="plugin_sync:slug")
+st, o_ = isy("open", marker="plugin_sync:at", description=["- ask @octocat"])
+check("an @name in a bullet is broken, no bare @ before a word", st == 200 and not bare_at(item(o_["item"])["description"]) and "octocat" in item(o_["item"])["description"], (st, o_)); isy("close", marker="plugin_sync:at")
+st, o_ = isy("open", marker="plugin_sync:prefix", subject="[work] [home] Wrong prefix")
+check("a prefix the caller wrote is replaced by the project scope's own", st == 200 and item(o_["item"])["subject"] == "[home] Wrong prefix", (st, o_)); isy("close", marker="plugin_sync:prefix")
+
+# a cap of 10 open items per project, refreshes and repeats never counted
+ids_ = []
+for i in range(10):
+    st, o_ = isy("open", marker=f"plugin_sync:run{i}"); ids_.append(o_.get("item") if st == 200 else None)
+nc2 = len(items())
+st, e = isy("open", marker="plugin_sync:run-new")
+check("ten markers file ten open items on one project; an eleventh is refused, naming the cap, nothing filed", all(ids_) and len({*ids_}) == 10 and st == 400 and "cap is 10" in e["error"] and len(items()) == nc2, (ids_, st, e))
+st, o_ = isy("open", marker="plugin_sync:run4")
+check("…a repeat of an open marker at the cap is still answered (a refresh)", st == 200 and o_["item"] == ids_[4] and o_["action"] == "refreshed" and len(items()) == nc2, (st, o_))
+st, o_ = isy("open", marker="plugin_sync:run-b", project="projects/beta", then="home-beta-main")
+check("…the cap is per project: another project still files", st == 200 and o_["action"] == "opened", (st, o_)); isy("close", marker="plugin_sync:run-b")
+isy("close", marker="plugin_sync:run0")
+st, o_ = isy("open", marker="plugin_sync:run-new")
+check("…after one item closes a new marker files again", st == 200 and o_["action"] == "opened", (st, o_))
+for m_ in [f"plugin_sync:run{i}" for i in range(1, 10)] + ["plugin_sync:run-new"]: isy("close", marker=m_)
+check("…everything closed, no open item of the route remains", [g for g in sync_open("plugin_sync:run1")] == [] and not [1 for g, p_ in _item_files_() if '"item_sync"' in p_.read_text(encoding="utf-8") and item(g)["status"] == "open"], None)
+
+# eight threads, one marker, one item
+n8 = len(items()); res = []
+ths = [threading.Thread(target=lambda: res.append(isy("open", marker="plugin_sync:race"))) for _ in range(8)]
+[t.start() for t in ths]; [t.join() for t in ths]
+check("item-sync: eight threads opening one marker at once file one item and all get its id", len(items()) == n8 + 1 and len({r[1]["item"] for r in res}) == 1 and all(r[0] == 200 for r in res) and sum(1 for r in res if r[1]["action"] == "opened") == 1, res[:3])
+isy("close", marker="plugin_sync:race"); settle()
+
+# ---- 8c. item-sync close and open against other writers, the lock, the rollback and the repair
+from stackshot.service import answer as _answer_svc
+from stackshot.service import item_sync as item_sync_svc
+from stackshot.model import states as _states_mod
+from stackshot.model.field_gates import _close_reason_max
+def steps_of(gid): return [(x["text"], x["status"]) for x in _steps_mod.view(item(gid)["metadata"])]
+def add_step(gid, who, text): _update_svc._update(_model_ids._norm_id(gid), next=f"{who}: {text}", sender=who)
+def mark(gid, who, text): _update_svc._update(_model_ids._norm_id(gid), done=[text], sender=who)
+
+# a close never settles another writer's step: nothing is ticked, the item stays open, the answer says so in one line (the board lets only his answer tick his step, so a script leaves it be)
+st, o8 = isy("open", marker="plugin_sync:others"); g8 = o8["item"]; pushed.clear()
+add_step(g8, "home-sparrow-notes", "write the changelog"); add_step(g8, "home-sparrow-builder", "review the sync"); settle(); pushed.clear()
+st, c8 = isy("close", marker="plugin_sync:others"); settle()
+check("close with two other writers' open steps: 200, the item left open, the one plain line says so", st == 200 and c8["action"] == "left-open" and c8["item"] == g8 and c8["note"] == "left open: open steps of others remain", (st, c8))
+check("…the item is still open and every step is as it was: his open, the two others' open, nothing ticked in anyone's name", item(g8)["status"] == "open" and sorted(steps_of(g8)) == sorted([("Oliver: open the plugin page and press Sync", "open"),
+      ("home-sparrow-notes: write the changelog", "open"), ("home-sparrow-builder: review the sync", "open")]), steps_of(g8))
+check("…nobody was told by the call", pushed == [], pushed)
+st, c8b = isy("close", marker="plugin_sync:others")
+check("…a second close says the same, writes nothing and leaves the checklist as it is", st == 200 and c8b["action"] == "left-open" and c8b["note"] == c8["note"] and item(g8)["status"] == "open" and len(steps_of(g8)) == 3, (st, c8b, steps_of(g8)))
+st, r8 = isy("refresh", marker="plugin_sync:others")
+check("…refresh still answers for the open item", st == 200 and r8["action"] == "refreshed", (st, r8))
+mark(g8, "home-sparrow-notes", "home-sparrow-notes: write the changelog")
+st, c8c = isy("close", marker="plugin_sync:others")
+check("…while one other writer's step is open the item stays open", st == 200 and c8c["action"] == "left-open" and item(g8)["status"] == "open" and ("home-sparrow-builder: review the sync", "open") in steps_of(g8), (st, c8c, steps_of(g8)))
+mark(g8, "home-sparrow-builder", "home-sparrow-builder: review the sync")
+st, c8d = isy("close", marker="plugin_sync:others")
+check("…when the others' steps are done the close completes the item as done", st == 200 and c8d["action"] == "closed" and item(g8)["status"] == "completed" and item(g8)["metadata"].get("outcome") == "done", (st, c8d))
+check("…and no step is left open on the closed item", not [x for x in _steps_mod.view(item(g8)["metadata"], closed=True) if x["status"] == "open"], _steps_mod.view(item(g8)["metadata"], closed=True))
+
+# he presses Done, the agent that takes the item adds a follow-up step: the next close leaves it alone
+st, o9 = isy("open", marker="plugin_sync:handed"); g9 = o9["item"]
+check("he answers Done: his step is done and the item goes on", _answer_svc._answer(_model_ids._norm_id(g9), "", "", "done") == "done" and ("Oliver: open the plugin page and press Sync", "done") in steps_of(g9), steps_of(g9))
+add_step(g9, "home-sparrow-builder", "do the follow-up"); settle(); pushed.clear()
+st, c9 = isy("close", marker="plugin_sync:handed"); settle()
+check("a close after his Done, with the agent's follow-up step open: the item is left open, the follow-up stays open, the answer says so", st == 200 and c9["action"] == "left-open" and c9["note"] == "left open: open steps of others remain"
+      and item(g9)["status"] == "open" and ("home-sparrow-builder: do the follow-up", "open") in steps_of(g9), (st, c9, steps_of(g9)))
+check("…and the agent is not told by the call, nothing is completed over it", pushed == [] and item(g9)["status"] == "open", pushed)
+mark(g9, "home-sparrow-builder", "home-sparrow-builder: do the follow-up")
+st, c9b = isy("close", marker="plugin_sync:handed")
+check("…once the follow-up is done the close completes the item", st == 200 and c9b["action"] == "closed" and item(g9)["status"] == "completed", (st, c9b))
+st, o9b = isy("open", marker="plugin_sync:handed2"); g9b = o9b["item"]
+_answer_svc._answer(_model_ids._norm_id(g9b), "", "", "done")
+st, c9c = isy("close", marker="plugin_sync:handed2")
+check("a close after his Done with no other step open completes the item as before", st == 200 and c9c["action"] == "closed" and item(g9b)["status"] == "completed", (st, c9c))
+
+# the reason is cut to the board's limit, never refused for its length
+st, o10 = isy("open", marker="plugin_sync:longreason")
+st, c10 = isy("close", marker="plugin_sync:longreason", reason="word " * 80)
+rs10 = item(o10["item"])["metadata"].get("reason", item(o10["item"]).get("reason")) or ""
+check("a close reason over the board's limit is cut to it: 200, closed, a stored reason of at most [close] reason_max characters that starts as given", st == 200 and c10["action"] == "closed" and 0 < len(rs10) <= _close_reason_max() < 400 and rs10.startswith("word word"), (st, c10, len(rs10), _close_reason_max()))
+
+# a session's close between the route's look and its write cannot land: the route holds the board's item lock across both
+st, o11 = isy("open", marker="plugin_sync:lock"); g11 = _model_ids._norm_id(o11["item"])
+_real_open_items = item_sync_svc._itemsync_open_items; blocked = []
+def _look_then_close():
+    found_ = _real_open_items()
+    t_ = threading.Thread(target=lambda: _update_svc._update(g11, outcome_text="- closed by a session", status="completed", outcome="done", reason="a session closed it", sender="home-sparrow-builder"), daemon=True)
+    t_.start(); t_.join(1.5); blocked.extend([t_.is_alive(), t_])
+    return found_
+item_sync_svc._itemsync_open_items = _look_then_close
+try: st, r11 = isy("refresh", marker="plugin_sync:lock", description=["- written while the item is open"])
+finally: item_sync_svc._itemsync_open_items = _real_open_items
+blocked[1].join(5)
+check("a session's close cannot land between the route's look and its write: the close waits for the route (it held the item lock), the refresh lands on the open item, then the close completes",
+      st == 200 and r11["action"] == "refreshed" and blocked[0] is True and item(g11)["status"] == "completed" and item(g11)["description"].splitlines()[0] == "- written while the item is open", (st, r11, blocked[:1], item(g11)["status"], item(g11)["description"]))
+
+# a state write that fails: the item the create made is closed again (the rollback), never left open
+_real_update = _update_svc._update
+def _fail_state(gid, *a, **kw):
+    if "step" in kw: raise RuntimeError("the state write failed")
+    return _real_update(gid, *a, **kw)
+ids12 = {g for g, _p in _item_files_()}; _update_svc._update = _fail_state
+try:
+    try: isy("open", marker="plugin_sync:rollback"); raised12 = False
+    except RuntimeError: raised12 = True
+finally: _update_svc._update = _real_update
+new12 = sorted({g for g, _p in _item_files_()} - ids12)
+check("a failed state write: the error reaches the caller, the one item the create made is closed as dropped, no open item is left for the marker", raised12 and len(new12) == 1 and sync_open("plugin_sync:rollback") == []
+      and item(_gh.shown(new12[0]))["status"] == "completed" and item(_gh.shown(new12[0]))["metadata"].get("outcome") == "dropped", (raised12, new12, sync_open("plugin_sync:rollback")))
+
+# a state write and the rollback both fail: the item stays open half made, and the next open makes it whole
+def _fail_all(gid, *a, **kw): raise RuntimeError("the board is down")
+_update_svc._update = _fail_all
+try:
+    try: isy("open", marker="plugin_sync:repair"); raised13 = False
+    except RuntimeError: raised13 = True
+finally: _update_svc._update = _real_update
+half = sync_open("plugin_sync:repair")
+hm = item(_gh.shown(half[0]))["metadata"] if half else {}
+check("a state write and the rollback both failing leaves one open item for the marker, with no your-step state", raised13 and len(half) == 1 and hm.get("state") != "your-step", (raised13, half, hm.get("state"), hm.get("step")))
+st, r13 = isy("open", marker="plugin_sync:repair")
+hm2 = item(_gh.shown(half[0]))["metadata"] if half else {}
+check("the next open of the marker makes the item whole (the state your-step with his step) and files nothing", st == 200 and r13["action"] == "refreshed" and r13["repeat"] is True and r13["item"] == _gh.shown(half[0]) and hm2.get("state") == "your-step"
+      and _states_mod.clean(hm2.get("step")) and sync_open("plugin_sync:repair") == half, (st, r13, hm2.get("state"), hm2.get("step")))
+hs = _gh.shown(half[0]); _answer_svc._answer(_model_ids._norm_id(hs), "", "", "done"); state13 = item(hs)["metadata"].get("state")
+st, r13c = isy("open", marker="plugin_sync:repair")
+check("…once he has answered Done a repeat open refreshes the description and does not put the item back to his step", st == 200 and r13c["action"] == "refreshed" and item(hs)["metadata"].get("state") == state13 and state13 != "your-step", (st, r13c, state13))
+isy("close", marker="plugin_sync:repair"); settle()
+
+# a new item's create (it reaches GitHub for the number) is made without the board's item lock, and under the route's own lock alone
+from stackshot.service import create as _create_svc_t
+from stackshot.service import writes as _writes_t
+_real_create = _create_svc_t.create_item
+def _slow_create(*a, **kw):
+    time.sleep(1.0); return _real_create(*a, **kw)
+st, ou = isy("open", marker="plugin_sync:unrelated"); gu = ou["item"]
+_create_svc_t.create_item = _slow_create
+try:
+    ts_ = threading.Thread(target=lambda: isy("open", marker="plugin_sync:slow"), daemon=True); ts_.start(); time.sleep(0.3)
+    t0_ = time.time(); _update_svc._update(_model_ids._norm_id(gu), description="- an unrelated update while the create is slow", sender="home-sparrow-builder"); waited = time.time() - t0_
+    ts_.join(10)
+finally: _create_svc_t.create_item = _real_create
+check("an unrelated update is not blocked while a new item's create is slow (the board's item lock is not held across the create)", waited < 0.5 and not ts_.is_alive() and len(sync_open("plugin_sync:slow")) == 1, (round(waited, 2), sync_open("plugin_sync:slow")))
+isy("close", marker="plugin_sync:slow"); isy("close", marker="plugin_sync:unrelated")
+n_dbl = len([1 for g, _p in _item_files_()]); _create_svc_t.create_item = _slow_create; dbl = []
+try:
+    tds_ = [threading.Thread(target=lambda: dbl.append(isy("open", marker="plugin_sync:double")), daemon=True) for _ in range(2)]
+    tds_[0].start(); time.sleep(0.3); tds_[1].start(); [t_.join(15) for t_ in tds_]
+finally: _create_svc_t.create_item = _real_create
+check("two opens of one marker at once, the create slow: one item is filed (the route's own lock holds the second until the first is made), both answered with it", len(sync_open("plugin_sync:double")) == 1 and len([1 for g, _p in _item_files_()]) == n_dbl + 1
+      and len({r[1].get("item") for r in dbl}) == 1 and sorted(r[1]["action"] for r in dbl) == ["opened", "refreshed"], (dbl, sync_open("plugin_sync:double")))
+isy("close", marker="plugin_sync:double")
+
+# the script-row flag is off again after every call: a success, a refusal of the board, an error that is not a refusal
+def row_flag(): return _writes_t.terminal_row()
+st, oz = isy("open", marker="plugin_sync:flag"); f1 = row_flag()
+st, rz = isy("refresh", marker="plugin_sync:flag"); f2 = row_flag()
+def _tool_refusal(gid, *a, **kw): raise ToolError_t("Refused: no")
+from fastmcp.exceptions import ToolError as ToolError_t
+_update_svc._update = _tool_refusal
+try: st3, _e3 = isy("refresh", marker="plugin_sync:flag"); f3 = row_flag()
+finally: _update_svc._update = _real_update
+def _crash(gid, *a, **kw): raise RuntimeError("down")
+_update_svc._update = _crash
+try:
+    try: isy("refresh", marker="plugin_sync:flag")
+    except RuntimeError: pass
+    f4 = row_flag()
+finally: _update_svc._update = _real_update
+check("the script-row flag is off again after a success, after the board's refusal (a 400) and after an error that is no refusal", (f1, f2, f3, f4) == (False, False, False, False) and st3 == 400, (f1, f2, f3, f4, st3))
+isy("close", marker="plugin_sync:flag")
+
+# the update's own close gate stands behind the route's check: with the check blind, a close over another session's step is refused by the board and ticks nothing
+import types as _types
+st, ob = isy("open", marker="plugin_sync:gate"); gb = ob["item"]
+add_step(gb, "home-sparrow-notes", "write the changelog"); settle()
+_real_steps = item_sync_svc._steps
+item_sync_svc._steps = _types.SimpleNamespace(**{k: getattr(_real_steps, k) for k in dir(_real_steps) if not k.startswith("__")}); item_sync_svc._steps.others_open = lambda *a, **kw: []
+try: st, cb = isy("close", marker="plugin_sync:gate")
+finally: item_sync_svc._steps = _real_steps
+check("a close the route's own check let through is refused by the update's gate for another session's open step (a 400, nothing ticked, the item open)", st == 400 and "nothing is ticked" in cb.get("error", "") and item(gb)["status"] == "open"
+      and sorted(steps_of(gb)) == sorted([("Oliver: open the plugin page and press Sync", "open"), ("home-sparrow-notes: write the changelog", "open")]), (st, cb, steps_of(gb)))
+mark(gb, "home-sparrow-notes", "home-sparrow-notes: write the changelog"); isy("close", marker="plugin_sync:gate")
+
 # ---- 9. over HTTP and through client.py
 app = server.mcp.http_app()
 with TestClient(app) as c:
@@ -350,6 +671,63 @@ with TestClient(app) as c:
     rc, o3, e = run(*BASE)
     check("client.py after the item was closed: a new id, exit 0", rc == 0 and o3 != o and re.fullmatch(r"\S+\n", o3) and len(items()) == before + 2, (rc, o3, e))
     close(o3.strip())
+    # item-sync over HTTP and through client.py
+    sbody = {"action": "open", "marker": "plugin_sync:http", "project": "projects/alpha", "subject": "Over http", "mover": "Oliver", "then": "home-sparrow-builder", "step": "press Sync", "description": ["- over http"], "sender": "http-script"}
+    r = c.post("/client/item-sync", json=sbody); check("item-sync http: without a token -> 401 and nothing filed", r.status_code == 401 and sync_open("plugin_sync:http") == [], r.status_code)
+    r = c.post("/client/item-sync", json=sbody, headers={"Authorization": "Bearer not-a-token"}); check("item-sync http: with a token the server never minted -> 401 and nothing filed", r.status_code == 401 and sync_open("plugin_sync:http") == [], r.status_code)
+    r = c.post("/client/item-sync", json=sbody, headers=HD)
+    check("item-sync http: with a machine token -> 200, opened", r.status_code == 200 and r.json()["action"] == "opened" and r.headers["cache-control"] == "no-store", r.text)
+    r = c.post("/client/item-sync", json={"action": "close", "marker": "plugin_sync:http"}, headers=HD)
+    check("item-sync http: close -> 200, closed", r.status_code == 200 and r.json()["action"] == "closed" and sync_open("plugin_sync:http") == [], r.text)
+    r = c.post("/client/item-sync", content=b"not json", headers=HD); check("item-sync http: a body that is not JSON is a 4xx, never a 500", 400 <= r.status_code < 500, r.status_code)
+    SBASE = ["post", "item-sync", "plugin_sync:cli"]
+    SOPEN = [*SBASE, "open", "--project", "projects/alpha", "--subject", "Press Sync", "--mover", "Oliver", "--then", "home-sparrow-builder", "--step", "press Sync", "--line", "first fact", "--line", "second fact", "--sender", "cli-script"]
+    before = len(items())
+    rc, o, e = run(*SOPEN)
+    sc_id = o.split()[0] if o.split() else ""
+    check("client.py item-sync open: one line '<item> opened' on stdout, nothing on stderr, exit 0, one item filed", rc == 0 and re.fullmatch(r"\S+ opened\n", o) and e == "" and len(items()) == before + 1, (rc, o, e))
+    check("…the item has both lines as bullets, then the attribution, and the person as mover", item(sc_id)["description"].splitlines() == ["- first fact", "- second fact", "- Opened by cli-script (a script on a client machine)"]
+          and item(sc_id)["metadata"]["item_sync"] == "plugin_sync:cli" and item(sc_id)["metadata"]["mover"] == "Oliver", item(sc_id))
+    rc, o2, e = run(*SOPEN)
+    check("client.py item-sync open again: '<item> refreshed', the same item, exit 0, nothing filed", rc == 0 and o2 == o.replace("opened", "refreshed") and e == "" and len(items()) == before + 1, (rc, o2, e))
+    rc, o2, e = run(*SBASE, "refresh", "--line", "a newer fact")
+    check("client.py item-sync refresh: '<item> refreshed', the description is the new line and the attribution, exit 0", rc == 0 and o2 == o.replace("opened", "refreshed") and e == ""
+          and item(sc_id)["description"].splitlines() == ["- a newer fact", "- Opened by client.py (a script on a client machine)"], (rc, o2, e, item(sc_id)["description"]))
+    rc, o2, e = run(*SBASE, "close", "--reason", "all in sync")
+    check("client.py item-sync close: '<item> closed', exit 0, the item is completed with the caller's reason", rc == 0 and o2 == o.replace("opened", "closed") and e == "" and item(sc_id)["status"] == "completed" and item(sc_id)["metadata"]["reason"] == "all in sync", (rc, o2, e))
+    rc, o2, e = run(*SBASE, "close")
+    check("client.py item-sync close with none open: one plain line on stdout, exit 0, no error", rc == 0 and e == "" and o2.startswith("no open item for plugin_sync:cli") and o2.count("\n") == 1, (rc, o2, e))
+    rc, o2, e = run(*SBASE, "refresh", "--line", "x")
+    check("client.py item-sync refresh with none open: one plain line on stdout, exit 0, no error", rc == 0 and e == "" and o2.startswith("no open item for plugin_sync:cli") and o2.count("\n") == 1, (rc, o2, e))
+    rc, o3, e = run(*SOPEN)
+    check("client.py item-sync open after the close: a new item, opened", rc == 0 and o3.endswith(" opened\n") and o3 != o and len(items()) == before + 2, (rc, o3, e))
+    run(*SBASE, "close")
+    rc, o4, e = run(*SOPEN); sc2 = o4.split()[0] if o4.split() else ""
+    add_step(sc2, "home-sparrow-notes", "write the changelog"); settle()
+    rc, o5, e = run(*SBASE, "close")
+    check("client.py item-sync close while another writer's step is open: the one plain line '<item> left open: open steps of others remain' on stdout, nothing on stderr, exit 0, the item still open", rc == 0 and e == "" and o5 == f"{sc2} left open: open steps of others remain\n" and item(sc2)["status"] == "open", (rc, o5, e))
+    mark(sc2, "home-sparrow-notes", "home-sparrow-notes: write the changelog"); run(*SBASE, "close")
+    before = len(items())
+    SU = "usage: client.py post item-sync"
+    for name, argv, needle in (("no marker", ["post", "item-sync"], SU), ("a flag first", ["post", "item-sync", "--project", "p"], SU), ("no action", [*SBASE], SU), ("an unknown action", [*SBASE, "drop"], SU),
+                               ("open with no then", [x for x in SOPEN if x not in ("--then", "home-sparrow-builder")], SU), ("open with no line", [x for x in SOPEN if x not in ("--line", "first fact", "second fact")], SU),
+                               ("refresh with no line", [*SBASE, "refresh"], SU), ("refresh with a project", [*SBASE, "refresh", "--line", "x", "--project", "p"], SU), ("close with a line", [*SBASE, "close", "--line", "x"], SU),
+                               ("a flag with no value", [*SBASE, "close", "--reason"], "needs a value"), ("a stray word", [*SOPEN, "stray"], SU)):
+        rc, o, e = run(*argv)
+        check(f"client.py item-sync misuse, {name}: usage or reason on stderr, nothing on stdout, exit 1", rc == 1 and o == "" and needle in e, (rc, o, e))
+    check("…and none of them filed an item", len(items()) == before, (len(items()), before))
+    rc, o, e = run(*[x if x != "Oliver" else "home-sparrow-main" for x in SOPEN])
+    check("client.py item-sync with a mover that is not the person: the server's 400 on stderr, exit 1, nothing on stdout, nothing filed", rc == 1 and o == "" and "[400]" in e and "mover is Oliver" in e and len(items()) == before, (rc, o, e))
+    _post = client.post
+    client.post = lambda what, body, timeout=20.0: (200, {"project": "projects/alpha"})
+    try:
+        rc, o, e = run(*SOPEN)
+        check("client.py item-sync when the answer has no item and is no no-op: exit 1 with a line on stderr, never silent", rc == 1 and o == "" and "item not synced" in e, (rc, o, e))
+    finally: client.post = _post
+    usage_src = pathlib.Path(client.__file__).read_text(encoding="utf-8")
+    check("the client's usage text lists the three item-sync calls", all(f"client.py post item-sync <marker> {v}" in usage_src for v in ("open", "refresh", "close")))
+    st, e = _rt_client._client_post(me, "no-such-write", {})
+    check("the 404 for an unknown write lists item-sync", st == 404 and "item-sync" in e["error"], (st, e))
     before = len(items())
     U = "usage: client.py post item-open"
     short = ["post", "item-open", "test_trim:x"]
