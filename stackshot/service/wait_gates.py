@@ -375,18 +375,20 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
     if do == "arrived":
         was_post = _watch.was_picker(w.get("was"))
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
+        front, post = post, _watching._front_to_background(post, meta) or post      # a front agent as `then` hands the item to the project's builder, as a wake does (its own step keeps it)
         _watch.turn_alive(meta, post, f"{OWNER} says {what} arrived", now)
         meta.pop("chases", None)
-        return f"arrived → {_watching.watch_label(post)}"
+        return f"arrived → {_watching.watch_label(post)}" + _watching.passed_note(front if front != post else "")
     if do == "words":     # his words with no button: never an arrival or a drop; the post-wake mover has the item, the wait's record (watch.was) and his words, and judges
         was_post = _watch.was_picker(w.get("was"))
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))
         keep = w.get("was")
+        front, post = post, _watching._front_to_background(post, meta) or post
         _watch.turn_alive(meta, post, f'{OWNER} answered in words: "{_clip_line(eff.get("text") or "", 300)}"', now)
         meta.pop("options", None); meta.pop("ask", None)
         if keep:
             meta["watch"] = {**(meta.get("watch") if isinstance(meta.get("watch"), dict) else {}), "was": keep}
-        return f"answered in words → {_watching.watch_label(post)}"
+        return f"answered in words → {_watching.watch_label(post)}" + _watching.passed_note(front if front != post else "")
     if do == "wait":
         meta.pop("then", None); meta.pop("woke", None); meta.pop("mover", None)      # before the restore: the wait's own mover (who picks it up) comes back with it and stays
         _watch.restore_wait(meta, eff["date"], reset_chases=True, now=now)      # a moved date is a new round: the backstop and the chases start over

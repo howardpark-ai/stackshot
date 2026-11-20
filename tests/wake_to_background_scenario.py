@@ -270,5 +270,44 @@ for i, cause, kw in ((24, "anchor", dict(wait_kind="anchor", wait_anchor=AURL, a
           ok and m.get("mover") == B_A and m.get("needs") == [B_A] and list(out) == [U[B_A]]
           and any("front agent" in n and f"→ {B_A}" in n for n in notes_of(f"a{i}")), (ok, m, out, notes_of(f"a{i}")))
 
+# ================================================================ 12. one message lists items of two projects for one recipient: each row reads the recipient by its own project
+# F_G keeps projects/golf (a front agent of no other kind there) and is a front agent of projects/delta, which has a builder
+def own_step_row(i): return row(i, project="projects/delta", next=f"{F_G}: ask him which one to keep")
+def golf_row(i): return row(i, project="projects/golf")
+both = watching_svc.watch_text(U[F_G], [golf_row(60), own_step_row(61)])
+rev = watching_svc.watch_text(U[F_G], [own_step_row(61), golf_row(60)])
+check("12 a batch of the keeper's own item first and another project's item with a step of its own second is marked (the second row is his)", both and both[1] == MARK, both)
+check("12 …and with the rows the other way round it is marked too", rev and rev[1] == MARK, rev)
+check("12 …a batch of the keeper's own item alone is not marked", watching_svc.watch_text(U[F_G], [golf_row(60), golf_row(62)])[1] == "", None)
+for first, second, ids in (("golf", "delta", (39, 40)), ("delta", "golf", (41, 42))):
+    for i, which in zip(ids, (first, second)):
+        if which == "golf": item(i, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_G, needs=[], project="projects/golf", subject=f"[home] the keeper's own {i}")
+        else: item(i, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_G, needs=[], project="projects/delta", next=f"{F_G}: ask him which one to keep", subject=f"[home] another project's, its own step {i}")
+    reset(); wakes_svc.wake_pass()
+    msgs = to(U[F_G])
+    check(f"12 end to end, the {first} item then the {second} item: one message to the recipient, naming both, and it carries the mark in either order",
+          len(msgs) == 1 and all(f"a{i}" in msgs[0][0].split(",") for i in ids) and msgs[0][2].startswith(MARK) and not to(U[B_A]) and mt(ids[0]).get("mover") == F_G and mt(ids[1]).get("mover") == F_G, (msgs, [mt(i).get("mover") for i in ids]))
+
+# ================================================================ 13. a standalone relay wait: the person's later answer hands the item on the same way a wake does
+from stackshot.service import answer as answer_svc
+def relay(i, **kw):
+    item(i, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), post_wake_mover=F_A, needs=[], subject=f"[home] relay {i}", **kw)
+    reset(); wakes_svc.wake_pass()
+for i, how in ((43, "arrived"), (44, "words")):
+    relay(i)
+    check(f"13 {how}: the ask-by day asks the person and tells nobody, the front agent is kept as the one after the wait", not SENT and mt(i).get("then") == F_A and "decision" in (mt(i).get("needs") or []), (mt(i), SENT))
+    reset()
+    out = answer_svc._answer(f"a{i}", "arrived", "", "answer") if how == "arrived" else answer_svc._answer(f"a{i}", "", "it came yesterday, thanks", "answer")
+    m = mt(i)
+    check(f"13 {how}: his answer passes the item to the project's builder (mover and needs), only the builder is told, unmarked", out == "decision" and m.get("mover") == B_A and m.get("needs") == [B_A]
+          and told(f"a{i}") == [U[B_A]] and not any(x[2].startswith(MARK) for x in SENT), (out, m, SENT))
+    check(f"13 {how}: …the History line says the front agent is not told", any("front agent" in n and f"→ {B_A}" in n for n in notes_of(f"a{i}")), notes_of(f"a{i}"))
+for i, how in ((45, "arrived"), (46, "words")):
+    relay(i, next=f"{F_A}: ask him which one to keep")
+    reset()
+    out = answer_svc._answer(f"a{i}", "arrived", "", "answer") if how == "arrived" else answer_svc._answer(f"a{i}", "", "it came yesterday, thanks", "answer")
+    m = mt(i)
+    check(f"13 {how}, a step of the front agent's own: the item stays with it, the builder is not told", m.get("mover") == F_A and m.get("needs") == [F_A] and told(f"a{i}") == [U[F_A]] and not told(f"a{i}").count(U[B_A]), (out, m, SENT))
+
 print(f"\n{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
