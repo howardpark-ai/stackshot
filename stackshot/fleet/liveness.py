@@ -32,11 +32,12 @@ Reads files only through fleet.py (imported inside the function that needs it: f
 from __future__ import annotations
 
 import datetime as dt
-import json
 import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+from stackshot.core import filecache as _fc
 
 from stackshot.core import config as _cfg
 
@@ -191,7 +192,7 @@ def pane_row(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> tu
         return None
     for f in files:
         try:
-            r = json.loads(f.read_text(encoding="utf-8"))
+            r = _fc.read_json(f)                             # a row nobody wrote since the last look is not parsed again; whether its process is alive is asked every time, below
             if r.get("kind") != "interactive":
                 continue
             if not (r.get("sessionId") in ids or r.get("name") in names):
@@ -199,7 +200,7 @@ def pane_row(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> tu
             os.kill(int(r.get("pid")), 0)                    # a row of a process that is gone says nothing
             at = float(r.get("statusUpdatedAt") or r.get("updatedAt") or 0) / 1000.0
             if best is None or at > best[0]:
-                best = (at, r)
+                best = (at, dict(r))
         except Exception:  # noqa: BLE001
             continue
     return best
@@ -215,7 +216,7 @@ def registered(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> 
         return False
     for f in files:
         try:
-            r = json.loads(f.read_text(encoding="utf-8"))
+            r = _fc.read_json(f)
             if not (r.get("sessionId") in ids or r.get("name") in names):
                 continue
             os.kill(int(r.get("pid")), 0)

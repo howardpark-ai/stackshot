@@ -28,7 +28,7 @@ The ten-minute set runs in the first paced round after the start (so a restart n
 
 `stalled(now)` says whether the last completed round is older than `STALL_AFTER` (3 minutes): the server's watchdog thread asks it every minute and tells the builder once per stall. `current` names the tick running now.
 
-Pure standard library; the server builds the tick table (it owns the functions) and passes in what the runner must ask it: whether the board is held by the
+Pure standard library (and `core/passmemo.py`, which is too: each tick runs inside a pass memo, so what it works out once for all its items is not worked out again per item); the server builds the tick table (it owns the functions) and passes in what the runner must ask it: whether the board is held by the
 migration's pass (`holding`) and how long the runner may sleep between event rounds (`wake_wait`)."""
 from __future__ import annotations
 
@@ -37,6 +37,8 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from stackshot.core import passmemo as _passmemo
 
 PACE = 60.0          # seconds between paced rounds: the minute pace
 WAKE_MAX = 60.0      # the longest the runner sleeps between event rounds
@@ -150,7 +152,8 @@ class Runner:
         err: str | None = None
         self.current = t.name
         try:
-            t.fn()
+            with _passmemo.scope():          # what the tick works out once for all its items (the roles, the session rows) is kept for it and dropped when it ends
+                t.fn()
         except BaseException as e:  # noqa: BLE001  — one tick that raises never stops the next; a SystemExit or KeyboardInterrupt out of a tick is a failure of that tick too (the loop ends only by stop())
             err = f"{e.__class__.__name__}: {e}"
             print(f"{self.label}: {t.name} failed: {err}", file=sys.stderr, flush=True)
