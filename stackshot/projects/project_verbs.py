@@ -967,11 +967,27 @@ def _demoted_note(key: str, old: str, old_src: str, new: str, roles: list[dict])
             f"To give it the standing back, list it as an agent and move the mark (`project.py keeper {key} {old}`)")
 
 
-def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, mirror_now: bool = True, pages: dict | None = None) -> dict:
-    """List an agent on the project's agents map with its mandate line (`front` False = a background agent), at the end of the map. The record first, then the page's `agents:` block (mirror): there
+def surface_refusal(name: str, front: bool, surface: str) -> str:
+    """Why an agent named `name` (`front` its side) cannot be listed with `surface`, in words; "" when it can. A surface that is not known is refused, and so is a non-sala agent that would be a background agent
+    (a mover) or the -main agent. The project's first agent (its keeper) is checked by agent_add, which knows the map."""
+    if surface not in pr.SURFACES:
+        return f"surface {surface!r} is not known; {pr.SURFACE_REFUSAL}"
+    if surface == pr.DEFAULT_SURFACE:
+        return ""
+    return pr.surface_problem(name, {"front": front, "surface": surface})
+
+
+def agent_add(project: str, name: str, front: bool, mandate: str, *, surface: str = "", by: str = "", io: Any = None, now: str | None = None, dry: bool = False, mirror_now: bool = True, pages: dict | None = None) -> dict:
+    """List an agent on the project's agents map with its mandate line (`front` False = a background agent), at the end of the map. `surface` is where a front agent talks with him: "" or "sala" (the default, never stored) or "slack"
+    (an agent that answers his Slack app messages, stored as `surface` on its entry); another value, a slack agent that is a background agent, the project's first agent (its keeper), or one named -main is refused (400). The record first, then the page's `agents:` block (mirror): there
     is no state in which the page owes a line. A name already listed with the same front flag and mandate changes nothing; with another, it is a 409. A pending entry of the same name is dropped.
     → {project, key, changed, entry, mirror, name, front, mandate}."""
     mandate = " ".join(str(mandate or "").split())
+    surface = str(surface or "").strip() or pr.DEFAULT_SURFACE
+    bad = surface_refusal(name, front, surface)
+    if bad:
+        raise VerbError(400, bad)
+    off = surface != pr.DEFAULT_SURFACE                                         # only a surface other than sala is stored: an entry of a sala agent is what it always was
 
     def work(ctx: Ctx) -> dict:
         pid = ctx.pid_of(project)
@@ -982,17 +998,19 @@ def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "
         have = _find(ag, name)
         if have is not None:
             cur = ag[have]
-            if bool(cur.get("front")) == bool(front) and _norm_m(cur.get("mandate_line", "")) == _norm_m(mandate):
+            if bool(cur.get("front")) == bool(front) and _norm_m(cur.get("mandate_line", "")) == _norm_m(mandate) and pr.surface_of(cur) == surface:
                 e["agents"] = ag
                 return {"pid": pid, "name": have, "marked": ""}
-            raise VerbError(409, f"{have} is already listed on the project as {'front' if cur.get('front') else 'background'}: {str(cur.get('mandate_line', ''))[:120]!r}; "
-                                 "to change its mandate line use agent_mandate; to change its side, retire it or rename it, then list it again")
+            raise VerbError(409, f"{have} is already listed on the project as {'front' if cur.get('front') else 'background'}{' on ' + pr.surface_of(cur) if pr.off_sala(cur) else ''}: {str(cur.get('mandate_line', ''))[:120]!r}; "
+                                 "to change its mandate line use agent_mandate; to change its side or its surface, retire it or rename it, then list it again")
         first = not ag and not _kp.effective_mark(ag, _page_row(ctx, e))        # the project's first agent, and nobody marked: it is the keeper (a later agent never is, and a project with a mark never gets a second)
+        if off and first:
+            raise VerbError(400, f"{name} would be the first agent of the project, and the first agent is its keeper: the keeper is a sala session, never a {surface} agent; list the project's own agent first")
         retired = e.get("status") == "archived"                                 # a retired project's mark is not moved by a verb (the `keeper` verb refuses it): the agent is listed and nothing is marked
         mark = first and not retired
         before = copy.deepcopy(ctx.ents) if mark else {}
         f0 = _keeper_fields(ctx, e, before) if mark else {}
-        ag[name] = {"front": bool(front), "mandate_line": mandate, **({"by": by} if by else {}), "at": ctx.now, **({_kp.KEY: True} if mark else {})}
+        ag[name] = {"front": bool(front), "mandate_line": mandate, **({"surface": surface} if off else {}), **({"by": by} if by else {}), "at": ctx.now, **({_kp.KEY: True} if mark else {})}
         e["agents"] = ag
         _former_agent(e, name, False)
         pend = ctx.d["pending_agents"].get(pid) or {}
@@ -1013,7 +1031,7 @@ def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": bool(front), "mandate": mandate, **({"keeper_marked": out["marked"], "lines": out["lines"]} if out.get("marked") else {})}, by=by,
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": bool(front), "mandate": mandate, **({"surface": surface} if off else {}), **({"keeper_marked": out["marked"], "lines": out["lines"]} if out.get("marked") else {})}, by=by,
                    mirror_now=mirror_now)
 
 
@@ -1138,6 +1156,9 @@ def agent_rename(project: str, old: str, new: str, *, by: str = "", io: Any = No
             raise VerbError(404, f"{old} is not listed on {pr.page_key(e) or pid}")
         if n is not None:
             raise VerbError(409, f"{new} is already listed on {pr.page_key(e) or pid}")
+        why = pr.surface_problem(new, ag[o]) if pr.off_sala(ag[o]) else ""
+        if why:
+            raise VerbError(400, f"{o} cannot be renamed {new}: {why[len('agent ' + new + ' '):]}")
         was = _kp.effective_mark(ag, _page_row(ctx, e))            # the mark as the readers see it: a flag in the record, or only the page's `keeper:` line
         retired = e.get("status") == "archived"                    # a retired project's mark is not moved by a verb (the `keeper` verb refuses it): a flag on the entry stays with it, a page-only mark is not written
         e["agents"] = {(new if k == o else k): v for k, v in ag.items()}
@@ -1194,6 +1215,8 @@ def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: A
         have = _find(ag, agent)
         if have is None:
             raise VerbError(404, f"{agent} is not listed on {key or pid}: the keeper mark goes on an agent the record lists ({', '.join(ag) or 'none listed'})")
+        if pr.off_sala(ag[have]):
+            raise VerbError(400, f"{have} is a {pr.surface_of(ag[have])} agent of {key or pid}: the keeper is a sala session, so the mark does not go on it")
         row = _page_row(ctx, e)
         old = _kp.effective_mark(ag, row)
         before = copy.deepcopy(ctx.ents)
@@ -1370,7 +1393,7 @@ def pageless_rec(x: Any) -> dict | None:
     if not v:
         return None
     pre = [v["name"]] if v["name"] else []
-    ag = {n: {"front": bool(a.get("front")), "role": prj.role_of(n, pre), "mandate_line": str(a.get("mandate_line") or "")} for n, a in v["agents"].items()}
+    ag = {n: {"front": bool(a.get("front")), "role": prj.role_of(n, pre), "mandate_line": str(a.get("mandate_line") or ""), **({"surface": str(a["surface"])} if pr.off_sala(a) else {})} for n, a in v["agents"].items()}
     return {"id": v["id"], "key": "", "keeper": v["name"], "agents": ag, "title": v["title"] or v["name"], "type": v["type"], "hub": v["hub"], "scope": v["scope"] or prj.default_scope(),
             "listed": not v["archived"], "listed_by": "on_purpose", "sub_page": False, "items_30d": 0, "status": v["status"], "retired": v["archived"], "pageless": True}
 
@@ -1521,6 +1544,27 @@ def agent_fields(body: dict[str, Any]) -> tuple[tuple[str, str, str, str, str, b
     return (project, name, role, mandate, sender, front), None
 
 
+SLACK_ROLE = "slack"       # the role word of a Slack agent (`<project>-slack`): `post project-agent --role slack` lists a front agent with the surface slack
+
+
+def agent_surface(body: dict[str, Any], role: str, front: bool) -> tuple[str, _Refusal | None]:
+    """The surface of the agent `post project-agent` lists → (the surface, None), or ("", the 400). The body's `surface` is "" or absent (sala, the default), "sala" or "slack"; the role word `slack` stands for the surface
+    slack when none is given, and conflicts with sala. A slack agent that is not a front agent is refused. The answer is "" for sala: a sala agent carries no surface, as before. Names and the first agent are agent_add's."""
+    raw = body.get("surface")
+    if raw is not None and not isinstance(raw, str):
+        return "", (400, {"error": f"surface is text; {pr.SURFACE_REFUSAL}"})
+    surface = (raw or "").strip()
+    if role.casefold() == SLACK_ROLE:                       # `Slack` is the role word too (the name's suffix compares case-folded)
+        if surface == pr.DEFAULT_SURFACE:
+            return "", (400, {"error": f"the role {SLACK_ROLE} is an agent on the surface {SLACK_ROLE}, and the surface asked for is {surface}: leave the surface out, or use another role"})
+        surface = surface or SLACK_ROLE
+    if surface and surface not in pr.SURFACES:
+        return "", (400, {"error": f"surface {surface!r} is not known; {pr.SURFACE_REFUSAL}"})
+    if surface and surface != pr.DEFAULT_SURFACE and not front:
+        return "", (400, {"error": f"a {surface} agent is a front agent: list it with front true (a background agent is a mover, which a {surface} agent never is)"})
+    return ("" if surface == pr.DEFAULT_SURFACE else surface), None
+
+
 def mark_age(mark: dict[str, Any], now: dt.datetime) -> float:
     """Seconds since the project's mark was made or renewed (`at`, else `on_purpose`) as of `now` (aware, UTC); infinite when the mark has no readable time."""
     try:
@@ -1569,18 +1613,18 @@ def agent_caller_refusal(rec: dict[str, Any], key: str, form: bool, first: bool,
     return front_caller_refusal(sender, is_id, names_get, rec, key, "lists a new agent")
 
 
-def listed_answer(rec: dict[str, Any], key: str, where: str, name: str, front: bool, mandate: str) -> tuple[str, _Refusal | None]:
-    """A name the page already lists (case-folded) → (the name as listed, the answer): the same side and mandate changes nothing (200), another is a 409; (name, None) when it is not listed."""
+def listed_answer(rec: dict[str, Any], key: str, where: str, name: str, front: bool, mandate: str, surface: str = "") -> tuple[str, _Refusal | None]:
+    """A name the page already lists (case-folded) → (the name as listed, the answer): the same side, mandate and surface (`surface` "" = sala) changes nothing (200), another is a 409; (name, None) when it is not listed."""
     fold = name.casefold()
     listed_name = next((n for n, a in rec["agents"].items() if n.casefold() == fold and not a.get("page_owed")), None)     # names compare case-folded
     if listed_name is None:
         return name, None
     name = str(listed_name)
     cur = rec["agents"][name]
-    if (cur["front"], cur["mandate_line"]) == (front, mandate):          # the role is read from the name: the one asked for is no part of "the same"
+    if (cur["front"], cur["mandate_line"], str(cur.get("surface") or "")) == (front, mandate, surface):          # the role is read from the name: the one asked for is no part of "the same"
         return name, (200, {"project": rec["id"], "key": key, "agent": {name: cur}, "page_owed": False, "page_yaml": "", "note": f"{name} is already listed on {where}: nothing changed"})
-    return name, (409, {"error": f"{name} is already listed on {where} as {'front' if cur['front'] else 'background'} ({cur['role']}): {cur['mandate_line'][:120]!r}; "
-                                 "to change its mandate line use `client.py post project-agent-mandate`; to change its side, retire it, or rename it, then list it again"})
+    return name, (409, {"error": f"{name} is already listed on {where} as {'front' if cur['front'] else 'background'}{' on ' + cur['surface'] if cur.get('surface') else ''} ({cur['role']}): {cur['mandate_line'][:120]!r}; "
+                                 "to change its mandate line use `client.py post project-agent-mandate`; to change its side or its surface, retire it, or rename it, then list it again"})
 
 
 def pending_name(pending: dict[str, Any], name: str) -> str:
@@ -1602,7 +1646,7 @@ def agent_added(rec: dict[str, Any], key: str, where: str, res: dict[str, Any], 
     """The 200 of a listed agent; `_mirror` is the project's id when its page is to get the agents line (the caller writes it after the lock and pops the key)."""
     has_page = bool(res["key"])
     return 200, {"project": rec["id"], "key": key, "agent": {res["name"]: new}, "page_owed": False, "page_yaml": "", "_mirror": rec["id"] if has_page else "",
-                 "note": f"Listed {res['name']} on {where} in the project record" + (f"; its page {key} gets the agents line from the record." if has_page else " (the project has no page).")
+                 "note": f"Listed {res['name']} on {where} in the project record" + (f" on the surface {new['surface']}" if new.get("surface") else "") + (f"; its page {key} gets the agents line from the record." if has_page else " (the project has no page).")
                  + (f" Note: {res['warning']}." if res.get("warning") else "")}
 
 

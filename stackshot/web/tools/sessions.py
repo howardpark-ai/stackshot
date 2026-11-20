@@ -67,7 +67,7 @@ def _sessions_listing(q: str = "", now: float | None = None) -> str:
         r = roles[k] if k else None
         if not r:
             return ""
-        label = _ROLE_LABEL.get(r['role'], r['role'])
+        label = f"{r['surface']} agent" if r.get("surface") else _ROLE_LABEL.get(r['role'], r['role'])      # a front agent that is not a sala session says where it talks
         kept = _anc.keeper_pages(k) if r.get('keeper') else []
         if kept and r['project'] not in kept:       # a marked agent whose best role is on another project than the one it keeps: both are said
             return f" · {label} of {r['project']}, and keeper of {' and '.join(kept)}"

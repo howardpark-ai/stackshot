@@ -50,8 +50,11 @@ runs on every box.
                                 Watch / Mute settings on items (an item with no flag is in neither); "watch" adds an item that is not watched by
                                 default, "mute" stops rows for it. A row leaves the list when he marks it seen on the board. Reads only.
                                 Exit 0 · 1 no token or not reached.
-  client.py post project-agent <project> <name> --role <role> (--front | --back) --mandate "<one line>" [--sender <session id>]
-                                ask to list a new agent of a project (<project> = its id, page key or bare slug). The server
+  client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id>]
+                                ask to list a new agent of a project (<project> = its id, page key or bare slug). --surface is where a front agent talks with him: sala (the
+                                default, a session of sala's list) or slack (an agent that answers his Slack app messages: a front agent that is never the project's keeper, a background
+                                agent or its -main agent, and that no router, audit or stall notice is addressed to); the role slack stands for it (`--role slack --front`), and
+                                any other surface, or a slack agent with --back, is refused (400). The server
                                 accepts it only when the asking session, by its id, resolves through the fleet to the agent marked as the project's keeper
                                 or to a front agent its page lists: the id is $CLAUDE_CODE_SESSION_ID (Claude Code sets it in every Bash
                                 command) or --sender <transcript id | cse_ id>; a bare name is refused. That id is the session's own
@@ -67,7 +70,7 @@ runs on every box.
                                 there is no line the page still owes, so the reply carries "page_owed": false and "page_yaml": "", and a "mirror"
                                 {state, key, note} that says whether the page was written ("failed": the record has the agent all the same, and the
                                 project's next change writes the page again). Said again as it stands it changes nothing; the same name with another front or
-                                mandate is a 409 (retire or rename it first). Exit 0 listed · 1 refused or not reached.
+                                mandate or surface is a 409 (retire or rename it first). Exit 0 listed · 1 refused or not reached.
   client.py get projects --scope <scope|all> [--q <search text>]
                                 the projects the fleet tool's New session form offers (the tool is the only reader, over this machine's token): JSON
                                 {"scope", "q", "generated", "scopes": [...], "projects": [{id, key, title, name, scope, listed, hidden, listed_by,
@@ -631,7 +634,7 @@ def sweep_step_proof(argv: list[str], timeout: float = 180.0) -> int:
     return 0
 
 
-PROJECT_AGENT_USAGE = 'usage: client.py post project-agent <project> <name> --role <role> (--front | --back) --mandate "<one line>" [--sender <session id>]'
+PROJECT_AGENT_USAGE = 'usage: client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id>]'
 
 
 def project_agent(argv: list[str], timeout: float = 30.0) -> int:
@@ -639,18 +642,20 @@ def project_agent(argv: list[str], timeout: float = 30.0) -> int:
     the agent marked as the project's keeper and its front agents, told by the asking session's id: --sender, else $CLAUDE_CODE_SESSION_ID. Also allowed: the fleet tool's New
     session form (a --sender label in the server's [project_agent] form_senders, sent from a machine in form_machines), on any listed project."""
     a, opt = list(argv), {}
-    for k in ("role", "mandate", "sender"):
+    for k in ("role", "mandate", "sender", "surface"):
         if "--" + k in a:
             i = a.index("--" + k)
             if i + 1 >= len(a): print(f"--{k} needs a value\n{PROJECT_AGENT_USAGE}"); return 1
             opt[k] = a[i + 1]; del a[i:i + 2]
     flags = [x for x in a if x in ("--front", "--back")]
     a = [x for x in a if x not in ("--front", "--back")]
+    if not flags and opt.get("role", "").strip().casefold() == "slack":
+        flags = ["--front"]                      # the role slack is a front agent on the surface slack: the side need not be said
     sender = (opt.get("sender") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
     if len(a) != 2 or len(flags) != 1 or not opt.get("role", "").strip() or not opt.get("mandate", "").strip():
         print(PROJECT_AGENT_USAGE); return 1
     if not sender: print("no asking session: pass --sender <transcript id | cse_ id>, or run it where $CLAUDE_CODE_SESSION_ID is set (a name is not accepted)"); return 1
-    status, d = post("project-agent", {"project": a[0], "name": a[1], "role": opt["role"], "front": flags[0] == "--front", "mandate": opt["mandate"], "sender": sender}, timeout)
+    status, d = post("project-agent", {"project": a[0], "name": a[1], "role": opt["role"], "front": flags[0] == "--front", "mandate": opt["mandate"], "sender": sender, **({"surface": opt["surface"]} if "surface" in opt else {})}, timeout)
     if status != 200 or not isinstance(d, dict):
         print(f"stackshot: agent not listed [{status}] {d.get('error') if isinstance(d, dict) else d}"[:700]); return 1
     print(d.get("note") or f"recorded {a[1]} in {d.get('project')}"); return 0

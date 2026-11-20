@@ -182,7 +182,8 @@ def _agents_of(project: str, reg: dict[str, dict[str, Any]], roots: list[str] | 
     page = reg.get(root) or {}
     agents = {str(k): str(v) for k, v in (page.get("agents") or {}).items()}
     back = {k: agents[k] for k in (page.get("back_agents") or {}) if k in agents}
-    return {k: v for k, v in agents.items() if k not in back}, back
+    off = _anc.surface_agents(page)                                      # an agent that is not a sala session is no recipient of a notice: neither front nor back here
+    return {k: v for k, v in agents.items() if k not in back and k not in off}, back
 
 
 def builder(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:

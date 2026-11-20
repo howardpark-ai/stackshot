@@ -113,6 +113,7 @@ def rdm(i): return json.loads((T / f"store/a/{i}.json").read_text())["metadata"]
 def upd(i, **kw):
     try: return _wt_update.stackshot_update(item_id=f"a{i}", sender="sparrow", **kw), ""
     except ToolError as e: return "", str(e)
+def D(n): return (_pg_self.zone_now() + dt.timedelta(days=n)).strftime("%Y-%m-%d")      # a date n days from today: the fixtures hold no calendar date, so the suite reads the same on any day
 WK = (_pg_self.zone_now() + dt.timedelta(days=5)).strftime("%Y-%m-%d")
 BAS = "visit on " + (_pg_self.zone_now() + dt.timedelta(days=9)).strftime("%Y-%m-%d")      # a time wait carries a reason
 for i in range(2, 12): mk(i)
@@ -136,15 +137,15 @@ check("the core write (what the server's own paths use) holds as before", _holde
 
 # the report: read only, a hold nothing holds now
 _sa = _item_read._scoped_anchors; _item_read._scoped_anchors = lambda proj, gid: [{"url": "https://github.com/example-owner/stackshot/pull/9", "items": [gid]}] if gid == "a10" else _sa(proj, gid)
-mk(13, hold=True, wake="2026-11-19")                                              # stored before the record, nothing holds it: listed
-mk(14, hold=True, wake="2026-11-20", hold_set={"at": _t.time() - 7200, "by": "sparrow"})                    # recorded, nothing holds it: listed
-mk(15, hold=True, wake="2026-11-21", hold_set={"at": _t.time() - 7200, "by": "sparrow", "why": ["said"]})   # a stored reason is never trusted: listed
-mk(16, hold=True, wake="2026-11-22", after=["a20"])                               # an open after holds it
-mk(17, hold=True, wake="2026-11-23", recycle=True)                                # a recycle holds it
-mk(18, hold=True, wake="2026-11-24", needs=["external"])                          # an outside party holds it
-mk(10, hold=True, wake="2026-11-25")                                              # an anchor scoped to it holds it (patched above)
+mk(13, hold=True, wake=D(1))                                              # stored before the record, nothing holds it: listed
+mk(14, hold=True, wake=D(2), hold_set={"at": _t.time() - 7200, "by": "sparrow"})                    # recorded, nothing holds it: listed
+mk(15, hold=True, wake=D(3), hold_set={"at": _t.time() - 7200, "by": "sparrow", "why": ["said"]})   # a stored reason is never trusted: listed
+mk(16, hold=True, wake=D(4), after=["a20"])                               # an open after holds it
+mk(17, hold=True, wake=D(5), recycle=True)                                # a recycle holds it
+mk(18, hold=True, wake=D(6), needs=["external"])                          # an outside party holds it
+mk(10, hold=True, wake=D(7))                                              # an anchor scoped to it holds it (patched above)
 mk(19, status="completed", hold=True)                                             # closed: never listed
-mk(21, hold=True, wake="2026-11-26", hold_set={"at": "garbage", "by": "sparrow"}); mk(22, hold=True, wake="2026-11-27", hold_set="oops")   # malformed records
+mk(21, hold=True, wake=D(8), hold_set={"at": "garbage", "by": "sparrow"}); mk(22, hold=True, wake=D(9), hold_set="oops")   # malformed records
 before = {f.name: f.read_text() for f in (T / "store/a").glob("*.json")}
 try: rows = _notes_tool._holds_unexplained(); rep = _notes_tool._holds_report()
 finally: _item_read._scoped_anchors = _sa
@@ -154,12 +155,12 @@ check("the report lists a hold nothing holds now (stored before the record, reco
 check("a malformed record (a value that is no number, a record that is no object) breaks nothing and reads as no record", {"a21", "a22"} <= set(gids)
       and all(r["at"] == 0 for r in rows if r["gid"] in ("a21", "a22", "a13")) and next(r for r in rows if r["gid"] == "a22")["by"] == "", [r for r in rows if r["gid"] in ("a21", "a22")])
 row = next(r for r in rows if r["gid"] == "a14"); old = next(r for r in rows if r["gid"] == "a13")
-check("each row has the owner, the wake, who set it and when; a hold from before the record says so", row["owner"] and wk_(row) == "2026-11-20" and row["by"] == "sparrow" and row["at"] > 0
-      and old["by"] == "" and old["at"] == 0 and wk_(old) == "2026-11-19", (row, old))
-check("the printed report: one line per item with mover, wake, setter and time", "a14 · mover sparrow · wake 2026-11-20 · set by sparrow (" in rep and "a13 · mover sparrow · wake 2026-11-19 · set by unknown (before the record)" in rep
+check("each row has the owner, the wake, who set it and when; a hold from before the record says so", row["owner"] and wk_(row) == D(2) and row["by"] == "sparrow" and row["at"] > 0
+      and old["by"] == "" and old["at"] == 0 and wk_(old) == D(1), (row, old))
+check("the printed report: one line per item with mover, wake, setter and time", "a14 · mover sparrow · wake " + D(2) + " · set by sparrow (" in rep and "a13 · mover sparrow · wake " + D(1) + " · set by unknown (before the record)" in rep
       and "a16 ·" not in rep and "update clear_hold=true" in rep, rep)
 check("the report writes nothing: every item file is as it was", before == {f.name: f.read_text() for f in (T / "store/a").glob("*.json")})
-st, ct, body = client_reads_svc._client_get("holds", {}); check("the client API serves it as holds", st == 200 and "a14 · mover sparrow · wake 2026-11-20" in body and "a16 ·" not in body and ct.startswith("text/plain"), (st, body[:120]))
+st, ct, body = client_reads_svc._client_get("holds", {}); check("the client API serves it as holds", st == 200 and "a14 · mover sparrow · wake " + D(2) + "" in body and "a16 ·" not in body and ct.startswith("text/plain"), (st, body[:120]))
 _cg = client.get; client.get = lambda what, *a, **k: (200, client_reads_svc._client_get(what, {})[2]); _o = sys.stdout; sys.stdout = __import__("io").StringIO()
 try: rc = client.main(["client.py", "holds"]); printed = sys.stdout.getvalue()
 finally: sys.stdout = _o; client.get = _cg
@@ -171,11 +172,11 @@ check("client.py holds exits 1 when the server is not reached", rc == 1)
 
 # a time that fromtimestamp cannot take (a milliseconds epoch, 1e300, a numeric string) is no record: nothing raises anywhere, the item reads as a hold from before the record
 BAD = {30: 1e12, 31: 1.76e12, 32: 1e300, 33: "1e12", 34: float("inf"), 35: -5, 36: 4102444801}
-for n, v in BAD.items(): mk(n, hold=True, wake="2026-11-28", hold_set={"at": v, "by": "sparrow"})
-mk(37, hold=True, wake="2026-11-29", hold_set={"at": _t.time() - 60, "by": "sparrow\n## injected heading\r\n- [a1](#x) fake"})
+for n, v in BAD.items(): mk(n, hold=True, wake=D(10), hold_set={"at": v, "by": "sparrow"})
+mk(37, hold=True, wake=D(11), hold_set={"at": _t.time() - 60, "by": "sparrow\n## injected heading\r\n- [a1](#x) fake"})
 md_ = _rmod.render(str(_core_store.STORE), "full"); br_ = _rmod.render(str(_core_store.STORE), "brief"); rows_ = _notes_tool._holds_unexplained(); rep_ = _notes_tool._holds_report()
 check("a hold time outside 0 < t < year 2100 (1e12, 1.76e12, 1e300, \"1e12\", inf, negative, 2100+1 s) reads as no record: board.md, the brief, the report, get and an update all work, the item listed as before the record",
-      all(_rmod.hold_at({"metadata": {"hold_set": {"at": v}}}) == 0.0 for v in BAD.values()) and all(f"a{n} · mover sparrow · wake 2026-11-28 · set by sparrow (before the record)" in rep_ for n in BAD)
+      all(_rmod.hold_at({"metadata": {"hold_set": {"at": v}}}) == 0.0 for v in BAD.values()) and all(f"a{n} · mover sparrow · wake " + D(10) + " · set by sparrow (before the record)" in rep_ for n in BAD)
       and all(next(r for r in rows_ if r["gid"] == f"a{n}")["at"] == 0 for n in BAD) and all(_wt_get.stackshot_get(f"a{n}") for n in BAD) and not upd(30, next="sparrow: the step that comes now", dropped=[1])[1]
       and _rmod.hold_at({"metadata": {"hold_set": {"at": _t.time() - 5}}}) > 0, (rep_[:300], rows_[:2]))
 mk(38, hold=True, recycle=True, hold_set={"at": 1790000000.0, "by": "home-first"}); upd(38, hold=True)      # a hold with a date folds into until and keeps no record; one that waits on an item or a recycle keeps its flag and record
@@ -201,7 +202,7 @@ check("a held item whose after item is already closed, or missing, is listed as 
 for i in (3, 4, 5): mk(i)
 mk(3, hold=True, wake=WK, hold_set={"at": _t.time() - 60, "by": "sparrow"})                      # new, nothing holds it
 mk(4, hold=True, wake=WK, after=["a20"], hold_set={"at": _t.time() - 60, "by": "sparrow"})       # new, an open after holds it
-mk(23, hold=True, wake="2026-11-24", hold_set={"at": _t.time() - 3 * 86400, "by": "sparrow"})   # set three days ago: not new
+mk(23, hold=True, wake=D(6), hold_set={"at": _t.time() - 3 * 86400, "by": "sparrow"})   # set three days ago: not new
 md = _rmod.render(str(_core_store.STORE), "full"); br = _rmod.render(str(_core_store.STORE), "brief")
 sect = md[md.find("## New holds"):md.find("Shared by every")]
 check("board.md has a section of the holds set in the last 24 hours, each with its owner, setter, wake and what holds it",

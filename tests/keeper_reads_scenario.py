@@ -144,7 +144,8 @@ KR.gauge([f"projects/p{i:03d}" for i in range(120)]); KR.flush()
 check("the gauge lists at most 50 keys and counts them all", filed()["legacy"]["count"] == 120 and len(filed()["legacy"]["keys"]) == 50, filed()["legacy"])
 KR.gauge([]); KR.flush()
 check("zero rows is a gauge of zero, written, not an absent one", filed()["legacy"]["count"] == 0 and filed()["legacy"]["keys"] == [], filed())
-KR._STATE["flushed"] = 0.0; before = filed()["flushed"]; time.sleep(1.1); KR.gauge([])
+# a minute ago on the monotonic clock itself: 0.0 is under a minute ago on a box up for less than one, which a fresh CI runner is
+KR._STATE["flushed"] = time.monotonic() - KR.EVERY - 1; before = filed()["flushed"]; time.sleep(1.1); KR.gauge([])
 check("the gauge is written again as a heartbeat when a minute has passed, with nothing else pending", filed()["flushed"] > before, filed())
 from stackshot.projects import projects as PRJ
 KR.gauge(["projects/stale"]); KR.flush()

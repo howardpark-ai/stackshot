@@ -51,7 +51,7 @@ def fronts(project: str, reg: dict[str, dict[str, Any]] | None = None) -> dict[s
     keys = [k for k in dict.fromkeys([key, _anc.pilot_root(key), _anc.hub_of(key, reg)]) if k]
     back: set[str] = set()
     for k in keys:
-        back |= {str(x) for x in ((reg.get(k) or {}).get("back_agents") or {})}
+        back |= {str(x) for x in ((reg.get(k) or {}).get("back_agents") or {})} | set(_anc.surface_agents(reg.get(k) or {}))      # an agent that is not a sala session is no contact an item's person talks to
     out: dict[str, str] = {}
     for k in keys:
         for n, m in ((reg.get(k) or {}).get("agents") or {}).items():

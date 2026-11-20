@@ -329,7 +329,8 @@ def recipient(f: dict[str, str], ents: dict, ov: dict, live: set[str]) -> str:
     e = ents.get(f.get("project") or "")
     if e and e.get("agents"):
         row = {"agents": {n: str(a.get("mandate_line") or "") for n, a in e["agents"].items()},
-               "back_agents": {n: "" for n, a in e["agents"].items() if not a.get("front", True)}}
+               "back_agents": {n: "" for n, a in e["agents"].items() if not a.get("front", True)},
+               "surface_agents": {n: _pr.surface_of(a) for n, a in e["agents"].items() if _pr.off_sala(a)}}      # a Slack agent is nobody's recipient, as in every other picker
         m = _anc.main_of(row)
         if m and m in live:
             return m

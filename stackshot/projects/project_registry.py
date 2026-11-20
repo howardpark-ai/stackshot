@@ -10,8 +10,11 @@ An entry (every field optional unless said):
     title, type    what the registry shows ("project")
     scope          one of [project_scopes] order
     status         "active" | "archived" (default active)
-    agents         {agent name: {"front": bool, "mandate_line": str, "keeper": true}} in the order the project lists them (the first builder listed is the builder). `keeper: true` marks the
-                   project's keeper: at most one agent of the entry carries it (a second flag is ignored and reported, never an error); with none the keeper is derived (keeper.py)
+    agents         {agent name: {"front": bool, "mandate_line": str, "keeper": true, "surface": str}} in the order the project lists them (the first builder listed is the builder). `keeper: true` marks the
+                   project's keeper: at most one agent of the entry carries it (a second flag is ignored and reported, never an error); with none the keeper is derived (keeper.py).
+                   `surface` is where a front agent talks with him: absent means "sala" (the session list), and "slack" is an agent that answers his Slack app messages. Only a value other than
+                   "sala" is stored. A non-sala agent is a front agent for the gates that guard front agents, but it is never the keeper, never a background agent and never named -main, and no
+                   picker of "the project's front agent" (the -main agent, the keeper, a successor, a recipient of a router or audit notice) chooses it
     page_keepers   {sub-page key: agent name}: the sub-pages under this project's page that carry a keeper mark of their own (keeper.py). The agent need not be on this project's map, only listed by some
                    project; a name nobody lists, or a key that is no page under the project, is ignored and reported on this project's row (`keeper_problems`), never an error. An empty name hands the
                    page back to the page above it (its keeper follows that page's)
@@ -66,6 +69,32 @@ ID_RE = re.compile(r"^prj_[0-9a-f]{8}$")
 STATUSES = ("active", "archived")
 HOWS = ("made", "adopted", "migrated")
 _STR_FIELDS = ("name", "title", "type", "scope", "hub", "page")
+SURFACES = ("sala", "slack")          # where a front agent talks with him; the first is the default, and an entry never stores it
+DEFAULT_SURFACE = _kp.SALA
+SURFACE_REFUSAL = f"a surface is {' or '.join(SURFACES)}"
+
+
+def surface_of(a: Any) -> str:
+    """The surface of an agent entry of the record (or of one agent's record): "sala" when it holds none."""
+    return str(a.get("surface") or DEFAULT_SURFACE) if isinstance(a, dict) else DEFAULT_SURFACE
+
+
+off_sala = _kp.off_sala                # is an agent entry one that is not a sala session (it holds a surface other than the default)
+
+
+def surface_problem(name: str, a: dict) -> str:
+    """Why the agent entry `a` named `name` cannot hold the surface it holds, in words ("" when it can): a value that is not a surface, or a non-sala agent that is a background agent, the keeper, or a -main agent."""
+    got = a.get("surface")
+    if got is None:
+        return ""
+    if got not in SURFACES:
+        return f"agent {name}: surface {got!r} is not known; {SURFACE_REFUSAL}"
+    if got == DEFAULT_SURFACE:
+        return ""
+    why = ("is a background agent: a {s} agent is a front agent" if not a.get("front", True) else
+           "is the project's keeper: the keeper is a sala session, never a {s} agent" if a.get(_kp.KEY) is True else
+           "is named -main: the -main agent is a sala session, never a {s} agent" if name.endswith("-main") else "")
+    return f"agent {name} {why.format(s=got)}" if why else ""
 
 
 def is_id(x: Any) -> bool:
@@ -101,6 +130,10 @@ def parse(doc: Any) -> dict:
             if not isinstance(ag, dict) or not all(isinstance(n, str) and n and isinstance(a, dict) and isinstance(a.get("front"), bool)
                                                    and isinstance(a.get("mandate_line", ""), str) for n, a in ag.items()):
                 raise bad("agents")
+            for n, a in ag.items():
+                why = surface_problem(n, a)
+                if why:
+                    raise bad(why)
         for f in ("former_keys", "former_names", "former_agents"):
             if f in e and not (isinstance(e[f], list) and all(isinstance(x, str) and x for x in e[f])):
                 raise bad(f"{f} is not a list of strings")
@@ -284,6 +317,9 @@ def _overlay(cur: dict, e: dict, retired: set) -> dict:
     page_mark = _kp.row_mark(cur)
     if page_mark and page_mark not in listed:                    # the record removed the agent the page marks: the visible `keeper:` line is not read, and the row says why
         problems = [*problems, f"`keeper: {page_mark}` on the page names an agent the project record does not list; the record's agents rule, so the line is ignored"]
+    elif page_mark and _kp.off_sala(listed.get(page_mark)):      # a Slack agent is never the keeper: the line is read as a name the record does not list is
+        problems = [*problems, f"`keeper: {page_mark}` on the page names a {surface_of(listed[page_mark])} agent, and the keeper is a sala session; the line is ignored"]
+        page_mark = ""
     mark = mark or (page_mark if page_mark in listed else "")    # the record's flag first, else the mark the page's own `keeper:` line gave
     if mark:                                                     # the marked agent is the row's keeper; the old name line stays beside it
         new["session"] = mark; new["role"] = _kp.MARK
@@ -315,7 +351,8 @@ def _overlay(cur: dict, e: dict, retired: set) -> dict:
     if "agents" in e:
         ag = {n: str(a.get("mandate_line", "")) for n, a in e["agents"].items()}
         back = {n: ag[n] for n, a in e["agents"].items() if not a.get("front", True)}
-        for k, v in (("agents", ag), ("back_agents", back)):
+        off = {n: surface_of(a) for n, a in e["agents"].items() if off_sala(a)}      # only an agent that is not a sala session is named: a record with none lays the row it always laid
+        for k, v in (("agents", ag), ("back_agents", back), ("surface_agents", off)):
             if v:
                 new[k] = v
             else:
@@ -363,12 +400,14 @@ def _inherit_marks(out: dict, tops: set) -> None:
                 row.pop("role", None)
 
 
-def _listed_agents(rows: dict, ents: dict) -> set:
-    """Every agent name some project lists: on the agents map of a row of `rows` (the entries are laid over it) or of an entry of `ents`."""
+def _listed_agents(rows: dict, ents: dict, sala_only: bool = False) -> set:
+    """Every agent name some project lists: on the agents map of a row of `rows` (the entries are laid over it) or of an entry of `ents`. `sala_only` leaves out the names a project lists only
+    as agents that are not sala sessions (a Slack agent: a row's `surface_agents`, an entry's `surface`): none of them keeps a page."""
     out: set = set()
     for src in (*rows.values(), *ents.values()):
         if isinstance(src, dict) and isinstance(src.get("agents"), dict):
-            out.update(str(n) for n in src["agents"])
+            off = src.get("surface_agents") or {}
+            out.update(str(n) for n, a in src["agents"].items() if not (sala_only and (n in off or _kp.off_sala(a))))
     return out
 
 
@@ -398,9 +437,9 @@ def _lay_page_keepers(base: dict, ents: dict) -> dict:
             elif row.get("role") == _kp.MARK:
                 why = "has a `keeper:` line of its own, which rules"
             elif who:
-                known = _listed_agents(out, ents) if known is None else known
+                known = _listed_agents(out, ents, True) if known is None else known
                 if who not in known:
-                    why = f"{who} is not an agent any project lists"
+                    why = f"{who} is not an agent any project lists" if who not in _listed_agents(out, ents) else f"{who} is not a sala session (the project lists it as a Slack agent, which never keeps a page)"
             elif row.get("role") != "agent":
                 continue                                   # nothing to hand back: the page follows the page above it already
             if why:
@@ -496,7 +535,8 @@ def apply(reg: dict, ents: dict | None = None) -> dict:
             if (_kp.MARK in (cur.get("role"), new.get("role")) or "legacy_session" in cur or "legacy_session" in new
                     or cur.get("status") != new.get("status") or cur.get("hub") != new.get("hub")      # a retired or re-hubbed project: the pages under it read their keeper again
                     or list((cur.get("agents") or {}).items()) != list((new.get("agents") or {}).items())
-                    or list((cur.get("back_agents") or {}).items()) != list((new.get("back_agents") or {}).items())):
+                    or list((cur.get("back_agents") or {}).items()) != list((new.get("back_agents") or {}).items())
+                    or (cur.get("surface_agents") or {}) != (new.get("surface_agents") or {})):
                 tops.add(_top(k))
         if out is None:
             return _lay_page_keepers(reg, ents)
