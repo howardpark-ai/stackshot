@@ -73,6 +73,7 @@ from stackshot.web import server; from stackshot.web.tools import anchors as _wt
 from stackshot.core import config as _config
 from stackshot.service import answer as answer_svc, update as update_svc, telling, handoff as handoff_svc
 from stackshot.waits import held
+from stackshot.router import routing
 from stackshot.service import contacts as contacts_svc, github_events as ghev
 from stackshot.web import publish as _web_publish, page_debts as _web_page_debts
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -106,7 +107,7 @@ _config.CFG.pop("presence", None)
 
 LOGGED = []
 _real_log = telling._front_held_log
-telling._front_held_log = lambda gid, who, kind, reason, note: (LOGGED.append((gid, who)), _real_log(gid, who, kind, reason, note))[1]
+telling._front_held_log = lambda gid, who, kind, reason, note, **kw: (LOGGED.append((gid, who)), _real_log(gid, who, kind, reason, note, **kw))[1]
 def answer(gid, *a):
     """One answer through the real `_answer` and the real tell_woken (the fake push) and the real front gate → (what happened, {name: [notes pushed to it]}, {name: the text its next turn is handed from the held store})."""
     p0 = len(pushes()); h0 = {n: held.count(U[n]) for n in NAMES}
@@ -284,6 +285,10 @@ out, got, kept = answer("a30", "Ship", "go", "answer")
 held.can_fetch = _real_can
 check("8 the gate fails for the contact: no push to it (no turn), no held line; the session in the needs is told as before", "demo-lead" not in got and "demo-lead" not in kept and len(got.get("demo-builder", [])) == 1, (got, kept))
 check("8 …the contact's History line says it was not told, and the routing log has its line", "demo-lead" in json.dumps(rd(30)["metadata"].get("front_quiet")) and ("a30", U["demo-lead"]) in LOGGED, (rd(30)["metadata"].get("front_quiet"), LOGGED))
+_proj30 = telling._hold_project(U["demo-lead"], "a30")
+_line30 = [x for x in routing.read(_proj30) if x.get("label") == "message a30"] if _proj30 else []
+check("8 …and that line says archived, with no next_turn mark and an archived reason: the answer the gate could not file waits for no one's next turn", len(_line30) == 1 and _line30[0]["ruling"] == "archived"
+      and str(_line30[0].get("reason", "")).startswith("archived: front agent, the front gate could not file it") and not [d for d in routing._file(_proj30).read_text(encoding="utf-8").splitlines() if '"next_turn"' in d and _line30[0]["id"] in d], (_proj30, _line30))
 out = upd("a30", "demo-lead", priority="p3")
 check("8 …and a contact the gate could not file is not recorded as told: it gets the line on its first write", "Oliver answered a30 on the board at" in out, out)
 item(31, needs=["decision", "demo-builder"], ask=ASK, options=OPTS, contact="demo-lead")

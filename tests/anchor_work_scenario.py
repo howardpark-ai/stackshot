@@ -137,7 +137,7 @@ fell("a registry that has no lead_agents (not rebuilt yet) falls through to toda
 
 # ---- 4. an image-only notice on the filtered anchor stays held by `image`
 ln = rule(notice("i1", text="[files: image.png]"))
-check("an image-only notice on a filtered anchor is held by image, not passed", ln and (ln["rule"], ln["ruling"], ln["target"]) == ("image", "held", ""), ln)
+check("an image-only notice on a filtered anchor is archived by image, not passed", ln and (ln["rule"], ln["ruling"], ln["target"]) == ("image", "archived", ""), ln)
 
 # ---- 5. the live act delivers the pass to the work agent and rules the notice
 sent = []

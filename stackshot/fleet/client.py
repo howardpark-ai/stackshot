@@ -40,7 +40,7 @@ runs on every box.
                                 is not reached ([0]). Older ids work.
   client.py get notice <id>     what the router did with a notice: the six hex characters a send to a project returns ("held for the router — the
                                 router rules notice a1b2c3 …"). Prints the same lines as the get tool for a notice id: sender, when, project, a one-line
-                                excerpt, the ruling (passed to whom, merged, held or dropped), reason, rule, item, who ruled it and when; or, for a notice
+                                excerpt, the ruling (passed to whom, merged, archived, held or dropped), reason, rule, item, who ruled it and when; or, for a notice
                                 not ruled yet, that it is still held and when the router rules it. Exit 0 · 1 an id no routing log holds ([404] no notice
                                 <id>), no id given, no token or not reached.
   client.py get for-you         the owner's For you list (what he should see: a close with his words on it, a decision asked of him, a done check

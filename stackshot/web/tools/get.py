@@ -244,7 +244,8 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
 
 
 # ----------------------------------------------------------------------------- a notice's ruling (get with a notice id)
-_RULING_SAYS = {"merged": "merged into a digest (nobody is told at once)", "held": "held (kept for the daily digest or the page pass; nobody is told at once)",
+_RULING_SAYS = {"merged": "merged into a digest (nobody is told at once)", "archived": "archived (kept in the daily digest record or for the page pass; nobody is told at once)",
+                "held": "held for an agent's next turn (nobody is told at once)",
                 "dropped": "dropped (nobody needed it)"}
 
 

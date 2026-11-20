@@ -50,8 +50,8 @@ when: the positions `update` takes in done=[…] and dropped=[…]. What a write
 each: `Acked-by:`, `Suggested-by:`, `Reported-by:` or `Done-by:` (a pasted result that proves a step, not his words)
 with the session, the time, checked or unchecked, and the quote. The item model is on docs/design. item_id can also be
 a notice id, the six hex characters a message to a project returns ("notice a1b2c3"): get then shows the notice
-instead of an item, with its `sender:`, `sent:` and `project:`, a one-line `text:` excerpt, the router's `ruling:`
-(passed to whom, merged, held or dropped) with its `reason:`, its `rule:` (a rule in code, or the router's call) and
+instead of an item, with its `sender:`, `sent:` and `project:`, a `text:` excerpt, the router's `ruling:`
+(passed to whom, merged, archived, held or dropped) with its `reason:`, its `rule:` (a code rule or the router's call) and
 who it was `ruled by:`, the `item:` it went onto and when it was `ruled:`; a repeat dropped by the rule in code also
 names the notice it repeats on a `repeat of:` line; a notice not ruled yet shows that it is still held for the router
 and when that is `expected:`, and a `last try:` line when the router's last judgment of it failed (a notice the router

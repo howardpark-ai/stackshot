@@ -88,7 +88,7 @@ def _tell_aside(gid: str, sid: str, line: str, tail: str, contact: bool = False)
     why = "the front gate could not file it"
     if contact:
         _telling._front_board_line(gid, sid, False, why, line)
-    _telling._front_held_log(gid, sid, "message", f"held: front agent, {why} (message)", line)
+    _telling._front_held_log(gid, sid, "message", f"archived: front agent, {why} (message)", line)
     return False
 
 

@@ -92,6 +92,7 @@ from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import message as _wt_message
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
@@ -168,6 +169,7 @@ out = telling.tell_owner("a1", it, "was completed (done)", B, close=True); settl
 check("3a: a completion of the builder's item by another session is not pushed to it", reach(X, n0) == [], pushes()[n0:])
 check("…it is held, one line, for its next turn", held.count(X) == 1 and "item 1" in held.take(X), held.count(X))
 check("…and the routing log says held: asks nothing (closed), logged by the server (not delivered to anyone)", len(logged("closed")) == 1 and logged("closed")[0].get("to", "") == "" and logged("closed")[0].get("ruled_by") == routing.AUTO_RULER, hold_lines())
+check("…and its ruling line carries the kind of hold (next_turn), so it stays held", [d.get("next_turn") for d in json.loads("[" + ",".join(routing._file(KEY).read_text().splitlines()) + "]") if d.get("ruling") == "held" and d.get("reason") == "held: asks nothing (closed)"] == ["closed"], routing._file(KEY).read_text()[-400:])
 fresh(); n0 = len(pushes()); it = _service_store._load("a2")
 telling.tell_owner("a2", it, "was completed (done)", B, close=True); settle()
 check("3b negative: the same completion with Oliver's words on the item (Oliver: \"ship it\") is pushed to the builder as before", len(reach(X, n0)) == 1 and held.count(X) == 0, (pushes()[n0:], held.count(X)))
@@ -310,6 +312,7 @@ res = act(n, "work-osprey-docs")
 rr = next(x for x in routing.read(KEY) if x["id"] == n["id"])
 check("5a: the router passes a notice recorded with hold=page-owed to a background agent: held, not delivered, ruled held with the reason", reach(D, n0) == [] and held.count(D) == 1
       and res["status"] == "ruled" and res["ruling"] == "held" and rr.get("ruling") == "held" and rr.get("reason") == "held: asks nothing (page-owed)" and rr.get("ruled_by") == _live.BY, (res, rr, pushes()[n0:]))
+check("5a2: …the ruling line carries the kind of hold (next_turn), which keeps it held and apart from the router's archived ruling", [d.get("next_turn") for d in json.loads("[" + ",".join(routing._file(KEY).read_text().splitlines()) + "]") if d.get("id") == n["id"] and "ruling" in d and "kind" not in d] == ["page-owed"], routing._file(KEY).read_text()[-400:])
 check("…the stored line is the notice's text, one line", "page update is owed" in held.take(D, "work-osprey-docs"))
 fresh(); n0 = len(pushes()); n = rec("[board] board#1 completed (done) by home-beta — the page update is owed", hold="page-owed"); res = act(n, "work-osprey-main")
 check("5b negative: the same notice passed to a FRONT agent is delivered, marked, as before", len(reach(A, n0)) == 1 and res["ruling"] == "passed" and held.count(A) == 0, (res, pushes()[n0:]))
@@ -452,7 +455,11 @@ check("6k2b: …and the router's own ruling is the one routing-log line for it: 
 os.unlink(held.clients_file()); gate_open()
 fresh(); n0 = len(pushes()); nid_f = routing.record(KEY, kind="message", to="", label="message to projects/alpha", who="home-beta", text="the release is live", target="project-wide", pilot=True, live=True, hold="fyi")
 res = act(next(x for x in routing.read(KEY) if x["id"] == nid_f), "work-osprey-main", rule="message-item")
-check("6k3: …a front agent whose hook does not fetch held lines is not given a turn: ruled held with the reason, nothing pushed", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 0 and "front agent" in str(res.get("reason")), (res, pushes()[n0:]))
+check("6k3: …a front agent whose hook does not fetch held lines is not given a turn: nothing is filed for it, so the notice is ruled archived (not held) with the reason, nothing pushed", res["ruling"] == "archived" and reach(A, n0) == [] and held.count(A) == 0 and "front agent" in str(res.get("reason")), (res, pushes()[n0:]))
+rr_f = next(x for x in routing.read(KEY) if x["id"] == nid_f); ln_f = {**res, "id": nid_f, "project": KEY, "key": KEY, "ts": time.time()}
+rows_f, _q, _pp = _live._digest_items(KEY, time.time(), {nid_f: _live._aliased(ln_f)}, {"sent": {}})
+check("6k3b: …and the routing log, the live line, the digest and the get tool say the same word for it: archived, listed by the digest, no next_turn mark", rr_f["ruling"] == "archived" and _live._aliased(ln_f)["ruling"] == "archived" and [r[1]["id"] for r in rows_f] == [nid_f]
+      and "ruling: archived" in _wt_get._notice_report(nid_f) and not any("next_turn" in d for d in json.loads("[" + ",".join(routing._file(KEY).read_text().splitlines()) + "]") if d.get("id") == nid_f), (rr_f, rows_f))
 held.mark_client(A, "work-osprey-main")
 fresh(); n0 = len(pushes()); n = rec("[home-beta] the release is live — [for Oliver] pick a or b", hold="fyi"); res = act(n, "work-osprey-main", rule="message-item")
 check("6k4 negative: an fyi pass to a front agent that carries Oliver's mark is delivered, marked, as before", res["ruling"] == "passed" and len(reach(A, n0)) == 1 and held.count(A) == 0, (res, pushes()[n0:]))
@@ -626,7 +633,7 @@ check("6w2: …and when the ruling names one item, the items the text names get 
 os.unlink(held.clients_file()); gate_open()
 fresh(); n0 = len(pushes()); b24 = len(fq_log(24))
 n = rec("a24 is merged, nothing for you", hold="fyi"); res = act(n, "work-osprey-main", rule="message-item"); settle()
-check("6w3: …a front agent whose hook cannot fetch held lines is not given a turn, and the board line is the fallback for the item the text names", res["ruling"] == "held" and held.count(A) == 0 and reach(A, n0) == [] and len(fq_log(24)) == b24 + 1, (res, fq_log(24)))
+check("6w3: …a front agent whose hook cannot fetch held lines is not given a turn (nothing filed: ruled archived), and the board line is the fallback for the item the text names", res["ruling"] == "archived" and held.count(A) == 0 and reach(A, n0) == [] and len(fq_log(24)) == b24 + 1, (res, fq_log(24)))
 held.mark_client(A, "work-osprey-main")
 fresh(); b23 = len(fq_log(23)); out = msg("work-osprey-main", "a23 is merged, nothing for you", "home-beta", fyi=True); settle()
 check("6x: the reply promises a History line only for an open item it names: a closed item gets none, and the reply does not claim one", len(fq_log(23)) == b23 and "an open item it names gets a History line" in out and "an item it names gets" not in out, (out, fq_log(23)))
@@ -745,12 +752,12 @@ check("7u: a retired session's file (untouched for KEEP_DAYS) is removed when an
 
 # the digest leaves out what is held for an agent
 fresh()
-nA = rec("[board] board#1 plain held by the router"); routing.rule(nA["id"], "held", reason="a router hold", by=_live.BY)
+nA = rec("[board] board#1 plain held by the router"); routing.rule(nA["id"], "archived", reason="a router archive", by=_live.BY)
 nB = rec("[board] board#1 completed (done) — page update", hold="page-owed"); resB = act(nB, "work-osprey-docs")
-lnA = {"id": nA["id"], "project": KEY, "key": KEY, "status": "ruled", "ruling": "held", "ts": time.time()}
+lnA = {"id": nA["id"], "project": KEY, "key": KEY, "status": "ruled", "ruling": "archived", "ts": time.time()}
 lnB = {**resB, "id": nB["id"], "project": KEY, "key": KEY, "ts": time.time()}
 rows_, _q, _pp = _live._digest_items(KEY, time.time(), {nA["id"]: lnA, nB["id"]: lnB}, {"sent": {}})
-check("7v: the digest lists a notice the router held for itself and leaves out one held for an agent's next turn (held_for), which would reach the agent twice",
+check("7v: the digest lists a notice the router archived for itself and leaves out one held for an agent's next turn (held_for), which would reach the agent twice",
       [r[1]["id"] for r in rows_] == [nA["id"]] and lnB.get("held_for") == "work-osprey-docs", ([r[1]["id"] for r in rows_], lnB))
 held.mark_client(A, "work-osprey-main"); fresh()
 nF = rec_po(); resF = act(nF, "work-osprey-main", rule="page-owed"); lnF = {**resF, "id": nF["id"], "project": KEY, "key": KEY, "ts": time.time()}

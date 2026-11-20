@@ -3,7 +3,8 @@ rulings carry its name; the `route` tool overrules one).
 
 Part of the pilot, now the router's for every project.
 anchor-hub records each anchor notice it delivers; the server records an agent's board write and a message addressed to a project.
-The router answers each line with a ruling: passed (to an agent) · merged (into a digest) · held · dropped. A line with no ruling is
+The router answers each line with a ruling: passed (to an agent) · merged (into a digest) · archived (kept in the log and the daily digest record,
+delivered to no one) · held (for a session's next turn, held.py) · dropped. A line with no ruling is
 pending — the router's backlog, and the sign that it is behind. A line recorded with `pilot` false (a direct anchor, a log-only one)
 is only a count of what came in.
 
@@ -23,7 +24,11 @@ from stackshot.core import config as _cfg
 from stackshot.core.lines import newline_lines
 
 DIR: Path = _cfg.state("routing")
-RULINGS = ("passed", "merged", "held", "dropped")
+RULINGS = ("passed", "merged", "archived", "held", "dropped")
+CALL_RULINGS = ("passed", "merged", "archived", "dropped")     # what the router's thin call may answer (it never holds a notice for a session's next turn)
+ARCHIVED = "archived"     # kept in the log and the daily digest record, delivered to no one; an older log wrote it `held`
+HELD = "held"             # filed for a session's next turn (held.py): the one `held` the log keeps
+_FILED_REASONS = ("held: asks nothing", "written onto the item it names, not delivered")     # how an older log's reason words a line filed for a session's next turn
 KEEP_DAYS = 30          # what a read returns at most; the files keep everything
 _NID = re.compile(r"[0-9a-f]{6}")      # a notice id: record() mints secrets.token_hex(3)
 AUTO_RULER = "stackshot (auto)"     # who rules a log-only notice at once (the turn rule): the server's and anchor-hub's own name
@@ -79,15 +84,38 @@ def record(project: str, *, kind: str, to: str, label: str = "", who: str = "", 
     return nid
 
 
-def record_auto(project: str, ruling: str, why: str, **kw: Any) -> str:
+def _worded_as_filed(reason: Any) -> bool:
+    """Is this reason, written before the `next_turn` mark, worded as a line FILED for a session's next turn (held.py's "held: asks nothing (kind)", the front gate's
+    "held: front agent, rides <agent>'s next turn", a router pass written onto an item)? A front gate's "held: front agent, <why>" with no "rides" told nobody and filed
+    nothing: it reads as archived. This is the last resort for a line with no mark; a new line carries `next_turn` or is written `archived`."""
+    r = str(reason or "")
+    return r.startswith(_FILED_REASONS) or (r.startswith("held: front agent, ") and "rides" in r and "next turn" in r)
+
+
+def ruling_of(ruling: Any, next_turn: Any = "", reason: Any = "") -> str:
+    """The ruling as it reads now. An older log wrote `held` for a notice kept from everyone and for one told to no one, as well as for one filed for a
+    session's next turn; only the last keeps `held`. It is `held` when its ruling line carries `next_turn` (the held kind), or, in a line written before that
+    mark, when its reason is worded as a filed line (_worded_as_filed: the stored marks decide first, the reason text last); any other is `archived`.
+    Accepted residual risk: an old router ruling written before the mark, whose model-written reason begins exactly "held: asks nothing" or "held: front agent, ... rides ... next turn",
+    reads held. The thin call's own answer is never worded that way, and no line written now depends on it."""
+    r = str(ruling or "").strip().lower()
+    if r == HELD and not next_turn and not _worded_as_filed(reason):
+        return ARCHIVED
+    return r
+
+
+def record_auto(project: str, ruling: str, why: str, next_turn: str = "", **kw: Any) -> str:
     """A notice logged and not delivered, ruled at once by AUTO_RULER (the turn rule's third build: a routine
     event on the fleet's own PR, from anchor-hub): one `record` line with no recipient, `log_only` and `reason`, then its ruling
     line, appended to the same project file without the cross-project lookup rule() makes. → the notice id. `kw` = record()'s
     other fields (kind, label, who, text, url, target, pilot, anchor, ts)."""
     if ruling not in RULINGS:
         raise ValueError(f"ruling must be one of {' | '.join(RULINGS)}")
+    if ruling == HELD and not next_turn:
+        ruling = ARCHIVED       # `held` is written only with the kind of hold; without one it is the older word for archived
     nid = record(project, to="", reason=why, log_only=True, **kw)
-    _append(project, {"id": nid, "ruling": ruling, "to": "", "reason": " ".join(str(why).split())[:300], "by": AUTO_RULER, "ts": time.time()})
+    _append(project, {"id": nid, "ruling": ruling, "to": "", "reason": " ".join(str(why).split())[:300], "by": AUTO_RULER, "ts": time.time(),
+                      **({"next_turn": str(next_turn)[:20]} if ruling == HELD else {})})
     return nid
 
 
@@ -106,7 +134,7 @@ def _fold(lines: list[str]) -> dict[str, dict[str, Any]]:
         if "ruling" in d and "kind" not in d:
             n = notices.get(str(d.get("id")))
             if n is not None:
-                n.update({"ruling": d["ruling"], "ruled_to": d.get("to", ""), "reason": d.get("reason", ""), "ruled_at": d.get("ts", 0), "ruled_by": d.get("by", "")})
+                n.update({"ruling": ruling_of(d["ruling"], d.get("next_turn"), d.get("reason")), "ruled_to": d.get("to", ""), "reason": d.get("reason", ""), "ruled_at": d.get("ts", 0), "ruled_by": d.get("by", "")})
         elif "reminder" in d and "kind" not in d:              # a reminder line of the earlier form (sessions were reminded): stage → when; no new one is written
             n = notices.get(str(d.get("id")))
             if n is not None:
@@ -169,21 +197,25 @@ def find(nid: str) -> tuple[str, dict[str, Any]] | None:
     return hit if hit is not None and float(hit[1].get("ts", 0)) >= time.time() - KEEP_DAYS * 86400 else None
 
 
-def rule(nid: str, ruling: str, to: str = "", reason: str = "", by: str = "") -> tuple[str, dict[str, Any]]:
-    """Record the ruling on a notice (again to overrule an earlier one). → (project, the notice as it now reads)."""
+def rule(nid: str, ruling: str, to: str = "", reason: str = "", by: str = "", next_turn: str = "") -> tuple[str, dict[str, Any]]:
+    """Record the ruling on a notice (again to overrule an earlier one). → (project, the notice as it now reads). `held` is the ruling of a
+    notice held for a session's next turn and is written only with `next_turn`, the kind of hold; without it the word is the older one for `archived`."""
     ruling = str(ruling).strip().lower()
     if ruling not in RULINGS:
         raise ValueError(f"ruling must be one of {' | '.join(RULINGS)}")
+    if ruling == HELD and not next_turn:
+        ruling = ARCHIVED
     hit = find(nid)
     if hit is None:
         raise KeyError(nid)
     project, _n = hit
-    _append(project, {"id": str(nid).strip().lower(), "ruling": ruling, "to": str(to).strip(), "reason": " ".join(str(reason).split())[:300], "by": str(by).strip(), "ts": time.time()})
+    _append(project, {"id": str(nid).strip().lower(), "ruling": ruling, "to": str(to).strip(), "reason": " ".join(str(reason).split())[:300], "by": str(by).strip(), "ts": time.time(),
+                      **({"next_turn": str(next_turn)[:20]} if ruling == HELD else {})})
     return project, next(n for n in read(project) if n["id"] == str(nid).strip().lower())
 
 
 def counts(keys: list[str], hours: float = 24.0, now: float | None = None, wait: float = 3600.0) -> dict[str, int]:
-    """What came in for these page keys in the last `hours`, and how it was ruled: {in, passed, merged, held, dropped, pending,
+    """What came in for these page keys in the last `hours`, and how it was ruled: {in, passed, merged, archived, held, dropped, pending,
     waiting, escalated}. `pending` counts pilot notices without a ruling, whatever their age within the log's reach: an old one is still
     owed. `waiting` is the part of them older than `wait` seconds: what the board flags. `escalated` is the
     part the project's -main agent had been told about (old log lines only: reminders["agent"]; nothing sets it any more)."""
