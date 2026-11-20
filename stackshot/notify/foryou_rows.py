@@ -37,7 +37,7 @@ def watched(mode: str, item: dict[str, Any]) -> tuple[bool, str]:
         return True, "it needs his decision"
     if _owner_words(item):
         return True, "his words are on it"
-    if any(isinstance(a, dict) for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])):
+    if any(isinstance(a, dict) and a.get("via") != "mail" for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])):      # a step the server ticked on a mail is not an answer of his
         return True, "he answered on it"
     return False, "not watched"
 

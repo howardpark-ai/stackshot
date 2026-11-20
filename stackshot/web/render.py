@@ -1412,7 +1412,7 @@ class Board:
                 pa_, na_ = answers_of(prev), answers_of(v)
                 if len(na_) > len(pa_) and na_[:len(pa_)] == pa_:        # phase 3: his answer from the board, one line each
                     for a in na_[len(pa_):]:
-                        ch, tx = str(a.get("choice") or ""), str(a.get("text") or "")
+                        ch, tx = str(a.get("choice") or ""), str(a.get("text") or a.get("server_note") or "")      # a step the server ticked on a mail he sent carries its own sentence, not his words
                         ev.append(("answer", f"{e(_OWNER)} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (' <span class="dim">· comment</span>' if a.get("kind") == "comment" else ' <span class="dim">· note on his step</span>' if a.get("kind") == "step-reply" else "")))
                 for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved or removed (a step status is folded under its step in the page, not a line each here)

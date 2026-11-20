@@ -1,6 +1,7 @@
 """anchorhub.gworkspace — Google Drive and Gmail: push channels (Drive changes.watch, Gmail Pub/Sub) with cursor polling behind them."""
 import json, os, glob, hmac, queue, threading, time, uuid
 from stackshot.anchors import gmail_query as _gq
+from stackshot.anchors import sent_mail as _sm
 from .core import Hub, HEALTH, HOOK_URL, WATCHES, _anc, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at, read_env, transient
 
 GDIR = str(_cfg.secrets("anchor-hub", "google"))
@@ -215,16 +216,25 @@ def run(hub: Hub):
         bx = boxes()
         readers = [k for k in bound if _anc.gmail_query(k) is not None and _anc.gmail_reads(k, a["email"], bx)]     # the query anchors that read this mailbox: a mail in a mailbox nobody reads costs no get
         keys = set(bound)
+        winfo = _sm.read_watch_full(CLOCK()); sent_on = winfo["mode"] != "off"       # the server's sent-mail watch (anchors/sent_mail.py): while on, the mail the user sends is read too and the ones that could fit a step are left in the spool for it; off reads none
+        own = {str(x).strip().lower() for x in [a["email"], *(_cfg.get("anchor_hub", "self_emails") or [])] if isinstance(x, str)}      # his own addresses: a mail to himself names nobody
         sent = list(a["sent"]); known = set(sent)        # the mail already handled in this mailbox (an inclusive startHistoryId repeats the last record); a mail given up on counts as handled
         seen, gets, stopped, failed, capped, now = set(), 0, None, [], False, CLOCK()     # failed: the gets that failed or wait, [mail id, thread id, tries so far, time of the last try], tried again at later polls
-        def wanted(tid): return bool(readers) or f"gmail:{tid}" in keys
+        def wanted(tid, labels=()): return bool(readers) or f"gmail:{tid}" in keys or (sent_on and "SENT" in labels)
         def fetch(mid, tid):
             """Get one mail and deliver it to the anchors that read it. False when the get failed: nothing was delivered, and the mail is not marked as handled."""
-            try: msg = a["gmail"].users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "To", "Cc"]).execute()
+            try: msg = a["gmail"].users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "To", "Cc", "Auto-Submitted", "Precedence"]).execute()
             except Exception as e: log.warning("gmail %s: get of mail %s failed: %s", a["email"], mid, str(e)[:120]); return False
             sent.append(mid); known.add(mid)
-            if "SENT" in msg.get("labelIds", []) or "DRAFT" in msg.get("labelIds", []): return True   # self-suppression
+            labels = msg.get("labelIds", [])
             hdr = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
+            if sent_on and "SENT" in labels and "DRAFT" not in labels and not _sm.is_auto(hdr):        # a mail he sent (not one a machine made): who it went to, its subject and first words, for the server's matching, left only when it could fit an open send step (the spool file is private, mode 0600, and deleted at its verdict)
+                to, cc = _sm.parse_addrs(hdr.get("to")), _sm.parse_addrs(hdr.get("cc"))
+                if _sm.may_match(winfo, tid, [x[1] for x in to + cc], own):
+                    try: ts = int(msg.get("internalDate")) / 1000.0
+                    except (TypeError, ValueError): ts = now
+                    _sm.put({"mid": mid, "tid": tid, "box": a["email"], "ts": ts, "to": to, "cc": cc, "subject": hdr.get("subject", ""), "snip": msg.get("snippet") or ""})
+            if "SENT" in labels or "DRAFT" in labels: return True   # self-suppression
             url = f"https://mail.google.com/mail/u/0/#all/{tid}"
             summ = {"title": f"\"{hdr.get('subject', '(no subject)')[:60]}\"", "who": hdr.get("from", "?").split("<")[0].strip(' "'),
                     "text": (msg.get("snippet") or "")[:140], "url": url, "ts": msg.get("internalDate")}
@@ -237,7 +247,7 @@ def run(hub: Hub):
         for e in a["retry"]:      # the gets that failed at an earlier poll, before any new mail; they count against MESSAGE_GETS, and the ones the cap leaves stay saved as they are
             mid, tid, tries = e[:3]; at = e[3] if len(e) > 3 else None
             seen.add(mid)
-            if mid in known or not wanted(tid): continue
+            if mid in known or not (wanted(tid) or sent_on): continue      # with the sent-mail watch on a failed get is tried again whatever it was (the get says whether it was a sent mail)
             if at is not None and 0 <= now - at < RETRY_SPACING: failed.append(e); continue      # tried a moment ago: not before RETRY_SPACING s have passed (an entry with no time, or one from the future, is due)
             if gets >= MESSAGE_GETS: failed.append(e); capped = True; continue
             gets += 1
@@ -250,7 +260,7 @@ def run(hub: Hub):
                 mid = m["message"]["id"]; tid = m["message"]["threadId"]
                 if mid in seen or mid in known or mid in fresh: continue      # a mail is handled once: not again after an earlier record, an earlier poll, or twice in one record
                 fresh.add(mid)
-                todo.append((mid, tid, wanted(tid)))
+                todo.append((mid, tid, wanted(tid, m["message"].get("labelIds") or ())))
             need = sum(1 for _m, _t, want in todo if want)
             if gets and gets + need > MESSAGE_GETS: stopped = i; break      # the cap on gets in one poll: the records before this one were handled whole, the rest waits for the next poll
             for mid, tid, want in todo:
@@ -356,6 +366,9 @@ def run(hub: Hub):
     def one_pass():
         active = state["active"]; last_health = state["last_health"]; last_fallback = state["last_fallback"]
         with hub.lock: kinds = {k.split(":", 1)[0] for k in hub.bindings} & {"drive", "gmail"}
+        _sm.sweep(CLOCK())                              # the hub's own age limit on the spool, whatever the server does and whether the watch is on
+        sent_on = _sm.read_watch(CLOCK()) != "off"
+        if sent_on: kinds = kinds | {"gmail"}           # the server's sent-mail watch needs the mailboxes read even when no Gmail anchor is bound
         first = state["first"]
         for kind in kinds - active:                     # source just became bound → cursor from now, then register push; at the start of the process the kinds bound already are not new:
             for a in accounts:                          # a kind with a saved cursor keeps it (what arrived while the service was stopped is read from it), one with none starts from now
@@ -387,7 +400,7 @@ def run(hub: Hub):
             last_fallback[k] = now
             for a in accounts:
                 if k == "gmail" and a["gmail"] is None: continue
-                if hub.push.get(k, {}).get(a["email"], {}).get("mode") != "push": due.add((k, a["email"]))
+                if hub.push.get(k, {}).get(a["email"], {}).get("mode") != "push" or (k == "gmail" and sent_on): due.add((k, a["email"]))      # a mailbox pushed for its inbox is read at this pace too while the sent-mail watch is on: Gmail pushes nothing for mail he sends
         hchecked, herr = health_due and not active, None     # nothing bound: no call to make, but the beat is stamped, so an idle receiver does not age on the board
         for item in due:
             kind, email = item[0], item[1]

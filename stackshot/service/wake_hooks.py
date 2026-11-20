@@ -35,6 +35,7 @@ class Hooks:
     rmod_options_of: Callable[..., Any]  # server._rmod.options_of
     rmod_parse_ask: Callable[..., Any]  # server._rmod.parse_ask
     rmod_whose: Callable[[], Any]  # server._rmod.WHOSE
+    sent_mail_tick: Callable[..., Any]  # service.sent_match.sent_mail_tick
     session_id: Callable[..., Any]  # server._session_id
     state_end: Callable[..., Any]  # holders._state_end
     zone: Callable[[], Any]  # server.ZONE

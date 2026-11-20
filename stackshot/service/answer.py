@@ -187,11 +187,35 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     return told
 
 
-def _answer(gid: str, choice: str, text: str, act: str) -> str:
+def _mail_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str) -> list[str]:
+    """The notice after the server ticked his send step on a mail he sent (`_answer` with via "mail"): a plain line to each session that now has the item, in its own words (the server did it, from a mail: it is not his
+    answer and not his note), and only to a background agent. A front agent is told nothing: the board shows the step ticked, and a front turn is for what he must do. A session whose role cannot be read counts as front. → the session ids told."""
+    meta = item.get("metadata") or {}
+    project = str(meta.get("project") or "")
+    url = _item_url(gid) or _telling.notice_link(gid)
+    step = _states.clean(rec.get("step"))
+    step = step if len(step) <= 240 else step[:240].rstrip() + " …"
+    thenid = _session_id(then) if then else ""
+    head = f"[stackshot] The server saw a mail {OWNER} sent that fits his step on {_gh.shown(gid)}: {step}. It ticked the step"
+    told: list[str] = []
+    names = [n for n in (_telling.holder(item), *_needs_sessions(meta), then) if n]
+    for n in names:
+        sid = _session_id(n)
+        if not sid or sid in told or _telling.front_keeper(n, project, strict=True)[0]:
+            continue
+        _telling.tell_woken(gid, sid, f"{head}. It's yours now → {url}" if sid == thenid else f"{head}. It goes to {_sr._session_label(then)} now → {url}", tag="answer")
+        told.append(sid)
+    return told
+
+
+def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail: dict[str, Any] | None = None) -> str:
     """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
     and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover (nothing written; `emptynote` is a Send note on a blank box). A step form has two buttons and an optional note box.
     Done (act=done) is his word that the step is finished (`done`: the item goes to its then-mover, recorded as his answer "Done"); a note in the box stays on that record (`text`) and goes with the Done to the then-mover,
-    which is told the step is done and shown the note (`donenote`: the same, and the notice says the note went along). Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
+    which is told the step is done and shown the note (`donenote`: the same, and the notice says the note went along). `via` is where the answer came from: "board" for his click, "mail" when the server settles
+    his send step because a mail he sent fits it (service/sent_match.py; the answer then reads Done by a mail, and is no word of his for a wait or a date). A mail tick passes `mail` = {"step": the step it was asked about, "since": the item's state clock then, "note": the server's
+    own sentence} and no text: under the lock it is dropped, nothing written, unless the item is open, in your-step with that very step and clock (else `changed`, `closed`) and asks nothing beside it (an ask, options or a decision need: `beside`);
+    the sentence is kept as `server_note`, never as his `text`; nobody is told it as his answer, a background agent is told plainly what the server did and a front agent nothing; no answer is left pending for escalation. Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
     on an item with no step any more it is a comment, and with no text nothing is written (`emptynote`). A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
     """
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
@@ -202,6 +226,17 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         if item.get("status") != "open":
             return _handover._keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
         meta = dict(item.get("metadata") or {})
+        if via == "mail":               # the server's tick: checked again here, under the lock, against the step it was asked about; anything else dropped, nothing written
+            if not mail or text or act != "done":
+                return "empty"
+            try:
+                clock_ok = float(item.get("state_updated") or 0) == float(mail.get("since"))
+            except (TypeError, ValueError):
+                clock_ok = False
+            if meta.get("state") != "your-step" or _states.clean(meta.get("step")) != mail.get("step") or not clock_ok:
+                return "changed"
+            if meta.get("ask") or meta.get("options") or "decision" in _needs_kinds(meta):
+                return "beside"         # a question for him stands beside the step: a mail is no answer to it, and a Done would take his decision need off
         stepped, then, handed, letter, until = False, "", "", "", ""
         if choice:
             choice, letter = _answers()._split_letter(item, choice)      # the board's box posts "B · <label>": the label is the choice, the letter is kept beside it
@@ -245,7 +280,9 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             rec["choice"] = choice
         if text:
             rec["text"] = text
-        rec["via"] = "board"
+        rec["via"] = via
+        if via == "mail":
+            rec["server_note"] = _clip_line(str((mail or {}).get("note") or ""), 300)
         forms = _answers()._option_forms(item)         # the item's valid options, as the page drew them: (the name a pick is stored under, the label shown, the label stored)
         names = [f[0] for f in forms]
         if choice and not stepped and choice in names:      # the option picked, by the name it is stored under (the list is valid, so its places are the stored list's)
@@ -323,7 +360,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())
         item["metadata"] = meta
         item["updated"] = now
-        _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(OWNER, "board"))
+        _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(NAME, "mail") if via == "mail" else (OWNER, "board"))
         if parked or until or (kind == "decision" and eff["do"] == "wait"):
             _runner.WAKE_EVENT.set()           # the minute loop takes the new wake in
         if kind == "decision" and eff["do"] == "drop":
@@ -332,14 +369,14 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             except Exception as e:  # noqa: BLE001
                 print(f"answer: {gid} dropped but its after releases failed: {e}", file=sys.stderr, flush=True)
         item["gid"] = gid
-        told = [t for t in _answer_deliver(gid, item, rec, then if stepped else "", handed) if t]
-        if kind in ("decision", "step-reply") and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
+        told = [t for t in (_mail_deliver(gid, item, rec, then) if via == "mail" else _answer_deliver(gid, item, rec, then if stepped else "", handed)) if t]
+        if via != "mail" and kind in ("decision", "step-reply") and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
             st = _answers()._answers_load()
             st[gid] = {"ts": now, "owner": _session_id(_telling.holder(item)), "project": str(meta.get("project") or ""),
                        "told": told, "words": _answers()._answer_words(rec, 300)}
             _answers()._answers_save(st)
     kind = ("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
-    print(f"answer: {gid} {kind} from the board" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
+    print(f"answer: {gid} {kind} from {'a sent mail' if via == 'mail' else 'the board'}" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
     _hooks().publish()
     return "askedback" if askback else kind
 
