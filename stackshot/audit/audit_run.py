@@ -1120,7 +1120,6 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
         text = compose(g["lines"], f"[stackshot] {label}:" if g["held"] else f"[stackshot] {label}: {len(g['lines'])} item(s) for you (id · check · evidence · what fixes it).", g["front"])
         ok, said = _send(env, to, text, fyi=g["held"])
         sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120), **({"kind": "held"} if g["held"] else {})})
-        reached = ok
         if not ok:
             # the mover could not be reached: its findings go to the project's -main agent, one message per -main, noted next to the failed one.
             # A refusal because the recipient is a front agent (a session id the role map did not know as one) is no unreachable mover: the lines go to the project's
@@ -1128,23 +1127,33 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             refused = FRONT_REFUSAL in said
             fb: dict[str, list[str]] = {}
             direct: dict[str, list[str]] = {}
+            where: list[str] = []       # for each finding of the group, the recipient its fallback went to ("" when it had none): a finding counts as delivered only when its own fallback was
             for proj, ln, wf in g["by"]:
                 if (refused or wf) and proj:       # a finding that needs nothing of the person goes unmarked to the page key too
                     direct.setdefault(page_key(proj), []).append(ln)
+                    where.append(page_key(proj))
                     continue
                 m = env.main_of(proj)
                 if m and m != to:
                     fb.setdefault(m, []).append(ln)
+                    where.append(m)
+                else:
+                    where.append("")
+            landed: set[str] = set()
             for pk, ls in sorted(direct.items()):
                 ok2, said2 = _send(env, pk, compose(ls, f"[stackshot] {label}: {len(ls)} item(s) for {to}, {'a front agent of this project that takes no unmarked message' if refused else 'whose session could not be reached (' + _clip(said, 80) + ')'}; please pass them to whoever moves them (id · check · evidence · what fixes it).", False))
                 sent.append({"to": pk, "lines": len(ls), "delivered": ok2, "said": _clip(said2, 120), "kind": "project", "for": to})
-                reached = reached or ok2
+                if ok2:
+                    landed.add(pk)
             for m, ls in sorted(fb.items()):
                 ok2, said2 = _send(env, m, compose(ls, f"[stackshot] {label}: {len(ls)} item(s) for {to}, whose session could not be reached ({_clip(said, 80)}); please pass them on (id · check · evidence · what fixes it).", True))
                 sent.append({"to": m, "lines": len(ls), "delivered": ok2, "said": _clip(said2, 120), "kind": "fallback", "for": to})
-                reached = reached or ok2
-        if reached:
+                if ok2:
+                    landed.add(m)
+        if ok:
             reached_fs += g["fs"]
+        elif landed:
+            reached_fs += [f for f, w in zip(g["fs"], where) if w in landed]       # one project's fallback landing does not stand for another's that did not: its finding is tried again
     return sent, reached_fs, sending_from
 
 
