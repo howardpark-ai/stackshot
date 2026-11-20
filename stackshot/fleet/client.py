@@ -241,6 +241,20 @@ runs on every box.
                                 name. The project's -main agent is the item's creator. The server runs the create tool's own checks (subject, description and next gates, project page, GitHub mirror) except the ones that judge a session's write: a description needs no Goal bullet, and the
                                 row owes no page. Exit 0 · 1 and the reason on stderr when refused (400 a check, 404 no such project, 409 no front agent to file under), not reached ([0]), misused (usage) or when the project record cannot be
                                 read right now (503, nothing filed).
+  client.py post item-sync <marker> open --project <key|id|slug> --subject "<action and object>" --mover <the person> --then <agent> --step "<what the person does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
+  client.py post item-sync <marker> refresh --line "<fact>" [--line "<fact>" ...] [--sender <label>]
+  client.py post item-sync <marker> close [--reason "<why>"] [--sender <label>]
+                                for a timer's script that keeps ONE board item for the person in step with a condition it checks (open while the condition holds, closed when it is gone). Each call prints one line and exits 0:
+                                "<item> opened", "<item> refreshed", "<item> closed", "<item> left open: open steps of others remain" (a close that found another writer's step open) or "no open item for <marker>; nothing was refreshed|closed" (a no-op, no error). <marker> = <kind>:<what> (for example
+                                plugin_sync:stackshot), the item's mark and its only key: refresh and close carry no project, and reach only an item this route opened (a machine token can touch no other item through it). open files an item
+                                whose mover is the person (--mover must be his name) and whose `then` is --then (an agent the project's page lists: it takes the item after his step), with --step as his one step (his name goes before it; one you wrote is not
+                                doubled), under the project's -main agent as its creator, the state your-step, as the terminal prompt's row; --subject is the action and its object with no prefix (the server puts the project scope's prefix
+                                before it); each --line is one fact, a "- " bullet of the description (repeat it; as for item-open: at most [description] max_lines less one, each at most [description] line_max characters, refused and never cut, and not judged by the Goal-first rule a session's description is; the last bullet
+                                is "- Opened by <label> (a script on a client machine)"). While an item with the marker is open a repeat open is a refresh (the description alone changes, never his step or the mover; the same marker on another project is refused); once it is closed an open files
+                                a new item. A project holds at most 10 open items of this route. refresh rewrites the description of the marker's open item and nothing else. close completes the open item as done through the update tool's own close
+                                (--reason is one line, cut to [close] reason_max; the default says the script saw the condition gone), ticks his open step and says so in the history, and leaves the item open (ticking nothing) while another writer's step is open on it (a script may refresh with a line saying the condition cleared; the close completes once the others are done, or the agent that holds the item completes it). --sender is the script's own label (default client.py): one word of at most 60
+                                characters, never the person's name. The server files it through the create tool's own code (its subject and next gates, project page, GitHub mirror; the description's line count and length are the route's own pre-checks), and the row owes no page and tells no session. Exit 0 · 1 and the reason on stderr when
+                                refused (400 a check, 404 no such project, 409 no front agent to file under), not reached ([0]), misused (usage) or when the project record cannot be read right now (503, nothing filed).
   client.py message <to> <text> --sender <label>
                                 for a script: send a message the way a session's `message` tool does. <to> = a session's
                                 name or id, or a page key (projects/<slug>), which reaches that project (its router rules
@@ -944,6 +958,37 @@ def item_open(argv: list[str], timeout: float = 60.0) -> int:
     print(d["item"]); return 0
 
 
+ITEM_SYNC_USAGE = ('usage: client.py post item-sync <kind>:<what> open --project <key|id|slug> --subject "<action and object>" --mover <the person> --then <agent> --step "<what the person does>" '
+                   '--line "<fact>" [--line "<fact>" ...] [--sender <label>]\n'
+                   '       client.py post item-sync <kind>:<what> refresh --line "<fact>" [--line "<fact>" ...] [--sender <label>]\n'
+                   '       client.py post item-sync <kind>:<what> close [--reason "<why>"] [--sender <label>]')
+ITEM_SYNC_OPTS = {"open": ("project", "subject", "mover", "then", "step", "line", "sender"), "refresh": ("line", "sender"), "close": ("reason", "sender")}
+
+
+def item_sync(argv: list[str], timeout: float = 60.0) -> int:
+    """`post item-sync <marker> open|refresh|close …`: a script keeps one board item for the person in step with a condition it checks (open while it holds, refreshed on every run that still finds it, closed when it is gone)
+    -> exit 0 and one line on stdout ("<item> opened | refreshed | closed", or that no item was open); 1 and the reason on stderr when refused, not reached or misused."""
+    if len(argv) < 2 or argv[0].startswith("--") or argv[1] not in ITEM_SYNC_OPTS: print(ITEM_SYNC_USAGE, file=sys.stderr); return 1
+    marker, verb, a, opt, lines = argv[0].strip(), argv[1], list(argv[2:]), {}, []
+    for k in ITEM_SYNC_OPTS[verb]:
+        while "--" + k in a:
+            i = a.index("--" + k)
+            if i + 1 >= len(a): print(f"--{k} needs a value\n{ITEM_SYNC_USAGE}", file=sys.stderr); return 1
+            if k == "line": lines.append(a[i + 1])
+            else: opt[k] = a[i + 1]
+            del a[i:i + 2]
+    if a or not marker or (verb == "open" and not all(opt.get(k, "").strip() for k in ("project", "subject", "mover", "then", "step"))) or (verb != "close" and not lines):
+        print(ITEM_SYNC_USAGE, file=sys.stderr); return 1
+    body: dict = {"action": verb, "marker": marker}
+    for k, v in opt.items():
+        if v.strip(): body[k] = v
+    if lines: body["description"] = lines
+    status, d = post("item-sync", body, timeout)
+    if status != 200 or not isinstance(d, dict) or not (d.get("item") or d.get("action") == "none"):
+        print(f"stackshot: item not synced [{status}] {d.get('error') if isinstance(d, dict) else d}"[:1200], file=sys.stderr); return 1
+    print(f"{d['item']} {d.get('note') or d.get('action')}" if d.get("item") else str(d.get("note") or f"no open item for {marker}; nothing was done")); return 0
+
+
 def answer(item: str, timeout: float = 20.0) -> int:
     """The owner's latest board answer on an item, as the server's one line (<option label> TAB <text>) -> exit 0 (nothing printed while
     he has not answered), 1 when the item is not found, the server is not reached or the id is misused."""
@@ -1106,6 +1151,9 @@ def main(argv: list[str]) -> int:
     if cmd == "post" and len(argv) > 2 and argv[2] == "item-open":
         try: return item_open(argv[3:])
         except Exception as e: print(f"stackshot: item not opened ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "post" and len(argv) > 2 and argv[2] == "item-sync":
+        try: return item_sync(argv[3:])
+        except Exception as e: print(f"stackshot: item not synced ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "get" and len(argv) > 2 and argv[2] == "answer":
         try: return answer(argv[3] if len(argv) > 3 else "")
         except Exception as e: print(f"stackshot: no answer read ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1

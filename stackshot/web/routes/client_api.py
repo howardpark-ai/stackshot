@@ -32,6 +32,7 @@ from stackshot.service import event_waits as _evwaits
 from stackshot.service import foryou as _fy
 from stackshot.service import handoff as _handoff
 from stackshot.service import item_open as _item_open
+from stackshot.service import item_sync as _item_sync
 from stackshot.service import job_gap as _job_gap
 from stackshot.service import messaging as _messaging
 from stackshot.service import migrations as _migrations
@@ -219,6 +220,8 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return _job_gap._jobgap_post(machine, body)
     if what == "item-open":     # a script opens one board item for a background agent of a project, once per marker while it is open (client.py post item-open)
         return _item_open._itemopen_post(machine, body)
+    if what == "item-sync":     # a script keeps one item for the person in step with a condition: open, refresh, close by its marker (client.py post item-sync)
+        return _item_sync._itemsync_post(machine, body)
     if what == "cap-words":     # tools/cap_words.py --apply: his park words already in the store, or a long wait's real-world date, recorded through the normal write path
         try:
             if "basis" in body:
@@ -302,7 +305,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         else:
             _clients.seen(machine, uuid)
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
-    return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
+    return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
 async def client_write(request: Request):
