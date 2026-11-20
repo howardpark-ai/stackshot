@@ -504,7 +504,7 @@ def sala_live(timeout: float = SALA_TIMEOUT) -> set[str] | None:
 
 
 def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | None = None, renames: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
-    """Every named session's role (a front agent takes a peer's message only with [for <owner>] on its first line, so the
+    """Every named session's role (a front agent is given a turn only by what needs the person, a message marked [for <owner>] on its first line, so the
     server and every box must know who is front) → {name: {"role": NAME_ROLE | "front" | "back", "project": <hub key>}}, plus
     `"surface": "slack"` on a front agent the project's record lists as a Slack agent (it stays `front`; no field = a sala session), plus
     `"retired": True` on the name-line session of a page that has user-facing agents, its own or its hub's (those panes are gone
@@ -716,6 +716,13 @@ def background_ranked(project: str, reg: dict[str, dict[str, Any]] | None = None
         return sorted((0 if re.search(r"\bbuild", m, re.I) else 1 if BUILDER.search(m) else 2, i, n) for i, (n, m) in enumerate(sorted(mand.items())))
     except Exception:  # noqa: BLE001
         return []
+
+
+def background_agent(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
+    """The one background agent a message or pass that is no need of the person goes to, for the router and the message tool alike: the first of background_ranked (the project's builder, else
+    the first agent that maintains or merges, else the first by name), read through the project's hub, so a component page with no background agent of its own has its hub's. "" when the project has none."""
+    ranked = background_ranked(project, reg)
+    return ranked[0][2] if ranked else ""
 
 
 def builder_of(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[str]:

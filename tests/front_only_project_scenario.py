@@ -249,8 +249,7 @@ close(20, 21, 22, 23)
 # ---- 4. messages between front agents
 MARK = f"[for {OWN}]"
 r = call(lambda: _wt_message.stackshot_message(to=FD, text="Can you check the vendor call before noon?", sender=FM))
-check("4.1 an unmarked message from a front agent to a peer is refused, naming the working form: a message to the page key whose first line is `For <peer>,`", r.startswith("Refused:") and f"{FD} is a front agent of projects/fo" in r
-      and f"to reach {FD} from a front agent of the project, make the message's first line `For {FD},` and send it to='projects/fo'" in r, r)
+check("4.1 an unmarked message from a front agent to a peer in a project with no background agent starts no turn: it is held for the peer's next turn, and where its hook cannot fetch held lines the sender is told it was not passed on", r.startswith("not passed on") and f"{FD} is a front agent" in r and "could not be held" in r, r)
 r = call(lambda: _wt_message.stackshot_message(to="projects/fo", text=f"For {FD}, can you check the vendor call before noon?", sender=FM))
 m42 = re.match(r"held for the router \u2014 the router rules notice (\w+) within about 60 s and passes it to the agent of projects/fo it fits", r)
 rec42 = next((n for n in _routing.read("projects/fo") if m42 and n.get("id") == m42.group(1)), {})
@@ -261,9 +260,9 @@ check("4.2 …and that form is accepted: held for the router, which rules the no
 r = call(lambda: _wt_message.stackshot_message(to=FD, text=f"{MARK} nothing is needed from you, this is only an FYI", sender=FM))
 check("4.3 a marked message that says nothing is needed from the owner stays refused, and does not offer the `For <peer>,` form (it would route around the refusal)", r.startswith("Refused:") and "marks only what" in r and "nothing is needed from him" in r and "For " + FD not in r, r)
 r = call(lambda: _wt_message.stackshot_message(to=FM, text="Can you check the vendor call before noon?", sender=BB))
-check("4.4 contrast: a sender that is no front agent (another project's builder) is refused too, but is not offered the `For <peer>,` form", r.startswith("Refused:") and f"{FM} is a front agent of projects/fo" in r and "to=" in r and "For " + FM not in r, r)
+check("4.4 contrast: a sender that is no front agent (another project's builder) gets the same answer, and is not offered the `For <peer>,` form", r.startswith("not passed on") and f"{FM} is a front agent" in r and "For " + FM not in r, r)
 r = call(lambda: _wt_message.stackshot_message(to=BD, text="Can you check the vendor call before noon?", sender=BM))
-check("4.5 contrast, a project with a builder: a front agent's unmarked message to its peer is refused with the same form named", r.startswith("Refused:") and f"make the message's first line `For {BD},` and send it to='projects/bd'" in r, r)
+check("4.5 contrast, a project with a builder: a front agent's unmarked message to its peer is the channel between front agents, not a message for the builder: held for the peer's next turn (here not passed on, its hook cannot fetch held lines), never refused to the builder", r.startswith("not passed on") and f"{BD} is a front agent" in r and f"message(to='{BB}'" not in r, r)
 
 # ---- 5. needs= naming a peer
 put(30, mover=FM)

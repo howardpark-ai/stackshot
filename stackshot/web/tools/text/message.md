@@ -13,11 +13,12 @@ message(to="widgets-builder", sender="my-x", text="board#N: the design is done, 
 then names that agent in the item's needs, unless that would leave the item with a second mover (another session
 already moves it, or it waits on a decision): the agent is then not named, the reply says so in one line, and the way
 to hand the item over is update(mover=<agent>). An item id cited only for context, not handed over, goes in backticks,
-since a plain-word id names the receiver on that item. A message to a front agent is refused unless its first line
-carries {{FOR_OWNER}} (except fyi=true, below), and the mark is for what {{OWNER}} has to do (a decision, a go-ahead, a step only he can take):
-a build hand-back, a result, a screenshot, "it's live" or an FYI goes to the project (to=projects/<slug>), where the
-router rules it and passes on what needs the agent (front peer: first line For <peer>,); a marked message that says nothing is needed from him (nothing
-needed from {{OWNER}}, no action needed, FYI, for the record, no reply needed, …) is refused too. A background agent's
+since a plain-word id names the receiver on that item. A front agent is given a turn only by what {{OWNER}} has to do: its
+message carries {{FOR_OWNER}} on its first line (except fyi=true, below). An unmarked message is delivered only as
+the answer to a question it (or its project) wrote to you, while he is in that conversation (30 minutes); later
+it goes onto the item it names, else is held; so is a front peer's or the background agent's own. Any other is refused, naming
+the project's background agent (none: held). A done, taken or
+no-action note (a plain status report, nothing needed from {{OWNER}}, FYI, no reply needed, …), marked or not, is refused: write it on the board item (update, complete) or say nothing. A background agent's
 message to a front agent (marked, or a project message that opens For <front agent>) that names one to three board
 items is held back, not delivered, only when it clearly reads as a plain status report: the reply then begins 'Not
 delivered: written onto <item> as a History line from <sender>, because ...' and the message sits on the item for the
