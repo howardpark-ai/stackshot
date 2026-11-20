@@ -38,6 +38,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from stackshot.core import filecache as _fc
+from stackshot.core import passmemo as _pm
 from stackshot.fleet import fleet as _fleet
 from stackshot.fleet import liveness as _lv
 
@@ -409,9 +411,18 @@ def _sessions_index() -> dict[str, dict[str, Any]]:
     """transcript UUID → {name, url, seen, machine} from every machine's live heartbeat (fleet.py; out of git). A permanent session
     id looks up the same way (see _Index). `.unreadable` on the result lists the machines whose sessions.json could not be read (fleet.sessions_unreadable): the index is partial then, and a session missing from it
     may be on one of those machines, not gone."""
+    return _pm.once("sessions_index", _build_index, _index_stamp)
+
+
+def _index_stamp() -> Any:
+    """What the index is built from, as one comparable value: each machine's sessions file stamp (`fleet.sessions_unreadable` and the rows read the same files)."""
+    return tuple((L, _fc.stamp(_fleet.FLEET_DIR / L / "sessions.json")) for L in _fleet.letters())
+
+
+def _build_index() -> "_Index":
     out = _Index()
     out.unreadable = _fleet.sessions_unreadable()
     for L in _fleet.letters():
-        for k, v in _fleet.read(L, "sessions").items():
+        for k, v in _fleet.read_shared(L, "sessions").items():
             if isinstance(v, dict) and not dict.__contains__(out, k): out[k] = {"machine": L, **v}
     return out

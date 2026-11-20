@@ -23,6 +23,7 @@ import time
 from typing import Any
 
 from stackshot.core import instance as _inst
+from stackshot.core import passmemo as _passmemo
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _sessions_index
 from stackshot.model import queued as _queued
@@ -38,7 +39,13 @@ from stackshot.waits import stall as _stall
 
 
 def stall_tick(now: float | None = None) -> list[str]:
-    """The stall pass (the runner calls it every 60 s; [stall] every_seconds gates it, so a value below 60 still runs once per round): the items it acted on, by gid."""
+    """The stall pass (the runner calls it every 60 s; [stall] every_seconds gates it, so a value below 60 still runs once per round): the items it acted on, by gid. The roles and the session rows
+    are worked out once for the pass (core/passmemo.py), not once per item."""
+    with _passmemo.scope():
+        return _stall_pass(now)
+
+
+def _stall_pass(now: float | None) -> list[str]:
     now = time.time() if now is None else now
     if not _stallsvc.stall_on(now) or _handoff.handoff_paused():
         return []

@@ -31,6 +31,8 @@ import time
 from typing import Any
 
 from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml; next to this module)
+from stackshot.core import filecache as _fc  # noqa: E402  (a file's stamp, and its parse kept while the file is as it was)
+from stackshot.core import passmemo as _pm  # noqa: E402  (what one pass works out once)
 from stackshot.anchors import gmail_query as _gq  # noqa: E402  (the terms of a Gmail query anchor: the grammar an add checks)
 from stackshot.projects import project_registry as _pr  # noqa: E402  (the project record's entries: read first, the page lines are the fallback)
 from stackshot.projects import keeper as _kp  # noqa: E402  (the keeper as a mark on one agent: a marked page keeps its name line for the roles)
@@ -509,6 +511,12 @@ def sala_live(timeout: float = SALA_TIMEOUT) -> set[str] | None:
     return None if got is None else got[0] | got[1]
 
 
+def _roles_stamp() -> Any:
+    """What session_roles reads, as one comparable value: the stamps of the page registry and of the project record (its entries, ids, marks and owed agents) and the two settings that shape the result."""
+    from stackshot.projects import projects as _prj
+    return (_fc.stamp(REGISTRY), _fc.stamp(_pr.record_path()), _fc.stamp(_prj.record_path()), tuple(_cfg.page_dirs()), frozenset(_prj.retired_statuses()))
+
+
 def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | None = None, renames: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
     """Every named session's role (a front agent is given a turn only by what needs the person, a message marked [for <owner>] on its first line, so the
     server and every box must know who is front) → {name: {"role": NAME_ROLE | "front" | "back", "project": <hub key>}}, plus
@@ -531,7 +539,12 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
     `live` = the names and aliases `sala sessions --json` lists (sala_live; the caller reads sala once per build): every entry then carries `"live": true | false`, whether
     sala lists that name as a session, or as an alias of one. None (not given, or sala could not be read) adds no field, never a false for everyone.
     `renames` = {old name: the name the session has now} (renamed_agents.renames_of): an entry whose name is such an old name also carries `"renamed_to": <new name>`, so a
-    reader that draws agents (the Projects page) can leave it out although `live` is true for it (an alias reads live). Additive: omitted when not given or empty."""
+    reader that draws agents (the Projects page) can leave it out although `live` is true for it (an alias reads live). Additive: omitted when not given or empty.
+    Called with no argument inside a pass (core/passmemo.py) the roles are worked out once for the pass and each caller gets its own copy; the memo is stamped with the files the roles read (the page registry and
+    the project record) and the settings that shape them, so a file written in the middle of the pass is read at the next call."""
+    if reg is None and live is None and renames is None and _pm.active():
+        got = _pm.once("session_roles", lambda: session_roles(registry()), _roles_stamp)
+        return {n: dict(r) for n, r in got.items()}
     from stackshot.projects import projects as _prj
     ren = {str(k).casefold(): v for k, v in (renames or {}).items()}      # old names compare case-folded
     reg = _prj.with_pending(registry() if reg is None else reg, made=True)

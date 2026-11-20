@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.core import filecache as _fc
 from stackshot.fleet import liveness as _lv
 
 FLEET_DIR: Path = _cfg.fleet_dir()
@@ -37,14 +38,22 @@ def read(letter: str, name: str) -> dict[str, Any]:
         return {}
 
 
+def read_shared(letter: str, name: str) -> dict[str, Any]:
+    """`read` for a caller that only looks: the parse is kept while the file is as it was (core/filecache.py), so a file nobody wrote is not opened and parsed again. The dict is shared: never changed by the caller."""
+    try:
+        d = _fc.read_json(FLEET_DIR / letter / f"{name}.json")
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
 def sessions_unreadable() -> list[str]:
     """The machine letters whose sessions.json cannot be read as an object (absent, torn or not JSON): `read` gives {} for each, so an index built from `read` alone is partial without saying so.
     The view writes machine.json and sessions.json together for every machine it holds (clients.py `_materialize`), so a letter with the one and not the other is a read that failed, never a machine with no sessions."""
     out: list[str] = []
     for L in letters():
         try:
-            with open(FLEET_DIR / L / "sessions.json", encoding="utf-8") as f:
-                ok = isinstance(json.load(f), dict)
+            ok = isinstance(_fc.read_json(FLEET_DIR / L / "sessions.json"), dict)
         except Exception:  # noqa: BLE001
             ok = False
         if not ok:
