@@ -117,6 +117,8 @@ def _answer_note(rec: dict[str, Any]) -> str:
     if rec.get("kind") == "comment":
         return "comment:\n\n" + text
     step = _states.clean(rec.get("step"))
+    if rec.get("via") == "mail":       # the server ticked his send step on a mail he sent: its own sentence, not his answer
+        return "step ticked by the server, on a mail he sent" + (f"\n\nthe step: {step}" if step else "") + ("\n\n" + str(rec.get("server_note") or "").strip() if rec.get("server_note") else "")
     if rec.get("kind") == "step-reply":
         return "note on his step:" + (f"\n\nthe step: {step}" if step else "") + "\n\n" + text
     return "answer: " + (f"**{_choice_words(rec)}**" if rec.get("choice") else "") + (f"\n\nthe step he did: {step}" if step else "") + ("\n\n" + text if text else "")

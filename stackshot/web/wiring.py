@@ -90,6 +90,7 @@ from stackshot.projects import project_registry as _project_registry
 from stackshot.service import projects as _projects_svc
 from stackshot.service import foryou_hooks as _foryou_hooks
 from stackshot.service import event_activity as _event_activity
+from stackshot.service import sent_match as _sent_match
 from stackshot.audit import audit_checks as _ac
 
 _HOST: Any = None       # the server module, set by `install_early`: the first owner of the passes' `S` (`pass_host` below)
@@ -292,6 +293,7 @@ def install_late() -> None:
         rmod_options_of=lambda *a, **k: _rmod.options_of(*a, **k),
         rmod_parse_ask=lambda *a, **k: _rmod.parse_ask(*a, **k),
         rmod_whose=lambda: _rmod.WHOSE,
+        sent_mail_tick=_late_in(_sent_match, "sent_mail_tick"),
         session_id=_late_in(_pdebts, "_session_id"),
         state_end=_late_in(_holders, "_state_end"),
         zone=lambda: _wttext.ZONE,

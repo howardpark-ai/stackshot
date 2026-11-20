@@ -94,7 +94,7 @@ def _owner_quote_on(item: dict[str, Any], said_l: list[dict[str, Any]], within_d
     ans_hits: list[tuple[str, str, str]] = []
     for a in answers if isinstance(answers, list) else []:
         try:
-            if isinstance(a, dict) and (a.get("text") or a.get("choice")) and float(a.get("ts") or 0) >= clock - 0.5:
+            if isinstance(a, dict) and a.get("via") != "mail" and (a.get("text") or a.get("choice")) and float(a.get("ts") or 0) >= clock - 0.5:      # a "mail" answer is the server settling a send step on a mail he sent: no word of his
                 via = "the board" if a.get("via") == "board" else "GitHub"
                 ans_hits.append(("a board answer", " ".join(str(a.get("text") or a.get("choice_line") or "").split()), f"{OWNER}'s {'answer' if a.get('kind') == 'decision' else 'note on his step' if a.get('kind') == 'step-reply' else 'comment'} on {via}"))
         except (TypeError, ValueError):

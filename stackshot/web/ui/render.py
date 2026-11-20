@@ -2579,7 +2579,7 @@ class Board:
                 pa_, na_ = answers_of(prev), answers_of(v)
                 if len(na_) > len(pa_) and na_[:len(pa_)] == pa_:        # phase 3: his answer from the board, one line each
                     for a in na_[len(pa_):]:
-                        ch, tx = str(a.get("choice") or ""), str(a.get("text") or "")
+                        ch, tx = str(a.get("choice") or ""), str(a.get("text") or a.get("server_note") or "")      # a step the server ticked on a mail he sent carries its own sentence, not his words
                         if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])      # the letter the answer box drew beside the option
                         ev.append(("answer", _t("item.log.answer_via", owner=e(_OWNER), via=e(a.get('via') or _t("item.log.via_board"))) + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (f' <span class="dim">{_t("item.log.tag_comment")}</span>' if a.get("kind") == "comment" else f' <span class="dim">{_t("item.log.tag_step_note")}</span>' if a.get("kind") == "step-reply" else "")))

@@ -431,7 +431,7 @@ check("paging cap: a history that ends on the last page the cap allows leaves no
 
 # ---- the reader tells an expired history from any other failure by the status, never by the text
 _NONE = object()
-def run_fake(make, bindings, total=None, saved=None, saved_all=None, peek=None, queue_of=None, poll=("gmail", ADA), **consts):
+def run_fake(make, bindings, total=None, saved=None, saved_all=None, peek=None, queue_of=None, poll=("gmail", ADA), push=None, **consts):
     """One mailbox (ADA) served by the fake `make()` returns, polled until the fake calls its stop(); `consts` are gworkspace constants set for the run.
     `saved` is what a service that ran before left for this mailbox (its read position as hub.saved holds it); None: a first start. `saved_all` is the whole of hub.saved["google"]
     instead (for a damaged file). `peek`, a list, gets what the saver gives right after the start, before the first pass. `queue_of(hub)` makes the trigger queue; `poll` is the first trigger.
@@ -444,6 +444,7 @@ def run_fake(make, bindings, total=None, saved=None, saved_all=None, peek=None, 
         for k, v in consts.items(): setattr(gw, k, v)
         hp = core.Hub(); hp.status["receivers"] = {}; hp.triggers = FastQ(); hp.bindings = {k: {"sess"} for k in bindings}
         if queue_of: hp.triggers = queue_of(hp)
+        if push is not None: hp.push = push      # what the push channels say per kind and mailbox (mode push: Google tells the hub of new inbox mail)
         if saved is not None: hp.saved = {"google": {ADA: saved}}
         if saved_all is not None: hp.saved = {"google": saved_all}
         got = []; pg.stop = hp.stopping.set; pg.poke = lambda: hp.triggers.put(("gmail", ADA))
@@ -772,6 +773,148 @@ with block("oversize"):
     got, pg, sv, _m = run_fake(lambda: Sized(ADA, [250, 1, 1], stop_lists=6), [UN], total=252)
     check("oversize: one history record holding more mails than MESSAGE_GETS is handled whole in one poll (250 gets against the cap of 200); the next record waits for the next poll",
           pg.gets_at[:2] == [0, 250] and pg.starts == ["0", "1"] and len(got) == 252 and sv["hist"] == "3", (pg.gets_at, pg.starts, len(got), sv))
+
+# ---- the sent-mail watch: while the server's watch file says count or on, the reader also reads the mail the user sends and leaves one private file (mode 0600) for each; off reads none
+from stackshot.anchors import sent_mail as SMAIL
+class SentBox(Many):
+    """A Many of four history records: an inbox mail, a sent mail (To Jane, Cc Sam), a draft and a second sent mail with a To of two; the history carries each mail's labels as Gmail's does."""
+    LABELS = {"m1-0": ["INBOX"], "m2-0": ["SENT"], "m3-0": ["DRAFT"], "m4-0": ["SENT", "INBOX"]}
+    TO = {"m2-0": "Jane Roe <Jane@Example.org>", "m4-0": '"Roe, Jane" <jane@example.org>, sam@example.org'}
+    def __init__(self, email, **kw):
+        super().__init__(email, 4, **kw); self.got = []
+        for r in self.recs:
+            for m in r["messagesAdded"]: m["message"]["labelIds"] = list(self.LABELS[m["message"]["id"]])
+    def handle(self, key, kw):
+        if key == "gmail.users.messages.get":
+            self.gets += 1; mid = kw["id"]; self.got.append(mid)
+            hd = [{"name": "From", "value": "Ada <ada@example.test>" if "SENT" in self.LABELS[mid] else "Pat <pat@example.test>"}, {"name": "Subject", "value": f"Re: SUBJMARK {mid}"}]
+            if mid in self.TO: hd += [{"name": "To", "value": self.TO[mid]}, {"name": "Cc", "value": "Sam Poe <sam@example.org>" if mid == "m2-0" else ""}]
+            return {"labelIds": list(self.LABELS[mid]), "snippet": f"SNIPMARK {mid}", "internalDate": "1700000000000", "payload": {"headers": hd}}
+        return super().handle(key, kw)
+class SentFlaky(SentBox):
+    """The get of the first sent mail fails once (a 500); the fake asks for another poll after each history.list until its last."""
+    def __init__(self, *a, **kw): super().__init__(*a, **kw); self.failed = False
+    def handle(self, key, kw):
+        if key == "gmail.users.messages.get" and kw["id"] == "m2-0" and not self.failed: self.failed = True; self.gets += 1; raise HttpErr(500, "Backend Error")
+        out = super().handle(key, kw)
+        if key == "gmail.users.history.list" and self.lists < self.stop_lists: self.poke()
+        return out
+def watch(mode, at=None, threads=(), addrs=("jane@example.org",), words=()):
+    """The server's watch file: the mode, when it was written, and the lists of what could matter (the threads of the open send steps' items, the addresses they name, the words of their steps)."""
+    for p in (SMAIL.watch_path(),): p.unlink(missing_ok=True)
+    for r in SMAIL.rows(): SMAIL.drop(r["mid"])
+    if mode: SMAIL.watch_path().parent.mkdir(parents=True, exist_ok=True); SMAIL.watch_path().write_text(json.dumps({"mode": mode, "at": time.time() if at is None else at, "threads": list(threads), "addrs": list(addrs), "words": list(words)}))
+def spooled_ids(): return sorted(r["mid"] for r in SMAIL.rows())
+class StopQ(FastQ):
+    """A trigger queue for a run in which nothing is read (the fake never stops it): the run ends after a few passes."""
+    def __init__(self, hub): super().__init__(); self.hub, self.n = hub, 0
+    def get(self, block=True, timeout=None):
+        self.n += 1
+        if self.n > 4: self.hub.stopping.set()
+        return super().get(block=False)
+with block("sent mail"):
+    watch(None)
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [], queue_of=StopQ)
+    check("sent watch: with no watch file the reader reads nothing when no anchor is bound (no history.list, no get), and leaves no file", pg.lists == 0 and pg.gets == 0 and spooled_ids() == [], (pg.lists, pg.gets, spooled_ids()))
+    watch("on", at=time.time() - 2 * 3600)
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [], queue_of=StopQ)
+    check("sent watch: a watch file the server stopped refreshing (two hours old) reads as off", pg.lists == 0 and pg.gets == 0 and spooled_ids() == [], (pg.lists, pg.gets, spooled_ids()))
+    watch("off")
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [], queue_of=StopQ)
+    check("sent watch: a watch file saying off reads nothing", pg.lists == 0 and pg.gets == 0 and spooled_ids() == [], (pg.lists, pg.gets))
+    watch("on")
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [])
+    check("sent watch: on, with no anchor bound, the mailbox is read and the mail he sent is got (the inbox mail and the draft are not)", pg.lists == 1 and sorted(pg.got) == ["m2-0", "m4-0"] and spooled_ids() == ["m2-0", "m4-0"], (pg.lists, pg.got, spooled_ids()))
+    r2 = next((r for r in SMAIL.rows() if r["mid"] == "m2-0"), {})
+    check("sent watch: the file holds who it went to (To and Cc, address in lower case), the subject, the first words, the mailbox and the time it left",
+          r2.get("to") == [["Jane Roe", "jane@example.org"]] and r2.get("cc") == [["Sam Poe", "sam@example.org"]] and r2.get("subject") == "Re: SUBJMARK m2-0"
+          and r2.get("snip") == "SNIPMARK m2-0" and r2.get("box") == ADA and r2.get("tid") == "t2-0" and r2.get("ts") == 1700000000.0, r2)
+    r4 = next((r for r in SMAIL.rows() if r["mid"] == "m4-0"), {})
+    check("sent watch: a To of two with a quoted comma name reads as two addresses, the same address once", r4.get("to") == [["Roe, Jane", "jane@example.org"], ["", "sam@example.org"]] and r4.get("cc") == [], r4)
+    check("sent watch: no event is made for his own mail (self-suppression stays), and the files are private (mode 0600)",
+          got == [] and all((p.stat().st_mode & 0o077) == 0 for p in SMAIL.spool_dir().glob("*.json")) and (SMAIL.spool_dir().stat().st_mode & 0o077) == 0, (got, oct(SMAIL.spool_dir().stat().st_mode)))
+    check("sent watch: the mail is saved as handled with the position", set(sv["sent"]) == {"m2-0", "m4-0"} and sv["hist"] == "4", sv)
+    watch("count")
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [])
+    check("sent watch: count reads the same (the server only counts)", spooled_ids() == ["m2-0", "m4-0"], spooled_ids())
+    watch("on")
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [UN, "gmail:t2-0"])
+    check("sent watch: beside anchors the inbox mail is still heard once; his own mail (one also on a thread an anchor holds, and one that carries the inbox label too) and the draft make no event; the sent mail is still left",
+          got == [(UN, "SNIPMARK m1-0")] and spooled_ids() == ["m2-0", "m4-0"], (got, spooled_ids()))
+    check("sent watch: no more gets than mail: four mails, four gets", pg.gets == 4, pg.gets)
+    watch("on")
+    got, pg, sv, _m = run_fake(lambda: SentFlaky(ADA, stop_lists=3), [])
+    check("sent watch: a get of a sent mail that failed is tried again at the next poll and the mail is left then", pg.got.count("m2-0") == 1 and spooled_ids() == ["m2-0", "m4-0"] and pg.failed, (pg.got, spooled_ids()))
+    # A file is left only for a mail that could fit an open send step: on a thread a step's item anchors, or to an address the steps name
+    watch("on", addrs=("zed@example.net",))
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [])
+    check("sent watch: a sent mail to nobody an open step names is read (one get) but leaves no file", sorted(pg.got) == ["m2-0", "m4-0"] and spooled_ids() == [], (pg.got, spooled_ids()))
+    watch("on", addrs=(), threads=("t2-0",))
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [])
+    check("sent watch: a mail on a thread a step's item anchors leaves a file; one elsewhere to nobody named does not", spooled_ids() == ["m2-0"], spooled_ids())
+    watch("on", addrs=("sam@example.org",))
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [])
+    check("sent watch: a mail to an address the steps name (here the Cc) leaves a file", spooled_ids() == ["m2-0", "m4-0"], spooled_ids())
+    class SentBoxRecv(SentBox):
+        """A received mail and a draft that name the party in To and list the user in Cc, on threads the lists name: neither is a mail he sent. The draft also carries the SENT label here, so only the draft label keeps it out."""
+        LABELS = {"m1-0": ["INBOX"], "m2-0": ["SENT"], "m3-0": ["DRAFT", "SENT"], "m4-0": ["SENT", "INBOX"]}
+        TO = {"m1-0": "Jane Roe <jane@example.org>", "m2-0": "Jane Roe <Jane@Example.org>", "m3-0": "Jane Roe <jane@example.org>", "m4-0": '"Roe, Jane" <jane@example.org>, sam@example.org'}
+        def handle(self, key, kw):
+            out = super().handle(key, kw)
+            if key == "gmail.users.messages.get" and kw["id"] in ("m1-0", "m3-0"):
+                for h in out["payload"]["headers"]:
+                    if h["name"] == "Cc": h["value"] = f"Ada <{ADA}>"
+            return out
+    watch("on", addrs=("jane@example.org",), threads=("t1-0", "t3-0"))
+    got, pg, sv, _m = run_fake(lambda: SentBoxRecv(ADA, stop_lists=1), ["gmail:t1-0", "gmail:t3-0"])      # the threads are anchored, so the received mail is got too
+    check("sent watch: a received mail (the party in To, the user in Cc, on an anchored thread) and a draft are never left as mail he sent; only the two sent mails are", spooled_ids() == ["m2-0", "m4-0"], spooled_ids())
+    watch("on", addrs=(), threads=("t2-9", "t4-0x", "t2"))
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [])
+    check("sent watch: a thread id that only starts like a listed one (a longer or a shorter id) is another thread: no file", spooled_ids() == [], spooled_ids())
+    watch("on", addrs=(), words=("jane",))
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [])
+    check("sent watch: a lone first name of four letters in a step names no address (too many mails would qualify)", spooled_ids() == [], spooled_ids())
+    class SentSelf(SentBox):
+        """Both sent mails go to himself (and m2-0 Cc Sam, who the lists do not name)."""
+        TO = {"m2-0": f"Ada <{ADA}>", "m4-0": f"Ada <{ADA}>"}
+    watch("on", addrs=(ADA,))
+    got, pg, sv, _m = run_fake(lambda: SentSelf(ADA, stop_lists=1), [])
+    check("sent watch: a mail to nobody but himself is never a candidate, whatever the lists name", spooled_ids() == [], spooled_ids())
+    class SentAuto(SentBox):
+        """The get of m2-0 carries Auto-Submitted: a mail a machine sent in his name (an auto-reply, a calendar answer)."""
+        def handle(self, key, kw):
+            out = super().handle(key, kw)
+            if key == "gmail.users.messages.get" and kw["id"] == "m2-0": out["payload"]["headers"].append({"name": "Auto-Submitted", "value": "auto-replied"})
+            return out
+    watch("on")
+    got, pg, sv, _m = run_fake(lambda: SentAuto(ADA, stop_lists=1), [])
+    check("sent watch: a mail marked Auto-Submitted is no mail he sent: no file (the plain sent mail beside it still leaves one)", spooled_ids() == ["m4-0"], spooled_ids())
+    # The watch setting gates every write and read of the sent mailbox, a bound anchor or not
+    for label, mode, at in (("no watch file", None, None), ("a stale watch file", "on", time.time() - 2 * 3600), ("off", "off", None)):
+        watch(mode, at=at)
+        got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [UN])
+        check(f"sent watch: with an anchor bound and {label}, no file is written for a sent mail (the spool put is gated by the setting)", spooled_ids() == [], spooled_ids())
+        got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), ["gmail:t9-9"])
+        check(f"sent watch: with a thread anchor bound that none of the mail is on and {label}, no sent mail is got at all (a get costs a quota unit: the setting gates the read)", pg.lists == 1 and pg.got == [], (pg.lists, pg.got))
+    # A mailbox Google pushes for its inbox is read at the poll pace while the watch is on (Gmail pushes nothing for sent mail), and left to its push when it is off
+    class Pinned(dict):
+        """The push channel's say for the mailbox: push, whatever the failed registration (no Pub/Sub topic in a test) writes after it."""
+        def __setitem__(self, k, v): pass
+    def pushed(): return {"gmail": Pinned({ADA: {"mode": "push"}})}
+    watch("on")
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [], queue_of=StopQ, push=pushed(), poll=("none", "none"), _gmail_poll=lambda: 1)
+    check("sent watch: a pushed mailbox is still polled while the watch is on, so a sent mail is read", pg.lists >= 1 and spooled_ids() == ["m2-0", "m4-0"], (pg.lists, spooled_ids()))
+    watch("off")
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [UN], queue_of=StopQ, push=pushed(), poll=("none", "none"), _gmail_poll=lambda: 1)
+    check("sent watch: with the watch off a pushed mailbox is not polled at all (the push is its way in)", pg.lists == 0 and pg.gets == 0, (pg.lists, pg.gets))
+    # The hub deletes a spool file older than three hours itself, in its own pass, whatever the setting
+    watch("off")
+    for mid, age in (("old1", 5 * 3600), ("new1", 0)):
+        SMAIL.put({"mid": mid, "tid": "t" + mid, "box": ADA, "ts": time.time() - age, "to": [["J", "j@example.org"]], "cc": [], "subject": "s", "snip": "b"})
+    os.utime(SMAIL.spool_dir() / "old1.json", (time.time() - 5 * 3600, time.time() - 5 * 3600))
+    got, pg, sv, _m = run_fake(lambda: SentBox(ADA, stop_lists=1), [], queue_of=StopQ)
+    check("sent watch: the hub's own pass deletes a spool file older than three hours (the server need not run) and keeps a fresh one", spooled_ids() == ["new1"], spooled_ids())
+    watch(None)
 
 # ---- the tool text teaches the syntax
 desc = _wt_anchors._ANCHORS_DESC

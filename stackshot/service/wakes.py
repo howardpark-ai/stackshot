@@ -584,6 +584,10 @@ def minute_anchor_pass() -> None:
         _hooks().event_activity_tick()      # records only (metadata.last_activity), no publish for it: the home page is kept for 30 s, then drawn again, and the rows pick the record up
     except Exception as e:  # noqa: BLE001  — groundwork for a later part; the merge pass above is done and the next minute reads again
         print(f"last activity: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        _hooks().sent_mail_tick()      # a send step of his ticks when a mail he sent fits it (service/sent_match.py; the setting [anchor_hub] sent_mail_watch is off by default); the answer it makes publishes itself
+    except Exception as e:  # noqa: BLE001  — an extra of the pass: the passes above are done and the next minute reads again
+        print(f"sent mail: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if released or moved:
         _hooks().publish()
 

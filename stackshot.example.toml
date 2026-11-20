@@ -457,6 +457,9 @@ quiet = { drive = 1800 }                            # per event kind: after the 
                                                     # editing session; other kinds: 60 s from the first
 quiet_max_hold = 10800                              # s: a burst that never goes quiet still reports this often
 gmail_poll_seconds = 300                            # a mailbox Google will not push for is read this often (poll external servers sparingly)
+sent_mail_watch = "off"                             # a step of the user's to send a mail ticks itself when a mail he sent fits it (docs/configuration-integrations.md, "Sent mail watch"):
+                                                    # "off" (the anchors service reads no sent mail), "count" (the dry run: counted in <state>/sent-mail-counts.json, nothing ticked,
+                                                    # asked or sent to a model) or "on". Anything else (true and false included) reads as off. Read each minute
 gmail_topics = {}                                   # per account: the Pub/Sub topic in its OAuth client's own Cloud project, "user@example.com" = "projects/<id>/topics/<name>"
 gmail_names = {}                                    # per mailbox, the short name a Gmail anchor scopes itself by: { work = "user@example.com" }; a mailbox with none is scoped by its address and not named in titles; names: letters, digits . _ -; a scope lists them comma-separated, no spaces
 google_oauth_envs = {}                              # stackshot/anchors/anchor_hub_google_auth.py: label → an oauth.env with GOOGLE_OAUTH_CLIENT_ID/SECRET, e.g. { team = "~/.config/example-google/oauth.env" }
