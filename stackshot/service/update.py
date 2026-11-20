@@ -58,6 +58,7 @@ from stackshot.service.save_hooks import hooks as _save_hooks
 from stackshot.service.store import _load, _shown_ids
 from stackshot.waits import handoff as _ho
 from stackshot.waits import server_fixes as _sf
+from stackshot.waits import stall as _stall
 from stackshot.waits import until_write as _uw
 from stackshot.waits import wait_end as _we
 from stackshot.waits import wait_list as _wl
@@ -786,6 +787,9 @@ def update_unlocked(
         _fg._gate_subject(subject, str(item.get("subject") or ""))
         item["subject"] = subject
     if description:
+        description, split_note = _fg.fix_long_bullets(description, str(item_was.get("description") or ""))       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
+        if split_note:
+            _stall.note(meta, time.time(), split_note)
         _fg._gate_description(description)
         if (_writes.session_next() and not reformat and not sender.strip().startswith("a script on ")
                 and description.strip() != str(item_was.get("description") or "").strip()):     # a replacement of the text by a session, not the stored text sent back

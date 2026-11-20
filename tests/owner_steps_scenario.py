@@ -59,6 +59,7 @@ item(21, needs=["decision"], ask=ASK, options=OPTS, next="home-agent: build it\n
 item(22, state="your-step", step=STEP, needs=["home-agent"], next="home-agent: prepare the box")                         # …a your-step stored without his step on the list
 CMD = "run `for p in a b; do echo $p; done` in a build-box terminal"
 for i in (33, 34): item(i, state="your-step", step=CMD, next="home-agent: build it")      # a your-step whose step carries a command
+item(74, step=STEP)                                                                                    # a step stored with no your-step state (an older write): step="none" still has something to withdraw
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
@@ -252,7 +253,18 @@ check("(setup) a your-step", his(7) == [OPEN(f"Oliver: {STEP}")], st(7))
 r = upd(7, step="none")
 check("withdrawing a your-step (step=\"none\": the state goes) drops his open step", [s for s, _ in his(7)] == ["dropped"] and "state" not in mt(7) and "step" not in mt(7), (his(7), mt(7)))
 check("…the reply says the step is withdrawn, and the mover is no longer him", "step withdrawn" in r and mt(7).get("mover") != OWNER, (r, mt(7)))
-refused("step=\"none\" on an item that stores no step is refused, nothing written", lambda: upd(7, step="none"), "stores none", i=7)
+from stackshot.core import call_log as _CL
+was7 = (st(7), mt(7).get("mover"))
+_tok = _CL.begin()
+r = upd(7, step="none")
+_fx = _CL.end(_tok)
+check("step=\"none\" on an item that stores no step is no refusal: nothing changes, and the server tells it (counted as a fix, told in its reply)",
+      [k for k, _ in _fx] == ["step-none"] and "stores no step" in _fx[0][1] and (st(7), mt(7).get("mover")) == was7 and "step withdrawn" not in r, (_fx, r))
+_tok = _CL.begin()
+r = upd(74, step="none")
+_fx = _CL.end(_tok)
+check("step=\"none\" on an item that stores a step but no your-step state withdraws it: no step-none fix is told (the guard reads the stored step, not only the state)", "step" not in mt(74) and "step-none" not in [k for k, _ in _fx], (_fx, mt(74)))
+check("…and a step-none no-op changes no bookkeeping (no History line, no mover change), so it has no line of its own beyond the reply's", not any("step" in (x.get("text") or "").lower() for x in (mt(7).get("stall") or {}).get("log") or []), mt(7).get("stall"))
 
 r = upd(8, step=STEP)
 refused("a session's done on a your-step's Oliver line is refused as well", lambda: upd(8, done=[2]), "only his answer", i=8)

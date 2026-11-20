@@ -16,6 +16,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.core import call_log as _calls
 from stackshot.core.instance import NAME, OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.model import holders as _holders
@@ -91,8 +92,9 @@ def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, st
             meta.pop(k, None)
         return ""
     if withdraw:
-        if was != "your-step" and not meta.get("step"):
-            raise ToolError("Refused: step=\"none\" withdraws a step, and this item stores none (its state is " + (was or "not stored") + "). Nothing was written")
+        if was != "your-step" and not meta.get("step"):      # nothing to withdraw: the item already reads as the writer wants it, so the rest of the call goes through
+            _calls.fixed("step-none", "step=\"none\" changed nothing: this item stores no step (its state is " + (was or "not stored") + ")")
+            return ""
         for k in ("step", *(["state"] if was == "your-step" else [])):
             meta.pop(k, None)
         return "\n(step withdrawn: the item is no longer in his step" + ("; its state your-step is gone" if was == "your-step" else "") + ")"

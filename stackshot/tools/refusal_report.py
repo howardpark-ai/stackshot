@@ -3,7 +3,8 @@
 Reads the call log the server keeps (call_log.py: one line per create, update, complete, confirm and message call, went through or refused, in
 `<paths.state>/calls/<YYYY-MM>.jsonl`) and reports, for one calendar week Monday to Sunday in the instance timezone: how many create and update calls
 were refused of how many, the share, the week before it, the kinds of refusal that make most of them, the sessions that were refused most, and what the
-server corrected instead of refusing (a bare item number, a wake with seconds or an offset, a subject with no scope prefix). Tokenless: no model call.
+server corrected instead of refusing (a bare item number, a wake with seconds or an offset, a subject with no scope prefix, a long description bullet split at its sentences,
+the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. Tokenless: no model call.
 
     refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]
     audit.py refusals [--dry-run] [--force] [--week YYYY-MM-DD]       the same, from the audit's own entry point (the timer's unit runs it after the audit run)
@@ -11,6 +12,9 @@ server corrected instead of refusing (a bare item number, a wake with seconds or
   run           the report of the last full week (Monday to Sunday) that has not been sent, sent once to `[refusal_report] to` (default: `[audit] summary_to`),
                 as a message that asks nothing (fyi). The audit's timer runs this twice a day, so the report goes out at the first run after the week ends, and
                 never twice for one week (`<paths.state>/refusal-report/sent.json` keeps the weeks sent). A week with no call records is not sent.
+                The page copy is the fyi above. The same report also goes, as a normal message that asks for something, to the project's background agent
+                (anchors.background_ranked of the `to` page: the builder first, else the first of the others), asking it to file a write-time hint or a server fix for each kind that repeats.
+                A `to` that is a session name, or a project with no background agent, gets the page copy alone.
   --dry-run     print the report and send nothing, mark nothing; it works while `[refusal_report] enabled` is false
   --force       report the week even if it was sent already (the record is rewritten)
   --week DATE   the week that starts on that Monday (YYYY-MM-DD) instead of the last full one
@@ -41,6 +45,8 @@ SENDER = "stackshot refusal report"
 HEADLINE = ("create", "update")          # the calls the share is measured on
 TOP_DEFAULT = 6
 SENDERS_TOP = 5
+STREAK_WINDOW = 15 * 60                  # seconds: a refusal joins a streak when the writer's last refusal on the same call was no more than this long before it
+STREAK_MIN = 3                           # a streak is this many refusals or more: a writer refused again and again on one call has hit a gap in its instructions (the tool text)
 
 
 def settings() -> dict[str, Any]:
@@ -81,13 +87,39 @@ def shown(d: dt.date) -> str:
     return f"{d:%a %b} {_ord(d.day)}"
 
 
+def streaks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The streaks in the refused lines of `rows`: one writer (sender) refused STREAK_MIN times or more on one call (the same tool and item, for a create the same `call` digest), each refusal within STREAK_WINDOW of the one before it.
+    → [{"kind": the kind most of its refusals are counted under (the later one on a tie), "tool", "sender", "item", "n": its refusals}]; a call that is not create or update has its tool before the kind."""
+    by: dict[tuple[str, str, str], list[dict[str, Any]]] = collections.defaultdict(list)
+    for r in rows:
+        call = str(r.get("item") or "") or str(r.get("call") or "")          # a refused create has no item: its `call` digest tells one from another; a line with neither is no call to count
+        if r.get("ok") is False and call:
+            by[(str(r.get("sender") or "-"), str(r.get("tool") or ""), call)].append(r)
+    out: list[dict[str, Any]] = []
+    for (who, tool, item), got in by.items():
+        got.sort(key=lambda r: r["t"])
+        run_: list[dict[str, Any]] = []
+        for r in [*got, None]:
+            if r is not None and run_ and r["t"] - run_[-1]["t"] <= STREAK_WINDOW:
+                run_.append(r)
+                continue
+            if len(run_) >= STREAK_MIN:
+                kinds = [_cl.kind_of(str(x.get("why") or "")) for x in run_]
+                most = collections.Counter(kinds)
+                kind = [k for k in kinds if most[k] == max(most.values())][-1]
+                out.append({"kind": kind if tool in HEADLINE else f"{tool}: {kind}", "tool": tool, "sender": who, "item": item, "n": len(run_)})
+            run_ = [r] if r is not None else []
+    return out
+
+
 def tally(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """The counts of a list of call lines: {"calls": {tool: n}, "refused": {tool: n}, "kinds": Counter, "senders": Counter, "fixes": Counter, "first": epoch of the first line or None}."""
+    """The counts of a list of call lines: {"calls": {tool: n}, "refused": {tool: n}, "kinds": Counter, "senders": Counter, "fixes": Counter, "bounces": Counter, "streaks": Counter (streaks by kind), "streak_refusals": Counter (the refusals they hold, by kind), "first": epoch of the first line or None}."""
     calls: collections.Counter = collections.Counter()
     refused: collections.Counter = collections.Counter()
     kinds: collections.Counter = collections.Counter()
     senders: collections.Counter = collections.Counter()
     fixes: collections.Counter = collections.Counter()
+    bounces: collections.Counter = collections.Counter()
     first = None
     for r in rows:
         tool = str(r.get("tool") or "")
@@ -101,7 +133,15 @@ def tally(rows: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             for k in r.get("fix") or []:
                 fixes[str(k)] += 1
-    return {"calls": dict(calls), "refused": dict(refused), "kinds": kinds, "senders": senders, "fixes": fixes, "first": first}
+            for k in r.get("bounce") or []:
+                bounces[str(k)] += 1
+    bounces = collections.Counter({k: min(v, fixes[k]) for k, v in bounces.items() if fixes.get(k)})          # a send-back is of a fix: never more of a kind than the fixes of that kind (a fix of an earlier week, or a count with no fix, shows as none)
+    runs = streaks(rows)
+    held: collections.Counter = collections.Counter()
+    for x in runs:
+        held[x["kind"]] += x["n"]
+    return {"calls": dict(calls), "refused": dict(refused), "kinds": kinds, "senders": senders, "fixes": fixes, "bounces": bounces, "first": first,
+            "streaks": collections.Counter(x["kind"] for x in runs), "streak_refusals": held}
 
 
 def _share(refused: int, calls: int) -> str:
@@ -120,6 +160,11 @@ def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: in
     z = _cfg.tz()
     lines = [f"Refused board writes, {shown(monday)} to {shown(sunday)} ({_cfg.tz_abbr(dt.datetime.combine(monday, dt.time(12, 0)))}):"]
     lines.append(f"- create and update: {r:,} of {n:,} calls refused ({_share(r, n)})" + (f"; the week before {pr:,} of {pn:,} ({_share(pr, pn)})" if pn else "; no records for the week before"))
+    if cur.get("streaks"):
+        total, held, every = sum(cur["streaks"].values()), sum(cur["streak_refusals"].values()), sum(cur["refused"].values())
+        before = f"; the week before {sum(prev['streaks'].values()):,} holding {sum(prev['streak_refusals'].values()):,} of {sum(prev['refused'].values()):,}" if prev.get("streaks") else ""
+        lines.append(f"- repeated refusals (one writer refused {STREAK_MIN} times or more on one call within {STREAK_WINDOW // 60} minutes, a gap in the tool text): {total:,} streaks hold {held:,} of {every:,} refusals ({_share(held, every)}){before}"
+                     + " (" + " · ".join(f"{k} {v:,} holding {cur['streak_refusals'][k]:,}" for k, v in cur["streaks"].most_common(top)) + ")")
     others = [(t, cur["refused"].get(t, 0), c) for t, c in sorted(cur["calls"].items()) if t not in HEADLINE and cur["refused"].get(t, 0)]
     if others:
         lines.append("- other writes refused: " + " · ".join(f"{t} {x:,} of {c:,}" for t, x, c in others))
@@ -132,6 +177,11 @@ def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: in
     if cur["fixes"]:
         total = sum(cur["fixes"].values())
         lines.append(f"- corrected by the server instead of refused: {total:,} (" + " · ".join(f"{k} {v:,}" for k, v in cur["fixes"].most_common()) + ")")
+    if cur["bounces"] or prev["bounces"]:
+        sent_back, made = sum(cur["bounces"].values()), sum(cur["fixes"].values())
+        before_back, before_made = sum(prev["bounces"].values()), sum(prev["fixes"].values())
+        lines.append(f"- fixes the writer sent back: {sent_back:,} of {made:,} ({_share(sent_back, made)})" + (f"; the week before {before_back:,} of {before_made:,} ({_share(before_back, before_made)})" if before_made else "")
+                     + (" (" + " · ".join(f"{k} {v:,}" + (f" of {cur['fixes'][k]:,}" if cur["fixes"].get(k) else "") for k, v in cur["bounces"].most_common()) + ")" if cur["bounces"] else ""))
     first = cur["first"]
     if first is not None and first > week_bounds(monday)[0] + 12 * 3600:
         lines.append(f"- the call log starts {shown(dt.datetime.fromtimestamp(first, z).date())}: the days before it are not counted")
@@ -160,6 +210,11 @@ def _write_sent(p: Path, d: dict[str, Any]) -> None:
 
 
 Deliver = Callable[[str, str, str], tuple[bool, str]]
+Resolve = Callable[[str], str]
+
+ASK = ("\n\nWhat I ask of you: take the repeated-refusal kinds first (a writer refused again and again on one call: the tool text leaves something out, so a hint at write time or a clearer line "
+       "of tool text closes it). Then, for each kind above that repeats, file a write-time hint or a server fix for it (a refusal whose intent the server can read and put right, with one plain line "
+       "to the writer saying what it did), or say in a line why none fits; a kind already filed needs nothing. A fix the writers send back is worse than a plain refusal: look at those next.")
 
 
 def deliver_client(to: str, text: str, sender: str) -> tuple[bool, str]:
@@ -169,8 +224,27 @@ def deliver_client(to: str, text: str, sender: str) -> tuple[bool, str]:
     return status == 200, f"[{status}] {said}"
 
 
+def deliver_agent_client(to: str, text: str, sender: str) -> tuple[bool, str]:
+    """One normal message (it asks something of its reader) through client.py → (delivered, the server's answer)."""
+    from stackshot.fleet import client as _client  # noqa: PLC0415 — only a real send needs it
+    status, said = _client.message(to, text, sender)
+    return status == 200, f"[{status}] {said}"
+
+
+def background_agent(to: str) -> str:
+    """The background agent of the project page `to` that reads the report: the first of anchors.background_ranked (the builder, else the others); "" for a name that is no page key, a project with none, or a registry that cannot be read."""
+    if "/" not in to:
+        return ""
+    try:
+        from stackshot.anchors import anchors as _anc  # noqa: PLC0415 — the registry is read only when a report is sent
+        ranked = _anc.background_ranked(to)
+    except Exception:  # noqa: BLE001
+        return ""
+    return ranked[0][2] if ranked else ""
+
+
 def run(*, dry: bool = False, force: bool = False, week: dt.date | None = None, now: float | None = None, cfg: dict[str, Any] | None = None,
-        deliver: Deliver = deliver_client, state: Path | None = None) -> dict[str, Any]:
+        deliver: Deliver = deliver_client, state: Path | None = None, deliver_agent: Deliver = deliver_agent_client, resolve: Resolve = background_agent) -> dict[str, Any]:
     """→ {"week": the Monday, "text": the report, "sent": bool, "why": what happened}. Sends the report of the last full week (or `week`) once."""
     cfg = cfg or settings()
     today = dt.datetime.fromtimestamp(time.time() if now is None else now, _cfg.tz()).date()
@@ -193,12 +267,17 @@ def run(*, dry: bool = False, force: bool = False, week: dt.date | None = None, 
     ok, said = deliver(cfg["to"], text, cfg["sender"])
     if not ok:
         return {"week": monday, "text": text, "sent": False, "why": said}
+    agent = resolve(cfg["to"])
+    also = ""
+    if agent:                      # the page copy is out; the background agent gets the same report as a message that asks it to file the repeating kinds. Its failure does not unsend the page copy or the record
+        ok2, said2 = deliver_agent(agent, text + ASK, cfg["sender"])
+        also = f" and to its background agent {agent}" if ok2 else f"; the message to its background agent {agent} failed: {said2}"
     done["weeks"] = sorted({*done["weeks"], key})[-60:]
     try:
         _write_sent(sp, done)
     except OSError as e:          # the report is out: a record that cannot be written is reported as such, not raised as a failed send
-        return {"week": monday, "text": text, "sent": True, "why": f"sent to {cfg['to']}, but not recorded ({e}): the next run will send it again until the record can be written"}
-    return {"week": monday, "text": text, "sent": True, "why": f"sent to {cfg['to']}"}
+        return {"week": monday, "text": text, "sent": True, "why": f"sent to {cfg['to']}{also}, but not recorded ({e}): the next run will send it again until the record can be written"}
+    return {"week": monday, "text": text, "sent": True, "why": f"sent to {cfg['to']}{also}"}
 
 
 def main(argv: list[str]) -> int:

@@ -14,6 +14,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import bullet_text as _bt
@@ -112,6 +113,29 @@ def _description_limits() -> tuple[int, int]:
 def _next_line_max() -> int:
     """The longest line of next the write takes: [metadata.next] line_max (200); 0 when the refusal is off (line_max = 0, or require_bullets = false)."""
     return int(_cfg.CFG.get("metadata", {}).get("next", {}).get("line_max", 200)) if _bullets_on() else 0
+
+
+def fix_long_bullets(desc: str, stored: str | None = None) -> tuple[str, str]:
+    """A description whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets (bullet_text.split_long: no word is
+    dropped, nothing is cut inside a link or a code span), and the reply says so (call_log.fixed). → (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything but a long bullet, or when the
+    split cannot be made (a sentence of its own over the limit, more than the line cap): the gate then refuses it as before. A description with no bullet form required ([description] require_bullets = false) is left alone. `stored` is the description the item holds already (an update passes it): when the split gives
+    exactly that text, the same long description has been sent before and is stored as split, so the server changed nothing this time: no fix is counted, no reply line, no History line."""
+    if not desc or not _bullets_on():
+        return desc, ""
+    max_lines, line_max = _description_limits()
+    bad = _bt.judge(desc, max_lines, line_max)
+    if not bad or bad[0] != "long":
+        return desc, ""
+    res = _bt.split_long(desc, max_lines, line_max)
+    if not res:
+        return desc, ""
+    new, n = res
+    if _bt.judge(new, max_lines, line_max):          # a split that still breaks the form (a later line not a bullet) is no fix
+        return desc, ""
+    if stored is not None and new.strip() == str(stored).strip():          # the same long text again, already stored as split: nothing is changed, so nothing is counted, told or noted
+        return new, ""
+    _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split at the end of a sentence into shorter bullets, no word changed", fields=["description"], stored=new, sent=desc)
+    return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server at the end of a sentence"
 
 
 def _gate_description(desc: str, field: str = "description") -> None:

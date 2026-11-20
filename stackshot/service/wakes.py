@@ -102,7 +102,7 @@ def parse_wake(text: str) -> str:
             if not iso:
                 raise ValueError(text)
             wake_at(iso)                    # a real date and a real time of day
-            _calls.fixed("wake", f"wake {text.strip()} read as {iso} {_cfg.tz_abbr()}")
+            _calls.fixed("wake", f"wake {text.strip()} read as {iso} {_cfg.tz_abbr()}", fields=["wake", "until"], stored=iso, sent=text.strip())
             return iso
         stored = m[1] + ("T" + m[2] if m[2] else "")
         wake_at(stored)                     # a real date and a real time of day (2026-02-30 and 24:00 fail here)

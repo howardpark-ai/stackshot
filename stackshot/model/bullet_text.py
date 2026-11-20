@@ -32,9 +32,14 @@ _RX_FENCE_END = re.compile(r"^[ \t]*(?:```|~~~)[ \t]*$")
 _RX_QUOTE = re.compile(r"^[ \t]*>")
 
 
+def _visible(line: str) -> str:
+    """A line as it reads: a link as its words, a naked URL as nothing, the ends trimmed."""
+    return RX_NAKED_URL.sub("", RX_MD_LINK.sub(r"\1", line)).strip()
+
+
 def visible_len(line: str) -> int:
     """A line's length as it reads: a link counts as its words, a naked URL as nothing, the ends trimmed."""
-    return len(RX_NAKED_URL.sub("", RX_MD_LINK.sub(r"\1", line)).strip())
+    return len(_visible(line))
 
 
 _RX_CODE_SPAN = re.compile(r"`[^`\n]*+`")
@@ -59,6 +64,20 @@ def bare_urls(text: str) -> list[str]:
     return out
 
 
+def _fenced(lines: list[str]) -> set[int]:
+    """The indexes of the lines inside a closed fenced block, fence lines included (a fence still open at the end is no fence: its lines stay judged)."""
+    fenced: set[int] = set()
+    open_at = -1                               # one pass: the line a fence opened at, -1 when none is open
+    for k, ln in enumerate(lines):
+        if open_at < 0:
+            if _RX_FENCE.match(ln):
+                open_at = k
+        elif _RX_FENCE_END.match(ln):
+            fenced.update(range(open_at, k + 1))
+            open_at = -1
+    return fenced
+
+
 def judge(text: str, max_lines: int, line_max: int) -> tuple[str, str, int] | None:
     """The form of a description, judged once for everyone (the write gate, the re-bullet pass): None when it keeps the form, else ("lines", "", n) when it has n non-blank
     lines (more than max_lines), ("marker", line, 0) for the first line that is not a `- ` bullet, or ("long", line, n) for the first line that reads n characters (over line_max).
@@ -68,15 +87,7 @@ def judge(text: str, max_lines: int, line_max: int) -> tuple[str, str, int] | No
     live = [(k, ln) for k, ln in enumerate(lines) if ln.strip()]
     if len(live) > max_lines:                  # the count first: nothing else is worth scanning for a text that is refused anyway
         return ("lines", "", len(live))
-    fenced: set[int] = set()
-    open_at = -1                               # one pass: the line a fence opened at, -1 when none is open
-    for k, ln in enumerate(lines):
-        if open_at < 0:
-            if _RX_FENCE.match(ln):
-                open_at = k
-        elif _RX_FENCE_END.match(ln):
-            fenced.update(range(open_at, k + 1))
-            open_at = -1                       # a fence still open at the end is no fence: its lines stay judged
+    fenced = _fenced(lines)
     for k, ln in live:
         if k in fenced:
             continue
@@ -145,6 +156,112 @@ def clip_bullet(line: str, line_max: int) -> str:
                 return cand
             room -= 1
     return ("- " if floor else "") + "…"
+
+
+_RX_CLAUSE_END = re.compile(r"(?<=[.;]) +(?=\S)")      # the gap after a sentence or a clause that ends with a full stop or a semicolon
+_RX_LEAD = re.compile(r"^\s*-[ \t]+")
+# What a full stop or semicolon may close without ending a sentence: an entity (&amp;), an abbreviation (e.g., i.e., Mr., Dr., vs., etc., St., Jr., Inc., No.), a dotted initialism (U.S., a.m.), a number ("3.").
+# It is searched in the last 24 characters before the gap only (`search(text, pos, endpos)` still reads the character before `pos`), so a long bullet costs a constant per gap.
+_RX_NO_CUT = re.compile(r"(?:&#?\w+;|(?i:(?<![\w.])(?:e\.g|i\.e|mr|mrs|ms|dr|vs|cf|fig|approx|etc|st|jr|sr|inc|ltd|corp))\.|(?<![\w.])(?:No|Nos)\.|(?<![\w.])(?:[A-Za-z]\.){2,}|(?<![\w.])\d+\.)$")
+_NO_CUT_WINDOW = 24
+
+
+def _indent(ln: str) -> int:
+    return len(ln) - len(ln.lstrip())
+
+
+def _merged(spans: list[tuple[int, int]]) -> tuple[list[int], list[int]]:
+    """The starts and the ends of `spans` with the ones that overlap taken as one (spans that only touch stay apart: a cut between them is outside both)."""
+    starts: list[int] = []
+    ends: list[int] = []
+    for a, b in sorted(spans):
+        if ends and a < ends[-1]:
+            ends[-1] = max(ends[-1], b)
+        else:
+            starts.append(a)
+            ends.append(b)
+    return starts, ends
+
+
+def _clauses(body: str) -> list[tuple[str, str]]:
+    """`body` cut at the gaps after a full stop or a semicolon, as (the clause, the spaces that followed it; "" for the last). A gap is no cut inside a link, a naked URL or a code span, inside an open
+    parenthesis or an unclosed `**` emphasis, nor after an entity, an abbreviation or a number (`_RX_NO_CUT`). One pass: the balance is counted on the stretch since the last gap, never again on the whole prefix."""
+    starts, ends = _merged(_spans(body) + [m.span() for m in _RX_CODE_SPAN.finditer(body)])
+
+    def inside(x: int) -> bool:
+        k = bisect.bisect_left(starts, x) - 1
+        return k >= 0 and x < ends[k]
+
+    out: list[tuple[str, str]] = []
+    at = seen = opens = closes = strong = 0
+    for m in _RX_CLAUSE_END.finditer(body):
+        s = m.start()
+        seg = body[seen:s]                 # a `**` never straddles a gap: its stars are not a full stop or a semicolon
+        opens, closes, strong, seen = opens + seg.count("("), closes + seg.count(")"), strong + seg.count("**"), s
+        if inside(s) or inside(m.end()) or opens > closes or strong % 2 or _RX_NO_CUT.search(body, max(0, s - _NO_CUT_WINDOW), s):
+            continue
+        out.append((body[at:s], m.group(0)))
+        at = m.end()
+    out.append((body[at:], ""))
+    return out
+
+
+def split_long(text: str, max_lines: int, line_max: int) -> tuple[str, int] | None:
+    """A description whose only fault is bullets that read over `line_max`, put right without losing a word: each such bullet is cut at the gaps after a full stop or a semicolon (never inside a link, a naked
+    URL or a code span) into the fewest bullets that each read within `line_max`, the same indent and dash on each. → (the new text, how many bullets were split), or None when it cannot be done that way: a
+    clause of its own over the limit, a result over `max_lines` lines, a long bullet that has an indented line under it (its children would end up under the last piece), or no long bullet to split. A cut is not
+    made inside an open parenthesis or an open `**` emphasis, nor after an entity, an abbreviation (e.g., i.e., Mr., etc., St., No., U.S.) or a bare number. A `>` quote line, a fenced block and a line that is no
+    bullet are left as they are (the gate still judges them). The text changes at the cut and nowhere else: each semicolon stays, the spaces between the clauses that stay together stay as written, and every
+    line end (LF, CRLF or any other the text has) is kept; a cut puts that line's own end between its pieces. The bullets that need a split are summed up first: when what they read, spaces left out, cannot fit
+    `max_lines` lines of `line_max`, the answer is None before any bullet is scanned (the splitter runs under the item lock, so a pasted wall of text is refused at once)."""
+    if not line_max:
+        return None
+    raw = str(text or "").splitlines(keepends=True)
+    lines = [r.splitlines()[0] for r in raw]
+    ends = [r[len(c):] for r, c in zip(raw, lines)]
+    default_end = next((e for e in ends if e), "\n")
+    fenced = _fenced(lines)
+    long_at: list[int] = []
+    dense = 0
+    for k, ln in enumerate(lines):
+        if not ln.strip() or k in fenced or _RX_QUOTE.match(ln) or not _RX_LEAD.match(ln):
+            continue
+        vis = _visible(ln)
+        if len(vis) > line_max:
+            long_at.append(k)
+            dense += len("".join(vis.split()))        # what a cut keeps whole: every character that is no space, so the pieces cannot read less than this in all
+    if not long_at or dense > max_lines * line_max:
+        return None
+    out: list[str] = []
+    n = 0
+    todo = set(long_at)
+    for k, ln in enumerate(lines):
+        if k not in todo:
+            out.append(ln + ends[k])
+            continue
+        lead = _RX_LEAD.match(ln)
+        body, mark = ln[lead.end():], lead.group(0)
+        below = next((x for x in lines[k + 1:] if x.strip()), "")
+        if below and _indent(below) > _indent(ln):          # a bullet with children under it: the children belong to the whole, so no cut
+            return None
+        pieces: list[str] = []
+        gap = ""
+        for c, after in _clauses(body):
+            if visible_len(mark + c) > line_max:
+                return None
+            if pieces and visible_len(mark + pieces[-1] + gap + c) <= line_max:
+                pieces[-1] += gap + c
+            else:
+                pieces.append(c)
+            gap = after
+        if len(pieces) < 2:
+            return None
+        sep = ends[k] or default_end
+        out.extend(mark + p + (sep if i < len(pieces) - 1 else ends[k]) for i, p in enumerate(pieces))
+        n += 1
+    if not n or len([ln for ln in out if ln.strip()]) > max_lines:
+        return None
+    return "".join(out), n
 
 
 _RX_FIRST_BULLET = re.compile(r"^\s*-[ \t]+(\S.*)$")
