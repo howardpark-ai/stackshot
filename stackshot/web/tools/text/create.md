@@ -39,8 +39,7 @@ Results and PRs go on the project page, never in next.
 The one line a needs=decision item carries, all four parts in this order, joined by " · ", no line break, at most 240
 characters in all: ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week
 delays the demo · By: Mon Jun 8th 2099" (By is a date in words, or no date). A real choice, not "have you done X?";
-one decision per ask (no ";" between decisions). With no options listed the Recommend is a yes or a no. Name who acts
-(a person or a session name) in every option, never I, you, we, us or me; the ask line never says I, you or me.
+one decision per ask (no ";" between decisions). With no options listed the Recommend is a yes or a no. The ask line never says I, you or me.
 
 ## param wait_reason
 What the step waits on that is not available now (a reply, a build or test still running, a window the work needs, a

@@ -35,6 +35,7 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model import nextlines as _nl
+from stackshot.model import option_labels as _ol
 from stackshot.model import states as _states
 from stackshot.model import steps as _steps
 from stackshot.model.bullet_text import _clip_line
@@ -64,7 +65,7 @@ from stackshot.waits import watchers as _watch
 # reworded as a yes/no, because the page's Yes and No fallback cannot answer it (_gate_open_question). An ask or
 # description that names alternatives while the item lists none is refused (_gate_alternatives), with a matcher kept narrow so a go/no-go ask passes (keywords in either; in the
 # Decide part also a list "x, y or z", "x vs y" and labeled choices, "A or B", "A (…) or B (…)", _lettered_alternatives). An ask whose Recommend part does not name the
-# recommended option's label gets a note in the reply (_options_note), never a refusal: scripts file asks of their own wording.
+# recommended option's label gets a note in the reply (_options_note), never a refusal: scripts file asks of their own wording. A label that opens with a lone letter is refused (option_labels.lone_letter_lead).
 # The decision gates live in model/decision_gates.py (the option form and the matchers); this module reads the option form and the mockup form for the options gate below.
 
 
@@ -107,6 +108,10 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
                             f"take the link out of the option and put it in the ask's Decide part, where a mockup goes as {_MOCKUP_ASK}; the option's line says in words what it is.")
         if any(c in label + line for c in "\r\n\v\f\x85\u2028\u2029"):
             raise ToolError(f"Refused: option {i} ({label}): its label and line are one line each")
+        lead = _ol.lone_letter_lead(label)
+        if lead:
+            raise ToolError(f"Refused: option {i} ({label}) opens with a lone letter ({lead}). The board letters the options itself (A, B, C by place in the list you give), so a letter in a label can cross its own: "
+                            f"the same option could read as A on the card and B in the label. Name each design of a mockup by name, and use the same words in the mockup and in the options: label=\"One-line strip\", not \"B: one-line strip\".")
         if len(label) > _hooks().option_label_max():
             raise ToolError(f"Refused: option {i}'s label is longer than {_hooks().option_label_max()} characters; put the detail in its line")
         if len(line) > _hooks().option_line_max():

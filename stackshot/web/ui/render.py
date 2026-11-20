@@ -1414,19 +1414,24 @@ document.addEventListener('click',function(e){var i=e.target;if(!i||!i.matches||
 if(f._was===i.value){i.checked=false;f._was=''}else f._was=i.value;sync(f)},true);
 document.addEventListener('input',function(e){var t=e.target;if(t&&t.matches&&t.matches('form[data-cards] textarea,form[data-step] textarea'))sync(t.form)});
 document.addEventListener('stackshot:swapped',all);window.addEventListener('pageshow',all);window.ssCards={sync:sync,all:all};all()})();</script>"""
-def _card_order(opts):
+def _card_order(opts, mockup=False):
     """The options in the order the answer box draws them. Three or more are drawn, and lettered, in the order the owner stored them, because a session writes its ask ("Recommend: B, …")
     in that order and the letter on a card has to agree with it; the recommended card keeps its badge wherever it sits. Two (Approve and Decline, Yes and No) carry no letters and keep the
-    page's rule of the recommended one first. web/answers.py `_split_letter` derives the letter from the same stored order."""
-    return list(opts) if len(opts) >= 3 else sorted(opts, key=lambda o: not o["recommended"])
-def _cards_html(opts) -> str:
+    page's rule of the recommended one first. web/answers.py `_split_letter` derives the letter from the same stored order. With a mockup linked on the item (`mockup`, see _named_only) the stored order
+    is kept for two as well: the session lists the options in its mockup's order."""
+    return list(opts) if len(opts) >= 3 or mockup else sorted(opts, key=lambda o: not o["recommended"])
+def _named_only(r):
+    """True when the item links a mockup: the board then draws its options by name alone and in the stored order. A mockup names its designs by name, and the server cannot read it (a claude.ai
+    page or a fleet tool's page), so a letter the board drew from the options' places could read as another design's letter; with names only, no letter exists to cross."""
+    return bool(mockup_url(r))
+def _cards_html(opts, named_only=False) -> str:
     """The option cards of the answer box: opts = [{"label", "line", "recommended"}] in the order drawn (_card_order). One label-wrapped radio (name=choice) per option,
     showing the label, the "recommended" badge on the recommended one and the whole text of the option; three or more options are lettered A, B, C by their place in the list and the radio's value is
-    "B · <label>" (the server splits it again, web/answers.py `_split_letter`), two carry no letters and post the bare label. Nothing here is a button: the page script's Send is the only way to send."""
-    lettered = len(opts) >= 3
+    "B · <label>" (the server splits it again, web/answers.py `_split_letter`), two carry no letters and post the bare label. With `named_only` (the item links a mockup, _named_only) the badge is not drawn but three or more options still post "B · <label>": the server reads the card's place, never the look of a label. Nothing here is a button: the page script's Send is the only way to send."""
+    lettered = len(opts) >= 3        # the value carries the place (A, B, C) from three options; a mockup's options are drawn by name, never with the letter (_named_only), but still post it
     cards = []
     for i, o in enumerate(opts):
-        key = f'<span class="akey">{chr(65 + i)}</span>' if lettered else ""
+        key = f'<span class="akey">{chr(65 + i)}</span>' if lettered and not named_only else ""
         val = (f"{chr(65 + i)} · {o['label']}" if o["label"] else chr(65 + i)) if lettered else o["label"]      # a label that was only its letter (option_labels) posts the letter alone
         cards.append(f'<label class="acard"><input type="radio" name="choice" value="{esc(val)}">'
                      f'<span class="adot" aria-hidden="true"></span><span class="abody"><span class="alab">{key}{esc(o["label"])}</span>'
@@ -2669,10 +2674,10 @@ class Board:
                     f'<div class="abtns"><button type="submit" class="b main" name="act" value="comment">{_t("home.send")}</button></div>'
                     '<p class="isent warn aerr" role="alert" hidden></p></form>')
         call = "decision" in [x.lower() for x in needs_of(r)]          # the server takes a choice only then (`_answer` of service/answer.py)
-        opts = _card_order(options_of(r) or yesno_options(r)) if call else []     # three or more in the stored order (lettered), two with the recommended one first; the owner's stored options only, and with none, Yes and No
+        opts = _card_order(options_of(r) or yesno_options(r), _named_only(r)) if call else []     # three or more in the stored order (lettered), two with the recommended one first; the owner's stored options only, and with none, Yes and No
         if opts:                  # the cards (_cards_html), an optional note and one Send, greyed by the page script (_CARDS_JS) until a card is picked or the note has text
             return (f'<form class="ianswer" data-cards method="post" action="{e(answer["action"])}"><b>{_t("answer.your_answer")}</b>'
-                    f'<input type="hidden" name="token" value="{e(answer["token"])}">{_cards_html(opts)}'
+                    f'<input type="hidden" name="token" value="{e(answer["token"])}">{_cards_html(opts, _named_only(r))}'
                     f'<label class="anote" for="atext">{_t("home.note_optional")}</label>'
                     + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
                     f'<div class="abtns-send"><button type="submit" class="b main" name="act" value="answer">{_t("home.send")}</button><span class="ahint" hidden>{_t("home.pick_hint")}</span></div>'
@@ -3735,8 +3740,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         pa = parse_ask(ask)
         q = pa["decide"] if pa else re.sub(r"^Decide:\s*", "", ask).split(" · Options:")[0].strip()
         stored = open_options(r)
-        opts = _card_order(stored or yesno_options(r))      # with no stored options, Yes and No
-        cards = _cards_html(opts) if opts else ""
+        opts = _card_order(stored or yesno_options(r), _named_only(r))      # with no stored options, Yes and No
+        cards = _cards_html(opts, _named_only(r)) if opts else ""
         hint = esc(_t("home.note_optional" if cards else "home.write_answer"))
         send = (f'<button type="submit" class="b main" name="act" value="answer" disabled>{esc(_t("home.send"))}</button>' + (f'<span class="ahint" hidden>{esc(_t("home.pick_hint"))}</span>' if cards else ""))
         form = (f'<form class="hanswer" {"data-cards " if cards else ""}method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">{cards}'

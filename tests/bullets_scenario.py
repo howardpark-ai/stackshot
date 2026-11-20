@@ -211,7 +211,7 @@ refused("a long prose line starting with the owner's name is judged and refused"
 refused("…even when it holds a backtick span", lambda: create(next=f"{_core_instance.OWNER}: run `ls` " + "and then think about it " * 10), "a line of next is")
 ASKL = "Decide: " + "ship it " * 20 + "· Recommend: ship · Stakes: a week · By: no date"
 check("fixture: the ask line is over 200 characters and a valid ask", 200 < len(ASKL) <= 240 and _rmod.parse_ask(ASKL) is not None, (len(ASKL), _rmod.parse_ask(ASKL)))
-passes("an ask line as next's first line is not judged when the call passes no ask", lambda: create(next=ASKL + "\nhome-other: do it", needs=["decision"], options=[{"label": "A", "line": "a", "recommended": True}, {"label": "B", "line": "b"}]))
+passes("an ask line as next's first line is not judged when the call passes no ask", lambda: create(next=ASKL + "\nhome-other: do it", needs=["decision"], options=[{"label": "Ship", "line": "a", "recommended": True}, {"label": "Hold", "line": "b"}]))
 refused("…but it is judged when the call also passes an ask", lambda: create(next=ASKL, ask="Decide: x · Recommend: y · Stakes: z · By: no date", needs=["decision"]), "a line of next is")
 refused("…and an ask-shaped line that is not the first line is judged", lambda: create(next="home-other: first\n" + ASKL), "a line of next is")
 

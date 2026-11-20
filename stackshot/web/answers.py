@@ -72,9 +72,15 @@ def _answer_same_origin(request: Request) -> bool:
 _LETTERED_CHOICE = re.compile(r"([A-Z]) · (.+)", re.S)
 
 
+def _mockup_url(item: dict[str, Any]) -> str:
+    """The mockup link of an open decision item ("" when it has none), read from the page module when it is called (ui/render.py draws the pages and imports this package's neighbors)."""
+    from stackshot.web.ui import render as _ui_render
+    return _ui_render.mockup_url(item)
+
+
 def _split_letter(item: dict[str, Any], choice: str) -> tuple[str, str]:
     """(label, letter) for the `choice` a form posted. The answer box of the board letters a question's options A, B, C when it has three or more, by their place in the order the owner
-    stored them (the order a session writes its ask in: "Recommend: B, …"), and posts "B · <label>"; every other form posts the bare label. The lettered form is tried first: a
+    stored them (the order a session writes its ask in: "Recommend: B, …"), and posts "B · <label>"; every other form posts the bare label. On an item that links a mockup the cards are drawn by name, without the badge, but post the same lettered value, so no label can pass for another's letter; the letter is then not kept beside the name. The lettered form is tried first: a
     "<letter> · <label>" whose letter is the label's stored place among three or more options gives (label, letter), so an option whose label is itself "B · X" cannot capture
     the card for "X" at place B. Otherwise a choice that is one of the stored labels (or Yes/No) comes back as it is with no letter, and anything else unchanged, for the caller's stale check.
     An option whose stored label repeats its own letter ("A Report", all of a card's labels in order: option_labels.strip_letters) is drawn without it, so the label a pick may name at a place is the
@@ -82,7 +88,7 @@ def _split_letter(item: dict[str, Any], choice: str) -> tuple[str, str]:
     forms = _option_forms(item)
     m = _LETTERED_CHOICE.fullmatch(choice)
     if m and len(forms) >= 3 and ord(m[1]) - 65 < len(forms) and m[2] in forms[ord(m[1]) - 65][1:]:
-        return forms[ord(m[1]) - 65][0], m[1]
+        return forms[ord(m[1]) - 65][0], ("" if _mockup_url(item) else m[1])      # a mockup's options are drawn by name: the card still posts its place, but no letter is recorded beside the name
     if len(forms) >= 3 and len(choice) == 1 and choice.isascii() and choice.isalpha() and ord(choice.upper()) - 65 < len(forms) and not forms[ord(choice.upper()) - 65][1]:
         return forms[ord(choice.upper()) - 65][0], choice.upper()      # the card of a label that was only its letter posts the letter (ASCII only: "ß".upper() is two characters)
     for name, shown, raw in (forms if choice else []):

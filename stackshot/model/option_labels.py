@@ -46,6 +46,27 @@ def strip_letters(labels: list[str]) -> list[str]:
     return rests
 
 
+# The write gate's rule (lone_letter_lead): the board letters the options itself, so a label that opens with a letter of its own can cross the board's. A lone letter (any case, the articles A and I
+# included) is the whole label, or is followed by a separator the board's own lettering draws: `:` `)` a middle dot (a space may come before them), a full stop then a space or the end, an em dash, or a hyphen or en
+# dash standing as a word (a space after it); "(A)" too. "A one-line strip", "I think so" and "B full panel" are plain words after a letter: no separator, no refusal. One of the fourteen Hangul list syllables (ga, na, da, ra, ma, ba, sa, a, ja, cha, ka, ta, pa, ha; followed by `)`, `.` or `:`, or in parentheses) is
+# a marker of the same kind; any other syllable is a word. After Option, Choice, Design, Mockup, Variant, Alt, Alternative, Version, Layout or Style a lone letter is a capital followed by anything, or a letter of either case
+# followed by one of the endings above ("Design a strip" keeps its article); after "Plan" only the separator forms are refused ("Plan B: x"; the phrase "Plan B" is a word). "X-ray", "A-frame",
+# "U.S. plan", "A.I. tools" and "B2B" are words.
+_SEP = r"(?:\s*[:)\u00b7\u2014]|\.(?=\s|$)|\s*[\u2013-](?=\s|$))"
+_SEP_END = r"(?:$|" + _SEP + r")"
+_HANGUL = r"[\uac00\ub098\ub2e4\ub77c\ub9c8\ubc14\uc0ac\uc544\uc790\ucc28\uce74\ud0c0\ud30c\ud558]"   # the fourteen syllables Korean lists run in (ga, na, da, ra, ma, ba, sa, a, ja, cha, ka, ta, pa, ha), not every syllable: a one-syllable word then a colon is a word
+_LONE_PLAIN = re.compile(r"(?:\([A-Za-z]\)(?=\s|$)|[A-Za-z]" + _SEP_END + r"|" + _HANGUL + _SEP + r"|\(" + _HANGUL + r"\)(?=\s|$))", re.S)
+_LONE_PREFIXED = re.compile(r"(?:option|choice|design|mockup|variant|alt|alternative|version|layout|style)\s+(?:\([A-Za-z]\)(?=\s|$)|[A-Za-z]" + _SEP_END + r"|(?-i:[A-Z])\s)", re.I | re.S)
+_LONE_PLAN = re.compile(r"plan\s+[A-Za-z]" + _SEP, re.I | re.S)
+
+
+def lone_letter_lead(label: str) -> str:
+    """The opening of `label` that is a lone letter (see the rule above), "" when it has none. The label as written, stripped."""
+    t = str(label or "").strip()
+    m = _LONE_PREFIXED.match(t) or _LONE_PLAN.match(t) or _LONE_PLAIN.match(t)
+    return m.group(0).strip() if m else ""
+
+
 def listed(label: str, place: int) -> str:
     """The label of the option at `place` (0 for the first) for a plain list, which draws no badge: the letter itself when the strip left nothing."""
     return label or chr(65 + place)
