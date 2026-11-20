@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import functools
 import json
+import re
 import sys
 import threading
 import time
@@ -43,7 +44,7 @@ from stackshot.model import states as _states
 from stackshot.model import step_commands as _sc
 from stackshot.model import steps as _steps
 from stackshot.model import work as _work
-from stackshot.model.bullet_text import _clip_line
+from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
@@ -69,6 +70,9 @@ RETIRED_NOTE = ("\n(note: expected_by and expected_reason are no longer kept: a 
                 "or wait_kind=\"relay\" with wait_event=<who> and ask_by=<the day to chase>.)")
 
 _STALE_WAIT_NOTE_MAX = 5
+_DROPPED_NOTE_MAX = 5           # the old description lines a dropped-lines note names, then "and N more"
+_DROPPED_NOTE_LINE_MAX = 120    # the characters of each old line the note shows
+_DROPPED_NOTE_LINK_MAX = 300    # a cut that would fall inside a link runs on to the link's end, up to this many characters; past it the line is cut plainly
 
 # A write whose every argument is one of these is bookkeeping on the item, not work on it: it names no background agent in needs
 # (_name_on_write). A page rename moves many items with update(project=<new key>), and the mover, a background agent, must not be
@@ -303,6 +307,43 @@ def _stale_wait_notes(item_was: dict[str, Any], item: dict[str, Any], keeper: st
     if len(lines) > _STALE_WAIT_NOTE_MAX:
         lines = lines[:_STALE_WAIT_NOTE_MAX] + [f"(note: {len(lines) - _STALE_WAIT_NOTE_MAX} more next lines still wait on an item whose wait was just cleared)"]
     return "".join("\n" + ln for ln in lines)
+
+
+def _dropped_line_shown(text: str) -> str:
+    """One old description line as the dropped-lines note shows it: whole when it is at most _DROPPED_NOTE_LINE_MAX characters, else cut at a word before that limit. A cut never falls inside a
+    link or a naked URL (the address is the fact the writer would want back): it runs on to the end of the link, unless that is past _DROPPED_NOTE_LINK_MAX, where the line is cut plainly. A cut
+    line ends with an ellipsis."""
+    t = " ".join(str(text or "").split())
+    if len(t) <= _DROPPED_NOTE_LINE_MAX:
+        return t
+    spans = [m.span() for rx in (RX_MD_LINK, RX_NAKED_URL) for m in rx.finditer(t)]
+    lim = _DROPPED_NOTE_LINE_MAX
+    cut = next((e for b, e in spans if b < lim < e), 0)      # the limit falls inside a link: run on to its end
+    if not cut:
+        cut = len(t[:lim].rsplit(" ", 1)[0]) if " " in t[:lim] else lim      # else a word boundary before the limit
+        cut = next((e for b, e in spans if b < cut < e), cut)      # …which moves to the end of a link it falls inside
+    cut = min(cut, max(_DROPPED_NOTE_LINK_MAX, lim))
+    return t if cut >= len(t) else t[:cut].rstrip(" ,;:") + " …"
+
+
+def _dropped_lines_note(old: Any, new: Any) -> str:
+    """The reply line of a write that changed the description and left out lines the old one held: every old line (whitespace trimmed and collapsed, the leading `- ` off, so a line that is only
+    re-indented, re-spaced, reordered or moved under another bullet is kept) that no line of the new one matches, at most _DROPPED_NOTE_MAX of them, each cut at _DROPPED_NOTE_LINE_MAX, then
+    "and N more". A reworded line is one dropped and one new line: the note shows its old text, so the writer can put a fact back. No refusal and nothing stored differently. "" when no line is dropped."""
+    key = lambda ln: " ".join(re.sub(r"^-[ \t]+", "", ln.strip()).split())
+    kept = {key(ln) for ln in str(new or "").splitlines()}
+    gone: list[str] = []
+    for ln in str(old or "").splitlines():
+        k = key(ln)
+        if k and k not in kept and k not in gone:
+            gone.append(k)
+    if not gone:
+        return ""
+    shown = [f'"{_dropped_line_shown(k)}"' for k in gone[:_DROPPED_NOTE_MAX]]
+    if len(gone) > _DROPPED_NOTE_MAX:
+        shown.append(f"and {len(gone) - _DROPPED_NOTE_MAX} more")
+    return (f"\n(note: this write dropped {len(gone)} line{'' if len(gone) == 1 else 's'} of the old description (a reworded line counts as dropped, its new wording as a new line); "
+            f"put back any fact you meant to keep: {'; '.join(shown)})")
 
 
 def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, Any], writer: str, naming_added: list[str], next_passed: bool) -> None:
@@ -1289,13 +1330,19 @@ def update_unlocked(
     except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
         print(f"update: {gid} stale-wait notes not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         stale_wait = ""
+    dropped_note = ""
+    if description.strip():
+        try:
+            dropped_note = _dropped_lines_note(item_was.get("description"), item.get("description"))      # lines of the old description the new one lacks: named with their old text, so the writer can put a fact back
+        except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
+            print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     if dropped_hold:
         hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never on hold: the hold is dropped"
                  + (f"; its date {_wt.wake_value(meta)} stays, and no date parks an item on his call" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + named + told + h.nag(debtor))
 
 
