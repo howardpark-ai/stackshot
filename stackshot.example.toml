@@ -498,7 +498,7 @@ command = ["claude"]                                # what starts the call, an a
 timeout_seconds = 120                               # a call that takes longer is killed; its notices go to the project's -main agent
 max_notices = 25                                    # at most this many notices in one call, the oldest first; the rest wait for the next tick
 max_age_hours = 24                                  # a notice older than this when the router first looks is not judged (a restart does not replay the backlog)
-page_senders = ["nightly-job", "size-watch"]        # sender names (a prefix match, case ignored) of the jobs whose message about a page, with `keeper:` in its text, is held for the page pass and never delivered to an agent; list your own jobs' sender names here ([] = the rule is off)
+page_senders = ["nightly-job", "size-watch"]        # sender names (a prefix match, case ignored) of the jobs whose message about a page, with `keeper:` in its text, is archived for the page pass and never delivered to an agent; list your own jobs' sender names here ([] = the rule is off)
 extra_args = []                                     # more arguments for the CLI, e.g. ["--effort", "low"]
 unset_env = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "CLAUDE_CODE_ENTRYPOINT"]   # variables unset in the call's shell after the login profile (any other ANTHROPIC_* and CLAUDE_CODE_USE_* too), so it runs on the signed-in lane. The call also runs with --safe-mode and --setting-sources project: no user hooks, CLAUDE.md or plugins
 login_shell = true                                  # true = the call starts from a login shell (bash -l), as a pane does; false = `env` directly
@@ -508,14 +508,14 @@ login_shell = true                                  # true = the call starts fro
 # page = "projects/mine"
 # anchor = "github:owner/repo#12"
 # agent = "mine-main"
-# [[router.quiet]]                                  # a standing ruling: in this project a non-urgent notice for (or on a Drive anchor of) the agent is held for one digest after the quiet hour, never for the owner
+# [[router.quiet]]                                  # a standing ruling: in this project a non-urgent notice for (or on a Drive anchor of) the agent is archived for one digest after the quiet hour, never for the owner
 # page = "projects/mine"
 # agent = "mine-docs"
 page_debt = false                                   # the page-debt call (step 3b), made with each audit run ([audit] at: twice a day in the example): true = per page, one thin call proposes the Current-state edit for the page debts that moved to the keeper; false = nothing runs
 page_debt_shadow = true                             # true = it only logs (<state>/router/page_debt.jsonl) and the 30-minute relay to the keeper stays as it is; false = LIVE: the edit is put on the page (revision-checked), the debt settled, what cannot be applied goes to the page's agent, else the builder, else the -main agent, and the 30-minute relay stops
 live_tick_seconds = 60                              # how often the live tick looks for notices the router holds (a call is made only when there are some)
 hold_notices = true                                 # a notice that asks nothing of a background agent (an item closed or changed, a place in the queue, a page-owed or audit reminder, a message marked fyi) is held and handed over with the agent's next turn instead of starting one (stackshot/waits/held.py); it also holds an fyi for a front agent, and a pass to one that asks nothing of the person where the project has no background agent (its next turn, by the front gate); false delivers every notice as before, a pass to a front agent marked, and the message tool refuses an unmarked fyi to a front agent. Read at each use
-digest_hour = 9                                     # the hour (0-23, the instance timezone) from which the day's digest of held notices is logged (live.jsonl, kind digest_logged; not delivered), once a day per project, only when the list is not empty; a digest with a notice the router could not rule goes to the project's builder (else its -main agent, marked [for <owner>]); a server down then does it when it is back the same day. A page's quiet-hour holds go to their own agent instead. Read at each use
+digest_hour = 9                                     # the hour (0-23, the instance timezone) from which the day's digest of archived notices is logged (live.jsonl, kind digest_logged; not delivered), once a day per project, only when the list is not empty; a digest with a notice the router could not rule goes to the project's builder (else its -main agent, marked [for <owner>]); a server down then does it when it is back the same day. A page's quiet-hour archive goes to its own agent instead. Read at each use
 notes = true                                        # a `note` on a ruling is written to the project page's timeline (source "stackshot (router)"), once per notice; false = notes are ignored. Read at each use
 
 [portal]

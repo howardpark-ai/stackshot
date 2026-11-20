@@ -47,7 +47,7 @@ def _route(notice: str, ruling: str, to: str = "", reason: str = "", sender: str
         raise ToolError(f"Refused: {e}")
     rel = _anchor_release(project, n, by=sender) if ruling in ("passed", "merged") else []   # a held item that waited on this anchor comes back
     _publish()
-    return (f"ruled {n['id']} ({project}): {ruling}" + (f" to {to.strip()}" if to.strip() else "") + (f" — {n.get('reason')}" if n.get("reason") else "") + f".\n{n.get('label', '')}: {n.get('text', '')}"
+    return (f"ruled {n['id']} ({project}): {n.get('ruling') or ruling}" + (f" to {to.strip()}" if to.strip() else "") + (f" — {n.get('reason')}" if n.get("reason") else "") + f".\n{n.get('label', '')}: {n.get('text', '')}"
             + _route_released(rel))
 
 

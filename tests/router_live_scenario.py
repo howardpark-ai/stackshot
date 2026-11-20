@@ -7,7 +7,7 @@ The router rules every project page: there is no live switch, no pilot list and 
 `projects/delta` (no agent: it falls to the scope's general -main), `projects/beta` (one session), a hub with a sub-page, and the
 work-/ops- pages for the scope fallback. Covers: a message to a project, an anchor-hub notice, a board relay and a wake are
 recorded for the router and delivered to nobody; the tick's pass (delivered to the target, with the mark only for a front agent and a
-notice for Oliver), dropped / merged / held (ruled, nothing delivered); a failed judgment goes to -main with the mark; the
+notice for Oliver), dropped / merged / archived (ruled, nothing delivered); a failed judgment goes to -main with the mark; the
 stand-in (builder, else the page's -main, else the hub's -main, else the scope's general -main: home-, work-, ops-) and the
 `general_*` config keys; a page with no agent anywhere holds the notice and refuses a message; a leftover `[router] live = false` or
 `[pilot] projects` is ignored; a failed delivery is retried and then goes to -main; a hold waiting on an anchor is released by the
@@ -243,7 +243,7 @@ n_hold = routing.read("projects/alpha")[-1]
 hub.send("gmail:7777777777777777", "work-osprey", "[anchor] Gmail thread: out of office reply → https://mail.google.com/y", ev("Gmail anchor", "Vee", "https://mail.google.com/y"), "out of office reply")
 n_hold2 = routing.read("projects/alpha")[-1]
 plan = [(m_quote["id"], "passed", "work-osprey-x", False), (n_hub["id"], "passed", "work-osprey-main", True), (n_board["id"], "passed", "work-osprey-docs", False),
-        (nids[0], "dropped", "", False), (nids[1], "held", "", False)]      # the wake notice is settled by a rule in code (the wake rule: a live wake for the item's mover passes to it)
+        (nids[0], "dropped", "", False), (nids[1], "archived", "", False)]      # the wake notice is settled by a rule in code (the wake rule: a live wake for the item's mover passes to it)
 fake("good", answer(plan)); p0 = len(pushes())
 res = live.tick()
 rb = {n["id"]: n for n in routing.read("projects/alpha")}
@@ -256,7 +256,7 @@ to_x = next(x for x in pp if x[0] == "work-osprey-x"); to_main = next(x for x in
 check("a pass to a background agent carries no mark; the notice text and the reason are in it", not to_x[1].startswith("[for Oliver]") and "vendor" in to_x[1] and "canned" in to_x[1] and m_quote["id"] in to_x[1], to_x)
 check("a pass to a front agent for Oliver opens with [for Oliver]", to_main[1].startswith("[for Oliver]") and "Friday" in to_main[1], to_main)
 check("a pass to the agent that keeps the page carries the board notice, unmarked (the default relay says the page update is the keeper's, an ask: it does not hold it)", any(x[0] == "work-osprey-docs" and not x[1].startswith("[for Oliver]") and "completed" in x[1] for x in pp) and rb[n_board["id"]]["ruling"] == "passed" and held.count("work-osprey-docs") == 0, pp)
-check("merged and dropped are ruled and nothing is delivered for them; held is ruled held; the mover's own wake is passed to it (never dropped)", (rb[n_wake["id"]]["ruling"], rb[nids[0]]["ruling"], rb[nids[1]]["ruling"]) == ("passed", "dropped", "held")
+check("merged and dropped are ruled and nothing is delivered for them; archived is ruled archived; the mover's own wake is passed to it (never dropped)", (rb[n_wake["id"]]["ruling"], rb[nids[0]]["ruling"], rb[nids[1]]["ruling"]) == ("passed", "dropped", "archived")
       and len([x for x in pp if "router: notice" in x[1]]) == 6 and all(rb[i]["ruled_by"] == "stackshot (router)" for i in (n_wake["id"], nids[0], nids[1])), ([x[0] for x in pp], [rb[i].get("ruling") for i in (n_wake["id"], nids[0], nids[1])]))
 check("the keeper heard none of it but its own wake (it moves the woken item)", [x[1][:60] for x in to_name_line(pushes()[p0:])] == [x[1][:60] for x in to_name_line(pushes()[p0:]) if "a2" in x[1] and "woke" in x[1]] and not to_name_line(pushes()[p0:], "work-gamma"))
 check("every action is a line in live.jsonl: ruled, with the ruling and target", {l["id"] for l in lines() if l["status"] == "ruled"} >= {i for i, *_ in plan}
@@ -295,9 +295,9 @@ check("the second hold's notice (passed by the rule in code) released its item t
 item(6, "projects/alpha", A, hold=True)          # held again, waiting on the Gmail anchor
 note_ = {"id": "feed01", "kind": "anchor", "anchor": "gmail:6666666666666666", "live": True, "to": "", "ts": time.time(), "ruled_at": time.time()}
 wiring._router_live_after("projects/alpha", {**note_, "ruling": "dropped"}); held_d = bool(_service_store._load("a6")["metadata"].get("hold"))
-wiring._router_live_after("projects/alpha", {**note_, "ruling": "held"}); held_h = bool(_service_store._load("a6")["metadata"].get("hold"))
+wiring._router_live_after("projects/alpha", {**note_, "ruling": "archived"}); held_h = bool(_service_store._load("a6")["metadata"].get("hold"))
 wiring._router_live_after("projects/alpha", {**note_, "ruling": "merged"}); held_m = bool(_service_store._load("a6")["metadata"].get("hold"))
-check("a hold waiting on an anchor: the router's dropped or held ruling leaves it held (as a keeper's does), a merged one releases it", (held_d, held_h, held_m) == (True, True, False), (held_d, held_h, held_m))
+check("a hold waiting on an anchor: the router's dropped or archived ruling leaves it held (as a keeper's does), a merged one releases it", (held_d, held_h, held_m) == (True, True, False), (held_d, held_h, held_m))
 
 # ---- 6. a notice the router cannot judge goes to -main with the mark; the keeper gets nothing
 _messaging._message("projects/alpha", "an odd one", "home-beta"); n_odd = routing.read("projects/alpha")[-1]
@@ -359,7 +359,7 @@ check("[router] live = false (and live_projects naming another page) is ignored:
 check("…and no function of the router delivers a notice to a keeper by name any more", not hasattr(live, "_to_steward_text") and not hasattr(live, "flush_stranded") and not hasattr(live, "enabled") and not hasattr(live, "scope"))
 cfg(live=True)
 
-# ---- 12. the daily digest of held notices, a ruling's note on the page's timeline, the cap on writing a ruling
+# ---- 12. the daily digest of archived notices, a ruling's note on the page's timeline, the cap on writing a ruling
 import datetime as dt; from stackshot.projects import rename_page as rp
 mid_ = dt.datetime.now(_cfg.tz()).replace(hour=0, minute=0, second=0, microsecond=0)
 D0 = (mid_ + dt.timedelta(hours=10)).timestamp()
@@ -379,28 +379,28 @@ _messaging._message(PLU, "keeper: the plan page is stale", "nightly-job"); n_pp 
 _messaging._message("projects/alpha", "keeper: the roadmap page is stale", "nightly-job"); n_ap = routing.read("projects/alpha")[-1]
 live.tick()
 lq = next(l for l in lines() if l.get("id") == n_q["id"]); lp = next(l for l in lines() if l.get("id") == n_pp["id"])
-check("example-site: the Drive anchor notice is held by the quiet rule, the nightly job's page message by the page pass; the router rules both held",
-      n_q["live"] and n_pp["live"] and rule_of(n_q["id"], PLU)["ruling"] == "held" and rule_of(n_pp["id"], PLU)["ruling"] == "held" and (lq["rule"], lp["rule"]) == ("quiet", "page-pass"), (lq, lp))
-exp_all = [n["id"] for n in routing.read("projects/alpha") if n.get("ruling") == "held" and n.get("ruled_by") == "stackshot (router)"]
+check("example-site: the Drive anchor notice is held by the quiet rule, the nightly job's page message by the page pass; the router rules both archived",
+      n_q["live"] and n_pp["live"] and rule_of(n_q["id"], PLU)["ruling"] == "archived" and rule_of(n_pp["id"], PLU)["ruling"] == "archived" and (lq["rule"], lp["rule"]) == ("quiet", "page-pass"), (lq, lp))
+exp_all = [n["id"] for n in routing.read("projects/alpha") if n.get("ruling") == "archived" and n.get("ruled_by") == "stackshot (router)"]
 exp_alpha = [i for i in exp_all if i != n_ap["id"]]          # the -main digest's: the page-pass hold goes to the builder
-check("alpha's page-pass hold is among the router's held rulings", n_ap["id"] in exp_all and next(l for l in lines() if l.get("id") == n_ap["id"])["rule"] == "page-pass")
-check("the router ruled some alpha notices held in the sections above", len(exp_alpha) >= 1, exp_alpha)
+check("alpha's page-pass archive is among the router's archived rulings", n_ap["id"] in exp_all and next(l for l in lines() if l.get("id") == n_ap["id"])["rule"] == "page-pass")
+check("the router ruled some alpha notices archived in the sections above", len(exp_alpha) >= 1, exp_alpha)
 st0 = {r["project"]: r for r in live.status()}
-check("status: held since the last digest and the last digest's time (none yet)", st0["projects/alpha"]["held_since_digest"] == len(exp_all) and st0["projects/alpha"]["last_digest_at"] == 0
-      and st0[PLU]["held_since_digest"] == 2 and st0["projects/gamma"]["held_since_digest"] == 0, st0)
+check("status: archived since the last digest and the last digest's time (none yet)", st0["projects/alpha"]["archived_since_digest"] == len(exp_all) and st0["projects/alpha"]["last_digest_at"] == 0
+      and st0[PLU]["archived_since_digest"] == 2 and st0["projects/gamma"]["archived_since_digest"] == 0, st0)
 
-# the digest: before the hour nothing; from it, one message per project with something held; the mark on -main's, none on the background agent's
+# the digest: before the hour nothing; from it, one message per project with something archived; the mark on -main's, none on the background agent's
 p0 = len(pushes()); r_early = live.digest_tick(now=D0 - 2 * 3600)
 check("before [router] digest_hour nothing is sent", r_early["sent"] == 0 and not digests(p0) and live.digest_hour() == 9)
 r_d = live.digest_tick(now=D0)
 dg = digests(p0); by = {x[0]: x[1] for x in dg}
-check("only the quiet-hour agent is sent a digest: held notices owe nothing, so the -main digests and the page-pass digests are logged, not sent",
+check("only the quiet-hour agent is sent a digest: archived notices owe nothing, so the -main digests and the page-pass digests are logged, not sent",
       len(dg) == 1 and set(by) == {"example-site-builder"} and r_d["sent"] == 1 and r_d["logged"] == 3, ([x[0] for x in dg], r_d))
-check("a held notice is delivered to no front agent: not to alpha's -main, not to its builder, nothing marked [for Oliver]",
+check("an archived notice is delivered to no front agent: not to alpha's -main, not to its builder, nothing marked [for Oliver]",
       not any(x[0] in ("work-osprey-main", "work-osprey-x", "work-example-site-main", "work-osprey") for x in dg) and not any("[for Oliver]" in x[1] and "router digest" in x[1] for x in dg), [x[0] for x in dg])
 lg = [l for l in lines() if l.get("kind") == "digest_logged"]
 lg_main = next(l for l in lg if l["group"] == "main" and l["project"] == "projects/alpha")
-check("the -main group's held notices are a line of live.jsonl instead: kind digest_logged, project, count, ids and the digest's text, unmarked, listing every held notice with its reason",
+check("the -main group's archived notices are a line of live.jsonl instead: kind digest_logged, project, count, ids and the digest's text, unmarked, listing every archived notice with its reason",
       lg_main["status"] == "logged" and "target" not in lg_main and sorted(lg_main["ids"]) == sorted(exp_alpha) and lg_main["count"] == len(exp_alpha) and "[for Oliver]" not in lg_main["text"]
       and "by the router and not passed to any agent" in lg_main["text"].split("\n")[0] and all(i in lg_main["text"] for i in exp_alpha) and f"canned {nids[1]}" in lg_main["text"]
       and f"{len(exp_alpha)} notice" in lg_main["text"], lg_main)
@@ -412,7 +412,7 @@ check("…a page-pass hold is logged the same way: its own group, the page-pass 
       and n_ap["id"] not in lg_main["text"] and len(lg) == 3, lg)
 check("example-site: the quiet-hour hold goes to example-site-builder unmarked, and not the page-pass one", n_q["id"] in by["example-site-builder"] and "[for Oliver]" not in by["example-site-builder"] and n_pp["id"] not in by["example-site-builder"], by["example-site-builder"])
 check("an empty list sends nothing: no digest for gamma, delta or epsilon", not any(x[0] in ("work-gamma-main", "work-delta", "work-gamma") for x in dg) and r_d["empty"] >= 2, (r_d, [x[0] for x in dg]))
-check("the routing log keeps the held ruling as it was, with no new line of the router's", all(rule_of(i)["ruling"] == "held" and rule_of(i)["ruled_by"] == "stackshot (router)" and "digest" not in (rule_of(i).get("reminders") or {}) for i in exp_alpha))
+check("the routing log keeps the archived ruling as it was, with no new line of the router's", all(rule_of(i)["ruling"] == "archived" and rule_of(i)["ruled_by"] == "stackshot (router)" and "digest" not in (rule_of(i).get("reminders") or {}) for i in exp_alpha))
 dl = dlines()
 check("each digest sent is a line of live.jsonl: kind digest, project, count, target, outcome", len(dl) == 1 and all(l["status"] == "sent" and l["outcome"].startswith("delivered") for l in dl)
       and {(l["project"], l["target"], l["count"]) for l in dl} == {(PLU, "example-site-builder", 1)}, dl)
@@ -421,26 +421,26 @@ check("the digested notices and the time of the last digest are in <state>/route
 p1 = len(pushes()); r_again = live.digest_tick(now=D0 + 3600); live.digest_tick(now=D0 + 7200)
 check("no double send: a later tick the same day sends nothing and logs nothing", r_again["sent"] == 0 and r_again["logged"] == 0 and not digests(p1) and len([l for l in lines() if l.get("kind") == "digest_logged"]) == 3)
 st1 = {r["project"]: r for r in live.status()}
-check("status after the digest: nothing held since it, its time shown", st1["projects/alpha"]["held_since_digest"] == 0 and st1["projects/alpha"]["last_digest_at"] == D0 and "last digest" in live.render(live.status()))
+check("status after the digest: nothing archived since it, its time shown", st1["projects/alpha"]["archived_since_digest"] == 0 and st1["projects/alpha"]["last_digest_at"] == D0 and "last digest" in live.render(live.status()))
 
-# a notice held later the same day waits for the next day's digest, and the digest lists it alone, with the router's reason
+# a notice archived later the same day waits for the next day's digest, and the digest lists it alone, with the router's reason
 _messaging._message("projects/alpha", "a photo of the whiteboard, please file it", "home-beta"); n_img = routing.read("projects/alpha")[-1]
-fake("good", json.dumps([{"id": n_img["id"], "ruling": "held", "target": "", "reason": "held for the digest: image not read", "for_owner": False}]))
+fake("good", json.dumps([{"id": n_img["id"], "ruling": "held", "target": "", "reason": "archived for the digest: image not read", "for_owner": False}]))
 live.tick(); p1 = len(pushes()); live.digest_tick(now=D0 + 4 * 3600)
-check("a notice held after the day's digest is not sent the same day", rule_of(n_img["id"])["ruling"] == "held" and not digests(p1))
+check("a notice archived after the day's digest is not sent the same day", rule_of(n_img["id"])["ruling"] == "archived" and not digests(p1))
 n_lg0 = len([l for l in lines() if l.get("kind") == "digest_logged"]); live.digest_tick(now=day(1)); d1 = digests(p1)
 lg1 = [l for l in lines() if l.get("kind") == "digest_logged"][n_lg0:]
 check("the next day's digest is logged, not sent: it lists it alone (not the ones already digested), with the reason; example-site has nothing new, so nothing",
       not d1 and len(lg1) == 1 and lg1[0]["group"] == "main" and lg1[0]["ids"] == [n_img["id"]] and "image not read" in lg1[0]["text"] and not any(i in lg1[0]["text"] for i in exp_alpha)
-      and "1 notice was held" in lg1[0]["text"] and n_img["id"] in ledger()["sent"], (d1, lg1))
+      and "1 notice was archived" in lg1[0]["text"] and n_img["id"] in ledger()["sent"], (d1, lg1))
 
-# a held-only digest is logged, never pushed
+# an archived-only digest is logged, never pushed
 _messaging._message("projects/alpha", "someone left a voicemail about the paper order", "home-beta"); n_v = routing.read("projects/alpha")[-1]
-fake("good", answer([(n_v["id"], "held", "", False)])); live.tick()
+fake("good", answer([(n_v["id"], "archived", "", False)])); live.tick()
 n_lg0 = len([l for l in lines() if l.get("kind") == "digest_logged"]); p1 = len(pushes()); n_dl0 = len(dlines())
 FAIL.write_text("work-osprey-main\nwork-osprey-x\n")
 for k_ in range(5): live.digest_tick(now=day(2) + k_ * 60)
-check("a held-only digest never pushes, so a failing pane cannot fail it: logged once, marked digested, no error line, nothing tried again",
+check("an archived-only digest never pushes, so a failing pane cannot fail it: logged once, marked digested, no error line, nothing tried again",
       len(dlines()) == n_dl0 and not digests(p1) and n_v["id"] in ledger()["sent"] and len([l for l in lines() if l.get("kind") == "digest_logged"]) - n_lg0 == 1, (dlines()[n_dl0:], ledger()["sent"].keys()))
 FAIL.unlink()
 
@@ -506,20 +506,20 @@ check("…the next digest lists it as one that could not be ruled, to the projec
 live.digest_tick(now=day(5))
 check("…once: the digest after it does not list it again", len(digests(p1)) == 1)
 cli2 = subprocess.run([sys.executable, str(pathlib.Path(STACK, "stackshot/router/router_live.py")), "status"], capture_output=True, text=True, timeout=60, env=dict(os.environ))
-check("`router_live.py status` shows the held count and the last digest", cli2.returncode == 0 and "last digest" in cli2.stdout and "held" in cli2.stdout, (cli2.returncode, cli2.stderr[-300:], cli2.stdout[:400]))
+check("`router_live.py status` shows the archived count and the last digest", cli2.returncode == 0 and "last digest" in cli2.stdout and "archived" in cli2.stdout, (cli2.returncode, cli2.stderr[-300:], cli2.stdout[:400]))
 
-# ---- 12d. who gets a digest that holds a notice the router could not rule: the builder unmarked, else -main marked; held rows are only listed with it
+# ---- 12d. who gets a digest that holds a notice the router could not rule: the builder unmarked, else -main marked; archived rows are only listed with it
 routing.rule = rr
 _messaging._message("projects/alpha", "the supplier quote is attached for the record", "home-beta"); n_h2 = routing.read("projects/alpha")[-1]
 _messaging._message("projects/alpha", "this second ruling cannot be written either", "home-beta"); n_s2 = routing.read("projects/alpha")[-1]; BREAK.add(n_s2["id"])
-fake("good", answer([(n_h2["id"], "held", "", False), (n_s2["id"], "dropped", "", False)])); live.tick()
+fake("good", answer([(n_h2["id"], "archived", "", False), (n_s2["id"], "dropped", "", False)])); live.tick()
 fake("good", answer([(n_s2["id"], "dropped", "", False)])); live.tick(); live.tick()
 _messaging._message("projects/gamma", "this gamma ruling cannot be written", "home-beta"); n_g = routing.read("projects/gamma")[-1]; BREAK.add(n_g["id"])
 fake("good", answer([(n_g["id"], "dropped", "", False)]))
 for _ in range(3): live.tick()
 routing.rule = _rr
-check("12d setup: alpha has one held and one stuck notice, gamma (no builder) one stuck notice",
-      rule_of(n_h2["id"])["ruling"] == "held" and not rule_of(n_s2["id"]).get("ruling") and [l for l in lines() if l.get("id") == n_s2["id"]][-1]["status"] == "stuck"
+check("12d setup: alpha has one archived and one stuck notice, gamma (no builder) one stuck notice",
+      rule_of(n_h2["id"])["ruling"] == "archived" and not rule_of(n_s2["id"]).get("ruling") and [l for l in lines() if l.get("id") == n_s2["id"]][-1]["status"] == "stuck"
       and not rule_of(n_g["id"], "projects/gamma").get("ruling") and [l for l in lines() if l.get("id") == n_g["id"]][-1]["status"] == "stuck",
       ([l["status"] for l in lines() if l.get("id") in (n_h2["id"], n_s2["id"], n_g["id"])]))
 p2 = len(pushes()); n_lg0 = len([l for l in lines() if l.get("kind") == "digest_logged"]); n_dl0 = len(dlines())
@@ -527,9 +527,9 @@ live.SINCE_DAYS = 30            # the test's days run ahead of the clock: keep t
 FAIL.write_text("work-gamma-main\n")
 for k_ in range(5): live.digest_tick(now=day(6) + k_ * 60)
 da = [x for x in digests(p2) if n_s2["id"] in x[1]]
-check("stuck plus held: the digest goes to the builder, unmarked, once, listing the held row and the stuck row; nothing to alpha's -main",
+check("stuck plus held: the digest goes to the builder, unmarked, once, listing the archived row and the stuck row; nothing to alpha's -main",
       len(da) == 1 and da[0][0] == "work-osprey-x" and not da[0][1].startswith("[for Oliver]") and "[for Oliver]" not in da[0][1] and n_h2["id"] in da[0][1] and "COULD NOT BE RULED" in da[0][1]
-      and "1 notice was held" in da[0][1] and "1 could not be ruled" in da[0][1] and not any(x[0] == "work-osprey-main" for x in digests(p2)), digests(p2))
+      and "1 notice was archived" in da[0][1] and "1 could not be ruled" in da[0][1] and not any(x[0] == "work-osprey-main" for x in digests(p2)), digests(p2))
 la_ = [l for l in dlines()[n_dl0:] if l["project"] == "projects/alpha"]
 check("…its line of live.jsonl: kind digest, target the builder, not marked, both ids; both notices are digested",
       len(la_) == 1 and la_[0]["target"] == "work-osprey-x" and la_[0]["marked"] is False and la_[0]["status"] == "sent" and sorted(la_[0]["ids"]) == sorted([n_h2["id"], n_s2["id"]])
@@ -828,8 +828,8 @@ item(50, "projects/alpha", A, then=A, needs=[X]); p50 = len(pushes()); n50 = len
 out50 = hb(50); settle(); h50 = hb_notes(50, n50)
 check("hand-back, router live: the builder leaves needs naming the front agent owner alone: stackshot hands the item to nobody, since the writer is the builder: nothing recorded for the router, nothing pushed, the reply says so",
       not h50 and not hb_pushes(50, p50) and not hb_pushes(50, p50, X, BK) and "nobody is told: a front agent is not handed an item on stackshot's own motion" in out50 and "told it is back with them alone" not in out50, (h50, pushes()[p50:], out50[-300:]))
-check("…the routing log says it was held, by stackshot (auto), for the owner",
-      [n for n in routing.read("projects/alpha")[n50:] if n.get("ruling") == "held" and n.get("ruled_by") == "stackshot (auto)" and n.get("target") == "for work-osprey-main" and "hand-back" in n.get("reason", "")] != [], routing.read("projects/alpha")[n50:])
+check("…the routing log says it was archived (nothing filed for its next turn), by stackshot (auto), for the owner",
+      [n for n in routing.read("projects/alpha")[n50:] if n.get("ruling") == "archived" and n.get("ruled_by") == "stackshot (auto)" and n.get("target") == "for work-osprey-main" and "hand-back" in n.get("reason", "")] != [], routing.read("projects/alpha")[n50:])
 p50b = len(pushes()); n50b = len(routing.read("projects/alpha")); out50b = hb(50, [A], next="Oliver: a second look"); settle()
 check("…the same needs written again (already the owner alone) is no hand-back: nothing recorded, nothing pushed", not hb_notes(50, n50b) and not hb_pushes(50, p50b), (hb_notes(50, n50b), out50b[-200:]))
 item(70, "projects/alpha", A, then=A, needs=[DC]); p70 = len(pushes()); n70 = len(routing.read("projects/alpha"))

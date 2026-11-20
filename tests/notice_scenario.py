@@ -111,17 +111,17 @@ check("2: …the sent time is the notice's own, in the instance timezone, in the
       and field(t_wait, "sent") == _rmod.when_words(dt.datetime.fromtimestamp(n_pass["ts"], ZONE)), t_wait)
 check("2: …and its text is one line of at most 120 characters, cut with an ellipsis", len(field(t_wait, "text")) <= 120 and field(t_wait, "text").endswith("…") and field(t_wait, "text").startswith("please look at the quote"), field(t_wait, "text"))
 
-# ---- 3. the tick: passed (the call), held, dropped, merged; each one's ruling shows
+# ---- 3. the tick: passed (the call), archived, dropped, merged; each one's ruling shows
 fake(answer([(id_pass, "passed", "work-osprey-x", "the builder reads vendor quotes"), (id_base, "merged", "", "a backup report, nobody needs to act"),
-             (id_held, "held", "", "wait for the page pass"), (id_drop, "dropped", "", "an acknowledgement")]))
+             (id_held, "archived", "", "wait for the page pass"), (id_drop, "dropped", "", "an acknowledgement")]))
 res = live.tick(); settle()
 t_pass, t_held, t_drop, t_mer = get(id_pass), get(id_held), get(id_drop), get(id_base)
 check("3: passed: the ruling names who it went to, the reason, the call that ruled it, who ruled it and when; no item",
       field(t_pass, "ruling") == "passed to work-osprey-x" and field(t_pass, "reason") == "the builder reads vendor quotes" and field(t_pass, "rule") == "the router's call"
       and field(t_pass, "ruled by") == "stackshot (router)" and re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th) \d\d:\d\d", field(t_pass, "ruled") or "")
       and field(t_pass, "item") == "none" and field(t_pass, "expected") is None and t_pass.startswith(f"notice {id_pass}: message to projects/alpha"), (t_pass, res))
-check("3: held: the ruling says it is kept for the digest and tells nobody at once, with the router's reason",
-      (field(t_held, "ruling") or "").startswith("held (kept for the daily digest") and field(t_held, "reason") == "wait for the page pass" and field(t_held, "ruled by") == "stackshot (router)", t_held)
+check("3: archived: the ruling says it is kept for the digest and tells nobody at once, with the router's reason",
+      (field(t_held, "ruling") or "").startswith("archived (kept in the daily digest") and field(t_held, "reason") == "wait for the page pass" and field(t_held, "ruled by") == "stackshot (router)", t_held)
 check("3: dropped: the ruling and the reason", (field(t_drop, "ruling") or "").startswith("dropped") and field(t_drop, "reason") == "an acknowledgement" and field(t_drop, "text") == "ack", t_drop)
 check("3: merged: the ruling says merged into a digest", (field(t_mer, "ruling") or "").startswith("merged into a digest") and field(t_mer, "sender") == "nightly-backup (a script on box-far)", t_mer)
 check("3: a notice that is ruled no longer says it is waiting", all(field(t, "expected") is None for t in (t_pass, t_held, t_drop, t_mer)))
@@ -188,7 +188,7 @@ check("9: lookup gives None for an id that is not six hex characters, or that no
 tr = live.trace(id_pass)
 check("9: the live log's trace of a ruled notice carries the router's rule line and the project's key", (tr["ruled"] or {}).get("key") == "projects/alpha" and tr["ruled"].get("source") == "call" and live.trace("deadbe") == {"ruled": None, "last": None, "stuck": None}, tr)
 check("9: read still folds rulings: the passed notice carries its ruling, and route can overrule it", routing.read("projects/alpha") and next(n for n in routing.read("projects/alpha") if n["id"] == id_pass)["ruled_by"] == "stackshot (router)"
-      and routing.rule(id_pass, "held", reason="by hand", by="x")[1]["ruling"] == "held" and field(get(id_pass), "ruling").startswith("held (kept"), get(id_pass))
+      and routing.rule(id_pass, "held", reason="by hand", by="x")[1]["ruling"] == "archived" and field(get(id_pass), "ruling").startswith("archived (kept"), get(id_pass))
 
 # ---- 10. the client's read
 check("10: client.py knows the read", "notice" in client.READS)

@@ -367,7 +367,7 @@ Expected: no unpushed board commits after a minute (`git -C ~/stackshot-data rev
 
 The create may leave a page owed (the page rule: section 3, `[page_rule]` and `[pilot] writer_owes_page`). With the defaults the debt is the page's keeper's, and the reply to `create` on a `projects/getting-started` item carries the line `(pilot project: this change is charged to the router, which passes the page update to the agent that keeps the page)`; a bare scratch page with no `display-name:` or `agents:` lines carried no such line. On a one-session install no other agent keeps the page, so do the page update yourself, once: edit `~/stackshot-data/pages/projects/getting-started.md`: update `## Current state` and add a dated line under `## Timeline` (`- **YYYY-MM-DD** | <session> — <what happened>`). Then commit and push from `~/stackshot-data`. If the push is refused, `git pull --rebase` first.
 
-Check with `get` that `mover:` shows your session. If a message or notice stays "held: no agent can take it", see T21.
+Check with `get` that `mover:` shows your session. If a message or notice stays "archived: no agent can take it", see T21.
 
 ## 5. Hand-offs (summary)
 
@@ -404,7 +404,7 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T18 | A session is refused: "you owe a project-page update" | Page rule with `[pilot] writer_owes_page = true`: owed longer than `grace_minutes` (30) | stackshot/web/server.py; example `[page_rule]` | Edit the page, commit, push, retry |
 | T19 | `create` refused: "subject must start with one of [...]", a description line "is not a `- ` bullet", or "the description must open with its goal" | Gate texts | stackshot/web/server.py | Fix the call. Read `rules` for the shape |
 | T20 | `create` refused: "metadata.project ... names no page" | The page file does not exist or the registry is stale | stackshot/web/server.py | Create `pages/projects/<slug>.md`; `python3 ~/stackshot/stackshot/projects/pages.py registry` |
-| T21 | Notice shows as waiting; router log says "no agent can take it" | Page and scope list no user-facing agent | stackshot/router/router_live.py:494-495 | `TODO(verify)` whether a solo install ever produces one. Fix: list an agent in the page's `agents:` frontmatter, or set `[router] general_general` |
+| T21 | Notice shows as archived (delivered to no one); router log says "no agent can take it" | Page and scope list no user-facing agent | stackshot/router/router_live.py:494-495 | `TODO(verify)` whether a solo install ever produces one. Fix: list an agent in the page's `agents:` frontmatter, or set `[router] general_general` |
 | T22 | Router calls time out or fail | `claude` not on the login-shell PATH, not signed in, or slow | example `[router]` (`command`, `timeout_seconds`, `login_shell`); stackshot/router/router.py:146 (timeout_seconds), stackshot/router/router.py:1187 (login_shell) | Run `bash -lc 'claude --version'` as the user; sign in. The notice is retried then passed to a `-main` agent (stackshot/router/router_live.py:18-19) |
 | T23 | Claude Code lists only `authenticate` stubs for the connector | Connector not signed in for the CLI | n/a | Hand-off H3, then a new session. `TODO(verify)` |
 | T24 | New connector tools or parameters do not appear after an update | claude.ai caches the tool list for about a day | docs/board-and-connector.md, "A new tool or parameter" | Wait, or call the new form through a portal. Not needed for a board-alone setup |

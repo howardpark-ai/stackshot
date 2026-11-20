@@ -666,12 +666,13 @@ def _front_board_line(gid: str, owner: str, told: bool, why: str, note: str) -> 
     return out
 
 
-def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str) -> None:
-    """the routing-log line (ruled `held` by stackshot (auto)) for a notice a front agent was not told. Never raises."""
+def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str, filed: bool = False) -> None:
+    """the routing-log line (by stackshot (auto)) for a notice a front agent was not told: ruled `held` when it was filed for the agent's next turn (`filed`), `archived` when nothing
+    was filed and it only stands in the log and on the item's History. Never raises."""
     try:
         proj = _hold_project(owner, gid)
         if proj:
-            _routing.record_auto(proj, "held", reason, kind="board", label=f"{kind} {gid}".strip(), who=NAME, text=note,
+            _routing.record_auto(proj, "held" if filed else "archived", reason, next_turn=(kind or "fyi") if filed else "", kind="board", label=f"{kind} {gid}".strip(), who=NAME, text=note,
                                  target="for " + (_session_label(owner) or str(owner)), pilot=bool(_anc.pilot_root(proj)))
     except Exception as e:  # noqa: BLE001  — the log line is a record
         print(f"front gate: {gid} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -700,12 +701,12 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
             fyi_ok = _held.add(_held.key_of(owner), held_kind, note, sender=NAME, gid=gid, nid=nid)
         if verdict == "fyi" and not fyi_ok:
             why = "its hook cannot fetch held lines, and a new turn is not worth it"
-        reason = f"held: front agent, rides {OWNER}'s next turn (fyi, {kind})" if fyi_ok else f"held: front agent, {why} ({kind})"
+        reason = f"held: front agent, rides {OWNER}'s next turn (fyi, {kind})" if fyi_ok else f"archived: front agent, {why} ({kind})"
         FRONT_HINT.result = ("fyi", "") if fyi_ok else ("held", why)
         if board and kind in ("progress", "message"):
             _front_board_line(gid, owner, fyi_ok, why, note)      # the board keeps the news whether or not the pane hears it
         if log:
-            _front_held_log(gid, owner, kind, reason, note)
+            _front_held_log(gid, owner, kind, reason, note, filed=fyi_ok)
         return True
     except Exception as e:  # noqa: BLE001  — the gate is an extra: a failure in it sends the notice as before
         print(f"front gate: {gid} notice to {owner} sent as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -715,7 +716,7 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
 def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True) -> tuple[str, str]:
     """An fyi for a front agent (a message its sender marked as asking nothing, sent through the message tool or passed by the router) through the front gate, the one path a notice
     for a front agent takes: it rides the agent's next turn and starts none, or is held when its hook cannot fetch held lines. `gid`: the items the message names (comma-separated), each
-    of which gets its board line. → ("fyi", "") filed for its next turn, ("held", why) nobody is told (logged), ("", "") the gate did not handle it (a recipient that is no front agent, or the
+    of which gets its board line. → ("fyi", "") filed for its next turn, ("held", why) nobody is told (logged `archived`), ("", "") the gate did not handle it (a recipient that is no front agent, or the
     gate failed): the caller does what it did before. `held_kind`: "page-owed" for a page-owed notice the router passes (same gate, same path; the line is filed under that kind). `board`: see `front_gate`."""
     if not front_gate(gid, agent, note, "message", "message", nid, log, held_kind, board):
         return "", ""
@@ -1224,7 +1225,7 @@ def handback_send(rec: dict[str, Any]) -> bool:
         # no builder to tell, or the builder wrote the hand-back itself (or may have): the board holds it (the item's needs and History), the routing log says it was held
         why = "the project lists no builder to tell instead" if not dest else "the builder wrote the hand-back itself" if wid else "who wrote the hand-back is not on record, so the builder may have"
         _front_board_line(gid, oid, False, f"{why}, and an item is not handed to a front agent on stackshot's own motion", str(rec["line"]))
-        _front_held_log(gid, oid, "progress", f"held: front agent, {why} (hand-back)", str(rec["line"]))
+        _front_held_log(gid, oid, "progress", f"archived: front agent, {why} (hand-back)", str(rec["line"]))
         return False
     delivered = False
     if _router_live.is_live(project):
@@ -1650,7 +1651,7 @@ def hold_notice(target: str, text: str, kind: str, *, gid: str = "", project: st
         try:
             proj = project or _hold_project(target, gid)
             if proj:
-                _routing.record_auto(proj, "held", _held.reason(kind), kind="board", label=f"{kind} {gid}".strip(), who=sender or NAME, text=text,
+                _routing.record_auto(proj, "held", _held.reason(kind), next_turn=kind, kind="board", label=f"{kind} {gid}".strip(), who=sender or NAME, text=text,
                                      target="for " + (_session_label(target) or str(target)), pilot=bool(_anc.pilot_root(proj)))
         except Exception as e:  # noqa: BLE001  — the log line is a record; the hold stands without it
             print(f"held: {kind} notice for {target} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

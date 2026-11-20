@@ -108,7 +108,7 @@ def _late_in(module: Any, name: str) -> Callable[..., Any]:
 
 def _router_live_after(project: str, n: dict[str, Any]) -> None:
     """After the live router ruled a notice (router_live._act): what _route does after a keeper's ruling. A hold that waited on the
-    notice's anchor is released on a passed or merged ruling (never a dropped or held one, as for a keeper's), and the board is
+    notice's anchor is released on a passed or merged ruling (never a dropped or archived one, as for a keeper's), and the board is
     republished."""
     if n.get("ruling") in ("passed", "merged") or n.get("front_held"):
         _wakes.anchor_release(project, n, by=_router_live.BY)

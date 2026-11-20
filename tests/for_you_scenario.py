@@ -247,11 +247,11 @@ p0 = len(pushes()); checks_svc.check_close("a92", _service_store._load("a92"), C
 check("done check: its close tells the front agent owner at once, one marked line, the same shape as a session's close with the check as the closer",
       len(to_owner(A, "a92", p0)) == 1 and to_owner(A, "a92", p0)[0].startswith("[for Oliver] [stackshot] a92 [home] item 92: closed by stackshot's done check: done (done check passed: ")
       and to_owner(A, "a92", p0)[0].endswith(f") \u2192 {BOARD}/items/a92"), pushes()[p0:])
-# Oliver not there for the pane: the same close tells nobody (the item's close revision is the board's record), and the routing log says it was held
+# Oliver not there for the pane: the same close tells nobody (the item's close revision is the board's record), and the routing log records it (ruled archived: nothing was filed for the agent's next turn)
 PRESENT[0] = False; item(67, needs=["osprey-x"]); p0 = len(pushes()); n0 = len(routing.read("projects/alpha")); outh = cl(67); settle(); PRESENT[0] = True
-check("Oliver not there for the pane: a close tells the front agent owner nothing, the reply still names it, and the routing log holds a line ruled `held` for it",
+check("Oliver not there for the pane: a close tells the front agent owner nothing, the reply still names it, and the routing log holds a line ruled `archived` for it",
       not to_owner(A, "a67", p0) and rd(67)["status"] == "completed"
-      and [n for n in routing.read("projects/alpha")[n0:] if n.get("ruling") == "held" and "a67" in str(n.get("label", "")) + str(n.get("text", ""))], (pushes()[p0:], routing.read("projects/alpha")[n0:], outh))
+      and [n for n in routing.read("projects/alpha")[n0:] if n.get("ruling") == "archived" and "a67" in str(n.get("label", "")) + str(n.get("text", ""))], (pushes()[p0:], routing.read("projects/alpha")[n0:], outh))
 p0 = len(pushes()); checks_svc.check_close("a93", _service_store._load("a93"), CHK, time.time()); settle()
 check("…a muted item: the owner is not told", not to_owner(A, "a93", p0), pushes()[p0:])
 p0 = len(pushes()); checks_svc.check_close("a94", _service_store._load("a94"), CHK, time.time()); checks_svc.check_close("a95", _service_store._load("a95"), CHK, time.time()); settle()

@@ -393,7 +393,7 @@ cx_nbb = _router.Context(); cx_nbb.reg[KEY] = {**cx_nbb.reg[KEY], "agents": {**A
 ln = _router.code_rule(KEY, board_msg("b3", "osprey-x", "set next: [for Oliver] PR 26 is up, merge it?"), KEY, cx_nbb, [])
 check("…with no builder (a background agent that does not build), only a notice that is for Oliver reaches the front agent; a plain one is merged", ln and ln["ruling"] == "passed" and ln["for_owner"] and ln["target"] == "osprey-main", ln)
 ln = _router.code_rule(KEY, board_msg("b4", "osprey-x", "set next: PR 26 is up"), KEY, cx_nbb, [])
-check("…(no builder, a plain notice, no front turn)", ln and ln["ruling"] in ("merged", "held") and not ln["target"], ln)
+check("…(no builder, a plain notice, no front turn)", ln and ln["ruling"] in ("merged", "archived") and not ln["target"], ln)
 # the receiver puts head and author on the event; the hub's send records them in the routing log
 ghr = __import__("stackshot.anchors.anchorhub.github", fromlist=["_"])
 G = {}; caught = []

@@ -122,7 +122,7 @@ def tell(gid, who, note, tag="owner", kind=""):
     (telling.tell_kind(kind, gid, U[who], note, tag=tag) if kind else telling.tell_woken(gid, U[who], note, tag=tag)); drain()
     return pushes()[p0:], held.count(U[who]) - h0
 def held_log(gid):
-    return [n for n in routing.read("projects/alpha") + routing.read("projects/beta") if n.get("ruling") == "held" and str(n.get("reason", "")).startswith("held: front agent") and gid in str(n.get("label", ""))]
+    return [n for n in routing.read("projects/alpha") + routing.read("projects/beta") if (n.get("ruling"), str(n.get("reason", "")).split(":")[0]) in (("held", "held"), ("archived", "archived")) and str(n.get("reason", "")).startswith(("held: front agent", "archived: front agent")) and gid in str(n.get("label", ""))]
 def quiet_log(i): return Q.log_of(mt(i))
 NOTE = lambda g: f"[stackshot] {g} \"[home] item\" (projects/alpha): a session wrote the item → https://x/items/{g}"
 
@@ -214,7 +214,7 @@ stamp("home-front", 60); held.mark_client(U["home-front"], "home-front")
 unstamp("home-front"); item(20, writer="home-front")
 p, h = tell("a20", "home-front", NOTE("a20"))
 check("6 absent: Oliver is not there: no push, no held line, nothing told", p == [] and h == 0, (p, h))
-check("6 absent: …logged as held in the routing log, with the reason", held_log("a20") and "not there" in held_log("a20")[-1]["reason"], routing.read("projects/alpha"))
+check("6 absent: …logged in the routing log, with the reason, ruled archived (nothing was filed for its next turn)", held_log("a20") and "not there" in held_log("a20")[-1]["reason"] and held_log("a20")[-1]["ruling"] == "archived", routing.read("projects/alpha"))
 # present, not touched
 stamp("home-front", 60); item(21, writer="home-send")
 p, h = tell("a21", "home-front", NOTE("a21"))
@@ -223,7 +223,7 @@ check("6 not touched: Oliver is there but the agent did not touch the item: noth
 item(22, writer="home-front")
 p, h = tell("a22", "home-front", NOTE("a22"))
 check("6 fyi: present and touched: an ordinary progress notice rides the next turn as one held fyi line, no push", p == [] and h == 1, (p, h))
-check("6 fyi: …logged as held (rides his next turn)", held_log("a22") and "next turn (fyi" in held_log("a22")[-1]["reason"], held_log("a22"))
+check("6 fyi: …logged as held (rides his next turn): filed for it, so ruled held", held_log("a22") and "next turn (fyi" in held_log("a22")[-1]["reason"] and held_log("a22")[-1]["ruling"] == "held", held_log("a22"))
 txt = held.take(U["home-front"])
 check("6 fyi: …the line is the notice's own words", "a22" in txt and "a session wrote the item" in txt, txt)
 # a stale stamp

@@ -5,7 +5,7 @@ There is no list of projects and no switch: every page of the registry is the ro
 
   [router] live_tick_seconds  how often the live tick looks (default 60)
   [router] general_<scope>  the general -main agent of each scope (a scope of [project_scopes] order) that a page with no agent of its own falls to (see STAND-IN); none by default
-  [[router.watch]] / [[router.quiet]]  the standing rulings (an anchor to an agent; a project whose agent is held for the digest); none by default
+  [[router.watch]] / [[router.quiet]]  the standing rulings (an anchor to an agent; a project whose agent is archived for the digest); none by default
 Both are read at each use, so a reload applies them. The keys [router] live and live_projects of the earlier form are ignored if present.
 
 HOLD. A notice for a project is not delivered to the session the page names (a name that no running session carries). The place that would have delivered it (anchor-hub's
@@ -27,9 +27,9 @@ or was left out stays held, undelivered, for one more try at the next tick (rout
            items, marked as a pass to that agent is marked (_act_split); `to` in the routing log lists every owner, one still holding lines from before an earlier change named
            "(held)". A finding is a task for its mover: a BACKGROUND owner is woken with its lines at once, whole, like any pass (they had been held for its
            next turn as "asked nothing of you", then as one line cut to 260 characters, which left the findings out).
-  dropped / merged / held   routing.rule only; nothing is delivered (a held notice is the page pass's).
+  dropped / merged / archived   routing.rule only; nothing is delivered (an archived notice is the page pass's).
 A notice that cannot be judged twice (or an exception) is passed to the -main agent, never dropped; with no -main agent anywhere (the
-page, its hub and the scope's general agent list none) it is held, with the reason. A delivery that fails is retried at the next ticks, three times, then
+page, its hub and the scope's general agent list none) it is archived, with the reason. A delivery that fails is retried at the next ticks, three times, then
 goes to the -main agent. Every action is a line in <state>/router/live.jsonl.
 
 STAND-IN. stand_in(project) is where delivery goes where a page's name-line session used to be written to: the project's builder, a background agent whose
@@ -38,19 +38,20 @@ page's agents (`hub:` line: agent_root), else (2) the general -main agent of its
 [router] general_<scope> (an agent name, or a page key whose -main agent is used; a page that lists no front agent but has a `display-name:` line gives its name-line session), else the default scope's. Router.Context.agents gives such a page that one agent, nobody else of the general page.
 A page's `display-name:` line is only its name now: it decides nothing.
 
-DIGEST. The router holds what no agent should be interrupted for (the page pass, a page's quiet hours, what the call is unsure of,
-an image it could not read), so a held notice reaches nobody at once. A held notice owes nothing, and what is for the owner lives in
+DIGEST. The router archives what no agent should be interrupted for (the page pass, a page's quiet hours, what the call is unsure of,
+an image it could not read), so an archived notice reaches nobody at once. An archived notice owes nothing, and what is for the owner lives in
 stackshot's For you list, not in a front agent's turn. digest_tick() (the same thread as the live tick) therefore does not deliver a
-digest of held notices: once a day per live project, from [router] digest_hour on (default 9, the instance timezone; a server down at
-that hour does it when it is back the same day), it writes one entry listing every notice ruled `held` since the last digest, each as id,
+digest of archived notices: once a day per live project, from [router] digest_hour on (default 9, the instance timezone; a server down at
+that hour does it when it is back the same day), it writes one entry listing every notice ruled `archived` since the last digest, each as id,
 label, sender, gist and reason, to live.jsonl as kind "digest_logged" (with its text), and the notices count as digested (none is listed
 twice). Nothing is pushed to any agent. The page-pass holds (the code rule `page-pass`: the page sheets of the jobs [router] page_senders
-names) are their own group, logged the same way under the head "held for the page pass". A notice the router could not rule (CAP below)
+names) are their own group, logged the same way under the head "archived for the page pass". A notice the router could not rule (CAP below)
 is stackshot's own problem, so a digest with one is delivered: to the project's builder, unmarked, listing every row of the group; a
 project with no builder takes it to its -main agent with "[for <owner>]" on line 1, since someone must see it. The quiet-hour holds of
 the instance's [[router.quiet]] rows (router.quiet_map) go in the same pass to that agent, unmarked when it is a background
 agent. Each group has its own day mark and tries. <state>/router/digest.json records the day each group was done, the notices already
-digested (so none is sent twice) and the time of each project's last delivered digest. The routing log keeps the held ruling as it is, and
+digested (so none is sent twice) and the time of each project's last delivered digest. The routing log keeps the archived ruling as it is (a record
+written before the rename says `held`: routing.ruling_of reads it as archived, the digest too), and
 each digest delivered is a line of live.jsonl (kind "digest", project, count, target, outcome). A push that fails is tried again at the
 next ticks (three times a day); its notices then wait for the next day's digest.
 
@@ -71,7 +72,7 @@ ruling), or goes to a front agent, is passed as before, except an fyi and a page
 CAP. A ruling that cannot be written to the routing log (routing.rule raised) is tried again at the next ticks, three times in all.
 After that the notice is logged with status "stuck", never judged again, and listed in the next digest as "could not be ruled".
 
-`stackshot router-live status` prints a line per project: the notices acted on in the last hour; the notices held
+`stackshot router-live status` prints a line per project: the notices acted on in the last hour; the notices archived
 since the last digest and the time of that digest; the last error. Stdlib only; anchor-hub imports it for holds() and stash().
 """
 from __future__ import annotations
@@ -101,7 +102,7 @@ from stackshot.waits import held as _held       # a notice that asks nothing of 
 
 BY = "stackshot (router)"           # the ruler's name in the routing log, and the sender of what the router delivers
 KINDS = _router.KINDS
-SINCE_DAYS = 7                      # a held notice older than this is not taken up
+SINCE_DAYS = 7                      # an archived notice older than this is not taken up
 MAX_TRIES = 3                       # delivery attempts to the target; then the -main agent. Also the writes of a ruling to the routing log; then "stuck"
 NOTE_MAX = 300                      # characters in a ruling's `note`
 DIGEST_SHOWN = 25                   # a digest lists this many notices, one line each, and counts the rest
@@ -138,7 +139,7 @@ def tick_s() -> float:
 
 
 def digest_hour() -> int:
-    """[router] digest_hour: the hour (0 to 23, the instance timezone) from which the day's digest of held notices may go (default 9)."""
+    """[router] digest_hour: the hour (0 to 23, the instance timezone) from which the day's digest of archived notices may go (default 9)."""
     try:
         return min(23, max(0, int(_cfg.get("router", "digest_hour", default=9))))
     except (TypeError, ValueError):
@@ -499,6 +500,14 @@ def compose(n: dict[str, Any], root: str, target: str, reason: str, mark: bool, 
 
 
 # ----------------------------------------------------------------------------- the live log
+def _aliased(d: dict[str, Any]) -> dict[str, Any]:
+    """A live.jsonl line with its ruling as it reads now. An older line says `held` for a notice kept from everyone and for one told to no one too; only a line
+    that names the agent it was filed for (`held_for`, which every filed hold carries) keeps `held`, and the reason text is not read."""
+    if d.get("ruling") == "held" and not d.get("held_for"):
+        d = {**d, "ruling": _routing.ARCHIVED}
+    return d
+
+
 def _last() -> dict[str, dict[str, Any]]:
     """The last live.jsonl line of each notice id, and (in `tries`) how many errors it has had, (in `rule_tries`) how many times writing
     its ruling to the routing log failed. A line with no id (a digest's) is no notice's."""
@@ -507,6 +516,7 @@ def _last() -> dict[str, dict[str, Any]]:
         i = str(d.get("id") or "")
         if not i:
             continue
+        d = _aliased(d)
         tries = int(out.get(i, {}).get("tries", 0)) + (1 if d.get("status") == "error" else 0)
         rule_tries = int(out.get(i, {}).get("rule_tries", 0)) + (1 if d.get("stage") == "rule" else 0)
         out[i] = {**d, "tries": tries, "rule_tries": rule_tries}
@@ -532,6 +542,7 @@ def trace(nid: str) -> dict[str, Any]:
             continue
         if not isinstance(d, dict) or str(d.get("id") or "") != nid:
             continue
+        d = _aliased(d)
         out["last"] = d
         if d.get("status") == "ruled":
             out["ruled"] = d
@@ -651,7 +662,7 @@ def _act_split(n: dict[str, Any], root: str, aroot: str, ln: dict[str, Any], cx:
     try:
         if not told:        # every keeper's lines were held by an earlier try (before an earlier change)
             base.update(ruling="held", reason=_held.reason("audit"), target="", held_for=", ".join(split), hold="audit")      # held_for: the digest leaves it out (it is waiting for the agents, not for a digest)
-            _project, ruled = _routing.rule(n["id"], "held", reason=_held.reason("audit"), by=BY)
+            _project, ruled = _routing.rule(n["id"], "held", reason=_held.reason("audit"), by=BY, next_turn="audit")
         else:
             to = [sent[a].split(":", 1)[0] + (" (held)" if a not in told else "") for a in split]          # every recipient, one with held lines named too
             _project, ruled = _routing.rule(n["id"], "passed", to=", ".join(dict.fromkeys(to)), reason=reason, by=BY)
@@ -677,8 +688,8 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 why = f"delivery to {tried if rerouted else target} failed {MAX_TRIES} times" if target else "no target"
                 target, reason = main, f"passed to {main}: {why} ({reason})"
                 base["source"] = "fallback"
-            if not target:                                    # no -main agent anywhere (the page, its hub and the scope's general agent list none): held, with the reason, never dropped and never handed to a session that is gone
-                ruling, reason = "held", f"no agent can take it: the page and its hub list no user-facing agent and the scope's general -main agent ([router] general_*) is on no page ({reason})"
+            if not target:                                    # no -main agent anywhere (the page, its hub and the scope's general agent list none): archived, with the reason, never dropped and never handed to a session that is gone
+                ruling, reason = "archived", f"no agent can take it: the page and its hub list no user-facing agent and the scope's general -main agent ([router] general_*) is on no page ({reason})"
                 base["source"] = "fallback"
             base.update(ruling=ruling, target=target, reason=reason)
             if ln.get("split") and target:
@@ -727,8 +738,8 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                     hold_as = "page-owed"
                 if verdict:
                     held_for = target if verdict == "fyi" else ""
-                    ruling, target = "held", ""
-                    reason = _held.reason(hold_as) if verdict == "fyi" else f"held: front agent, {why} ({hold_as})"
+                    ruling, target = ("held" if held_for else "archived"), ""      # filed for the agent's next turn, or told to no one (its hook cannot fetch held lines): only the first is held
+                    reason = _held.reason(hold_as) if verdict == "fyi" else f"archived: front agent, {why} ({hold_as})"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hold_as)
         if ruling == "passed":
             mark = _is_front(target, aroot, cx) and not unmarked_front       # the mark means the person must see it: a pass to a front agent without a need of his is held, sent to the background agent, or (an answer in his conversation) unmarked, above; what reaches here marked had a need, or no place to be held
@@ -747,7 +758,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
         else:
             base["outcome"] = ""
             try:
-                _project, ruled = _routing.rule(n["id"], ruling, reason=reason, by=BY)
+                _project, ruled = _routing.rule(n["id"], ruling, reason=reason, by=BY, next_turn=str(base.get("hold") or "") if ruling == "held" else "")
             except Exception as e:  # noqa: BLE001
                 return {**base, "status": "error", "stage": "rule", "error": f"not ruled: {type(e).__name__}: {str(e)[:100]}"}
         done = _HOOKS["after_rule"]
@@ -828,7 +839,7 @@ def loop() -> None:
             print(f"router live tick failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
 
-# ----------------------------------------------------------------------------- the daily digest of held notices
+# ----------------------------------------------------------------------------- the daily digest of archived notices
 def digest_path() -> Path:
     return _dir() / "digest.json"
 
@@ -853,9 +864,9 @@ def _write_digest(st: dict[str, Any], now: float) -> None:
 
 
 def _digest_items(root: str, now: float, last: dict[str, dict[str, Any]], st: dict[str, Any]) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], ...]:
-    """What the next digest of this project lists → (the "main" group: held notices, logged only, and the ones the router could not rule,
+    """What the next digest of this project lists → (the "main" group: archived notices, logged only, and the ones the router could not rule,
     delivered; quiet-hour holds for the QUIET agent; page-pass holds, logged only), each a list of (the
-    router's live.jsonl line, the notice as the routing log reads it), oldest first: the notices the router ruled `held` (and nobody has
+    router's live.jsonl line, the notice as the routing log reads it), oldest first: the notices the router ruled `archived` (and nobody has
     overruled since) and the ones it could not rule (status "stuck", still unruled), that no digest has listed, from the last SINCE_DAYS."""
     rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
     notices: dict[str, dict[str, dict[str, Any]]] = {}
@@ -865,13 +876,13 @@ def _digest_items(root: str, now: float, last: dict[str, dict[str, Any]], st: di
             continue
         if ln.get("held_for"):          # held for a background agent's next turn (held.py), which hands it over: the digest would send it twice
             continue
-        if not ((status == "ruled" and ln.get("ruling") == "held") or status == "stuck"):
+        if not ((status == "ruled" and ln.get("ruling") == _routing.ARCHIVED) or status == "stuck"):
             continue
         key = str(ln.get("key") or root)
         if key not in notices:
             notices[key] = {x["id"]: x for x in _routing.read(key)}
         n = notices[key].get(i)
-        if n is None or (status == "ruled" and not (n.get("ruling") == "held" and n.get("ruled_by") == BY)) or (status == "stuck" and n.get("ruling")):
+        if n is None or (status == "ruled" and not (n.get("ruling") == _routing.ARCHIVED and n.get("ruled_by") == BY)) or (status == "stuck" and n.get("ruling")):
             continue
         rows.append((ln, n))
     rows.sort(key=lambda r: float(r[0].get("ts", 0)))
@@ -889,11 +900,11 @@ def _when(ts: float) -> str:
 def digest_text(root: str, rows: list[tuple[dict[str, Any], dict[str, Any]]], group: str, mark: bool) -> str:
     """The digest message: a line per notice (id, label, sender, gist, reason), then what is owed (nothing; a notice that could not be ruled
     is the router's, listed so a person sees it)."""
-    held = [r for r in rows if r[0].get("status") != "stuck"]
+    archived = [r for r in rows if r[0].get("status") != "stuck"]
     stuck = [r for r in rows if r[0].get("status") == "stuck"]
     parts = []
-    if held:
-        parts.append(f"{len(held)} notice{'s were' if len(held) != 1 else ' was'} held " + {"quiet": "through the quiet hour", "pagepass": "for the page pass"}.get(group, "by the router and not passed to any agent"))
+    if archived:
+        parts.append(f"{len(archived)} notice{'s were' if len(archived) != 1 else ' was'} archived " + {"quiet": "through the quiet hour", "pagepass": "for the page pass"}.get(group, "by the router and not passed to any agent"))
     if stuck:
         parts.append(f"{len(stuck)} could not be ruled")
     head = (f"{_owner_mark()} " if mark else "") + f"[stackshot] router digest for {root}: " + " and ".join(parts) + " since the last digest."
@@ -907,15 +918,15 @@ def digest_text(root: str, rows: list[tuple[dict[str, Any], dict[str, Any]]], gr
         lines.append(f"- {n['id']} · {tag}{label} · from {who} · {_when(n.get('ts', 0))} · \"{gist}\"" + (f" — {why}" if why else ""))
     if len(rows) > DIGEST_SHOWN:
         lines.append(f"- and {len(rows) - DIGEST_SHOWN} more (the project's routing page lists them)")
-    lines.append("The router ruled these held; nothing is owed on a held one." if held and not stuck else
-                 "A held notice is the router's ruling and owes nothing; one that could not be ruled is in the routing log with no ruling.")
+    lines.append("The router ruled these archived; nothing is owed on an archived one." if archived and not stuck else
+                 "An archived notice is the router's ruling and owes nothing; one that could not be ruled is in the routing log with no ruling.")
     return "\n".join(lines)
 
 
 def digest_tick(now: float | None = None) -> dict[str, int]:
     """The day's digest of each live project, from [router] digest_hour on (a server that was down then sends it when it is back the
     same day) → {"sent", "empty", "failed", "logged"}. A project is done once a day per group (main, pagepass, and for router.QUIET's project
-    quiet). A "main" or "pagepass" group of held rows only is logged, not delivered; one with a notice that could not be ruled is delivered
+    quiet). A "main" or "pagepass" group of archived rows only is logged, not delivered; one with a notice that could not be ruled is delivered
     (main: to the builder unmarked, else to -main marked). An empty list sends nothing. The notices listed are marked digested only when the push went through; a push
     that failed is tried again at the next ticks, DIGEST_TRIES times in the day, and then waits for the next day. Never raises."""
     out = {"sent": 0, "empty": 0, "failed": 0, "logged": 0}
@@ -941,7 +952,7 @@ def digest_tick(now: float | None = None) -> dict[str, int]:
                         out["empty"] += 1
                         continue
                     if group in ("main", "pagepass") and not any(l.get("status") == "stuck" for l, _n in rows):
-                        # held notices are the router's own ruling and owe nothing (the owner's are in stackshot's For you list, not in a front
+                        # archived notices are the router's own ruling and owe nothing (the owner's are in stackshot's For you list, not in a front
                         # agent's turn), so the digest wakes nobody: it goes to the log, and its notices count as digested (none is listed
                         # twice). A digest with a notice that could not be ruled is delivered (below).
                         _log({"kind": "digest_logged", "ts": time.time(), "project": root, "group": group, "count": len(rows), "status": "logged",
@@ -995,7 +1006,7 @@ def digest_tick(now: float | None = None) -> dict[str, int]:
 
 # ----------------------------------------------------------------------------- status
 def status(now: float | None = None) -> list[dict[str, Any]]:
-    """One row per top-level page: the notices acted on in the last hour, the notices held since the last digest and when
+    """One row per top-level page: the notices acted on in the last hour, the notices archived since the last digest and when
     that digest went out (0 = none yet), the last error (text, when)."""
     now = time.time() if now is None else now
     rows = []
@@ -1008,8 +1019,8 @@ def status(now: float | None = None) -> list[dict[str, Any]]:
         errs = [(float(d.get("ts", 0)), str(d.get("error") or d.get("note_error") or "")) for d in mine if d.get("status") == "error" or d.get("error") or d.get("note_error")]
         errs += [(float(c.get("ts", 0)), f"call {c.get('status')}: {c.get('note')}") for c in calls if c.get("project") == root and c.get("status") not in ("ok", None)]
         err = max(errs) if errs else (0.0, "")
-        held_rows = _digest_items(root, now, last, st)
-        rows.append({"project": root, "acted_last_hour": acted, "held_since_digest": sum(len(g) for g in held_rows),
+        archived_rows = _digest_items(root, now, last, st)
+        rows.append({"project": root, "acted_last_hour": acted, "archived_since_digest": sum(len(g) for g in archived_rows),
                      "last_digest_at": float(st["last"].get(root, 0)), "last_error": err[1], "last_error_at": err[0]})
     return rows
 
@@ -1017,10 +1028,10 @@ def status(now: float | None = None) -> list[dict[str, Any]]:
 def render(rows: list[dict[str, Any]]) -> str:
     fmt = lambda ts: dt.datetime.fromtimestamp(ts, _cfg.tz()).strftime("%Y-%m-%d %H:%M")
     out = ["router: rules every project",
-           f"{'project':34} {'1h':>4} {'held':>5}  {'last digest':16}  last error"]
+           f"{'project':34} {'1h':>4} {'archived':>8}  {'last digest':16}  last error"]
     for r in rows:
         when = fmt(r["last_error_at"]) if r["last_error_at"] else ""
-        out.append(f"{r['project'][:34]:34} {r['acted_last_hour']:>4} {r['held_since_digest']:>5}  {fmt(r['last_digest_at']) if r['last_digest_at'] else '-':16}  "
+        out.append(f"{r['project'][:34]:34} {r['acted_last_hour']:>4} {r['archived_since_digest']:>8}  {fmt(r['last_digest_at']) if r['last_digest_at'] else '-':16}  "
                    + (f"{when} {r['last_error'][:120]}" if r["last_error"] else "-"))
     return "\n".join(out)
 

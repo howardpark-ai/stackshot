@@ -164,7 +164,7 @@ def body(h): return _html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", v
 # words that stay English because they are data, not interface: names, titles, notes, ids the fixture holds
 DATA = {"alpha", "main", "ghost", "box", "work", "home", "stackshot", "lantern", "quarterly", "inventory", "state", "kim", "wrote", "about", "the", "release", "slack", "hub",
         "went", "quiet", "waits", "thing", "that", "closed", "ask", "missing", "agent", "note", "with", "one", "take", "log", "only", "nothing", "deliver", "nightly", "check", "turned", "red",
-        "builds", "stale", "current", "old", "for", "general", "change", "live", "now", "example", "completed", "done", "progress", "board", "front", "https", "items", "org", "session", "was", "by", "is", "its", "pane", "not", "this", "box", "held", "here"}
+        "builds", "stale", "current", "old", "for", "general", "change", "live", "now", "example", "completed", "done", "progress", "board", "front", "https", "items", "org", "session", "was", "by", "is", "its", "pane", "not", "this", "box", "held", "archived", "here"}
 # the audit module's own audit names and the log's kinds are identifiers, never routed
 for _g in ov.GROUPS:
     for _a in _g["audits"]: DATA |= set(re.findall(r"[a-z']{3,}", str(_a[0]).lower()))
