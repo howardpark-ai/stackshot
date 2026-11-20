@@ -1227,7 +1227,7 @@ refused("a missing quote is refused for every tag", lambda: _update_svc._update(
 refused("a missing msg is refused", lambda: _update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "x"}]), "said[0] (Reported-by): msg is required", "uuid")
 refused("a msg that is not a uuid is refused", lambda: _update_svc._update(g_t, sender="home-here", said=S(msg="home-here")), "msg must be the message's uuid")
 refused("an unknown key is refused", lambda: _update_svc._update(g_t, sender="home-here", said=S(text="x")), "unknown key text")
-refused("said that is not a list of objects is refused with the form", lambda: _update_svc._update(g_t, sender="home-here", said="ok, acked-by it is"), "not valid JSON", "said=[{tag")
+refused("said that opens like a list and is not JSON is refused with the form", lambda: _update_svc._update(g_t, sender="home-here", said="[ok, acked-by it is"), "not valid JSON", "said=[{tag")
 check("a refused write stored nothing, queued nothing and posted nothing", len(said_of(g_t)) == k_q and len(comments(n_t)) == k_c and qlen() == 0, (len(said_of(g_t)), len(comments(n_t)), qlen()))
 # not refused: the marker mentioned further down or quoted below the first line is his; promptSource never decides
 _update_svc._update(g_t, sender="home-here", said=[{"tag": "Reported-by", "quote": "is mentioned here, by me", "msg": U(8)}, {"tag": "Reported-by", "quote": "is not the first line", "msg": U(11)}]); G.drain(GH, STORE, say=lambda s: None)

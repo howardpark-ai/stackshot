@@ -740,6 +740,14 @@ def _substance(item: dict[str, Any]) -> str:
     return json.dumps({"t": item.get("status"), "h": bool(m.get("hold")), **{k: (_list_shape(m.get(k)) if k == "waits" else m.get(k)) for k in _REPARK_FIELDS}}, sort_keys=True, default=str)
 
 
+class HisStepRefusal(ToolError):
+    """gate_owner_step's refusal of an update, with the line (`line`) that is his step, the id of the item it is about (`gid`, as the update normalized it) and the said entries the write stores (`said`, set by
+    the update): service/step_settle.py reads them to settle that step when the write itself says what became of it."""
+    line = ""
+    gid = ""
+    said: tuple[Any, ...] = ()
+
+
 def gate_owner_step(item: dict[str, Any], gid: str = "", create: bool = False, sender: str = "", keeper: str = "") -> None:
     """The owner's step hidden under an agent's state: refuse a create or update whose resulting item (open) has a first line of `next` that opens with a who-takes-it
     opener for him (states.next_names_owner: `<owner>:`, `<alias>:`, `you:`, "the owner to …") while its state, stored or derived, is doing, queued, blocked or verifying. The caller runs it only for a
@@ -761,8 +769,11 @@ def gate_owner_step(item: dict[str, Any], gid: str = "", create: bool = False, s
         raise ToolError(head + ". Set needs=decision with an ask (a create stores no state or step), or open next with the agent who takes the step." + tail)
     writer = (_nl.writers_of(m, keeper) or [""])[0]
     if sender and writer and not _handoff.ho_same(writer, sender):      # the first line is another session's, kept at its place by nextlines.write: opening next with an agent cannot move it
-        raise ToolError(head + f". That line was written by {writer}, not by this write's sender. Drop the step (dropped=[its number]), or pass clear_next=true, or pass step=<his step in one line> if it is truly his step (step='none' releases an item that stands in his step). Mark it done only when {who}'s own words for it are recorded on the item." + tail)
-    raise ToolError(head + ". Pass step=<his step in one line>, or needs=decision with an ask; or open next with the agent who takes the step." + tail)
+        err = HisStepRefusal(head + f". That line was written by {writer}, not by this write's sender. Drop the step (dropped=[its number], or step='none'), or pass clear_next=true, or pass step=<his step in one line> if it is truly his step. Mark it done only when {who}'s own words for it are recorded on the item." + tail)
+    else:
+        err = HisStepRefusal(head + ". Pass step=<his step in one line>, or needs=decision with an ask; or open next with the agent who takes the step." + tail)
+    err.line, err.gid = first, gid
+    raise err
 
 
 def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: list[str], ask_was: Any, gid: str) -> None:
@@ -1404,16 +1415,45 @@ def _said_verify(sess: str, spec: dict[str, str], root: Any, prefixes: Any, phra
     when it is a transcript id, then the registry's transcripts of that session, newest first, then what _session_id makes of it. The first
     candidate whose transcript is on this box is the one verified against and stored; none → the newest candidate, unchecked. An entry of kind
     acted is checked by said.verify_acted (a queued_command attachment entry of human origin), every other by said.verify (his typed message)."""
-    h = _hooks()
     fn = _said.verify_acted if spec.get("kind") == _said.ACTED else _said.verify
-    sid = h.session_id(sess)                          # a pane name → its transcript uuid (old rule) or its permanent id (registry); ids pass through
-    given = str(sess or "").strip().lower()
-    cands = [c for c in dict.fromkeys([given if _said.is_uuid(given) else "", *reversed(_sr.transcripts(sid)), sid]) if c]
+    sid, cands = _said_candidates(sess)
     for c in cands:
         if _said.find_transcript(c, root) is not None:
             return c, fn(c, spec["msg"], spec["quote"], root, prefixes, phrases, marker)
     keep = next((c for c in cands if not _sr.is_perm_id(c)), sid)       # nothing readable on this box: stored unchecked under a transcript id, not the permanent id
     return keep, fn(keep, spec["msg"], spec["quote"], root, prefixes, phrases, marker)
+
+
+def _said_candidates(sess: str) -> tuple[str, list[str]]:
+    """The session's id and the transcript ids its `said` is looked for under, in order (see _said_verify)."""
+    h = _hooks()
+    sid = h.session_id(sess)                          # a pane name → its transcript uuid (old rule) or its permanent id (registry); ids pass through
+    given = str(sess or "").strip().lower()
+    return sid, [c for c in dict.fromkeys([given if _said.is_uuid(given) else "", *reversed(_sr.transcripts(sid)), sid]) if c]
+
+
+def _said_plain(quote: str, sess: str, root: Any, prefixes: Any, phrases: Any, marker: str) -> list[dict[str, str]]:
+    """A `said` sent as plain text → the one entry it stands for, an Acked-by with that quote, and his message found in the sender's transcript by its words (the latest of his own typed messages that holds
+    them; the same transcript lookup as the structured form, then the same check). A transcript this box cannot read leaves the entry unchecked, as the structured form does. A readable transcript with no
+    message of his that holds the text is refused: the words are not his."""
+    sid, cands = _said_candidates(sess)
+    msg = ""
+    for c in cands:
+        path = _said.find_transcript(c, root)
+        if path is not None:
+            try:
+                msg = _said.find_by_quote(path, quote, prefixes, phrases, marker)
+            except OSError:
+                msg = ""
+                break               # a transcript that cannot be read: unchecked, like any other
+            if not msg:
+                raise ToolError(f"Refused: said: no message of {OWNER}'s own in the transcript of {_session_label(c) or sess or 'the sender'} holds that text (whitespace aside); "
+                                f"cut his sentences verbatim, or pass said as a list of objects, {_said.FORM}")
+            break
+    _calls.fixed("said-text", f"said was sent as text, so it is recorded as {OWNER}'s Acked-by with that quote"
+                 + (f", found in his message {msg[:8]} of the sender's session" if msg else " (no transcript of the sender's session can be read here, so it is stored unchecked)")
+                 + "; to record another tag or a message that is not the latest holding those words, pass said as a list of objects")
+    return [{"tag": "Acked-by", "quote": quote, "msg": msg, "session": "", "kind": _said.WORDS}]
 
 
 def gate_said(said: Any, default_session: str, by: str) -> list[dict[str, Any]]:
@@ -1425,13 +1465,16 @@ def gate_said(said: Any, default_session: str, by: str) -> list[dict[str, Any]]:
     a queued_command attachment entry of human origin) is stored with tag Done-by and kind acted; it never counts as his words or his decision."""
     if said is None or said == [] or (isinstance(said, str) and not said.strip()):
         return []
-    try:
-        specs = _said.parse(said)
-    except ValueError as e:
-        raise ToolError(f"Refused: {e}")
     root = _said_roots()
     prefixes, phrases = _said.prefixes_of(_cfg.get("said", "injected_prefixes")), _said.phrases_of(_cfg.get("said", "injected_phrases"))   # stopgaps for messages before the marker
     marker = str(_cfg.get("said", "injected_marker") or "")                   # what the fleet tool puts at the start of text it types; "" = none
+    if quote := _said.plain_quote(said):      # text, not the structured form: his words as an Acked-by, his message found by them (the server takes the fix and says so)
+        specs = _said_plain(quote, default_session, root, prefixes, phrases, marker)
+    else:
+        try:
+            specs = _said.parse(said)
+        except ValueError as e:
+            raise ToolError(f"Refused: {e}")
     out: list[dict[str, Any]] = []
     for i, s in enumerate(specs):
         sess = s["session"] or default_session
