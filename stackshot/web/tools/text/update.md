@@ -71,11 +71,9 @@ dropped=[…] when it is no longer wanted, each entry a step's 1-based position 
 under `checklist:`) or the exact text of its first line. Example, steps 1 `my-x: build it` and 2 `my-x: test it` open,
 step 1 finished: update(item_id="board#N", sender="my-x", done=[1], next="my-x: test it\nmy-x: open the PR") (the open
 step 2 is written again as it stands). An update that replaces or removes (next="none") your lines of next and leaves
-one out unmarked is refused, naming the step, its position and the call to retry with (done=[n], dropped=[n] or
-reword={n: "<new text>"}); another session's lines are never touched by your next. Parameter reword (map, position or
+one out unmarked keeps that step open as written and the reply names it (end it with done=[n] or dropped=[n]); another session's lines are never touched by your next. Parameter reword (map, position or
 first-line text → new text) gives an open step of yours new words and keeps its number, place and open state (leave
-next out and the line is changed for you); a line reworded in next alone is a new step, and the old one is refused
-unmarked. A reword is the same action in other words, never the old text with progress added. Refused: a step of
+next out and the line is changed for you); a line reworded in next alone is a new step, and the old one stays open. A reword is the same action in other words, never the old text with progress added. Refused: a step of
 another session or of his, one already done or dropped, one also in done or dropped, a text of several steps or one
 another open step reads; a different action is a new line of next. done and dropped mark any open step, whoever wrote
 it, except a step of his (a line opening with his name) while the item asks him: that one is ticked when he answers,
@@ -204,8 +202,8 @@ Retired: refused. Ranks are retired; a call that carries this is refused.
 next replaces only your own lines: every line of next remembers the session whose update wrote it (the sender, or the
 item's creator when the call names none; not the name the line starts with). next=<lines> takes the place of the lines
 you wrote before, where the first of them stood (at the end when you had none) and leaves every other session's lines
-where they are; an open step of yours that the new next leaves out must be marked in the same update, done=[n] or
-dropped=[n] (a line reworded in next alone is a new step: mark the old one and write the new text, or pass reword).
+where they are; an open step of yours that the new next leaves out stays open unless marked in the same update (done=[n],
+dropped=[n]; reword gives it new words).
 next="none" removes only your own lines; clear_next=true wipes every line, whoever wrote it, and with next given the
 wipe comes first and your lines are then set. A line of yours that another session's open line already reads the same
 is not added a second time. A close clears next whoever wrote it.
@@ -213,7 +211,7 @@ is not added a second time. A close clears next whoever wrote it.
 ## text UPDATE_DESC trail
 Update an item; only the fields you pass change.{{OFF_MAP}} Right calls (sender = you): steps 1 "my-x: build it" and 2
 "my-x: test it" open, step 1 done: update(item_id="board#N", sender="my-x", done=[1], next="my-x: test it\nmy-x: open
-the PR") (next lists every open step of yours that stays; one it leaves out must be in done or dropped); reword an
+the PR") (next lists every open step of yours that stays); reword an
 open step: reword={"2": "my-x: ship the export"}; drop a step: dropped=[2]; work: the status of your open step, one line per call: work={"text":
 "PR 83 up", "state": "in progress"}; park for a work window: hold=true,
 until="<last day of the window, YYYY-MM-DD>", wait_basis="soak ends <that day>" (the basis names its date, YYYY-MM-DD;

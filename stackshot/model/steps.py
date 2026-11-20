@@ -382,6 +382,23 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
     return steps
 
 
+def carry(written: str, old: list[dict[str, Any]], lost_ix: list[int]) -> str:
+    """`written` (the text of next a write sets) with the lines of the steps `lost_ix` put back as they stand, each after the line of the nearest open step before it that `written` still lists (at the start when none is),
+    so the open steps keep their order. The lines come from `old` unchanged."""
+    chunks = split(written)
+    for i in lost_ix:
+        at = 0
+        for j in range(i - 1, -1, -1):
+            if old[j]["status"] == OPEN:
+                kj = key(old[j]["text"])
+                pos = [n for n, c in enumerate(chunks) if key(c) == kj]
+                if pos:
+                    at = pos[-1] + 1
+                    break
+        chunks.insert(at, old[i]["text"])
+    return join(chunks)
+
+
 def changes(before: dict[str, Any] | None, after: dict[str, Any] | None, closed: bool = False) -> list[tuple[str, str]]:
     """[(done | dropped, the step's first line)] for the steps a write marked, between the metadata before it and after it, in checklist order: the History's `step done: …` and
     `step dropped: …` lines. A step that left next with nobody marking it (a write that knows nothing of steps) is no event here: the line of next says it. `closed`: `after` is a closed item's; the mark a close puts on its open steps by itself (done for outcome done, dropped otherwise) is no event here, the close line says it, so only

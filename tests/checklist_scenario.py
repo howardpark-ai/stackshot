@@ -3,7 +3,7 @@
 Covers: an item with next lines and no stored steps has the checklist its lines give, all open (the list starts from now); `update(done=[…])` checks a step by position,
 by its exact text and by a JSON string, `dropped=[…]` drops one, and a marked step keeps its place, with who marked it and when; `next` stays the text of the open
 lines exactly (what every reader of next reads: get, the home row, the guards, the hand-off record); a next write that no longer lists an open step the call does not
-mark is refused, naming done and dropped, and writes nothing; one that only adds or reorders open steps works, the open steps taking the new order in the places open steps
+mark keeps that step open as written and says so (a step-kept fix; tests/five_fixes_scenario.py has the full set), and a line rewritten with words added is refused; one that only adds or reorders open steps works, the open steps taking the new order in the places open steps
 held; a mark with a next, a mark alone (next becomes the open steps left), a mark of a step that is not open, of a position that is not there, of text that matches none or
 two, a step in both lists and a step still listed in next are refused; `[metadata.next] require_marks = false` reads an unmarked removal as dropped, nobody and no time;
 a line that left next by a write that knows nothing of steps reads as dropped; a close marks the open steps (done when the outcome is done, dropped otherwise) and keeps the checklist as the record (get and the page show it), marks on
@@ -114,6 +114,16 @@ def refused(name, f, *want, i=None):
         out = f(); check(name, False, out)
     except ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
+from stackshot.core import call_log as _CL
+def kept(name, f, i, pred, *words):
+    """A next that leaves an open step of the writer's out with no word on it is not refused: the step stays open as written, the reply line names it (one step-kept fix), and `pred(next)` holds of the stored next; the item is put back after, so the cases below start from the same item."""
+    was = rd(i); tok = _CL.begin()
+    try: out = f()
+    except ToolError as e: out = e
+    finally: fx = _CL.end(tok)
+    ok = not isinstance(out, ToolError) and [k for k, _ in fx] == ["step-kept"] and all(w in fx[0][1] for w in words) and pred(mt(i).get("next", ""))
+    check(name, ok, (str(out)[:300], fx, mt(i).get("next")))
+    (T / f"store/a/{i}.json").write_text(json.dumps(was))
 def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-here", **kw)
 def upa(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
 def upi(i, **kw): return _update_svc._update(f"a{i}", sender="home-agent", **kw)           # the server's own write: N6 (an open item keeps an open step) judges a session's write only
@@ -162,11 +172,19 @@ check("the last open step checked: next is gone, the checklist stays", "next" no
 snap()
 
 # ---- 4. the refusals
-refused("a next that no longer lists an open step, with none marked: refused, naming done and dropped, the step and its position; nothing written",
-        lambda: upd(4, next="home-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper"), "done=[1]", "dropped=[1]", "home-agent: build the thing", "1.", "a reworded line counts as a new step", "codemode.stackshot_update", i=4)
-refused("…two steps lost: both named, with their positions in done and dropped", lambda: upd(4, next="home-agent: test it\nhome-agent: tell the keeper"), "done=[1,3]", "dropped=[1,3]", i=4)
-refused("…a mark of another step does not cover it", lambda: upd(4, next="home-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`", done=[4]), "done=[1]", "home-agent: build the thing", i=4)
-refused("a reworded line is a line lost and a new one: refused", lambda: upd(4, next="home-agent: build the big thing\nhome-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper"), "home-agent: build the thing", i=4)
+kept("a next that no longer lists an open step, with none marked, keeps that step open as written: next is as it was, and the reply names the step and its position",
+     lambda: upd(4, next="home-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper"), 4, lambda n: n == L4, "1. home-agent: build the thing", "done=[n]", "dropped=[n]")
+kept("…two steps lost: both kept, each back where it stood, both named", lambda: upd(4, next="home-agent: test it\nhome-agent: tell the keeper"), 4, lambda n: n == L4, "1. home-agent: build the thing", "3. Oliver: In PowerShell")
+kept("…a mark of another step does not cover it: the step stays, the other is marked done", lambda: upd(4, next="home-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`", done=[4]), 4,
+     lambda n: n == "home-agent: build the thing\nhome-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`", "1. home-agent: build the thing")
+kept("a line reworded in next alone (a step out, a new line of other words in) is a new step: the old step stays open beside it, never replaced",
+     lambda: upd(4, next="home-agent: build the big thing\nhome-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper"), 4,
+     lambda n: "home-agent: build the thing" in n.split("\n") and "home-agent: build the big thing" in n.split("\n") and len(n.split("\n")) == 5, "1. home-agent: build the thing", "reword={n:")
+kept("a new line of other words beside two steps lost is a new step (never a reword): the steps stay open as written", lambda: upd(4, next="home-agent: build and test\nOliver: In PowerShell run `ssh -t box-a 'ls'`"), 4,
+     lambda n: "home-agent: build the thing" in n.split("\n") and "home-agent: test it" in n.split("\n") and "home-agent: build and test" in n.split("\n"), "home-agent: build the thing")
+kept("one step out, one new line of other words in (a step finished, another added, none marked): the old step stays open beside the new line, the new line is a new step",
+     lambda: upd(4, next="home-agent: test it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: tell the keeper\nhome-agent: open the PR"), 4,
+     lambda n: n.split("\n").count("home-agent: build the thing") == 1 and "home-agent: open the PR" in n.split("\n") and "home-agent: test it" in n.split("\n"), "1. home-agent: build the thing", "reword={n:")
 refused("a step both done and dropped", lambda: upd(4, done=[1], dropped=[1]), "both done and dropped", i=4)
 refused("a position that is not there", lambda: upd(4, done=[9]), "no step 9", "the checklist has 4", i=4)
 refused("position 0", lambda: upd(4, done=[0]), "no step 0", i=4)
@@ -323,17 +341,17 @@ upa(30, next="home-agent: agent line")
 check("the agent's update adds its line after the keeper's, the keeper's lines stay and keep their writer",
       mt(30)["next"] == "home-here: keeper line one\nOliver: keeper line two\nhome-agent: agent line" and [p[0] for p in mt(30)["next_by"]] == [OWNER, OWNER, AGENT]
       and [x["writer"] for x in S.view(mt(30)) ] == [OWNER, OWNER, AGENT], (mt(30)["next"], mt(30).get("next_by")))
-refused("the agent replaces its own line and leaves it out unmarked: refused, naming the step and its position, and what to pass",
-        lambda: upa(30, next="home-agent: another line"), "your open step", "3. home-agent: agent line", "done=[3]", "dropped=[3]", "clear_next=true", i=30)
-refused("next=none by the agent without a mark: the same refusal (its own line would go unmarked)", lambda: upa(30, next="none"), "3. home-agent: agent line", "dropped=[3]", i=30)
+kept("the agent replaces its own line and leaves it unmarked: the old line stays open, the new line is a new step, the keeper's lines untouched, the reply names the old line",
+     lambda: upa(30, next="home-agent: another line"), 30, lambda n: n == "home-here: keeper line one\nOliver: keeper line two\nhome-agent: agent line\nhome-agent: another line", "3. home-agent: agent line")
+kept("next=none by the agent without a mark: its line stays open, the keeper's lines are untouched", lambda: upa(30, next="none"), 30, lambda n: n == "home-here: keeper line one\nOliver: keeper line two\nhome-agent: agent line", "3. home-agent: agent line")
 upa(30, next="home-agent: another line", dropped=[3])
 check("…marked dropped in the same update it passes: the step is struck, by the agent, the new line is open at the end, the keeper's lines untouched",
       st(30) == [OPEN("home-here: keeper line one"), OPEN("Oliver: keeper line two"), ("dropped", "home-agent: agent line"), OPEN("home-agent: another line")]
       and mt(30)["steps"][2]["by"] == "home-agent" and mt(30)["next"] == "home-here: keeper line one\nOliver: keeper line two\nhome-agent: another line", (st(30), mt(30)["next"]))
 upa(30, next="home-agent: another line\nhome-agent: and one more")
 check("the agent adds a line to its own: nothing is lost, nothing is asked", mt(30)["next"].endswith("home-agent: another line\nhome-agent: and one more") and len(st(30)) == 5, st(30))
-refused("the keeper leaves one of its own lines out unmarked: refused for that line only (the agent's lines are not its to answer for)",
-        lambda: upd(30, next="home-here: keeper line one\nhome-here: and a new keeper line"), "your open step", "2. Oliver: keeper line two", "done=[2]", i=30)
+kept("the keeper leaves one of its own lines out unmarked: that line stays open (the agent's lines are not its to answer for)",
+     lambda: upd(30, next="home-here: keeper line one\nhome-here: and a new keeper line"), 30, lambda n: "Oliver: keeper line two" in n.split("\n") and "home-here: and a new keeper line" in n.split("\n") and "home-agent: another line" in n.split("\n"), "2. Oliver: keeper line two")
 r = upa(30, done=[1])
 check("the agent marks the keeper's line done: it leaves next with its writer pair; the others keep theirs",
       st(30)[0] == ("done", "home-here: keeper line one") and mt(30)["steps"][0]["by"] == "home-agent"
@@ -496,11 +514,18 @@ refused("reword with clear_next is refused", lambda: upd(57, reword={1: "home-ag
 _wt_complete.stackshot_complete("a58", outcome="done", reason="finished", outcome_text="- All done", sender="home-here")
 refused("reword on a closed item is refused (the checklist is the record)", lambda: upd(58, reword={1: "home-agent: other words here"}), "is closed", "reopen it", i=58)
 refused("reword in a close is refused", lambda: upd(59, status="completed", outcome="done", reason="finished", outcome_text="- All done", reword={1: "home-agent: other words here"}), "reword changes the words of a step that stays open", i=59)
-refused("the refusal of an unmarked step left out of next prints the retry calls with the number filled in, in one line", lambda: upd(4, next="home-agent: test it\n" + OL + "\nhome-agent: tell the keeper"),
-        'Retry with done=[1], dropped=[1] or reword={1: "<new text>"}.', "a reworded line counts as a new step", "reword the step itself", i=4)
-refused("…two steps: both numbers in each call", lambda: upd(4, next="home-agent: test it\nhome-agent: tell the keeper"), 'Retry with done=[1,3], dropped=[1,3] or reword={1: "<new text>", 3: "<new text>"}.', i=4)
+# a line rewritten with words added (N3) is still refused by the progress rule; the strict refusal of steps.apply (the guard behind the carry-over) prints the retry calls with the number filled in, in one line
+refused("a step rewritten with words added is refused as ever (the progress rule), nothing written", lambda: upd(4, next="home-agent: build the thing (in progress)\nhome-agent: test it\n" + OL + "\nhome-agent: tell the keeper"), "with words added", "home-agent: build the thing", i=4)
+def apply_refused(name, i, new_next, *want):
+    try:
+        S.apply(S.view(mt(i)), new_next, [], [], "home-here", time.time(), written=new_next, own=lambda w: True); check(name, False, "no refusal")
+    except S.StepError as e:
+        check(name, all(w in str(e) for w in want), str(e))
+apply_refused("steps.apply (strict) prints the retry calls with the number filled in, in one line", 4, "home-agent: test it\n" + OL + "\nhome-agent: tell the keeper",
+              'Retry with done=[1], dropped=[1] or reword={1: "<new text>"}.', "a reworded line counts as a new step", "reword the step itself")
+apply_refused("…two steps: both numbers in each call", 4, "home-agent: test it\nhome-agent: tell the keeper", 'Retry with done=[1,3], dropped=[1,3] or reword={1: "<new text>", 3: "<new text>"}.')
 item(60); upd(60, done=[1])
-refused("…the number is the step's position in the checklist, marked steps counted", lambda: upd(60, next="home-agent: test it\nhome-agent: tell the keeper"), 'Retry with done=[3], dropped=[3] or reword={3: "<new text>"}.', "3. Oliver:", i=60)
+apply_refused("…the number is the step's position in the checklist, marked steps counted", 60, "home-agent: test it\nhome-agent: tell the keeper", 'Retry with done=[3], dropped=[3] or reword={3: "<new text>"}.', "3. Oliver:")
 for empty in ({}, "{}", " ", ""):
     was58, was57 = rd(58), rd(57)
     r = upd(58, reword=empty)
@@ -535,7 +560,7 @@ sig = __import__("inspect").signature(_wt_update.stackshot_update.fn if hasattr(
 check("update takes done and dropped; its description teaches the checklist", {"done", "dropped"} <= set(sig.parameters) and "next is a checklist" in _wt_text._lead(_wt_update._UPDATE_DESC + _wt_update._CHECKLIST_FORM)
       and "done=[…]" in _wt_update._CHECKLIST_FORM and "dropped=[…]" in _wt_update._CHECKLIST_FORM and "step done: …" in _wt_update._CHECKLIST_FORM, list(sig.parameters)[-4:])
 check("update takes reword; the parameter's description, the checklist text and the refusals' text teach it and the retry call",
-      "reword" in sig.parameters and "reword={n:" in _wt_update._CHECKLIST_FORM and "done=[n], dropped=[n] or reword={n:" in _wt_update._CHECKLIST_FORM and "reword={n:" in _wt_text._NEXT_REFUSALS
+      "reword" in sig.parameters and "Parameter reword" in _wt_update._CHECKLIST_FORM and "end it with done=[n] or dropped=[n]" in _wt_update._CHECKLIST_FORM and "reword={n:" in _wt_text._NEXT_REFUSALS
       and "keeps its number" in _wt_update._REWORD_PARAM.__metadata__[0].description and "same action in other words" in _wt_update._CHECKLIST_FORM and "after its `<actor>: ` prefix" in _wt_text._ITEM_FORM,
       _wt_update._REWORD_PARAM.__metadata__[0].description[:300])
 

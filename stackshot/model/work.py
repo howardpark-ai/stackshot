@@ -17,6 +17,7 @@ import re
 import time
 from typing import Any, Callable
 
+from stackshot.model import bullet_text as _bt
 from stackshot.model import steps as _steps
 
 STATES = ("defined", "assigned", "in progress", "done")
@@ -131,7 +132,7 @@ def norm_state(s: Any) -> str:
 
 
 def parse(spec: Any) -> dict[str, Any]:
-    """The update tool's `work` argument as given → {text, state, agent, remove}, each normalized ("" / False when not given). Accepts an object, a JSON string of one (a client whose
+    """The update tool's `work` argument as given → {text, state, agent, remove, cut}, each normalized ("" / False / 0 when not given; `cut` is the length the text was before a text over TEXT_MAX was cut at its last whole word). Accepts an object, a JSON string of one (a client whose
     cached schema sends the parameter as text), or a plain string, which is the text of the status line. ValueError with the hint on anything else."""
     if isinstance(spec, str):
         s = spec.strip()
@@ -152,10 +153,14 @@ def parse(spec: Any) -> dict[str, Any]:
     if bad:
         raise ValueError(f"work: unknown key{'s' if len(bad) > 1 else ''} {', '.join(bad)}; the keys are {', '.join(KEYS)}")
     text = re.sub(r"\s+", " ", str(spec.get("text") or "")).strip()
-    if len(text) > TEXT_MAX:
-        raise ValueError(f"work: a status line is a few words, at most {TEXT_MAX} characters ({len(text)} given: \"{text[:TEXT_MAX]}…\"); the details of a stage stay on the project page")
+    cut = 0
+    if len(text) > TEXT_MAX:          # over the limit: cut at the last whole word that fits (the caller tells the writer); a first word over the room is refused
+        was, text = len(text), _bt.cut_words(text, TEXT_MAX) or ""
+        if not text:
+            raise ValueError(f"work: a status line is a few words, at most {TEXT_MAX} characters ({was} given); the details of a stage stay on the project page")
+        cut = was
     out = {"text": text, "state": norm_state(spec["state"]) if spec.get("state") not in (None, "") else "",
-           "agent": str(spec.get("agent") or "").strip(), "remove": bool(spec.get("remove"))}
+           "agent": str(spec.get("agent") or "").strip(), "remove": bool(spec.get("remove")), "cut": cut}
     if not out["text"] and not out["state"] and not out["remove"]:
         raise ValueError(f"work: text is the status line's few words (or state alone, to move the line you have); {FORM}")
     return out

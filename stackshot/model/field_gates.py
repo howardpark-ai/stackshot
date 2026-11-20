@@ -67,6 +67,49 @@ def _gate_subject(subject: str, current: str | None = None) -> None:
                         "the detail goes in the description bullets (and the project page's timeline).")
 
 
+def fix_long_subject(subject: str, current: str | None = None) -> str:
+    """A subject over [subject] max_length, put right instead of refused: cut at the last word that fits with " …" after it, the whole counted in the limit (bullet_text.cut_words: no word is cut in two, the kept
+    words and the scope prefix are as written), and the reply says so (call_log.fixed). The subject as given when it fits, when it is the stored text sent back (a long one stored before the limit), when it
+    has no scope prefix (the prefix check refuses it as before) or when no word after the prefix fits: the gate then refuses it as before."""
+    lim = _subject_max()
+    if not lim or len(subject) <= lim or subject == current:
+        return subject
+    pfx = next((p for p in _cfg.CFG["subject"]["prefixes"] if subject.startswith(p)), None)
+    new = _bt.cut_words(subject, lim) if pfx is not None else None
+    if not new or not new.startswith(pfx) or len(new) - 2 <= len(pfx.rstrip()):          # the cut fell inside the prefix, or left nothing after it
+        return subject
+    _calls.fixed("subject-cut", f"the subject was {len(subject)} characters and the limit is {lim}, the scope prefix counted: it was cut at the last word that fits and ends with an ellipsis; to change it, send a shorter subject",
+                 fields=["subject"], stored=new, sent=subject)
+    return new
+
+
+def fix_bare_urls(description: str, stored: str | None = None, session: bool = False) -> str:
+    """A session's description with a bare http(s) URL in it, put right instead of refused (_gate_bare_urls): each URL the stored description does not already hold is written as a link to itself,
+    `[url](url)` (bullet_text.link_bare_urls: the address ends at its last URL character, one inside an angle autolink, a link, a reference definition, an attribute or code is left alone, nothing else changes), and the
+    reply says so and shows the addresses (call_log.fixed). The text as given for a script's or the server's own write (not judged), when it holds no new bare URL, when it breaks the description's form for a reason other
+    than a long bullet (the line cap, or a line that is no bullet: the gates refuse it, and it is not scanned), or when a URL would still be bare after the change (the gate then refuses it as before). next and ask keep
+    their refusal: a link in a step or a question is the writer's to word."""
+    if not session or not description:
+        return description
+    bad = _description_fault(description)
+    if bad and bad[0] != "long":
+        return description
+    old = set(_bt.bare_urls(str(stored or "")))
+    if not [u for u in _bt.bare_urls(description) if u not in old]:
+        return description
+    res = _bt.link_bare_urls(description, old)
+    if res is None or res[0] == description:
+        return description
+    new, linked = res
+    if stored is not None and new.strip() == str(stored).strip():          # the same text again, already stored as links: nothing is changed, so nothing is counted or told
+        return new
+    n = len(linked)
+    shown = ", ".join(_clip_line(u, 60) for u in linked[:3]) + (f" and {n - 3} more" if n > 3 else "")
+    _calls.fixed("description-url", f"{n} bare address{'' if n == 1 else 'es'} in the description {'was' if n == 1 else 'were'} written as a link to itself, the address as the link's text and target ({shown}): the page links a bare address by its own rule for where it ends, so the link stores the address exactly; "
+                 "to give a link words, write `[words](address)`", fields=["description"], stored=new, sent=description)
+    return new
+
+
 def _when_idle() -> str:
     """What a session does about a recycle no item covers, read at use: run [fleet] recycle_when_idle with its reason (the fleet
     tool runs the recycle once the box is idle), or, with no such command configured, nothing: the change waits for the next one."""
@@ -138,6 +181,12 @@ def fix_long_bullets(desc: str, stored: str | None = None) -> tuple[str, str]:
     return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server at the end of a sentence"
 
 
+def _description_fault(desc: str) -> tuple[str, str, int] | None:
+    """The first fault of a description's form (bullet_text.judge; with [description] require_bullets = false the line cap alone), None when it keeps it."""
+    max_lines, line_max = _description_limits()
+    return _bt.judge(desc, max_lines, line_max) if _bullets_on() else (("lines", "", n) if (n := len([ln for ln in desc.splitlines() if ln.strip()])) > max_lines else None)
+
+
 def _gate_description(desc: str, field: str = "description") -> None:
     """A description is short `- ` bullets, one fact each, refused at write time and not only noted. Checks the text
     written in this call and nothing stored (the callers pass it only when the write carries a description, a close included). The judgement is
@@ -150,7 +199,7 @@ def _gate_description(desc: str, field: str = "description") -> None:
     d = _cfg.CFG["description"]
     max_lines, line_max = _description_limits()
     fix = f"write short `- ` bullets, one fact each (at most {max_lines} lines of {line_max} characters; parallel bullets such as batches, steps or parts go under one parent bullet, indented two spaces); details go on the project page"
-    bad = _bt.judge(desc, max_lines, line_max) if _bullets_on() else (("lines", "", n) if (n := len([ln for ln in desc.splitlines() if ln.strip()])) > max_lines else None)
+    bad = _description_fault(desc)
     if bad:
         kind, ln, n = bad
         if kind == "lines":
@@ -259,7 +308,7 @@ def _gate_next(next_: str, has_ask: bool = False, session: bool = False) -> None
 
 
 def _require_marks() -> bool:
-    """[metadata.next] require_marks (default true): a write of next that drops an open step without marking it done or dropped is refused. false is the way back: the step reads as dropped, with nobody and no time."""
+    """[metadata.next] require_marks (default true): a write of next that leaves out an open step of the writer's without marking it done, dropped or reworded keeps the step open (the update carries its line over and the reply says so; a line rewritten with words added is refused). false is the way back: the step reads as dropped, with nobody and no time."""
     return bool(_cfg.CFG.get("metadata", {}).get("next", {}).get("require_marks", True))
 
 

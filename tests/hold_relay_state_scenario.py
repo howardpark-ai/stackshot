@@ -9,7 +9,7 @@ refused with the ask_by date wording, not the reason until's refusal gives.
   1  hold ends the state   hold=true + wake (or ask_by) on a relay or event wait stored beside state doing: the model has no conflict, the stored state is gone, the wait stays a relay or event wait with its
                            date, no hold flag; the reply says the state was dropped
   2  hold, no state        a relay wait with no stored state is unchanged: accepted, no flag, no state note
-  3  wake with a time      wake=<day>T10:00 (and ask_by, and hold with either) on a relay or event wait is refused with the until wording (the ask-by day is YYYY-MM-DD, with no time of day), nothing stored
+  3  wake with a time      wake=<day>T10:00 (and ask_by, and hold with either) on a relay or event wait is fixed, not refused: the day is stored, the time dropped, and the call log counts an ask-by-day fix
   4  unchanged             a hold on an item with no wait still ends its stored state and sets the flag
   5  derived state         a relay or event wait whose needs name only a session and that stores no state lists no alive-state conflict; with a stored doing state it does, and a hold clears it;
                            an anchor wait is not exempt
@@ -119,15 +119,22 @@ out = bupd(5, hold=True, wake=w(3))
 check("2 a relay wait with no stored state: accepted as before, no state note", not mt(5).get("hold") and W.stored_until(mt(5)) == w(3) and "stored state" not in out and not conflicts("a5"), (mt(5), out[-500:]))
 
 # ================================================================ 3. a wake with a time of day on a relay or event wait
-TIME_MSG = "on a relay or event wait wake is its ask-by day, YYYY-MM-DD with no time of day"      # the until path's wording (tests/hold_relay_wake_scenario.py), with the parameter the call gave
+from stackshot.core import call_log as CL
+def fixed_by(fn):
+    tok = CL.begin()
+    try: fn()
+    finally: fx = CL.end(tok)
+    return fx
 item(6, **REL); item(7, **EVT)
 for i, nm in ((6, "relay"), (7, "event")):
-    refused(f"3 wake with a time of day on a {nm} wait is refused with the reason", lambda i=i: bupd(i, wake=w(3) + "T10:00"), TIME_MSG, w(3))
-    refused(f"3 hold=true + wake with a time of day on a {nm} wait is refused with the reason", lambda i=i: bupd(i, hold=True, wake=w(3) + "T10:00"), TIME_MSG)
-    refused(f"3 ask_by with a time of day on a {nm} wait is refused as before, by the model's own ask_by check", lambda i=i: bupd(i, ask_by=w(3) + "T10:00"), "ask_by is YYYY-MM-DD, a real date")
-    check(f"3 …nothing was stored on the {nm} wait", W.stored_until(mt(i)) == w(5) and not mt(i).get("hold"), mt(i))
-bupd(6, wake=w(3))
-check("3 wake with the day alone on a relay wait is accepted", W.stored_until(mt(6)) == w(3), mt(6))
+    kinds = fixed_by(lambda i=i: bupd(i, wake=w(4) + "T10:00"))
+    check(f"3 wake with a time of day on a {nm} wait is fixed: the day is stored, the time dropped, the fix is counted", W.stored_until(mt(i)) == w(4) and [k for k, _ in kinds] == ["ask-by-day"] and "wake" in kinds[0][1], (mt(i), kinds))
+    kinds = fixed_by(lambda i=i: bupd(i, hold=True, wake=w(3) + "T10:00"))
+    check(f"3 hold=true + wake with a time of day on a {nm} wait is fixed the same way", W.stored_until(mt(i)) == w(3) and not mt(i).get("hold") and [k for k, _ in kinds] == ["ask-by-day"] and "wake" in kinds[0][1], (mt(i), kinds))
+    kinds = fixed_by(lambda i=i: bupd(i, ask_by=w(2) + "T10:00"))
+    check(f"3 ask_by with a time of day on a {nm} wait is fixed the same way", W.stored_until(mt(i)) == w(2) and "T" not in str(W.stored_until(mt(i))) and [k for k, _ in kinds] == ["ask-by-day"] and "ask_by" in kinds[0][1], (mt(i), kinds))
+    kinds = fixed_by(lambda i=i: bupd(i, wake=w(1)))
+    check(f"3 …the day alone on the {nm} wait is no fix", W.stored_until(mt(i)) == w(1) and kinds == [], (mt(i), kinds))
 item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", post_wake_mover=BACK)
 bupd(8, wake=w(3) + "T10:00")
 check("3 a wake with a time of day on an anchor wait is still accepted", W.stored_until(mt(8)) == w(3) + "T10:00", mt(8))

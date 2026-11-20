@@ -54,9 +54,8 @@ notes it.
 
 ## text ITEM_FORM
 subject (a create's, or one an update sets): the outcome wanted ("Make X work when Y"), never the symptom ("X fails
-when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is refused: the rest goes in the
-description bullets. An update that leaves subject out, or sets the one it has, is never refused for a stored long
-subject. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
+when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is cut at a word (the reply says so): the
+rest goes in the description bullets. An update that leaves subject out or sets the stored one is never refused for its length. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
 lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); split a longer
 fact into two bullets or put it on the project page; prose, a longer line and more lines are refused. The first bullet
 opens `Goal:` (case-sensitive) with the outcome wanted in a sentence (the subject names the same outcome); a symptom,
@@ -89,7 +88,7 @@ this one>). Right: next="my-x: ship the export once board#N closes", after=["boa
 lines the call sets are checked; a line that only mentions an item ("see board#N") is not a deferral; on an item
 waiting on his call (needs=decision) write "see board#N", not after=; wake=YYYY-MM-DD is the way to be reminded on a
 day. Links sit on the words (`blocked on [#7](url)`), never a naked URL or a bare id: a naked http(s) URL in
-description, next or ask is refused, write `[words](url)` (a code span or fence is fine). needs: whose move it is now
+next or ask is refused, in a description it becomes a link to itself; write `[words](url)` (a code span or fence is fine). needs: whose move it is now
 (the list is described below). due: YYYY-MM-DD {{TIMEZONE}}, set only from a real deadline ({{OWNER}}'s word, an
 outside date, or a date a dependency fixes), otherwise left empty: a made-up date reads to {{OWNER}} as their own
 deadline (to expect something back by a date, use a wake). ask: the line a needs=decision item carries, written so
@@ -190,7 +189,7 @@ online): the server reads it itself and the item turns within a minute or two of
 waiting on a date for an offline machine says wait_event="box_online <machine>" with that date as ask_by instead; the
 machine must be one the fleet knows (an unknown name is refused with the known ones). The backstop must be after now,
 and a day (ask_by=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already
-past: give tomorrow at the earliest (a relay or event wait takes the day alone, with no time of day). A wait for
+past: give tomorrow at the earliest (a relay or event wait takes the day alone: a time of day is dropped). A wait for
 something that has already happened (a PR already merged or live, a machine already online) is refused; a recycle wait
 never asks for a recycle (it waits for the next one). A step of his, or needs holding decision, makes him the mover: a
 write that names a session as mover beside it is refused (leave mover out, or mover={{OWNER}}, and put the session in

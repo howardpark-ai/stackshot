@@ -28,6 +28,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchor_scope as _ascope
 from stackshot.anchors import anchors as _anc
+from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.fleet.sessions_registry import _session_label
@@ -310,6 +311,17 @@ def _stale_wait_notes(item_was: dict[str, Any], item: dict[str, Any], keeper: st
     if len(lines) > _STALE_WAIT_NOTE_MAX:
         lines = lines[:_STALE_WAIT_NOTE_MAX] + [f"(note: {len(lines) - _STALE_WAIT_NOTE_MAX} more next lines still wait on an item whose wait was just cleared)"]
     return "".join("\n" + ln for ln in lines)
+
+
+def _left_out(dry_meta: dict[str, Any], steps_old: list[dict[str, Any]], done_ix: list[int], drop_ix: list[int], reword_ix: dict[int, str], keeper: str) -> tuple[list[int], bool]:
+    """What a write of next (`dry_meta`: the item's metadata with the write put in) does to the open steps, lined up as steps.apply lines them (next_rules.moves): (the positions of the open steps it leaves out with no word on
+    them, whether a new line is a leaving step's text with words added: the rewrite N3 refuses). A step this call marks done or dropped or rewords is not left out, and the new words of a reword are not a new line."""
+    text = _fg._nl_text_without(dry_meta, [steps_old[i]["text"] for i in (*done_ix, *drop_ix)], keeper)
+    leaving, arriving = _nr.moves(steps_old, done_ix, drop_ix, text)
+    skip = {*drop_ix, *reword_ix}
+    worded = {_steps.key(t) for t in reword_ix.values()}
+    fresh = [c for c in arriving if _steps.key(c) not in worded]
+    return [i for i, _t in leaving if i not in skip], bool(_nr.growths([t for i, t in leaving if i not in skip], fresh))
 
 
 def _dropped_line_shown(text: str) -> str:
@@ -725,6 +737,9 @@ def update_unlocked(
             work_spec = _work.parse(work)
         except ValueError as e:
             raise ToolError(f"Refused: {e}")
+        if work_spec.get("cut"):
+            _calls.fixed("work-cut", f"the status line was {work_spec['cut']} characters and the limit is {_work.TEXT_MAX}: it was cut at the last word that fits and ends with an ellipsis, as \"{work_spec['text']}\"; to change it, send a shorter one",
+                         fields=["work"], stored=work_spec["text"], sent=str(work))
         work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
         work_writer = _session_label(h.session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
         _gates.gate_work_writer(gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
@@ -783,8 +798,10 @@ def update_unlocked(
         raise ToolError("Refused: a completed item keeps no draft (a close drops it); draft goes with an open item")
     if state_change:
         h.refuse_if_owing(debtor)
+    description = _fg.fix_bare_urls(description, str(item_was.get("description") or ""), session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     _fg._gate_bare_urls({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was}, session=_writes.session_next())   # only the fields this call sets; a stored bare URL is no reason to refuse
     if subject:
+        subject = _fg.fix_long_subject(subject, str(item.get("subject") or ""))       # a subject over the limit is cut at its last word that fits (the reply says so)
         _fg._gate_subject(subject, str(item.get("subject") or ""))
         item["subject"] = subject
     if description:
@@ -847,6 +864,18 @@ def update_unlocked(
     if next_touch:
         dry_meta = json.loads(json.dumps(meta))
         h.next_put(dry_meta, next, next_writer, keeper_was, wipe=clear_next, drop_own=next_drop)      # a dry run: a refusal comes before anything is written or told
+        if steps_on and not closing and not clear_next and _fg._require_marks():       # an open step of the writer's that next leaves out with no word on it stays open: its line is carried over unchanged, and the reply says so
+            left_ix, grown = _left_out(dry_meta, steps_old, done_ix, drop_ix, reword_ix, keeper_was)
+            if left_ix and grown and _writes.session_next():      # a line rewritten with words added is refused below as ever (N3), not carried over beside its longer twin
+                left_ix = []
+            if left_ix:
+                one = len(left_ix) == 1
+                _calls.fixed("step-kept", f"next no longer listed {'an open step' if one else 'open steps'} of yours and the call did not say what became of {'it' if one else 'them'}, so {'it stays' if one else 'they stay'} open as written: "
+                             + "; ".join(f"{i + 1}. {_clip_line(_steps.first_line(steps_old[i]['text']), 90)}" for i in left_ix)
+                             + f". Mark {'it' if one else 'each'} with done=[n] or dropped=[n] when it is finished or no longer wanted, or give it new words with reword={{n: \"new words\"}}")
+                next, next_drop = _steps.carry(next, steps_old, left_ix), False
+                dry_meta = json.loads(json.dumps(meta))
+                h.next_put(dry_meta, next, next_writer, keeper_was, wipe=clear_next, drop_own=next_drop)
         next_after = dry_meta.get("next")
     if status:
         if status == "on_hold":   # a retired status: on hold is a property of an open item
