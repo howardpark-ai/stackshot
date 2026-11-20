@@ -479,6 +479,74 @@ check("a done check's close writes a reason within 120 characters, starting with
 it66 = _service_store._load("a66"); wait_gates_svc._watch_close(it66, "dropped on his answer on the board: " + "something " * 40, time.time())
 check("a watcher's drop writes a reason within 120 characters", it66["status"] == "completed" and 0 < len(it66["metadata"]["reason"]) <= 120, it66["metadata"].get("reason"))
 
+# ---- 6k. an update that drops lines of the description says which; the write itself is as before
+def upd_desc(gid, desc): return _update_svc._update(gid, description=desc, sender=MAIN)
+def stored_desc(gid): return _service_store._load(gid)["description"]
+def dropped_lines(out): return [ln for ln in out.splitlines() if ln.startswith("(note: this write dropped")]
+OLD = "- Goal: Keep the thing running\n- It lives on the demo-box under /srv/thing\n- Done when the check passes"
+_, d1 = create(OLD)
+NEW1 = "- Goal: Keep the thing running\n- Done when the check passes"
+o1 = upd_desc(d1, NEW1)
+check("dropped: one line gone → one note that names the old text", len(dropped_lines(o1)) == 1 and "dropped 1 line of the old description" in o1 and '"It lives on the demo-box under /srv/thing"' in o1, o1)
+check("dropped: …the note sits in the reply after the item block, on its own line, and the write is stored as sent", o1.startswith("updated ") and o1.find("(note: this write dropped") > o1.find("\n") > 0 and stored_desc(d1) == NEW1, (o1, stored_desc(d1)))
+_, d2 = create(OLD + "\n- A third fact about it")
+NEW2 = "- Goal: Keep the thing running\n- Done when the check passes"
+o2 = upd_desc(d2, NEW2)
+check("dropped: several lines gone → one note with every old line", len(dropped_lines(o2)) == 1 and "dropped 2 lines" in o2 and "It lives on the demo-box under /srv/thing" in o2 and "A third fact about it" in o2, o2)
+check("dropped: …stored as sent", stored_desc(d2) == NEW2)
+_, d3 = create(OLD + "\n  - a child bullet under it")
+NEW3 = "- Done when the check passes\n-   Goal:   Keep the thing running\n- a child bullet under it\n  - It lives on the demo-box under /srv/thing"
+o3 = upd_desc(d3, NEW3)
+check("dropped: a line that is reordered, re-indented, re-spaced or moved under another bullet is kept → no note", "dropped" not in o3, o3)
+check("dropped: …and it is stored as sent", stored_desc(d3) == NEW3, stored_desc(d3))
+_, d4 = create(OLD)
+NEW4 = "- Goal: Keep the thing running\n- It lives on the demo-box under /srv/other\n- Done when the check passes"
+o4 = upd_desc(d4, NEW4)
+check("dropped: a reworded line counts as dropped, with its old text, and says so", len(dropped_lines(o4)) == 1 and "dropped 1 line" in o4 and "/srv/thing" in dropped_lines(o4)[0] and "/srv/other" not in dropped_lines(o4)[0]
+      and "reworded line counts as dropped" in o4, o4)
+check("dropped: …the new wording is what is stored", stored_desc(d4) == NEW4)
+o5 = _update_svc._update(d4, priority="p2", sender=MAIN)
+check("dropped: an update that does not pass a description gives no note", "dropped" not in o5, o5)
+o5b = upd_desc(d4, NEW4)
+check("dropped: the description sent back as stored gives no note", "dropped" not in o5b, o5b)
+o5c = upd_desc(d4, NEW4 + "\n- Added: a new fact")
+check("dropped: a line added and none removed gives no note", "dropped" not in o5c, o5c)
+r6, d6 = create(OLD)
+check("dropped: a create gives no note", "dropped" not in r6, r6)
+_, d7 = create("\n".join(["- Goal: Keep the thing running"] + [f"- Old fact number {i}" for i in range(1, 8)]))
+o7 = upd_desc(d7, "- Goal: Keep the thing running")
+n7 = dropped_lines(o7)
+check("dropped: at most five lines are named, then a count of the rest", len(n7) == 1 and "dropped 7 lines" in n7[0] and "Old fact number 5" in n7[0] and "Old fact number 6" not in n7[0] and n7[0].rstrip(")").endswith("and 2 more"), n7)
+check("dropped: …the write is stored as sent", stored_desc(d7) == "- Goal: Keep the thing running")
+_, d8 = create("- Goal: Keep the thing running\n- See [the long page](https://link.test/" + "a" * 130 + ") for it")
+o8 = upd_desc(d8, "- Goal: Keep the thing running")
+n8 = dropped_lines(o8)
+check("dropped: a long old line that holds a long link keeps the whole link, the cut runs on to the link's end", len(n8) == 1 and "a" * 130 in n8[0] and "for it" not in n8[0] and n8[0].endswith('…")'), n8)
+DOCS = "https://docs.example.com/projects/some/very/long/path/to/the/design/document/with/a/long/name/and/anchor?x=1&y=2#section-nine"
+_, d8c = create("- Goal: Keep the thing running\n- Design is in [the design page](" + DOCS + ") now")
+n8c = dropped_lines(upd_desc(d8c, "- Goal: Keep the thing running"))
+check("dropped: …the review's example: the link target is in the note and the cut falls after the link", len(n8c) == 1 and f"[the design page]({DOCS})" in n8c[0] and "now" not in n8c[0].split("keep:")[1], n8c)
+_, d8d = create("- Goal: Keep the thing running\n- A fact first, then words " + "word " * 10 + "and [a link](https://link.test/" + "b" * 50 + ") after that")
+n8d = dropped_lines(upd_desc(d8d, "- Goal: Keep the thing running"))
+check("dropped: …a word cut that lands inside a link moves to the link's end too", len(n8d) == 1 and "b" * 50 + ")" in n8d[0] and "after that" not in n8d[0], n8d)
+_, d8e = create("- Goal: Keep the thing running\n- Long link [here](https://link.test/" + "c" * 600 + ") end")
+n8e = dropped_lines(upd_desc(d8e, "- Goal: Keep the thing running"))
+q8e = n8e[0].split('keep: "')[1].rstrip(')').rstrip('"') if n8e else ""
+check("dropped: …a link past the hard cap is cut plainly at it", len(n8e) == 1 and q8e.endswith(" …") and len(q8e) == _update_svc._DROPPED_NOTE_LINK_MAX + 2 and "c" * 200 in q8e, (n8e, len(q8e)))
+check("dropped: the hard cap is a named constant above the line cap", _update_svc._DROPPED_NOTE_LINK_MAX == 300 > _update_svc._DROPPED_NOTE_LINE_MAX)
+_, d8f = create("- Goal: Keep the thing running\n- Same fact\n- Same fact")
+o8f = upd_desc(d8f, "- Goal: Keep the thing running")
+check("dropped: a duplicate line counts once", len(dropped_lines(o8f)) == 1 and "dropped 1 line of" in o8f and o8f.count('"Same fact"') == 1, o8f)
+_, d8b = create("- Goal: Keep the thing running\n- " + "word " * 12 + "end")
+_cap_was = _update_svc._DROPPED_NOTE_LINE_MAX; _update_svc._DROPPED_NOTE_LINE_MAX = 30
+try: n8b = dropped_lines(upd_desc(d8b, "- Goal: Keep the thing running"))
+finally: _update_svc._DROPPED_NOTE_LINE_MAX = _cap_was
+check("dropped: …the length each old line is cut to is the named constant", len(n8b) == 1 and '"word word word word word word …"' in n8b[0] and "end" not in n8b[0], n8b)
+_, d9 = create(OLD)
+check("dropped: the constants for the cap are named in the service", _update_svc._DROPPED_NOTE_MAX == 5 and _update_svc._DROPPED_NOTE_LINE_MAX == 120)
+r9 = _update_svc._update(d9, status="completed", outcome="done", reason="finished", outcome_text="- It ended well", sender=MAIN)
+check("dropped: a close that passes no description gives no note", "dropped" not in r9, r9)
+
 # ---- 7. the tool texts state the limits
 TOOLS = {t.name: t.description or "" for t in __import__("asyncio").run(server.mcp.list_tools())}
 for tool in ("create", "update", "complete"):
