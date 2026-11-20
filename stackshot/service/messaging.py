@@ -256,7 +256,7 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
         return ""
 
 
-ASKED_LOOKBACK_HOURS = 24       # an answer is to a question the front agent (or its project) put to the sender within this long: the message log is read back this far
+ASKED_LOOKBACK_HOURS = 24       # an answer is to a question the front agent itself put to the sender within this long: the message log is read back this far
 _LOG_TAIL_BYTES = 800_000      # and no further than this much of its end
 
 
@@ -284,18 +284,15 @@ def _idset(who: str, idx: dict[str, dict[str, Any]]) -> set[str]:
     return out
 
 
-def asked_by(front: str, project: str, sender: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], now: float | None = None) -> bool:
-    """Was `sender` asked something, within ASKED_LOOKBACK_HOURS, by the front agent or by an agent of its project? The one signal the relay already keeps for it: a row of the message log (`MSG_LOG`, one line
-    per message sent through the message tool) whose `from` is the front agent or a session the project's page lists, whose `to` is the sender, that was delivered (not a failed or timed-out send) and whose text holds a question mark. A message that went to a page key or to nobody logs no
+def asked_by(front: str, sender: str, idx: dict[str, dict[str, Any]], now: float | None = None) -> bool:
+    """Was `sender` asked something, within ASKED_LOOKBACK_HOURS, by the front agent itself? A question another agent of the project put to the sender is that agent's, and its answer goes back to it. The one signal the relay already keeps for it: a row of the message log (`MSG_LOG`, one line
+    per message sent through the message tool) whose `from` is the front agent, whose `to` is the sender, that was delivered (not a failed or timed-out send) and whose text holds a question mark. A message that went to a page key or to nobody logs no
     such row, so an answer to one is not known as an answer: it is held or sent to the builder as any other. False on any doubt."""
     try:
         me = _idset(sender, idx)
         if not me:
             return False
-        peers: set[str] = set()
-        for n in {front, *(n for n, r in roles.items() if r.get("project") == project)}:
-            peers |= _idset(n, idx)
-        peers -= me
+        peers = _idset(front, idx) - me
         if not peers:
             return False
         floor = (time.time() if now is None else now) - ASKED_LOOKBACK_HOURS * 3600
@@ -325,12 +322,12 @@ def background_of(project: str) -> str:
 
 
 def answer_route(front: str, project: str, sender: str, raw: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], via: str = "", nid: str = "") -> tuple[str, str]:
-    """What becomes of a message with no need of the person that comes from `sender` to the front agent `front`, when it is an answer to a question the front agent or its project put to the sender (asked_by):
+    """What becomes of a message with no need of the person that comes from `sender` to the front agent `front`, when it is an answer to a question the front agent itself put to the sender (asked_by):
     ("deliver", "") the person is in that conversation (his last message to the front agent within [presence] minutes, 30 by default: telling.presence_here), so it goes back to the agent, unmarked;
     ("items", reply) he is not, and the text names one to REPORT_ITEMS_MAX open items, none waiting on his decision or naming the agent in its needs: it is written onto them (_write_on_items, once per `nid`, a router notice) and `reply` says so;
     ("hold", why) he is not, and no item can carry it (it names none, a closed one, or one that waits on his decision): the front gate holds it for the agent's next turn. ("", "") it is no answer (the sender was not written to), so the caller applies its other rules. Never raises."""
     try:
-        if not sender.strip() or not asked_by(front, project, sender, idx, roles):
+        if not sender.strip() or not asked_by(front, sender, idx):
             return "", ""
         if _telling.presence_here(front, idx=idx):
             return "deliver", ""
@@ -378,7 +375,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
       marked ([for <owner>] on its first non-empty line): it needs him, and is delivered; unless it says in a fixed phrase that nothing is needed from him (a done, taken or no-ask note): refused, one line;
         a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
       unmarked, from the person himself or with the mark or needs: decision away from the first line: refused, the mark goes on the first line;
-      unmarked, an answer to a question the front agent or its project put to the sender (answer_route): delivered while he is in that conversation, else written onto the item it names, else held;
+      unmarked, an answer to a question the front agent itself put to the sender (answer_route): delivered while he is in that conversation, else written onto the item it names, else held;
       unmarked, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
       a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
       any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).

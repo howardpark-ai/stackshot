@@ -15,7 +15,7 @@ already moves it, or it waits on a decision): the agent is then not named, the r
 to hand the item over is update(mover=<agent>). An item id cited only for context, not handed over, goes in backticks,
 since a plain-word id names the receiver on that item. A front agent is given a turn only by what {{OWNER}} has to do: its
 message carries {{FOR_OWNER}} on its first line (except fyi=true, below). An unmarked message is delivered only as
-the answer to a question it (or its project) wrote to you, while he is in that conversation (30 minutes); later
+the answer to a question it wrote to you, while he is in that conversation (30 minutes); later
 it goes onto the item it names, else is held; so is a front peer's or the background agent's own. Any other is refused, naming
 the project's background agent (none: held). A done, taken or
 no-action note (a plain status report, nothing needed from {{OWNER}}, FYI, no reply needed, …), marked or not, is refused: write it on the board item (update, complete) or say nothing. A background agent's
