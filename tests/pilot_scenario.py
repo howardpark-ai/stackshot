@@ -1200,8 +1200,8 @@ check("minute loop: no next wake while nothing is on hold", wakes_svc.next_wake(
 # an item waiting on the owner is never held. The refusal
 # names the after form; a hold whose next says it waits on him is noted, never refused (a wake on an item he has answered is fine)
 check("hold (owner wait): the refusal names the after form for a hold that waits on the owner's decision",
-      f"An item waiting on {_core_instance.OWNER} is never parked: needs=decision with its ask, or after=[<the item that carries the ask>]" in e, e)
-NOTE_OWNER = f"this hold's next says it waits on {_core_instance.OWNER}: an item waiting on {_core_instance.OWNER} is never parked. Give it needs=decision with its ask, or after=[<the item that carries the ask>]"
+      f"An item waiting on {_core_instance.OWNER}'s call is parked with needs=[<session>] and mover={_core_instance.OWNER} (his ask returns at the date); to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>]" in e, e)
+NOTE_OWNER = f"this hold's next says it waits on {_core_instance.OWNER}: park his call with needs=[<session>] and mover={_core_instance.OWNER} (his ask returns at the date), or give it needs=decision with its ask, or after=[<the item that carries the ask>]"
 for i in (74, 75, 76): item(i, "projects/beta", B)
 res = _update_svc._update("a74", hold=True, wake=D(2), next=f"waiting on {_core_instance.OWNER}'s call on the pricing", sender="home-beta")
 check("hold (owner wait): a hold whose next says it waits on the owner gets the note and still applies", NOTE_OWNER in res and held_("a74") and wk_(rd("a74")["metadata"]) == D(2), res)
@@ -1483,7 +1483,7 @@ check("decision + hold flag: the server's views agree (get, the brief's lanes)",
       and "on hold" not in _get_tool._fmt({**rd("a35"), "gid": "a35"}).splitlines()[0])
 res = _update_svc._update("a35", next="prepping the options", sender="home-beta"); m_ = rd("a35")["metadata"]
 check("decision + hold flag: any write drops the hold, keeps its date, and says so",
-      "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its date " + D(4) + " stays, and no date parks an item on his call" in res, res)
+      "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its date " + D(4) + " stays)" in res, res)
 res = _update_svc._update("a35", hold=True, wake=D(5), sender="home-beta"); m_ = rd("a35")["metadata"]
 check("decision: hold=true on it parks nothing (the hold is dropped, the wake stays), never refused", "hold" not in m_ and wk_(m_) == D(5) and "the hold is dropped" in res, res)
 for i in (30, 25, 34, 31, 35, 36, 37): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: later checks count the open items

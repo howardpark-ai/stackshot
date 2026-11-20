@@ -294,7 +294,7 @@ def _state_check_notes(item: dict[str, Any]) -> list[str]:
     who = _states.next_names_owner(m.get("next"), OWNER)
     if who:
         s = _eff_state(item)
-        if s in _states.AGENT_STATES:
+        if s in _states.AGENT_STATES and not _item_read.parked_for_owner(item):      # a call parked for him names him in next on purpose
             out.append(f"note: next names {who} but the state is {s}: pass step=… (or needs=decision with an ask)")
     _hits, broad = _hooks().wait_words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))
     if broad:

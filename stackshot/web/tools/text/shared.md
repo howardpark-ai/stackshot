@@ -19,8 +19,8 @@ item counts as waiting without a hold, and when the last one closes it wakes and
 mover) are told; a dropped one releases it too, a superseded one is followed to its replacement; a loop is refused;
 after="none" clears. after is for a real dependency (this item needs that one's output), never for the order a builder
 takes its items in. A hold (hold=true) names what it waits for (a wake, after items, an anchor notice, a recycle, or a
-wait_basis window); one with none is refused. An item waiting on {{OWNER}} is never on hold: it carries needs=decision
-with its ask, or after=<the item that carries the ask>. needs names only who can move now. An item that waits on
+wait_basis window); one with none is refused. An item waiting on {{OWNER}} carries needs=decision
+with its ask, or after=<the item that carries the ask>; to park his call, see update (hold, mover={{OWNER}}). needs names only who can move now. An item that waits on
 {{OWNER}} and on a session at once: where his answer could change with the session's work, or its work with his
 answer, the session goes first and adds decision when it is done (or the decision is its own item, linked with
 after=); decision sits beside this project's background agents only when the two are independent (beside any other

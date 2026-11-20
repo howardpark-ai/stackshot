@@ -1512,7 +1512,7 @@ def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fal
     wake_day = h.wake_at(wake).date()
     why = _wt.basis_problem(t, wake_day)
     if why:
-        raise ToolError(f"Refused: wait_basis must name the real-world date the wait stands on as a real YYYY-MM-DD, from the wake day ({wake_day.isoformat()}) to "
+        raise ToolError(f"Refused: wait_basis must name the real-world date the wait stands on as a real YYYY-MM-DD, from the wake or ask-by day ({wake_day.isoformat()}) to "
                         f"{_wt.BASIS_WINDOW_DAYS} days after it: {why}. \"The vendor visits Tue 2099-03-10 14:00\" on a wake of 2099-03-10 is a basis; "
                         "a date years off, or one that is not on the calendar, is a way around the rule")
     return t

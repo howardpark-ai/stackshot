@@ -282,8 +282,9 @@ check("5 end: a legacy outside item's chase day is its ask-by (a write that touc
 
 # ================================================================ 6. decision with a hold
 item(80, needs=[BACK])
-refused_nw("6 decision + hold: needs decision with a hold is refused, saying an ask for later is a time wait", 80, lambda: upd(80, needs=["decision"], ask=ASK, hold=True, wake=day(3), wait_basis=f"visit on {day(4)}"),
-           "needs holds decision together with a hold", "an ask for later is a time wait that", "clear_hold=true", "mover=")
+refused_nw("6 decision + hold: needs decision with a hold is refused, and the refusal says the way: hand the item to a session, hold with him as the mover, the ask and options come back", 80,
+           lambda: upd(80, needs=["decision"], ask=ASK, hold=True, wake=day(3), wait_basis=f"visit on {day(4)}"),
+           "needs holds decision together with a hold", "needs=[<session>]", "mover=", "the same ask and options", "clear_hold=true", none=("an ask for later is a time wait",))
 upd(80, needs=["decision"], ask=ASK)
 check("6 decision + hold: …a decision without the hold passes", "decision" in mt(80)["needs"], mt(80))
 item(81, needs=["decision"], ask=ASK, hold=True, wake=day(3))
@@ -293,6 +294,105 @@ check("6 decision + hold: …clear_hold is the fix", "hold" not in mt(81), mt(81
 item(96, needs=["decision"], ask=ASK, hold=True, wake=day(3))
 upd(96, description="- A thing\n- It lives here, changed\n- Done when done")
 check("6 decision + hold: …an update that does not touch them passes (and drops the stale hold, as before)", rd(96)["description"].endswith("changed\n- Done when done") and "hold" not in mt(96), mt(96))
+
+# ---- 6d. a decision parked for a date: the ask and options wait on the item and come back as his call at the wake
+from stackshot.web.tools import update as _wt_update
+from stackshot.service import watching as _watching
+from stackshot.service import wakes as _wakes
+OPTS = [{"label": "Go", "line": "Ship it now.", "recommended": True}, {"label": "Wait", "line": "Hold it a week.", "recommended": False}]
+PARK = dict(needs=[BACK], mover=OWN, hold=True, wait_basis=f"Oliver is away until {day(3)}")
+_model_view_phase = lambda i: mt(i).get("phase")      # the phase the model stores beside the item: alive, waiting
+def wake_all(): return _watching.watch_pass(time.time() + 6 * DAY), _wakes.wake_pass()
+item(110, needs=["decision"], ask=ASK, options=OPTS)
+upd(110, wake=day(3), **PARK)
+check("6d park: a decision is parked as a hold with a session in needs and him as the mover; its ask and options stay exactly as written", mt(110).get("ask") == ASK and mt(110).get("options") == OPTS and mt(110)["needs"] == [BACK], mt(110))
+check("6d park: …it shows as waiting (not his move) until the date, with him as the one who picks it up", _model_view_phase(110) == "waiting" and mt(110)["mover"] == OWN, (mt(110), _model_view_phase(110)))
+check("6d park: …and its page says he picks it up when the wait ends", f"mover: {OWN} (picks it up when the wait ends)" in _wt_get.stackshot_get("a110"), _wt_get.stackshot_get("a110")[:300])
+woke_a = wake_all()
+check("6d wake: at the date it is his call again, needs decision, with the same ask and the same options", mt(110)["needs"] == ["decision"] and mt(110)["ask"] == ASK and mt(110)["options"] == OPTS, (mt(110), woke_a))
+check("6d wake: …alive, with him as the mover, and the page shows the ask and options", _model_view_phase(110) == "alive" and f"mover: {OWN}" in _wt_get.stackshot_get("a110") and ASK in _wt_get.stackshot_get("a110") and "Ship it now." in _wt_get.stackshot_get("a110"), _wt_get.stackshot_get("a110")[:400])
+item(111, needs=["decision"], ask=ASK, options=OPTS)
+upd(111, clear_needs=True)
+upd(111, mover=OWN, hold=True, wake=day(3), wait_basis=f"Oliver is away until {day(3)}")
+check("6d park: the ask and options also survive when the session is dropped from needs first (clear_needs), then the hold is set", mt(111).get("ask") == ASK and mt(111).get("options") == OPTS and _model_view_phase(111) == "waiting", mt(111))
+wake_all()
+check("6d wake: …and that route wakes the same way", mt(111)["needs"] == ["decision"] and mt(111)["ask"] == ASK and mt(111)["options"] == OPTS, mt(111))
+item(119, needs=["decision"], ask=ASK)
+upd(119, wake=day(3), **PARK)
+wake_all()
+check("6d wake: a parked ask stored with no options comes back as that ask, a yes/no (options are stored only when the item had them)", mt(119)["needs"] == ["decision"] and mt(119)["ask"] == ASK and not mt(119).get("options"), mt(119))
+item(404, needs=["decision"], ask="not a valid ask", options=OPTS)
+upd(404, wake=day(3), **PARK)
+wake_all()
+check("6d wake: a stored ask that does not parse still gets the generic question with its two buttons", mt(404)["needs"] == ["decision"] and "whose wait ended" in mt(404)["ask"] and len(mt(404)["options"]) == 2, mt(404))
+item(112, needs=[BACK])
+refused_nw("6d no date: a decision with a hold and no wake time is still refused", 112, lambda: upd(112, needs=["decision"], ask=ASK, hold=True), "hold")
+item(113, needs=[BACK], mover=BACK)
+upd(113, hold=True, wake=day(3), wait_basis=f"the vendor ships on {day(3)}")
+wake_all()
+check("6d plain hold: a hold with no decision in it parks and wakes as before: no ask made up, no decision raised", "decision" not in mt(113).get("needs", []) and "ask" not in mt(113), mt(113))
+item(114, needs=["decision"], ask=ASK, options=OPTS)
+upd(114, wake=day(3), **PARK)
+before_114 = raw(114)
+check("6d early answer: his answer on the board while it is parked is answered as an answer to a question that moved: stale, nothing written", answer_svc._answer("a114", "Go", "", "answer") == "stale" and raw(114) == before_114, mt(114))
+
+# ---- 6e. a relay wait parked with a basis: its date stands in ask_by (until), and the basis reads that day
+RB = f"Robin replies by {day(4)}"
+def tried(f):
+    try: return f()
+    except Exception as e: return f"REFUSED {e}"      # a refusal shows in the check below as its text, not as a crash of the suite
+item(115, needs=[BACK])
+out_r1 = tried(lambda: _wt_update.stackshot_update("a115", sender="home-front", wait_kind="relay", wait_event="Robin", hold=True, until=day(4), wait_basis=RB))
+check("6e relay: wait_kind=relay, wait_event, hold=true, until=<day>, wait_basis is accepted (until is the relay's ask-by day; the basis reads it)", mt(115).get("wait_kind") == "relay" and mt(115).get("until") == day(4) and "updated" in out_r1, (mt(115), out_r1))
+check("6e relay: …the basis is stored for that day", _WT.basis_of(mt(115)) == RB, mt(115))
+item(116, needs=[BACK])
+out_r3 = tried(lambda: upd(116, wait_kind="relay", wait_event="Robin", hold=True, ask_by=day(4), wait_basis=RB))
+check("6e relay: the same with the old ask_by name passes too, and needs no wake beside it", mt(116).get("wait_kind") == "relay" and mt(116).get("until") == day(4) and _WT.basis_of(mt(116)) == RB and "wake" not in mt(116), (mt(116), out_r3))
+item(117, needs=[BACK])
+refused_nw("6e relay: a basis with no date at all is still refused", 117, lambda: upd(117, wait_kind="relay", wait_event="Robin", hold=True, wait_basis=RB), "no wake date")
+item(118, needs=[BACK])
+out_r2 = tried(lambda: _wt_update.stackshot_update("a118", sender="home-front", wait_kind="relay", wait_event="Robin", until=day(4)))
+check("6e relay: a relay wait with until alone (no basis) still passes", mt(118).get("until") == day(4) and mt(118).get("wait_kind") == "relay", (mt(118), out_r2))
+# the basis and the cap lift stay on a parked relay (waiting.wake_value reads its ask-by day) through the writes that touch nothing of the wait
+def tool_(i, **kw):
+    try: return _wt_update.stackshot_update(f"a{i}", sender="home-front", **kw)
+    except Exception as e: return f"REFUSED {e}"
+for kind_, who_, far_ in (("relay", "Robin", 30), ("event", "recycle", 30), ("relay", "Robin", 4)):
+    n_ = {30: 420, 4: 424}[far_] + (1 if kind_ == "event" else 0)
+    RBf = f"Robin replies by {day(far_)}"
+    item(n_, needs=[BACK])
+    o_ = tool_(n_, wait_kind=kind_, wait_event=who_, hold=True, until=day(far_), wait_basis=RBf)
+    check(f"6e keep ({kind_}, {far_} days): a parked {kind_} wait with a basis is accepted, and the basis and its cap lift read from the stored date", "updated" in o_ and _WT.basis_of(mt(n_)) == RBf and _WT.cap_words(mt(n_)), (mt(n_), o_))
+    for what_, kw_ in (("a next edit", dict(next=f"{BACK}: look again on {day(far_)}")), ("a description edit", dict(description="- Goal: the thing is done\n- It lives here, changed\n- Done when done")),
+                       ("clear_hold", dict(clear_hold=True)), ("a repeated hold=true", dict(hold=True))):
+        o_ = tool_(n_, **kw_)
+        check(f"6e keep ({kind_}, {far_} days): {what_} keeps the stored basis", "REFUSED" not in o_ and _WT.basis_of(mt(n_)) == RBf, (what_, mt(n_), o_[:300]))
+# the cap: a relay more than a week out needs its basis, and passes with one
+item(428, needs=[BACK]); item(429, needs=[BACK])
+o_far = tool_(428, wait_kind="relay", wait_event="Robin", hold=True, until=day(30), wait_basis=f"Robin replies by {day(30)}")
+check("6e cap: a relay hold 30 days out passes with a basis that names that day", "updated" in o_far and mt(428).get("until") == day(30), (mt(428), o_far[:300]))
+o_nb = tool_(429, wait_kind="relay", wait_event="Robin", hold=True, until=day(30))
+check("6e cap: …and the same date with no basis is refused, nothing written", o_nb.startswith("REFUSED") and "until" not in mt(429) and "hold" not in mt(429), (mt(429), o_nb[:300]))
+
+# ---- 6f. the parked call (a decision handed to the waiting session, him as mover) draws no note that it waits on him, and a wake keeps a yes/no ask
+NOTEWORDS = ("never parked", "this hold's next says it waits on", "the state is", "next names")
+PARKT = dict(needs=[BACK], mover=OWN, hold=True, until=day(10), wait_basis=f"Oliver is away until {day(10)}", next=f"{OWN}: waiting on {OWN}'s call, decide it after {day(10)}")
+item(410, needs=["decision"], ask=ASK, options=OPTS)
+o_p = tool_(410, **PARKT)
+check("6f park: the reply of the parked call carries no note that it waits on him", "updated" in o_p and not any(w in o_p for w in NOTEWORDS), o_p)
+g_p = _wt_get.stackshot_get("a410")
+check("6f park: …nor does its read say the state is an agent's while next names him", not any(w in g_p for w in NOTEWORDS), g_p[:600])
+item(411, needs=["decision"], ask=ASK, options=OPTS, state="your-call")
+o_p2 = tool_(411, **PARKT)
+g_p2 = _wt_get.stackshot_get("a411")
+check("6f park: …also for an item that stored a state before", "updated" in o_p2 and not any(w in o_p2 + g_p2 for w in NOTEWORDS), (o_p2[:300], g_p2[:600]))
+item(412, needs=[BACK], mover=BACK)
+o_n = tool_(412, hold=True, until=day(10), wait_basis=f"the vendor ships on {day(10)}", next=f"{BACK}: waiting on {OWN}'s call, then ship")
+check("6f note: a plain hold whose next says it waits on him still draws the note, and it names the way to park his call", "this hold's next says it waits on" in o_n and f"needs=[<session>] and mover={OWN}" in o_n, o_n)
+item(413, needs=["decision"], ask=ASK)
+upd(413, wake=day(3), **PARK)
+wake_all()
+check("6f wake: a parked yes/no ask (no options stored) comes back as the same ask, as a decision", mt(413)["needs"] == ["decision"] and mt(413)["ask"] == ASK and not mt(413).get("options"), mt(413))
 
 # ================================================================ 6b. his state makes him the mover
 STEP = "gh pr merge 241 --squash"

@@ -144,6 +144,17 @@ def _scoped_anchor_exists(gid: str, meta: dict[str, Any]) -> bool:
         return True
 
 
+def parked_for_owner(item: dict[str, Any]) -> bool:
+    """Is the open item a parked call: waiting, with him as the one who picks it up when the wait ends (the ask returns at the date, and next naming him is true)?"""
+    if item.get("status") != "open":
+        return False
+    try:
+        mod = _model_of(item)
+    except Exception:
+        return False
+    return mod.state == _model.WAITING and mod.wait is not None and _model.is_owner(mod.picker)
+
+
 def _model_of(item: dict[str, Any]) -> "_model.Model":
     """The item read by the model (model.py): the state, the effective mover and the effective wait, from the stored fields and today's state."""
     gid, m = str(item.get("gid") or item.get("id") or ""), item.get("metadata") or {}

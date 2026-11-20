@@ -117,8 +117,8 @@ def stored_until(m: dict[str, Any]) -> str:
 
 
 def wake_value(m: dict[str, Any]) -> Any:
-    """The date a wake-side record (wait_basis, cap_ok) stands for: the stored `until`, else the stored `wake` as it is. The records are read only for the very date they were given for."""
-    return stored_until(m) or m.get("wake")
+    """The date a wake-side record (wait_basis, cap_ok) stands for: the stored `until`, else the stored `wake` as it is, else (while a write holds a relay's or an event wait's date unfolded) its `ask_by`. The records are read only for the very date they were given for."""
+    return stored_until(m) or m.get("wake") or (m.get("ask_by") if kind_of(m) in ("relay", "event") else None)
 
 
 def list_holds(m: dict[str, Any]) -> bool:
