@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +185,43 @@ def _dead_recipient(to: str, cands: list[dict[str, Any]], idx: dict[str, dict[st
 REPORT_ITEMS_MAX = 3        # a report that names more items than this is delivered: it is not about one thing the items can carry
 
 
+ANSWERED_DAYS = 7         # a router notice written onto its items is remembered this long, so a ruling that failed to write and is retried does not write the History line twice
+
+
+def _answered_dir() -> Path:
+    return MSG_LOG.parent / "answered-notices"
+
+
+def _write_on_items(target: str, sname: str, sender: str, raw: str, body: str, gids: list[str], via: str, line: str, because: str, nid: str = "") -> str:
+    """Write `line` onto each item in `gids` as a History line from the sender (the server's note on the item, an audit's own send marked as one), log the message as written onto them and not delivered,
+    and return the sender's reply (`because`: why it was not delivered). The one item-writing path of a message a front agent is not woken for: a background agent's plain report (_builder_report) and
+    an answer to the front agent's question that comes when the person is not in that conversation (_gate_front)."""
+    shown = ", ".join(_gh.shown(g) for g in gids)
+    mark_ = _answered_dir() / re.sub(r"[^0-9A-Za-z_.-]", "_", nid) if nid else None
+    if mark_ is not None and mark_.exists():             # the router's notice was written onto its items already (its ruling failed to write and the pass came round again): once is enough
+        return f"Not delivered: written onto {shown} as a History line from {sname}, " + because
+    for gid in gids:
+        with _writes.ITEM_LOCK:
+            _writes.save(gid, _svcstore._load(gid), note=line, activity=_activity.AUDIT if _activity.audit_writer([sender, sname], _writes.audit_writer_names()) else _activity.MESSAGE)      # a background agent's report written onto the item is a message about the work, unless the audit sent it
+    if mark_ is not None:
+        try:
+            mark_.parent.mkdir(parents=True, exist_ok=True)
+            mark_.write_text(shown, encoding="utf-8")
+            for old in mark_.parent.iterdir():
+                if old.stat().st_mtime < time.time() - ANSWERED_DAYS * 86400:
+                    old.unlink(missing_ok=True)
+        except OSError:
+            pass
+    try:
+        MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(MSG_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": "", "to": via or target,
+                                "outcome": f"written onto {shown}, not delivered", "error": "", "text": _svcstore._shown_ids(raw)}, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+    return f"Not delivered: written onto {shown} as a History line from {sname}, " + because
+
+
 def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], via: str = "") -> str:
     """(a front agent is woken by a message only when it has something to do or to
     tell him). A background agent's message to the front agent `target` that names a board item and **clearly only reports** (reports.report_doubt
@@ -209,32 +247,141 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
             m_ = _svcstore._load(gid).get("metadata") or {}
             if "decision" in _needs_kinds(m_) or (tid and tid in {_session_id(x) for x in _needs_sessions(m_)}):
                 return ""
-        line = f"{sname} reported to {target} (not sent to it: a plain status report): {_clip_line(body, 1500)}"
-        for gid in gids:
-            with _writes.ITEM_LOCK:
-                _writes.save(gid, _svcstore._load(gid), note=line, activity=_activity.AUDIT if _activity.audit_writer([sender, sname], _writes.audit_writer_names()) else _activity.MESSAGE)      # a background agent's report written onto the item is a message about the work, unless the audit sent it
-        shown = ", ".join(_gh.shown(g) for g in gids)
-        try:
-            MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
-            with open(MSG_LOG, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": "", "to": via or target,
-                                    "outcome": f"written onto {shown}, not delivered", "error": "", "text": _svcstore._shown_ids(raw)}, ensure_ascii=False) + "\n")
-        except Exception:  # noqa: BLE001
-            pass
-        return (f"Not delivered: written onto {shown} as a History line from {sname}, because {target} is a front agent, a session {OWNER} talks to, and this "
-                f"message reads as a plain status report (done, live, merged, deployed ...; no question, no word of trouble or waiting, nobody named to act). "
-                f"It does not wake {target}, which reads it on the item. If {target} or {OWNER} has something to do, decide or know, send it again saying what "
-                f"and it is delivered.")
+        return _write_on_items(target, sname, sender, raw, body, gids, via,
+                               f"{sname} reported to {target} (not sent to it: a plain status report): {_clip_line(body, 1500)}",
+                               f"because {target} is a front agent, a session {OWNER} talks to, and this message reads as a plain status report (done, live, merged, deployed ...; no question, no word of trouble or waiting, nobody named to act). "
+                               f"It does not wake {target}, which reads it on the item. If {target} or {OWNER} has something to do, decide or know, send it again saying what and it is delivered.")
     except Exception as e:  # noqa: BLE001  — the check is an extra: a failure in it delivers as before
         print(f"report: message to {target} not checked, delivered as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
 
 
-def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "") -> str | None:
-    """(the owner's decision): a front agent, a session he talks to, takes a peer's message only when its first non-empty line
-    carries the mark ([for <owner>]); anything else is its project's, to the router. A message addressed to a project page goes to the
-    project (the router rules it) and never reaches this gate. a background agent's marked message that only reports on a board
-    item is written onto the item instead of delivered (_builder_report) → the sender's reply then, else None (the message is delivered)."""
+ASKED_LOOKBACK_HOURS = 24       # an answer is to a question the front agent (or its project) put to the sender within this long: the message log is read back this far
+_LOG_TAIL_BYTES = 800_000      # and no further than this much of its end
+
+
+class _Hold:
+    """What _gate_front returns for a message a front agent is not woken for and nobody is refused: the front gate files it for the agent's next turn (`why`: the reason, for the sender's reply)."""
+    def __init__(self, why: str, project: str = "") -> None:
+        self.why = why
+        self.project = project
+
+
+def _idset(who: str, idx: dict[str, dict[str, Any]]) -> set[str]:
+    """Every spelling a session goes by in the message log: as written, its name, its session id (case-folded)."""
+    who = str(who or "").strip()
+    out = {who.casefold()} if who else set()
+    rec = idx.get(who)
+    if rec and rec.get("name"):
+        out.add(str(rec["name"]).casefold())
+    out.update(k.casefold() for k, r in idx.items() if who and r.get("name") == who)
+    try:
+        sid = _session_id(who) if who else ""
+        if sid:
+            out.add(str(sid).casefold())
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def asked_by(front: str, project: str, sender: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], now: float | None = None) -> bool:
+    """Was `sender` written to, within ASKED_LOOKBACK_HOURS, by the front agent or by an agent of its project? The one signal the relay already keeps for it: a row of the message log (`MSG_LOG`, one line
+    per message sent through the message tool) whose `from` is the front agent or a session the project's page lists and whose `to` is the sender. A message that went to a page key or to nobody logs no
+    such row, so an answer to one is not known as an answer: it is held or sent to the builder as any other. False on any doubt."""
+    try:
+        me = _idset(sender, idx)
+        if not me:
+            return False
+        peers: set[str] = set()
+        for n in {front, *(n for n, r in roles.items() if r.get("project") == project)}:
+            peers |= _idset(n, idx)
+        peers -= me
+        if not peers:
+            return False
+        floor = (time.time() if now is None else now) - ASKED_LOOKBACK_HOURS * 3600
+        with open(MSG_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - _LOG_TAIL_BYTES))
+            tail = f.read().decode("utf-8", "replace").splitlines()
+        for ln in reversed(tail):
+            try:
+                d = json.loads(ln)
+                at = dt.datetime.fromisoformat(str(d["t"])).timestamp()
+            except (ValueError, KeyError, TypeError):
+                continue
+            if at < floor:
+                break
+            if str(d.get("from") or "").strip().casefold() in peers and str(d.get("to") or "").strip().casefold() in me:
+                return True
+        return False
+    except Exception:  # noqa: BLE001  — no signal, no answer
+        return False
+
+
+def background_of(project: str) -> str:
+    """The project's background agent a message not for the person goes to: anchors.background_agent, the one lookup the router uses too (its builder, else the first background agent, read through the project's hub), "" when the project has none."""
+    return _anc.background_agent(project)
+
+
+def answer_route(front: str, project: str, sender: str, raw: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], via: str = "", nid: str = "") -> tuple[str, str]:
+    """What becomes of a message with no need of the person that comes from `sender` to the front agent `front`, when it is an answer to a question the front agent or its project put to the sender (asked_by):
+    ("deliver", "") the person is in that conversation (his last message to the front agent within [presence] minutes, 30 by default: telling.presence_here), so it goes back to the agent, unmarked;
+    ("items", reply) he is not, and the text names one to REPORT_ITEMS_MAX open items, none waiting on his decision or naming the agent in its needs: it is written onto them (_write_on_items, once per `nid`, a router notice) and `reply` says so;
+    ("hold", why) he is not, and no item can carry it (it names none, a closed one, or one that waits on his decision): the front gate holds it for the agent's next turn. ("", "") it is no answer (the sender was not written to), so the caller applies its other rules. Never raises."""
+    try:
+        if not sender.strip() or not asked_by(front, project, sender, idx, roles):
+            return "", ""
+        if _telling.presence_here(front, idx=idx):
+            return "deliver", ""
+        gids = _agent_names._item_refs(raw)
+        tid = _session_id(front)
+        if gids and len(gids) <= REPORT_ITEMS_MAX:
+            ok = True
+            for gid in gids:
+                it_ = _svcstore._load(gid)
+                m_ = it_.get("metadata") or {}
+                if it_.get("status") == "completed" or "decision" in _needs_kinds(m_) or (tid and tid in {_session_id(x) for x in _needs_sessions(m_)}):      # a closed item is read by nobody: the answer is held for the agent instead
+                    ok = False
+            if ok:
+                sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) or _msg_label(sender, idx)
+                body = re.sub(r"\A\s*\[for [^\]\n]{1,40}\]\s*", "", raw)
+                return "items", _write_on_items(front, sname, sender, raw, body, gids, via,
+                                                f"{sname} answered {front} (not sent to it: {OWNER} is not in that conversation now): {_clip_line(body, 1500)}",
+                                                f"because it answers a question of {front}'s and {OWNER} has not written to {front} in the last {_telling.presence_minutes():g} minutes. {front} reads it on the item.", nid)
+        return "hold", f"an answer to {front}, and {OWNER} is not in that conversation now"
+    except Exception as e:  # noqa: BLE001  — the check is an extra: a failure in it leaves the message to the rules below
+        print(f"answer: message to {front} not checked: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return "", ""
+
+
+def router_answer(front: str, who: str, raw: str, nid: str = "") -> tuple[str, str]:
+    """The router's use of answer_route (router_live's `front_answer` hook): a message notice's `who` is the sender's label (`name (id…)`, or `x (a script on m)`), whose name is the sender; a script is no answer.
+    → answer_route's pair, ("", "") when the notice is no answer or anything cannot be read."""
+    try:
+        sender = re.split(r" \(", str(who).strip(), maxsplit=1)[0].strip()
+        if not sender or "(a script on" in str(who):
+            return "", ""
+        roles = _anc.session_roles()
+        idx = _sr._sessions_index()
+        name = _sr._role_name(roles, front, str((idx.get(front) or {}).get("name") or ""))
+        if not name or roles[name]["role"] != "front":
+            return "", ""
+        return answer_route(name, roles[name]["project"], sender, raw, idx, roles, nid=nid)
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+
+def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "") -> "str | _Hold | None":
+    """(the owner's decision): a front agent, a session he talks to, hears a peer's message with a turn only when it needs him. A message addressed to a project page goes to the
+    project (the router rules it) and never reaches this gate. In order:
+      marked ([for <owner>] on its first non-empty line): it needs him, and is delivered; unless it says in a fixed phrase that nothing is needed from him (a done, taken or no-ask note): refused, one line;
+        a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
+      unmarked, from the person himself or with the mark or needs: decision away from the first line: refused, the mark goes on the first line;
+      unmarked, an answer to a question the front agent or its project put to the sender (answer_route): delivered while he is in that conversation, else written onto the item it names, else held;
+      unmarked, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
+      a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
+      any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
+    → the sender's reply (item-written), a _Hold, or None (deliver it). Raises ToolError for a refusal."""
     roles = _anc.session_roles()
     name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
     if not name or roles[name]["role"] != "front":
@@ -243,18 +390,39 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     lines = text.splitlines()
     at = next((i for i, ln in enumerate(lines) if ln.strip()), len(lines))
     first = lines[at] if at < len(lines) else ""
+    back = background_of(project)
+    sname = (_sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) or "") if sender.strip() else ""
+    same = bool(sname and back and sname.casefold() == back.casefold())          # the sender is the background agent itself: it cannot be sent back to itself
+    goes = (f"the project's background agent, {back} (message(to={back!r}, …))" if back and not same else f"the project, where the router rules it (to={project!r})")
     if _FOR_OWNER not in first:
-        raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes a message only when the "
-                        f"message's first line carries {_FOR_OWNER}. Put {_FOR_OWNER} on the first line if this is for {OWNER}; anything "
-                        f"else goes to {_project_takes(project, name if sender.strip() and _telling.front_sender(sender) else '')} instead.")
-    # The mark is for what he has to do; a marked message that says nothing is
-    # needed from him (_NOT_FOR_OWNER, in the text after the mark) wakes his pane for nothing, so it goes to the project instead
+        if (sender.strip() and _model.is_owner(sender)) or _held._owner_mark().search(text):
+            raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_FOR_OWNER} on the message's first line. "
+                            f"Put {_FOR_OWNER} on the first line if this is for {OWNER}; anything else goes to {goes} instead.")
+        kind, arg = answer_route(name, project, sender, text, idx, roles) if sender.strip() else ("", "")
+        if kind == "deliver":
+            return None
+        if kind == "items":
+            return arg
+        if kind == "hold" and _held.enabled():
+            return _Hold(arg, project)
+        front = tuple(n for n, r in roles.items() if r.get("role") == "front")
+        if _NOT_FOR_OWNER_RE.search(text) or _reports.is_report(text, front):
+            raise ToolError(f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")
+        peer_ = bool(sname) and roles.get(sname, {}).get("role") == "front" and sname.casefold() != name.casefold()      # a front agent's message to a peer front agent: the channel between them
+        if _held.enabled():
+            if peer_:
+                return _Hold(f"{sname} is a front agent, so its message to {name} rides {name}'s next turn", project)
+            if same:
+                return _Hold(f"{sname} is the project's background agent, so it cannot go back to it", project)
+            if not back:
+                return _Hold(f"{project} has no background agent", project)
+        raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "      # with the hold switched off nothing can hold it
+                        f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here.")
+    # The mark is for what he has to do; a marked message that says nothing is needed from him (_NOT_FOR_OWNER, in the text after the mark) is a note
     m = _NOT_FOR_OWNER_RE.search("\n".join([first.split(_FOR_OWNER, 1)[1], *lines[at + 1:]]))
     if m:
-        raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and {_FOR_OWNER} marks only what {OWNER} has "
-                        f"to do; this message says nothing is needed from him ({m.group(0)!r}). A hand-back, a result or an FYI goes to "
-                        f"{_project_takes(project)} instead, which passes on what needs {name}; a move to "
-                        f"needs=decision reaches {OWNER} on the board, not through a message. If {OWNER} does have something to do here, say what it is and leave that phrase out.")
+        raise ToolError(f"Refused: {name} is a front agent of {project} and {_FOR_OWNER} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
+                        f"If {OWNER} does have something to do here, say what it is and leave that phrase out.")
     return (_builder_report(name, text, sender, idx, roles) if sender.strip() else "") or None
 
 
@@ -310,9 +478,12 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         raise ToolError(f"Refused: message longer than {_hooks().msg_max()} characters — put the long form somewhere both sessions can read (a gbrain page, a file in the repo) and send the pointer")
     idx = _sr._sessions_index()
     fyi = bool(fyi) and not _model.is_owner(sender)
+    hold_why = hold_project = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold)
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
     if not re.match(_cfg.page_dirs_re() + "/", to):
-        reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent takes only what is for the person: a builder's report on an item goes onto it, not to the pane
+        reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent is given a turn only by what needs the person: the rest is refused, written onto an item, or held (_gate_front)
+        if isinstance(reported, _Hold):
+            hold_why, hold_project, reported = reported.why, reported.project, None
         if reported:
             return reported
     elif not origin:
@@ -375,30 +546,33 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                             f"ever ran on {_fleetev.fleet_names().get(_pub_letter(), 'the server box')}. If it is the id in a claude.ai/chat/… link: a Cowork or cloud session is addressed by its cse_… id, "
                             "which it shows as the sender of its own messages and as the creator of its board items (the sessions tool lists those); until it has done either, "
                             "stackshot cannot reach it. A pane started in the last few minutes on another machine appears at that machine's next heartbeat: address it by name then.")
-    if fyi and not held and (front_fyi or _front_fyi_name(to, raw, idx)):         # an fyi to a front agent starts no turn, from a session or a script: the front gate files it for his next turn, or holds it
+    if (fyi or hold_why) and not held and (front_fyi or hold_why or _front_fyi_name(to, raw, idx)):         # an fyi to a front agent starts no turn, from a session or a script: the front gate files it for his next turn, or holds it; so does a message _gate_front held
         held_text = f"[stackshot message] from {held_who}: {text}"
         verdict, why_ = _telling.front_fyi(to, held_text, ",".join(_agent_names._item_refs(raw)))
         if not verdict:
-            if front_fyi:
-                _gate_front(to, raw, idx, "" if origin else sender)           # the gate did not take it: what it did before (refused without the mark)
+            if front_fyi or hold_why:         # the gate did not take it (the hold is off, or the gate failed): refused, as it was before the hold
+                raise ToolError(f"Refused: {to} is a front agent, and this message is not for {OWNER}, so it starts no turn there; it could not be held for its next turn either. Put it on the board item it concerns "
+                                f"(update, complete), or send it to the project's page key (to={(hold_project or 'projects/<slug>')!r}), or, when it asks something of {OWNER}, put {_FOR_OWNER} on its first line.")
         else:
             filed = verdict == "fyi"
-            outcome_ = "held for its next turn (fyi)" if filed else f"not passed on (fyi, front agent: {why_})"
+            kind_ = "fyi" if fyi else "front agent"
+            outcome_ = f"held for its next turn ({kind_})" if filed else f"not passed on ({kind_}: {why_})"
             try:
                 MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
                 with open(MSG_LOG, "a", encoding="utf-8") as f:
                     f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": auth, "to": to, "outcome": outcome_,
-                                        "error": "", "text": text, "fyi": True}, ensure_ascii=False) + "\n")
+                                        "error": "", "text": text, **({"fyi": True} if fyi else {})}, ensure_ascii=False) + "\n")
             except Exception:  # noqa: BLE001
                 pass
             if filed:
-                return (f"held for {to}'s next turn (fyi: it asks nothing, so it starts no turn) — it is handed over with the first turn {to} takes, whatever causes it, once, "
-                        f"oldest first; an open item it names gets a History line. If it does ask something, send it again without fyi, its first line carrying {_FOR_OWNER}." + _cut_note(held_text, script=bool(origin)))
+                lead_ = "(fyi: it asks nothing, so it starts no turn)" if fyi else f"({hold_why}, so it starts no turn)"
+                return (f"held for {to}'s next turn {lead_} — it is handed over with the first turn {to} takes, whatever causes it, once, "
+                        f"oldest first; an open item it names gets a History line. If it does ask something of {OWNER}, send it again without fyi, its first line carrying {_FOR_OWNER}." + _cut_note(held_text, script=bool(origin)))
             if origin:          # a script reads the status, not the sentence: an fyi that could not be held is a failure to it, as it was before the gate took a script's fyi
                 raise ToolError(f"Refused: {to} is a front agent whose hook cannot fetch held lines, so an fyi cannot be held for its next turn and nothing was sent to its pane. "
                                 f"An open item the text names has it on its History, and the message log has it. Send it to the project's page key (to=projects/<slug>), which the router rules, "
                                 f"or, when it asks something of {OWNER}, send it without fyi with {_FOR_OWNER} on its first line.")
-            return (f"not passed on — {to} is a front agent, an fyi starts no turn there, and the message could not be held for its next turn ({why_}). {to}'s pane was not given it; "
+            return (f"not passed on — {to} is a front agent, {'an fyi' if fyi else 'a message that is not for ' + OWNER} starts no turn there, and the message could not be held for its next turn ({why_}). {to}'s pane was not given it; "
                     f"an open item it names has it on its History, and the message log has it. If {to} must have it, put it on an item (update, complete), or send it again without fyi, "
                     f"its first line carrying {_FOR_OWNER}, when it asks something of {OWNER}.")
     if fyi and not held and _agent_names._back_agent(to, idx):         # an fyi to a background agent starts no turn; it is handed over with the next one (it names the agent in no item's needs: it asked nothing)

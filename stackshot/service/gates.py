@@ -277,7 +277,7 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
             if not front:
                 continue
             mv = _session_label(mover) or mover
-            # the tail names what works: a plain message to a front agent is refused unless marked, so it is the hand-over (`mover=`, between front agents of one front-only project) and the `For <agent>,` first line to the agent's page
+            # the tail names what works: a plain message to a front agent starts no turn there (it goes to the project's background agent or is held), so it is the hand-over (`mover=`, between front agents of one front-only project) and the `For <agent>,` first line to the agent's page
             ask = f"ask {key} with a message to {roles[key]['project']} whose first line starts \"For {key},\""
             tail = (f"Put an open step before it (the step hand-over moves the item to {key} when that one is done), hand {key} the item with mover={key}, or {ask}." if first
                     else f"Keep the step with {mv}, hand {key} the item with mover={key} (only between front agents of one project that has no builder), or {ask}." if _handoff.ho_same(sender, mover)

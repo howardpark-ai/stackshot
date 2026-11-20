@@ -17,9 +17,12 @@ ACT. tick() (a thread of the server, loop()) takes the unruled live-held notices
 router.py's own code: its rules in code (code_rule), then one thin call per project (call_project). A notice whose call failed
 or was left out stays held, undelivered, for one more try at the next tick (router.py's attempts file); the second failure is a pass to the -main agent (fallback_line). Then it acts on each:
   passed   delivered to the target the way a pass is delivered (push.py, the pane inbox), then ruled with
-           routing.rule(id, "passed", to=target, by="stackshot (router)"). The text opens with "[for <owner>]" whenever the target
-           is a front agent, whatever for_owner says: a front pane takes a peer's message only with the mark. A delivery
-           to a background agent is unmarked.
+           routing.rule(id, "passed", to=target, by="stackshot (router)"). The text opens with "[for <owner>]" only when the target
+           is a front agent and the pass carries a real need of the person (_must_see: the ruling's for_owner, his words, a hand-back, the mark or
+           needs: decision in the text, a named item that waits on a decision, an audit finding, the fallback pass): the mark means he must see it, and is never added to get a pass
+           through. Any other pass to a front agent (_front_route) is an answer to the agent's own question (delivered unmarked while the person is in
+           that conversation, else written onto the item it names or held), or goes to the project's background agent, unmarked, or, in a project with none, is held
+           through the front gate for the agent's next turn. A gate that cannot file it leaves the pass delivered, marked. A delivery to a background agent is unmarked.
            A batch finding of the audit (router.py's rule `audit-owners`) carries a `split`: one message per owner, each with the lines of its own
            items, marked as a pass to that agent is marked (_act_split); `to` in the routing log lists every owner, one still holding lines from before an earlier change named
            "(held)". A finding is a task for its mover: a BACKGROUND owner is woken with its lines at once, whole, like any pass (they had been held for its
@@ -63,7 +66,7 @@ handed over by the UserPromptSubmit hook), ruled `held` in the routing log with 
 a notice recorded with `hold` (routing.record: a page-owed notice, a message its sender marked fyi) and a batch finding of the audit (rule
 audit-owners, kind audit). A notice that carries the owner's words ([for <owner>], needs: decision, a `words` or `handback` mark, for_owner on the
 ruling), or goes to a front agent, is passed as before, except an fyi and a page-owed notice for a front agent: they go through the front gate and are held for its next turn
-(_front_fyi, _front_page_owed; the router rules them `held` too). [router] hold_notices = false turns the hold off.
+(_front_fyi, _front_page_owed; the router rules them `held` too), and a pass to a front agent with no need of the person (_front_route, above). [router] hold_notices = false turns the hold off.
 
 CAP. A ruling that cannot be written to the routing log (routing.rule raised) is tried again at the next ticks, three times in all.
 After that the notice is logged with status "stuck", never judged again, and listed in the next digest as "could not be ruled".
@@ -107,7 +110,7 @@ _LOCK = threading.Lock()
 
 # What the server wires in (configure): the front-agent test (telling.front_keeper), the push, the call made after a ruling
 # (the release of a hold that waited on the notice's anchor, the board's republish), and the front gate for an fyi or a page-owed notice (telling.front_fyi). The defaults stand alone, for the tests and the CLI.
-_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None}
+_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None, "front_answer": None}      # front_answer: messaging.router_answer, what becomes of an answer to a front agent's own question
 
 
 def configure(**kw: Any) -> None:
@@ -312,6 +315,16 @@ def _is_front(who: str, root: str, cx: "_router.Context") -> bool:
     return who in cx.agents(root)[0]
 
 
+def _front_anywhere(who: str, root: str, cx: "_router.Context") -> bool:
+    """Is `who` a front agent of this project or of any other (the message tool reads its sender's role the same way)?"""
+    if _is_front(who, root, cx):
+        return True
+    try:
+        return _anc.session_roles(cx.reg).get(who, {}).get("role") == "front"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _person_words(n: dict[str, Any], ln: dict[str, Any], body: str) -> bool:
     """Does this notice carry the person's words or mark: a ruling for him, his words, a hand-back, a strong mention in the text?"""
     return bool(_router.line_for_owner(ln) or n.get("words") or n.get("handback") or _router.strong_owner(body) or _router.strong_owner(n.get("text")))
@@ -369,6 +382,82 @@ def _front_page_owed(n: dict[str, Any], ln: dict[str, Any], target: str, root: s
             return "", ""
         verdict, _why = fn(target, _page_owed_line(n, body, project), "", n["id"], False, kind="page-owed") or ("", "")      # no item is named: the owed list is the board's record of it; log=False: the router's own ruling is the routing-log line
         return ("fyi", "") if verdict == "fyi" else ("", "")
+    except Exception:  # noqa: BLE001
+        return "", ""
+
+
+_ITEM_URL = re.compile(r"/items/(?:board-tmp-[\w-]+-)?([A-Za-z]?\d+)\b")
+_ITEM_BARE = re.compile(r"(?<![\w#/&.:@-])#(\d+)\b")
+_ITEM_OLD = re.compile(r"(?<![\w#/\\.:@-])([A-Za-z]\d+)(?![\w\-/\\]|\.\w)")
+
+
+def _item_refs_loose(text: str) -> set[str]:
+    """Every way a notice's text can name an item, as the board index spells it: the id forms the router reads (a board id, a letter id), an item page link, a bare #<number> and a capital-letter id.
+    More than the tool's own reading on purpose: a name that is no item (a pull request's number) only keeps a pass marked, which is the safe side."""
+    out = set(_router._TOKEN.findall(text))
+    out.update(f"board#{d}" if d.isdigit() else d.lower() for d in _ITEM_URL.findall(text))
+    out.update(f"board#{d}" for d in _ITEM_BARE.findall(text))
+    out.update(x.lower() for x in _ITEM_OLD.findall(text))
+    return out
+
+
+def _item_waits_decision(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context") -> bool:
+    """Does an item the notice names (the ruling's `item`, the notice's label, an id, a link or a bare number in its text) wait on a decision of the person (its needs include `decision`)? False when it names none or the board cannot be read."""
+    try:
+        refs = {str(ln.get("item") or "").strip(), *_item_refs_loose(body), *_item_refs_loose(str(n.get("label") or ""))} - {""}
+        return any(cx.index.get(r) is not None and _router.waits_decision(cx.index[r]) for r in refs)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _sender_name(n: dict[str, Any]) -> str:
+    """The session a notice came from, from its label (`name (id...)`; a script `x (a script on m)` is no session): "" for none."""
+    who = str(n.get("who") or "").strip()
+    return "" if "(a script on" in who else re.split(r" \(", who, maxsplit=1)[0].strip()
+
+
+def _held_text(n: dict[str, Any], body: str) -> str:
+    """The words a held pass carries to the front gate: the whole text while it fits one held line (held.LINE_MAX), else its start and a closing note naming the sender and the notice
+    (its whole text is in the notice), so a line that was cut says so and says where the rest is."""
+    one = " ".join(str(body or "").split())
+    if len(one) <= _held.LINE_MAX:
+        return body
+    note = f" … (cut: the whole text is in notice {n['id']}, from {_sender_name(n) or str(n.get('who') or 'a sender')})"
+    return one[:max(0, _held.LINE_MAX - len(note))].rstrip() + note
+
+
+def _must_see(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context") -> bool:
+    """Does a pass to a front agent carry a real need of the person, so that it stays marked and starts a turn? The signals: the ruling's for_owner, his own words on the notice, a hand-back, the mark or
+    needs: decision in the text (_person_words, the held rule's own mark test), a named item whose needs include a decision, and an audit batch finding (rule audit-owners: a task for the agent, its own path).
+    Where the router has no signal the answer is no: a pass with none is not marked."""
+    return bool(_person_words(n, ln, body) or _held._owner_mark().search(body) or ln.get("rule") == "audit-owners" or _item_waits_decision(n, ln, body, cx))
+
+
+def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx: "_router.Context") -> tuple[str, str]:
+    """What a pass to a FRONT agent with no need of the person becomes (_must_see is false; an fyi and a page-owed notice have their own paths above). -> ("", "") as before: marked, delivered (a need, no gate
+    wired, the switch off, a recipient that is no front agent); ("deliver", "") an answer to a question of the agent's while the person is in that conversation (a message notice from a session the agent or its project wrote to: the
+    answer hook): delivered to the agent, unmarked; ("items", reply) such an answer while he is not: written onto the item it names, nothing delivered; ("background", name) the project's background agent (its builder,
+    else the first listed) takes it, unmarked; ("hold", why) held for the agent's next turn through the front gate (an answer outside the conversation that names no item, or a project with no background agent). Never raises."""
+    try:
+        if not _HOOKS["front_fyi"] or not target or not _held.enabled() or not _is_front(target, root, cx):
+            return "", ""
+        if str(n.get("hold") or "") in ("fyi", "page-owed") or ln.get("rule") == "audit-owners":
+            return "", ""
+        body = _body(n)
+        if _must_see(n, ln, body, cx):
+            return "", ""
+        fn = _HOOKS["front_answer"]
+        if fn and n.get("kind") == "message":
+            kind, arg = fn(target, str(n.get("who") or ""), body, n["id"]) or ("", "")
+            if kind in ("deliver", "items", "hold"):
+                return kind, arg
+        sender = _sender_name(n)
+        if sender and sender.casefold() != str(target).casefold() and _front_anywhere(sender, root, cx):      # a front agent's word to a peer front agent: the channel between them, held for that peer's next turn
+            return "hold", f"{sender} is a front agent, so its message to {target} rides {target}'s next turn"
+        back = _anc.background_agent(root, cx.reg)       # the one lookup the message tool uses too: the builder, else the first background agent, a hub's for a component page with none
+        if back and sender and sender.casefold() == back.casefold():      # the background agent's own word to the front agent can never go back to it
+            return "hold", f"{back} is the project's background agent, so it cannot go back to it"
+        return ("background", back) if back else ("hold", "the project has no background agent")
     except Exception:  # noqa: BLE001
         return "", ""
 
@@ -603,6 +692,25 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                         res["error"] = f"after-rule: {type(e).__name__}: {str(e)[:100]}"
                 _note(res, root, n["id"])
                 return res
+        unmarked_front = False         # a pass to a front agent that goes unmarked: an answer to the agent's own question, while the person is in that conversation
+        if ruling == "passed" and prior.get("status") != "delivered" and base.get("source") != "fallback":      # a pass to a front agent with no need of the person: not marked, not a turn for him
+            act_, arg_ = _front_route(n, ln, target, aroot, cx)
+            if act_ == "deliver":
+                unmarked_front = True
+                base["reason"] = reason = f"{reason} (an answer to {target}'s own question, and the person is in that conversation)"
+            elif act_ == "background":
+                base.update(target=arg_, reason=f"{reason} (not for the person: passed to the project's background agent {arg_}, not to {target})")
+                target, reason = arg_, base["reason"]
+            elif act_ in ("items", "hold"):
+                verdict_ = "fyi"
+                if act_ == "hold":
+                    verdict_, _why = _HOOKS["front_fyi"](target, _held_text(n, _body(n)), str(ln.get("item") or ""), n["id"], False) or ("", "")      # log=False: the router's own ruling is the routing-log line
+                if verdict_ == "fyi":
+                    held_for = target
+                    ruling, target = "held", ""
+                    reason = f"written onto the item it names, not delivered: an answer to {held_for}'s question, and the person is not in that conversation" if act_ == "items" else f"held: front agent, {arg_} (rides its next turn, starts none)"
+                    base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="fyi")
+                # a gate that could not file it (the agent's hook cannot fetch held lines, or the gate failed): delivered as before, marked, never dropped for want of a place to hold it
         if ruling == "passed" and prior.get("status") != "delivered":      # a pass that asks nothing of a background agent is held for its next turn
             hk = _hold_kind(n, ln, target, cx)
             if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"]):
@@ -621,7 +729,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                     reason = _held.reason(hold_as) if verdict == "fyi" else f"held: front agent, {why} ({hold_as})"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hold_as)
         if ruling == "passed":
-            mark = _is_front(target, aroot, cx)       # a front pane takes a peer's message only with the mark: every delivery to one carries it, whatever for_owner says
+            mark = _is_front(target, aroot, cx) and not unmarked_front       # the mark means the person must see it: a pass to a front agent without a need of his is held, sent to the background agent, or (an answer in his conversation) unmarked, above; what reaches here marked had a need, or no place to be held
             base["marked"] = mark
             if prior.get("status") == "delivered":            # delivered earlier; only the ruling is missing
                 out = str(prior.get("outcome") or "delivered")

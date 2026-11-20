@@ -2850,11 +2850,11 @@ def why(fn):
     try: fn(); return ""
     except ToolError as e: return str(e)
 n0 = len(wait_push(0)); MK = _wt_text._FOR_OWNER
-r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "home-beta"))
-check("an unmarked message to a front agent is refused, naming the mark and the project, where the router rules it",
-      r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and it takes a message only when the message's first line "
-           f"carries {MK}. Put {MK} on the first line if this is for {_core_instance.OWNER}; anything else goes to the project, where the router rules it (to='projects/alpha') instead.", r)
-check("…by its transcript id too, and nothing was delivered", why(lambda: _messaging._message(A, "unmarked", "home-beta")).startswith("Refused: work-osprey-main is a front agent")
+r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "home-gamma"))
+check("an unmarked message to a front agent is refused, naming the mark and the project's background agent",
+      r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and this message is not for {_core_instance.OWNER}, so it goes to the project's background agent, "
+           f"work-osprey-x (message(to='work-osprey-x', …)). Put {MK} on the first line only if {_core_instance.OWNER} has something to do here.", r)
+check("…by its transcript id too, and nothing was delivered", why(lambda: _messaging._message(A, "unmarked", "home-gamma")).startswith("Refused: work-osprey-main is a front agent")
       and len(wait_push(0)) == n0)
 check("…and the mark below the first line does not count", why(lambda: _messaging._message("work-osprey-main", f"a status line\n{MK} decide this", "home-beta")).startswith("Refused:"))
 check("…nor does a script's message get past it", why(lambda: _messaging._message("work-osprey-main", "run finished", "nightly-job", origin="testbox")).startswith("Refused:"))
@@ -2864,9 +2864,8 @@ try:
     r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "work-peer-main"))
 finally:
     _messaging._telling.front_sender = _fs
-check("a front agent's unmarked message to a peer front agent is refused as any is, and the refusal also names the working form: a first line `For work-osprey-main,` on a message sent to the project's page key",
-      r.startswith("Refused: work-osprey-main is a front agent of projects/alpha") and f"takes a message only when the message's first line carries {MK}" in r
-      and "anything else goes to the project, where the router rules it (to='projects/alpha'); to reach work-osprey-main from a front agent of the project, make the message's first line `For work-osprey-main,` and send it to='projects/alpha' instead." in r, r)
+check("a front agent's unmarked message to a peer front agent is refused as any is, naming the project's background agent",
+      r.startswith("Refused: work-osprey-main is a front agent of projects/alpha") and "background agent, work-osprey-x" in r, r)
 check("…a sender that is no front agent (the refusal above) is told no such form", "For work-osprey-main," not in why(lambda: _messaging._message("work-osprey-main", "can you look?", "home-beta")))
 res = _messaging._message("work-osprey-main", f"\n  \n{MK} vendor A or B? the keeper recommends A", "home-beta"); pp = wait_push(n0 + 1)
 check("a marked message (first non-empty line) to a front agent is delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-main" and MK in pp[-1][1], pp[-1:])
@@ -2883,8 +2882,8 @@ check("gate: the phrase list is short and fixed", NOT == (f"nothing needed from 
 for ph in NOT:
     r = why(lambda: _messaging._message("work-osprey-main", f"{MK} the build is live. {ph}, the rest is on the page.", "home-beta"))
     check(f"gate: a marked message to a front agent that says {ph!r} is refused, naming the phrase and the project",
-          r.startswith(f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and {MK} marks only what {_core_instance.OWNER} has to do; "
-                       f"this message says nothing is needed from him ({ph!r}). A hand-back, a result or an FYI goes to the project, where the router rules it (to='projects/alpha') instead"), r)
+          r.startswith(f"Refused: work-osprey-main is a front agent of projects/alpha and {MK} marks only what {_core_instance.OWNER} has to do; "
+                       f"this says nothing is needed from him ({ph!r}): write it on the board item it concerns, or say nothing."), r)
 r = why(lambda: _messaging._message(A, f"{MK} the release\nis live: NO ACTION NEEDED.", "home-beta"))
 check("gate: …without regard to case, on a later line, and by its transcript id", r.startswith("Refused: work-osprey-main is a front agent") and "('NO ACTION NEEDED')" in r, r)
 check("gate: nothing was delivered by the refusals", len(wait_push(0)) == n0)

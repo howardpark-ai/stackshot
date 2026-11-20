@@ -262,7 +262,7 @@ check("the keeper heard none of it but its own wake (it moves the woken item)", 
 check("every action is a line in live.jsonl: ruled, with the ruling and target", {l["id"] for l in lines() if l["status"] == "ruled"} >= {i for i, *_ in plan}
       and next(l for l in lines() if l["id"] == m_quote["id"])["target"] == "work-osprey-x" and next(l for l in lines() if l["id"] == m_quote["id"])["marked"] is False
       and next(l for l in lines() if l["id"] == n_hub["id"])["marked"] is True, lines()[:2])
-check("the rule in code took the anchor notices scoped to one item: passed to its owner -main, no call for them", rb[n_hold["id"]]["ruling"] == "passed" and rb[n_hold["id"]]["ruled_to"] == "work-osprey-main" and rb[n_hold["id"]]["ruled_by"] == "stackshot (router)", rb[n_hold["id"]])
+check("the rule in code took the anchor notices scoped to one item: passed, no call for them (its mover is a front agent and the notice has no need of Oliver, so the project's background agent takes it)", rb[n_hold["id"]]["ruling"] == "passed" and rb[n_hold["id"]]["ruled_to"] == "work-osprey-x" and rb[n_hold["id"]]["ruled_by"] == "stackshot (router)", rb[n_hold["id"]])
 it6, it7 = _service_store._load("a6"), _service_store._load("a7")
 check("a hold waiting on that anchor is released by the router's passed ruling", not it6["metadata"].get("hold"), it6["metadata"])
 
@@ -574,7 +574,7 @@ check("message gate: an unmarked message to a front agent is sent to the project
       "the project, where the router rules it (to='projects/alpha')" in _messaging._project_takes("projects/alpha") and "steward" not in _messaging._project_takes("projects/alpha"), _messaging._project_takes("projects/alpha"))
 try: _messaging._message("work-osprey-main", "unmarked", "home-beta"); e = ""
 except ToolError as x: e = str(x)
-check("…and the refusal says so", e.startswith("Refused: work-osprey-main is a front agent") and "router rules it" in e and "steward" not in e, e)
+check("…and the refusal says so: it names the project's background agent", e.startswith("Refused: work-osprey-main is a front agent") and "background agent, work-osprey-x" in e and "steward" not in e, e)
 out = _wt_anchors._anchors("projects/alpha", who="home-beta")
 check("anchors: the list names the router and the keeper, not the retired name-line session", "alpha anchors (router: rules this project; keeper: work-osprey-x" in out.replace("projects/", "") and "steward:" not in out.splitlines()[0], out.splitlines()[0])
 cfg(live=False)
@@ -1049,7 +1049,7 @@ finally:
 
 # ---- 16. a message whose first line is "For <agent>" reaches that agent, a front agent included (notices a1b2c6 and a1b2c7)
 cfg(live=True); c15 = len(calls())
-_messaging._message("projects/alpha", "For work-osprey-main: you were renamed and your brief is now ~/briefs/alpha-main.md. No action needed.", "home-beta"); f15 = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "For work-osprey-main: you were renamed and your brief is now ~/briefs/alpha-main.md. needs: decision on whether it stays.", "home-beta"); f15 = routing.read("projects/alpha")[-1]
 _messaging._message("projects/epsilon", "For work-gamma-main, from home-beta: the hand-over is ready.", "home-beta"); e15 = routing.read("projects/epsilon")[-1]
 _messaging._message("projects/alpha", "For work-osprey-nobody: this agent is not on the page.", "home-beta"); u15 = routing.read("projects/alpha")[-1]
 fake("good", answer([(u15["id"], "merged", "", False)])); p15 = len(pushes()); live.tick(); settle(); g15 = pushes()[p15:]
