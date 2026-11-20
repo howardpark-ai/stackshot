@@ -948,9 +948,10 @@ check("a read is one GET of the comments since the cursor, sorted by update, asc
 check("the state holds the cursor, the start, the owner's login and no copy flag", st.get("login") == "example-owner" and not st.get("copied") and st.get("since") and st.get("started"), st)
 c1 = F.comment(n_c, "Ship it, option 1.\nAnd thanks."); F.log.clear(); told.clear()
 r = G.poll_comments(GH, STORE, say=lambda s: None); it_c = rd(g_c[0], gn); ans = it_c["metadata"].get("answers")
-check("the owner's comment is recorded on the item: answers = [{ts, kind comment, text, via github, url, comment_id}], ts the comment's own time",
+check("the owner's comment is recorded on the item: answers = [{ts, kind comment, text, via github, url, comment_id, told}], ts the comment's own time, told the ids of the sessions it was pushed to",
       r["new"] == 1 and isinstance(ans, list) and len(ans) == 1
-      and ans[0] == {"ts": ans[0]["ts"], "kind": "comment", "text": "Ship it, option 1.\nAnd thanks.", "via": "github", "url": c1["html_url"], "comment_id": c1["id"]}
+      and isinstance(ans[0].get("told"), list) and ans[0]["told"] and all(isinstance(x, str) and x for x in ans[0]["told"])
+      and {k: v for k, v in ans[0].items() if k != "told"} == {"ts": ans[0]["ts"], "kind": "comment", "text": "Ship it, option 1.\nAnd thanks.", "via": "github", "url": c1["html_url"], "comment_id": c1["id"]}
       and abs(ans[0]["ts"] - G._epoch(c1["created_at"])) < 1, (r, ans))
 NOTE = f"[stackshot] the owner commented on board#{gn} on GitHub: Ship it, option 1. And thanks. → https://board.example.org/items/{gn}"
 check("the mover (the session in its needs) alone is told, once: the text on one line, the card link, the id as shown (the creator is not told)",

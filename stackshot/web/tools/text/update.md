@@ -39,30 +39,30 @@ needs=["decision"] with an ask; his own step is step=<one line, no command, of t
 what he runs goes in a next line that starts `{{OWNER}}:`> (the board ticks it when he says it is done; never ask him
 "have you done it?" as a decision); a wait on another item is after=["board#N"] (supplies=<one line: what that item's
 output gives this one> says what it takes from it); a park is hold=true with a wake and either his recorded words for
-it (cap_ok) or a wait_basis (the end of a window the work itself needs, or a wake past the cap); a wait on someone
+it (cap_ok) or a wait_basis (the end of a window the work needs, or a wake past the cap); a wait on someone
 outside is wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, mover=<who takes it then> and needs=["external"].
-Work in hand needs next and its mover, carries no expected time (the item shows how long it has run), and expected_by
+Work in hand needs next and its mover and carries no expected time (the item shows how long it has run); expected_by
 and expected_reason, which older calls pass, are accepted and not kept (the reply says so). Work in hand is not a
-wait: a wait (a date, a timer, someone else's step or release) is parked in the turn it starts, with update(hold=true,
+wait: a wait (a date, a timer, someone else's step or release) is parked the turn it starts, with update(hold=true,
 until="YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", wait_basis="<what it waits for, with its date YYYY-MM-DD>"),
 update(after=["board#N"]) for another item, or the relay wait above for someone outside (a write that leaves wait
-wording in next, such as overnight, in the morning or once the vendor replies, gets a note saying to park it). No
+wording in next, such as overnight or once the vendor replies, gets a note saying to park it). No
 clock renewal without progress: a write that moves a wake or ask_by to a later time while the item's reason
 (description, wait_basis text) and its open steps are as they were is refused (a wait_reason does not count: it is not
-stored); in the same write mark a step done or dropped, write the next step or state the new reason (or send
+stored); in the same write mark a step done or dropped, write the next step or state a new reason (or send
 {{OWNER}}'s own words in said), or change what the wait stands on to a shape the item never held (wait_kind,
 wait_event, wait_anchor, after: a flip back to an earlier one does not count; such a shape change alone lets a clock
-push through twice in a row and the third is refused, until a step, the reason, his new words or a hand-off resets the
+push through twice and the third is refused, until a step, the reason, his new words or a hand-off resets the
 count); or, if the item now waits, park it (hold=true, wake, wait_basis) or use the event-wait form
-(wait_kind="event", wait_event, ask_by, mover). Setting a clock for the first time, pulling one in, clearing
-it and handing the item to another session are not renewals. On a parked item give a new wait_basis; an item on his
-decision cannot be held. Take a wake from the real schedule of the wait (a timer, a watch tick, a catch-up run), or
-check it live; never a guessed round time. step=<one line> sets the item in his step and makes him the mover (then, or
+(wait_kind="event", wait_event, ask_by, mover). Setting a first clock, pulling one in, clearing
+it and handing the item on are not renewals. On a parked item give a new wait_basis; an item on his
+decision cannot be held. Take a wake from the wait's real schedule (a timer, watch tick, catch-up run) or
+check it live, never a guessed round time. step=<one line> sets the item in his step and makes him the mover (then, or
 the agent that had it, takes it after his Done); step="none" withdraws it; supplies=<one line: what the item it waits
 after gives this one>, with after=["board#N"], sets the item blocked on that item. Each is refused without what it
 needs, with what to add; a close drops both. Checks: a next that opens with {{OPEN_LIST}} under an agent's state is
 noted; the third bare re-park in a row is refused; a next may be marked stale; needs=decision again within 60 min of
-his answer is refused unless the ask changed.
+his answer is refused unless the ask changed. A reply names his answer given since your last write, unless told of it.
 
 ## text CHECKLIST_FORM lead trail
 next is a checklist: the item keeps every step in the order written, open, done or dropped, and next holds the open

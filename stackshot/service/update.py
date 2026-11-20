@@ -54,6 +54,7 @@ from stackshot.service import handoff as _handoff
 from stackshot.service import proofs as _proofs
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
+from stackshot.service.save_hooks import hooks as _save_hooks
 from stackshot.service.store import _load, _shown_ids
 from stackshot.waits import handoff as _ho
 from stackshot.waits import server_fixes as _sf
@@ -455,6 +456,34 @@ def _fix_loose_reason(item: dict[str, Any], meta: dict[str, Any], next_after: An
         return none
 
 
+def _answered_since_note(gid: str, item: dict[str, Any], sender: str) -> str:
+    """The reply line for a write by a session whose picture of the item is older than his answer: the latest answer recorded on the item (`metadata.answers`) is newer than the sender's last write to it (`telling.touched_or_unknown`: one
+    of the item's revisions since then names the sender as its writer). The server keeps no log of what a session read, so a write is the signal there is: a session that wrote after his answer has seen the item as it stands. The
+    write itself is never refused; the line says the item has moved. "" for a write with no session behind it (the server's own, a script's), an item he never answered, a session the answer was handed to (its `told` list on the
+    answer's own record: it holds the answer already, whether the pending answer is settled or not), a sender that wrote after his answer, and when the item's history could not be read in full (a store outside git, more than 60 newer
+    revisions, a failed read): a missing line is better than a wrong one. Never raises: read before the write is saved, since that write is the sender's too."""
+    who = sender.strip()
+    try:
+        if not who or who == _ho.COLD or who.startswith("a script on "):
+            return ""
+        recs = [a for a in ((item.get("metadata") or {}).get("answers") or []) if isinstance(a, dict) and isinstance(a.get("ts"), (int, float)) and not isinstance(a.get("ts"), bool)]
+        if not recs:
+            return ""
+        rec = max(recs, key=lambda a: a["ts"])
+        if _save_hooks().session_id(who) in (rec.get("told") or []):      # handed his answer already (kept on the record by service/answer.py `_record_told`)
+            return ""
+        if _telling.touched_or_unknown(gid, who, float(rec["ts"])):
+            return ""
+        at = _hooks().render_when_words(dt.datetime.fromtimestamp(float(rec["ts"]), _hooks().zone()))
+        verb = "answered" if rec.get("kind") == "decision" else "commented on"
+        words = _save_hooks().answers_mod()._answer_words(rec, 200)
+        where = "on GitHub" if rec.get("via") == "github" else "on the board"
+        return f"\n(note: {OWNER} {verb} {_gh.shown(gid)} {where} at {at} {_cfg.tz_abbr()}{': ' + words if words else ''}. You have not written to the item since his answer, so what you hold of it may be out of date: read it again before you rely on it)"
+    except Exception as e:  # noqa: BLE001  — the write goes on; a note that fails is a stderr line
+        print(f"update: {gid} answer note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return ""
+
+
 def _reads_time_wait(item: dict[str, Any]) -> bool:
     """The model reads the open item as a wait on a time with no hold flag: a verifying item (its end date is its wait), or any item the model reads as a time wait (wait_kind=time). The snooze guard
     (model_guards) asks such a wait for its reason like a hold's, so update takes a wait_basis for its wake at any length, as it does for a held item; a wake an alive item
@@ -574,6 +603,7 @@ def update_unlocked(
         opts = []
     gid = _norm_id(item_id, bare=_bare_id_ok(status))
     item = _load(gid)
+    answered_note = _answered_since_note(gid, item, sender)      # read now: the write below is the sender's too
     had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save
     if was_until and clear_wake and _uw.kind_of(item["metadata"]) in ("", "time") and not had_hold:
@@ -1346,7 +1376,7 @@ def update_unlocked(
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
                                                                  ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
-            + named + told + h.nag(debtor))
+            + answered_note + named + told + h.nag(debtor))
 
 
 def _completion_anchor_prompt(gid: str, item: dict[str, Any]) -> str:

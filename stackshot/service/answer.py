@@ -1,7 +1,7 @@
 """answer.py: the owner's answer from the board: its record, its delivery, the settle of a pending one and the escalation.
 
 `_answer` records one answer (a decision, a comment, a Done or a note on his step) on the item under the item lock and then the answer lock, in the order every writer takes them, and hands the item over; `_answer_deliver` tells the item's mover and every
-session named in its needs, one line each, through the owner-notice path; `_answer_ack` settles the answer pending on an item when a session that was told of it writes to the item; `_answer_tick` is the escalation pass of the minute set: a decision
+session named in its needs, one line each, through the notice path, and then the item's contact and the front agents he is talking to now, the same line once each (a front agent's as a held line for its next turn); `_answer_ack` settles the answer pending on an item when a session that was told of it writes to the item; `_answer_tick` is the escalation pass of the minute set: a decision
 answer that no session it was sent to has followed with a write within `_ANSWER_ESCALATE_S` goes to the project's keeper, once. The hand-over after an answer is service/answer_handover.py's.
 
 A service module: it reads the store and writes an item through `writes.save`, under the locks it takes itself. The answer form's lock, its limits, the file of pending answers and its words (web/answers.py), the renderer's reader of the
@@ -33,6 +33,7 @@ from stackshot.model.ids import _item_url
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store
 from stackshot.projects import pages as _pages
 from stackshot.service import answer_handover as _handover
+from stackshot.service import contacts as _contacts
 from stackshot.service import item_read as _item_read
 from stackshot.service import owner_words as _owner_words
 from stackshot.service import pane_recovery as _pane_recovery
@@ -43,6 +44,7 @@ from stackshot.service import wait_gates as _wait_gates
 from stackshot.service import wakes as _wakes
 from stackshot.service import writes as _writes
 from stackshot.service.save_hooks import hooks as _hooks
+from stackshot.waits import held as _held
 from stackshot.waits import watchers as _watch
 
 _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as web/tools/text.py holds it
@@ -68,6 +70,64 @@ def _answer_ack(gid: str, writer: str) -> None:
             return
         st.pop(gid, None)
         _answers()._answers_save(st)
+
+
+def _tell_aside(gid: str, sid: str, line: str, tail: str, contact: bool = False) -> bool:
+    """His answer for a session that only keeps up with the item (its contact, a front agent he is talking to): a front agent gets it through the front gate as a held line, which rides its next turn, starts none and carries no
+    mark (`telling.front_fyi`; where the gate holds it back, because its hook cannot fetch held lines, the gate says so in the routing log and, for the contact, the board's History line stays). Only the contact leaves a History line on the
+    item: a front agent of another project that he happens to be talking to keeps the routing-log line alone. It fails closed: a session that is a front agent, or whose role could not be read, is never sent the plain push; when the gate does not handle
+    it (it failed) the line goes onto the item's History for the contact and nobody is told. Any other session gets the plain send, as the sessions in the needs do. A held line is cut at `held.LINE_MAX`: the item's link, the tail, is kept and his words are cut.
+    → whether the session was handed the line (sent, or filed for its next turn)."""
+    if _telling.front_role(sid) is False:
+        _telling.tell_woken(gid, sid, line, tag="answer")
+        return True
+    fyi = line if len(line) <= _held.LINE_MAX or not line.endswith(tail) else line[:-len(tail)][:max(0, _held.LINE_MAX - len(tail) - 2)].rstrip() + " …" + tail
+    res = _telling.front_fyi(sid, fyi, gid=gid, board=contact)
+    if res != ("", ""):
+        return res[0] == "fyi"
+    why = "the front gate could not file it"
+    if contact:
+        _telling._front_board_line(gid, sid, False, why, line)
+    _telling._front_held_log(gid, sid, "message", f"held: front agent, {why} (message)", line)
+    return False
+
+
+def _record_told(gid: str, rec: dict[str, Any], ids: list[str]) -> None:
+    """Keep the sessions his answer was handed to on the answer's own record (`metadata.answers[].told`, the session ids), so an update by one of them is not told his answer again, whatever came of the pending
+    answer since (a first told session's write settles it, the escalation drops it, and a comment or a Done has none). A server save like the front gate's History line: no writer, no clock moves, nothing posted
+    to the issue. The caller holds the item lock. Never raises."""
+    if not ids:
+        return
+    try:
+        it = _svcstore._load(gid)
+        meta = dict(it.get("metadata") or {})
+        recs = [dict(a) if isinstance(a, dict) else a for a in (meta.get("answers") or [])]
+        mine = next((a for a in reversed(recs) if isinstance(a, dict) and a.get("ts") == rec.get("ts")), None)
+        if mine is None:
+            return
+        mine["told"] = list(ids)
+        meta["answers"] = recs
+        it["metadata"] = meta
+        _writes.save(gid, it, note="who his answer was handed to")
+    except Exception as e:  # noqa: BLE001  — a record kept for a reply line: the answer stands without it
+        print(f"answer: {gid} told names not kept: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+
+def _also_reached(meta: dict[str, Any]) -> list[tuple[str, bool]]:
+    """The sessions beside the item's mover, its needs and its then-mover that hear his answer: the item's contact (`_contact_of`: the stored one while it is a front agent, else the project's -main agent) and every front
+    agent he is in conversation with now (`telling.present_fronts`: his last message in its pane within the presence window), whether or not the item names it. (name, is the item's contact), contact first. Never raises."""
+    out: list[tuple[str, bool]] = []
+    try:
+        c = _contacts._contact_of(meta)
+        if c:
+            out.append((c, True))
+    except Exception as e:  # noqa: BLE001  — a contact that cannot be read leaves that line out; the answer is saved
+        print(f"answer: contact not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        out += [(n, False) for n in _telling.present_fronts()]
+    except Exception as e:  # noqa: BLE001
+        print(f"answer: front agents in conversation not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return out
 
 
 def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "") -> list[str]:
@@ -116,6 +176,14 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         tell(thenid, to_then(line))
     if not told:
         print(f"answer: {gid} has no mover and names no session to tell", file=sys.stderr, flush=True)
+    seen, handed_to = list(told), list(told)
+    for s, is_contact in _also_reached(meta):     # the item's contact and the front agents he is talking to now: his answer is a held line for their next turn, never a turn of its own
+        sid = _session_id(s)
+        if sid and sid not in seen:
+            seen.append(sid)
+            if _tell_aside(gid, sid, line, f" → {url}", is_contact):      # not in `told`: a front agent's write must not settle an answer the sessions that hold the item have not acted on
+                handed_to.append(sid)
+    _record_told(gid, rec, handed_to)
     return told
 
 

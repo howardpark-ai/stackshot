@@ -390,6 +390,21 @@ def front_sender(who: str) -> bool:
         return False
 
 
+def front_role(who: str) -> bool | None:
+    """`front_sender` for a caller that must not fail open: True for a front agent, False for any other session and for him, None when the roles could not be read (the caller then
+    treats the session as a front agent, so a notice that must never start a turn does not start one on a failed read)."""
+    who = str(who or "").strip()
+    if not who or _model.is_owner(who):
+        return False
+    try:
+        roles = _anc.session_roles()
+        name = _hooks().role_name(roles, who)
+        return bool(name) and roles[name]["role"] == "front"
+    except Exception as e:  # noqa: BLE001
+        print(f"front role: {who} not read ({e.__class__.__name__}: {e})", file=sys.stderr, flush=True)
+        return None
+
+
 # ---- a front agent is no channel to the owner for an item's moves
 # Two rules. (1) A return or fallback that stackshot makes itself (the hand-off ladder's return to the sender, the cold call's pick, the fallback mover a stepped answer or an
 # ended wait lands on) never goes to a front agent: the item goes to the project's builder; a project without one keeps the item with its current mover. What
@@ -483,6 +498,26 @@ def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None
         return False
 
 
+def present_fronts(now: float | None = None, idx: dict[str, Any] | None = None) -> list[str]:
+    """The front agents he is in conversation with now: a pane whose stamp file (the prompt hook's, read by `presence_here`, so the one window of [presence] minutes) is fresh and whose session is a front agent by
+    anchors.session_roles(). The stamp files name a pane by its transcript id; the fleet's index gives its name. → the names, in the order of the stamp files; [] when the folder or the index cannot be read. Never raises."""
+    out: list[str] = []
+    try:
+        idx = _sessions_index() if idx is None else idx
+        names = sorted(f.name for f in _cfg.state("prompts").iterdir() if f.is_file())
+    except Exception:  # noqa: BLE001  — no stamp folder, no conversation
+        return out
+    for sid in names:
+        try:
+            row = idx.get(sid)
+            name = str(row.get("name") or "") if isinstance(row, dict) else ""
+            if name and name not in out and front_sender(name) and presence_here(name, now, idx):
+                out.append(name)
+        except Exception:  # noqa: BLE001  — one unreadable row leaves that pane out
+            continue
+    return out
+
+
 def _stamped_at(v: dict[str, Any]) -> float:
     """When a revision's writer stamp (`written_by`, `written_by_id`) was written: `written_at`, which only a write by a session or the owner sets (`writes.record_writer`); a revision from before
     that field has `updated`. A server save with no writer moves `updated` and leaves the stamp (and `written_at`) as the last real writer left them, so it is never a touch."""
@@ -492,22 +527,25 @@ def _stamped_at(v: dict[str, Any]) -> float:
         return 0.0
 
 
-def writers_since(gid: str, since: float) -> list[tuple[str, str]]:
+def _writers_read(gid: str, since: float) -> tuple[list[tuple[str, str]], bool]:
     """The (name, id) every revision of the item whose writer stamp (`written_by`, `written_by_id`) was written at or after `since` (_stamped_at; a git revision committed after `since` that
     only carries an older stamp, a server save, does not count): the file on disk, then the store's git revisions (one `git log` and one `git cat-file --batch`, as render.item_versions
-    reads them; a store outside git adds none)."""
+    reads them; a store outside git adds none). The second value says whether the history was read in full: False when the file or the store's history could not be read (a store outside git, a failed
+    command), or when more than 60 revisions are newer than `since` (only the newest 60 are read). Writes inside one debounce window of the store's commits (web/publish.py) are one revision, so the
+    stamp of a write that a later write overwrote before the commit is in no revision: that gap is not seen."""
     out: list[tuple[str, str]] = []
+    full = True
     try:
         it = _load(gid)
         if _stamped_at(it) >= since:
             out.append((str(it.get("written_by") or ""), str(it.get("written_by_id") or "")))
     except Exception:  # noqa: BLE001
-        pass
+        full = False
     try:
         p = _path(gid)
         lg = subprocess.run(["git", "-C", str(_store.STORE), "log", f"--since={int(since)}", "--name-only", "--format=%x01%H", "--", str(p)], capture_output=True, timeout=10)
         if lg.returncode:
-            return out
+            return out, False
         want = []
         for chunk in lg.stdout.decode("utf-8", "replace").split("\x01")[1:]:
             head, _, rest = chunk.partition("\n")
@@ -515,9 +553,12 @@ def writers_since(gid: str, since: float) -> list[tuple[str, str]]:
             if head.strip() and path:
                 want.append(f"{head.strip()}:{path}\n")
         if not want:
-            return out
+            return out, full
+        if len(want) > 60:
+            full = False
         buf = subprocess.run(["git", "-C", str(_store.STORE), "cat-file", "--batch"], input="".join(want[:60]).encode(), capture_output=True, timeout=10).stdout
         i = 0
+        read = 0
         while i < len(buf):
             nl = buf.find(b"\n", i)
             if nl < 0:
@@ -529,14 +570,22 @@ def writers_since(gid: str, since: float) -> list[tuple[str, str]]:
             n = int(hdr[2])
             try:
                 v = json.loads(buf[i:i + n].decode("utf-8", "replace"))
+                read += 1
                 if _stamped_at(v) >= since:
                     out.append((str(v.get("written_by") or ""), str(v.get("written_by_id") or "")))
             except Exception:  # noqa: BLE001
                 pass
             i += n + 1
+        if read < min(len(want), 60):
+            full = False
     except Exception:  # noqa: BLE001
-        pass
-    return out
+        full = False
+    return out, full
+
+
+def writers_since(gid: str, since: float) -> list[tuple[str, str]]:
+    """The (name, id) every revision of the item whose writer stamp was written at or after `since`: the file on disk, then the newest 60 of the store's git revisions (`_writers_read`)."""
+    return _writers_read(gid, since)[0]
 
 
 def touched(gid: str, who: str, since: float) -> bool:
@@ -548,6 +597,22 @@ def touched(gid: str, who: str, since: float) -> bool:
         return False
     for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)]:
         for name, wid in writers_since(g, since):
+            if (wid and h.same_sess(wid, who)) or (name and h.same_sess(name, who)):
+                return True
+    return False
+
+
+def touched_or_unknown(gid: str, who: str, since: float) -> bool:
+    """`touched` for a caller that must lean toward saying nothing: True also when the item's history could not be read in full (`_writers_read`), since a session's write may be in the part that was not read. No
+    start time (`since` of 0 or less) is a touch here too: with nothing to compare the answer's time against, nothing is claimed."""
+    h = _hooks()
+    if not since or since <= 0:
+        return True
+    for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)]:
+        names, full = _writers_read(g, since)
+        if not full:
+            return True
+        for name, wid in names:
             if (wid and h.same_sess(wid, who)) or (name and h.same_sess(name, who)):
                 return True
     return False
@@ -612,7 +677,7 @@ def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str) -> 
         print(f"front gate: {gid} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True, held_kind: str = "fyi") -> bool:
+def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True) -> bool:
     """the one gate every item notice passes in tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
     Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act). The [for <owner>]
     mark does not exempt a notice: a close or a stuck notice stackshot itself sends carries it, and takes a turn of its own only under presence plus touched. A message a session sends
@@ -620,7 +685,8 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
     A tag the map does not know is a progress notice (held when he is away); tests/front_quiet_scenario.py fails on a tag passed to the gate that the map lacks.
     `nid`: the router notice this is the pass of, so a pass retried after its ruling failed to write holds the line once (held.add is idempotent on it).
     `log`: False when the caller writes the routing-log line itself (the router's own ruling), so one notice leaves one line there.
-    `held_kind`: the kind the held line is filed under (held.KINDS): an fyi, or a page-owed notice the router passes."""
+    `held_kind`: the kind the held line is filed under (held.KINDS): an fyi, or a page-owed notice the router passes.
+    `board`: False leaves the item's History line out (only the routing-log line is written), for a notice to a front agent the item is not about."""
     kind = kind or FRONT_TAG_KIND.get(tag, "progress")
     FRONT_HINT.result = ("", "")
     if kind == "exempt" or not front_sender(owner):
@@ -636,7 +702,7 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
             why = "its hook cannot fetch held lines, and a new turn is not worth it"
         reason = f"held: front agent, rides {OWNER}'s next turn (fyi, {kind})" if fyi_ok else f"held: front agent, {why} ({kind})"
         FRONT_HINT.result = ("fyi", "") if fyi_ok else ("held", why)
-        if kind in ("progress", "message"):
+        if board and kind in ("progress", "message"):
             _front_board_line(gid, owner, fyi_ok, why, note)      # the board keeps the news whether or not the pane hears it
         if log:
             _front_held_log(gid, owner, kind, reason, note)
@@ -646,12 +712,12 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
         return False
 
 
-def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True, held_kind: str = "fyi") -> tuple[str, str]:
+def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True) -> tuple[str, str]:
     """An fyi for a front agent (a message its sender marked as asking nothing, sent through the message tool or passed by the router) through the front gate, the one path a notice
     for a front agent takes: it rides the agent's next turn and starts none, or is held when its hook cannot fetch held lines. `gid`: the items the message names (comma-separated), each
     of which gets its board line. → ("fyi", "") filed for its next turn, ("held", why) nobody is told (logged), ("", "") the gate did not handle it (a recipient that is no front agent, or the
-    gate failed): the caller does what it did before. `held_kind`: "page-owed" for a page-owed notice the router passes (same gate, same path; the line is filed under that kind)."""
-    if not front_gate(gid, agent, note, "message", "message", nid, log, held_kind):
+    gate failed): the caller does what it did before. `held_kind`: "page-owed" for a page-owed notice the router passes (same gate, same path; the line is filed under that kind). `board`: see `front_gate`."""
+    if not front_gate(gid, agent, note, "message", "message", nid, log, held_kind, board):
         return "", ""
     return gate_result()
 
