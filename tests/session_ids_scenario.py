@@ -262,6 +262,13 @@ fa = json.loads(client_reads_svc._client_item_facts(Tr["main_b"], gt)[2])["items
 check("old transcript owner: item-facts says it is mine and gives the name", fa["mover_me"] is True and fa["mover"] == "home-sparrow-main", fa)
 
 # ---- 6. delivery
+# a message marked for him starts a front agent's turn only while he is talking with it (service/front_turn.py): stage that, the CLI's registry row of the pane and the stamp of his last prompt
+from stackshot.service import handoff as _handoff
+(T / "cli").mkdir(exist_ok=True); _handoff.CLI_SESSIONS = T / "cli"
+(T / f"cli/{os.getpid()}-home-sparrow-main.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": S["main"], "name": "home-sparrow-main", "status": "idle", "startedAt": int((time.time() - 7200) * 1000)}))
+(T / f"cli/{os.getpid()}-home-sparrow-docs.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": S["docs"], "name": "home-sparrow-docs", "status": "idle", "startedAt": int((time.time() - 7200) * 1000)}))
+(T / "state/prompts").mkdir(parents=True, exist_ok=True)
+for _k in ("main", "docs"): (T / "state/prompts" / S[_k]).write_text(f"{time.time() - 60:.0f}\n")
 sent = []
 real_run = subprocess.run
 def fake_run(argv, *a, **k):

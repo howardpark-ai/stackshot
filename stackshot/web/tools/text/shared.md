@@ -14,7 +14,7 @@ sender=<its name> on its writes, so they reach the mover as another session's. n
 create has no step), and the board ticks it when he says it is done, so an ask that only asks whether he has done it
 is refused. agent=<session> is the older form: it makes that session the one named in needs (the decision and external
 entries stay); agent="none" takes the sessions out. observers: sessions that hear only a close or a reopen;
-observers="none" clears. after: items of any project that must close first (after=["board#N"]); while one is open the
+observers="none" clears. tell_him: front agents he asked to tell him of it, a turn even while he is away; the write needs his words in said; "none" clears. after: items of any project that must close first (after=["board#N"]); while one is open the
 item counts as waiting without a park, and when the last one closes it wakes and the sessions in its needs (else its
 mover) are told; a dropped one releases it too, a superseded one is followed to its replacement; a loop is refused;
 after="none" clears. after is for a real dependency (this item needs that one's output), never for the order a builder
@@ -63,8 +63,7 @@ cause or trigger goes in a later bullet that opens `Problem:`. Then what the ite
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
 commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;
 details go on the project page. A create, or an update that replaces the description, whose first bullet does not open
-`Goal:` is refused; an update that leaves description out is never judged. Example: description="- Goal: the export
-finishes in under a minute\n- Problem: the nightly run takes 9 minutes\n- Lives in export.py". Item text renders as
+`Goal:` is refused; an update that leaves description out is never judged. Item text renders as
 markdown (nested `- ` lists, **bold**, `code`, > quotes; no raw HTML, headings or tables). next: {{NEXT_WORDS}}
 {{NEXT_REFUSALS}}A line of next is refused unless it is <= {{NEXT_LINE_MAX}} characters after its `<actor>: ` prefix,
 and <= {{NEXT_LINE_FULL}} in all (a link counts by its text); only the text you write in a call is checked. Each line

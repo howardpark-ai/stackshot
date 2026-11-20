@@ -1,9 +1,9 @@
 """needs.py: what an item's needs, after and observers lists hold, and the readers of them: the two kinds of need (`_NEEDS_KINDS`: decision, external) and the session names after them
 (`_needs_sessions`), the list as stored and as written back (`_needs_list`, `_needs_of`, `_needs_kinds`, `_needs_store`), the stored order (`_canon_needs`), whether the item waits on the owner's
-decision (`_waits_decision`), and the `after` and `observers` lists (`_after_of`, `_observers_of`).
+decision (`_waits_decision`), and the `after`, `observers` and `tell_him` lists (`_after_of`, `_observers_of`, `_tell_him_of`).
 
-An item relates to sessions four ways: its mover, metadata.needs (whose move it is now: a LIST of "decision" (the owner's), "external" (someone outside, named in next) and session names, several at once;
-empty is the mover's move), metadata.observers (sessions that hear only a close or a reopen) and metadata.after (items of any project that must close first). The stored needs list is canonical: decision,
+An item relates to sessions five ways: its mover, metadata.needs (whose move it is now: a LIST of "decision" (the owner's), "external" (someone outside, named in next) and session names, several at once;
+empty is the mover's move), metadata.observers (sessions that hear only a close or a reopen), metadata.tell_him (the front agents he asked to tell him about it: a turn each time, even while he is away) and metadata.after (items of any project that must close first). The stored needs list is canonical: decision,
 external, then the sessions as given.
 
 A domain module: it reads an item's metadata dict and nothing else (no store, no clock). What needs the store stays with it: `_after_open`, which reads each `after` item from the store, is server.py's still."""
@@ -73,4 +73,10 @@ def _after_of(meta: dict[str, Any]) -> list[str]:
 
 def _observers_of(meta: dict[str, Any]) -> list[str]:
     v = meta.get("observers")
+    return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+
+
+def _tell_him_of(meta: dict[str, Any]) -> list[str]:
+    """metadata.tell_him: the front agents he asked, in his own words, to tell him about the item (recorded only by a write that carries them: gates.gate_tell_him); never the observers."""
+    v = meta.get("tell_him")
     return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []

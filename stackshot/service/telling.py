@@ -50,7 +50,7 @@ from stackshot.model.needs import _needs_kinds, _NEEDS_KINDS, _needs_list, _need
 from stackshot.model.said import _owner_words
 from stackshot.projects import keeper_reads as _reads
 from stackshot.router import router_live as _router_live, routing as _routing
-from stackshot.service import foryou as _fy, foryou_events as _fyev, writes as _writes
+from stackshot.service import foryou as _fy, foryou_events as _fyev, front_turn as _front_turn, writes as _writes
 from stackshot.service.store import _load, _path
 from stackshot.waits import handoff as _ho, held as _held, quiet as _frontq
 
@@ -623,6 +623,8 @@ def front_verdict(gid: str, owner: str, kind: str) -> tuple[str, str]:
     A `message` (a peer's fyi, sent on purpose to this agent) always rides its next turn: it needs no presence stamp and no touch of an item, since it starts no turn and was addressed to it."""
     if kind == "message":
         return "fyi", ""
+    if _front_turn.asked(owner, gid, closed=True):
+        return "send", ""      # he asked this agent to tell him about the item (it is in the item's tell_him): a turn, with or without him there; a close too, the item is already saved as completed
     h = _hooks()
     idx = _sessions_index()
     row = h.handoff_pane_row(owner, idx)

@@ -81,7 +81,7 @@ _DROPPED_NOTE_LINK_MAX = 300    # a cut that would fall inside a link runs on to
 # A write whose every argument is one of these is bookkeeping on the item, not work on it: it names no background agent in needs
 # (_name_on_write). A page rename moves many items with update(project=<new key>), and the mover, a background agent, must not be
 # named in each one's needs as if it had begun working on it.
-_FILING_ONLY = frozenset({"project", "subject", "priority", "owner_name", "observers", "contact", *_model.MODEL_FIELDS, "clear_goal", "clear_mover", "clear_then", "clear_wait"})
+_FILING_ONLY = frozenset({"project", "subject", "priority", "owner_name", "observers", "tell_him", "contact", *_model.MODEL_FIELDS, "clear_goal", "clear_mover", "clear_then", "clear_wait"})
 
 
 @dataclass(frozen=True)
@@ -541,6 +541,7 @@ def update_unlocked(
     options: list[dict[str, Any]] | str | None = None,
     agent: str = "",
     observers: list[str] | str | None = None,
+    tell_him: list[str] | str | None = None,
     after: list[str] | str | None = None,
     work: dict[str, Any] | str | None = None,
     said: list[dict[str, Any]] | str | None = None,
@@ -590,7 +591,7 @@ def update_unlocked(
         reword = None             # {} and "{}" name no step: the call is as if it passed none
     given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait", "busy_note") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
     h = _hooks()
-    filing_only = bool(given) and set(given) <= _FILING_ONLY      # a bookkeeping write (a page rename's update(project=<new key>)): no work was done, so no agent is named for it
+    filing_only = bool(given) and set(given) <= (_FILING_ONLY | ({"said"} if "tell_him" in given else set()))      # a bookkeeping write (a page rename's update(project=<new key>)): no work was done, so no agent is named for it
     subject, description, next, ask, reason, outcome_text = (_shown_ids(x) for x in (subject, description, next, ask, reason, outcome_text))   # g7 →
     next_drop = next.strip().lower() in _nl.NONE_WORDS   # next="none" (or clear, -) removes the sender's own lines, as "none" clears due, wake and needs; an empty next is "not passed"
     if next_drop:
@@ -769,6 +770,11 @@ def update_unlocked(
                 next = (next.rstrip() + "\n" if next.strip() else (kept_own.rstrip() + "\n" if kept_own.strip() else "")) + work_made
                 next_touch = True
     said_l = _gates.gate_said(said, sender.strip() or own_for, debtor)   # the trailers: his words checked against the transcript; a failed check refuses the write here
+    clear_tell = tell_him is not None and (tell_him == [] or (isinstance(tell_him, str) and tell_him.strip().lower() in h.ask_none))
+    if clear_tell:
+        meta.pop("tell_him", None)      # taking the ask back needs no words of his
+    elif tell_him is not None and (tell_him if isinstance(tell_him, list) else tell_him.strip()):
+        meta["tell_him"] = _gates.gate_tell_him(tell_him, said_l)      # his ask to a front agent, recorded only with his own words in this write
     reformat = bool(description) and bool(_writes.reformat())   # a re-bullet changes the form of the description, never what it says: the state clock and the confirm stay, no page is owed
     rewording = _steps.reword_given(reword)      # reword={position: new text}: an open step's words change; an empty mapping ({} or "{}") is not given
     marks = _fg._marks_given(done) or _fg._marks_given(dropped) or rewording or work_tick >= 0      # a step checked, dropped or reworded is a change of next; so is the step a status done ticks

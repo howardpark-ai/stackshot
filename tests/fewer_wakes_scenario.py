@@ -157,6 +157,12 @@ check("reports: the reason names what stopped it", reports.report_doubt("is it l
       and reports.report_doubt("merged, osprey-main knows", FRONT) == "the name osprey-main" and reports.report_doubt("") == "nothing said", reports.report_doubt("live; ask Oliver"))
 
 # ---- 1. the message tool
+# a message marked for Oliver starts a front agent's turn only while he is talking with it (service/front_turn.py; its own suite: front_turn): stage that for both front agents, the CLI's registry row of the pane and the stamp of his last prompt
+from stackshot.service import handoff as _handoff
+(T / "cli").mkdir(exist_ok=True); _handoff.CLI_SESSIONS = T / "cli"; (T / "state/prompts").mkdir(parents=True, exist_ok=True)
+for _sid, _nm in ((A, "osprey-main"), (Y, "osprey-front2")):
+    (T / f"cli/{os.getpid()}-{_nm}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": _sid, "name": _nm, "status": "idle", "startedAt": int((time.time() - 7200) * 1000)}))
+    (T / "state/prompts" / _sid).write_text(f"{time.time() - 60:.0f}\n")
 roles = _anc_y.session_roles()
 check("fixture: osprey-main and osprey-front2 are front agents, osprey-x a background one", roles["osprey-main"]["role"] == "front" and roles["osprey-front2"]["role"] == "front" and roles["osprey-x"]["role"] == "back", {k: v["role"] for k, v in roles.items()})
 p0, s0 = len(pushes()), len(saved)

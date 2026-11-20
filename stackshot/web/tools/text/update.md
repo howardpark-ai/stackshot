@@ -241,9 +241,7 @@ name of until) and until take YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day,
 seconds or a UTC offset is converted to that minute in {{TZ_ABBR}}, and the reply says so. At that moment the server
 tells the item's mover and the sessions in its needs once and drops the date. A doing item whose wake is over an hour away and whose every open step waits for a later date ("after Mar 2", "until
 Mar 2"; a deadline such as "by Mar 2" or "due Mar 2" is no wait) is listed as waiting, and the audit asks why the step
-cannot run now. A front agent's own wake or until date (no hold) on an alive item another session moves is refused
-(the result lands through stackshot when the mover closes the item or hands it back to you; watch_reason=<why no push
-reaches you> lets a real exception through; a park's wake with hold=true is a wait of its own and stays allowed). Parked
+cannot run now. Parked
 = an open item waiting until its next move is due: hold=true, always passed explicitly, with what it waits for;
 with a wake the server releases it at that moment, tells the sessions in its needs (else its mover; refresh the ask
 then) and returns it to the lane its needs give it. Meanwhile it reads as parked (a waiting state), not as work moving

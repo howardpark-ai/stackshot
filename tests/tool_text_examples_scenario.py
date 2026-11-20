@@ -222,6 +222,11 @@ MSGS = [("ask a front agent", 'to="widgets-main", sender="my-x", text="[for the 
         ("a plain result to the project", 'to="projects/widgets", sender="my-x", text="PR 12 is live", fyi=true'),
         ("a question to a background agent (the id in backticks)", 'to="widgets-builder", sender="my-x", text="Does `board#N` need the export in the nightly run?"'),
         ("a hand-off of a done step (the id as a plain word)", 'to="widgets-builder", sender="my-x", text="board#N: the design is done, build the export"')]
+# a message marked for him starts a front agent's turn only while he is talking with it (or on his ask, service/front_turn.py): stage that, the CLI's registry row of its pane and the stamp of his last prompt
+from stackshot.service import handoff as _handoff
+(T / "cli").mkdir(exist_ok=True); _handoff.CLI_SESSIONS = T / "cli"
+(T / f"cli/{os.getpid()}-home-alpha-main.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": FRONT, "name": "home-alpha-main", "status": "idle", "startedAt": int((now - 7200) * 1000)}))
+(T / "state/prompts").mkdir(parents=True, exist_ok=True); (T / "state/prompts" / FRONT).write_text(f"{time.time() - 60:.0f}\n")
 for what, frag in MSGS:
     check(f"message: {what}: the example is in the first {CLI_CUT} characters", f"message({frag})" in msg, frag)
     out = runs(f"message: {what}", "message", [frag], lambda **k: _wt_message.stackshot_message(**k), swap=[("widgets-main", "home-alpha-main"), ("[for the owner]", _wt_text._FOR_OWNER), ("widgets-builder", "home-builder"), ("board#N", "a12")])

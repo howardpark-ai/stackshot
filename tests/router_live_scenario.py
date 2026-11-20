@@ -123,6 +123,7 @@ from stackshot.web.tools import get as _wt_get
 from stackshot.web.routes import board_pages as _rt_board
 from stackshot.service import telling
 from stackshot.anchors.anchorhub import core
+live._HOOKS["front_turn"] = lambda target, subject, needs=True: True      # he is with every front agent, so a pass to one is delivered: this suite is about what the router rules and where it delivers; the gate (a turn only while he is there, or on his ask) has its own: front_turn, front_hold
 for _bg in ("work-osprey-x", "work-osprey-docs", "work-zeta-lib"): held.mark_client(_bg)      # the rollout gate: these background agents' hooks fetch held lines (a notice is held only for such a session)
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about what the router and
@@ -283,7 +284,8 @@ hub.send("slack:C0000000001", "work-osprey", "[anchor] Slack: bot chatter → ht
 n_chat = routing.read("projects/alpha")[-1]
 fake("good", answer([(n_chat["id"], "dropped", "", False)])); live.tick()
 # gamma has no background agent, so PR A's clamp lets a front pass without for_owner stand: -main is the only fit, and the mark still goes on
-hub.send("slack:C0000000003", "work-gamma", "[anchor] Slack: the vendor needs a yes → https://u/10", ev("Slack anchor", "Vee", "https://u/10"), "the vendor needs a yes"); n_fr = routing.read("projects/gamma")[-1]
+item(45, "projects/gamma", A, mover="work-gamma-main", needs=["decision"])      # waits on his decision: the notice that names it needs him, whatever for_owner says
+hub.send("slack:C0000000003", "work-gamma", "[anchor] Slack: a45, the vendor needs a yes → https://u/11", ev("Slack anchor", "Vee", "https://u/11"), "a45, the vendor needs a yes"); n_fr = routing.read("projects/gamma")[-1]
 fake("good", answer([(n_fr["id"], "passed", "work-gamma-main", False)])); p0 = len(pushes()); live.tick(); settle()
 fl = next(l for l in lines() if l["id"] == n_fr["id"])
 check("a delivery to a front agent carries [for Oliver] whatever for_owner says (a front pass without it, in a project with no background agent)", [x for x in pushes()[p0:] if x[0] == "work-gamma-main" and n_fr["id"] in x[1]][0][1].startswith("[for Oliver]")
@@ -1050,7 +1052,7 @@ finally:
 # ---- 16. a message whose first line is "For <agent>" reaches that agent, a front agent included (notices a1b2c6 and a1b2c7)
 cfg(live=True); c15 = len(calls())
 _messaging._message("projects/alpha", "For work-osprey-main: you were renamed and your brief is now ~/briefs/alpha-main.md. needs: decision on whether it stays.", "home-beta"); f15 = routing.read("projects/alpha")[-1]
-_messaging._message("projects/epsilon", "For work-gamma-main, from home-beta: the hand-over is ready.", "home-beta"); e15 = routing.read("projects/epsilon")[-1]
+_messaging._message("projects/epsilon", "For work-gamma-main, from home-beta: the hand-over is ready. needs: decision on who takes it.", "home-beta"); e15 = routing.read("projects/epsilon")[-1]
 _messaging._message("projects/alpha", "For work-osprey-nobody: this agent is not on the page.", "home-beta"); u15 = routing.read("projects/alpha")[-1]
 fake("good", answer([(u15["id"], "merged", "", False)])); p15 = len(pushes()); live.tick(); settle(); g15 = pushes()[p15:]
 pf = [x for x in g15 if f15["id"] in x[1]]; pe15 = [x for x in g15 if e15["id"] in x[1]]

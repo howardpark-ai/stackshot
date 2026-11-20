@@ -369,6 +369,15 @@ def gate_observers(observers: Any) -> list[str]:
     return out
 
 
+def gate_tell_him(names: Any, said_l: list[dict[str, Any]]) -> list[str]:
+    """tell_him: the front agents he asked to tell him about an item → the names stored, when this very write carries his own words (a checked Acked-by said entry, never a kind acted one); refused otherwise.
+    Only his request starts a front agent's turn while he is away (service/front_turn.py), so a session cannot record it for him."""
+    if not any(e.get("checked") and e.get("tag") == "Acked-by" and e.get("kind") != _said.ACTED for e in said_l or []):
+        raise ToolError(f"Refused: tell_him records that {OWNER} asked a front agent to tell him about this item, so the write carries his own words: said=[{{tag: Acked-by, quote: his sentence verbatim, msg: the uuid of his message}}], "
+                        "checked against the transcript (an unchecked one is not enough). Without it nothing is recorded; tell_him=\"none\" takes an ask back without it.")
+    return gate_observers(names)
+
+
 def gate_work_writer(gid: str, writer: str, owner: str, meta: dict[str, Any], finishing: bool = False) -> None:
     """a step's status (work) is written by the item's mover (`owner` here) or a session named in its needs; anyone else is refused with the way in.
     A name or an id on either side; the needs list is read as the call leaves it. `finishing`: the writer finishes its own step
