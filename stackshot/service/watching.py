@@ -78,6 +78,11 @@ def _own_step(meta: dict[str, Any], who: str) -> bool:
     return any((nm := _steps.opener(t)) and _anc.same_session(nm, who) for t in named[:1] + [meta.get("ask")])
 
 
+def passed_note(front: str) -> str:
+    """The History words for an item that went to the project's builder instead of the front agent `front` ("" when it did not)."""
+    return f" ({watch_label(front)} is a front agent: the item passes to the project's builder, and it is not told)" if front else ""
+
+
 def _front_to_background(post: str, meta: dict[str, Any]) -> str:
     """When a wait ends on a front agent (a session he talks to), the item goes to the project's builder instead: the front agent is not told by the wake and hears of the item only on a turn he gives it
     (the History line names it). → the builder's name, or "" when the item stays with `post`: `post` is not a front agent, the project has no builder (the ended wait's fallback stays, as for the answers
@@ -215,7 +220,7 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             it["confirmed"] = _hooks().rmod_confirmed_at(it)
         it["metadata"] = meta
         it["updated"] = it["state_updated"] = now
-        by_front = f" ({watch_label(passed)} is a front agent: the item passes to the project's builder, and it is not told)" if passed else ""
+        by_front = passed_note(passed)
         _writes.save(gid, it, note=(f"woke: {what} → {watch_label(mover)}{by_front}" if mover != OWNER else f"the wait ended: {what}; asks {OWNER}: {meta.get('ask')}"))
         print(f"watch: {gid} {kind} wait over ({cause}) → {mover}{' (passed over ' + passed + ')' if passed else ''} — {it.get('subject')}", file=sys.stderr, flush=True)
         if mover != OWNER:
@@ -230,8 +235,7 @@ def watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[s
     if not rows:
         return None
     msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
-    project = str((rows[0][1].get("metadata") or {}).get("project") or "")
-    marked = _telling.front_keeper(sid, project)[0] and any(_waits_decision(m := it.get("metadata") or {}) or _own_step(m, sid) for _g, it, _w in rows)      # a front agent takes what is his to do: a wake that asks him nothing is not marked for him
+    marked = any(_telling.front_keeper(sid, str((m := it.get("metadata") or {}).get("project") or ""))[0] and (_waits_decision(m) or _own_step(m, sid)) for _g, it, _w in rows)      # per row, as each row's project reads the recipient (a keeper of one project is a front agent of another): a front agent takes what is his to do, a wake that asks him nothing is not marked for him
     return _watch.message(msg_rows), (_FOR_OWNER if marked else ""), [g for g, *_ in rows]
 
 
