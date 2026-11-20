@@ -99,6 +99,23 @@ check("2 a long finding whose fix says needs: decision is still held (the phrase
 sent.clear(); _, reached, _ = send([finding("ask-options")], front_only=True, deliver=lambda to, t, fy=False: (sent.append((to, t, fy)), (False, "[400] down"))[1])
 check("2 when the held send and the page-key send both fail, the finding has reached no one (it is tried again next pass)", [to for to, _m, _f in msgs()] == ["demo-main", "projects/demo"] and reached == [], (sent, reached))
 
+ROLES["other-main"] = {"role": "front"}
+def flaky(to, text, fyi=False):
+    sent.append((to, text, fyi))
+    return (False, "[404] no such session") if to in ("demo-builder", "other-main") else (True, "[200] ok")
+pair = [finding("ask-options", mover="demo-builder", to="demo-builder", project="projects/one", i=9201), finding("ask-options", mover="demo-builder", to="demo-builder", project="projects/two", i=9202)]
+sent.clear(); _o = AR.deliver_findings(env(deliver=flaky, fallback=lambda p: "other-main" if p.endswith("two") else "demo-main"), pair, "Filing check 2099-03-03 10:00 UTC")
+check("2 two projects share an unreachable builder and only one project's fallback lands: only that finding counts as delivered, the other is tried again next pass",
+      [f["id"] for f in _o[1]] == [shown(9201)] and [m["delivered"] for m in _o[0] if m.get("kind") == "fallback"] == [True, False], (_o[1], _o[0]))
+sent.clear(); _o = AR.deliver_findings(env(deliver=flaky, fallback=lambda p: "demo-main"), pair, "Filing check 2099-03-03 10:00 UTC")
+check("2 when every fallback lands, every finding of the group counts as delivered", [f["id"] for f in _o[1]] == [shown(9201), shown(9202)], _o[1])
+sent.clear(); _o = AR.deliver_findings(env(deliver=flaky, fallback=lambda p: "demo-builder" if p.endswith("one") else "demo-main"), pair, "Filing check 2099-03-03 10:00 UTC")
+check("2 a finding whose project has no one else to tell (its -main agent is the unreachable builder itself) is not counted as delivered when another project's fallback lands: it is tried again",
+      [f["id"] for f in _o[1]] == [shown(9202)], _o[1])
+fo = env(front_only=True, builder=lambda p: "")
+check("2 the unmoved digest of a quiet finding on an item the owner moves, in a project with no builder, goes to the page key unmarked, never to the -main agent marked for him", AR.chase_to(fo, "projects/demo", "Oliver") == ("projects/demo", False), AR.chase_to(fo, "projects/demo", "Oliver"))
+check("2 in a project with a builder it goes to the builder, unmarked", AR.chase_to(env(), "projects/demo", "Oliver") == ("demo-builder", False), AR.chase_to(env(), "projects/demo", "Oliver"))
+
 # ---- 3. what stays
 sent.clear(); send([finding("stale", detail="past its wake")])
 check("3 a finding that needs him (stale) keeps the marked path: the -main agent, [for Oliver] first, a real message", msgs() == [("demo-main", True, False)], sent)
