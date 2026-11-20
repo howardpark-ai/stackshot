@@ -13,6 +13,8 @@ Used by server.py's description and next gates, by the cold call's close (cold_c
   clip_bullet   one bullet shortened to `line_max` visible characters at a word boundary that lies outside any link and any naked URL, then an ellipsis
   bullets       a text as `- ` bullets, split on lines only, each clipped, at most `max_lines` of them (the last says how many more there were)
   _clip_line    free text as one line of a notice: whitespace collapsed, cut at a word before a limit with an ellipsis
+  cut_words     one line cut at the last whole word that fits with " …" after it (None when no whole word fits): the cut of a subject or a status line over its limit
+  link_bare_urls  a text with each bare http(s) URL written as a link to itself, `[url](url)` (the address ends at its last URL character; none inside an angle autolink, a link, a reference definition, an attribute or code, nor one `skip` holds)
 
 Every pattern here is linear in the line's length (no nested quantifier over the same characters, the open-ended parts are bounded, and whitespace that two neighbours could
 match is matched possessively), so a 40,000-character line of brackets, angle marks or spaces costs milliseconds, not seconds."""
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import bisect
 import re
+from typing import Any
 
 # A Markdown link: `[words](destination)`, the destination as `(url)`, `(url "title")`, `(url 'title')`, `(url (title))`, `(<a destination with spaces>)`, or a url that holds
 # one level of balanced parentheses. The words take no bracket (so a run of `[` is one step each); the angle destination and the title are bounded.
@@ -44,6 +47,7 @@ def visible_len(line: str) -> int:
 
 _RX_CODE_SPAN = re.compile(r"`[^`\n]*+`")
 _RX_ANY_URL = re.compile(r"https?://[^\s<>)\]]++", re.I)
+_URL_TAIL = ".,;:!?'\"*_"           # what a sentence puts after a URL, not part of it
 
 
 def bare_urls(text: str) -> list[str]:
@@ -60,8 +64,176 @@ def bare_urls(text: str) -> list[str]:
     out = []
     for ln in keep:
         for m in _RX_ANY_URL.finditer(RX_MD_LINK.sub(" ", _RX_CODE_SPAN.sub(" ", ln))):
-            out.append(m.group(0).rstrip(".,;:!?'\"*_"))
+            out.append(m.group(0).rstrip(_URL_TAIL))
     return out
+
+
+def _closed_fences(lines: list[str]) -> set[int]:
+    """The indexes of the lines inside a closed fenced block, fence lines included (a fence still open at the end is no fence), as bare_urls reads them."""
+    out, open_at = set(), -1
+    for k, ln in enumerate(lines):
+        if open_at < 0:
+            if _RX_FENCE.match(ln):
+                open_at = k
+        elif _RX_FENCE_END.match(ln):
+            out.update(range(open_at, k + 1))
+            open_at = -1
+    return out
+
+
+_RX_SCHEME = re.compile(r"https?://", re.I)
+_RX_ANGLE = re.compile(r"<https?://[^\s<>]*+>", re.I)                 # an autolink
+_RX_REFDEF = re.compile(r"^[ ]{0,3}\[[^\]\n]*+\]:[ \t]*+<?(https?://\S*+)", re.I)      # a reference definition's address
+_RX_ATTR = re.compile(r"=[ \t]*+[\"']?+")                              # what an attribute puts before its address
+_URL_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#@!$&'*+,;=%")      # the ASCII a URL is made of (a bracket, a quote, a space and anything else ends it); parentheses by balance
+
+
+_RX_TICKS = re.compile(r"`+")
+_JOINERS = "/?#=&%~+:@.-_"           # what an address does not end on when more of it follows (a character that is no URL character after one of these is part of a path, not a particle)
+_REST_TAIL = ".,;:!?'\")]*_"          # what a sentence, a quote, a closing bracket or a closing emphasis puts after an address
+
+
+def _code_spans(ln: str) -> list[tuple[int, int]]:
+    """The code spans of one line as Markdown reads them: a run of N backticks to the next run of exactly N (a longer or shorter run is no closer). A run with no closer opens nothing. Linear: the runs of each length are
+    walked once."""
+    runs = [m.span() for m in _RX_TICKS.finditer(ln)]
+    by_len: dict[int, list[int]] = {}
+    for k, (a, b) in enumerate(runs):
+        by_len.setdefault(b - a, []).append(k)
+    at: dict[int, int] = {}
+    out, k = [], 0
+    while k < len(runs):
+        n = runs[k][1] - runs[k][0]
+        lst, j = by_len[n], at.get(n, 0)
+        while j < len(lst) and lst[j] <= k:
+            j += 1
+        at[n] = j
+        if j < len(lst):
+            out.append((runs[k][0], runs[lst[j]][1]))
+            k = lst[j] + 1
+        else:
+            k += 1
+    return out
+
+
+_RX_EMPH = re.compile(r"\*+|_+")
+
+
+def _emph_depths(ln: str) -> dict[tuple[str, int], tuple[list[int], list[int]]]:
+    """For each emphasis run of one line (a run of * or _ and its length): its start positions in order and, after each, how many runs of that kind are open there. A run opens when no letter or digit stands before it and a
+    non-space follows (so `snake_case_` and `* item` open nothing); one closes the latest open run of its kind when a non-space stands before it and no letter or digit follows. One pass over the line."""
+    out: dict[tuple[str, int], tuple[list[int], list[int]]] = {}
+    for m in _RX_EMPH.finditer(ln):
+        a, b = m.span()
+        before, after = ln[a - 1] if a else "", ln[b] if b < len(ln) else ""
+        pos, depth = out.setdefault((m.group()[0], b - a), ([], []))
+        d = depth[-1] if depth else 0
+        if not before.isalnum() and after and not after.isspace():
+            d += 1
+        elif before and not before.isspace() and not after.isalnum() and d:
+            d -= 1
+        pos.append(a)
+        depth.append(d)
+    return out
+
+
+def _url_span(s: str, at: int, emph: dict[str, Any] | None = None) -> tuple[int, int]:
+    """(where the address that opens with the scheme at `s[at:]` ends, where the scan goes on): the end is `at` when the address is not to be linked. It runs as far as URL characters go, a parenthesis only as one
+    that closes one inside it (an unclosed one ends the address before it), without the . , ; : ! ? or ' a sentence puts after it, and without a closing run of * or _ that an emphasis opened earlier in the line (a run of the same
+    character and length opened before the address and not yet closed; a trailing run nothing opened, as in `__init__` or `src/**`, is the address's own). `emph` is the line's cache of those runs, built once on first use. When the address stops short and the rest of its whitespace-delimited token still reads as
+    address (a path character, a letter or a digit, or any non-ASCII character after one of / ? # = & % . - _ ~ + : @), the token is no address this can cut in the right place: it is not linked, and the caller's
+    refusal stands. A short rest that is no address (a particle after the address, a closing bracket or quote) stays out of the link."""
+    start = _RX_SCHEME.match(s, at).end()
+    i, opens = start, []
+    while i < len(s):
+        c = s[i]
+        if c == "(":
+            opens.append(i)
+        elif c == ")":
+            if not opens:
+                break
+            opens.pop()
+        elif c not in _URL_CHARS:
+            break
+        i += 1
+    stop = opens[0] if opens else i
+    token = stop
+    while token < len(s) and not s[token].isspace():
+        token += 1
+    end = stop
+    if emph is None:
+        emph = {}
+    while True:                                                           # what a sentence and what an emphasis put after the address, in either order (`**address**.`)
+        was = end
+        while end > start and s[end - 1] in ".,;:!?'":
+            end -= 1
+        run = 0
+        while end > start and end - run > start and s[end - run - 1] in "*_" and s[end - run - 1] == s[end - 1]:
+            run += 1
+        if run:
+            if "runs" not in emph:
+                emph["runs"] = _emph_depths(s)
+            pos, depth = emph["runs"].get((s[end - 1], run), ([], []))
+            k = bisect.bisect_left(pos, at) - 1                           # the last run of this kind before the address: how many are open there
+            if k >= 0 and depth[k]:
+                end -= run
+        if end == was:
+            break
+    if end <= start:
+        return at, token
+    rest = s[stop:token].rstrip(_REST_TAIL)
+    if rest and (any(c.isascii() and (c.isalnum() or c in "/?#=&%.-~+") for c in rest) or (not rest.isascii() and s[stop - 1] in _JOINERS)):
+        return at, token
+    return end, token
+
+
+def link_bare_urls(text: str, skip: Any = ()) -> tuple[str, list[str]] | None:
+    """(`text` with every bare http(s) URL that bare_urls finds written as a link to itself, `[url](url)`, the addresses linked in order): the address as the link's words and its target, ending at its last URL character
+    (never on a Korean particle after it, a closing parenthesis only when it closes one inside it, a closing emphasis mark that was opened earlier left out, a trailing _ or * run nothing opened kept), nothing else changed (the ends of the line, the line breaks and the punctuation after
+    a URL stay). An address already inside an angle autolink, a Markdown link, a reference definition, an attribute or a code span of any backtick count (or a fence) is left as it is, and so is one that stops short with more address-like text after it in its token (see _url_span), and so is one in `skip` (the ones the item already holds,
+    as bare_urls reads them). None when a URL is still bare after the change (the caller then leaves the text as written for its own refusal). Linear in the text: each address is scanned once, the guarded stretches are
+    searched by position."""
+    lines = str(text or "").splitlines(keepends=True)
+    fenced = _closed_fences([ln.rstrip("\r\n") for ln in lines])
+    room = max(map(len, skip), default=0) + 2          # a run of more characters than any held address is none of them
+    out, linked = [], []
+    for k, ln in enumerate(lines):
+        if k in fenced or "http" not in ln.lower():
+            out.append(ln)
+            continue
+        spans = sorted([m.span() for rx in (_RX_CODE_SPAN, RX_MD_LINK, _RX_ANGLE) for m in rx.finditer(ln)] + [m.span(1) for m in _RX_REFDEF.finditer(ln)] + _code_spans(ln))
+        guard: list[tuple[int, int]] = []
+        for a, b in spans:
+            if guard and a <= guard[-1][1]:
+                guard[-1] = (guard[-1][0], max(b, guard[-1][1]))
+            else:
+                guard.append((a, b))
+        starts = [a for a, _ in guard]
+        attr_at = {m.end() for m in _RX_ATTR.finditer(ln)}
+        parts, at, pos = [], 0, 0
+        emph: dict[str, Any] = {}
+        for m in _RX_SCHEME.finditer(ln):
+            if m.start() < pos:
+                continue                                                   # inside the address just written
+            g = bisect.bisect_right(starts, m.start()) - 1
+            if (g >= 0 and m.start() < guard[g][1]) or m.start() in attr_at:
+                continue
+            end, nxt = _url_span(ln, m.start(), emph)
+            if end == m.start():
+                pos = nxt                                                  # not linked: the rest of its token is no other address (the scan stays linear)
+                continue
+            url = ln[m.start():end]
+            if skip:
+                raw = _RX_ANY_URL.match(ln, m.start(), min(len(ln), m.start() + room))
+                if url in skip or (raw is not None and raw.end() < m.start() + room and raw.group(0).rstrip(_URL_TAIL) in skip):
+                    pos = end
+                    continue
+            parts.append(ln[at:m.start()] + f"[{url}]({url})")
+            linked.append(url)
+            at = pos = end
+        out.append("".join(parts) + ln[at:])
+    new = "".join(out)
+    return None if set(bare_urls(new)) - set(skip) else (new, linked)
 
 
 def _fenced(lines: list[str]) -> set[int]:
@@ -321,3 +493,21 @@ def _clip_line(text: str, limit: int = 600) -> str:
         return t
     cut = t[:limit].rsplit(" ", 1)[0] if " " in t[:limit] else t[:limit]
     return cut.rstrip(" ,;:") + " …"
+
+
+def cut_words(text: str, limit: int, mark: str = " …") -> str | None:
+    """One line `text` over `limit` characters cut at the last whole word that fits, with `mark` after it (counted in the limit, as clip_bullet and the server's own cuts do): no word is cut in two and the
+    kept words are as written. Never inside a code span, a link's words or a parenthesis: the cut falls before one that would be left open (an odd number of backticks, a `[` or a `(` with no closing mark in what is kept).
+    `text` itself when it reads within the limit; None when no whole word fits (a first word over the room, or no gap outside such a stretch), which the caller refuses as before."""
+    t = str(text or "").strip()
+    if len(t) <= limit:
+        return t
+    room = limit - len(mark)
+    if room < 1:
+        return None
+    head = t[:room + 1]
+    for e in sorted((m.start() for m in re.finditer(r"\s", head) if m.start() <= room), reverse=True):          # the gaps a word can end at: a word of exactly `room` characters ends at the gap just after it
+        kept = t[:e].rstrip(" ,;:")
+        if kept and kept.count("`") % 2 == 0 and kept.count("[") <= kept.count("]") and kept.count("(") <= kept.count(")"):
+            return kept + mark
+    return None

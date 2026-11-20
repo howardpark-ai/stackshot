@@ -56,6 +56,7 @@ from stackshot.projects.project_registry import _registry, _roles_sync_safe
 from stackshot.router import router_live as _router_live
 from stackshot.service import handoff as _handoff
 from stackshot.service import telling as _telling
+from stackshot.service import wakes as _wakes
 from stackshot.service import watching as _watching
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path
@@ -1309,10 +1310,37 @@ def gate_handoff(gid: str, before: dict[str, Any] | None, after: dict[str, Any],
                        else f"The project has no background agent with a pane either: hand it to a session that has one, or put the call to {OWNER} (needs=decision with its ask)."))
 
 
-def _ask_by_day_only(param: str, value: str) -> None:
-    """A relay or event wait waits on news, so its date is a day, not a time of day: the refusal for the date a call gave as `param` (until, or the old name wake) with a time on it."""
-    if len(value) != 10:
-        raise ToolError(f"Refused: on a relay or event wait {param} is its ask-by day, YYYY-MM-DD with no time of day (got {value!r}); pass the day alone, e.g. {param}={value[:10]}")
+_RX_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_RX_TIMED_DAY = re.compile(r"(\d{4}-\d{2}-\d{2})[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)?")
+
+
+def ask_by_day(value: Any, param: str = "ask_by") -> str:
+    """A relay or event wait waits on news, so its date is a day, not a time of day: the caller reads this only for a date it gives to that kind of wait. The date a call gave as `param` (ask_by, until, or the old name
+    wake) with a time on it (YYYY-MM-DDTHH:MM, seconds, a zone or a space for the T allowed, on a real day) keeps its day and loses the time, and the reply says so (call_log.fixed); a time with an offset or Z is first
+    read in the instance timezone, and its day there is the day kept. Anything else comes back as it was, for the checks that judge it. A day falls due at 00:00 of that day, so a day that is not after now, given alone or
+    with a time later today, is no day that can be kept: the write is refused, with tomorrow as the earliest."""
+    v = _model.clean(value)
+    m = _RX_TIMED_DAY.fullmatch(v)
+    if not m:
+        day = v if _RX_DAY.fullmatch(v) else ""
+        keep = ""
+    else:
+        day = m.group(1)
+        keep = (_wakes._wake_iso(v) or day)[:10]
+    if not day:
+        return value
+    try:
+        dt.date.fromisoformat(day)
+    except ValueError:
+        return value
+    final = keep or day
+    if _hooks().wake_at(final) <= _pages.zone_now():
+        raise ToolError(f"Refused: on a relay or event wait {param} is its ask-by day, YYYY-MM-DD with no time of day, and a day falls due at 00:00 of that day: {final} is already past (got {v!r}); "
+                        f"give tomorrow at the earliest, {param}={(_pages.zone_now().date() + dt.timedelta(days=1)).isoformat()}")
+    if not m:
+        return value
+    _calls.fixed("ask-by-day", f"{param} {v} had a time of day and a relay or event wait's ask-by is a day: {final} was kept and the time dropped", fields=[param], stored=final, sent=v)
+    return final
 
 
 def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold: bool, wait_kind: str) -> tuple[str, str, bool, list[str], str]:
@@ -1333,14 +1361,19 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
         except Exception:  # noqa: BLE001  — an unknown item is _update's to refuse
             kind = ""
     slot = _uw.slot_of(kind)                                                  # the one working field the date of this kind stands in ("ask_by" for a relay or event wait, else "wake")
+    if not u and slot != "ask_by" and ask_by.strip() and not wake.strip() and not none(ask_by) and kind not in ("anchor", "item") and _RX_TIMED_DAY.fullmatch(_model.clean(ask_by)):
+        u = _model.clean(ask_by)                                              # ask_by is the old name of until: beside no relay or event wait it keeps its time of day, as until does
     if not u:
         if kind and not (wake.strip() and ask_by.strip()):                    # an old parameter on a kind of wait names the date for that kind: it goes where the stored date stands, so it replaces it
             if slot == "ask_by" and wake.strip() and not none(wake):
-                _ask_by_day_only("wake", wake.strip())
-                return "", wake, False, used, given
+                day = ask_by_day(wake.strip(), "wake")
+                return "", day, False, used, day if given == wake.strip() else given            # the note names the day stored, not the time the fix cut
             if slot == "wake" and ask_by.strip() and not none(ask_by) and kind in ("anchor", "item"):
                 return ask_by, "", False, used, given
-        return wake, ask_by, False, used, given
+        day = ask_by_day(ask_by) if slot == "ask_by" and not none(ask_by) else ask_by
+        return wake, day, False, used, day if used == ["ask_by"] and day != ask_by else given       # the note names the day stored, not the time the fix cut
+    if slot == "ask_by" and u.lower() not in h.ask_none:                      # a relay or event wait: its date is a day, judged as one first (a time is cut to its day in the instance zone, a day not ahead is refused naming tomorrow); the read below would log a wake fix for an offset time beside it
+        u = str(ask_by_day(u, "until"))
     if u.lower() not in h.ask_none:
         try:
             at = h.wake_at(h.parse_wake(u))
@@ -1349,8 +1382,6 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
         if at <= _pages.zone_now():
             raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
     if slot == "ask_by":
-        if u.lower() not in h.ask_none:
-            _ask_by_day_only("until", u)
         return "", u, True, used, given
     return u, "", True, used, given
 

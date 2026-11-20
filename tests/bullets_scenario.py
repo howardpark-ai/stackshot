@@ -6,7 +6,7 @@ nested bullet are fine; a Markdown link counts by its text and a naked URL not a
 (200) is refused, a `<owner>:` command line and the hash/count/past-tense report notes are not; only the text written in the call is
 judged (an update without description and next on an item whose stored description is prose is not refused); a close judges its new
 description (complete, and update with status=completed); the limits come from the config; the script question route keeps its form;
-and the tool texts state the limits; a subject over [subject] max_length (80) and a close reason over [close] reason_max (120) are refused on create, update and the closes, a stored longer one is left alone, and the server's own closes are cut to the limit.
+and the tool texts state the limits; a subject over [subject] max_length (80) that has no word to cut at, and a close reason over [close] reason_max (120), are refused on create, update and the closes (a subject with words is cut: five_fixes), a stored longer one is left alone, and the server's own closes are cut to the limit.
 
     tests/run-suite bullets        → exit 0 / 1"""
 import json, os, re, sys, pathlib, tempfile, logging, time
@@ -109,7 +109,9 @@ check("fixture: the link-heavy bullet is over 120 raw and within 120 as read", l
 passes("a link-heavy bullet passes: a link counts by its text, not its URL", lambda: create(long_link))
 refused("the words of a link do count", lambda: create("- " + f"[{'w' * 130}](https://example.com/x)"), "description bullet is")
 passes("a long URL on a link is not counted", lambda: create("- Lives at [the doc](https://example.com/" + "a" * 200 + ")"))
-refused("a naked URL is refused, however short (it is never drawn as a link for sure)", lambda: create("- Lives at https://example.com/a"), "description has a bare URL")
+_r_url, _g_url = create("- Lives at https://example.com/a")
+check("a naked URL in a description is written as a link to itself, however short (it is never drawn as a link for sure), with no naked-URL note after it",
+      "Lives at [https://example.com/a](https://example.com/a)" in _r_url and "naked URL" not in _r_url, _r_url[:400])
 refused("the forbidden tokens still refuse", lambda: create("- resolved: it works"), "contains 'resolved:'")
 
 # ---- 2. next lines on create

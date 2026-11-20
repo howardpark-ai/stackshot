@@ -216,8 +216,10 @@ def create_item(
         if pfx_:
             subject = pfx_ + subject.lstrip()
             _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it", fields=["subject"], stored=subject)
+    subject = _fg.fix_long_subject(subject)       # a subject over the limit is cut at its last word that fits (a pure form fix; the reply says so)
     _fg._gate_subject(subject)
     _fg._gate_recycle_item(subject)
+    description = _fg.fix_bare_urls(description, None, session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     description, split_note = _fg.fix_long_bullets(description)       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
     _fg._gate_description(description)
     if _writes.session_next() and not by:      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
@@ -242,19 +244,22 @@ def create_item(
         until_v = ""                   # a "none" on a create is nothing to clear
     alias_used = ["ask_by"] if _model.clean(ask_by) and _model.clean(ask_by).lower() not in h.ask_none else []
     alias_ends = h.wait_alias_gate(alias_used)
+    by_day = _uw.slot_of(_model.clean(wait_kind).lower()) == "ask_by"      # a relay or event wait: its date is a day
     if until_v:
+        if by_day:
+            until_v = _gates.ask_by_day(until_v, "until")       # a relay or event wait's date is a day, judged as one: a time of day is dropped (the reply says so), a day that is not ahead is refused naming tomorrow
         try:
             until_at = h.wake_at(h.parse_wake(until_v))
         except ToolError:
             raise ToolError(f"Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {until_v!r})")
         if until_at <= _pages.zone_now():
             raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
-        if _uw.slot_of(_model.clean(wait_kind).lower()) == "ask_by" and len(until_v) != 10:
-            raise ToolError(f"Refused: on a relay or event wait until is its ask-by day, YYYY-MM-DD with no time of day (got {until_v!r}); pass the day alone, e.g. until={until_v[:10]}")
-        if _uw.slot_of(_model.clean(wait_kind).lower()) != "ask_by":      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
+        if not by_day:      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
             _gates.gate_cap({}, said_l, "until", h.parse_wake(until_v), until_at.timestamp())
     elif alias_used:
         until_v = _model.clean(ask_by)          # ask_by is the old name of the date (an until beside it wins)
+        if by_day:
+            until_v = _gates.ask_by_day(until_v)
     model_set, _ = _gates.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                      "until": until_v, "post_wake_mover": post_wake_mover}, {})   # a "none" on a create is nothing to clear
     list_plan = _gates.gate_waits(waits, wait_mode, gid="", project=project, creating=True, stored={}, backstop=str(h.parse_wake(until_v)) if until_v else "",

@@ -6,7 +6,7 @@ sends a wake there), so the hold flag was set with no wake beside it. A relay wa
 
   1  relay + hold   hold=true with a wake (or ask_by) on a relay or event wait is accepted: the date is stored as until, no hold flag, the reply says the wait is the park; hold=true alone on a
                     relay that already has its day is accepted too; a wake past the cap is still refused by the cap
-  2  until + time   until with a time of day on a relay or event wait is refused with the reason (the ask-by day is YYYY-MM-DD)
+  2  until + time   until with a time of day on a relay or event wait is fixed (the day is stored, the time dropped, an ask-by-day fix is counted)
   3  unchanged      an anchor wait with hold=true and a wake keeps its hold flag; a hold with no date on an anchor-scoped item is still refused with the backstop-wake message
 
     tests/run-suite hold_relay_wake        -> exit 0 / 1"""
@@ -126,15 +126,19 @@ check("1 clear_hold on a relay wait that holds no flag says the wait goes on and
 
 # ================================================================ 2. until with a time
 item(6, **REL)
-refused("2 until with a time of day on a relay wait is refused with the reason", lambda: bupd(6, until=w(3) + "T10:00"), "on a relay or event wait until is its ask-by day, YYYY-MM-DD", "until=" + w(3))
-check("2 …nothing was stored", W.stored_until(mt(6)) == w(5), mt(6))
+from stackshot.core import call_log as CL
+tok = CL.begin()
+try: bupd(6, until=w(4) + "T10:00")
+finally: fx2 = CL.end(tok)
+check("2 until with a time of day on a relay wait is fixed: the day is stored, the time dropped, and the fix is counted", W.stored_until(mt(6)) == w(4) and [k for k, _ in fx2] == ["ask-by-day"] and "until" in fx2[0][1], (mt(6), fx2))
 bupd(6, until=w(3))
 check("2 until with the day alone is accepted", W.stored_until(mt(6)) == w(3), mt(6))
 
-refused("2 a create with until and a time on a relay wait is refused the same way",
-        lambda: create_svc.create_item(subject="[home] new relay", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: wait for the reply", needs=[BACK],
-                                       wait_kind="relay", wait_event="the vendor's reply", until=w(3) + "T10:00", post_wake_mover=BACK, request_id="hrw-create-1"),
-        "on a relay or event wait until is its ask-by day")
+tok = CL.begin()
+try: gid_c, _ = create_svc.create_item(subject="[home] new relay", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: wait for the reply", needs=[BACK],
+                                       wait_kind="relay", wait_event="the vendor's reply", until=w(3) + "T10:00", post_wake_mover=BACK, request_id="hrw-create-1")
+finally: fxc = CL.end(tok)
+check("2 a create with until and a time on a relay wait is fixed the same way: the day is stored", W.stored_until(_service_store._load(gid_c)["metadata"]) == w(3) and [k for k, _ in fxc] == ["ask-by-day"], (gid_c, fxc))
 
 # ================================================================ 3. unchanged
 item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", post_wake_mover=BACK)

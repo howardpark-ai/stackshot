@@ -123,7 +123,7 @@ def bind(*, main_agent) -> None:
 
 
 # ----------------------------------------------------------------------------- the notes a reply carries
-_NAKED_URL = re.compile(r"(?<!\]\()https?://[^\s)\]>]+")
+_NAKED_URL = re.compile(r"(?<!\[)(?<!\]\()https?://[^\s)\]>]+")      # a link's own text (`[url](url)`, what the server writes for a bare address in a description) is no naked URL
 
 
 # Words that say an item waits on the owner running something (a command must sit on the item, not only in a session's chat). Narrow on purpose: the note is a nudge.
