@@ -185,6 +185,14 @@ def reset() -> None:
     _CACHE["sig"] = None
 
 
+def signature() -> tuple:
+    """What the cached read of the registry stands on, one `(path, inode, mtime_ns, size)` per file, after the look at the directory `load` takes (so within its trust window it is the signature of the read the lookups
+    are served from, not of what is on disk now). A caller that keeps an answer built from these lookups and stamps it with this value never holds a stamp newer than the registry it read. () with no registry."""
+    load()
+    sig = _CACHE.get("sig")
+    return sig if isinstance(sig, tuple) else ()
+
+
 def available() -> bool:
     """Does the registry hold any session (a cheap test before work that only matters when it does)."""
     return bool(load().rows)
