@@ -112,6 +112,23 @@ check("2 when every fallback lands, every finding of the group counts as deliver
 sent.clear(); _o = AR.deliver_findings(env(deliver=flaky, fallback=lambda p: "demo-builder" if p.endswith("one") else "demo-main"), pair, "Filing check 2099-03-03 10:00 UTC")
 check("2 a finding whose project has no one else to tell (its -main agent is the unreachable builder itself) is not counted as delivered when another project's fallback lands: it is tried again",
       [f["id"] for f in _o[1]] == [shown(9202)], _o[1])
+def mixed(down):
+    def dl(to, text, fyi=False):
+        sent.append((to, text, fyi))
+        return (False, "[404] gone") if to in ("demo-builder", down) else (True, "[200] ok")
+    return dl
+quiet = finding("ask-options", mover="Oliver", to="Oliver", project="projects/one", i=9301)       # the owner's item: its fallback is the page key, unmarked
+loud = finding("ask-options", mover="demo-builder", to="demo-builder", project="projects/two", i=9302)       # a session's item: its fallback is the -main agent
+for down, want in (("projects/one", [shown(9302)]), ("demo-main", [shown(9301)])):
+    sent.clear(); _o = AR.deliver_findings(env(deliver=mixed(down), builder=lambda p: "demo-builder", fallback=lambda p: "demo-main"), [quiet, loud], "Filing check 2099-03-03 10:00 UTC")
+    check(f"2 one group with a page-key fallback and a -main fallback, the {'page-key' if down.startswith('projects') else '-main'} send failing: only the other send's finding counts as delivered",
+          [f["id"] for f in _o[1]] == want and sorted(to for to, _t, _f in sent) == sorted(["demo-builder", "projects/one", "demo-main"]), (_o[1], [(to, fy) for to, _t, fy in sent]))
+def same_name(to, text, fyi=False):       # the page key and the -main agent read alike; the unmarked page-key message is refused, the marked -main one lands
+    sent.append((to, text, fyi))
+    return (False, "[404] gone") if to == "demo-builder" or (to == "projects/one" and not text.startswith("[for Oliver]")) else (True, "[200] ok")
+quiet1 = finding("ask-options", mover="Oliver", to="Oliver", project="projects/one", i=9303); loud1 = finding("ask-options", mover="demo-builder", to="demo-builder", project="projects/one", i=9304)
+sent.clear(); _o = AR.deliver_findings(env(deliver=same_name, builder=lambda p: "demo-builder", fallback=lambda p: "projects/one"), [quiet1, loud1], "Filing check 2099-03-03 10:00 UTC")
+check("2 a page-key fallback and a -main fallback that read alike are two sends: when only the marked -main one lands, only its finding counts as delivered", [f["id"] for f in _o[1]] == [shown(9304)], (_o[1], [(to, t[:24]) for to, t, _f in sent]))
 fo = env(front_only=True, builder=lambda p: "")
 check("2 the unmoved digest of a quiet finding on an item the owner moves, in a project with no builder, goes to the page key unmarked, never to the -main agent marked for him", AR.chase_to(fo, "projects/demo", "Oliver") == ("projects/demo", False), AR.chase_to(fo, "projects/demo", "Oliver"))
 check("2 in a project with a builder it goes to the builder, unmarked", AR.chase_to(env(), "projects/demo", "Oliver") == ("demo-builder", False), AR.chase_to(env(), "projects/demo", "Oliver"))
