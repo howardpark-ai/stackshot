@@ -725,18 +725,62 @@ def recipient(who: str, project: str, env: Env, mover: str = "") -> tuple[str, b
     is no decision for him and follows the mover's rule. A finding with no project has no page key: the -main agent, marked, as before."""
     w = str(who or "").strip()
     if _model.is_owner(w):
-        m = str(mover or "").strip()
-        if _no_session(m) and not _model.is_owner(m):          # no mover, "-" and an outside party read alike
-            m = ""
-        if not m or _model.is_owner(m):
+        if person_moves(w, mover):
             return env.main_of(project), True
-        w = m
+        w = _mover_name(mover)
     r = env.role_map().get(w) or {}
     if not _no_session(w) and not r.get("retired") and r.get("role") not in FRONT_ROLES:
         return w, False
     if not str(project or "").strip():
         return env.main_of(project), True
     return page_key(project), False
+
+
+def _mover_name(mover: Any) -> str:
+    """The item's mover as a session name: "" for none, "-" or an outside party (they read alike), the person's own name as it stands."""
+    m = str(mover or "").strip()
+    return "" if _no_session(m) and not _model.is_owner(m) else m
+
+
+def person_moves(who: Any, mover: Any) -> bool:
+    """Is a finding for `who` on an item the person moves: `who` is the person and so is the item's mover (or it has none)?"""
+    if not _model.is_owner(str(who or "").strip()):
+        return False
+    m = _mover_name(mover)
+    return not m or _model.is_owner(m)
+
+
+def quiet_target(f: dict[str, Any], env: Env) -> tuple[str, bool]:
+    """(where a finding that needs nothing of the person goes when it would have been marked for him, whether it goes as a held note). The project's builder when it has one that is a live background agent: a plain
+    unmarked message. A project with none (front-only, or no live builder) holds it through the front gate for its front agent's next turn: no turn started, nothing marked. With no front agent either, the project's
+    page key, unmarked, where the router rules it. A finding with no project has no page key: the -main agent, held when that is a front agent."""
+    proj = str(f.get("project") or "").strip()
+    roles = env.role_map()
+    if proj:
+        try:
+            builderless = env.is_front_only(proj)
+        except Exception:  # noqa: BLE001  — a registry that cannot be read counts as no builder
+            builderless = True
+        if not builderless:
+            b = env.builder_of(proj)
+            rb = roles.get(b) or {}
+            if b and rb and not rb.get("retired") and rb.get("role") not in FRONT_ROLES and not env.is_front(b, proj):
+                return b, False
+    main = env.main_of(proj)
+    if main and env.is_front(main, proj):
+        return main, True
+    return (page_key(proj) if proj else main), False
+
+
+def finding_route(f: dict[str, Any], env: Env) -> tuple[str, bool, bool]:
+    """(where a finding goes, whether its message is marked for the person, whether it goes as a held note). `recipient` decides, except for a finding that needs nothing of the person (audit_checks.needs_person)
+    on an item he moves: it goes to the project's builder or is held for its front agent (`quiet_target`), never marked. A finding that needs him, and a category not yet classified, keep `recipient`'s marked path."""
+    who = f.get("to") or f.get("mover") or ""
+    if not _ac.needs_person(f.get("category")) and person_moves(who, f.get("mover")):
+        to, held = quiet_target(f, env)
+        return to, False, held
+    to, front = recipient(who, f.get("project") or "", env, f.get("mover") or "")
+    return to, front, False
 
 
 def chase_to(env: Env, project: str, mover: str, first_to: str = "") -> tuple[str, bool]:
@@ -784,6 +828,12 @@ def sent_before(rec: dict[str, Any] | None) -> dict[tuple[str, str, str], tuple[
     return out
 
 
+def once_only(f: dict[str, Any]) -> bool:
+    """Is the finding sent once and never repeated or escalated: a category of ONCE, or a finding that needs nothing of the person on an item he moves (`finding_route`). A later try would only stack another held note on a
+    front agent, and the one escalation that would follow is marked for the person, which a finding that asks nothing of him never is. The item's next write sends it again if it still stands."""
+    return f.get("category") in ONCE or (not _ac.needs_person(f.get("category")) and person_moves(f.get("to") or f.get("mover"), f.get("mover")))
+
+
 _TRY = ("", "", "second try", "third try", "fourth try", "fifth try")
 
 
@@ -792,6 +842,18 @@ def line_of(f: dict[str, Any]) -> str:
     n = f.get("tries")
     t = (_TRY[n] if isinstance(n, int) and n < len(_TRY) else "a later try") if isinstance(n, int) and n > 1 else ""
     return f"{f['id']} · {f['category']} · " + (f"{t}, no answer · " if t else "") + f"{_clip(f['detail'], 260)} · {_clip(f.get('fix'), 160)}"
+
+
+HELD_DETAIL, HELD_FIX = 75, 35      # a held line is cut at held.LINE_MAX (260) after the sender's lead and the head: a finding's line has about 145 characters of its own, so detail and fix are clipped to fit it whole
+
+
+def held_line_of(f: dict[str, Any]) -> str:
+    """One finding as a line of a held note for a front agent: `line_of` clipped to what a held line holds. The server's own test for a message that asks nothing reads `needs: decision` as the person's mark and would
+    refuse the fyi, and two fixes say it ("take needs: decision off the item"), so the note writes it without the colon. The message log and the item's History keep the whole finding."""
+    n = f.get("tries")
+    t = (_TRY[n] if isinstance(n, int) and n < len(_TRY) else "a later try") if isinstance(n, int) and n > 1 else ""
+    line = f"{f['id']} · {f['category']} · " + (f"{t}, no answer · " if t else "") + f"{_clip(f['detail'], HELD_DETAIL)} · {_clip(f.get('fix'), HELD_FIX)}"
+    return re.sub(r"needs:\s*decision", "needs decision", line, flags=re.I)
 
 
 def compose(lines: list[str], head: str, front: bool) -> str:
@@ -1010,11 +1072,14 @@ def recheck_fresh(env: Env, items: dict[str, dict[str, Any]], by_shown: dict[str
 def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
     """Send `fresh` findings, one message per recipient (a finding goes to its mover, or the project's -main agent / page key as `recipient` says; a mover that cannot be reached falls back to the
     project's -main agent). `label` opens each message head ("Board audit 2099-03-03"). → (what was sent, the findings that reached someone, `sending_from`: the time just before the first send).
-    `sending_from` is the time a write the caller did not make is told apart from the deliveries' own: a message that names an item may write it."""
+    `sending_from` is the time a write the caller did not make is told apart from the deliveries' own: a message that names an item may write it.
+    A finding that needs nothing of the person, on an item he moves (`finding_route`), goes unmarked to the project's builder as a plain message, else, in a project with no live background agent, as a held note
+    for its front agent's next turn, one message for each finding, sent as an fyi (the server's front gate files it and starts no turn). A held note that cannot be filed (the agent's hook cannot fetch held lines) goes
+    unmarked to the project's page key instead, never marked for the person."""
     sent: list[dict[str, Any]] = []
     sending_from = env.clock()
     reached_fs: list[dict[str, Any]] = []
-    groups: dict[tuple[str, bool], dict[str, Any]] = {}     # (recipient, whether its message is marked for the owner), as `esc` and the digest: one session can be a front agent for one project and the mover of another's item
+    groups: dict[tuple[str, bool, bool, tuple[str, str, str]], dict[str, Any]] = {}     # (recipient, whether its message is marked for the owner), as `esc` and the digest: one session can be a front agent for one project and the mover of another's item
     esc: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its message is marked for the owner): one session can be a front agent for one project and a builder for another, and gets one message of each kind
     up: dict[str, list[tuple[dict[str, Any], str]]] = {}
     for f in [f for f in fresh if f.get("escalate") == 2]:       # still unanswered after the builder was told: the project's -main agent hears of a finding that went to a builder, once (marked for the owner, as every message to it)
@@ -1046,15 +1111,15 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             for f, _ln in ls: f["lvl"] = 1       # kept on the record: only a builder send made with the level kept is followed by the message to -main (split_sent)
             reached_fs += [f for f, _ln in ls]
     for f in fresh:
-        to, front = recipient(f.get("to") or f.get("mover") or "", f["project"], env, f.get("mover") or "")
-        g = groups.setdefault((to, front), {"front": front, "lines": [], "by": [], "fs": []})
-        g["lines"].append(line_of(f))
-        g["by"].append((f["project"], line_of(f)))
+        to, front, held = finding_route(f, env)
+        g = groups.setdefault((to, front, held, finding_key(f) if held else ("", "", "")), {"front": front, "held": held, "lines": [], "by": [], "fs": []})      # a held note is one finding's: a held line is one short line
+        g["lines"].append(held_line_of(f) if held else line_of(f))
+        g["by"].append((f["project"], line_of(f), not _ac.needs_person(f.get("category")) and person_moves(f.get("to") or f.get("mover"), f.get("mover"))))      # the last: needs nothing of the person, on an item he moves: never marked for him
         g["fs"].append(f)
-    for (to, _front), g in sorted(groups.items()):
-        text = compose(g["lines"], f"[stackshot] {label}: {len(g['lines'])} item(s) for you (id · check · evidence · what fixes it).", g["front"])
-        ok, said = _send(env, to, text)
-        sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120)})
+    for (to, _front, _held, _unit), g in sorted(groups.items()):
+        text = compose(g["lines"], f"[stackshot] {label}:" if g["held"] else f"[stackshot] {label}: {len(g['lines'])} item(s) for you (id · check · evidence · what fixes it).", g["front"])
+        ok, said = _send(env, to, text, fyi=g["held"])
+        sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120), **({"kind": "held"} if g["held"] else {})})
         reached = ok
         if not ok:
             # the mover could not be reached: its findings go to the project's -main agent, one message per -main, noted next to the failed one.
@@ -1063,15 +1128,15 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             refused = FRONT_REFUSAL in said
             fb: dict[str, list[str]] = {}
             direct: dict[str, list[str]] = {}
-            for proj, ln in g["by"]:
-                if refused and proj:
+            for proj, ln, wf in g["by"]:
+                if (refused or wf) and proj:       # a finding that needs nothing of the person goes unmarked to the page key too
                     direct.setdefault(page_key(proj), []).append(ln)
                     continue
                 m = env.main_of(proj)
                 if m and m != to:
                     fb.setdefault(m, []).append(ln)
             for pk, ls in sorted(direct.items()):
-                ok2, said2 = _send(env, pk, compose(ls, f"[stackshot] {label}: {len(ls)} item(s) for {to}, a front agent of this project that takes no unmarked message; please pass them to whoever moves them (id · check · evidence · what fixes it).", False))
+                ok2, said2 = _send(env, pk, compose(ls, f"[stackshot] {label}: {len(ls)} item(s) for {to}, {'a front agent of this project that takes no unmarked message' if refused else 'whose session could not be reached (' + _clip(said, 80) + ')'}; please pass them to whoever moves them (id · check · evidence · what fixes it).", False))
                 sent.append({"to": pk, "lines": len(ls), "delivered": ok2, "said": _clip(said2, 120), "kind": "project", "for": to})
                 reached = reached or ok2
             for m, ls in sorted(fb.items()):
@@ -1896,7 +1961,7 @@ def split_sent(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]],
             lv = (levels or {}).get(k, 0)
             if lv:
                 f["lvl"] = lv       # the level a repeat has reached stays on its record
-            if hrs > 0 and now is not None and f.get("category") not in ONCE and n <= REMIND_TRIES + (1 if lv else 0) and now - st[0] >= hrs * 3600:
+            if hrs > 0 and now is not None and not once_only(f) and n <= REMIND_TRIES + (1 if lv else 0) and now - st[0] >= hrs * 3600:
                 f["tries"] = n + 1
                 f["prev"] = {"sent": st[0], "sending_from": st[1], "run_started": st[2], "tries": n}       # what carry_unreached puts back if this send is not reached
                 if n >= REMIND_TRIES:

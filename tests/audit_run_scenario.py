@@ -431,7 +431,8 @@ check("runs() reads it, the findings with the keys the agent's record has", audi
 by_to = {to: text for to, text, fyi in sent if not fyi}
 check("one message per recipient; lines are '<id> · <category> · <evidence> · <fix>'", len({to for to, _, _ in sent if _ != ""}) == len(sent) and by_to.get("home-agent", "").count("board#") >= 1
       and all(len(l.split(" · ")) == 4 for l in by_to["home-agent"].splitlines() if l.startswith("board#")), sent)
-check("a finding on Oliver goes to the project's -main agent with [for Oliver] first", by_to.get("alpha-main", "").startswith("[for Oliver]") and "board#1 · ask-missing" in by_to["alpha-main"], by_to.get("alpha-main"))
+check("a finding on Oliver's item that asks nothing of him (ask-missing: the ask is its writer's to write) goes to the project's builder, unmarked, and starts no turn at the -main agent",
+      "board#1 · ask-missing" in by_to.get("alpha-builder", "") and not by_to.get("alpha-builder", "").startswith("[for Oliver]") and "alpha-main" not in by_to, by_to)
 check("a stuck-elsewhere finding is the filing pass's: the run sends none to the session whose step it is", "ops-other" not in by_to and all("stuck-elsewhere" not in t for t in by_to.values()), by_to)
 summary = [(to, text, fyi) for to, text, fyi in sent if to == "projects/example"]
 check("a summary goes to projects/example, fyi", len(summary) == 1 and summary[0][2] is True and "Board audit" in summary[0][1], summary)
@@ -923,7 +924,10 @@ check("a stale finding on an item a front agent moves goes to the project's page
 check("…and one on a background agent's item goes to that agent", to_of(82) == ["home-agent"], sent)
 check("a stuck-elsewhere finding whose first step is the owner's is no decision for him: it goes to the item's mover, never to the -main agent", to_of(83) == ["home-agent"] and "alpha-main" not in {to for to, t, fy in sent}, sent)
 rec_clear(); fake(); rec = go(build(item(84, wrote=now - H, state="your-call", needs=["decision"], mover="Oliver", next="Oliver: pick one")))
-check("the owner's own marked path stays: a finding on an item that is his move goes to the project's -main agent with [for Oliver] first", to_of(84) == ["alpha-main"] and [t for to, t, fy in sent if to == "alpha-main"][0].startswith("[for Oliver]"), sent)
+check("a finding on an item that is his move, about how the item is written (here: no ask), goes to the project's builder, unmarked: it asks nothing of him", to_of(84) == ["alpha-builder"] and not any(t.startswith("[for Oliver]") for to, t, fy in sent), sent)
+rec_clear(); fake(); sent.clear()
+AR.deliver_findings(env(), [{"id": f"board#{fid(84)}", "project": "projects/alpha", "owner": "Oliver", "mover": "Oliver", "category": "stale", "detail": "past its wake", "fix": "decide or move the wake"}], "Board audit 2099-03-03")
+check("the owner's own marked path stays for a finding that needs him (stale): the project's -main agent, [for Oliver] first, a real message", [(to, t.startswith("[for Oliver]"), fy) for to, t, fy in sent] == [("alpha-main", True, False)], sent)
 check("recipient(): background -> itself; front, keeper, retired, outside, nobody -> the page key; no project -> the -main agent, marked", AR.recipient("home-agent", "projects/alpha", env()) == ("home-agent", False)
       and AR.recipient("alpha-main", "projects/alpha", env()) == ("projects/alpha", False) and AR.recipient("-", "alpha", env()) == ("projects/alpha", False)
       and AR.recipient("an outside party", "projects/alpha", env()) == ("projects/alpha", False) and AR.recipient("home-agent", "", env()) == ("home-agent", False)

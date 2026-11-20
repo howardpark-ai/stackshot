@@ -74,6 +74,22 @@ FIX = {
     "reads-as-wait": "set the wait itself (a hold with its reason, an after item, an event wait), or write next as the action to take now",
 }
 
+# Which findings need the person. A finding of the categories below is about how an item is written, filed or waited on (its ask, its next, its state, its wait): no decision and no step of his is in it, so on an item
+# the person moves it still asks nothing of him. The audit sends such a finding to the project's builder (a plain message), else holds it for the -main agent's next turn, never marked for the person
+# (`audit_run.finding_route`). A category left out keeps the marked path to -main, and so does one named nowhere (a new check) until it is classified here.
+#   no need of him  ask-missing, ask-options (the ask's wording and options), next rules, board checks (arbitrary-hold, mislabeled-state), reads-as-wait, why-not-now, wait-end (how the wait is filed),
+#                   next-done, wrong-needs, unneeded-escalation, older-than-page, obsolete-wait, goal-unclear (the judgment checks: each says what the item's text should say),
+#                   step-handover (a session hands the item on), proof-wait (a session stages the event and closes the item)
+#   needs him       stale (an item he moves is past its own wake: only he writes a date, a decision or a done; the dates pass leaves an item he moves alone today, so it is kept for a pass that does)
+#   its own `to`    stuck-elsewhere (the session whose step it is), event-missing (the builder): not the person's findings, unchanged
+NO_PERSON_NEED = frozenset({"ask-missing", "ask-options", "next rules", "board checks", "reads-as-wait", "why-not-now", "wait-end", "next-done", "wrong-needs", "unneeded-escalation",
+                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait"})
+
+
+def needs_person(category: Any) -> bool:
+    """Does a finding of this category carry a real need of the person (a decision or a step only he can take)? True for every category not in NO_PERSON_NEED, one named nowhere included."""
+    return str(category or "") not in NO_PERSON_NEED
+
 
 def goal_view(item: dict[str, Any]) -> tuple[str, str] | None:
     """(the subject, the sentence after `Goal:`) of an item whose description opens with a Goal bullet, else None: the two texts the goal-unclear check judges. An item filed before the Goal form
