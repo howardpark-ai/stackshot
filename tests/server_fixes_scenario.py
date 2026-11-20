@@ -143,7 +143,8 @@ check("1 the pass parks each item itself: on hold with the wake as it was, a wai
       and "text" in (mt(9031).get("wait_basis") or {}) and stamped(9031) == ("waiting", "time"), (mt(9031), stamped(9031)))
 check("1 …History has a line for each, and the fix is recorded", len(log(9031)) == 1 and "parked" in log(9031)[0] and "clear_hold" in log(9031)[0] and SF.marked(mt(9031), SF.WAKE_PARK, w9031), (log(9031), mt(9031).get(SF.MARK)))
 check("1 …the why-not-now finding is not sent (the audit message is retired): one short message to the mover says what the server did and how to undo it", r1["fresh"] == 0
-      and not [m for m in sent if "· why-not-now ·" in m[1]] and len(sent) == 1 and sent[0][0] == "team-back" and sent[0][2] is True and "clear_hold" in sent[0][1] and all(str(i) in sent[0][1] for i in (9031, 9071)), (r1, sent))
+      and not [m for m in sent if "· why-not-now ·" in m[1]] and len(sent) == 1 and sent[0][0] == "team-back" and sent[0][2] is True and "clear_hold" in sent[0][1] and all(str(i) in sent[0][1] for i in (9031, 9071))
+      and "The server parked 2 items of yours whose only open step waits for its wake" in sent[0][1] and ". Each is parked until its wake, with a wait_basis made from the step's own words, and History has a line." in sent[0][1] and "on hold" not in sent[0][1], (r1, sent))
 check("1 …the record says what the pass did", [re.sub(r"\D", "", x) for x in r1.get("wake_park", {}).get("parked", [])] == ["9031", "9071"], r1)
 sent.clear()
 r2 = AR.filing_pass(now=now + 600, items={"a9031": rd(9031), "a9071": rd(9071)}, anchors={}, env=env(wake_park=_wait_fixes_svc._wake_park))

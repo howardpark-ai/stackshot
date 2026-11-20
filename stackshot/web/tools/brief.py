@@ -84,8 +84,8 @@ def stackshot_brief() -> str:
         _legacy_hold(it); _ip.read_through(it)
         if it.get("status") == "open":
             it["gid"] = gid; (held if _is_parked(it) else mine).append(_get._fmt(it, brief=True))
-    hold = ("\n\nOn hold (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
-    return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} on hold below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
+    hold = ("\n\nParked (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
+    return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} parked below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
             + "\n\nFull board: " + _inst.BOARD_URL + " · any item by id: the get tool") + _nag()
 
 

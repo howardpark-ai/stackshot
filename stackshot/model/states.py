@@ -250,7 +250,7 @@ def problems(meta: dict[str, Any], state: str, today: dt.date, *, check_dates: b
         if not _wt.wake_value(meta):
             out.append("wake=YYYY-MM-DD")
         if not _wt.is_held({"status": "open", "metadata": meta}):
-            out.append("hold=true (the parked state stands on a hold: a date alone makes the item wait until then, outside a hand-off, and states no park)")
+            out.append("hold=true (the parked state is hold=true: a date alone makes the item wait until then, outside a hand-off, and states no park)")
         if not (_wt.wake_value(meta) and _wt.cap_words(meta, "wake")):
             out.append("the owner's words for the wake (said=[...], which records cap_ok) or wait_basis=\"<what happens> YYYY-MM-DD\"")
     elif state == "verifying":

@@ -209,7 +209,7 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
             what = f"woke (wake {wake})"
             _writes.save(gid, it, note=f"{what}: {back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
             woke.append(gid)
-            print(f"wake: {gid} back from hold (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
+            print(f"wake: {gid} unparked (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
             wake_notify(gid, it, what, out=out)
         for sid, rows in out.items():
             wake_tell(sid, rows, extra=_watching.watch_text(sid, wout.pop(sid, [])))     # one message per session for the whole pass

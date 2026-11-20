@@ -164,7 +164,7 @@ def setdesc(i, text):
 
 # ---------------------------------------------------------------- 1. refuses
 want = ("Refused: this item is being moved now: a release of PR #77 tied to this item is running (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1)), so it is not paused. "
-        "Keep it in hand and write where its step stands (work=<one line>, state in progress), or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, mover=<who takes it then>). Park it with a hold only once nothing is running on it.")
+        "Keep it in hand and write where its step stands (work=<one line>, state in progress), or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, mover=<who takes it then>). Park it only once nothing is running on it.")
 got = gate(rel_live(anch=A77))
 check("1 a running release of a pull request anchored to the item refuses the mover's hold, in exactly the words of the refusal", got == ("refused", want), got)
 check("1 …the same text is the constant, formatted", gates.BUSY_RELEASE_REFUSAL.format(live="a release of PR #77 tied to this item is running (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1))") == want)

@@ -122,11 +122,11 @@ res, err = upd(2, hold=True, recycle=True)
 check("hold=true behaves as before: a session's hold for a pane recycle is accepted", not err and _holders._is_held(_service_store._load("a2")), (err, rdm(2)))
 hs = rdm(2).get("hold_set") or {}
 check("…and records who set it and when, nothing more (the reason is the wait_basis, not in the hold record)", set(hs) == {"at", "by"} and hs["by"] == "sparrow" and abs(hs["at"] - _t.time()) < 60, hs)
-check("get shows who set the hold and when", "hold: set by sparrow " in _wt_get.stackshot_get("a2"), _wt_get.stackshot_get("a2"))
+check("get shows who set the hold and when", "parked: set by sparrow " in _wt_get.stackshot_get("a2"), _wt_get.stackshot_get("a2"))
 upd(2, clear_hold=True)
 check("clear_hold releases it and drops the record", not _holders._is_held(_service_store._load("a2")) and "hold_set" not in rdm(2), rdm(2))
 res, err = upd(3, hold=True)
-check("a hold with no wake and nothing holding it is still refused as an indefinite park (the rule of main)", err.startswith("Refused: a hold names what it waits for; an unconditional or indefinite park is refused."), err)
+check("a hold with no wake and nothing holding it is still refused as an indefinite park (the rule of main)", err.startswith("Refused: a park names what it waits for; an unconditional or indefinite park is refused."), err)
 check("the update tool's text no longer invites a session to park its own item: no \"without asking\", no \"park it to the date\", no \"nearest date to check\"",
       not any(x in _wt_update._UPDATE_DESC for x in ("without asking", "park it to the date", "an owner parks its own item", "nearest date to check")) and "A session does not park to defer work it could do now" in _wt_update._UPDATE_DESC,
       _wt_update._UPDATE_DESC[:200])
@@ -158,7 +158,7 @@ row = next(r for r in rows if r["gid"] == "a14"); old = next(r for r in rows if 
 check("each row has the owner, the wake, who set it and when; a hold from before the record says so", row["owner"] and wk_(row) == D(2) and row["by"] == "sparrow" and row["at"] > 0
       and old["by"] == "" and old["at"] == 0 and wk_(old) == D(1), (row, old))
 check("the printed report: one line per item with mover, wake, setter and time", "a14 · mover sparrow · wake " + D(2) + " · set by sparrow (" in rep and "a13 · mover sparrow · wake " + D(1) + " · set by unknown (before the record)" in rep
-      and "a16 ·" not in rep and "update clear_hold=true" in rep, rep)
+      and "a16 ·" not in rep and "update clear_hold=true" in rep and " open item(s) parked that nothing holds now (no open after, pane recycle, needs external or item-scoped anchor); " in rep and "on hold" not in rep, rep)
 check("the report writes nothing: every item file is as it was", before == {f.name: f.read_text() for f in (T / "store/a").glob("*.json")})
 st, ct, body = client_reads_svc._client_get("holds", {}); check("the client API serves it as holds", st == 200 and "a14 · mover sparrow · wake " + D(2) + "" in body and "a16 ·" not in body and ct.startswith("text/plain"), (st, body[:120]))
 _cg = client.get; client.get = lambda what, *a, **k: (200, client_reads_svc._client_get(what, {})[2]); _o = sys.stdout; sys.stdout = __import__("io").StringIO()
@@ -204,20 +204,21 @@ mk(3, hold=True, wake=WK, hold_set={"at": _t.time() - 60, "by": "sparrow"})     
 mk(4, hold=True, wake=WK, after=["a20"], hold_set={"at": _t.time() - 60, "by": "sparrow"})       # new, an open after holds it
 mk(23, hold=True, wake=D(6), hold_set={"at": _t.time() - 3 * 86400, "by": "sparrow"})   # set three days ago: not new
 md = _rmod.render(str(_core_store.STORE), "full"); br = _rmod.render(str(_core_store.STORE), "brief")
-sect = md[md.find("## New holds"):md.find("Shared by every")]
+sect = md[md.find("## Newly parked"):md.find("Shared by every")]
 check("board.md has a section of the holds set in the last 24 hours, each with its owner, setter, wake and what holds it",
-      "## New holds (last 24 hours)" in md and re.search(r"- \[a3\]\(#task-a-3\) · mover `[^`]*` · set by sparrow .* · wake .* · nothing holds it now", sect)
-      and re.search(r"\[a4\].* · held by after a20", sect), sect)
+      "## Newly parked (last 24 hours)" in md and re.search(r"- \[a3\]\(#task-a-3\) · mover `[^`]*` · set by sparrow .* · wake .* · nothing holds it now", sect)
+      and re.search(r"\[a4\].* · parked for after a20", sect), sect)
+check("the legacy renderer marks a parked item (parked, wake <day>) or (parked, no wake date) and an after wait \"after a20\", never on hold", re.search(r"\*\*a3 · [^\n]*\*\* \(parked, wake ", md) and re.search(r"\*\*a4 · [^\n]*\*\* \([^)\n]*after a20", md) and "(on hold" not in md and ", on hold" not in md, [l for l in md.split("\n") if "**a3 ·" in l or "**a4 ·" in l])
 check("…and not one set three days ago, one stored before the record, a malformed record or an item that is not held",
       all(f"[a{n}](#task-a-{n})" not in sect for n in (23, 13, 21, 22, 19, 1, 30, 31, 32, 33)), sect)
-check("the session-start brief lists them too", "  new hold (24 h): a3 [home] hold fixture 3" in br and "nothing holds it now" in br and "held by after a20" in br and "a23" not in br, br)
+check("the session-start brief lists them too", "  newly parked (24 h): a3 [home] hold fixture 3" in br and "nothing holds it now" in br and "parked for after a20" in br and "a23" not in br, br)
 (T / "board.md").write_text(md, encoding="utf-8")
 head = _wt_brief.stackshot_brief()
-check("the brief tool's head carries the section (it reads board.md up to the first lane)", head.find("## New holds") != -1 and head.find("## New holds") < head.find("All open items in full"), head[:300])
+check("the brief tool's head carries the section (it reads board.md up to the first lane)", head.find("## Newly parked") != -1 and head.find("## Newly parked") < head.find("All open items in full"), head[:300])
 check("a hold_set whose time is no number never raises in the renderer or in get", _rmod.hold_at({"metadata": {"hold_set": {"at": "x"}}}) == 0.0 and _rmod.hold_at({"metadata": {"hold_set": {"at": float("nan")}}}) == 0.0
-      and "hold: set by sparrow" in _wt_get.stackshot_get("a21") and _wt_get.stackshot_get("a22"), _wt_get.stackshot_get("a21"))
+      and "parked: set by sparrow" in _wt_get.stackshot_get("a21") and _wt_get.stackshot_get("a22"), _wt_get.stackshot_get("a21"))
 _update_svc._update("a3", clear_hold=True, sender="sparrow")
-check("a released hold is no longer new", "[a3]" not in _rmod.render(str(_core_store.STORE), "full").split("Shared by every")[0].split("## New holds")[-1])
+check("a released hold is no longer new", "[a3]" not in _rmod.render(str(_core_store.STORE), "full").split("Shared by every")[0].split("## Newly parked")[-1])
 for i in range(2, 50): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 
 # ---- 4. over HTTP, in-process
@@ -231,7 +232,7 @@ with TestClient(app) as c:
     r = c.get("/client/registry", headers=H); check("http: registry", r.status_code == 200 and "projects/alpha" in r.json()["pages"] and r.headers["cache-control"] == "no-store", r.text[:100])
     r = c.get("/client/page-ts", params={"key": "projects/alpha"}, headers=H); check("http: page-ts", r.status_code == 200 and r.json()["ts"], r.text)
     r = c.get("/client/brief", headers=H); check("http: brief", r.status_code == 200 and r.text.startswith("Board: 1 open"), r.text[:80])
-    r = c.get("/client/holds", headers=H); check("http: holds → the report (nothing on hold without a reason here)", r.status_code == 200 and r.text == "no open item is on hold without something holding it\n" and r.headers["cache-control"] == "no-store", r.text[:100])
+    r = c.get("/client/holds", headers=H); check("http: holds → the report (nothing on hold without a reason here)", r.status_code == 200 and r.text == "no open item is parked without something holding it\n" and r.headers["cache-control"] == "no-store", r.text[:100])
     r = c.get("/client/holds"); check("http: holds without a token → 401", r.status_code == 401, r.status_code)
     r = c.get("/client/nothing", headers=H); check("http: unknown read → 404", r.status_code == 404, r.status_code)
     r = c.get("/client/config"); check("http: config without a token → 401", r.status_code == 401, r.status_code)

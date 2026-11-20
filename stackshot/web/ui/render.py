@@ -245,7 +245,7 @@ def waits_on_end(r):
 def anchor(r): return f"task-{r['L']}-{r['id']}"
 def is_held(r):
     """On hold: parked, out of the queue; drawn as a kind of on agent, never your call or on others. A
-    property of an open item (its lane stays 'on agent' and a secondary property renders it as 'on hold'):
+    property of an open item (its lane stays 'on agent' and a secondary property renders it as 'parked'):
     status open with a truthy metadata.hold; optional metadata.wake
     YYYY-MM-DD or YYYY-MM-DDTHH:MM in the instance timezone, at which the server itself releases the item (drops hold and wake) and it returns to
     the lane its needs give it, so the board only shows it; needs and due stay on the item meanwhile. A row with the retired
@@ -2297,26 +2297,26 @@ class Board:
         ta, tb = (datetime.datetime.fromtimestamp(float(x), self.now.tzinfo) for x in (a, b))
         return self.when(a) if (ta.hour, ta.minute, ta.date()) == (tb.hour, tb.minute, tb.date()) else f"{self.when(a)} – {tb:%H:%M}" if ta.date() == tb.date() else f"{self.when(a)} – {self.when(b)}"
     def new_hold_words(self, r):
-        """A new hold's words for the briefings: "set by my-x Sat Mar 21st 09:00 · wake Mon Mar 23rd · held by after board#N",
+        """A new hold's words for the briefings: "set by my-x Sat Mar 21st 09:00 · wake Mon Mar 23rd · parked for after board#N",
         or "… · nothing holds it now" when no open after, recycle, needs external or item-scoped anchor holds it."""
         h, w = hold_set_of(r), wake_of(r)
         why = hold_whys(r, self.scoped_urls(r["gid"]), self.after_words(r))
-        return " · ".join([f"set by {hold_by(r) or 'unknown'} {self.when(hold_at(r))}", f"wake {self.when(w)}" if w else "no wake date", "held by " + ", ".join(why) if why else "nothing holds it now"])
+        return " · ".join([f"set by {hold_by(r) or 'unknown'} {self.when(hold_at(r))}", f"wake {self.when(w)}" if w else "no wake date", "parked for " + ", ".join(why) if why else "nothing holds it now"])
     def after_words(self, r):
         """"after board#N" (several: "after board#N, board#M"): the open items an item waits on, "" when none."""
         a = after_open(r)
         return ("after " + ", ".join(shown(g) for g in a)) if a else ""
     def hold_tip(self, r):
-        """A parked item's words for a tooltip or a list: "on hold · wakes Fri Mar 6th 12:00", "on hold · no wake date", or for an
+        """A parked item's words for a tooltip or a list: "parked · wakes Fri Mar 6th 12:00", "parked · no wake date", or for an
         item that waits on another "after board#N · until it closes" (both when both)."""
         w = wake_of(r); parts = []
-        if is_held(r): parts.append("on hold · " + (f"wakes {self.when(w)}" if w else "no wake date"))
+        if is_held(r): parts.append("parked · " + (f"wakes {self.when(w)}" if w else "no wake date"))
         if after_open(r): parts.append(self.after_words(r) + " · until it closes")
         return " · ".join(parts)
     def md_hold(self, r):
-        """board.md's mark on a parked item: "on hold, wake Thu Mar 12th 09:30", "on hold, no wake date", or "after board#N"."""
+        """board.md's mark on a parked item: "parked, wake Thu Mar 12th 09:30", "parked, no wake date", or "after board#N"."""
         w = wake_of(r); parts = []
-        if is_held(r): parts.append("on hold, " + (f"wake {self.when(w)}" if w else "no wake date"))
+        if is_held(r): parts.append("parked, " + (f"wake {self.when(w)}" if w else "no wake date"))
         if after_open(r): parts.append(self.after_words(r))
         return "; ".join(parts)
     # ---------------- step statuses: what is in motion on an item ----------------
@@ -3120,8 +3120,8 @@ class Board:
         lines += [f"  your move: {rid_full(r)} {r['subject']} [{self.lab(r)}]" for r, _m in pairs[_home.YOUR_MOVE][:5]]
         lines += [f"  waiting: {rid_full(r)} {r['subject']} [{self.lab(r)}]{' · ' + _home.wait_phrase(m_, 'on', shown_full) if _home.wait_phrase(m_, 'on', shown_full) else ''}" for r, m_ in pairs[_home.WAITING][:5]]
         nh = new_holds(self.held, self.now)       # the holds set in the last 24 hours, with their reason
-        lines += [f"  new hold (24 h): {rid_full(r)} {r['subject']} [{self.lab(r)}] · {self.new_hold_words(r)}" for r in nh[:8]]
-        if len(nh) > 8: lines.append(f"  … and {len(nh) - 8} more new holds")
+        lines += [f"  newly parked (24 h): {rid_full(r)} {r['subject']} [{self.lab(r)}] · {self.new_hold_words(r)}" for r in nh[:8]]
+        if len(nh) > 8: lines.append(f"  … and {len(nh) - 8} more newly parked")
         if T["open"]:
             lines.append(f"  alive {T['alive']} (your move {T['your_move']}, agents {T['agents']}) · waiting {T['waiting']}")
             # held doing items that wait for their wake (dated_wait.held_wait) and doing items whose wake stands on a wait_basis (dated_wait.basis_wait) are left out on purpose: the line's advice (park it, or write the step that can run now) does not apply to an item already on hold
@@ -3145,7 +3145,7 @@ class Board:
             return f"`{l}` · [open](<{u}>)" if u else f"`{l}`"
         def m_ids(xs, per=4, held=()):
             links = ([f"[{rid_full(r)}](#{anchor(r)})" for r in sorted(xs, key=lambda r: (r["L"], num(r)))]
-                     + [f"[{rid_full(r)}](#{anchor(r)}) ({'on hold' if is_held(r) else self.after_words(r)})" for r in sorted(held, key=lambda r: (wake_key(r), r["L"], num(r)))])   # parked: after the active ones
+                     + [f"[{rid_full(r)}](#{anchor(r)}) ({'parked' if is_held(r) else self.after_words(r)})" for r in sorted(held, key=lambda r: (wake_key(r), r["L"], num(r)))])   # parked: after the active ones
             return "<br>".join(", ".join(links[i:i+per]) for i in range(0, len(links), per)) or "—"
         def m_item(r):
             m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {r['subject']}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
@@ -3237,7 +3237,7 @@ class Board:
                 print()
             _newh = new_holds(self.held, now)    # the morning briefing's data: the holds set in the last 24 hours and why; left out when none
             if _newh:
-                print("## New holds (last 24 hours)"); print()
+                print("## Newly parked (last 24 hours)"); print()
                 for r in _newh: print(f"- [{rid_full(r)}](#{anchor(r)}) · {self.mover_word()} `{self.lab(r)}` · {self.new_hold_words(r)}")
                 print()
             print("Shared by every Claude session on every machine. Items are human-level: deliverables, decisions, blockers, handoffs. Ask any session to add, complete or reprioritise; every write publishes at once.")

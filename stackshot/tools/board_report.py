@@ -211,11 +211,11 @@ def check_item(item: dict[str, Any], gid: str, items: dict[str, dict[str, Any]],
         texts = _texts(item)
         if not why and not any(names_event(t) for t in texts):
             said = _nr._clip(next((t for t in texts if t), ""), 70)
-            out.append(("arbitrary-hold", f"on hold with {_wake_words(meta)}; nothing holds it (no open after, check, outside party or anchor) and its words name no event" + (f": {said}" if said else " (it has none)")))
+            out.append(("arbitrary-hold", f"parked with {_wake_words(meta)}; nothing holds it (no open after, check, outside party or anchor) and its words name no event" + (f": {said}" if said else " (it has none)")))
     # --- mislabeled-state
     probs: list[str] = []
     if mismatch:
-        probs.append(f"stored state {stored}, but its fields read as {derived}" + (" (it is on hold)" if held and stored == "doing" else ""))
+        probs.append(f"stored state {stored}, but its fields read as {derived}" + (" (it is parked)" if held and stored == "doing" else ""))
     if stored in ("your-call", "outside", "blocked"):
         for p in _states.problems(meta, stored, dt.datetime.fromtimestamp(now, _cfg.tz()).date(), check_dates=False):
             if p.startswith(("ask=", "needs including", "after=")):
@@ -224,9 +224,9 @@ def check_item(item: dict[str, Any], gid: str, items: dict[str, dict[str, Any]],
     if held and not probs and not labeled:
         text = " ".join(_texts(item))
         if _decision_rx().search(_sf.settled_out(text, _sf.owner_names())):      # a quoted span or a pick he already made is no wait on him (server_fixes.settled_out)
-            probs.append(f"on hold while its words wait on {_cfg.owner()}'s decision: that is your-call, not a hold")
+            probs.append(f"parked while its words wait on {_cfg.owner()}'s decision: that is your-call, not a park")
         elif _OUTSIDE_RX.search(text):
-            probs.append("on hold while its words wait on an outside party: that is outside (needs external, party, chase), not a hold")
+            probs.append("parked while its words wait on an outside party: that is outside (needs external, party, chase), not a park")
     for p in probs:
         out.append(("mislabeled-state", p))
     order = {k: i for i, k in enumerate(KINDS)}
@@ -272,13 +272,13 @@ def scan(items: dict[str, dict[str, Any]], anchors: dict[str, Any] | None = None
 
 def line(rep: dict[str, Any]) -> str:
     if not rep["items"]:
-        return "Board checks: no open item is held for no reason or in the wrong state"
+        return "Board checks: no open item is parked for no reason or in the wrong state"
     per = " · ".join(f"{k} {n}" for k, n in rep["kinds"].items())
     return f"Board checks: {rep['items']} item(s) · {per}"
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="The open items that are held for no concrete reason or carry the wrong state (read only).")
+    ap = argparse.ArgumentParser(description="The open items that are parked for no concrete reason or carry the wrong state (read only).")
     ap.add_argument("--line", action="store_true", help="the one line of counts the audit carries")
     ap.add_argument("--json", action="store_true", help="the report as JSON")
     ap.add_argument("--store", help="read the items from this folder (a copy of the store) instead of [paths] store")

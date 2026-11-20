@@ -71,7 +71,7 @@ FIX = {
                  "or rewrite the line as the action to take now"),
     "event-missing": "add an event type for it to event_waits.py, or tell the mover to wait on a time or a relay",
     "ask-options": f"rewrite the ask with options ({_render.OPTIONS_MIN} to {_render.OPTIONS_MAX} answers {_cfg.owner()} could pick, one recommended and named in the Recommend part), or reword the Decide part as a yes/no whose Recommend answers yes or no",
-    "reads-as-wait": "set the wait itself (a hold with its reason, an after item, an event wait), or write next as the action to take now",
+    "reads-as-wait": "set the wait itself (a park with its reason, an after item, an event wait), or write next as the action to take now",
 }
 
 # Which findings need the person. A finding of the categories below is about how an item is written, filed or waited on (its ask, its next, its state, its wait): no decision and no step of his is in it, so on an item

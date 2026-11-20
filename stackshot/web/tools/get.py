@@ -103,7 +103,7 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
 
 def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     m = item.get("metadata") or {}
-    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _item_read._is_parked(item) else ''}] {item.get('subject')}"]
+    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · parked' if _item_read._is_parked(item) else ''}] {item.get('subject')}"]
     if not brief:                            # step 4b: get leads with the mover (and then); the brief's item lines carry the `model:` line, which names it
         out.extend(_notes._mover_lines(item))
     if item.get("description"):
@@ -146,7 +146,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         out.append(f"contact: {_contacts._contact_label(item)}")
     if _item_read._is_parked(item) and _rmod.hold_set_of(item):   # who set the hold, and when
         hs = _rmod.hold_set_of(item)
-        out.append(f"hold: set by {_rmod.hold_by(item) or 'unknown'}"
+        out.append(f"parked: set by {_rmod.hold_by(item) or 'unknown'}"
                    + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), _wttext.ZONE))}" if _rmod.hold_at(item) else ""))
     if item.get("status") == "open" and _wt.basis_of(m):   # a wake past the cap that stands on a real-world date, and who said so
         wb = m["wait_basis"]

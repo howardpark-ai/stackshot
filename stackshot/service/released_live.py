@@ -147,7 +147,7 @@ def merged_prs(head: str, limit: int = 3000, cwd: Path | None = None) -> dict[in
 def released_skip(it: dict[str, Any], meta: dict[str, Any], mover: str) -> str:
     """Why an item that names the release is left alone ("" when it is not): on hold, or its needs name a decision or a session other than its mover."""
     if _hooks().is_held(it) or _hooks().hold_flag(it) or _hooks().date_parked(it):
-        return "on hold"
+        return "parked"
     if _hooks().rmod_needs_kind(it) == "call":
         return f"its needs name a decision: it waits on {OWNER}"
     return _hv.skip_reason(meta, mover, lambda a, b: _hooks().same_sess(a, b) or _hooks().session_id(a) == _hooks().session_id(b), _session_label, OWNER)

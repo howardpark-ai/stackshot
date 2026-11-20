@@ -59,7 +59,7 @@ def show(d: dict[str, Any]) -> str:
 
 
 def refused_note(date: str) -> str:
-    return (f"a refused item keeps its old fields untouched (such as a hold beside an open after item or one held by needs external: anything that would read differently as until): they are still read as before; "
+    return (f"a refused item keeps its old fields untouched (such as a park beside an open after item or one kept by needs external: anything that would read differently as until): they are still read as before; "
             f"the next write that touches its wait stores it as until, and a person re-saves it with update(until=...) before {human_date(date)}, when the old parameters wake, ask_by and hold stop being accepted in writes")
 
 

@@ -7,7 +7,7 @@ A create or update is refused, with what is wrong and the fix, when it would lea
   3  a time wait (a hold with a wake) with neither the owner's words (a stored quote that parks, waits, says until or names a date) nor a real date (wait_basis)
   4  filler (TBD, TBC, "?", a dash) in goal, next, ask, wait_event
   5  a wait with no end (an anchor, item or relay wait with neither ask_by nor a backstop wake)
-  6  needs decision together with a hold
+  6  needs decision together with a park
   6b his state makes him the mover (the agent in then); 6c the way back when his wait ends, the server's own saves, and the start-up migration
   6d the mirror: the owner as mover needs his step (your-step) or his ask (your-call, needs decision); doing or queued with him as mover is refused, a waiting item, a close and a bookkeeping write are not judged
   7  a second mover in needs (two sessions, or decision plus a session); switchable by [model] one_mover
@@ -284,11 +284,11 @@ check("5 end: a legacy outside item's chase day is its ask-by (a write that touc
 item(80, needs=[BACK])
 refused_nw("6 decision + hold: needs decision with a hold is refused, and the refusal says the way: hand the item to a session, hold with him as the mover, the ask and options come back", 80,
            lambda: upd(80, needs=["decision"], ask=ASK, hold=True, wake=day(3), wait_basis=f"visit on {day(4)}"),
-           "needs holds decision together with a hold", "needs=[<session>]", "mover=", "the same ask and options", "clear_hold=true", none=("an ask for later is a time wait",))
+           "needs holds decision together with a park", "needs=[<session>]", "mover=", "the same ask and options", "clear_hold=true", none=("an ask for later is a time wait",))
 upd(80, needs=["decision"], ask=ASK)
 check("6 decision + hold: …a decision without the hold passes", "decision" in mt(80)["needs"], mt(80))
 item(81, needs=["decision"], ask=ASK, hold=True, wake=day(3))
-refused_nw("6 decision + hold: an old item that has both is refused when a write touches a field of the state", 81, lambda: upd(81, wake=day(4)), "decision together with a hold")
+refused_nw("6 decision + hold: an old item that has both is refused when a write touches a field of the state", 81, lambda: upd(81, wake=day(4)), "decision together with a park", "release the park (clear_hold=true)")
 upd(81, clear_hold=True)
 check("6 decision + hold: …clear_hold is the fix", "hold" not in mt(81), mt(81))
 item(96, needs=["decision"], ask=ASK, hold=True, wake=day(3))
@@ -375,7 +375,7 @@ o_nb = tool_(429, wait_kind="relay", wait_event="Robin", hold=True, until=day(30
 check("6e cap: …and the same date with no basis is refused, nothing written", o_nb.startswith("REFUSED") and "until" not in mt(429) and "hold" not in mt(429), (mt(429), o_nb[:300]))
 
 # ---- 6f. the parked call (a decision handed to the waiting session, him as mover) draws no note that it waits on him, and a wake keeps a yes/no ask
-NOTEWORDS = ("never parked", "this hold's next says it waits on", "the state is", "next names")
+NOTEWORDS = ("never parked", "this park's next says it waits on", "the state is", "next names")
 PARKT = dict(needs=[BACK], mover=OWN, hold=True, until=day(10), wait_basis=f"Oliver is away until {day(10)}", next=f"{OWN}: waiting on {OWN}'s call, decide it after {day(10)}")
 item(410, needs=["decision"], ask=ASK, options=OPTS)
 o_p = tool_(410, **PARKT)
@@ -388,7 +388,7 @@ g_p2 = _wt_get.stackshot_get("a411")
 check("6f park: …also for an item that stored a state before", "updated" in o_p2 and not any(w in o_p2 + g_p2 for w in NOTEWORDS), (o_p2[:300], g_p2[:600]))
 item(412, needs=[BACK], mover=BACK)
 o_n = tool_(412, hold=True, until=day(10), wait_basis=f"the vendor ships on {day(10)}", next=f"{BACK}: waiting on {OWN}'s call, then ship")
-check("6f note: a plain hold whose next says it waits on him still draws the note, and it names the way to park his call", "this hold's next says it waits on" in o_n and f"needs=[<session>] and mover={OWN}" in o_n, o_n)
+check("6f note: a plain hold whose next says it waits on him still draws the note, and it names the way to park his call", "this park's next says it waits on" in o_n and f"needs=[<session>] and mover={OWN}" in o_n, o_n)
 item(413, needs=["decision"], ask=ASK)
 upd(413, wake=day(3), **PARK)
 wake_all()
@@ -910,7 +910,7 @@ check("report: next with no name → 10; a wait in next → 11; an alarming word
 check("report: the closed items without an outcome → 15 and 16; the broad list flags 12", ids(mg.CLOSED_NO_OUTCOME) == [15, 16] and rep.flagged == ["a12"], (rep.ids, rep.flagged))
 check("report: what rests on a default is counted (alive items with no stored mover, waiting ones with no post-wake mover)", rep.defaulted.get("mover", 0) >= 7 and rep.defaulted.get("post_wake_mover", 0) >= 4, rep.defaulted)
 line = mg.brief_line(rep)
-check("report: the brief line is one line of counts", line.startswith("model guards would refuse on existing items: mover 2 · wait input 1 · post-wake mover 1 · snooze 1 · filler 1 · wait with no end 2 · decision with a hold 1 · second mover 2 · next line with no name 1 · wait in next 1 · alarming word 1 · closed without an outcome 2")
+check("report: the brief line is one line of counts", line.startswith("model guards would refuse on existing items: mover 2 · wait input 1 · post-wake mover 1 · snooze 1 · filler 1 · wait with no end 2 · decision that is parked 1 · second mover 2 · next line with no name 1 · wait in next 1 · alarming word 1 · closed without an outcome 2")
       and "\n" not in line, line)
 text = mg.full_text(rep, _gh.shown)
 check("report: the full text lists the ids per guard, an example refusal each, the flags and the defaults", "mover: 2: a2, a3" in text and "closed without an outcome: 2: a15, a16" in text and "e.g. a2:" in text and "flagged for broad wait words in next (when, once, after, until; accepted, not refused): 1: a12" in text and "resting on a default" in text, text)

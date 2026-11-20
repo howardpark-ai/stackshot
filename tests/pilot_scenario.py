@@ -1058,9 +1058,9 @@ check("held: no separate on-hold section", 'id="on-hold"' not in hh and 'class="
 hp_ = bh.item_html("a67")
 check("held: the item page says it waits and until when, not whose move", '<span class="tag t-wait">Waiting</span>' in hp_ and "<dt>Watched by</dt><dd>the scheduler</dd><dt>Until</dt><dd>Mon Mar 2nd</dd>" in hp_ and "your call</span>" not in hp_, hp_[hp_.find('class="istate"'):][:400])
 _md = bh.markdown(); _mdw = _md[_md.find("\n## Waiting\n"):_md.find("\n## On agents\n")]; _mda = _md[_md.find("\n## On agents\n"):_md.find("## Completed")]
-check("held: board.md lists them in the list the model puts them in (a hold with a wake is a wait), marked, and drops the On hold section", "## On hold" not in _md
-      and "**a67 · [home] queue item 67** (on hold, wake Mon Mar 2nd)" in _mdw and "**a68 · [home] queue item 68** (on hold, no wake date)" in _mdw + _mda
-      and "waiting on needs your call" not in _md and "[a67](#task-a-67) (on hold)" in _md and "_9 open · " in _md and "on hold)" not in _md[:_md.find("## Machines")], (_mdw[-900:], _mda[-300:]))
+check("held: board.md lists them in the list the model puts them in (a hold with a wake is a wait), marked, and drops the Parked section", "## Parked" not in _md
+      and "**a67 · [home] queue item 67** (parked, wake Mon Mar 2nd)" in _mdw and "**a68 · [home] queue item 68** (parked, no wake date)" in _mdw + _mda
+      and "waiting on needs your call" not in _md and "[a67](#task-a-67) (parked)" in _md and "_9 open · " in _md and "on hold)" not in _md[:_md.find("## Machines")], (_mdw[-900:], _mda[-300:]))
 check("held: the helper is the one place", render.is_held({"status": "open", "metadata": {"hold": True}}) and render.is_held({"status": "on_hold"})
       and not render.is_held({"status": "open"}) and not render.is_held({"status": "open", "metadata": {"hold": False}}) and not render.is_held({"status": "completed", "metadata": {"hold": True}})
       and not render.is_held({"status": "held"}) and render.wake_of({"metadata": {"wake": "2026-03-02"}}) == datetime.date(2026, 3, 2))
@@ -1074,7 +1074,7 @@ check("held, timed wake: parsed as a datetime in the instance timezone", render.
       and render.wake_of({"metadata": {"wake": "2026-03-02 09:30"}}) == datetime.datetime(2026, 3, 2, 9, 30, tzinfo=render._cfg.tz()))
 check("held, timed wake: the item page shows the clock", "<dt>Until</dt><dd>Mon Mar 2nd 09:30</dd>" in bt.item_html("a69"), bt.item_html("a69")[bt.item_html("a69").find('class="istate"'):][:300])
 check("held, timed wake: sorted by the minute (a date-only wake is its midnight, so it goes first)", [r["gid"] for r in bt.held][:2] == ["a67", "a69"], [r["gid"] for r in bt.held])
-check("held, timed wake: board.md shows the clock", "(on hold, wake Mon Mar 2nd 09:30)" in bt.markdown())
+check("held, timed wake: board.md shows the clock", "(parked, wake Mon Mar 2nd 09:30)" in bt.markdown())
 check("held, timed wake: a held relay stays out of the relays and the calls", all(r["gid"] not in ("a67", "a68", "a69") for r in bt.n_relay + bt.n_call) and len(bt.held) == 3, [r["gid"] for r in bt.n_relay])
 
 # ---- 15b. the four item sections grouped by scope: the Task board's scopes in its order ([scopes] order here:
@@ -1142,9 +1142,9 @@ evs, more = bgs.item_events(bgs.item("a70")); txt = [(bgs.when(ts), k_, re.sub(r
 check("history: every event, newest first, in the instance timezone, with the uncommitted write on top", txt == [
     ("Sun Feb 22nd 18:30", "edit", "subject edited (was “[home] history item”)"),
     ("Sun Feb 22nd 18:05", "completed", "completed"),
-    ("Sun Feb 22nd 09:15", "unhold", "back from hold · Waiting"),
+    ("Sun Feb 22nd 09:15", "unhold", "unparked · Waiting"),
     ("Sat Feb 21st 20:00", "hold", "wake cleared"),
-    ("Sat Feb 21st 08:00", "hold", "put on hold · wake Mon Mar 2nd"),
+    ("Sat Feb 21st 08:00", "hold", "parked · wake Mon Mar 2nd"),
     ("Fri Feb 20th 11:30", "due", "due moved: Fri Feb 27th → Mon Mar 2nd"),
     ("Thu Feb 19th 10:00", "needs", "moved to Waiting"),
     ("Thu Feb 19th 09:00", "created", "created as “[home] history item” · Your move · mover the owner · created by home-beta")] and more == 0, txt)
@@ -1189,19 +1189,19 @@ def refusal(fn):
 rd = lambda g: json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 held_ = lambda g: rd(g)["status"] == "open" and hd_(rd(g)["metadata"]) is True
 today = pages.zone_now().date(); D = lambda n: (today + datetime.timedelta(days=n)).isoformat()
-NEW_FORM = "Refused: status must be open | completed; on hold is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it"
-HINT = "\nstill on hold: pass clear_hold=true to release it"
+NEW_FORM = "Refused: status must be open | completed; parked is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it"
+HINT = "\nstill parked: pass clear_hold=true to release it"
 for i in (5, 6, 7, 8): item(i, "projects/beta", B)
 runner_svc.WAKE_EVENT.clear(); e = refusal(lambda: _update_svc._update("a3", hold=True, sender="home-beta"))
 check("hold: hold=true with no wake, after, anchor or recycle is refused, naming the four conditions",
-      e.startswith("Refused: a hold names what it waits for; an unconditional or indefinite park is refused.") and all(x in e for x in ("wake=", "after=[\"board#N\"]", "anchors(project, add=[url], items=[\"a3\"])", "recycle=true"))
+      e.startswith("Refused: a park names what it waits for; an unconditional or indefinite park is refused.") and all(x in e for x in ("wake=", "after=[\"board#N\"]", "anchors(project, add=[url], items=[\"a3\"])", "recycle=true"))
       and not held_("a3") and not runner_svc.WAKE_EVENT.is_set(), e)
 check("minute loop: no next wake while nothing is on hold", wakes_svc.next_wake() is None, wakes_svc.next_wake())
 # an item waiting on the owner is never held. The refusal
 # names the after form; a hold whose next says it waits on him is noted, never refused (a wake on an item he has answered is fine)
 check("hold (owner wait): the refusal names the after form for a hold that waits on the owner's decision",
       f"An item waiting on {_core_instance.OWNER}'s call is parked with needs=[<session>] and mover={_core_instance.OWNER} (his ask returns at the date); to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>]" in e, e)
-NOTE_OWNER = f"this hold's next says it waits on {_core_instance.OWNER}: park his call with needs=[<session>] and mover={_core_instance.OWNER} (his ask returns at the date), or give it needs=decision with its ask, or after=[<the item that carries the ask>]"
+NOTE_OWNER = f"this park's next says it waits on {_core_instance.OWNER}: park his call with needs=[<session>] and mover={_core_instance.OWNER} (his ask returns at the date), or give it needs=decision with its ask, or after=[<the item that carries the ask>]"
 for i in (74, 75, 76): item(i, "projects/beta", B)
 res = _update_svc._update("a74", hold=True, wake=D(2), next=f"waiting on {_core_instance.OWNER}'s call on the pricing", sender="home-beta")
 check("hold (owner wait): a hold whose next says it waits on the owner gets the note and still applies", NOTE_OWNER in res and held_("a74") and wk_(rd("a74")["metadata"]) == D(2), res)
@@ -1215,7 +1215,7 @@ check("hold (owner wait): the matcher stays narrow", [_notes_tool._waits_on_owne
 for i in (74, 75, 76): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: the sections below count the held items
 runner_svc.WAKE_EVENT.clear()
 res = _update_svc._update("a3", hold=True, wake=D(2), sender="home-beta")
-check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and wk_(rd("a3")["metadata"]) == D(2) and res.startswith("updated a3.\na3 [open · on hold] "), res)
+check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and wk_(rd("a3")["metadata"]) == D(2) and res.startswith("updated a3.\na3 [open · parked] "), res)
 check("hold: hold=true wakes the minute loop", runner_svc.WAKE_EVENT.is_set())
 check("hold: the hold is a state change (the writer owes the page)", "a3" in json.dumps(_web_page_debts._owed_load().get("projects/beta", {})), _web_page_debts._owed_load())
 res = _update_svc._update("a3", wake=D(3), sender="home-beta")
@@ -1226,7 +1226,7 @@ b5 = ui_render.Board(str(T / "store"))
 check("hold: a held item with needs external is drawn held, counted on agent, never on others",
       "a5" in [r["gid"] for r in b5.held] and "a5" not in [r["gid"] for r in b5.n_call + b5.n_relay + b5.agent] and "a5" in {r["gid"] for rs in b5.by_proj.values() for r in rs}, [r["gid"] for r in b5.n_relay])
 e = refusal(lambda: _update_svc._update("a2", hold=True, sender="home-beta"))
-check("hold: hold=true on a completed item refused", e == "Refused: a completed item does not go on hold; set it open first" and rd("a2")["status"] == "completed" and "hold" not in rd("a2")["metadata"], e)
+check("hold: hold=true on a completed item refused", e == "Refused: a completed item cannot be parked; set it open first" and rd("a2")["status"] == "completed" and "hold" not in rd("a2")["metadata"], e)
 e = refusal(lambda: _update_svc._update("a2", wake=D(3), sender="home-beta"))
 check("hold: a wake on a completed item refused (a wake on a closed item is nothing to check)", e == "Refused: a completed item takes no wake; set it open first" and "wake" not in rd("a2")["metadata"], e)
 e = refusal(lambda: _update_svc._update("a6", status="on_hold", sender="home-beta"))
@@ -1244,7 +1244,7 @@ e = refusal(lambda: _update_svc._update("a5", clear_hold=True, wake=D(3), sender
 check("hold: clear_hold with a wake refused, nothing saved", e == "Refused: clear_hold releases the item and drops its wake; it does not go with hold or wake" and held_("a5") and wk_(rd("a5")["metadata"]) == D(2), e)
 res = _update_svc._update("a5", status="open", sender="home-beta")
 check("hold: status=open on a held item keeps the hold and the wake, and the reply says how to release it",
-      held_("a5") and wk_(rd("a5")["metadata"]) == D(2) and res.startswith("updated a5.\na5 [open · on hold] "), res)
+      held_("a5") and wk_(rd("a5")["metadata"]) == D(2) and res.startswith("updated a5.\na5 [open · parked] "), res)
 res = _update_svc._update("a5", next="ask Kim for A or B", sender="home-beta")
 check("hold: other edits on a waiting item carry no hint", HINT not in res and held_("a5"), res)
 res = _update_svc._update("a5", clear_hold=True, sender="home-beta"); m5 = rd("a5")["metadata"]
@@ -1260,7 +1260,7 @@ check("hold: clear_wake=true the same", not held_("a3") and not _WT.stored_until
 _update_svc._update("a3", hold=True, recycle=True, sender="home-beta"); res = _update_svc._update("a3", wake=D(3), sender="home-beta"); res = _update_svc._update("a3", wake="none", sender="home-beta")
 check("hold: with a recycle to wait for, wake=\"none\" drops the date and the hold stays", rd("a3")["metadata"].get("hold") is True and not _WT.stored_until(rd("a3")["metadata"]) and rd("a3")["metadata"].get("recycle") is True, rd("a3"))
 e = refusal(lambda: _update_svc._update("a3", clear_recycle=True, sender="home-beta"))
-check("hold: clear_recycle=true that would leave the hold waiting on nothing is refused", e.startswith("Refused: a hold names what it waits for") and rd("a3")["metadata"].get("recycle") is True, e)
+check("hold: clear_recycle=true that would leave the hold waiting on nothing is refused", e.startswith("Refused: a park names what it waits for") and rd("a3")["metadata"].get("recycle") is True, e)
 _update_svc._update("a3", wake=D(1), sender="home-beta"); _update_svc._update("a3", clear_recycle=True, sender="home-beta")   # a wake on an item already on hold is that hold's
 check("hold: …and passes once a wake holds it", held_("a3") and wk_(rd("a3")["metadata"]) == D(1) and "recycle" not in rd("a3")["metadata"], rd("a3"))
 # the wake pass: items due (wakes in the past, written into the store files past the gate), one due today, one not yet.
@@ -1368,17 +1368,18 @@ check("timed and date-only wakes: the owner is told each time, the date as store
       f"[stackshot] a9 is yours now: its until {D(1)} came."]), p[n9:])
 # brief: the held item has its own block, after the open ones and not among them
 (T / "board.md").write_text(ui_render.Board(f"{tmp}/store").markdown(), encoding="utf-8")   # what the publish writes; the brief reads its head
-b = _wt_brief.stackshot_brief(); op, _, hd = b.partition("\n\nOn hold (")
+b = _wt_brief.stackshot_brief(); op, _, hd = b.partition("\n\nParked (")
 check("brief: an item waiting on a date is listed (with its date) and no longer in an On hold block", "a7 [open" in b and f"until: {D(5)}" in b and "a3 [open]" in b, b[-1500:])
+check("brief: the held block is headed Parked with how many, on the agent side but out of the queue, and the open block says how many are parked below", re.search(r"\n\nParked \(\d+\), on the agent side but out of the queue until they wake or are released:", b) and re.search(r"All open items in full \(\d+ active, \d+ parked below\):", b) and "On hold" not in b, b[-1200:])
 check("brief: the board's index links each item's page, never its card anchor #task-<letter>-<n>",
       "#task-" not in b and "](https://stackshot.example.com/items/a3)" in b and "#task-" in (T / "board.md").read_text(), b[:1500])
 # the pilot relay names the hold
 n0 = len(wait_push(0)); _update_svc._update("a1", hold=True, wake=D(2), sender="work-osprey-main"); p = wait_push(n0 + 1)
-check("pilot relay: an agent putting an item on hold → the keeper is told 'put on hold'", len(p) == n0 + 1 and p[-1][0] == S and "a1 put on hold by work-osprey-main" in p[-1][1], p[-1:])
+check("pilot relay: an agent putting an item on hold → the keeper is told 'parked'", len(p) == n0 + 1 and p[-1][0] == S and "a1 parked by work-osprey-main" in p[-1][1], p[-1:])
 _update_svc._update("a1", wake=D(3), sender="work-osprey-main"); p = wait_push(n0 + 2)
 check("pilot relay: a wake on an item already held is named among the changed fields", len(p) == n0 + 2 and "a1 changed (wake) by work-osprey-main" in p[-1][1], p[-1:])
 _update_svc._update("a1", clear_hold=True, sender="work-osprey-main"); p = wait_push(n0 + 3)
-check("pilot relay: …and 'released from hold' on clear_hold", len(p) == n0 + 3 and "a1 released from hold by work-osprey-main" in p[-1][1] and not held_("a1"), p[-1:])
+check("pilot relay: …and 'unparked' on clear_hold", len(p) == n0 + 3 and "a1 unparked by work-osprey-main" in p[-1][1] and not held_("a1"), p[-1:])
 
 # the session-start line (ui_render.Board.brief): held items are open and on agent, named inside on agent
 bl = ui_render.Board(str(T / "store")).brief().splitlines()[0]
@@ -1397,7 +1398,7 @@ check("legacy: before the migration, _load reads it as open + hold", _service_st
 check("legacy: before the migration, its wake is on the minute loop's list", "a91" in [g for g, *_ in wakes_svc.wake_rows()])
 bl_ = ui_render.Board(str(T / "store"))
 check("legacy: before the migration, the board draws it held, never on others", {"a91", "a92"} <= {r["gid"] for r in bl_.held} and not {"a91", "a92"} & {r["gid"] for r in bl_.n_relay})
-check("legacy: before the migration, the brief tool lists it on hold", "a91 [open · on hold]" in _wt_brief.stackshot_brief().partition("\n\nOn hold (")[2])
+check("legacy: before the migration, the brief tool lists it on hold", "a91 [open · parked]" in _wt_brief.stackshot_brief().partition("\n\nParked (")[2])
 _err = io.StringIO()
 with contextlib.redirect_stderr(_err):
     mig = migsvc.migrate_holds()
@@ -1417,13 +1418,13 @@ for i in (30, 25, 34, 31, 35, 36, 37): item(i, "projects/beta", B)
 runner_svc.WAKE_EVENT.clear()
 res = _update_svc._update("a30", wake=D(2), next="home-beta: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
 check("wake alone: a wake alone is stored as the wait on that date and is no hold; its own step passes; the reply shows the item waiting",
-      wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "home-beta: review the draft" and res.startswith("updated a30.\na30 [open · on hold] ") and f"until: {D(2)}" in res, res)
+      wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "home-beta: review the draft" and res.startswith("updated a30.\na30 [open · parked] ") and f"until: {D(2)}" in res, res)
 check("wake alone: it wakes the minute loop and is on its list", runner_svc.WAKE_EVENT.is_set() and "a30" in [g for g, *_ in wakes_svc.wake_rows()])
 b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
 check("wake alone: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
 _wk30 = re.search(r"<dt>Wake</dt><dd>([^<]*)</dd>", ip_)
 check("wake alone: the item page shows the date in the sidebar's Wake row, and says waiting", bool(_wk30) and _wk30.group(1) == b_.when(render.wake_of(rd("a30"))) and "tag t-wait" in ip_, (_wk30.group(1) if _wk30 else None, ip_[ip_.find("istat"):][:300]))
-_b30 = _wt_brief.stackshot_brief().partition("\n\nOn hold (")
+_b30 = _wt_brief.stackshot_brief().partition("\n\nParked (")
 check("wake alone: the brief lists it among the parked, not the active items", "a30 [open" in _b30[2] and "a30 [open" not in _b30[0], _b30[0][-300:])
 check("wake alone: the update description says a wake alone is a wait until that date, never that it implies a hold",
       "alone is a wait: the item waits until that date" in _wt_update._UPDATE_DESC and "a wake implies" not in _wt_update._UPDATE_DESC and "implies hold" not in _wt_update._UPDATE_DESC)
@@ -1479,13 +1480,13 @@ check("decision + hold flag: the board shows it in your call, never parked; the 
       "a35" in [r["gid"] for r in b_.n_call] and "a35" not in [r["gid"] for r in b_.held]
       and '<span class="badge hold">on hold</span>' not in ip_ and "(on hold" not in b_.markdown().split("a35 · ")[1][:200] if "a35 · " in b_.markdown() else False,
       [r["gid"] for r in b_.held])
-check("decision + hold flag: the server's views agree (get, the brief's lanes)", not _holders._is_held(rd("a35")) and "a35 [open]" in _wt_brief.stackshot_brief().partition("\n\nOn hold (")[0]
+check("decision + hold flag: the server's views agree (get, the brief's lanes)", not _holders._is_held(rd("a35")) and "a35 [open]" in _wt_brief.stackshot_brief().partition("\n\nParked (")[0]
       and "on hold" not in _get_tool._fmt({**rd("a35"), "gid": "a35"}).splitlines()[0])
 res = _update_svc._update("a35", next="prepping the options", sender="home-beta"); m_ = rd("a35")["metadata"]
 check("decision + hold flag: any write drops the hold, keeps its date, and says so",
-      "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its date " + D(4) + " stays)" in res, res)
+      "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never parked: the park is dropped; its date " + D(4) + " stays)" in res, res)
 res = _update_svc._update("a35", hold=True, wake=D(5), sender="home-beta"); m_ = rd("a35")["metadata"]
-check("decision: hold=true on it parks nothing (the hold is dropped, the wake stays), never refused", "hold" not in m_ and wk_(m_) == D(5) and "the hold is dropped" in res, res)
+check("decision: hold=true on it parks nothing (the hold is dropped, the wake stays), never refused", "hold" not in m_ and wk_(m_) == D(5) and "the park is dropped" in res, res)
 for i in (30, 25, 34, 31, 35, 36, 37): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: later checks count the open items
 wait_push(0)
 
@@ -2038,12 +2039,12 @@ res = _wt_update.stackshot_update(g6, priority="p2", sender="home-beta"); check(
 res = _wt_update.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- Done when decided and posted", sender="home-beta"); check("bare url: …nor one that sets the description with the stored URL still in it", rd(g6)["description"].endswith("posted"), res)
 res, fk = fixes_of(lambda: _wt_update.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- And at https://example.com/r", sender="home-beta")); check("bare url: …a new bare URL beside it becomes a link, the stored one is left as it is", fk == ["description-url"] and "Lives at https://example.com/q\n" in rd(g6)["description"] and "[https://example.com/r](https://example.com/r)" in rd(g6)["description"], res)
 check("bare url: the create and update descriptions say it", "in a description it becomes a link to itself" in _wt_text._ITEM_FORM and _wt_text._ITEM_FORM in _wt_update._UPDATE_DESC)
-e = refusal(lambda: _update_svc._update(g5, hold=True, sender="home-beta")); check("form: an owner's hold without a wake is refused outright, no longer noted", e.startswith("Refused: a hold names what it waits for") and not hd_(rd(g5)["metadata"]), e)
+e = refusal(lambda: _update_svc._update(g5, hold=True, sender="home-beta")); check("form: an owner's hold without a wake is refused outright, no longer noted", e.startswith("Refused: a park names what it waits for") and not hd_(rd(g5)["metadata"]), e)
 wk = (today + datetime.timedelta(days=3)).isoformat()
 res = _update_svc._update(g5, hold=True, wake=wk, sender="home-beta"); check("form: a hold with a wake → no note", "(note:" not in res, res)
 res = _update_svc._update(g5, priority="p2", sender="home-beta"); check("form: a filing edit of a held item → no note", "(note:" not in res, res)
 _update_svc._update(g5, clear_hold=True, sender="home-beta"); _update_svc._update(g5, needs="external", next="wait on Kim", sender="home-beta")
-res = _update_svc._update(g5, hold=True, wake=wk, sender="home-beta"); check("form: parking an item that waits on someone outside → a note", "(note: on hold while it waits on someone outside" in res and "without a wake" not in res, res)
+res = _update_svc._update(g5, hold=True, wake=wk, sender="home-beta"); check("form: parking an item that waits on someone outside → a note", "(note: parking an item that waits on someone outside" in res and "without a wake" not in res, res)
 check("form: the update description carries the rules that moved", all(x in _wt_update._UPDATE_DESC for x in ("(needs=external) is not parked", "never a naked URL", "page first")), _wt_update._UPDATE_DESC[:200])
 
 # an item put on someone outside with no anchor scoped to it draws one note to anchor the thread, never a refusal
@@ -2065,7 +2066,7 @@ res = _update_svc._update(gdx, needs="external", next="wait on Kim", sender="hom
 _wt_anchors._anchors("projects/beta", remove=["https://github.com/example/repo/issues/92"], who="t")
 _update_svc._update(gdx, clear_hold=True, needs="decision", ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
 res = _update_svc._update(gdx, needs="external", next="wait on Kim", hold=True, wake=wk, sender="home-beta")
-check("ext anchor: external added with a hold and no anchor → exactly one note, the hold's", "(note: on hold while it waits on someone outside" in res and EXTN not in res and res.count("(note:") == 1, res)
+check("ext anchor: external added with a hold and no anchor → exactly one note, the hold's", "(note: parking an item that waits on someone outside" in res and EXTN not in res and res.count("(note:") == 1, res)
 _wt_anchors._anchors("projects/beta", remove=["https://github.com/example/repo/issues/91"], who="t")
 for g in (gx, gdx): (T / f"store/{g[0]}/{g[1:]}.json").unlink()
 
@@ -2125,7 +2126,7 @@ res = _update_svc._update(g5, hold=True, wake=wk, sender="home-beta"); check("an
 _update_svc._update(g5, clear_hold=True, next=f"wait on Kim in [#7]({TH})", sender="home-beta")
 res = _update_svc._update(g5, hold=True, wake=wk, sender="home-beta"); check("anchored hold: anchored to the item and named in next → no note", "(note:" not in res and hd_(rd(g5)["metadata"]), res)
 res = _update_svc._update(g5, wake=(today + datetime.timedelta(days=45)).isoformat(), sender="home-beta")
-check("anchored hold: a wake beyond the backstop (the 7-day cap) → a note", "(note: on hold on an anchored thread with a wake more than 7 days out" in res and "a longer one needs" in res, res)
+check("anchored hold: a wake beyond the backstop (the 7-day cap) → a note", "(note: parked on an anchored thread with a wake more than 7 days out" in res and "a longer one needs" in res, res)
 res = _update_svc._update(g5, wake=(today + datetime.timedelta(days=7)).isoformat(), sender="home-beta"); check("anchored hold: a backstop of cap_days → no note", "(note:" not in res, res)
 check("anchored hold: the update description carries the exception", "anchored to it (anchors(project, add=[url], items=[its id])) and named in next" in _wt_update._UPDATE_DESC
       and "backstop wake (at most [waiting] cap_days out unless his words are on the item)" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
@@ -2133,7 +2134,7 @@ check("anchored hold: the update description carries the exception", "anchored t
 # releases the hold when the keeper passes or merges it, never when it drops it; the anchor alone is no condition (the backstop wake stays);
 # a project with no keeper releases on the notice itself, by the minute loop's pass
 e = refusal(lambda: _update_svc._update(g5, wake="none", sender="home-beta"))
-check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is refused, naming the backstop", e.startswith(f"Refused: a hold that waits on a notice from the anchor scoped to {g5} still carries a backstop wake, at most 7 days out unless the owner's words are on the item") and held_(g5), e)
+check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is refused, naming the backstop", e.startswith(f"Refused: a park that waits on a notice from the anchor scoped to {g5} still carries a backstop wake, at most 7 days out unless the owner's words are on the item") and held_(g5), e)
 t0 = time.time(); time.sleep(0.05)
 n_d = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="a comment on #7", target="for home-beta", anchor=TH)
 _wt_route._route(n_d, "dropped", reason="noise", sender="home-beta")
@@ -2141,7 +2142,7 @@ check("anchor wait: a notice the keeper drops releases nothing", held_(g5), rd(g
 n_p = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="Kim answered on #7", target="for home-beta", anchor=TH)
 n0 = len(wait_push(0)); res = _wt_route._route(n_p, "passed", to="home-beta", reason="Kim's answer", sender="home-beta"); p = wait_push(n0 + 1)
 check("anchor wait: a notice the keeper passes releases the hold and its wake; the route reply says so", not held_(g5) and "wake" not in rd(g5)["metadata"] and rd(g5)["status"] == "open"
-      and f"({g5} waited on this anchor and is released from hold)" in res, (res, rd(g5)["metadata"]))
+      and f"({g5} waited on this anchor and is unparked)" in res, (res, rd(g5)["metadata"]))
 check("anchor wait: the owner is told what released it", any(m[0] == B and m[1].startswith(f"[stackshot] {g5} woke: a notice from {TH}, the anchor it waited on, was passed by home-beta") for m in p[n0:]), p[n0:])
 check("anchor wait: the release moves both clocks (so one notice never releases twice)", rd(g5)["state_updated"] >= t0 and rd(g5)["updated"] == rd(g5)["state_updated"], rd(g5))
 _update_svc._update(g5, hold=True, wake=wk, sender="home-beta")
@@ -2163,7 +2164,7 @@ check("anchor wait: …and the notice itself does once it arrives, saying the pr
       and any(m[1].startswith(f"[stackshot] {g5} woke: a notice from {TH}, the anchor it waited on, arrived (nobody rules this project's notices)") for m in p[n0:]), (rel, p[n0:]))
 check("anchor wait: the pass releases once", wakes_svc.anchor_pass() == [])
 _pj["pages"]["projects/beta"]["session"] = _keep_beta; (T / "store/projects.json").write_text(json.dumps(_pj))
-check("anchor wait: the update description says how the hold is released", "releases the hold when the project's router (or the project's builder, else its -main agent) passes or merges a notice from that anchor" in _wt_update._UPDATE_DESC)
+check("anchor wait: the update description says how the park is released", "releases the park when the project's router (or the project's builder, else its -main agent) passes or merges a notice from that anchor" in _wt_update._UPDATE_DESC)
 
 # last confirmed: set on create and on a state change, never on a filing edit
 it5 = rd(g4); check("confirmed: set on create (with both clocks)", rd(g1)["confirmed"] == rd(g1)["updated"] == rd(g1)["state_updated"], rd(g1))
@@ -2932,7 +2933,7 @@ check("after: the item is parked (out of the queue, a wait on the item) without 
 _ap = "".join(bA.routing_html(k) for k in bA.proj); _ar = _ap[_ap.find(f'<li class="irow hrow" id="task-{a1_[0]}-{a1_[1:]}" data-st="wait">'):][:1400]
 check("after: the project page's Waiting row says what it waits for (after the two items), and the item page's prop",
       f'data-fold="project.items.waiting"' in _ap and f'<span class="hwait">After <a href="/items/{a2_}"' in _ar and f'/items/{a3_}"' in _ar and f'<dt>After</dt><dd><a href="/items/{a2_}">{a2_}</a> <span class="dim">(open)</span>' in _side(bA.item_html(a1_)), _side(bA.item_html(a1_)))
-res = _update_svc._update(a1_, hold=True, sender="home-beta"); check("after: a hold with no wake passes while an after is open (the after is what it waits for); both show", held_(a1_) and bA.md_hold(ui_render.Board(str(T / "store")).item(a1_)) == f"on hold, no wake date; after {a2_}, {a3_}", res)
+res = _update_svc._update(a1_, hold=True, sender="home-beta"); check("after: a hold with no wake passes while an after is open (the after is what it waits for); both show", held_(a1_) and bA.md_hold(ui_render.Board(str(T / "store")).item(a1_)) == f"parked, no wake date; after {a2_}, {a3_}", res)
 _update_svc._update(a1_, clear_hold=True, sender="home-beta")
 e = refusal(lambda: _update_svc._update(a2_, after=[a1_], sender="home-beta")); check("after: a loop is refused", e.startswith("Refused: a loop:") and "after" not in rd(a2_)["metadata"], e)
 e = refusal(lambda: _update_svc._update(a1_, after=[a1_], sender="home-beta")); check("after: itself is refused", "cannot wait on itself" in e, e)
@@ -3162,7 +3163,7 @@ check("auto-name: a background agent's wake alone names nobody; the wake lands, 
 n5 = mk46(); res = _update_svc._update(n5, hold=True, wake=wk46, sender="work-osprey-x")
 check("auto-name: …nor does hold=true with its wake", "needs" not in rd(n5)["metadata"] and "(named" not in res and hd_(rd(n5)["metadata"]), (rd(n5)["metadata"], res))
 n6 = mk46(); e = refusal(lambda: _update_svc._update(n6, hold=True, sender="work-osprey-x"))
-check("auto-name: …and a bare hold, refused as an indefinite park, leaves no naming behind", e.startswith("Refused: a hold names what it waits for") and "needs" not in rd(n6)["metadata"], (e, rd(n6)["metadata"]))
+check("auto-name: …and a bare hold, refused as an indefinite park, leaves no naming behind", e.startswith("Refused: a park names what it waits for") and "needs" not in rd(n6)["metadata"], (e, rd(n6)["metadata"]))
 n7 = mk46(); res = _update_svc._update(n7, recycle=True, sender="work-osprey-x")
 check("auto-name: a background agent's recycle=true alone names nobody; the recycle lands", "needs" not in rd(n7)["metadata"] and "(named" not in res and rd(n7)["metadata"].get("recycle"), (rd(n7)["metadata"], res))
 n8 = mk46(); res = _update_svc._update(n8, next="building it", sender="work-osprey-x")
@@ -3488,7 +3489,7 @@ _update_svc._update("a54", hold=True, wake="2099-01-01", sender="work-osprey-mai
 got, ln = ev48(A48, "comment", "a question for the owner", who="kim", kind="github")
 res = _wt_route._route(ln["id"], "passed", to="work-osprey-main", reason="Kim asks", sender="work-osprey")
 check("release: a delivered notice the keeper passes releases it too, its anchor id matched to the store's URL",
-      "(a54 waited on this anchor and is released from hold)" in res and not _holders._is_held(rd("a54")), res)
+      "(a54 waited on this anchor and is unparked)" in res and not _holders._is_held(rd("a54")), res)
 wait_push(0)
 # a green head that follows no failure is record_only: the event log has it and nothing else does, whatever [pilot] own_repos says (no notice, no routing line, no release of the item held on the anchor)
 from stackshot.anchors import event_log as _el48

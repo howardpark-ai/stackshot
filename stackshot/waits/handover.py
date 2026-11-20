@@ -77,7 +77,7 @@ def skip_reason(meta: dict[str, Any], mover: str, same: Callable[[str, str], boo
     needs = [str(x).strip() for x in raw if str(x).strip()] if isinstance(raw, list) else ([str(raw).strip()] if str(raw or "").strip() else [])
     decision = any(x.lower() == "decision" for x in needs)
     if meta.get("hold") and not decision:
-        return "on hold"
+        return "parked"
     if decision:
         return f"its needs name a decision: it waits on {owner}"
     others = [x for x in needs if x.lower() not in ("decision", "external") and not (mover and same(x, mover))]

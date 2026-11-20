@@ -299,8 +299,8 @@ check("waits_on_end (both renderers): a verifying item waits on its end date onl
 # the wake park reads an until as the wake
 w4 = sitem(914, until=day(3), needs=[BACK], mover=BACK)
 pk = _wait_fixes_svc._wake_park(w4, now)
-check("_wake_park reads an until as the wake: it gets past 'no wake' to judge the wait", pk["why"] != "not an open item with a wake and no hold", pk)
-check("_wake_park: an item with no date at all is still 'no wake'", _wait_fixes_svc._wake_park(sitem(915, needs=[BACK], mover=BACK), now)["why"] == "not an open item with a wake and no hold")
+check("_wake_park reads an until as the wake: it gets past 'no wake' to judge the wait", pk["why"] != "not an open item with a wake and no park", pk)
+check("_wake_park: an item with no date at all is still 'no wake'", _wait_fixes_svc._wake_park(sitem(915, needs=[BACK], mover=BACK), now)["why"] == "not an open item with a wake and no park")
 
 # the arrival text through the server's own turn
 w5 = sitem(921, until=day(-1), needs=[BACK], mover=BACK)

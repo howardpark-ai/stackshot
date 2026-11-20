@@ -160,6 +160,23 @@ for word in STEP_SEND_TERMS:
     check(f"retired: \"{word}\" in a string of server.py and in the tool-text snapshot is a hit (two, one per file), and the two-button wording beside it is not",
           sorted((h.file, h.term) for h in got) == [("server.py", word), ("tests/tool_text.snapshot.json", word)], [str(h) for h in got])
 
+# a dated wait is "parked", never "on hold": the live list names the old phrases and says "parked" for each; the allowed uses are the guard's pattern label and the GitHub label's name
+PARK_TERMS = ("on hold", "released from hold", "back from hold", "a hold names what it waits for", "New holds")
+check("the live list names the retired on-hold phrases, each saying what to write instead (parked, unparked, a park, Newly parked)",
+      set(PARK_TERMS) <= set(byname) and all(any(w in byname[x].use for w in ("parked", "unparked", "a park", "Newly parked")) for x in PARK_TERMS), [(w, byname.get(w) and byname[w].use) for w in PARK_TERMS])
+for word in PARK_TERMS:
+    plant = T / ("plant-park-" + str(PARK_TERMS.index(word))); plant.mkdir()
+    (plant / "server.py").write_text(f'LINE = "an item is {word} until Friday"\nOK = "the item is parked until Friday, and a held note waits for its next turn"\n')
+    (plant / "tests").mkdir(); (plant / "tests" / "tool_text.snapshot.json").write_text(json.dumps({"tools": {"get": {"description": f"text with {word} inside"}}}, indent=2) + "\n")
+    got = rt.lint(plant, pathlib.Path(SCR, "retired_terms.toml"))
+    check(f"retired: \"{word}\" in a string of server.py and in the tool-text snapshot is a hit (two, one per file), and the parked wording beside it is not",
+          sorted((h.file, h.term) for h in got) == [("server.py", word), ("tests/tool_text.snapshot.json", word)], [str(h) for h in got])
+plant = T / "plant-park-allow"; plant.mkdir()
+(plant / "server.py").write_text('LABEL = ("\\"on hold\\" in next", 1)\nDOC = "the mirror puts no label on it (`on hold` included)"\nBAD = "the item stays on hold"\n')
+got = rt.lint(plant, pathlib.Path(SCR, "retired_terms.toml"))
+check("the two allowed uses of \"on hold\" (the guard's pattern label, the name of the GitHub label) are not hits, and the same words in a sentence are",
+      [(h.file, h.term) for h in got] == [("server.py", "on hold")], [str(h) for h in got])
+
 # a tool's text file (stackshot/web/tools/text/*.md) is read by its sections, the wrapped lines of one joined by a space: a retired phrase wrapped across two lines is a hit,
 # an allow phrase may span the wrap, the header line is not text, and the live list scans the folder
 plant = T / "plant-sections"; (plant / "stackshot" / "web" / "tools" / "text").mkdir(parents=True)

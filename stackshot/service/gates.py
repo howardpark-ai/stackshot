@@ -1139,13 +1139,13 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
 
 
 BUSY_HOLD_REFUSAL = ("Refused: this item is being moved now: {live} is running on it, so it is not paused. Keep it in hand and write where its step stands (work=<one line>, state in progress) "
-                     "instead of a hold. Park it with a hold only once nothing of yours is running on it.")
+                     "instead of a park. Park it only once nothing of yours is running on it.")
 
 
 BUSY_RELEASE_PREFIX = "a release of PR #"      # what the words of a running release begin with (audit/busy_hold.py `live_release`): the refusal that names one is BUSY_RELEASE_REFUSAL
 BUSY_RELEASE_REFUSAL = ("Refused: this item is being moved now: {live}, so it is not paused. Keep it in hand and write where its step stands (work=<one line>, state in progress), "
                         "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, mover=<who takes it then>). "
-                        "Park it with a hold only once nothing is running on it.")
+                        "Park it only once nothing is running on it.")
 
 
 def _given(v: Any) -> bool:
@@ -1572,13 +1572,13 @@ def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fal
     if item.get("status") == "completed":
         raise ToolError("Refused: a completed item waits for nothing; wait_basis goes with an open item's wake")
     if not wake:
-        raise ToolError("Refused: wait_basis explains the wake of a time wait (a hold's or a verifying item's), or a wake past the cap, by the real-world date it waits for, and this item has no wake date. A hold with no date is refused too: "
+        raise ToolError("Refused: wait_basis explains the wake of a time wait (a park's or a verifying item's), or a wake past the cap, by the real-world date it waits for, and this item has no wake date. A park with no date is refused too: "
                         f"give the wake (hold=true with wake=YYYY-MM-DD, the date the outside event or {OWNER}'s words give) and the basis with it")
     cap = _wt.cap_days()
     days = (h.wake_at(wake).timestamp() - time.time()) / 86400.0
     if not held and (not _wt.cap_needs_owner() or days <= cap):
         raise ToolError(f"Refused: wait_basis is not needed: this wake ({wake}) is {max(days, 0):.0f} days out, within the {cap:g} days a wait may run "
-                        "([waiting] cap_days). It is for the wake of a time wait (a hold, or a verifying or parked item), which carries a reason at any length, and for a wake past the cap; a date alone within the cap is a wait on its own and needs none")
+                        "([waiting] cap_days). It is for the wake of a time wait (a park, or a verifying item), which carries a reason at any length, and for a wake past the cap; a date alone within the cap is a wait on its own and needs none")
     if days > _wt.BASIS_MAX_WAKE_DAYS:
         raise ToolError(f"Refused: wait_basis stands for a wake at most {_wt.BASIS_MAX_WAKE_DAYS} days from now, and this wake ({wake}) is {days:.0f} days out. "
                         "A wait that long is not a basis for the cap but a date to set again nearer the time")

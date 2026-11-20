@@ -696,7 +696,7 @@ res = answer_svc._answer("a31", "", "I'll do it tomorrow evening", "send"); m = 
 check("his note 'tomorrow evening' wakes the minute loop and stores the one until date, with no hold and no old wake", runner_svc.WAKE_EVENT.is_set() and m.get("until") == f"{tomorrow_}T19:00" and "hold" not in m and "wake" not in m, (runner_svc.WAKE_EVENT.is_set(), m))
 tomorrow = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
 check("his note 'tomorrow evening' holds the item until then: hold, wake, his words behind the wake", hd_(m) is True and str(wk_(m)) == f"{tomorrow}T19:00" and (m.get("cap_ok") or {}).get("quote") == "I'll do it tomorrow evening", (hd_(m), wk_(m), m.get("cap_ok")))
-check("the notice names the hold and the time, and asks nothing before then", told and "Judge the note" not in told[-1][2] and f"on hold until {tomorrow}T19:00" in told[-1][2] and "nothing is asked of you before then" in told[-1][2], told)
+check("the notice names the hold and the time, and asks nothing before then", told and "Judge the note" not in told[-1][2] and f"parked the item until {tomorrow}T19:00" in told[-1][2] and "nothing is asked of you before then" in told[-1][2], told)
 told.clear()
 res = answer_svc._answer("a32", "", "can I do it tomorrow evening?", "send"); m = rd(32)["metadata"]
 check("a question naming a time is neither a tick nor a hold: it goes to the session to judge", res == "stepreply" and not hd_(m) and not wk_(m) and not (m["answers"][-1].get("applied")) and told and "Judge the note" in told[-1][2], (m, told))

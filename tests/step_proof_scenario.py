@@ -276,7 +276,7 @@ check("two pure proofs of different PRs: the first is ticked with nobody told, t
       a14["status"] == "completed" and [r["action"] for r in rows["a14"]] == ["ticked", "closed"] and rows["a14"][0]["quiet"] is True and not pushes_for("a14")
       and [(s["text"], s["status"]) for s in a14["metadata"]["steps"]] == [("home-builder: release PR #42", "done"), ("home-builder: merge PR #39", "done")], (a14["metadata"], rows.get("a14")))
 check("negated phrases are never proofs: untouched, not listed", raw(15) == s0[15] and "a15" not in rows)
-check("held: left alone, with why", raw(16) == s0[16] and rows["a16"][0]["action"] == "left" and rows["a16"][0]["why"] == "on hold")
+check("held: left alone, with why", raw(16) == s0[16] and rows["a16"][0]["action"] == "left" and rows["a16"][0]["why"] == "parked")
 a17 = rd(17)
 check("a condition on a merge (when PR #39 is merged, ...): not ticked, the mover is told once",
       a17["status"] == "open" and a17["metadata"].get("next") == "home-builder: when PR #39 is merged, announce it" and len(pushes_for("a17")) == 1 and "PR #39 is merged" in pushes_for("a17")[0][1], (a17["metadata"], pushes_for("a17")))
@@ -421,7 +421,7 @@ import contextlib, io as _io
 err = _io.StringIO(); proofs_svc.PROOF_LOGGED.clear()
 with contextlib.redirect_stderr(err):
     proofs_svc.sweep_proofs(); proofs_svc.sweep_proofs(); proofs_svc.sweep_proofs()
-check("a held item is logged as left alone once, not every pass", err.getvalue().count("released: a16 left alone for PR #39: on hold") == 1, err.getvalue()[-600:])
+check("a held item is logged as left alone once, not every pass", err.getvalue().count("released: a16 left alone for PR #39: parked") == 1, err.getvalue()[-600:])
 # the cost: git is read only for the pull requests some open step waits on, and kept by commit
 calls = {"prs": 0, "live": 0, "base": 0}
 _mp, _live, _base = rlive_svc.merged_prs, rlive_svc.released_is_live, rlive_svc.released_live_base

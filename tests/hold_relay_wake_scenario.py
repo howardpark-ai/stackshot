@@ -122,7 +122,7 @@ check("1 a wake past the cap with the owner's recorded words on the item is acce
 
 item(54, **REL)
 out = bupd(54, clear_hold=True)
-check("1 clear_hold on a relay wait that holds no flag says the wait goes on and clear_wait ends it", "holds no flag" in out and "clear_wait=true ends the wait" in out and mt(54).get("wait_kind") == "relay", (out[-400:], mt(54)))
+check("1 clear_hold on a relay wait that holds no flag says the wait goes on and clear_wait ends it", "(clear_hold releases a park, and this relay or event wait holds no flag" in out and "clear_wait=true ends the wait" in out and "on hold" not in out and mt(54).get("wait_kind") == "relay", (out[-400:], mt(54)))
 
 # ================================================================ 2. until with a time
 item(6, **REL)

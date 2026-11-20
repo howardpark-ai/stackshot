@@ -57,8 +57,8 @@ BATCH = 60                                                  # writes (or items) 
 PASS_ID_RX = re.compile(r"\d{8}-\d{6}-[0-9a-f]{6}")         # the id `begin` gives a pass
 # The event paths that still notify while the pass holds the board, each a person's or a session's own act (the pass writes through none of them); an item one moves is `moved` when the pass reaches it.
 MID_PASS_PATHS = (
-    "a keeper's ruling on an anchor notice (`_route` → `anchor_release` in service/wakes.py): a held item that waited on that anchor is released and its session told; the waits' watchers stand still (the hold)",
-    "a session closing an item (`release_after` in service/wakes.py): an item with an old `after` wait that closes the last blocker wakes and its session is told; a watched item's wait stands still (the hold)",
+    "a keeper's ruling on an anchor notice (`_route` → `anchor_release` in service/wakes.py): a held item that waited on that anchor is released and its session told; the waits' watchers stand still (the park)",
+    "a session closing an item (`release_after` in service/wakes.py): an item with an old `after` wait that closes the last blocker wakes and its session is told; a watched item's wait stands still (the park)",
     "any session's own update, answer or comment on an item: the usual History line, notices and hand-off record, as ever",
 )
 
@@ -690,13 +690,13 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
                 drop = [k for k in ("hold", "hold_set", "state", *_states.CARRY_FIELDS) if k in m]
                 mod2 = env.derive(gid, after_state(it, {}, drop))
                 if mod2.state != _model.ALIVE:
-                    plan.note(gid, "snooze", f"a time wait (wake {m.get('wake')}) with none of his words in its answers and no real date; without the hold it still waits ({mod2.wait.kind if mod2.wait else '?'}): set by hand")
+                    plan.note(gid, "snooze", f"a time wait (wake {m.get('wake')}) with none of his words in its answers and no real date; without the park it still waits ({mod2.wait.kind if mod2.wait else '?'}): set by hand")
                 else:
                     mover, swapped = _take(env, plan, gid, mod2.mover, project, "mover")
                     set_["mover"] = mover
-                    plan.note(gid, "snooze_alive", f"a time wait (wake {m.get('wake')}) with none of his words in its answers and no real date: the hold goes, the wake stays as a backstop, "
+                    plan.note(gid, "snooze_alive", f"a time wait (wake {m.get('wake')}) with none of his words in its answers and no real date: the park goes, the wake stays as a backstop, "
                                                   f"the item is alive with {env.label(mover)}", hand=False)
-                    notes.append("a snooze: the hold goes, the wake stays as a backstop")
+                    notes.append("a snooze: the park goes, the wake stays as a backstop")
                     who = f"{_model.owner_display()} moves it" if _model.is_owner(mover) else "an agent moves it"
                     _commit(env, plan, gid, it, f"{today_state} → alive, {who} (snooze: none of his words found)", set_, drop, notes, env.label(mover))
                     return

@@ -218,7 +218,7 @@ def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
             raise ToolError(f"Refused: {_gh.shown(gid)} moved while its history was being read (its wake or state changed); run the job again")
         ok, how = _wt.entry_pairs(item, hit.get("ts"), now_t, None if current else prior)
         if not ok:
-            raise ToolError(f"Refused: that entry of {OWNER}'s does not stand behind {_gh.shown(gid)}'s current wake or hold: {how}"
+            raise ToolError(f"Refused: that entry of {OWNER}'s does not stand behind {_gh.shown(gid)}'s current wake or park: {how}"
                             + ("" if how == _wt.UNREADABLE_WHY else f". Ask {OWNER} to answer on the item again"))
         quote = str(spec.get("quote") or "")
         if quote and " ".join(quote.split()) != " ".join(text.split()):

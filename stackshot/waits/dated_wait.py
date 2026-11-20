@@ -197,6 +197,6 @@ def basis(dw: DatedWait) -> str:
     if dw.reason:
         return dw.reason
     if not dw.steps:
-        return "on hold until its wake"
+        return "parked until its wake"
     words = list(dict.fromkeys(w for _, _, w in dw.steps))[:2]
     return "every open step is dated for later (" + ", ".join(words) + ")"

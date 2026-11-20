@@ -510,10 +510,10 @@ item(13, hold=True, wake=day(9), needs=[BACK], subject="[home] held, no stored w
 reset()
 rel = wakes_svc.anchor_release("projects/alpha", notice("PR #65 merged: it landed", anchor="github:o/r#65"), by="home-stew")
 m = mt(56)
-check("review 1: a held, anchor-scoped item with a stored anchor wait is turned by the watchers (alive, post-wake mover, the notice's gist), not released from hold by today's branch first",
+check("review 1: a held, anchor-scoped item with a stored anchor wait is turned by the watchers (alive, post-wake mover, the notice's gist), not unparked by today's branch first",
       m.get("mover") == BACK and "wait_kind" not in m and "hold" not in m and "PR #65 merged" in m["woke"]["what"] and "stayed silent" not in m["woke"]["what"], m)
 check("review 1: …told once, in the watchers' line", len([x for x in sent() if x[1] == UB and "a56" in x[0]]) == 1 and any("is yours now" in x[2] for x in sent() if "a56" in x[0]), sent())
-check("review 1: …and the held item with no stored wait is released from hold as before, in the same call", "a13" in rel and "hold" not in mt(13) and "wait_kind" not in mt(13) and "mover" not in mt(13), (rel, mt(13)))
+check("review 1: …and the held item with no stored wait is unparked as before, in the same call", "a13" in rel and "hold" not in mt(13) and "wait_kind" not in mt(13) and "mover" not in mt(13), (rel, mt(13)))
 
 _anc.save({"projects/alpha": [{"url": A2, "items": ["a57", "a15"], "added": now0, "by": "x"}]})
 item(57, wait_kind="anchor", wait_anchor=A2, wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] replay, watched", watch=WATCHED())
@@ -700,7 +700,7 @@ item(39, wait_kind="anchor", wait_anchor=A5, wait_event="a reply", ask_by=day(9)
 item(49, hold=True, wake=day(9), needs=[BACK], subject="[home] route: held")
 nid = _routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="a reply on PR 79", anchor="github:o/r#79", pilot=True)
 reply = _wt_route._route(nid, "passed", to=BACK, reason="for the builder", sender="home-stew")
-check("review 12: _route's reply says a watched item turned to its mover, and a held one was released from hold", "a39 turned to team-back" in reply and "a49 waited on this anchor and is released from hold" in reply and "a39 waited" not in reply, reply)
+check("review 12: _route's reply says a watched item turned to its mover, and a parked one was unparked", "a39 turned to team-back" in reply and "a49 waited on this anchor and is unparked" in reply and "a39 waited" not in reply, reply)
 item(196, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/97", wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], project="projects/beta", subject="[home] pre-filter", watch={"set_at": now0 - 56})
 _read0, _since = _routing.read, []
 def _read_spy(project, since=0.0, *a, **k):

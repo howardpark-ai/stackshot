@@ -142,7 +142,7 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
         item = _svcstore._load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open" or not _wt.wake_value(meta) or meta.get("hold"):
-            return {"parked": False, "why": "not an open item with a wake and no hold"}
+            return {"parked": False, "why": "not an open item with a wake and no park"}
         mod = _item_read._model_of(item)
         if not mod.mover or _model.is_owner(mod.mover) or _waits_decision(meta):
             return {"parked": False, "why": f"{OWNER} moves it"}
@@ -334,7 +334,7 @@ def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...], legacy_wake:
     return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's only open next line{'s' if len(found) > 1 else ''} of yours wait{'' if len(found) > 1 else 's'} for a time or an event (\"{found[0]}\"), "
             "so the item waits until then, listed as waiting. To move the date: update(until=\"<when the wait ends>\"), "
             "with wait_reason=<what the step waits on> when you set the date"
-            + ("; when it waits on a named person outside answering, park it as an outside wait instead of a plain hold: needs=[\"external\"] with wait_kind=\"relay\", wait_event=<who> and ask_by=YYYY-MM-DD" if any(_mg.is_reply_trigger(f) for f in found) else "")
+            + ("; when it waits on a named person outside answering, park it as an outside wait instead of a plain park: needs=[\"external\"] with wait_kind=\"relay\", wait_event=<who> and ask_by=YYYY-MM-DD" if any(_mg.is_reply_trigger(f) for f in found) else "")
             + "; if the step can run now, write it as the action and drop the date with until=\"none\")")
 
 
@@ -347,14 +347,14 @@ def _anchored_wait(gid: str, meta: dict[str, Any]) -> str:
     except Exception:
         scoped = []
     if not any(e["url"] in str(meta.get("next") or "") for e in scoped):
-        return (f"on hold while it waits on someone outside: such an item is not parked but stays with needs=external, unless {OWNER} "
+        return (f"parking an item that waits on someone outside: such an item is not parked but stays with needs=external, unless {OWNER} "
                 f"parked it or the thread it waits on is anchored to it (anchors(project, add=[url], items=[{gid or 'its id'}])) and named in next")
     cap = _wt.cap_days()
     try:
         far = _wakes.wake_at(_wt.wake_value(meta)) - _pages.zone_now() > dt.timedelta(days=cap + 1) and not _wt.cap_words(meta, "wake")
     except ValueError:
         far = False
-    return (f"on hold on an anchored thread with a wake more than {cap:g} days out: the wake is only a backstop, "
+    return (f"parked on an anchored thread with a wake more than {cap:g} days out: the wake is only a backstop, "
             f"at most {cap:g} days away (a longer one needs {OWNER}'s words), since the anchor's notice wakes you sooner") if far else ""
 
 

@@ -217,7 +217,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
             it["updated"] = time.time()      # a filing edit: the state clock and the confirm stay as they were
         it["metadata"] = meta
         _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
-              + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
+              + (": unparked" if freed else "; still parked, waiting on its wake or after" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
         for sid, _why in _telling.notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
             to = (sid, "") if sid == owner else (sid, _sr._session_label(owner) or owner)
             cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
@@ -233,8 +233,8 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
                     f"named in {its} needs: resume {its} work.")
         else:
             note = f"[stackshot] the {what} you waited for {ran}: re-read {names} and resume."
-        note += (f" {' and '.join(freed)} waited only for the recycle and {'is' if len(freed) == 1 else 'are'} released from hold." if freed else "")
-        note += (f" {' and '.join(held)} {'stays' if len(held) == 1 else 'stay'} on hold, waiting on {'its' if len(held) == 1 else 'their'} wake or after too: clear_hold=true if it should come back now." if held else "")
+        note += (f" {' and '.join(freed)} waited only for the recycle and {'is' if len(freed) == 1 else 'are'} unparked." if freed else "")
+        note += (f" {' and '.join(held)} {'stays' if len(held) == 1 else 'stay'} parked, waiting on {'its' if len(held) == 1 else 'their'} wake or after too: clear_hold=true if it should come back now." if held else "")
         raw = [g for g, _ in rows]
         _telling.tell_woken(raw[0] if len(raw) == 1 else ", ".join(raw[:-1]) + " and " + raw[-1], to, note, tag="recycle")
     if cleared:

@@ -21,7 +21,7 @@ from stackshot.model import nextlines as _nl
 from stackshot.model import steps as _steps
 
 NO_STEP_FIX = f"add the next step in next, opening with who takes it (`<session>:`, `{_cfg.owner()}:` or the outside party's name), or keep one open step (for a parked item, who looks again at the wake), or close the item (complete); an open item always has an open step"
-NO_STEP_FIX_HELD = "a parked item needs a step too, the one its wake leads to: write it in the same call, opening with who looks again (`<session>: look again at … on the wake`), or complete the item; the hold keeps the item out of sight, it does not take the step away"
+NO_STEP_FIX_HELD = "a parked item needs a step too, the one its wake leads to: write it in the same call, opening with who looks again (`<session>: look again at … on the wake`), or complete the item; the park keeps the item out of sight, it does not take the step away"
 FIX = f"open the line with who takes it: `<session>:`, `{_cfg.owner()}:` or the outside party's name"      # the fix N1's refusal names (the tool text says the same)
 
 hint = _mg.line_hint      # why a refused line names no one, when it can be said (a label such as `Status:`, a missing space after the colon)

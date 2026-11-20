@@ -238,7 +238,7 @@ check("answer: …and a plain write on it works", mt(59)["next"] == "home-front:
 
 # ---- a hold and a state of another kind cannot stand together
 item(130, needs=[BACK], hold=True, wake=day(20), cap_ok={"wake": day(20), "by": "the owner", "quote": "park it until then"}, state="parked")
-refused_nw("hold: a decision put on a parked item is refused (an ask for later is a time wait whose post-wake mover is the owner), naming clear_hold", 130, lambda: upd(130, needs=["decision"], ask=ASK), "decision together with a hold", "clear_hold=true")
+refused_nw("hold: a decision put on a parked item is refused (an ask for later is a time wait whose post-wake mover is the owner), naming clear_hold", 130, lambda: upd(130, needs=["decision"], ask=ASK), "decision together with a park", "clear_hold=true")
 out = upd(130, needs=["decision"], ask=ASK, clear_hold=True)
 check("hold: …with clear_hold the hold goes, and the state that stood on it (the write drops it)", "hold" not in mt(130) and "state" not in mt(130) and "decision" in mt(130)["needs"] and "stored state parked dropped" in out, (mt(130), out[-300:]))
 upd(130, next="home-front: carry on")
@@ -246,7 +246,7 @@ check("hold: …and a plain write afterwards is not refused", mt(130)["next"].sp
 item(38, needs=[BACK], state="doing", expected_by=hrs(2))
 out = upd(38, hold=True, wake=day(3), wait_basis=f"paper delivery confirmed {day(4)}")      # a time wait carries a reason: a real date
 check("hold: hold=true on a doing item drops the stored state and says why", "state" not in mt(38) and "expected_by" not in mt(38) and hd_(mt(38)) is True
-      and "stored state doing dropped: a hold ends it; the item reads parked" in out, (mt(38), out[-300:]))
+      and "stored state doing dropped: a park ends it; the item reads parked" in out, (mt(38), out[-300:]))
 check("hold: …it reads as waiting on a time from its until (the hold and the wake are stored as that one date) and shows no state word",
       _model.derive({**rd(38), "gid": "a38"}).state == "waiting" and _WT.stored_until(mt(38)) and "state: " not in _get_tool._fmt({**rd(38), "gid": "a38"}), None)
 item(132, needs=[BACK], hold=True, wake=day(30), wait_basis={"text": f"Printer order confirmed {day(35)}", "wake": day(30), "by": "x", "at": now0}, state="parked")
@@ -501,7 +501,7 @@ g(106, needs=["external"], state="doing", hold=True, wake=wk(24), next="team-bac
 g(107, needs=[BACK], state="parked", hold=True, wake=wk(24), wait_basis={"text": f"visit {day(1)}", "wake": wk(24), "by": "x", "at": now0})    # a stored state of another kind beside the hold
 w_a = view_of(100)
 check("held wait: a stored doing item on hold with a wake tomorrow reads as waiting on a time until the wake, whatever its undated step says",
-      w_a.state == _model.WAITING and w_a.wait.kind == "time" and w_a.wait.until == wk(24) and w_a.wait.post_wake_mover == "team-back" and lst(100) == "waiting" and w_a.wait.basis == "on hold until its wake", (w_a, lst(100)))
+      w_a.state == _model.WAITING and w_a.wait.kind == "time" and w_a.wait.until == wk(24) and w_a.wait.post_wake_mover == "team-back" and lst(100) == "waiting" and w_a.wait.basis == "parked until its wake", (w_a, lst(100)))
 check("held wait: …a hold with no wake, a wake already past, or a wake within the hour is unchanged (alive)", all(view_of(n).state == _model.ALIVE for n in (101, 102, 103)), [view_of(n).state for n in (101, 102, 103)])
 check("held wait: …a stored expected_by within the hour beside the wake is not read: the far wake on hold is a held wait all the same", view_of(105).state == _model.WAITING and _dw.held_wait(dict(rd(105, "g"), gid="g105"), now_) is not None, view_of(105))
 check("held wait: …a mover that is not a session (external) gets no held wait", W.mover_of(rd(106, "g")["metadata"])["kind"] != "session" and _dw.held_wait(dict(rd(106, "g"), gid="g106"), now_) is None, W.mover_of(rd(106, "g")["metadata"]))
@@ -510,7 +510,7 @@ check("held wait: …an item whose needs hold decision is no held item", view_of
 check("held wait: …the dated-step reading (dated_wait.of) still leaves a held item alone, and the stored model is unchanged",
       _dw.of(dict(rd(100, "g"), gid="g100"), now_) is None and _dw.held_wait(dict(rd(100, "g"), gid="g100"), now_) is not None and _dw.held_wait(dict(rd(101, "g"), gid="g101"), now_) is None
       and _model.derive(dict(rd(100, "g"), gid="g100"), now_, after_open=lambda i: [], anchored=lambda i: False).state == _model.ALIVE, None)
-check("held wait: get says the board lists it as waiting until the wake and that it is on hold", "on hold until its wake" in "\n".join(_notes_tool._model_lines(dict(rd(100, "g"), gid="g100"))), "\n".join(_notes_tool._model_lines(dict(rd(100, "g"), gid="g100"))))
+check("held wait: get says the board lists it as waiting until the wake and that it is on hold", "parked until its wake" in "\n".join(_notes_tool._model_lines(dict(rd(100, "g"), gid="g100"))), "\n".join(_notes_tool._model_lines(dict(rd(100, "g"), gid="g100"))))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": state scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

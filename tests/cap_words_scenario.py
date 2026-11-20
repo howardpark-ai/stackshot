@@ -137,7 +137,7 @@ check("A: ...and cap_ok.source names the comment's url, not only its id", "https
 # an answer older than the item's current wake or hold is no words behind it (the state clock, as _owner_words_on)
 item(62, hold=True, wake=day(30), su=now0 - 5 * DAY, answers=[{"ts": now0 - 8 * DAY, "kind": "decision", "text": "park this until Jun 4th", "via": "board"},
                                                                 {"ts": now0 - 4 * DAY, "kind": "decision", "text": "park it a bit longer", "via": "board"}])
-refused("A: with no history, an answer more than 24 hours before the move that set the current wake is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a62", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours")
+refused("A: with no history, an answer more than 24 hours before the move that set the current wake is refused", lambda: _owner_words._record_cap_words({"sender": "home-test", "item": "a62", "ts": now0 - 8 * DAY}, "testbox"), "more than 24 hours", "the move that set the current wake or park", "'s current wake or park: ")
 check("A: ...and nothing was recorded", "cap_ok" not in rd(62)["metadata"], rd(62)["metadata"])
 out = _owner_words._record_cap_words({"sender": "home-test", "item": "a62", "ts": now0 - 4 * DAY}, "testbox")
 check("A: an answer given after that move is taken (pairing: since the move)", out["action"] == "set" and rd(62)["metadata"]["cap_ok"]["quote"] == "park it a bit longer", out)
@@ -145,6 +145,7 @@ check("A: W.entry_current: at or after the state clock, with half a second of sl
       and not W.entry_current({"state_updated": 1000.0}, 990.0, now0) and not W.entry_current({"state_updated": 1000.0}, "x", now0), None)
 it0 = {"state_updated": 100000.0}
 check("A: entry_pairs: since the move pairs", W.entry_pairs(it0, 100001.0, now0)[0] and W.entry_pairs(it0, 99999.7, now0)[0], None)
+check("A: entry_pairs says why in the park's words: given since the move that set the current wake or park", W.entry_pairs(it0, 100001.0, now0)[1] == "given since the move that set the current wake or park", W.entry_pairs(it0, 100001.0, now0))
 check("A: entry_pairs: earlier, with the previous state change before the answer (nothing between), pairs whatever the lead", W.entry_pairs(it0, 50000.0, now0, prior=40000.0)[0], W.entry_pairs(it0, 50000.0, now0, prior=40000.0))
 check("A: entry_pairs: earlier, with a state change between the answer and the move, is refused", not W.entry_pairs(it0, 99000.0, now0, prior=99500.0)[0] and "came after it" in W.entry_pairs(it0, 99000.0, now0, prior=99500.0)[1], W.entry_pairs(it0, 99000.0, now0, prior=99500.0))
 check("A: entry_pairs: with no history, 24 hours before pairs and more does not", W.entry_pairs(it0, 100000.0 - 86000, now0)[0] and not W.entry_pairs(it0, 100000.0 - 87000, now0)[0], None)
@@ -418,7 +419,7 @@ p9001, p9002, p9003 = cw.plan_a(9193, "", now0), cw.plan_a(9194, "", now0), cw.p
 check("tool: an item with his park words: found, the body names the entry by ts and carries his sentence", p9001["found"] and p9001["body"]["ts"] == TB + 10.5 and p9001["body"]["quote"] == "keep this parked until jun 4", p9001)
 check("tool: the dry run lists every entry, marks his and the park, and says what it would record", "HIS, reads as a park" in "\n".join(p9001["lines"]) and "WOULD RECORD cap_ok for wake 2099-06-04T09:00" in "\n".join(p9001["lines"]), p9001["lines"])
 check("tool: an item with no words of his is reported as such and left alone; an agent's paraphrase is shown and not used",
-      not p9002["found"] and "no answers or comments of his are stored" in "\n".join(p9002["lines"]) and "NOT used as his words" in "\n".join(p9002["lines"]) and "NOTHING TO RECORD" in "\n".join(p9002["lines"]), p9002["lines"])
+      not p9002["found"] and "no answers or comments of his are stored" in "\n".join(p9002["lines"]) and "NOT used as his words" in "\n".join(p9002["lines"]) and "NOTHING TO RECORD" in "\n".join(p9002["lines"]) and "stands behind the move that set its current wake or park" in "\n".join(p9002["lines"]), p9002["lines"])
 check("tool: his words that do not park are listed but not picked", not p9003["found"] and "HIS ·" in "\n".join(p9003["lines"]) and "NOTHING TO RECORD" in "\n".join(p9003["lines"]), p9003["lines"])
 p9004, p9005 = cw.plan_b(9196, "", now0), cw.plan_b(9197, "", now0)
 check("tool: a B item with no basis given has none proposed and is not recorded (no basis table ships with the tool, and no item is named by default)",

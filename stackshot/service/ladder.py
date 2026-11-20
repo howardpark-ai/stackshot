@@ -154,7 +154,7 @@ def ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, d
     "stall", kind exempt), marked for the owner as every message a front agent takes is, and says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
     gids = [g for g, _l in items]
     every = f"{_ladder.MAIN_EVERY / 3600.0:g} hours"
-    stop = f"To stop the repeats, write to the item, hold it or set its wait; it comes again in {every} while the item stays silent. "
+    stop = f"To stop the repeats, write to the item, park it or set its wait; it comes again in {every} while the item stays silent. "
     if len(items) == 1:
         d = info[gids[0]]
         again = f" {_session_label(to)} was told about this at {d['told']} and nothing has been written since." if d["told"] else ""

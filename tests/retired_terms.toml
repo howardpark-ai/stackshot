@@ -299,3 +299,35 @@ allow = [
     # the one sentence of docs/item-model.md that tells the two wordings apart
     "a `then` as `, then <agent>`",
 ]
+
+# ---- a dated wait is "parked", never "on hold": an item waiting until a date or time reads `parked` on the board, in its History, in the digest and briefs, in refusals and in the tool text. "Held" stays for
+# what waits for a session's next turn, and `hold`, `clear_hold` and `hold=true` stay as the parameter and stored names, which a session types and a record keeps.
+[[term]]
+retired = "on hold"
+use = "`parked` for an item that waits until a date or time (`parked`, `unparked`, `parked with a wake on <date>`); `held` is only what waits for a session's next turn"
+allow = [
+    # the guard's label for the words it looks for in an item's next (a pattern over the old phrase, so a next that still says it is caught)
+    "\"on hold\" in next",
+    # the name of the GitHub label the mirror puts on a parked item: a label already on a repository, which the mirror matches by its text
+    "`on hold`",
+]
+
+[[term]]
+retired = "released from hold"
+use = "`unparked`"
+allow = []
+
+[[term]]
+retired = "back from hold"
+use = "`unparked`"
+allow = []
+
+[[term]]
+retired = "a hold names what it waits for"
+use = "`a park names what it waits for` (the refusal of a park with nothing to wait on)"
+allow = []
+
+[[term]]
+retired = "New holds"
+use = "`Newly parked` (the board's section of the items parked in the last 24 hours)"
+allow = []

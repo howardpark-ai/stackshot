@@ -461,9 +461,9 @@ def _fix_loose_reason(item: dict[str, Any], meta: dict[str, Any], next_after: An
         words = " ".join(_steps.strip_opener(line).split())
         basis = f"{words[:240]} (wake {day})" if day not in words else words[:260]
         _gates.gate_wait_basis({**item, "metadata": {**meta, "wake": wk}}, basis, wk, held=True)
-        note = (f"\n(fixed: this hold had a wake and no wait reason, and your {where} says what it waits for (\"{_clip_line(words, 90)}\"), so that line is the wait_basis. "
+        note = (f"\n(fixed: this park had a wake and no wait reason, and your {where} says what it waits for (\"{_clip_line(words, 90)}\"), so that line is the wait_basis. "
                 "Send wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\" to use other words: the server then leaves the field alone)")
-        return basis, (note, wk, f"wait reason: the hold had a wake and no reason; the {where} line \"{_clip_line(words, 80)}\" is its wait_basis. A wait_basis sent in a later write replaces it")
+        return basis, (note, wk, f"wait reason: the park had a wake and no reason; the {where} line \"{_clip_line(words, 80)}\" is its wait_basis. A wait_basis sent in a later write replaces it")
     except Exception as e:  # noqa: BLE001  — the fix is an extra: a failure leaves the write as it was, with the refusal
         if not isinstance(e, ToolError):
             print(f"loose wait reason: not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -879,14 +879,14 @@ def update_unlocked(
         next_after = dry_meta.get("next")
     if status:
         if status == "on_hold":   # a retired status: on hold is a property of an open item
-            raise ToolError("Refused: status must be open | completed; on hold is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it")
+            raise ToolError("Refused: status must be open | completed; parked is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it")
         if status not in ("open", "completed"):
             raise ToolError("Refused: status must be open | completed")
         item["status"] = status
     if clear_hold and (hold or wake):
         raise ToolError("Refused: clear_hold releases the item and drops its wake; it does not go with hold or wake")
     if hold and item.get("status") == "completed":
-        raise ToolError("Refused: a completed item does not go on hold; set it open first")
+        raise ToolError("Refused: a completed item cannot be parked; set it open first")
     if wake and item.get("status") == "completed":
         raise ToolError("Refused: a completed item takes no wake; set it open first")
     if recycle and clear_recycle:
@@ -991,14 +991,14 @@ def update_unlocked(
     # come). Checked when the call touches the hold, its wake, its after or its recycle, so a park stored before the rule is read as it is.
     if meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle"):
         if h.scoped_anchors(str(meta.get("project") or ""), gid):
-            raise ToolError(f"Refused: a hold that waits on a notice from the anchor scoped to {gid} still carries a backstop wake, at most {_wt.cap_days():g} "
+            raise ToolError(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop wake, at most {_wt.cap_days():g} "
                             f"days out unless {OWNER}'s words are on the item (wake=YYYY-MM-DD): the notice may never come")
-        raise ToolError("Refused: a hold names what it waits for; an unconditional or indefinite park is refused. Give it a date (hold=true with wake=YYYY-MM-DD or "
+        raise ToolError("Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (hold=true with wake=YYYY-MM-DD or "
                         f"YYYY-MM-DDTHH:MM: the date {OWNER} gave, the date the outside party or event it waits on is due, or the end of a window the work itself needs, with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"), the items that must close first (`after=[\"board#N\"]`), "
                         f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop wake at most {_wt.cap_days():g} "
                         f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER}'s call is parked with needs=[<session>] and mover={OWNER} (his ask returns at the date); "
                         "to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
-                        "item stays active, set no date: a date with no hold is a wait until it (outside a hand-off)")
+                        "item stays active, set no date: a date with no park is a wait until it (outside a hand-off)")
     # The done check: set or cleared by this write (a filing edit: no page owed), then the hand-off gate: a write
     # that hands the item to another session (a `<session>: <action>` line of next) leaves it with a check or a wake
     chk = " ".join(str(check or "").split())
@@ -1123,7 +1123,7 @@ def update_unlocked(
     elif _wlw.clearing(waits) and not _wl.stored(item_was.get("metadata") or {}):
         wait_note += "\n(waits=[] clears a list of waits; this item stores none, so nothing was cleared and its wait is as it was)"
     if relay_clear_hold:
-        wait_note += "\n(clear_hold releases a hold, and this relay or event wait holds no flag: it goes on waiting; clear_wait=true ends the wait)"
+        wait_note += "\n(clear_hold releases a park, and this relay or event wait holds no flag: it goes on waiting; clear_wait=true ends the wait)"
     if relay_hold:
         wait_note += "\n(hold=true is not stored on a relay or event wait: the wait is itself the park, until its ask-by day " + (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) + "; it ends when the notice arrives or on that day)"
     gave_ask = bool(ask_by.strip()) and ask_by.strip().lower() not in h.ask_none
@@ -1211,7 +1211,7 @@ def update_unlocked(
     hold_note = ""
     if ((hold and meta.get("hold") and meta.get("state") in _states.STATES and meta["state"] != "parked")
             or (relay_hold and meta.get("state") in _model.ALIVE_STATES)) and not state_st:     # a hold makes the item read parked: a state of another kind cannot stand beside it; a relay or event wait stores no flag, so the hold ends only the alive states the model's conflict line names (a waiting state stands beside the wait and keeps its fields)
-        hold_note = f"\n(stored state {meta['state']} dropped: a hold ends it; the item reads " + ("as its relay or event wait" if relay_hold else "parked") + ")"
+        hold_note = f"\n(stored state {meta['state']} dropped: a park ends it; the item reads " + ("as its relay or event wait" if relay_hold else "parked") + ")"
         h.state_end(meta)
     state_touched = frozenset(k for k, v in (("needs", needs_set or clear_needs or agent.strip()), ("after", after_set or clear_after),
                                               ("wake", wake or clear_wake), ("hold", hold or clear_hold), ("ask", ask or clear_ask), ("next", next_touch),
@@ -1325,7 +1325,7 @@ def update_unlocked(
         if not moved:
             h.owed_mark(meta.get("project", ""), stew or debtor, gid)
         if stew:
-            what = (f"completed ({outcome}{' by ' + _gh.shown(superseded_by) if superseded_by else ''})" if closing else "reopened" if reopening else "completed" if status == "completed" else "put on hold" if now_parked and not was_parked else "released from hold" if clear_hold and was_parked
+            what = (f"completed ({outcome}{' by ' + _gh.shown(superseded_by) if superseded_by else ''})" if closing else "reopened" if reopening else "completed" if status == "completed" else "parked" if now_parked and not was_parked else "unparked" if clear_hold and was_parked
                     else "changed (" + ", ".join(k for k, v in (("description", description), ("next", next_touch), ("needs", needs_set or clear_needs), ("status", status), ("due", due or clear_due),
                                                                  ("hold", hold or clear_hold), ("wake", wake or clear_wake), ("after", after_set or clear_after)) if v) + ")")
             if not moved:
@@ -1339,7 +1339,7 @@ def update_unlocked(
                                                 tail=f"no page update is owed by you ({_session_label(debtor)} writes it); this notice is for the anchors scoped to {_gh.shown(gid)}"))
     h.publish()
     item["gid"] = gid
-    hint = ("\nstill on hold: pass clear_hold=true to release it"
+    hint = ("\nstill parked: pass clear_hold=true to release it"
             if status == "open" and was_held and now_held and not (hold or wake) else "")   # a session with the old rulebook in context learns the new form
     heard: list[str] = []         # the mover, when a notice below reached it as mover: its "now needs you" line would double it
     owner_told = _telling.owner_reached(named, relayed)   # tell_owner (the server's naming of the writer above, or a notice below) already told the mover this write: tell_owner_change then adds nothing
@@ -1409,7 +1409,7 @@ def update_unlocked(
             print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     if dropped_hold:
-        hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never on hold: the hold is dropped"
+        hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never parked: the park is dropped"
                  + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
