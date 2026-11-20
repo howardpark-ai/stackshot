@@ -213,6 +213,49 @@ check("rules parts: only a matching pair of quotes is stripped", "## Part: it's 
 _cfg.paths = _real_cfg_paths
 check("rules parts: a bare string in config counts as a one-item list", _cfg.paths("paths", "rules_parts", ) == [] and _cfg.paths("paths", "rules") == [_real_cfg_path("paths", "rules")])
 _cfg.path = _real_cfg_path
+# the section marker has two spellings, `<!-- surface: cli -->` and `<!-- host: machines -->`: both drop the next "## " section
+_f = lambda t: _wt_rules._cowork_filter(t).rstrip("\n") + "\n"          # the filter joins lines without a final newline: compare with one
+_OLD, _NEW = "<!-- surface: cli -->", "<!-- host: machines -->"
+for _label, _m in (("the old marker", _OLD), ("the new marker", _NEW)):
+    check(f"cowork filter: {_label} drops the next section up to the following heading, the marker line too",
+          _f(f"# T\n\n{_m}\n## Hidden\n\n- gone\n\n## Shown\n\n- kept\n") == "# T\n\n## Shown\n\n- kept\n", _f(f"# T\n\n{_m}\n## Hidden\n\n- gone\n\n## Shown\n\n- kept\n"))
+    check(f"cowork filter: {_label} with spaces or a tab around the line still counts",
+          _f(f"  {_m}\t\n## Hidden\n- gone\n## Shown\n- kept\n") == "## Shown\n- kept\n", _f(f"  {_m}\t\n## Hidden\n- gone\n## Shown\n- kept\n"))
+    check(f"cowork filter: text before the marker words on the same line is not {_label}",
+          _f(f"see {_m} here\n## Shown\n- kept\n") == f"see {_m} here\n## Shown\n- kept\n", _f(f"see {_m} here\n## Shown\n- kept\n"))
+    check(f"cowork filter: text after the marker words on the same line is not {_label}",
+          _f(f"{_m} and more\n## Shown\n- kept\n") == f"{_m} and more\n## Shown\n- kept\n", _f(f"{_m} and more\n## Shown\n- kept\n"))
+    check(f"cowork filter: {_label} as the last line only vanishes",
+          _f(f"## Shown\n- kept\n{_m}") == "## Shown\n- kept\n", _f(f"## Shown\n- kept\n{_m}"))
+    check(f"cowork filter: {_label} drops only the section right after it, not a later one",
+          _f(f"{_m}\n## A\n- a\n## B\n- b\n## C\n- c\n") == "## B\n- b\n## C\n- c\n", _f(f"{_m}\n## A\n- a\n## B\n- b\n## C\n- c\n"))
+check("cowork filter: the markers differ only by spelling: both in one file drop their own sections",
+      _f(f"{_OLD}\n## A\n- a\n## B\n- b\n{_NEW}\n## C\n- c\n## D\n- d\n") == "## B\n- b\n## D\n- d\n", _f(f"{_OLD}\n## A\n- a\n## B\n- b\n{_NEW}\n## C\n- c\n## D\n- d\n"))
+check("cowork filter: a marker followed directly by another marker still drops one section (the next)",
+      _f(f"{_OLD}\n{_NEW}\n## A\n- a\n## B\n- b\n") == "## B\n- b\n" and _f(f"{_NEW}\n{_OLD}\n## A\n- a\n## B\n- b\n") == "## B\n- b\n", _f(f"{_NEW}\n{_OLD}\n## A\n- a\n## B\n- b\n"))
+check("cowork filter: a bullet marker `<!-- cli -->` is unchanged: it drops its own line only, next to either section marker",
+      _f(f"## A\n- keep\n- drop <!-- cli -->\n{_NEW}\n## B\n- b <!-- cli -->\n## C\n- c\n") == "## A\n- keep\n## C\n- c\n", _f(f"## A\n- keep\n- drop <!-- cli -->\n{_NEW}\n## B\n- b <!-- cli -->\n## C\n- c\n"))
+check("cowork filter: other comments and a `<!-- host: other -->` line are not markers",
+      _f("<!-- host: other -->\n<!-- note -->\n## Shown\n- kept\n") == "<!-- host: other -->\n<!-- note -->\n## Shown\n- kept\n")
+# the same marker inside a rules part (a skill file): frontmatter dropped, the section dropped in cowork, kept in full
+PN = R / "newmark" / "SKILL.md"; PN.parent.mkdir()
+PN.write_text("---\nname: new-marker\ndescription: x\n---\n\n# Part\n\n- first\n\n<!-- host: machines -->\n## Machines only\n\n- hidden from Cowork\n\n## Last\n\n- a visible rule\n", encoding="utf-8")
+_cfg.path = lambda *k: (R / "nomarkers.md") if k == ("paths", "rules") else _real_cfg_path(*k)
+_cfg.paths = lambda *k: [PN] if k == ("paths", "rules_parts") else _real_cfg_paths(*k)
+cw9 = _wt_rules._rules_text("cowork"); full9 = _wt_rules._rules_text("full")
+check("rules parts: a part with the new marker drops that section in cowork, frontmatter gone, the next section kept",
+      "## Part: new-marker\n\n# Part\n\n- first" in cw9 and "hidden from Cowork" not in cw9 and "Machines only" not in cw9 and "<!-- host: machines -->" not in cw9
+      and "- a visible rule" in cw9 and "description: x" not in cw9, cw9[-400:])
+check("rules parts: the same part under profile full keeps the section and the marker, frontmatter gone",
+      "hidden from Cowork" in full9 and "<!-- host: machines -->" in full9 and "description:" not in full9, full9[-400:])
+# the rulebook body itself, both spellings in one file
+(R / "both.md").write_text(f"# Rules\n\n## One\n\n- one\n\n{_OLD}\n## Old only\n\n- old hidden\n\n{_NEW}\n## New only\n\n- new hidden\n\n## Two\n\n- two\n", encoding="utf-8")
+_cfg.path = lambda *k: (R / "both.md") if k == ("paths", "rules") else _real_cfg_path(*k)
+_cfg.paths = _real_cfg_paths
+cw10 = _wt_rules._rules_text("cowork"); full10 = _wt_rules._rules_text("full")
+check("rules: a rulebook with both markers drops both sections in cowork and keeps the rest; profile full keeps all",
+      "- one" in cw10 and "- two" in cw10 and "old hidden" not in cw10 and "new hidden" not in cw10 and "old hidden" in full10 and "new hidden" in full10, cw10[-300:])
+_cfg.path = _real_cfg_path; _cfg.paths = _real_cfg_paths
 
 # ---- 10. a receiver whose start fails on the network is retried; its routes say 503 meanwhile (DNS down at boot)
 # The hub's clock is the fake one above; this section needs the real one (the retry thread sleeps, the HTTP server answers).

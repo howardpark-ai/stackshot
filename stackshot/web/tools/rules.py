@@ -56,12 +56,17 @@ def _rules_source(p) -> str:
     return "\n".join(out)
 
 
+_SECTION_MARKERS = frozenset({"<!-- surface: cli -->", "<!-- host: machines -->"})   # the older and the newer spelling of one marker
+
+
 def _cowork_filter(full: str) -> str:
-    """The Cowork view of rulebook text: a "<!-- surface: cli -->" line marks the NEXT "## " section as CLI-only (dropped up to
-    the following heading); a bullet carrying "<!-- cli -->" is dropped on its own; dated incident notes are stripped."""
+    """The Cowork view of rulebook text: a line that is exactly "<!-- surface: cli -->" or "<!-- host: machines -->" (the same
+    marker under its older and its newer name; spaces around the line are ignored) marks the NEXT "## " section as one that
+    runs only on the person's machines (dropped up to the following heading); a bullet carrying "<!-- cli -->" is dropped on
+    its own; dated incident notes are stripped."""
     out, skip, pending = [], False, False
     for ln in full.splitlines():
-        if ln.strip() == "<!-- surface: cli -->":
+        if ln.strip() in _SECTION_MARKERS:
             pending = True
             continue
         if ln.startswith("## "):
