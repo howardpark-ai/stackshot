@@ -195,8 +195,8 @@ AR.filing_pass(now=now, items=front, anchors={}, env=env())
 text_to = lambda to: "\n".join(t for t_, t, _f in sent if t_ == to)
 check("3 a front agent's finding goes to the project's page key, unmarked, and not to the front agent", "board#9010" in text_to("projects/alpha") and "board#9010" not in text_to("alpha-main")
       and not text_to("projects/alpha").startswith("[for Oliver]"), sent)
-check("3 …the owner's own item goes to the project's -main agent with [for Oliver] first; an unknown mover's finding goes to that name, as the daily run sends it",
-      text_to("alpha-main").startswith("[for Oliver]") and "board#9032" in text_to("alpha-main") and "board#9040" in text_to("home-nobody"), sent)
+check("3 …the owner's own item (a filing defect: it asks nothing of him) goes to the project's builder, unmarked, and to no -main agent; an unknown mover's finding goes to that name, as the daily run sends it",
+      "board#9032" in text_to("alpha-builder") and not text_to("alpha-builder").startswith("[for Oliver]") and text_to("alpha-main") == "" and "board#9040" in text_to("home-nobody"), sent)
 
 # a daily run in progress, a dry run
 clear_state()

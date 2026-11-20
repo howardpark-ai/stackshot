@@ -390,8 +390,8 @@ clear_state()
 live = build(asking(9083, OPEN), asking(9040, YESNO), asking(9041, ask("which layout the item page uses", "Narrow"), opts("Wide", "Narrow", rec="Narrow")))
 r1 = AR.filing_pass(now=now, items=live, anchors={}, env=env())
 msg = [(to, t) for to, t, _f in sent if "ask-options" in t]
-check("4 the pass finds the one old ask, sends it once, to the project's -main agent marked for the owner (the owner's own item), with the fix line",
-      r1["findings"] == 1 and r1["fresh"] == 1 and len(msg) == 1 and msg[0][0] == "alpha-main" and "board#9083" in msg[0][1] and "[for Oliver]" in msg[0][1]
+check("4 the pass finds the one old ask, sends it once, to the project's builder, unmarked (the ask's wording is its writer's to fix: it asks nothing of the owner), with the fix line",
+      r1["findings"] == 1 and r1["fresh"] == 1 and len(msg) == 1 and msg[0][0] == "alpha-builder" and "board#9083" in msg[0][1] and "[for Oliver]" not in msg[0][1]
       and "rewrite the ask with options" in msg[0][1] and "board#9040" not in msg[0][1] and "board#9041" not in msg[0][1], (r1, sent))
 sent.clear()
 r2 = AR.filing_pass(now=now + 600, items=live, anchors={}, env=env())
