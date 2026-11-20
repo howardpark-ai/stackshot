@@ -43,6 +43,13 @@ MARK = "mark"                   # the registry role of a row whose `session` is 
 SOURCES = ("mark", "derived", "legacy")
 _UNMARKED = ("agent", "inherited")      # registry roles that are not a page's own name line
 
+SALA = "sala"                  # the surface of an agent entry that names none (project_registry.SURFACES): a session of sala's list
+
+
+def off_sala(a) -> bool:
+    """Is the agent entry `a` ({front, mandate_line, ...}) one that is not a sala session: it holds a surface other than "sala" (a Slack agent)? False for an entry with no surface, and for anything that is no entry."""
+    return isinstance(a, dict) and str(a.get("surface") or SALA) != SALA
+
 
 def record_mark(agents) -> tuple[str, list]:
     """(the marked agent, problems) of a project record entry's `agents` ({name: {front, mandate_line, keeper?}}). The first agent listed with `keeper: true` is the
@@ -206,7 +213,7 @@ def successor(agents) -> str:
         hits = [(0 if re.search(r"\bbuild", m, re.I) else 1, i, k) for i, (k, m) in enumerate(back.items()) if _anc.BUILDER.search(m)]
         if hits:
             return min(hits)[2]
-        front = [str(n) for n, a in agents.items() if isinstance(a, dict) and a.get("front", True)]
+        front = [str(n) for n, a in agents.items() if isinstance(a, dict) and a.get("front", True) and not off_sala(a)]      # an agent that is not a sala session never takes the mark
         return next((n for n in front if n.endswith("-main")), front[0] if front else "")
     except Exception:  # noqa: BLE001
         return ""
@@ -219,7 +226,7 @@ def effective_mark(agents, page_row=None) -> str:
     if got:
         return got
     pm = row_mark(page_row)
-    return pm if pm and isinstance(agents, dict) and pm in agents else ""
+    return pm if pm and isinstance(agents, dict) and pm in agents and not off_sala(agents[pm]) else ""
 
 
 def unlisted_lines(problems) -> list:
@@ -244,10 +251,12 @@ def problems_of(agents, page_row=None, former=()) -> list:
         if pm and pm not in listed:
             kind = "keeper-retired" if pm.casefold() in former_l else "keeper-not-listed"
             out.append((kind, f"the page's `keeper: {pm}` names an agent the project record does not list"))
+        elif pm and off_sala(listed.get(pm)):
+            out.append(("keeper-not-listed", f"the page's `keeper: {pm}` names a {listed[pm].get('surface')} agent, and the keeper is a sala session; the line is ignored"))
         for t in unlisted_lines((page_row or {}).get("keeper_problems") if isinstance(page_row, dict) else None):
             m = re.search(r"`keeper: (.+?)` names no agent", t)
             out.append(("keeper-retired" if m and m.group(1).strip().casefold() in former_l else "keeper-not-listed", t))
-        if got and pm and pm in listed and pm != got:
+        if got and pm and pm in listed and pm != got and not off_sala(listed.get(pm)):
             out.append(("keeper-two-marks", f"the record flags {got} as the keeper, and the page's `keeper:` line names {pm}; the record's flag rules"))
         if got and got.casefold() in former_l:
             out.append(("keeper-retired", f"{got} is flagged as the keeper, and the record says it was retired from the project's agents"))

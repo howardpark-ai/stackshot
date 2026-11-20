@@ -506,6 +506,7 @@ def sala_live(timeout: float = SALA_TIMEOUT) -> set[str] | None:
 def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | None = None, renames: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
     """Every named session's role (a front agent takes a peer's message only with [for <owner>] on its first line, so the
     server and every box must know who is front) → {name: {"role": NAME_ROLE | "front" | "back", "project": <hub key>}}, plus
+    `"surface": "slack"` on a front agent the project's record lists as a Slack agent (it stays `front`; no field = a sala session), plus
     `"retired": True` on the name-line session of a page that has user-facing agents, its own or its hub's (those panes are gone
     and the router rules their notices; the router rules every project), and on the name-line session of a finished page (its
     own `status` among projects.retired_statuses: nothing is left to keep). The name-line session of an active page that lists none is the
@@ -554,6 +555,7 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
     served = lambda k: any(front_agents(reg.get(x) or {}) for x in dict.fromkeys(["/".join(k.split("/")[:2]), hub_of(k, reg)]) if x)
     return {n: ({"role": r, "project": k, "retired": True} if r == NAME_ROLE and (served(k) or dead(k)) else {"role": r, "project": k})
                | ({"keeper": True} if n in marked else {})
+               | ({"surface": surface_agents(reg.get(k) or {})[n]} if r == "front" and n in surface_agents(reg.get(k) or {}) else {})
                | ({"page_owed": True} if n in owed_won else {})
                | ({"live": n in live} if live is not None else {})
                | ({"renamed_to": ren[n.casefold()]} if n.casefold() in ren else {})
@@ -587,7 +589,7 @@ def file_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | No
         s, rl = _kp.name_line(e)
         if not s or rl in ("agent", "inherited"):
             continue
-        if set(e.get("agents") or {}) - set(e.get("back_agents") or {}):
+        if front_agents(e):
             real.add(s)
         if _pages._active(e):
             active.add(s)
@@ -666,9 +668,17 @@ def notice_name(project: str, reg: dict[str, dict[str, Any]] | None = None, root
 GENERAL_DEFAULTS: dict[str, str] = {}
 
 
+def surface_agents(e: dict[str, Any]) -> dict[str, str]:
+    """The agents of a registry entry that are not sala sessions, {name: surface} (`slack`: an agent that answers his Slack app messages); {} for an entry that lists none, which is every entry
+    of a record that never named a surface. A page has no such field: only the project record lays it (project_registry._overlay)."""
+    got = e.get("surface_agents") if isinstance(e, dict) else None
+    return {str(k): str(v) for k, v in got.items()} if isinstance(got, dict) else {}
+
+
 def front_agents(e: dict[str, Any]) -> list[str]:
-    """The user-facing agents a registry entry lists: its `agents:` map minus the `background:` ones."""
-    back = {str(k) for k in (e.get("back_agents") or {})}
+    """The user-facing agents a registry entry lists: its `agents:` map minus the `background:` ones, and minus the agents that are not sala sessions (surface_agents): a Slack agent is a front agent
+    for the gates that guard one (session_roles), but never the project's -main agent, keeper, successor or the recipient of a router or audit notice, and every picker of "the front agent" reads this list."""
+    back = {str(k) for k in (e.get("back_agents") or {})} | set(surface_agents(e))
     return [str(k) for k in (e.get("agents") or {}) if str(k) not in back]
 
 

@@ -302,13 +302,14 @@ def role_of(name: str, prefixes) -> str:
 
 
 def agent_records(key: str, entry: dict, reg: dict) -> dict:
-    """A page's `agents:` map as {name: {front, role, mandate_line}} (plus `keeper: true` on the one agent marked as the project's keeper): a top-level entry is front, a `background:` entry is not.
-    The registry keeps both: `agents` (flat, every agent) and `back_agents` (the background subset)."""
+    """A page's `agents:` map as {name: {front, role, mandate_line}} (plus `keeper: true` on the one agent marked as the project's keeper, and `surface: "slack"` on an agent that is not a sala session; no record
+    has either field when nothing is marked or named): a top-level entry is front, a `background:` entry is not. The registry keeps both: `agents` (flat, every agent) and `back_agents` (the background subset)."""
     flat = entry.get("agents") if isinstance(entry.get("agents"), dict) else {}
     back = set(entry.get("back_agents") or {})
     pre = _name_prefixes(key, entry, reg)
     marked = _kp.row_mark(entry)                    # `keeper: true` on the one agent the page or the record marks; with no mark no record has the field
-    return {str(n): {"front": str(n) not in back, "role": role_of(n, pre), "mandate_line": str(m), **({"keeper": True} if str(n) == marked else {})} for n, m in flat.items()}
+    off = entry.get("surface_agents") if isinstance(entry.get("surface_agents"), dict) else {}      # the agents that are not sala sessions, laid by the project record
+    return {str(n): {"front": str(n) not in back, "role": role_of(n, pre), "mandate_line": str(m), **({"keeper": True} if str(n) == marked else {}), **({"surface": str(off[n])} if n in off else {})} for n, m in flat.items()}
 
 
 def registry_fields(key: str, entry: dict, reg: dict, pid: str) -> dict:
@@ -426,7 +427,7 @@ def fields(x, reg: dict | None = None) -> dict | None:
         return None
     e = _pr.entries().get(v["id"]) or {}
     pre = [str(v["name"])] if v.get("name") else []
-    agents = {n: {"front": bool(a.get("front")), "role": role_of(n, pre), "mandate_line": str(a.get("mandate_line", ""))} for n, a in (v.get("agents") or {}).items()}
+    agents = {n: {"front": bool(a.get("front")), "role": role_of(n, pre), "mandate_line": str(a.get("mandate_line", "")), **({"surface": str(a["surface"])} if _kp.off_sala(a) else {})} for n, a in (v.get("agents") or {}).items()}
     out = {"id": v["id"], "key": "", "owner_key": "", "sub_page": False, "source": "record", "display_name": str(v.get("name") or ""), "status": v.get("status") or "active",
            "retired": bool(v.get("archived")), "hub": str(v.get("hub") or ""), "agents": agents, "main": main_of(agents),
            "from": {"display_name": "record" if v.get("name") else "", "status": "record", "agents": "record" if "agents" in e else ""}}
@@ -713,7 +714,7 @@ def listing_fields(key: str, entry: dict, reg: dict, agents: dict, mark: dict | 
 def main_of(agents: dict) -> str:
     """The project's main agent: the front entry whose name ends in -main ("" when none). One the page lists wins over one only registered here
     (page_owed): a pending entry is the main agent only when the page has none."""
-    mains = [(bool(a.get("page_owed")), n) for n, a in sorted(agents.items()) if a.get("front") and n.endswith("-main")]
+    mains = [(bool(a.get("page_owed")), n) for n, a in sorted(agents.items()) if a.get("front") and not _kp.off_sala(a) and n.endswith("-main")]
     return min(mains)[1] if mains else ""
 
 

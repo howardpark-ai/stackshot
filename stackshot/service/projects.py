@@ -72,8 +72,8 @@ def _project_agent(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
 
 
 def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None = None) -> tuple[int, dict[str, Any]]:
-    """`client.py post project-agent <project> <name> --role R (--front|--back) --mandate "…"`: list an agent in a
-    project's record. Allowed to the project's keeper and to its front agents, as the record lists them (an agent a leftover pending
+    """`client.py post project-agent <project> <name> --role R (--front|--back) [--surface S] --mandate "…"`: list an agent in a
+    project's record. `surface` is "sala" (the default) or "slack": a Slack agent is a front agent that answers his Slack app messages (role `slack` stands for it), never the keeper, a background agent or -main (400). Allowed to the project's keeper and to its front agents, as the record lists them (an agent a leftover pending
     entry holds, its page line still owed, does not count). `sender` must be the asking session's id, a transcript id (what
     $CLAUDE_CODE_SESSION_ID holds) or a cse_ id, never a bare name: a name anyone can type; an id has to resolve through the fleet's
     heartbeat to a name that is the keeper or a listed front agent (a cloud session whose own cse_ id is the keeper or the listed name
@@ -103,6 +103,8 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
     fields, bad = _verbs.agent_fields(body)
     if bad: return bad
     project, name, role, mandate, sender, front = fields
+    surface, bad = _verbs.agent_surface(body, role, front)         # "" for sala, the default; a slack agent is a front agent that answers his Slack app messages
+    if bad: return bad
     reg = _prj.with_made(_registry("projects"))        # a project just made through `post project` is here before the pages checkout has read its page
     rec, bad = _verbs.pick_project(project, _recs_of(project, reg))
     if bad: return bad
@@ -125,18 +127,18 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
     prefixes = _verbs.project_prefixes(rec, entry, reg)      # the name, else the page's slug: an agent is always <project>-<role>
     bad = _verbs.prefix_refusal(name, prefixes, where)
     if bad: return bad
-    new = {"front": front, "role": role, "mandate_line": mandate}
+    new = {"front": front, "role": role, "mandate_line": mandate, **({"surface": surface} if surface else {})}
     clash = _name_clash(name, key, rec["id"], prefixes, reg)
     if clash:
         return 409, {"error": clash}
-    name, bad = _verbs.listed_answer(rec, key, where, name, front, mandate)
+    name, bad = _verbs.listed_answer(rec, key, where, name, front, mandate, surface)
     if bad: return bad
     name = _verbs.pending_name(_prj._pending_all().get(rec["id"], {}), name)     # a pending entry under another spelling is the same agent
     pend = _prj.pending_entry(rec["id"], name)
     bad = _verbs.pending_refusal(pend, sender, name, where, front, role, mandate)
     if bad: return bad
     try:
-        res = _verbs.agent_add(rec["id"], name, front, mandate, by=sender, io=_page_io(), mirror_now=False, pages=pages if pages is not None else {})       # the record first; the page's mirror follows, outside the lock
+        res = _verbs.agent_add(rec["id"], name, front, mandate, surface=surface, by=sender, io=_page_io(), mirror_now=False, pages=pages if pages is not None else {})       # the record first; the page's mirror follows, outside the lock
     except _verbs.VerbError as e:
         return e.status, {"error": e.message}
     except ValueError as e:

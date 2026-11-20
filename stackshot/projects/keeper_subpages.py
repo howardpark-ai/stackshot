@@ -73,11 +73,14 @@ def _maps(rows: dict, ents: dict) -> dict:
     """agent name → the page keys whose project lists it (the rows' maps, the entries laid over them, and the entries' own maps), sorted."""
     out: dict = {}
     for k, r in sorted(rows.items()):
+        off = (r.get("surface_agents") or {}) if isinstance(r, dict) else {}
         for n in ((r.get("agents") or {}) if isinstance(r, dict) else {}):
-            out.setdefault(str(n), set()).add(k)
+            if n not in off:                                    # an agent that is not a sala session (a Slack agent) keeps no page: its name is on no map, as an unlisted one's is
+                out.setdefault(str(n), set()).add(k)
     for e in ents.values():
-        for n in (e.get("agents") or {}):
-            out.setdefault(str(n), set()).add(pr.page_key(e) or "")
+        for n, a in (e.get("agents") or {}).items():
+            if not pr.off_sala(a):
+                out.setdefault(str(n), set()).add(pr.page_key(e) or "")
     return {n: sorted(x for x in ks if x) for n, ks in out.items()}
 
 

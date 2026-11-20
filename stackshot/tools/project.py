@@ -6,7 +6,7 @@
     tools/project.py move-page PROJECT NEW_KEY [--phase plan|copy|stub ...] [--why W]    runs rename_page.py (copy, then stub), then the record: the pointer is the new key, the old key a former key; refused (403) for a page in a shared brain
     tools/project.py archive PROJECT [--why W]                                            status archived (by, at, how); the page's status: line follows
     tools/project.py reopen PROJECT                                                       status active again
-    tools/project.py agent-add PROJECT NAME (--front | --back) --mandate "one line"        the agent on the project's agents map, then the page's agents: block
+    tools/project.py agent-add PROJECT NAME (--front | --back) [--surface sala|slack] --mandate "one line"        the agent on the project's agents map, then the page's agents: block
     tools/project.py agent-mandate PROJECT NAME --mandate "one line"                      the mandate line of an agent already on the map changed (record first, then the page's agents: block)
     tools/project.py agent-retire PROJECT NAME                                            the agent off the map; the archive rule is applied (no agent and no open item archives)
     tools/project.py agent-rename PROJECT OLD NEW                                         the entry renamed in place
@@ -72,7 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     a = sub.add_parser("archive"); a.add_argument("project"); a.add_argument("--why", default="")
     o = sub.add_parser("reopen"); o.add_argument("project")
     aa = sub.add_parser("agent-add"); aa.add_argument("project"); aa.add_argument("name"); g = aa.add_mutually_exclusive_group(required=True)
-    g.add_argument("--front", action="store_true"); g.add_argument("--back", action="store_true"); aa.add_argument("--mandate", required=True)
+    g.add_argument("--front", action="store_true"); g.add_argument("--back", action="store_true"); aa.add_argument("--mandate", required=True); aa.add_argument("--surface", default="", help="where a front agent talks with him: sala (default) or slack")
     am = sub.add_parser("agent-mandate"); am.add_argument("project"); am.add_argument("name"); am.add_argument("--mandate", required=True)
     ar = sub.add_parser("agent-retire"); ar.add_argument("project"); ar.add_argument("name")
     an = sub.add_parser("agent-rename"); an.add_argument("project"); an.add_argument("old"); an.add_argument("new")
@@ -142,7 +142,7 @@ def run(a: argparse.Namespace) -> dict:
     if a.cmd == "reopen":
         return pv.reopen(a.project, **kw, **dry)
     if a.cmd == "agent-add":
-        return pv.agent_add(a.project, a.name, a.front, a.mandate, **kw, **dry)
+        return pv.agent_add(a.project, a.name, a.front, a.mandate, surface=a.surface, **kw, **dry)
     if a.cmd == "agent-mandate":
         return pv.agent_mandate(a.project, a.name, a.mandate, **kw, **dry)
     if a.cmd == "agent-retire":
@@ -228,7 +228,7 @@ def main(argv: list[str]) -> int:
         print(f"{v.get('id') or rec.get('id')}  name {v.get('name') or rec.get('keeper') or '-'}  status {v.get('status') or rec.get('status') or '-'}  scope {v.get('scope') or rec.get('scope') or '-'}")
         print(f"page {v.get('page') or rec.get('key') or '-'}" + (f"  (found by {v['via']})" if v.get("via") else ""))
         for n, ag in (v.get("agents") or rec.get("agents") or {}).items():
-            print(f"  {'front' if ag.get('front') else 'back '}  {n}: {ag.get('mandate_line', '')}")
+            print(f"  {ag.get('surface') or 'front' if ag.get('front') else 'back '}  {n}: {ag.get('mandate_line', '')}")
     else:
         head = f"{'dry run: ' if res.get('dry') else ''}{a.cmd} {res.get('project') or ''}".strip()
         if "changed" in res:

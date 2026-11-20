@@ -84,7 +84,8 @@ def _hub_sessions(project: str) -> tuple[str, str, list[str], list[str], str]:
         e = reg.get(k) or {}
         b = [str(x) for x in (e.get("back_agents") or {})]
         back += [x for x in b if x not in back]
-        front += [str(x) for x in (e.get("agents") or {}) if str(x) not in b and str(x) not in front]
+        off = _anc.surface_agents(e)                      # an agent that is not a sala session is nobody's keeper of an item nor an item's contact: left out of the front agents
+        front += [str(x) for x in (e.get("agents") or {}) if str(x) not in b and str(x) not in off and str(x) not in front]
     e = reg.get(str(project).strip("/")) or {}
     keeper = str(e.get("session") or "") if e.get("role") == "agent" else ""
     stew = ""      # the retired name-line session is not offered as a session to name

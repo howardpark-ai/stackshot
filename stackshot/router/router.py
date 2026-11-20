@@ -215,7 +215,8 @@ class Context:
         page = self.reg.get(root) or {}
         agents = {str(k): str(v) for k, v in (page.get("agents") or {}).items()}
         back = {k: agents[k] for k in (page.get("back_agents") or {}) if k in agents}
-        front = {k: v for k, v in agents.items() if k not in back}
+        off = _anc.surface_agents(page)                                  # an agent that is not a sala session is no recipient of a notice: it is neither front nor back here
+        front = {k: v for k, v in agents.items() if k not in back and k not in off}
         if not front:
             main = _anc.fallback_main(root, self.reg)
             if main:
