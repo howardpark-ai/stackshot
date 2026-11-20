@@ -73,7 +73,18 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
      checkout and tests/, so those are listed by every suite)
   6. F is a .py file → the suites that read it whole, the suites that ran the functions its changed lines are in, and
      those that read the names its module-level changes bind (a new file: whoever imports it changed too; one named like a
-     module the suites import, which it could shadow → all)
+     module the suites import, which it could shadow → all); a new .py file (added, or a rename's new side) also reaches the
+     suites that read as text every .py file the directory held at the map's commit: such a suite globs the directory (a
+     scenario that parses every module of service/), so it reads the new file too, and no earlier measurement could have
+     named it. The directory listing is no signal for this: the import machinery lists a package directory for every suite
+     that imports from it (216 of 262 suites listed stackshot/service), so the whole-file reads are the signal. The limit: it
+     holds for a suite whose reads cover every .py file of the folder. A glob that skips files by name before it reads them
+     (`__init__.py`, a name filter) did not read all, so this rule does not choose it for a new file.
+     A directory that held no .py file (a folder of docs or of text files) has no glob of its own: it reaches the suites that
+     read every .py file of the checkout (a recursive glob) and the suites that listed that folder (the listers of rule 7, a
+     small set there). The suite that reads a new file through a narrower glob (every .py of stackshot/, say) and never
+     listed the folder can still be missed. A new .py at the top of a checkout that held none reaches every suite: the
+     listers of the top are nearly all of them, and a new root .py is rare, so every glob of the root may read it
   7. any other file → the suites that touched it; added, deleted or renamed: also the suites that listed its directory;
      a data file of the DATA table (stackshot.example.toml) is first read by what it holds, not by who touched it: see *The example config*
   A suite the map has no clean measurement for (new since, or `ok: false`) always runs. When the union is every suite: all.
@@ -2348,6 +2359,24 @@ def selection(m, a, b, pathspec=()):
         hit = set()
         if f.endswith(".py"):
             hit |= {s for s, e in S.items() if any(p in e.get("whole", ()) for p in (old, new) if p)}
+            if added:
+                # a suite that read as text every .py file of the directory (a glob over it) reads the new one too; the files are those of the
+                # map's commit (not those of its subfolders). A directory that held none (a folder of docs or of text files) has no glob of its
+                # own: what reads a file added there is a suite that read every .py file of the checkout (a recursive glob, a walk) or one that
+                # listed the folder (a glob of a part of the checkout that holds it), so those are chosen then; a suite that reads it through a
+                # glob of a larger folder and never listed this one can still be missed (see the docstring)
+                d = os.path.dirname(added)
+                def pyfiles(*spec): return {p for p in (git("ls-tree", "--name-only", *spec) or "").split("\n") if p.endswith(".py")}
+                sib = pyfiles(a, *([d + "/"] if d else []))
+                if sib:
+                    hit |= {s for s, e in S.items() if sib <= set(e.get("whole", ()))}
+                elif not d:
+                    # the listers of the top are nearly every suite (the import machinery lists the checkout), a new root .py is rare, and any
+                    # glob of the root may read it: every suite
+                    return "all", why + [(f, "a new .py at the top of a checkout that held none: every glob of the root may read it")]
+                else:
+                    every = pyfiles("-r", a)
+                    hit |= {s for s, e in S.items() if (every and every <= set(e.get("whole", ()))) or d in e.get("dirs", ())}
             if names is None:
                 names = (Names(a), Names(b))
             fns, bound, own, whole, docs = py_change(names, S, a, b, old, new)
