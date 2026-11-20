@@ -300,6 +300,14 @@ st_, body_ = _rt_client._client_post(MACH, "message", {"to": SOLO, "text": "the 
 check("5h: …a script gets a refusal (400) in that case, since it reads the status and not the sentence", st_ == 400 and held.count(E) == 0, (st_, body_))
 gate_open()
 
+# an anchor notice held through the front gate (a project with no background agent) still releases the item that waits on its anchor: the front agent gets the line at its next turn
+PRURL = "https://github.com/example/repo/pull/77"
+item(20, owner=E, hold=True, wake="2099-01-01", project="projects/solo", mover=SOLO)
+_wt_anchors._anchors("projects/solo", add=[PRURL], items=["a20"], who="t")
+fresh(); n0 = len(pushes()); n = recp("merged", key="projects/solo", kind="anchor", who="hub", anchor=PRURL); res = act2(n, SOLO, key="projects/solo")
+check("4o: an anchor notice held for a front-only project's front agent starts no turn", res["ruling"] == "held" and reach(E, n0) == [], (res, pushes()[n0:]))
+check("4p: …and still releases the item that waited on its anchor", not rd(20)["metadata"].get("hold"), rd(20)["metadata"])
+
 # ---- 7. the review's cases: a sender that is the destination, front peers, one choice of background agent, a cut line, a closed item, one write, the need signals
 COMP, DUOM, DUOA, DUOB = "comp-main", "duo-main", "duo-a", "duo-b"
 no_log(); fresh(); unstamp(A); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page when you have a minute?", BACK); settle()
