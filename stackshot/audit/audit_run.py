@@ -1127,29 +1127,29 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             refused = FRONT_REFUSAL in said
             fb: dict[str, list[str]] = {}
             direct: dict[str, list[str]] = {}
-            where: list[str] = []       # for each finding of the group, the recipient its fallback went to ("" when it had none): a finding counts as delivered only when its own fallback was
+            where: list[tuple[str, str] | None] = []       # for each finding of the group, the fallback it went with, as (kind, recipient), None when it had none: a finding counts as delivered only when its own fallback was
             for proj, ln, wf in g["by"]:
                 if (refused or wf) and proj:       # a finding that needs nothing of the person goes unmarked to the page key too
                     direct.setdefault(page_key(proj), []).append(ln)
-                    where.append(page_key(proj))
+                    where.append(("page", page_key(proj)))
                     continue
                 m = env.main_of(proj)
                 if m and m != to:
                     fb.setdefault(m, []).append(ln)
-                    where.append(m)
+                    where.append(("main", m))
                 else:
-                    where.append("")
-            landed: set[str] = set()
+                    where.append(None)
+            landed: set[tuple[str, str]] = set()       # the fallbacks that landed, by kind and recipient: a page key and a -main agent that read alike are two sends
             for pk, ls in sorted(direct.items()):
                 ok2, said2 = _send(env, pk, compose(ls, f"[stackshot] {label}: {len(ls)} item(s) for {to}, {'a front agent of this project that takes no unmarked message' if refused else 'whose session could not be reached (' + _clip(said, 80) + ')'}; please pass them to whoever moves them (id · check · evidence · what fixes it).", False))
                 sent.append({"to": pk, "lines": len(ls), "delivered": ok2, "said": _clip(said2, 120), "kind": "project", "for": to})
                 if ok2:
-                    landed.add(pk)
+                    landed.add(("page", pk))
             for m, ls in sorted(fb.items()):
                 ok2, said2 = _send(env, m, compose(ls, f"[stackshot] {label}: {len(ls)} item(s) for {to}, whose session could not be reached ({_clip(said, 80)}); please pass them on (id · check · evidence · what fixes it).", True))
                 sent.append({"to": m, "lines": len(ls), "delivered": ok2, "said": _clip(said2, 120), "kind": "fallback", "for": to})
                 if ok2:
-                    landed.add(m)
+                    landed.add(("main", m))
         if ok:
             reached_fs += g["fs"]
         elif landed:
