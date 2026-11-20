@@ -4,7 +4,7 @@ The step guard (gates.gate_owner_step) refuses a write whose result has his step
 their own answer, and the server takes it (the write goes through, its reply says in one plain line what was changed, the call log counts it as a fix, see call_log.fixed):
 
   his-step-settled   the same write clears `needs` and hands the item to an agent (a mover, `agent`, or a line of `next` that opens with another session): his step is no longer waited on. It is marked
-                     done only when exactly ONE step of his is open on the item (the said can then only be about it) and the said this write stores holds a CHECKED Acked-by (the refusal carries what
+                     done only when exactly ONE step of his is open on the item (the said can then only be about it: the server does not compare the quote with the step's words, and this inference is the accepted trade-off) and the said this write stores holds a CHECKED Acked-by (the refusal carries what
                      the gate stored: `said`); else it is dropped, and with two or more open steps of his every step of his that leads `next` is dropped (a said cannot say which of them it is about, so
                      none is marked done) and the line says that his words are stored on the item. Said that is empty, unchecked or of another tag is no proof that he did the step, and the line says what was stored.
   step-none          the write passes step="none" (withdraw his step). The refusal text offered it as a way out, but it withdrew nothing where the item stores no step of its own: it now drops that line
@@ -25,6 +25,7 @@ from fastmcp.exceptions import ToolError
 from stackshot.core import call_log as _calls
 from stackshot.core.instance import OWNER
 from stackshot.model import model as _model
+from stackshot.model import model_guards as _mg
 from stackshot.model import said as _said
 from stackshot.model import steps as _steps
 from stackshot.service import gates as _gates
@@ -47,13 +48,15 @@ def clears_needs(kw: dict[str, Any]) -> bool:
     return _text(needs).lower() in NONE_WORDS or (bool(kw.get("clear_needs")) and not _text(needs))
 
 
-def hands_to_agent(kw: dict[str, Any]) -> bool:
-    """Does the write hand the item to an agent: a mover or `agent` that names a session (not him), or a line of `next` that opens with another name than his?"""
+def hands_to_agent(kw: dict[str, Any], project: str = "") -> bool:
+    """Does the write hand the item to an agent: a mover or `agent` that names a session (not him), or a line of `next` that opens with the name of a session the mover guard accepts (a mistyped opener
+    hands the item to no one, so his step stays refused)?"""
     for k in ("mover", "post_wake_mover", "agent"):
         v = _text(kw.get(k))
         if v and v.lower() not in NONE_WORDS and not _model.is_owner(v):
             return True
-    return any((op := _steps.opener(ln)) and not _model.is_owner(op) for ln in _steps.split(_text(kw.get("next"))))
+    ctx = _mg.Ctx()
+    return any((op := _steps.opener(ln)) and not _model.is_owner(op) and not ctx.mover_problem(op, project) for ln in _steps.split(_text(kw.get("next"))))
 
 
 def _marks(v: Any) -> list[Any]:
@@ -77,11 +80,12 @@ def _stored_said(entries: Any) -> str:
     return "the said this write stores holds no Acked-by of his (" + ", ".join(sorted({str(e.get("tag") or "?") for e in got})) + ")"
 
 
-def _leading(steps: list[dict[str, Any]], pos: int) -> list[int]:
-    """The positions (0-based, on the checklist) of the open steps of his that lead `next` from the open step at `pos`: that one, and each open step after it as long as it is his too."""
+def _leading(steps: list[dict[str, Any]], pos: int, skip: "set[int]" = frozenset()) -> list[int]:
+    """The positions (0-based, on the checklist) of the open steps of his that lead `next` from the open step at `pos`: that one, and each open step after it as long as it is his too. A position in `skip`
+    is a step the write itself drops or marks done: it is no longer in the way."""
     out = [pos]
     for i in range(pos + 1, len(steps)):
-        if steps[i]["status"] != _steps.OPEN:
+        if steps[i]["status"] != _steps.OPEN or i in skip:
             continue
         if not _steps.is_his(steps[i]["text"], unnamed_is_his=False):
             break
@@ -98,8 +102,7 @@ def settle(exc: "_gates.HisStepRefusal", kw: dict[str, Any]) -> "tuple[dict[str,
     step on the checklist of the item the refusal names."""
     gid = exc.gid
     withdraw = _text(kw.get("step")).lower() in NONE_WORDS and bool(_text(kw.get("step")))
-    settled = clears_needs(kw) and hands_to_agent(kw) and not withdraw and not kw.get("done") and not kw.get("dropped")
-    if not gid or not (settled or withdraw) or not exc.line:
+    if not gid or not exc.line:
         return None
     try:
         item = _load(gid)
@@ -108,12 +111,16 @@ def settle(exc: "_gates.HisStepRefusal", kw: dict[str, Any]) -> "tuple[dict[str,
     if item.get("status") != "open":
         return None
     meta = item.get("metadata") or {}
+    settled = clears_needs(kw) and hands_to_agent(kw, str(meta.get("project") or "")) and not withdraw and not kw.get("done") and not kw.get("dropped")
+    if not (settled or withdraw):
+        return None
     steps = _steps.view(meta, keeper=str(meta.get("owner") or ""))
     want = _steps.first_line(exc.line)
     pos = next((i for i, s in enumerate(steps) if s["status"] == _steps.OPEN and _steps.first_line(s["text"]) == want), -1)
     if pos < 0:
         return None
-    lead = _leading(steps, pos)
+    skip = {int(x) - 1 for x in (*_marks(kw.get("dropped")), *_marks(kw.get("done"))) if str(x).strip().isdigit()}
+    lead = _leading(steps, pos, skip)
     shown = _quoted(steps, lead)
     many = len(lead) > 1
     what = f"steps {shown}" if many else f"step {shown}"
