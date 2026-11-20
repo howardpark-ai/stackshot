@@ -74,7 +74,7 @@ def watch_ask(gid: str, meta: dict[str, Any], what: str) -> tuple[str, list[dict
     """The question the owner gets when HE is the post-wake mover of a time, item or anchor wait: the ask and options the item already carries when they are valid, else one in the
     ask's shape with two buttons (take it up, drop it)."""
     ask, opts = str(meta.get("ask") or ""), _hooks().rmod_options_of({"metadata": meta}, raw=True)
-    if _hooks().rmod_parse_ask(ask) is not None and opts:
+    if _hooks().rmod_parse_ask(ask) is not None:      # a valid ask with no options is a yes/no: it comes back as written
         return ask, opts
     ask = (f"Decide: what to do with {_gh.shown(gid)}, whose wait ended · Recommend: Take it up · Stakes: {_clip_line(what, 90)} · By: no date")
     if _hooks().rmod_parse_ask(ask) is None:

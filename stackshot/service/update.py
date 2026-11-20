@@ -859,12 +859,15 @@ def update_unlocked(
     if basis_txt.lower() in h.ask_none:
         clear_wait_basis, basis_txt = True, ""
     basis_ok = ""
+    basis_day = ""                # a relay or event wait keeps its date in ask_by, not in a wake: its basis stands for that day
+    if not wake and not meta.get("wake") and (wait_kind.strip().lower() or _uw.kind_of(meta)) in ("relay", "event"):
+        basis_day = _uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))
     if basis_txt:                 # a wake past the cap that stands on a real-world date: checked before the wake gate reads it
         if clear_wait_basis:
             raise ToolError("Refused: clear_wait_basis drops the basis; it does not go with a new one")
         if clear_wake or clear_hold:
             raise ToolError("Refused: wait_basis goes with a wake; this call drops the wake")
-        basis_ok = _gates.gate_wait_basis({**item, "status": status or item.get("status")}, basis_txt, h.parse_wake(wake) if wake else str(meta.get("wake") or ""), held=h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold)
+        basis_ok = _gates.gate_wait_basis({**item, "status": status or item.get("status")}, basis_txt, h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day, held=h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold)
     if wake:                      # a moment to come
         stored = h.parse_wake(wake)
         if h.wake_at(stored) <= _pages.zone_now():      # for a date-only wake the same as "after today"
@@ -881,7 +884,7 @@ def update_unlocked(
         hold, relay_hold = False, True      # a relay or event wait is itself the park until its ask-by day (the date this call gave as wake or ask_by went there): no second wait, the hold flag is not stored
         if _uw._dated(ask_by):               # the date went to ask_by, which the wake cap above never sees: the cap judges it here as it judges a hold's wake (his words lift it the same way)
             rd = h.parse_wake(_uw._dated(ask_by))
-            rwords = _gates.gate_cap(item, said_l, "wake", rd, h.wake_at(rd).timestamp())
+            rwords = _gates.gate_cap(item, said_l, "wake", rd, h.wake_at(rd).timestamp(), basis_ok)
             if rwords and rwords != h.basis_words:
                 _, rq_text, rq_src = h.owner_quote_on(item, said_l, _wt.cap_days())
                 h.cap_ok_put(meta, "wake", rd, rwords, quote=rq_text, source=rq_src)
@@ -907,7 +910,7 @@ def update_unlocked(
     if item.get("status") == "completed":   # completed: nothing is held or due any more
         meta.pop("hold", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("hold_set", None); meta.pop("cap_ok", None)
     if basis_ok:                  # the basis is bound to the wake it was given for; a different wake, no wake or a closed item drops it
-        h.basis_put(meta, basis_ok, str(meta.get("wake") or ""), _session_label(debtor) or debtor or "unknown")
+        h.basis_put(meta, basis_ok, str(meta.get("wake") or basis_day), _session_label(debtor) or debtor or "unknown")
     elif clear_wait_basis or (isinstance(meta.get("wait_basis"), dict) and meta["wait_basis"].get("wake") != _wt.wake_value(meta)):      # the basis stands for the date the wait ends on: the stored until, else the wake
         meta.pop("wait_basis", None)
     if h.model_guards_on() and meta.get("hold") and meta.get("wake") and (hold or wake) and not basis_ok and not _wt.basis_of(meta) and not str(_wt.words_of(meta).get("quote") or "").strip():
@@ -916,7 +919,7 @@ def update_unlocked(
             h.cap_ok_put(meta, "wake", str(meta["wake"]), q_why, quote=q_text, source=q_src)
     hold_pre = bool(meta.get("hold"))     # the hold as this write leaves it, before the old rule below drops it beside a decision (the model guards refuse that pair instead)
     dropped_hold = item.get("status") == "open" and bool(meta.get("hold")) and _waits_decision(meta)
-    if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its date stays, and no date parks an item on his call)
+    if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its date stays)
         meta.pop("hold", None); meta.pop("hold_set", None)
         h.state_end(meta, "parked")    # the park it stood in is gone with the hold (needs is not something parked stands on: the hold would only be stripped again)
     # A hold names what it waits for, a wake, open after
@@ -929,8 +932,8 @@ def update_unlocked(
         raise ToolError("Refused: a hold names what it waits for; an unconditional or indefinite park is refused. Give it a date (hold=true with wake=YYYY-MM-DD or "
                         f"YYYY-MM-DDTHH:MM: the date {OWNER} gave, the date the outside party or event it waits on is due, or the end of a window the work itself needs, with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"), the items that must close first (`after=[\"board#N\"]`), "
                         f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop wake at most {_wt.cap_days():g} "
-                        f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER} is never parked: needs=decision with its ask, "
-                        "or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
+                        f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER}'s call is parked with needs=[<session>] and mover={OWNER} (his ask returns at the date); "
+                        "to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
                         "item stays active, set no date: a date with no hold is a wait until it (outside a hand-off)")
     # The done check: set or cleared by this write (a filing edit: no page owed), then the hand-off gate: a write
     # that hands the item to another session (a `<session>: <action>` line of next) leaves it with a check or a wake
@@ -1339,7 +1342,7 @@ def update_unlocked(
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     if dropped_hold:
         hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never on hold: the hold is dropped"
-                 + (f"; its date {_wt.wake_value(meta)} stays, and no date parks an item on his call" if _wt.wake_value(meta) else "") + ")")
+                 + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
                                                                  ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")

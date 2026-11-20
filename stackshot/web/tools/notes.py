@@ -201,8 +201,8 @@ def _form_notes(description: str = "", next_: str = "", parked: bool = False, me
         # an item waiting on an outside reply with no anchor
         out.append("this item now waits on someone outside, and no thread is anchored to it: anchor the thread it waits on in this same turn "
                    f"(anchors(project, add=[url], items=[{gid or 'its id'}])), so its reply wakes you and the item links it")
-    if parked and meta is not None and _waits_on_owner(str(meta.get("next") or "")):
-        out.append(f"this hold's next says it waits on {OWNER}: an item waiting on {OWNER} is never parked. Give it needs=decision with its ask, "
+    if parked and meta is not None and _waits_on_owner(str(meta.get("next") or "")) and not _item_read.parked_for_owner({"status": "open", "metadata": meta}):
+        out.append(f"this hold's next says it waits on {OWNER}: park his call with needs=[<session>] and mover={OWNER} (his ask returns at the date), or give it needs=decision with its ask, "
                    f"or after=[<the item that carries the ask>], which releases it when that item closes (a wake on an item {OWNER} has already answered is fine)")
     if cmd and meta is not None and (why := _command_note(meta)):
         out.append(why)
@@ -211,8 +211,8 @@ def _form_notes(description: str = "", next_: str = "", parked: bool = False, me
     return "".join(f"\n(note: {x}.)" for x in out)
 
 
-# An item parked on a timed hold while his choice was open calls for 'needs your call', not 'on hold':
-# an item waiting on him is never held; it carries needs=decision with its ask, or after=<the item carrying the ask>.
+# An item parked on a timed hold while his choice was open calls for 'needs your call', not 'on hold': it carries needs=decision with its ask,
+# or after=<the item carrying the ask>, or is parked as his call (needs=[<session>], hold, until, wait_basis, mover=him), which draws no note.
 # A hold whose next says it waits on him draws a note, never a refusal (a wake on an item he has already answered is legitimate).
 # Narrow on purpose: a waiting word, then the owner or "his"/"<owner>'s" with a decision noun, or "until/for <owner> to decide" and
 # the like. A next that only mentions him ("per the owner's call, deploy") stays quiet.

@@ -119,7 +119,7 @@ reword.
 ## param WAKE
 The old name of until, accepted for now: when the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a
 time of day, in the board timezone (a relay or event wait takes the day alone, YYYY-MM-DD). Alone it is a wait, as
-until says. A window the work needs: wake="<last day of the window, YYYY-MM-DD>", wait_basis="soak ends <that day>". A
+until says. A
 wait on your own item also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters); a wait with wait_basis
 needs none, and a wake more than {{CAP_DAYS}} days out needs a wait_basis. Moving a wake (or ask_by) later with the
 item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new
@@ -157,7 +157,7 @@ or clear_ask=true withdraws it.
 
 ## param HOLD
 The old way to wait on a date, accepted for now (stored as until). True parks the item until its wake, for a window
-the work itself needs: hold=true, until="<last day of the window, YYYY-MM-DD>", wait_basis="soak ends <that day>". It
+the work itself needs (the form is under wait_basis). It
 reads as waiting, not on agent; clear_hold=true ends it. On a relay or event wait no flag is stored (the wait is the
 park until its day) and the hold ends a stored work-in-hand state.
 
@@ -185,10 +185,10 @@ pasted output), or when the step points elsewhere ("see the description", "see b
 step, mover, description or draft are judged, and [model] guards = false skips these checks.
 
 ## param WAIT_BASIS
-The reason a wake carries when it parks the item or lies past the cap: one line of 12 to 300 characters that names the
+The reason a wake (on a relay or event wait, its ask-by day) carries when it parks the item or lies past the cap: one line of 12 to 300 characters that names the
 real date it stands on as YYYY-MM-DD, from the wake day to 30 days after it: hold=true, until="<last day of the
 window, YYYY-MM-DD>", wait_basis="error-log soak ends <that day, YYYY-MM-DD>"; a date outside the board reads the same way, wait_basis="vendor
-reply due <YYYY-MM-DD>" or "release freeze lifts <YYYY-MM-DD>" (a wake with no date is refused). Three
+reply due <YYYY-MM-DD>" (a wake with no date is refused). Three
 wakes take it, each basis bound to the wake it was given for: a hold's wake (the park), a verifying item's wake, and a
 wake more than {{CAP_DAYS}} days out (it lifts the cap for that wake alone, up to {{BASIS_MAX_WAKE_DAYS}} days: a wake
 further out is refused whatever the basis). A bare date within the cap takes wait_reason on your own item and a basis
@@ -250,8 +250,8 @@ reaches you> lets a real exception through; a park's wake with hold=true is a wa
 hold = an open item parked until its next move is due: hold=true, always passed explicitly, with what it waits for;
 with a wake the server releases it at that moment, tells the sessions in its needs (else its mover; refresh the ask
 then) and returns it to the lane its needs give it. Meanwhile it reads as parked (a waiting state), not as work moving
-on agent; needs and due stay as they are. An item whose needs hold decision is never on hold: a write to one drops its
-hold (its date stays, and no date parks an item on his call). {{OWNER}} parks on his word. A hold always names what it
+on agent; needs and due stay as they are. A write to an item whose needs hold decision drops its hold (its date stays).
+Park his call instead: needs=["<session>"], hold, until, wait_basis, mover={{OWNER}}; the ask returns at the date. {{OWNER}} parks on his word. A hold always names what it
 waits for: {{OWNER}}'s words, the items that must close first (after), a notice from an anchor scoped to the item, a
 pane recycle (recycle=true), or the end of a window the work itself needs; an unconditional or indefinite park is
 refused. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release or its
@@ -272,8 +272,7 @@ leaves that line alone. Steps started by an outside event ("when the next releas
 with hold=true, wake, wait_basis, wait_reason (needs=external for a named outside party's reply). Neither applies to
 an action to take now, another party's step in flight, or an item not on agent (on hold, waiting on {{OWNER}}'s
 decision or an open after item, needs=external, outside, verifying, blocked). An item that waits on another item is
-not parked but names it: after=["board#N"]. Nor is one that waits on {{OWNER}}: needs=decision with its ask, or
-after=<the item that carries the ask>. An item that waits on a named person outside (needs=external) is not parked,
+not parked but names it: after=["board#N"]. Nor is one that waits on {{OWNER}}: needs=decision with its ask, after=<the item that carries the ask>, or his call parked as above. An item that waits on a named person outside (needs=external) is not parked,
 unless the thread it waits on is anchored to it (anchors(project, add=[url], items=[its id])) and named in next: park
 that one with a backstop wake (at most [waiting] cap_days out unless his words are on the item), since the notice may
 never come; the server releases the hold when the project's router (or the project's builder, else its -main agent)

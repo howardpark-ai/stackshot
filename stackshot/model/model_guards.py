@@ -13,7 +13,7 @@ The guards, each a key of GUARDS:
   snooze         a time wait (a hold with a wake) carries the owner's words (cap_ok with a quote that parks, waits, says until or names a date) or a real date (wait_basis)
   filler         TBD, TBC, TBA, "?", dashes and "to be determined" are refused in goal, next, ask and wait_event
   no_end         a wait has an end: a relay's ask_by, an anchor's, an item's or an event's ask_by (or its backstop wake); a time wait's end is its wake
-  decision_hold  needs decision together with a hold ("an ask for later is a time wait whose post-wake mover is the owner")
+  decision_hold  needs decision together with a hold (a call for later is parked as a hold with a session in needs and him as the mover: the ask and options stay and come back at the date)
   mover_state    an agent stored as mover on an item in the owner's state (your-step, your-call, needs decision): he is its mover; the agent goes in `then`
   owner_mover   an alive item whose mover is the owner but which is not in his state: not your-step with a step, not your-call or needs decision (the ask is the ask rule's: [ask] refuse_after); the mirror of mover_state
   second_mover   more than one mover in needs (two sessions, or decision plus a session): the post-answer mover goes in `then`   [config: [model] one_mover]
@@ -972,8 +972,9 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         add("second_mover", f"needs names more than one mover ({'decision plus ' if 'decision' in kinds else ''}{who}): an item has one mover, and a second one in needs is a second mover. "
                             f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.")
     if "decision" in kinds and held:
-        add("decision_hold", f"needs holds decision together with a hold: an ask for later is a time wait that {H} picks up when it ends. Release the hold (clear_hold=true) and keep the ask, "
-                             f"or drop decision from needs and wait with hold=true, until=YYYY-MM-DD, mover={H} and the wait's reason.")
+        add("decision_hold", f"needs holds decision together with a hold: an item on {H}'s call is on his move, and a park is not. To park the call for a date, hand the item to the session that waits "
+                             f"(needs=[<session>]; the ask and options stay on the item as written) and park it with hold=true, until=YYYY-MM-DD, wait_basis=<what it waits for, with its date> and mover={H}: it shows as waiting until the date, "
+                             f"and at the date it is his call again, needs decision with the same ask and options, no rewrite. Or keep the item on his move and release the hold (clear_hold=true).")
     if mod.state == _model.ALIVE:
         clash = next((c for c in mod.conflicts if c.startswith("mover=")), "")
         if clash and mod.mover_explicit and not _model.is_owner(mod.mover) and _model.owner_state(m, mod.today):
