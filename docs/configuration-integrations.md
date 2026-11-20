@@ -101,6 +101,12 @@ The keys are grouped in three pages by what they set: [Configuration](configurat
 | `client.session_ttl_hours` | `12` | A session registered by a hook on a machine with no puller is forgotten after this long without a sign of life. | |
 | `server.host`, `.port`, `.path` | `"127.0.0.1"`, `8020`, `"/mcp"` | Where the server listens and where the connector is served. | |
 
+## Gmail thread anchors: the link
+
+A Gmail thread is added by its link, in either form: the browser's `https://mail.google.com/mail/u/0/#inbox/<thread id>` or the one the Workspace connector returns, `https://mail.google.com/mail/u/<address>/#all/<thread id>`. After `/u/` comes a number or an address: one local part (letters, digits, `.`, `_`, `-` and a plus, written as `+` or `%2B`), then `@` (or `%40`), then a dotted domain such as `example.org`. The view after `#` may be `all`, `inbox`, `sent`, `label/<name>` or `search/<terms>`, with no empty part; the thread id is the 16 hex digits at the end. Every form of one thread is the same anchor (`gmail:<thread id>`): a second form of a thread a project already holds adds nothing, and removing either form removes it. A link that is none of these (no `#` view, an empty part in the view, a thread id of another length, a scheme other than `https` or `http`, an account that is neither a number nor an address of that shape) is refused when added. A link already stored with an empty part in its view (for example `#inbox//<thread id>`, which an earlier version read as the thread) is no longer read as one: its URL text is kept as stored and it has no thread anchor id.
+
+Two entries already stored for one thread on one project's page (say `#inbox/<thread id>` for one item and `#all/<thread id>` for another) now behave as one anchor, because they are one: a removal by either form removes both, the lists of the items they name read it once (each item still sees the URL of its own entry), and adding a form of it with other items widens the first entry. The store keeps the URL text as it was typed.
+
 ## Gmail query anchors: the query
 
 An anchor `gmail:q:<query>` (every mailbox the anchors service reads) or `gmail:q@<mailbox>[,<mailbox>]:<query>` (only those) tells a project's agents about each new mail whose headers match the query. The mailbox scope is described under `anchor_hub.gmail_names` above; this section is the query.

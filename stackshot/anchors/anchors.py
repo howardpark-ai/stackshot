@@ -131,7 +131,10 @@ def canonical(session: str, nm: dict[str, str] | None = None) -> str:
 # ---------- anchor ids (the canonical form anchor-hub keys events by) ----------
 _SLACK = re.compile(r"https?://[\w.-]+\.slack\.com/archives/([CDG][A-Z0-9]+)(?:/p\d+)?")
 _DRIVE = re.compile(r"https?://(?:drive|docs)\.google\.com/(?:drive/(?:u/\d+/)?folders/|file/d/|document/d/|spreadsheets/d/|presentation/d/|open\?id=)([\w-]{20,})")
-_GMAIL = re.compile(r"https?://mail\.google\.com/mail/(?:u/\d+/)?#[\w/]+/([0-9a-f]{16})$")
+# A Gmail thread link: the account after /u/ is a number (the browser) or an address (what the Workspace connector returns): one local part (letters, digits, . _ - and a plus, raw or
+# as %2B), then @ or %40, then a dotted domain; the view after # is any of all, inbox, sent, label/<name>, search/<terms>, none of its parts empty; the thread's 16 hex digits end it.
+# Every form of one thread is the one anchor id gmail:<hex>.
+_GMAIL = re.compile(r"https?://mail\.google\.com/mail/(?:u/(?:\d+|(?:[A-Za-z0-9._-]|\+|%2[Bb])+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/)?#[\w%.+~-]+(?:/[\w%.+~-]+)*/([0-9a-f]{16})$")
 _GITHUB = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/(\d+)")
 _GHREL = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)/releases(?:/latest)?/?$")
 _GHREPO = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+?)/?(?:#notifications)?$")   # a repo root: what the owner's account is notified of there
@@ -160,7 +163,10 @@ _GH_HOST = re.compile(r"(https?://github\.com/)([\w.-]+/[\w.-]+)", re.I)
 def same_url_key(u: str) -> str:
     """A stored anchor URL as its identity check reads it: the GitHub repo in it through [github.moved] (config.canon_name), the rest as
     written. With an empty table this is the URL itself, so only an exact URL is "the same"; with a transfer listed, the old and the new
-    URL of one repository are. The stored text is never changed."""
+    URL of one repository are, and so are the links of one Gmail thread in any form (the browser's and the connector's). The stored text is never changed."""
+    g = _GMAIL.match(str(u or "").strip())
+    if g:
+        return f"gmail:{g.group(1)}"
     return _GH_HOST.sub(lambda m: m.group(1) + _cfg.canon_name(m.group(2)), str(u or "").strip(), count=1)
 
 
