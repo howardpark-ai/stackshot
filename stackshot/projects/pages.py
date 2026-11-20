@@ -62,6 +62,7 @@ import glob, json, os, re, shlex, subprocess, sys, time, datetime
 HOME = os.path.expanduser("~")
 from stackshot import paths as _paths
 HERE = str(_paths.ROOT)      # the checkout: the commands this module prints for a session name this file by its package path (the allow rules match that path)
+from stackshot.core import filecache as _fc   # what the server works out from the registry file is dropped when this writes it
 from stackshot.core import config as _cfg   # stackshot.toml through the repo checkout: the same paths on every machine (stdlib tomllib)
 from stackshot.core.lines import newline_lines
 from stackshot.projects import project_registry as _pr   # the project record's entries, laid over the registry's page lines (stdlib only)
@@ -654,6 +655,7 @@ def cmd_registry(quiet=False):
         tmp = REG + ".tmp"
         open(tmp, "w", encoding="utf-8").write(text())
         os.replace(tmp, REG)
+        _fc.drop()      # the server's own registry readers build again at the next look (core/filecache.py)
     if not quiet: print(f"projects.json: {len(pages)} pages")
     return 0
 

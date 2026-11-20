@@ -61,9 +61,9 @@ def names() -> dict[str, str]:
     stored transcript id does."""
     try:
         from stackshot.fleet import fleet
-        rows = fleet.sessions()
-        out = _Names({k: str(v.get("name") or "") for k, v in rows.items()})
-        out.by_name = fleet.by_name(rows, present_only=True)
+        view = fleet.view()       # the rows indexed once per change of the sessions files (fleet.SessionView), not once per question
+        out = _Names(view.names)
+        out.by_name = view.by_name(present_only=True)
     except Exception:
         out = _Names()
     try:
@@ -315,11 +315,29 @@ def save(d: dict[str, list[dict[str, Any]]]) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({k: v for k, v in sorted(d.items()) if v}, f, ensure_ascii=False, indent=1)
     os.replace(tmp, FILE)
+    _fc.drop()
+
+
+def _registry_built() -> dict[str, dict[str, Any]]:
+    with open(REGISTRY, encoding="utf-8") as f:
+        return _pr.apply(json.load(f).get("pages", {}) or {})
+
+
+def _registry_token() -> Any:
+    """What `registry()` reads besides its two files: where they are, and the settings and defaults `project_registry.apply` reaches ([project_scopes] and its built-in defaults, [router] general_<scope>, [pages], this module's
+    GENERAL_DEFAULTS). A setting is read by value, so a reload and a changed setting alike build the registry again."""
+    from stackshot.projects import projects as _prj
+    router = _cfg.get("router")
+    general = {k: v for k, v in router.items() if str(k).startswith("general_")} if isinstance(router, dict) else router
+    return (str(REGISTRY), str(_pr.record_path()), repr((_cfg.get("project_scopes"), general, _cfg.get("pages"), sorted(GENERAL_DEFAULTS.items()), _prj._SCOPES, _prj._BY_PREFIX, _prj._BY_TAG, _prj._RETIRED)))
 
 
 def registry() -> dict[str, dict[str, Any]]:
+    """The page registry with the project record's entries laid over it (project_registry.apply); {} when the file cannot be read. Built again only when projects.json or project-record.json was written or a setting
+    it reads changed (core/filecache.py `derived`, which does not keep a file written a moment ago and which a writer here `drop`s). Each caller gets its own dict (a key added or replaced in it is no other caller's),
+    but the entries are shared by every caller: one that changes an entry takes a copy of it first."""
     try:
-        return _pr.apply(json.load(open(REGISTRY, encoding="utf-8")).get("pages", {}) or {})
+        return dict(_fc.derived("anchors.registry", (REGISTRY, _pr.record_path()), _registry_token(), _registry_built))
     except Exception:
         return {}
 
@@ -552,7 +570,8 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
     best: dict[str, tuple[tuple, str, str]] = {}
     marked: set[str] = set()                            # the agents a page or record marks as a keeper: each carries the flag, though its best role may be on another project (the project stays the best one)
     claims: dict[str, tuple[tuple, str, str]] = {}      # the owed claims, ranked among themselves the same way
-    dead = lambda k: _prj.page_status(reg.get(k) or {}) in _prj.retired_statuses()
+    retired = _prj.retired_statuses()                   # once per build, not once per offer
+    dead = lambda k: _prj.page_status(reg.get(k) or {}) in retired
     def offer(name: str, role: str, key: str, e: dict[str, Any], owed: bool = False) -> None:
         rank = (_ROLE_RANK[role], dead(key), not e.get("agents"), bool(e.get("hub")), key.count("/"), not key.startswith(first), key)
         into = claims if owed else best

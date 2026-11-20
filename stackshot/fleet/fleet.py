@@ -12,6 +12,7 @@ items only.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -157,3 +158,47 @@ def by_name(rows: dict[str, dict[str, Any]] | None = None, now: float | None = N
         if n not in live:
             out[n] = u
     return out
+
+
+class SessionView:
+    """The session rows of every machine, indexed once for the readers that only look up a name (`anchors.names`): uuid -> name of every row, and what `by_name` needs from them, found once per change of the files
+    instead of once per question. The time a row is gone since is the only thing that moves with the clock, so each gone row keeps the stamp it was gone at (parsed once), and `by_name(now)` gives, for the same rows and
+    the same `now`, the answer `fleet.by_name(rows, now, present_only)` gives (the same pairs; the order of the pairs is not kept, no reader goes by it)."""
+    __slots__ = ("names", "_live", "_old")
+
+    def __init__(self, rows: dict[str, dict[str, Any]]) -> None:
+        self.names: dict[str, str] = {k: str(v.get("name") or "") for k, v in rows.items()}
+        live: dict[str, list[str]] = {}; gone: dict[str, list[tuple[float, str]]] = {}
+        for u, r in rows.items():
+            n = str((r or {}).get("name") or "") if isinstance(r, dict) else ""
+            if not n:
+                continue
+            if running(r):
+                live.setdefault(n, []).append(u)
+            else:
+                gone.setdefault(n, []).append((_lv.ts(r["gone"]), u))
+        self._live = {n: us[0] for n, us in live.items() if len(us) == 1}      # two running namesakes resolve to nobody
+        old = [(n, c, max((t for t, _u in c if t), default=float("-inf"))) for n, c in gone.items() if n not in live]       # a name a running session carries is that session's
+        old.sort(key=lambda x: -x[2])                       # the most recently gone first: gone_for only falls with the stamp, so the names fall out of the grace in this order
+        self._old = old
+
+    def by_name(self, now: float | None = None, present_only: bool = False) -> dict[str, str]:
+        """`by_name` over these rows: a running namesake, else the row gone most recently (the first of equal times), only within the grace when `present_only`. `now` as `gone_for` takes it (the clock when None)."""
+        now = time.time() if now is None else now
+        out = dict(self._live); limit = _grace()
+        for n, cands, _k in self._old:
+            best, bu = float("inf"), None
+            for t, u in cands:
+                g = float("inf") if not t else max(0.0, now - t)       # gone_for's own rule
+                if bu is None or g < best:
+                    best, bu = g, u
+            if present_only and best > limit:
+                break                                           # the names after this one were gone no later
+            out[n] = bu
+        return out
+
+
+def view() -> SessionView:
+    """The SessionView of the machines' session rows, built again only when one of their files was written (core/filecache.py `derived`; a machine that comes or goes changes the token). Shared: never changed by a caller."""
+    L = letters()
+    return _fc.derived("fleet.view", [FLEET_DIR / x / "sessions.json" for x in L], (str(FLEET_DIR), tuple(L)), lambda: SessionView(sessions()))

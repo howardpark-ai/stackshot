@@ -48,6 +48,7 @@ import datetime, errno, fcntl, json, os, re, secrets, shutil, sys, tempfile, thr
 from pathlib import Path
 
 from stackshot.core import config as _cfg
+from stackshot.core import filecache as _fc      # what is worked out from files is dropped when this module writes one
 from stackshot.projects import project_registry as _pr      # the project entries of the record: the registry reads them first, the page lines are the fallback
 from stackshot.projects import keeper_reads as _reads      # the gauge of the keepers only an old form names
 from stackshot.projects import keeper as _kp      # the keeper as a mark on one agent (readers only: nothing here writes a mark)
@@ -115,6 +116,7 @@ def write_atomic(path, text: str) -> None:
             finally:
                 try: os.unlink(beside)
                 except FileNotFoundError: pass
+        _fc.drop()      # what is worked out from this file (anchors.registry reads projects.json and the record) is built again at the next look, never waiting on a stamp
         try:   # and the rename itself: fsync the directory (cheap on Linux); a filesystem that refuses it is no reason to fail the write
             dfd = os.open(path.parent, os.O_RDONLY)
             try: os.fsync(dfd)
@@ -467,10 +469,19 @@ def scopes() -> list:
     return [str(x) for x in (_cfg.get("project_scopes", "order") or _SCOPES)]
 
 
+_RETIRED_KEPT: tuple = ((), frozenset())        # (the setting and the defaults the words were made from, the words): made again only when either changed
+
+
 def retired_statuses() -> set:
-    """The page `status:` words that retire a project (lowercase): [project_scopes] retired_statuses, else _RETIRED."""
+    """The page `status:` words that retire a project (lowercase): [project_scopes] retired_statuses, else _RETIRED. Asked tens of thousands of times in a pass, so the words are made once per value of the setting
+    (a reload or a test that changes it is seen at the next call) and each caller gets its own set."""
+    global _RETIRED_KEPT
     v = _cfg.get("project_scopes", "retired_statuses")
-    return {str(x).strip().lower() for x in (v if isinstance(v, list) else _RETIRED)}
+    key = (tuple(v) if isinstance(v, list) else None, tuple(_RETIRED))
+    kept = _RETIRED_KEPT
+    if kept[0] != key:
+        kept = _RETIRED_KEPT = (key, frozenset(str(x).strip().lower() for x in (v if isinstance(v, list) else _RETIRED)))
+    return set(kept[1])
 
 
 def page_status(entry: dict) -> str:
