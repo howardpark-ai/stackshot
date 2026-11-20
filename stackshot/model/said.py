@@ -145,13 +145,13 @@ def plain_quote(spec: Any) -> str:
 
 def find_by_quote(path: Path, quote: str, prefixes: tuple[str, ...] | list[str] = DEFAULT_PREFIXES, phrases: tuple[str, ...] | list[str] = DEFAULT_PHRASES, marker: str = "") -> str:
     """The uuid of his latest message in the transcript at `path` that holds `quote` (whitespace aside) and passes check() as his own typed words, "" when none does. The file is read once, line by line; only a user
-    entry that carries the quote's longest word is parsed. OSError when the file cannot be read."""
+    entry that carries the quote's longest word, or a \\u escape (which may spell it), is parsed. OSError when the file cannot be read."""
     q = norm_ws(quote)
     words = sorted(set(re.findall(r"[A-Za-z0-9]{4,}", q)), key=len, reverse=True)[:1]
     found = ""
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
-            if '"user"' not in line or any(w not in line for w in words):
+            if '"user"' not in line or (any(w not in line for w in words) and "\\u" not in line):      # a line with a \u escape may spell a word of the quote in escapes: parse it
                 continue
             try:
                 e = json.loads(line)

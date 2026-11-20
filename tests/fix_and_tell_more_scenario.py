@@ -13,6 +13,10 @@ Covers:
   5  done or dropped follows what the write stores as said: only a checked Acked-by marks his step done; an empty, null, unchecked or other-tagged said drops it, and the line says what was stored
   6  step="none" on an item that stores a step or the your-step state, with needs cleared and a mover: the retry keeps step="none" and goes through
   7  the branches of step_settle that no write above tells apart (called directly or by a write built for the branch)
+  8  done only for his only open step; with several open steps of his, every one that leads next is dropped and his words stay stored
+  9  each hand-off shape alone, and a stored step without the your-step state and the reverse
+  10 a next line opened with a name no session has hands the item to no one; the quote search parses a line that spells a word in \\u escapes; the doc says the quote is not compared with the step
+  3b step="none" beside a dropped or done of the write's own: the retry does not repeat or trip over those positions
 
     tests/run-suite fix_and_tell_more        → exit 0 / 1"""
 import asyncio, contextlib, datetime as dt, io, json, logging, os, pathlib, re, sys, time, types
@@ -228,6 +232,14 @@ r, why, fx = run(15, step="none")
 check("3 step='none' alone (the guard not reached) is as before: no-op, his step stays open", r is not None and his(15) == ["open"] and kinds(fx) == ["step-none"], (why, st(15), fx))
 r, why, fx = run(16, next="home-agent: more", step="none", done=[1])
 check("3 step='none' beside a done of its own is as it was: the write's own mark stands", r is not None and his(16) == ["done"] and "step-none-applied" not in kinds(fx), (why, st(16), fx))
+item(110, next="Oliver: step A\nhome-agent: step B\nOliver: step C")
+r, why, fx = run(110, next="home-agent: more", step="none", dropped=[2])
+check("3 step='none' beside a dropped of its own for the agent's line between two steps of his: the write goes through, all three are dropped as written (the retry does not trip over step C)",
+      r is not None and why == "" and [s for s, t in st(110)][:3] == ["dropped", "dropped", "dropped"] and kinds(fx) == ["step-none-applied"], (why, st(110), fx))
+check("3 …the line names the steps it dropped itself (A and C), not the one the write dropped", kinds(fx) == ["step-none-applied"] and "step A" in fx[0][1] and "step C" in fx[0][1] and "step B" not in fx[0][1], fx)
+item(111, next="Oliver: step A\nhome-agent: step B\nOliver: step C")
+r, why, fx = run(111, next="home-agent: more", step="none", done=[2])
+check("3 the same with a done of its own for the agent's line: the write's own mark stands and the steps of his are dropped", r is not None and [s for s, t in st(111)][:3] == ["dropped", "done", "dropped"], (why, st(111), fx))
 for i in (17, 18): item(i)
 wipe()
 out = mw(17, next="home-agent: more", step="none")
@@ -385,6 +397,40 @@ item(97, needs=[], step="paste it into the form"); item(98, needs=[], state="you
 plan94 = SS.settle(refusal(gid="a97"), {"step": "none", "next": "home-agent: x"}); plan95 = SS.settle(refusal(gid="a98"), {"step": "none", "next": "home-agent: x"})
 plan96 = SS.settle(refusal(gid="a96"), {"step": "none", "next": "home-agent: x"})
 check("9 settle keeps step='none' for a stored step alone and for the state alone, and drops it for neither", plan94 is not None and plan94[0].get("step") == "none" and plan95 is not None and plan95[0].get("step") == "none" and plan96 is not None and "step" not in plan96[0], (plan94, plan95, plan96))
+
+# ---- 10. a mistyped opener hands the item to no one; the quote search reads a line that spells a word in \\u escapes; the doc says the quote is not compared
+item(120)
+r, why, fx = run(120, next="home-agnet: go on with the build", needs="none")
+check("10 his step first and a next line that opens with a name no session has (a mistyped one): refused as before, his step open, nothing settled", r is None and "his step would sit hidden" in why and his(120) == ["open"] and mt(120).get("needs") == ["home-agent"] and fx == [], (why, st(120), fx))
+item(121)
+r, why, fx = run(121, next="home-agent: go on with the build", needs="none")
+check("10 …the same write with the name of a real session settles", r is not None and his(121) == ["dropped"] and kinds(fx) == ["his-step-settled"], (why, st(121), fx))
+item(122)
+r, why, fx = run(122, next="Reminder: go on with the build", needs="none")
+check("10 …an opener that is no session at all (a word and a colon) is refused too", r is None and "his step would sit hidden" in why and his(122) == ["open"] and fx == [], (why, st(122), fx))
+asked = []
+class _Ctx:
+    def mover_problem(self, who, project): asked.append((who, project)); return ""
+_real_ctx = SS._mg.Ctx; SS._mg.Ctx = _Ctx
+try: plan = SS.settle(refusal(gid="a60"), {"next": "home-agent: go on", "needs": "none"})
+finally: SS._mg.Ctx = _real_ctx
+check("10 the opener is judged by the mover guard against the project of the item the refusal names", asked == [("home-agent", "projects/alpha")] and plan is not None, (asked, plan))
+check("10 hands_to_agent: a mistyped opener hands nothing on, a real one does, and the mover and agent forms are as before", not SS.hands_to_agent({"next": "home-agnet: go on"}) and SS.hands_to_agent({"next": "home-agent: go on"}) and SS.hands_to_agent({"mover": "home-agnet"}), None)
+
+def jl(*rows): return "".join(json.dumps(r) + "\n" for r in rows)
+esc = lambda row, *words: "".join(json.dumps(row).replace(w, "\\u%04x" % ord(w[0]) + w[1:]) for w in words) + "\n"
+tp = T / "probe-said.jsonl"
+tp.write_text(esc(u(30, "Zephyrine Quokka go"), "Zephyrine"), encoding="utf-8")
+check("10 find_by_quote: a message whose longest word is spelled with a \\u escape in the raw line is found by its plain quote", SAID.find_by_quote(tp, "Zephyrine Quokka go") == uid(30), SAID.find_by_quote(tp, "Zephyrine Quokka go"))
+line_a = json.dumps(u(31, "Quasar Nebula is the plan")) + "\n"
+line_b = json.dumps(u(32, "Quasar Nebula is the plan")).replace("Quasar", "\\u0051uasar").replace("Nebula", "\\u004eebula") + "\n"
+tp.write_text(line_a + line_b, encoding="utf-8")
+check("10 find_by_quote: an older plain message and a later one spelled with escapes: the quote is attributed to the later one", SAID.find_by_quote(tp, "Quasar Nebula is the plan") == uid(32), SAID.find_by_quote(tp, "Quasar Nebula is the plan"))
+tp.write_text(line_a, encoding="utf-8")
+check("10 find_by_quote: a line with no escape and without the word is still skipped, and the plain one is found", SAID.find_by_quote(tp, "Quasar Nebula is the plan") == uid(31) and SAID.find_by_quote(tp, "Zephyrine Quokka go") == "", None)
+tp.unlink()
+doc = (pathlib.Path(STACK) / "docs/item-model.md").read_text(encoding="utf-8")
+check("10 the doc and the module say the server does not compare the quote with the step's words, and that it is the accepted trade-off", all("does not compare the quote with the step's words" in t and "accepted trade-off" in t for t in (doc, (pathlib.Path(STACK) / "stackshot/service/step_settle.py").read_text(encoding="utf-8"))), None)
 
 # ---- the plumbing
 def _unfix_probe():
