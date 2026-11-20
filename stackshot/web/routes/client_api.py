@@ -450,7 +450,11 @@ async def client_api(request: Request):
         from starlette.concurrency import run_in_threadpool
         rows = await run_in_threadpool(_clients.puller_lag)
         return PlainTextResponse("".join(f"{h} {r} {c}\n" for h, r, c in rows), headers={"Cache-Control": "no-store"})
-    status, ctype, body = _client_get(what, dict(request.query_params))
+    if what == "items":            # a scan of the board: off the event loop, so the pages keep answering while it runs
+        from starlette.concurrency import run_in_threadpool
+        status, ctype, body = await run_in_threadpool(_client_get, what, dict(request.query_params))
+    else:
+        status, ctype, body = _client_get(what, dict(request.query_params))
     return PlainTextResponse(body, status_code=status, media_type=ctype, headers={"Cache-Control": "no-store"})
 
 

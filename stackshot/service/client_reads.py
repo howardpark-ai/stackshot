@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
+import threading
 import time
 from typing import Any
 
@@ -24,6 +26,8 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import store as _store
 from stackshot.core.store import _item_files
+from stackshot.fleet import fleet as _fleet
+from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import item_project as _ip
@@ -129,22 +133,160 @@ def _wait_fields(gid: str, it: dict[str, Any], ctx: "_agents._WaitCtx") -> dict[
 _ROLE_MOVER, _ROLE_THEN, _ROLE_NEEDS = "mover", "then", "needs"     # the values of a client items row's `roles` (pages.py words them)
 
 
-def _client_items(key: str) -> tuple[int, str, str]:
-    """`items?key=<session>`: the open items a session moves, for the end-of-turn board check in
-    pages.py. key = the asking session as its hook knows it: a transcript uuid, a cse_ id or a pane name. An item is its own when
-    it moves (its needs, its stored mover, or the project's builder, else its -main agent when nothing names one) or takes after the owner's answer (`then`: the creator is no
-    one's), or when it names the session in its needs, with role "agent" (the key the hooks have read since an earlier change). Every row carries `roles`: the asking session's live roles on the item, from "mover", "then" and "needs" (named in it); the alive item a session moves without keeping or being named is listed too. One pass over the store, one read of
-    the fleet's names. Held items, items that wait on an open item (after) and doing items the board lists as waiting for a wake that states its reason (wait_basis) are listed with held: true (the hook skips them). Every row carries `list`: the home page's list the item is in, "your-move", "agents" or "waiting" (home.list_of), the key the fleet tool's items sheet groups by, so it shows the page's three groups; never empty (an item the page cannot place is in "agents", as there)."""
-    k = str(key or "").strip()
-    if not k or len(k) > 200 or any(c in k for c in "\r\n\t"):
-        return 400, "text/plain", "key = the asking session: its transcript uuid, cse_ id or pane name"
+_VIEW_TTL = 30.0        # s: the longest a board view is served whatever else holds. A backstop only: the files are in the stamp, the dates the rows read in `valid_until` (`_next_edge`, `_clock_edge`) and the queue map is compared at each read; no input is left to this bound
+_VIEW_FRESH_NS = 200_000_000   # a file written within this long before its stamp is read could be written again with the same stamp: such a view is never kept
+_VIEW_KEYS_MAX = 512    # the answers kept per view, one per asking session; a view that has this many serves the others without keeping them
+_VIEW_BUILD = threading.Lock()      # one rebuild at a time: a reader that finds the view stale waits here, then looks again (a hit never takes it)
+_VIEW: dict[str, "_ItemsView | None"] = {"v": None}
+_EDGE_FIELDS = ("until", "wake", "ask_by")      # the metadata fields that hold a date the model, the dated-wait rule or a relay's ask-by day reads against the clock
+
+
+def _board_stamp() -> tuple[frozenset, int]:
+    """(what the items view stands on, the newest mtime of it in ns). The stat of every item file and every file of the store (the registry, anchors, project record: `name, mtime_ns, size, inode`),
+    the fleet view's machine and session files, and the signature of the session registry as the registry's own cache holds it (`sessions_registry.signature`: the registry trusts its look at its directory for a
+    second, and a view must not stand on a newer one than the reads it is built from go through). A file added, removed, rewritten or replaced reads as another stamp; a file the readers never open is not looked at.
+    Never raises."""
+    parts: list[tuple] = []
+    newest = 0
+
+    def files(d: Any, tag: str, keep: Any) -> list[str]:
+        nonlocal newest
+        subdirs: list[str] = []
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    n = e.name
+                    if n[:1] == ".":
+                        continue
+                    try:
+                        if e.is_dir():
+                            subdirs.append(n)
+                            continue
+                        if not keep(n):
+                            continue
+                        st = e.stat()
+                    except OSError:         # gone between the listing and the stat: the next stamp lists it again
+                        continue
+                    parts.append((tag, n, st.st_mtime_ns, st.st_size, st.st_ino))
+                    newest = max(newest, st.st_mtime_ns)
+        except OSError:
+            parts.append((tag, None))
+        return subdirs
+
+    letters = lambda names: [n for n in names if len(n) == 1 and n.isalpha()]
+    for L in letters(files(_store.STORE, "store", lambda n: n.endswith(".json"))):
+        files(_store.STORE / L, "store/" + L, lambda n: n.endswith(".json"))
+    for L in letters(files(_fleet.FLEET_DIR, "fleet", lambda n: False)):
+        files(_fleet.FLEET_DIR / L, "fleet/" + L, lambda n: n in ("machine.json", "sessions.json"))
+    try:
+        sig = _sr.signature()
+    except Exception:  # noqa: BLE001
+        sig = None
+    parts.append(("registry", sig))
+    for f in sig or ():
+        newest = max(newest, f[2] or 0)
+    return frozenset(parts), newest
+
+
+def _next_edge(m: dict[str, Any], now: float, soon_s: float) -> float | None:
+    """The first instant after `now` at which a date of an item (`_EDGE_FIELDS`) can change what a row of it says: the date itself, read as a wake (the start of the day or the minute) and as a due day (the end of
+    the day), and `soon_s` before it, where a doing item's wake stops being far enough ahead to read as a wait (dated_wait.of and held_wait). None when the item holds no such date."""
+    edge: float | None = None
+    for k in _EDGE_FIELDS:
+        v = m.get(k)
+        if not v:
+            continue
+        for e in (_wt.wake_epoch(v), _wt.due_epoch(v)):
+            for at in ((e, e - soon_s) if e is not None else ()):
+                if at > now and (edge is None or at < edge):
+                    edge = at
+    return edge
+
+
+def _clock_edge(now: float) -> float:
+    """The first instant after `now` at which the clock alone, with no file written, changes an answer, for every input the rows read except the items' own dates: the next midnight in the instance zone (the
+    dated-wait rule reads a step's day against today), the moment a session that is gone leaves the fleet's grace (its name stops resolving: fleet.by_name), and the moment the session registry stops standing in for
+    a file that does not read (its `stale_until`). An item whose date cannot be read drops the view at once (in `_items_pass`: that input's own bound is now, so that board is built at every read, as the per-read path did). The queue
+    map (a mover's second item quiet for an hour) has no edge here: its own cache renews it every `_QUEUE_TTL` seconds and `_ItemsView.holds` compares the view's copy with the map at each read."""
+    zone = _cfg.tz()
+    edge = dt.datetime.combine(dt.datetime.fromtimestamp(now, zone).date() + dt.timedelta(days=1), dt.time(), zone).timestamp()
+    grace = _lv.grace()
+    for r in _fleet.sessions().values():
+        t = _lv.ts(r.get("gone")) if isinstance(r, dict) and r.get("gone") else 0.0
+        if t and now < t + grace < edge:
+            edge = t + grace
+    su = _sr.load().stale_until
+    if su != float("inf"):
+        edge = min(edge, now + max(0.0, su - time.monotonic()))
+    return edge
+
+
+class _ItemsView:
+    """The board read once for every asking session: per open item its parsed file and the identities of who moves it, who takes it after the answer and who its needs name (the part that asks
+    nothing of the asker), the fleet's names as they were then, the queue map the rows read, and, built when a session first needs them, each item's row. `body_for(key)` is one session's answer.
+    `valid_until` is the first instant the clock alone changes an answer (`_next_edge`, `_clock_edge`); the view is not served from then on."""
+    __slots__ = ("stamp", "at", "nm", "ctx", "entries", "rows", "bodies", "lock", "queue", "queue_on", "cfg", "valid_until")
+
+    def __init__(self, stamp: frozenset, at: float, nm: Any, ctx: Any, entries: list, queue: dict[str, str], queue_on: bool, valid_until: float) -> None:
+        self.stamp, self.at, self.nm, self.ctx, self.entries, self.queue, self.queue_on, self.valid_until = stamp, at, nm, ctx, entries, queue, queue_on, valid_until
+        self.cfg = _cfg.CFG
+        self.rows: dict[str, dict[str, Any]] = {}
+        self.bodies: dict[str, str] = {}
+        self.lock = threading.Lock()
+
+    def holds(self, stamp: frozenset, now: float) -> bool:
+        """Is this view what the per-read path would answer now: the files it stands on are as they were, the running config is the one it was built under, no date it read has come, it is younger than `_VIEW_TTL`,
+        and the queue map the rows read (a derived reading of the board that its own cache renews every few seconds, `_queue_map`) is the map now."""
+        return (self.stamp == stamp and self.cfg is _cfg.CFG and 0 <= now - self.at < _VIEW_TTL and now < self.valid_until
+                and (not self.queue_on or self.queue == _hooks().queue_map()))
+
+    def row(self, gid: str, p: Any, it: dict[str, Any]) -> dict[str, Any]:
+        """The session-free part of an item's row (everything but `roles` and `role`), built once per view."""
+        r = self.rows.get(gid)
+        if r is None:
+            r = self.rows[gid] = _item_row(gid, p, it, self.ctx, self.queue)
+        return r
+
+    def body_for(self, k: str) -> str:
+        with self.lock:
+            hit = self.bodies.get(k)
+            if hit is not None:
+                return hit
+            nm = self.nm
+            me = {k, _anc.canonical(k, nm)}
+            me |= {nm.get(x, "") for x in list(me)}
+            me.discard("")
+            out = []
+            for gid, p, it, mover_ids, then_ids, linked_ids in self.entries:
+                is_mover, is_then, linked = bool(mover_ids & me), bool(then_ids & me), bool(linked_ids & me)
+                if not (is_mover or is_then or linked):
+                    continue
+                roles = ([_ROLE_MOVER] if is_mover else []) + ([_ROLE_THEN] if is_then else []) + ([_ROLE_NEEDS] if linked else [])
+                out.append({**self.row(gid, p, it), "roles": roles, **({"role": "agent"} if linked else {})})
+            body = json.dumps({"items": out}, ensure_ascii=False)
+            if len(self.bodies) < _VIEW_KEYS_MAX:
+                self.bodies[k] = body
+            return body
+
+
+def _items_pass(stamp: frozenset) -> _ItemsView:
+    """One scan of the store for every session: each open item's file is read once, its mover, `then` and the sessions its needs name are resolved to the identities a session may be asked by, and the first instant
+    a date of the board changes an answer is worked out (the item's own dates and the clock's: `_next_edge`, `_clock_edge`)."""
     nm = _anc.names()
-    me = {k, _anc.canonical(k, nm)}
-    me |= {nm.get(x, "") for x in list(me)}
-    me.discard("")
-    out = []
     now = time.time()
+    queue_on = _queued.enabled()
+    queue = dict(_hooks().queue_map()) if queue_on else {}     # read once, as the rows are built from it (the per-read path read it at each row)
     ctx = _agents._WaitCtx(now)                # every open item has a mover, listed whatever wait it is in
+    canon: dict[str, frozenset] = {}
+    soon_s = _wt.dated_wait_min_hours() * 3600.0
+    edge = _clock_edge(now)
+
+    def ids(who: str) -> frozenset:
+        r = canon.get(who)
+        if r is None:
+            r = canon[who] = frozenset({who, _anc.canonical(who, nm)})
+        return r
+    entries = []
     for gid, p in _item_files():
         try:
             with open(p, encoding="utf-8") as f:
@@ -157,33 +299,69 @@ def _client_items(key: str) -> tuple[int, str, str]:
         if it.get("status") != "open":
             continue
         m = it.get("metadata") or {}
-        linked = any({ag, _anc.canonical(ag, nm)} & me for ag in _needs_sessions(m))   # named in its needs
+        try:
+            e = _next_edge(m, now, soon_s)
+        except Exception:  # noqa: BLE001  — a date that cannot be read drops the view at once: it is built again at the next read
+            e = now
+        if e is not None and e < edge:
+            edge = e
+        linked_ids = frozenset().union(*[ids(ag) for ag in _needs_sessions(m)])      # named in its needs
         mv_, alive_ = _item_mover_model(dict(it, gid=gid))
-        is_mover = bool(alive_ and mv_ and not _model.is_owner(mv_) and ({mv_, _anc.canonical(mv_, nm)} & me))      # the item's mover, by its needs, its stored mover or the project's default (builder, else -main agent)
+        mover_ids = ids(mv_) if (alive_ and mv_ and not _model.is_owner(mv_)) else frozenset()      # the item's mover, by its needs, its stored mover or the project's default (builder, else -main agent)
         th_ = _then_label_raw(dict(it, gid=gid))
-        is_then = bool(th_ and ({th_, _anc.canonical(th_, nm)} & me))
-        theirs = me if (is_mover or is_then) else set()        # the rows' `mine`: this session moves the item or takes it after the owner
-        if not (is_mover or is_then or linked):
-            continue
-        try:
-            su = float(it.get("state_updated") or 0) or None
-        except (TypeError, ValueError):
-            su = None
-        try:
-            up = float(it.get("updated") or 0) or None    # any write, a filing edit too (an ask-only update moves only this)
-        except (TypeError, ValueError):
-            up = None
-        st_, st_derived = _states.of(it, lambda i_: _item_read._after_open(i_.get("metadata") or {}))     # the item's stored state, or the one derived from its fields (not sent)
-        # the asking session's live roles on the item, as the server holds them now (the end-of-turn text shows them): "mover" (it moves the alive item: by its needs, its
-        # stored mover or the project's default), "then" (it takes the item after the owner's answer) and "needs" (named in its needs).
-        roles = ([_ROLE_MOVER] if is_mover else []) + ([_ROLE_THEN] if is_then else []) + ([_ROLE_NEEDS] if linked else [])
-        out.append({"gid": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "needs": _hooks().shown_needs(_needs_of(m)),
-                    **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
-                    "contact": _contacts._contact_label(dict(it, gid=gid)),
-                    "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _hooks().rmod_confirmed_at(it, p),
-                    "updated": up, "held": _item_read._is_parked(it) or bool(_item_read._after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
-                    "roles": roles, **({"role": "agent"} if linked else {})})      # "agent": named in the item's needs (the session named in needs is its mover too, so the key no longer excludes it)
-    return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
+        then_ids = ids(th_) if th_ else frozenset()
+        if mover_ids or then_ids or linked_ids:
+            entries.append((gid, p, it, mover_ids, then_ids, linked_ids))
+    return _ItemsView(stamp, now, nm, ctx, entries, queue, queue_on, edge)
+
+
+def _items_view() -> _ItemsView:
+    """The view of the board as it stands: the kept one while it holds (`_ItemsView.holds`), else one new scan (one at a time: the readers that arrive meanwhile wait for it and take it). The stamp is read before the scan,
+    so a write during the scan reads as a change at the next call. A view built from a file written within `_VIEW_FRESH_NS` of that read is served but not kept."""
+    stamp, _newest = _board_stamp()
+    v = _VIEW["v"]
+    if v is not None and v.holds(stamp, time.time()):
+        return v
+    with _VIEW_BUILD:
+        stamp, newest = _board_stamp()
+        v = _VIEW["v"]
+        if v is not None and v.holds(stamp, time.time()):
+            return v
+        t_ns = time.time_ns()
+        v = _items_pass(stamp)
+        _VIEW["v"] = v if t_ns - newest >= _VIEW_FRESH_NS else None
+        return v
+
+
+def _item_row(gid: str, p: Any, it: dict[str, Any], ctx: "_agents._WaitCtx", queue: dict[str, str] | None = None) -> dict[str, Any]:
+    """An open item's row of the items list, without the asking session's `roles` and `role`."""
+    m = it.get("metadata") or {}
+    try:
+        su = float(it.get("state_updated") or 0) or None
+    except (TypeError, ValueError):
+        su = None
+    try:
+        up = float(it.get("updated") or 0) or None    # any write, a filing edit too (an ask-only update moves only this)
+    except (TypeError, ValueError):
+        up = None
+    st_, st_derived = _states.of(it, lambda i_: _item_read._after_open(i_.get("metadata") or {}))     # the item's stored state, or the one derived from its fields (not sent)
+    return {"gid": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "needs": _hooks().shown_needs(_needs_of(m)),
+            **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
+            "contact": _contacts._contact_label(dict(it, gid=gid)),
+            "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _hooks().rmod_confirmed_at(it, p),
+            "updated": up, "held": _item_read._is_parked(it) or bool(_item_read._after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid), queue), **_wait_fields(gid, it, ctx)}
+
+
+def _client_items(key: str) -> tuple[int, str, str]:
+    """`items?key=<session>`: the open items a session moves, for the end-of-turn board check in
+    pages.py. key = the asking session as its hook knows it: a transcript uuid, a cse_ id or a pane name. An item is its own when
+    it moves (its needs, its stored mover, or the project's builder, else its -main agent when nothing names one) or takes after the answer (`then`: the creator is no
+    one's), or when it names the session in its needs, with role "agent" (the key the hooks have read since an earlier change). Every row carries `roles`: the asking session's live roles on the item, from "mover", "then" and "needs" (named in it); the alive item a session moves without keeping or being named is listed too. One pass over the store serves every session (`_items_view`: kept while the files it stands on, the dates it read against the clock and the queue map are as they were, `_VIEW_TTL` seconds at most), one read of
+    the fleet's names. Held items, items that wait on an open item (after) and doing items the board lists as waiting for a wake that states its reason (wait_basis) are listed with held: true (the hook skips them). Every row carries `list`: the home page's list the item is in, "your-move", "agents" or "waiting" (home.list_of), the key the fleet tool's items sheet groups by, so it shows the page's three groups; never empty (an item the page cannot place is in "agents", as there)."""
+    k = str(key or "").strip()
+    if not k or len(k) > 200 or any(c in k for c in "\r\n\t"):
+        return 400, "text/plain", "key = the asking session: its transcript uuid, cse_ id or pane name"
+    return 200, "application/json", _items_view().body_for(k)
 
 
 def _then_label_raw(item: dict[str, Any]) -> str:
@@ -214,13 +392,13 @@ def _basis_wait_of(item: dict[str, Any]) -> bool:
         return False
 
 
-def _item_list(item: dict[str, Any]) -> str:
+def _item_list(item: dict[str, Any], queue: dict[str, str] | None = None) -> str:
     """Which of the home page's three lists an open item is in, as the wire word: "your-move", "agents" or "waiting" (home.list_of on the model's reading). The home page's own
     rule for an item it cannot place (a failed reading, or a dead one) is Agents at work (home.classify), so the field is never empty: the items sheet groups as the page does."""
     try:
         it = dict(item, gid=str(item.get("gid") or item.get("id") or ""))
         vw = _model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {}))
-        which = _hooks().home_list_of(_queued.overlay(vw, _hooks().queue_map().get(it["gid"], "")))     # a doing item with a far wake and every step dated is listed as waiting, and one queued behind its mover's other item
+        which = _hooks().home_list_of(_queued.overlay(vw, (_hooks().queue_map() if queue is None else queue).get(it["gid"], "")))     # a doing item with a far wake and every step dated is listed as waiting, and one queued behind its mover's other item
     except Exception:  # noqa: BLE001
         which = ""
     return which or _hooks().home_agents()
