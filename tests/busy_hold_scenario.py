@@ -122,7 +122,7 @@ BUILD = [sub("Build @1: the export fix")]
 got = gate(live_for(BUILD))
 check("1 a running subagent whose description names the item refuses a hold from its mover, naming the subagent", refused(got) and X('your subagent "Build @1: the export fix"') in got[1], got)
 check("1 …the refusal says to keep it in hand with work= and to park only once nothing of the mover's runs on it",
-      "work=" in got[1] and "Keep it in hand" in got[1] and "Park it with a hold only once nothing of yours is running on it." in got[1], got)
+      "work=" in got[1] and "Keep it in hand" in got[1] and "Park it only once nothing of yours is running on it." in got[1], got)
 check("1 …and it names no item of the board but what the subagent's own description says", not re.search(r"\b(?:" + BOARD + r"\d+|a\d+)\b", got[1].replace(BOARD + "1", "")), got)
 check("1 the item's id is read whole: a subagent on item 10 or 12 is not on item 1", not refused(gate(live_for([sub("Build @10"), sub("Fix @12: a thing")]))), gate(live_for([sub("Build @10")])))
 a_pr = {"a1": {"acme/stack#77"}}
@@ -391,7 +391,7 @@ ctext = " ".join(pathlib.Path(STACK, "stackshot/web/tools/text/create.md").read_
 check("5 the update text no longer lists another release among the waits to park", "another release" not in utext and "a timer, someone else's step or release" in utext)
 check("5 …and the create text says the same of a wait", "another release" not in ctext and "someone else's step or release is not doing" in ctext)
 check("5 …says a release or its queue, a run or a subagent of the mover's own is work moving in real time: do not park it", "a release or its queue, a run or subagent of yours): do not park it" in utext)
-check("5 …and says the mover's hold is refused while its subagent runs on the item", "its mover's hold is refused while its subagent runs on it" in utext)
+check("5 …and says the mover's park is refused while its subagent runs on the item", "its mover's park is refused while its subagent runs on it" in utext)
 
 print(f"busy_hold scenario: {len(ran) - len(fails)}/{len(ran)} checks")
 _scratch.cleanup()

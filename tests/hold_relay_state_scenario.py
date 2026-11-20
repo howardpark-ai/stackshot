@@ -2,7 +2,7 @@
 stackshot/service/gates.py until_in) — a scratch store and config, no port, no network, no model call.
 
 The report: an item stored wait_kind=relay beside state doing (the state was stored before the wait was rewritten) listed "model conflict: wait_kind=relay on an item whose state is doing, which
-is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true (a hold ends a stored work-in-hand state)". hold=true with a wake was accepted, but on
+is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true (a park ends a stored work-in-hand state)". hold=true with a wake was accepted, but on
 a relay or event wait no hold flag is stored (the wait is the park), and the stored state was left alone, so the conflict stayed: the advice was circular. And wake=<day>T10:00 on a relay wait was
 refused with the ask_by date wording, not the reason until's refusal gives.
 

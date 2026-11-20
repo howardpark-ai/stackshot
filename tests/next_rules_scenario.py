@@ -249,7 +249,7 @@ check("N6: closing the item (complete) is exempt: the last open step goes with i
 import datetime as _dt3
 _w3 = (_dt3.date.today() + _dt3.timedelta(days=3)).isoformat()
 refused("N6 hold (a): a hold that drops the last step is refused with the parked-item text: a parked item needs a step, the one its wake leads to", lambda: upd(58, hold=True, wake=_w3, wait_basis=f"the vendor ships the part {_w3}", dropped=[1]),
-        "no open step in next", "a parked item needs a step too", "the one its wake leads to", "look again", i=58)
+        "no open step in next", "a parked item needs a step too", "the one its wake leads to", "look again", "the park keeps the item out of sight", i=58)
 r = upd(58, hold=True, wake=_w3, wait_basis=f"the vendor ships the part {_w3}", next=f"home-agent: look again at the vendor part on {_w3}", dropped=[1])
 check("N6 hold (a): a hold that carries a wake step in the same call passes: the old step is dropped, the wake step is open, the item is held", hd_(mt(58)) and st(58) == [("dropped", "home-agent: build it"), OPEN(f"home-agent: look again at the vendor part on {_w3}")], (r, st(58)))
 refused("N6 (a): an item that is not held gets the ordinary text, with no mention of parking", lambda: upd(59, next="none", dropped=[1]), "no open step in next", "an open item always has an open step", i=59)

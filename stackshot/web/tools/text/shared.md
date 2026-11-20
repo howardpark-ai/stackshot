@@ -15,10 +15,10 @@ create has no step), and the board ticks it when he says it is done, so an ask t
 is refused. agent=<session> is the older form: it makes that session the one named in needs (the decision and external
 entries stay); agent="none" takes the sessions out. observers: sessions that hear only a close or a reopen;
 observers="none" clears. after: items of any project that must close first (after=["board#N"]); while one is open the
-item counts as waiting without a hold, and when the last one closes it wakes and the sessions in its needs (else its
+item counts as waiting without a park, and when the last one closes it wakes and the sessions in its needs (else its
 mover) are told; a dropped one releases it too, a superseded one is followed to its replacement; a loop is refused;
 after="none" clears. after is for a real dependency (this item needs that one's output), never for the order a builder
-takes its items in. A hold (hold=true) names what it waits for (a wake, after items, an anchor notice, a recycle, or a
+takes its items in. A park (hold=true) names what it waits for (a wake, after items, an anchor notice, a recycle, or a
 wait_basis window); one with none is refused. An item waiting on {{OWNER}} carries needs=decision
 with its ask, or after=<the item that carries the ask>; to park his call, see update (hold, mover={{OWNER}}). needs names only who can move now. An item that waits on
 {{OWNER}} and on a session at once: where his answer could change with the session's work, or its work with his
@@ -47,7 +47,7 @@ the colon is refused); (2) on an update, an open step reworded in next alone (it
 left unmarked): keep the step as it is, mark it done=[n] when the work is finished, or write a different action as a
 new line (a step marked dropped=[n] may be replaced by a longer one); progress goes on the project page, never in a
 step (to give an open step other words, pass reword={n: "<new text>"}); (3) a write that leaves an item that stays
-open with no open step in next: name who takes the next step, keep one open step (a held item's is the one its wake
+open with no open step in next: name who takes the next step, keep one open step (a parked item's is the one its wake
 leads to), or close the item with complete, which is exempt; {{OWNER}}'s server-made step counts. A step with a commit
 id, a test count, a merged, live or deployed status or a "since 09:30" stamp is written all the same and the reply
 notes it.
@@ -146,7 +146,7 @@ checkout, the server ticks a step that says it releases that PR (`release PR #<n
 before the PR's URL; the step events, below, say what counts), only on an item anchored to that PR or naming its URL.
 An item whose only open steps are that release is completed, outcome done; on an item with any other open step the
 release step is ticked done and the mover told once. A step that only mentions the PR (investigate, review, verify) is
-never ticked and never closes the item. An item on hold, or whose needs name his decision or a session other than its
+never ticked and never closes the item. A parked item, or one whose needs name his decision or a session other than its
 mover, is left alone; a check that passes while the item waits on his decision does not close it until the decision is
 cleared. An update whose next hands the work to another session (a line of next in the form `<session>: <action>`, a
 list marker before the name at most: any session but the item's mover and you, not one already in needs; a name

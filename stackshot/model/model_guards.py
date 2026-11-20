@@ -54,7 +54,7 @@ from stackshot.waits import waiting as _wt
 
 GUARDS = ("mover", "wait_input", "post_wake", "snooze", "filler", "no_end", "decision_hold", "mover_state", "owner_mover", "second_mover", "next_unnamed", "next_wait", "next_windows", "alarm", "description")
 LABELS = {"mover": "mover", "wait_input": "wait input", "post_wake": "post-wake mover", "snooze": "snooze", "filler": "filler", "no_end": "wait with no end",
-          "decision_hold": "decision with a hold", "mover_state": "agent mover on his state", "owner_mover": f"{_cfg.owner()} as mover with no step or ask", "second_mover": "second mover", "next_unnamed": "next line with no name", "next_wait": "wait in next", "next_windows": "his next line with a command that is not in backticks, does not say where it runs, runs on the wrong machine or is a `! ` line", "alarm": "alarming word", "description": "description not in bullets"}
+          "decision_hold": "decision that is parked", "mover_state": "agent mover on his state", "owner_mover": f"{_cfg.owner()} as mover with no step or ask", "second_mover": "second mover", "next_unnamed": "next line with no name", "next_wait": "wait in next", "next_windows": "his next line with a command that is not in backticks, does not say where it runs, runs on the wrong machine or is a `! ` line", "alarm": "alarming word", "description": "description not in bullets"}
 CLOSED_NO_OUTCOME = "closed_no_outcome"
 STATE_FIELDS = frozenset({"needs", "hold", "wake", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "cap_ok", "wait_basis", "waits", "wait_mode"})
 FIELD_GUARDS = frozenset({"subject", "goal", "next", "ask", "wait_event", "description"})       # the fields a text guard reads
@@ -178,7 +178,7 @@ _PRECISE: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("blocked on / by", re.compile(r"\bblocked\s+(?:on|by)\b", re.I)),
     ("until a date or item", re.compile(rf"\b(?:until|till)\s+{_DATE}", re.I)),
     ("once X lands / merges / replies", re.compile(r"\bonce\b[^.\n]{0,80}?\b(?:lands?|landed|merges?|merged|replies|replied|reply)\b", re.I)),
-    ("on hold", re.compile(r"\bon\s+hold\b", re.I)),
+    ("\"on hold\" in next", re.compile(r"\bon\s+hold\b", re.I)),
 )
 
 
@@ -972,9 +972,9 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         add("second_mover", f"needs names more than one mover ({'decision plus ' if 'decision' in kinds else ''}{who}): an item has one mover, and a second one in needs is a second mover. "
                             f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.")
     if "decision" in kinds and held:
-        add("decision_hold", f"needs holds decision together with a hold: an item on {H}'s call is on his move, and a park is not. To park the call for a date, hand the item to the session that waits "
+        add("decision_hold", f"needs holds decision together with a park: an item on {H}'s call is on his move, and a park is not. To park the call for a date, hand the item to the session that waits "
                              f"(needs=[<session>]; the ask and options stay on the item as written) and park it with hold=true, until=YYYY-MM-DD, wait_basis=<what it waits for, with its date> and mover={H}: it shows as waiting until the date, "
-                             f"and at the date it is his call again, needs decision with the same ask and options, no rewrite. Or keep the item on his move and release the hold (clear_hold=true).")
+                             f"and at the date it is his call again, needs decision with the same ask and options, no rewrite. Or keep the item on his move and release the park (clear_hold=true).")
     if mod.state == _model.ALIVE:
         clash = next((c for c in mod.conflicts if c.startswith("mover=")), "")
         if clash and mod.mover_explicit and not _model.is_owner(mod.mover) and _model.owner_state(m, mod.today):
@@ -1036,8 +1036,8 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             if not (w.basis or (quote and has_wait_words(quote))):
                 add("snooze", f"{what} waits on a time (wake {wake}) with no reason: a time wait carries {H}'s words (his answer on the item, or said=[{{tag: Acked-by, quote, msg}}] with a quote that "
                               f"parks, waits, says until or names a date) or a real outside date (wait_basis=\"<what happens> YYYY-MM-DD\"). With neither, a park has no reason: when the work itself needs this window (a soak, "
-                              "a log or data collection, a trial week, a timer you started), add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's wake takes it too, with no hold; a hold's wake does at any length); to only check back on work you keep moving, set no date: "
-                              "a date with no hold is a wait until it (outside a hand-off) and the item reads as waiting (a front agent's own date on work another session moves is refused: that result lands through stackshot).")
+                              "a log or data collection, a trial week, a timer you started), add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's wake takes it too, with no park; a park's wake does at any length); to only check back on work you keep moving, set no date: "
+                              "a date with no park is a wait until it (outside a hand-off) and the item reads as waiting (a front agent's own date on work another session moves is refused: that result lands through stackshot).")
         if w.kind in ("anchor", "item", "relay", "event"):
             end = clean(m.get("ask_by")) or (w.backstop if w.kind != "relay" else "") or (w.until if w.kind == "relay" else "")
             if not end:

@@ -707,7 +707,7 @@ for k_, kw_ in (("list", dict(waits=[Re("a"), Re("b")], until=w(6))), ("relay", 
     check(f"7c a {k_} wait written on an item with no stored state is no model conflict (the state it would read as is the wait's own)", conflicts_("a320") == [] and not MODEL.derive({**rd(320), "gid": "a320"}).conflicts, conflicts_("a320"))
 item(320, needs=[BACK])
 bupd(320, wait_kind="anchor", wait_anchor=A1, wait_event="merged", until=w(6))
-check("7c …a single anchor wait on such an item keeps its note, as before", len(conflicts_("a320")) == 1 and "update hold=true (a hold ends" in conflicts_("a320")[0], conflicts_("a320"))
+check("7c …a single anchor wait on such an item keeps its note, as before", len(conflicts_("a320")) == 1 and "update hold=true (a park ends" in conflicts_("a320")[0], conflicts_("a320"))
 item(321, needs=[BACK], state="doing")
 bupd(321, waits=[Re("a"), Re("b")], until=w(6))
 check("7c a list written on an item whose state is stored as doing keeps the note, and its advice says where hold=true goes (an update of its own: beside waits it is refused)", len(conflicts_("a321")) == 1 and "update hold=true in an update of its own, not beside waits" in conflicts_("a321")[0], conflicts_("a321"))

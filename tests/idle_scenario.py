@@ -113,6 +113,7 @@ it3 = rd(3); m3 = it3["metadata"]
 check("Park until …: the minute loop is woken, and the log line says it was parked until the day", runner_svc.WAKE_EVENT.is_set() and f"parked until {park}" in err3.getvalue(), err3.getvalue()[-300:])
 check("Park until …: his decision is in and the server parks it: waiting until the option's day (the one until date), decision out of needs, the ask and the idle record gone, the state clock moved",
       r == "decision" and m3.get("until") == park and "hold" not in m3 and "wake" not in m3 and "needs" not in m3 and "ask" not in m3 and "idle" not in m3 and it3["state_updated"] >= now0, m3)
+check("Park until …: the mover's notice says the server parked it with a wake on the day, and never on hold", any(g == "a3" and f"; parked with a wake on {park}, set by the server" in n and "on hold" not in n for t, g, o, n in told), [x for x in told if x[1] == "a3"])
 check("the answer record carries the park the server set", m3["answers"][-1].get("choice") == opts3[0]["label"] and m3["answers"][-1].get("parked") == park, m3.get("answers"))
 check("the park he set from the board stores no hold record and no old field: the one until date is the whole wait",
       "hold_set" not in m3 and "hold" not in m3 and "wake" not in m3, m3)

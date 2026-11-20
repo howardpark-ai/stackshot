@@ -258,7 +258,7 @@ PIN_GOLD = json.loads(rf'''{{
 "code",
 "home-agent",
 "",
-"arbitrary-hold: on hold with no wake date; nothing holds it (no open after, check, outside party or anchor) and its words name no event: home-agent: later",
+"arbitrary-hold: parked with no wake date; nothing holds it (no open after, check, outside party or anchor) and its words name no event: home-agent: later",
 "move the item, or write what holds it and the state that fits"
 ],
 [
@@ -285,7 +285,7 @@ PIN_GOLD = json.loads(rf'''{{
 "code",
 "home-agent",
 "",
-"arbitrary-hold: on hold with wake <t>; nothing holds it (no open after, check, outside party or anchor) and its words name no event: ops-other: the first part",
+"arbitrary-hold: parked with wake <t>; nothing holds it (no open after, check, outside party or anchor) and its words name no event: ops-other: the first part",
 "move the item, or write what holds it and the state that fits"
 ]
 ],

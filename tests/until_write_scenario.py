@@ -280,7 +280,7 @@ check("5.5 a legacy hold + after given wake= stores the item wait with the date 
 item(60, needs=[BACK], until=w(3))
 item(61, needs=["decision"], until=w(3))
 fm60, fm61 = _get_tool._fmt(dict(rd(60), gid="a60")).splitlines()[0], _get_tool._fmt(dict(rd(61), gid="a61")).splitlines()[0]
-check("5.6 get tags a wait on a date alone as on hold, and never a decision item", "on hold" in fm60 and "on hold" not in fm61, (fm60, fm61))
+check("5.6 get tags a wait on a date alone as parked, and never a decision item", "[open · parked]" in fm60 and "parked" not in fm61, (fm60, fm61))
 st_, ct_, body_ = client_reads_svc._client_get("items", {"key": U["team-back"]})
 held_ = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
 check("5.6 the session items listing says held for it, as the board draws it", held_.get("a60") is True, held_)
@@ -322,12 +322,12 @@ check("5.9 ...a relay's ask-by day is no wake: the cap does not judge it, as on 
 item(67, needs=["decision", BACK], until=w(3), ask="Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date")
 item(68, needs=[BACK], until=w(3))
 f67, f68 = _get_tool._fmt(dict(rd(67), gid="a67")).splitlines()[0], _get_tool._fmt(dict(rd(68), gid="a68")).splitlines()[0]
-check("5.10 tag: a decision with an until is not on hold, a date-only wait is", "on hold" not in f67 and "on hold" in f68, (f67, f68))
+check("5.10 tag: a decision with an until is not parked, a date-only wait is", "parked" not in f67 and "[open · parked]" in f68, (f67, f68))
 st_, ct_, body_ = client_reads_svc._client_get("items", {"key": U["team-back"]})
 held10 = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
 check("5.10 listing: a decision with an until is held False, a date-only wait True", held10.get("a67") is False and held10.get("a68") is True, held10)
 (T / "board.md").write_text("", encoding="utf-8")
-brief10 = _wt_brief.stackshot_brief(); act10, _, hold10 = brief10.partition("\n\nOn hold (")
+brief10 = _wt_brief.stackshot_brief(); act10, _, hold10 = brief10.partition("\n\nParked (")
 check("5.10 brief: a decision with an until is among the active items, a date-only wait among the parked", "a67 [open" in act10 and "a67 [open" not in hold10 and "a68 [open" in hold10 and "a68 [open" not in act10, (act10[-300:], hold10[:300]))
 check("5.10 all three read the one rule: _is_parked is render.is_held", _item_read._is_parked(rd(68)) and not _item_read._is_parked(rd(67)) and _item_read._is_parked(rd(68)) == _rmod.is_held(rd(68)) and _item_read._is_parked(rd(67)) == _rmod.is_held(rd(67)), None)
 
@@ -370,7 +370,7 @@ try:
     bupd(69, clear_hold=True)
 finally:
     telling.pilot_charge, telling.pilot_relay, _web_page_debts._writer_owes = real_charge, real_relay, real_owes
-check("5.12 a write that sets a date-only wait tells the keeper 'put on hold', and one that clears it 'released from hold'", len(rel12) == 2 and rel12[0] == "put on hold" and rel12[1] == "released from hold", rel12)
+check("5.12 a write that sets a date-only wait tells the keeper 'parked', and one that clears it 'unparked'", len(rel12) == 2 and rel12[0] == "parked" and rel12[1] == "unparked", rel12)
 check("5.12 ...and the minute loop is woken by the write that parks it", woke12, None)
 
 # 5.13 the words that teach the date carry the hand-off exception, and none calls a date a reminder or recommends the aliases the window ends
@@ -432,7 +432,7 @@ check("5.14 …a hold's wake takes it", bool(bupd(95, hold=True, wake=w(3), wait
 check("5.14 …and a date past the cap takes it", bool(bupd(96, until=w(40), wait_basis=f"the vendor ships {w(40)}")) and bool(W.basis_of(mt(96))), mt(96))
 upd14 = _wt_update._UPDATE_DESC + _wt_update._WAIT_FORM
 check("5.14 the update description says so: a bare date within the cap refuses a basis unless the item is on hold or verifying, and a date no longer leaves an item active as a reminder",
-      "A bare date within the cap (until, or its old name wake) is a wait on its own" in upd14 and "refused as not needed unless the item is on hold (hold=true) or verifying" in upd14 and "a date no longer leaves the item active as a reminder" in upd14, None)
+      "A bare date within the cap (until, or its old name wake) is a wait on its own" in upd14 and "refused as not needed unless the item is parked (hold=true) or verifying" in upd14 and "a date no longer leaves the item active as a reminder" in upd14, None)
 check("5.14 docs/item-model.md names until as the one date of a wait", "stored as `until`" in (root14 / "docs" / "item-model.md").read_text(encoding="utf-8"), None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

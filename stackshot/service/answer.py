@@ -138,7 +138,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     owner, project = _telling.holder(item), str(meta.get("project") or "")
     verb = "answered" if rec.get("kind") == "decision" else "commented on"
     url = _item_url(gid) or _telling.notice_link(gid)
-    done = f"; on hold with a wake on {rec['parked']}, set by the server" if rec.get("parked") else ""   # a stored raise's park, applied
+    done = f"; parked with a wake on {rec['parked']}, set by the server" if rec.get("parked") else ""   # a stored raise's park, applied
     line = f"[stackshot] {OWNER} {verb} {_gh.shown(gid)} on the board: {_answers()._answer_words(rec)}{done} → {url}"
     thenid = _session_id(then or handed) if (then or handed) else ""
     if then:      # a Done: the step he did, then who has the item now and his note
@@ -151,7 +151,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         line = (f"[stackshot] {OWNER} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now with his note: "
                 f"“{_answers()._answer_words({'text': rec.get('text')}, 300)}” → {url}")
         judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {OWNER} "
-                 f"with a new step (step=…); if it says he will do the step at a later time, put the item on hold until then "
+                 f"with a new step (step=…); if it says he will do the step at a later time, park the item until then "
                  f"(update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
                  f"leave his step open and hand no new step back.")
     yours = ("" if _answers()._answer_words(rec).rstrip()[-1:] in (".", "!", "?", ")") else ".") + " It's yours now" if handed and not then else ""      # a decision handed over: the mover's line plus the tail
@@ -315,7 +315,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                 said = _noteread.read(text, _pages.zone_now(), _watch.parse_date)      # what the note says, applied by the server (note_read.py): a note that says he did it, or names a later time
                 if said["until"]:           # "tomorrow evening": his step stays open and the item waits until then, on his words (the park path below); the then-mover is told it is held
                     until = said["until"]
-                    rec["applied"] = f"The server read the note as a later time and put the item on hold until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
+                    rec["applied"] = f"The server read the note as a later time and parked the item until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
                 else:
                     _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_holders._owner_want(meta), writer=NAME, add=False)
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told

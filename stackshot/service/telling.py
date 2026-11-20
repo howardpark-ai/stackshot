@@ -1418,7 +1418,7 @@ def writer_charge(project: str, gid: str, writer: str, keeper: str, what: str, l
     h = _hooks()
     _ho_told(gid, writer)         # step 2: the writer hears this write in the reply
     h.owed_mark(project, writer, gid, settle="any" if loose else "ct", moves=keeper, what=what)
-    which = ("any page write, a timeline line included, since only next or the hold changed" if loose
+    which = ("any page write, a timeline line included, since only next or the park changed" if loose
              else "its Current state, since the item's state changed")
     return (f"\n(pilot project: the page update is yours in this turn: {project}, {which}. If it is still missing after "
             f"{h.grace_min()} min, it moves to {h.debt_mover(project, keeper)}.)")

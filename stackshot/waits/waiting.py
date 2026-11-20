@@ -361,16 +361,16 @@ def entry_pairs(item: dict[str, Any], ts: Any, now: float, prior: "float | None 
         return False, "it has no time"
     cur = clock_of(item, now)
     if t >= cur - 0.5:
-        return True, "given since the move that set the current wake or hold"
+        return True, "given since the move that set the current wake or park"
     if prior is UNREADABLE:
         return False, UNREADABLE_WHY
     if prior is not None:
         if prior <= t + 0.5:
-            return True, "the last thing before the move that set the current wake or hold: no state move lies between"
+            return True, "the last thing before the move that set the current wake or park: no state move lies between"
         return False, f"a state move ({_whenwords(prior)}) came after it and before the move that set the current wake"
     if cur - t <= PAIR_LEAD_SECONDS:
-        return True, "within 24 hours before the move that set the current wake or hold (no history shows an earlier move)"
-    return False, f"older than the move that set the current wake or hold ({_whenwords(cur)}) by more than 24 hours, and no history shows that nothing moved between"
+        return True, "within 24 hours before the move that set the current wake or park (no history shows an earlier move)"
+    return False, f"older than the move that set the current wake or park ({_whenwords(cur)}) by more than 24 hours, and no history shows that nothing moved between"
 
 
 def _whenwords(ts: float) -> str:

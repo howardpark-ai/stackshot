@@ -31,7 +31,7 @@ def _route_released(rel: list[str]) -> str:
             turned.append(f"{g} turned to {_watch_label(str(w.get('to') or ''))}")
         else:
             held.append(g)
-    out = f"\n({', '.join(held)} waited on this anchor and {'is' if len(held) == 1 else 'are'} released from hold)" if held else ""
+    out = f"\n({', '.join(held)} waited on this anchor and {'is' if len(held) == 1 else 'are'} unparked)" if held else ""
     return out + (f"\n({'; '.join(turned)}: its wait on this anchor ended)" if turned else "")
 
 

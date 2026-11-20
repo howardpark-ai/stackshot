@@ -157,8 +157,8 @@ check("3 a wake with no wait_basis → unchanged: alive, listed on agents, no bo
 # ---- 4. hold=true variants
 m7, m8 = view_of(7), view_of(8)
 check("4 on hold with a wake and a basis: a held wait as before, its reason the hold (the hold is the park), not the basis",
-      m7.state == _model.WAITING and m7.wait.until == W1 and m7.wait.basis == "on hold until its wake" and _dw.basis_wait(it_of(7), now_) is None and _dw.held_wait(it_of(7), now_) is not None, m7)
-check("4 …on hold with a wake and no basis: the same held wait", m8.state == _model.WAITING and m8.wait.basis == "on hold until its wake", m8)
+      m7.state == _model.WAITING and m7.wait.until == W1 and m7.wait.basis == "parked until its wake" and _dw.basis_wait(it_of(7), now_) is None and _dw.held_wait(it_of(7), now_) is not None, m7)
+check("4 …on hold with a wake and no basis: the same held wait", m8.state == _model.WAITING and m8.wait.basis == "parked until its wake", m8)
 check("4 …on hold with no wake: unchanged, alive", view_of(9).state == _model.ALIVE and _dw.basis_wait(it_of(9), now_) is None, view_of(9))
 
 # ---- 5. needs, after, a stored wait

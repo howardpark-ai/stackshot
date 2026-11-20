@@ -89,6 +89,7 @@ check("1 arbitrary-hold: a hold nothing explains is a board checks finding of th
 check("1 mislabeled-state: a stored state its fields contradict is a board checks finding of that kind",
       any(f["id"] == "board#3" and f["category"] == "board checks" and f["detail"].startswith("mislabeled-state: ") for f in fs), fs)
 check("1 reads-as-wait: an alive item whose next says it waits, naming the line and the pattern", any(f["id"] == "board#4" and f["category"] == "reads-as-wait" and "waiting for the build" in f["detail"] for f in fs), fs)
+check("1 reads-as-wait: its fix line says to set the wait itself, a park with its reason, an after item or an event wait", any(f["id"] == "board#4" and f["category"] == "reads-as-wait" and f["fix"] == "set the wait itself (a park with its reason, an after item, an event wait), or write next as the action to take now" for f in fs), [f.get("fix") for f in fs])
 check("1 the broad words are a flag (id, mover, the words) and no finding", flags == [{"id": "board#5", "project": "projects/alpha", "mover": "home-agent", "words": ["when"]}] and not any(f["id"] == "board#5" for f in fs), (flags, fs))
 check("1 none is raised for a clean item, a closed one, one that already waits, one idle for hours or one stale by its dates",
       not any(f["id"] in ("board#6", "board#7", "board#8", "board#9", "board#9041") for f in fs), [f for f in fs if f["id"] in ("board#6", "board#7", "board#8", "board#9", "board#9041")])

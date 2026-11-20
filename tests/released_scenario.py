@@ -207,7 +207,7 @@ check("\"release PR #41\" on an unanchored item without the URL, in the release'
       raw(8) == before[8] and "a8" not in rows, rows.get("a8"))
 check("held, decision, other-session needs, another PR, completed: untouched, byte for byte", not same({i: before[i] for i in (3, 4, 5, 7, 14)}), same(before))
 check("…held, decision and other-session needs are reported as left alone, each with why; the others are not listed",
-      rows.get("a3", {}).get("action") == "left" and rows["a3"]["why"] == "on hold"
+      rows.get("a3", {}).get("action") == "left" and rows["a3"]["why"] == "parked"
       and rows.get("a4", {}).get("action") == "left" and "decision" in rows["a4"]["why"]
       and rows.get("a14", {}).get("action") == "left" and "its needs name home-third, not its mover" == rows["a14"]["why"]
       and not {"a5", "a7"} & set(rows), rows)
@@ -389,7 +389,7 @@ client.post = lambda what, body, timeout=30.0: (sent.append((what, body)), (200,
     {"item": "a2", "action": "ticked", "told": "home-builder", "subject": "[home] item 2", "pr": 41},
     {"item": "a25", "action": "ticked", "told": "", "quiet": True, "mover": "home-builder", "subject": "[home] item 25", "pr": 41},
     {"item": "a16", "action": "told", "told": "home-builder", "subject": "[home] item 16", "pr": 41},
-    {"item": "a3", "action": "left", "why": "on hold", "subject": "[home] item 3", "pr": 41},
+    {"item": "a3", "action": "left", "why": "parked", "subject": "[home] item 3", "pr": 41},
     {"item": "a14", "action": "left", "why": "its needs name home-third, not its mover", "subject": "[home] item 14", "pr": 41}]}))[1]
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf): rc = client.main(["client.py", "released", "--pr", PR, "--sha", "0606060"])
@@ -399,7 +399,7 @@ check("…and prints one line per item, a skipped one with why (release.sh logs 
     "stackshot: PR #41: ticked the release step of a2 and told its mover home-builder that the item's other open steps remain — [home] item 2",
     "stackshot: PR #41: ticked the release step of a25 (every other open step releases another PR: nobody told) — [home] item 25",
     "stackshot: PR #41: told the mover home-builder of a16 that the PR is live and its release step is not ticked (it names a follow-up or a condition, so the step stays open) — [home] item 16",
-    "stackshot: PR #41: left a3 alone: on hold — [home] item 3",
+    "stackshot: PR #41: left a3 alone: parked — [home] item 3",
     "stackshot: PR #41: left a14 alone: its needs name home-third, not its mover — [home] item 14"], buf.getvalue())
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf): rc = client.main(["client.py", "sweep-released", "--dry-run"])

@@ -258,7 +258,7 @@ leaves = true                                       # true: the server takes an 
 [freshness]                                         # an active open item reads stale when it has gone this many days without being confirmed (computed, never sent):
 call_days = 1                                       # needs decision (your call)
 agent_days = 1                                      # no needs (on agent)
-external_days = 3                                   # needs external (on others). Items on hold are never stale; nor are completed ones
+external_days = 3                                   # needs external (on others). Parked items are never stale; nor are completed ones
 
 [publish]
 git = true                                          # false: render only, never fetch, commit or push the store (a staging instance)
@@ -476,7 +476,7 @@ own_repos = []                                      # private repositories only;
                                                     # A comment, a review, failing CI and every event on another repository are delivered as before.
                                                     # [] = none (everything delivered). Read at each event: a reload applies it
 writer_owes_page = false                            # true = another session's board write is that writer's page update (its Current
-                                                    # state; any page write for a next-only change or a hold), never refused; still missing after
+                                                    # state; any page write for a next-only change or a park), never refused; still missing after
                                                     # [page_rule] grace_minutes it moves to the project's keeper with the board notice. A close of an item with
                                                     # anchors scoped to it still tells the keeper, for the anchors. false = the keeper is charged and told at once
 never_named = []                                    # background agents the server never names in an item's needs on its own (a handover message that
@@ -563,7 +563,7 @@ park_days = 3                                       # only a raise stored with a
                                                     # that session has no turn running for `minutes`: the CLI's registry says the pane is idle and its status changed that long ago (a pane that
                                                     # starts a turn restarts the count). Steps, each `minutes` after the one before it: the notice goes to the mover once more; the hand-off's cold
                                                     # call (`claude -p`, [model] cold_call) names who takes it, at most once per item in 24 hours; the project's builder; when none can take it the
-                                                    # fleet's builder ([fleet] operator_session) is sent one message, once per hand-off record, and the item stays with its mover. Not looked at: an item on hold or on a wait, one the owner or an
+                                                    # fleet's builder ([fleet] operator_session) is sent one message, once per hand-off record, and the item stays with its mover. Not looked at: a parked item or on a wait, one the owner or an
                                                     # outsider moves, a hand-off in flight to a session that is not a front agent (the hand-off ladder has it), a pane the registry does not show
                                                     # (another machine's). Each step is written on the item (History) and the journal. Needs [model] handoff on. Live
 enabled = true                                      # false: the pass does nothing, but only with [stall] pause_item (below) naming an item with the owner's answer, and only for [stall] max_pause_hours (below) from when the server first saw it: a pause always ends on its own.
@@ -615,8 +615,8 @@ github_minutes = 5                                  # one pull request is read a
                                                     # down the wait doubles up to an hour). 0 = every pass. Live
 
 [waiting]                                           # what an item waits on (stackshot/waits/waiting.py): every open item has a mover (the one party whose move it is now: a session, the owner, an
-                                                    # outside party, or for an `after` item the item it waits on). No "expected by" time is computed for it and a parked item (on hold, or after
-                                                    # an open item) carries no stale mark: it is held until its wake or its blocker closes. default_days and agent_hours, which timed that
+                                                    # outside party, or for an `after` item the item it waits on). No "expected by" time is computed for it and a parked item (parked, or after
+                                                    # an open item) carries no stale mark: it waits until its wake or its blocker closes. default_days and agent_hours, which timed that
                                                     # computed date, are no longer read: a config file that still has them loads, and they do nothing.
                                                     # All live (read at use).
 cap_days = 7                                        # the longest a wake a session sets may lie after the item's last move; no wait is exempt (anchored too). A due date is
@@ -625,7 +625,7 @@ cap_needs_owner = true                             # true: a longer wake is refu
                                                     # real transcript, a message from the last cap_days; or his board answer given since the item's last state change); false: allowed.
                                                     # The cap gates the write only; a date stored earlier is read as it is.
                                                     # A wake past the cap may also stand on a real-world date instead of his words: update(wait_basis="<what happens> YYYY-MM-DD"),
-                                                    # for that wake only (metadata.wait_basis; a different wake drops it). Not for a wake within the cap, nor for a hold with no date.
+                                                    # for that wake only (metadata.wait_basis; a different wake drops it). Not for a wake within the cap, nor for a park with no date.
 basis_weekday = 0                                   # the weekday (0 = Monday … 6 = Sunday; -1 = every day) on which board.md's head and the brief list the waits that stand on a
                                                     # real-world date, for a person to check the dates still hold
 dated_wait_min_hours = 1                            # a doing item whose wake is more than this many hours out, with every open step dated for that day or later, is shown as waiting until then (stackshot/waits/dated_wait.py); nearer, it is work in hand

@@ -96,9 +96,16 @@ kind = lambda i: sorted(set(by.get(f"board#{i}", [])))
 check("no idle-on-agent kind: items 8, 8 and 9 hours old on a session are no board finding", kind(1) == [] and kind(3) == [] and kind(4) == [] and "idle-on-agent" not in BR.KINDS and not hasattr(BR, "IDLE_HOURS"), by)
 check("clean: written an hour ago, verifying, held, on Oliver", kind(2) == [] and kind(5) == [] and kind(6) == [] and kind(7) == [], by)
 check("mislabeled-state: doing while held, your-call with no ask, outside with no external in needs", kind(8) == ["mislabeled-state"] and kind(9) == ["mislabeled-state"] and kind(10) == ["mislabeled-state"], by)
-check("the doing-while-held finding says it is on hold", any(f["id"] == "board#8" and "on hold" in f["detail"] for f in rep["findings"]), rep["findings"])
+check("the doing-while-held finding says it is parked", any(f["id"] == "board#8" and "(it is parked)" in f["detail"] for f in rep["findings"]), rep["findings"])
 check("mislabeled-state: a hold whose words wait on Oliver's decision, and on an outside party", kind(9012) == ["mislabeled-state"] and kind(9020) == ["mislabeled-state"]
       and any(f["id"] == "board#9012" and "your-call" in f["detail"] for f in rep["findings"]) and any(f["id"] == "board#9020" and "outside" in f["detail"] for f in rep["findings"]), rep["findings"])
+dt = lambda i: [f["detail"] for f in rep["findings"] if f["id"] == f"board#{i}"]
+check("the findings say parked, never on hold: the decision words, the outside-party words and the arbitrary park each in the park's own words",
+      any(d.startswith("parked while its words wait on Oliver's decision: that is your-call, not a park") for d in dt(9012))
+      and any(d.startswith("parked while its words wait on an outside party: that is outside (needs external, party, chase), not a park") for d in dt(9020))
+      and any(d.startswith("parked with ") and "; nothing holds it (no open after" in d for d in dt(13)) and not any("on hold" in f["detail"] or "hold:" in f["detail"] for f in rep["findings"]), rep["findings"])
+check("the clean line says no open item is parked for no reason, and the tool's own help says the same",
+      BR.line({"items": 0, "kinds": {}}) == "Board checks: no open item is parked for no reason or in the wrong state" and "parked for no concrete reason" in subprocess.run([sys.executable, os.path.join(STACK, "stackshot", "tools", "board_report.py"), "--help"], capture_output=True, text=True).stdout.replace("\n", " "), None)
 check("arbitrary-hold: a hold whose words name no event, and one that names only a date", kind(13) == ["arbitrary-hold"] and kind(14) == ["arbitrary-hold"], by)
 check("a hold that something holds is no finding: an open after item, needs external with a party, Oliver's recorded words, an item in the words",
       kind(15) == [] and kind(16) == [] and kind(17) == [] and kind(18) == [], by)

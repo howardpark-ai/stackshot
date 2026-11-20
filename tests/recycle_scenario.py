@@ -115,7 +115,7 @@ check("kept: its owner is on another machine", kept.get("a4", "").startswith("it
 check("one line per target, tagged: each item's mover is told of its own item (the keeper stands in for no one)", sorted(o for _, o, _ in told) == sorted([U["home-here"], U["home-held"]]) and all(t == "recycle" for t, _, _ in told), told)
 here = next(n for _, o, n in told if o == U["home-here"] and "a1" in n); held = next(n for _, o, n in told if o == U["home-held"] and "a5" in n)
 check("the owner's line names its item and says resume", "recycle you waited for has run (testbox" in here and "re-read a1 and resume" in here and ", partly" in here, here)
-check("the mover's line for the held item says the hold went with the recycle", "re-read a5 and resume" in held and "a5 waited only for the recycle and is released from hold." in held, held)
+check("the mover's line for the held item says the hold went with the recycle", "re-read a5 and resume" in held and "a5 waited only for the recycle and is unparked." in held, held)
 check("the recycle clears without a state change", rd(1)["state_updated"] == now - 3600, rd(1))
 check("wanted: only the item flagged after the last recycle began (the skipped owner's item is not)", recycle_svc._recycle_wanted("testbox") == ["a2"], recycle_svc._recycle_wanted("testbox"))
 say(5); _update_svc._update("a5", hold=True, wake="2099-01-02"); _update_svc._update("a5", recycle=True)            # held again (with a wake), and flagged again
@@ -293,7 +293,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf): rc = client.main(["client.py", "recycle-due", "--pr", PR])
 check("client.py recycle-due --pr posts the PR", rc == 0 and sent[-1] == ("recycle-due", {"pr": PR}), sent)
 check("and prints one line per item, held ones said", buf.getvalue() == (f"stackshot: s12 (mover home-here, anchored to {PR}) now waits for a recycle\n"
-      f"stackshot: s13 (mover home-away, anchored to {PR}) already waits for a recycle — but it is on hold, so the watchdog does not count it until it wakes\n"), buf.getvalue())
+      f"stackshot: s13 (mover home-away, anchored to {PR}) already waits for a recycle — but it is parked, so the watchdog does not count it until it wakes\n"), buf.getvalue())
 with contextlib.redirect_stdout(io.StringIO()): rc = client.main(["client.py", "recycle-due", "--item", "s12"])
 check("client.py recycle-due --item posts the id", rc == 0 and sent[-1] == ("recycle-due", {"item": "s12"}), sent)
 n_sent = len(sent)
@@ -346,12 +346,13 @@ with TestClient(app) as c:
           and rd(27)["metadata"].get("recycle") is True and rd(27)["metadata"].get("hold") is True, (res1.text, rd(27)["metadata"]))
     check("retry: and clears the unheld and recycle-only held items it covered, releasing the hold", {"a20", "a23"} <= set(res1.json().get("cleared", []))
           and "recycle" not in rd(20)["metadata"] and "hold" not in rd(20)["metadata"], (res1.text, rd(20)["metadata"]))
+    check("retry: the mover's line says the recycle-only item is unparked and the one that also waits on a wake stays parked", any("a20 and a22 waited only for the recycle and are unparked." in n and "a21 stays parked, waiting on its wake or after too: clear_hold=true if it should come back now." in n for _, _, n in told), [n[-260:] for _, _, n in told if "a2" in n])
     told.clear()
     res2 = c.post("/client/recycled", json={"kind": "recycle", "started": S, "result": "ok", "skipped": []}, headers=h)
     check("retry: a second report for the same start time is accepted", res2.status_code == 200, res2.text)
     check("retry: it clears the items the first one kept", {"a26", "a27"} <= set(res2.json().get("cleared", [])) and "recycle" not in rd(26)["metadata"]
           and "recycle" not in rd(27)["metadata"], (res2.text, rd(26)["metadata"], rd(27)["metadata"]))
-    check("retry: the item held only for the recycle is released from hold", "hold" not in rd(27)["metadata"] and any("a27" in n and "released from hold" in n for _, _, n in told), (rd(27)["metadata"], told))
+    check("retry: the item held only for the recycle is unparked", "hold" not in rd(27)["metadata"] and any("a27" in n and "unparked" in n for _, _, n in told), (rd(27)["metadata"], told))
     check("retry: the recorded start of the machine's last recycle stays the original", json.load(open(recycle_svc._recycles_path())).get("testbox") == S, open(recycle_svc._recycles_path()).read())
     res3 = c.post("/client/recycled", json={"kind": "recycle", "started": S, "result": "ok", "skipped": []}, headers=h)
     check("retry: a third report changes nothing and still answers", res3.status_code == 200 and not ({"a26", "a27"} & set(res3.json().get("cleared", []))), res3.text)
@@ -439,6 +440,19 @@ with TestClient(app) as c:
     check("GET /client/recycle-wanted: the first token is still the count of the tokens after it, the tokens are the server's", res.status_code == 200
           and _parts[0] == str(len(_parts) - 1) == str(len(_rows)) and _parts[1:] == _toks, res.text)
 _anc_path.write_text(_anc_before)
+
+# ---- 6e. the History line the server writes when a recycle is done says parked, never on hold: ": unparked" for the item the recycle alone held, "; still parked, waiting on its wake or after" for one a wake holds as well
+for i in (40, 41): item(i, "home-here")
+_update_svc._update("a40", recycle=True); _update_svc._update("a40", hold=True)
+_update_svc._update("a41", recycle=True); say(41); _update_svc._update("a41", hold=True, wake="2099-01-02")
+_notes = {}; _orig_save = recycle_svc._writes.save
+def _spy_save(gid, it, writer="", note="", **kw):
+    _notes[gid] = note; return _orig_save(gid, it, writer=writer, note=note, **kw)
+recycle_svc._writes.save = _spy_save
+try: recycle_svc._recycled("testbox", "recycle", time.time() + 200, "ok", [])
+finally: recycle_svc._writes.save = _orig_save
+check("the History line of a recycle that freed its item says unparked, and one that left it parked on a wake says still parked",
+      _notes.get("a40", "").endswith(": unparked") and _notes.get("a41", "").endswith("; still parked, waiting on its wake or after") and not any("hold" in n for n in _notes.values()), _notes)
 
 # ---- 7. release.sh --recycle: flags the PR's anchored items after a green deploy, sala's idle recycle when none (after)
 rel = pathlib.Path(STACK, "release.sh").read_text(encoding="utf-8")

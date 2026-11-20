@@ -131,7 +131,7 @@ def plan_a(n: int, use: str, now: float) -> dict[str, Any]:
         if attributed(a) and _wt.park_words(a.get("text")):
             pairing[id(a)] = _wt.entry_pairs(item, a.get("ts"), now, prior)
             ok, why = pairing[id(a)]
-            mark += f", pairs with the current wake or hold ({why})" if ok else f", but STALE: {why}"
+            mark += f", pairs with the current wake or park ({why})" if ok else f", but STALE: {why}"
         L.append(f"  entry {a.get('ts')} {local_time(a.get('ts') or 0)} · {a.get('kind')} via {a.get('via')} · {mark} · “{' '.join(str(a.get('text') or a.get('choice') or '').split())[:300]}”")
     if not entries:
         L.append("  no answers or comments of his are stored on the item")
@@ -143,7 +143,7 @@ def plan_a(n: int, use: str, now: float) -> dict[str, Any]:
     if cands:
         pick = max(cands, key=lambda a: float(a.get("ts") or 0))
     if pick is None:
-        L.append("  NOTHING TO RECORD: no stored sentence of his parks this item and stands behind the move that set its current wake or hold")
+        L.append("  NOTHING TO RECORD: no stored sentence of his parks this item and stands behind the move that set its current wake or park")
     elif co.get("wake") == m.get("wake") and str(co.get("quote") or "").strip() == str(pick.get("text") or "").strip():
         L.append("  ALREADY RECORDED: cap_ok holds this quote for the current wake")
     elif not m.get("wake"):

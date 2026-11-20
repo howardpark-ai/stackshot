@@ -745,6 +745,8 @@ check("11 told: a pilot relay's push to a session is in the write's told-set (it
       ("a64", _web_page_debts._session_id("home-peer")) in telling.HO_STATE.told and len([x for x in pushes() if x[0] == "home-peer" and "a64" in x[1]]) == 1 and isinstance(ho(64).get("delivered_at"), float), (telling.HO_STATE.told, pushes(), ho(64)))
 telling.HO_STATE.told = set(); telling.writer_charge("projects/alpha", "a64", "home-send", "home-stew", "created", False)
 check("11 told: …and so is a writer charge's (the writer hears the write in its reply)", ("a64", _web_page_debts._session_id("home-send")) in telling.HO_STATE.told, telling.HO_STATE.told)
+_wc_loose = telling.writer_charge("projects/alpha", "a64", "home-send", "home-stew", "created", True)
+check("11 told: …a loose charge names any page write, a timeline line included, since only next or the park changed", "since only next or the park changed" in _wc_loose and "on hold" not in _wc_loose and "hold changed" not in _wc_loose, _wc_loose)
 
 # 11.4 writes that are no session's: Oliver's board answer, a script, the server's own save
 item(17, needs=["decision"], ask=ASK, next=f"{OWN}: decide")
@@ -981,10 +983,10 @@ for n_, kw_ in ((140, {"wake": FUT}), (141, {"until": FUT}), (142, {"wake": FUT,
     check(f"15.1b a{n_} a hand-off with {'/'.join(sorted(kw_))}: the record names the new mover and the item is not parked", ho(n_).get("to") == "home-peer" and m_.get("mover") == "home-peer" and not stale_now(n_) and not m_.get("until") and not m_.get("hold"), m_)
     check(f"15.1b a{n_} …the date stays as the hand-off's backstop (a wake), and the board draws the item alive", m_.get("wake") == FUT and not _item_read._is_parked(rd(n_)) and not _item_read._date_parked(rd(n_)), m_)
 item(143); out143 = upd(143, "home-send", mover="home-peer", next="home-peer: do the thing", wake=FUT)
-check("15.1b the reply names no wait note for the backstop", "alone is a wait" not in out143 and "put on hold" not in out143 and "until" not in out143.split("\n", 1)[0], out143[-400:])
+check("15.1b the reply names no wait note for the backstop", "alone is a wait" not in out143 and "parked" not in out143 and "until" not in out143.split("\n", 1)[0], out143[-400:])
 item(146); out146 = _wt_update.stackshot_update("a146", sender="home-send", mover="home-peer", next="home-peer: do the thing", wake=FUT)      # through the tool: the whole reply, the alias note included
 check("15.1b the whole reply of the tool says the date is stored as the wake, the hand-off's backstop, and no wait (not as until)",
-      f"stored as wake={FUT}" in out146 and "no wait" in out146 and "stored as until" not in out146 and "now written as until" not in out146 and "alone is a" not in out146 and "put on hold" not in out146, out146[-700:])
+      f"stored as wake={FUT}" in out146 and "no wait" in out146 and "stored as until" not in out146 and "now written as until" not in out146 and "alone is a" not in out146 and "parked" not in out146, out146[-700:])
 check("15.1b …and the stored date is the wake it says", mt(146).get("wake") == FUT and not mt(146).get("until"), mt(146))
 item(147); out147 = _wt_update.stackshot_update("a147", sender="home-send", mover="home-peer", next="home-peer: do the thing", check=CHK, ask_by=FUT)
 check("15.1b an ask_by backstop says so in the whole reply too", f"stored as ask_by={FUT}" in out147 and "stored as until" not in out147, out147[-700:])

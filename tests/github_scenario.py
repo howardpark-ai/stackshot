@@ -919,7 +919,7 @@ rc = [t for t in told if t[3] == "recycle"]
 b1, b2 = f"board#{num(g_r1)}", f"board#{num(g_r2)}"
 check("a recycle notice names its items board#<n>, the released one too; the stderr tag keeps g<n>",
       len(rc) == 1 and rc[0][0] == f"{g_r1} and {g_r2}" and rc[0][2].startswith(f"[stackshot] the recycle you waited for has run (testbox, ")
-      and f"re-read {b1} and {b2} and resume. {b2} waited only for the recycle and is released from hold." in rc[0][2]
+      and f"re-read {b1} and {b2} and resume. {b2} waited only for the recycle and is unparked." in rc[0][2]
       and not re.search(rf"(?<![\w/-])({g_r1}|{g_r2})\b", rc[0][2]), rc)
 
 # ---- 6c. phase 3, the inbound half: the owner's own comments on GitHub reach the item and its sessions

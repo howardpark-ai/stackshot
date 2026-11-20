@@ -36,9 +36,9 @@ day or later, so it is listed as waiting until then; a date alone (an until, or 
 until it and the item is listed as waiting, except in a write that hands the item to another session, where the date
 is only that hand-off's backstop and is no wait (unless the item carries hold, wait_kind, wait_basis or an after link,
 in this call or stored by an earlier one: then the date stays a wait); for a wake an item still carries with no until:
-on a stored doing item that is on hold, with a wake more than that hour away it is listed as waiting until the wake
-(`on hold until its wake`), and on a stored doing item that is not on hold whose wake is still ahead and carries a
-wait_basis: it is listed as waiting until the wake with the basis text as the reason (an item on hold keeps `on hold
+on a stored doing item that is parked, with a wake more than that hour away it is listed as waiting until the wake
+(`parked until its wake`), and on a stored doing item that is not parked whose wake is still ahead and carries a
+wait_basis: it is listed as waiting until the wake with the basis text as the reason (an item parked keeps `parked
 until its wake` as the reason, a basis or not; a wake with no wait_basis there is a backstop and the item stays
 active). An item shows only its real dates (wake, due, ask by) and no expected time: nothing is sent when a date
 passes, so whoever reads it closes the item or moves it through update. `next:` holds the open steps (the first open

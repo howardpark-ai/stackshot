@@ -202,7 +202,7 @@ def _form_notes(description: str = "", next_: str = "", parked: bool = False, me
         out.append("this item now waits on someone outside, and no thread is anchored to it: anchor the thread it waits on in this same turn "
                    f"(anchors(project, add=[url], items=[{gid or 'its id'}])), so its reply wakes you and the item links it")
     if parked and meta is not None and _waits_on_owner(str(meta.get("next") or "")) and not _item_read.parked_for_owner({"status": "open", "metadata": meta}):
-        out.append(f"this hold's next says it waits on {OWNER}: park his call with needs=[<session>] and mover={OWNER} (his ask returns at the date), or give it needs=decision with its ask, "
+        out.append(f"this park's next says it waits on {OWNER}: park his call with needs=[<session>] and mover={OWNER} (his ask returns at the date), or give it needs=decision with its ask, "
                    f"or after=[<the item that carries the ask>], which releases it when that item closes (a wake on an item {OWNER} has already answered is fine)")
     if cmd and meta is not None and (why := _command_note(meta)):
         out.append(why)
@@ -267,8 +267,8 @@ def _holds_report() -> str:
     """The unexplained holds as the client prints them: one line each, for the item's mover to release one by one."""
     rows = _holds_unexplained()
     if not rows:
-        return "no open item is on hold without something holding it\n"
-    out = [f"{len(rows)} open item(s) on hold that nothing holds now (no open after, pane recycle, needs external or item-scoped anchor); "
+        return "no open item is parked without something holding it\n"
+    out = [f"{len(rows)} open item(s) parked that nothing holds now (no open after, pane recycle, needs external or item-scoped anchor); "
            "its mover releases each with update clear_hold=true (the server takes it from any session that writes the item), or gives it its condition; the mover shown is who holds it:"]
     for r in rows:
         when = _rmod.when_words(dt.datetime.fromtimestamp(r["at"], _wttext.ZONE)) if r["at"] else "before the record"

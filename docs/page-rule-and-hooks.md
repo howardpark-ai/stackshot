@@ -21,7 +21,7 @@ commits, pushes, opens or merges a PR, or runs `deploy.sh` or `release.sh`) whil
 updated nor confirmed is asked once to update them, `confirm` them, or say there is no change. The answer can be in the
 turn's own final message: `Board: no change, <reason>` covers every such item, `Board <id>: no change, <reason>` one
 item, a bare `Board:` line followed by one bullet per item (`- <id>: no change, <reason>`) several, and the reason is at
-least three words (the same line in the instance's own language, set under `[keywords.pages]` `board_label` and `no_change`, reads the same). Items on hold are never asked
+least three words (the same line in the instance's own language, set under `[keywords.pages]` `board_label` and `no_change`, reads the same). Parked items are never asked
 about. The hook gets the session's open items with one read of the client API (`items?key=<session>`), only on a turn
 that wrote something; when the server does not answer, nothing is asked. With `mode = "note"` the same question does not
 hold the turn: `check` keeps it in the session's state and `nag` says it at the next prompt, which saves the extra model

@@ -637,7 +637,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           [(a["kind"], a.get("choice"), a["text"], a["via"], a["step"]) for a in m41["answers"]] == [("step-reply", None, "which box do I run it on?", "board", _STEPN)], m41["answers"])
     _tz, _minreason = _cfg.tz_abbr(), _cfg.WAIT_GUARD_REASON_MIN
     _judge_old = ". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to Oliver with a new step (step=…)"
-    _judge_later = (f"; if it says he will do the step at a later time, put the item on hold until then (update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_tz}>, "
+    _judge_later = (f"; if it says he will do the step at a later time, park the item until then (update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_tz}>, "
                     f"wait_reason=<what it waits on, at least {_minreason} characters>), leave his step open and hand no new step back.")
     _judge = _judge_old + _judge_later
     check("an old page's Send with a note: the then-mover alone is told, with his note and the instruction to judge it (the creator is not told)",
@@ -671,7 +671,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear(); r_s47 = post("/items/a47/answer", {"token": tok("a47"), "act": "send", "text": "I will do this tomorrow evening", "back": "/#task-a-47"}); m47 = rd("a", 47)["metadata"]; n47 = {t[1]: t[2] for t in told}[AGENT]
     check("a note the server reads as a later time: the item is on hold until then (the wake as YYYY-MM-DDTHH:MM, his words behind it), with the then-mover, and the notice says what was done, not to judge the note",
           hd_(m47) is True and wk_(m47) == _when and (m47.get("cap_ok") or {}).get("quote") == "I will do this tomorrow evening" and m47.get("mover") == "home-agent"
-          and "put the item on hold until" in n47 and "Judge the note" not in n47 and [a["kind"] for a in m47["answers"]] == ["step-reply"], (m47, n47))
+          and "parked the item until" in n47 and "Judge the note" not in n47 and [a["kind"] for a in m47["answers"]] == ["step-reply"], (m47, n47))
     # a wake past the cap: his note, given since the item's last move, is the words that let it stand
     told.clear(); post("/items/a46/answer", {"token": tok("a46"), "act": "send", "text": "after the trip, next month", "back": "/#task-a-46"})
     _far = (dt.datetime.now(_wt_text.ZONE) + dt.timedelta(days=_WT.cap_days() + 12)).replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")

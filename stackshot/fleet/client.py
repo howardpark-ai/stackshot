@@ -7,8 +7,8 @@ runs on every box.
                                 also installs it as <secrets>/client.token and points <secrets>/client.url at the local port.
   client.py revoke <machine>    forget that machine's token
   client.py list                which machines hold a token (names and dates, nothing secret)
-  client.py holds               the open items on hold that nothing holds now (no open after item, pane recycle, needs=external or
-                                item-scoped anchor): item, mover, wake, who set it and when ("before the record" for a hold stored
+  client.py holds               the open parked items that nothing holds now (no open after item, pane recycle, needs=external or
+                                item-scoped anchor): item, mover, wake, who set it and when ("before the record" for a park stored
                                 before the server wrote one), one line each, so the item's mover can release them one by one
                                 (update clear_hold=true). Reads only: nothing is released here. Exit 0 listed · 1 not reached.
   client.py get <read> [key]    registry | rules | brief | page-ts <page key | project id> | items <session> | project <id | page key | slug> | holds |
@@ -303,7 +303,7 @@ runs on every box.
                                 only open steps are that release is completed, outcome done, by the server, with no session turn; an item
                                 with any other open step gets the release step ticked done and its mover one real notice ("PR #N is live; its
                                 step is ticked; the item's other open steps remain"; none when every other open step is a release of another
-                                PR), stamped on the item so a rerun never sends a second. Items on hold, whose needs name a decision
+                                PR), stamped on the item so a rerun never sends a second. Parked items, whose needs name a decision
                                 or a session other than the mover, or completed are left alone, each with why. --dry-run prints what it
                                 would do and writes nothing. One line per item. Exit 0 · 1 refused or not reached.
   client.py sweep-released [--dry-run]
@@ -535,7 +535,7 @@ def recycle_due(argv: list[str], timeout: float = 30.0) -> int:
     for x in d.get("items") or []:
         print(f"stackshot: {x.get('item')} (mover {x.get('owner') or '?'}" + (f", anchored to {d['pr']}" if d.get("pr") else "") + ") "
               + ("already waits for a recycle" if x.get("action") == "already" else "now waits for a recycle")
-              + (" — but it is on hold, so the watchdog does not count it until it wakes" if x.get("held") else ""))
+              + (" — but it is parked, so the watchdog does not count it until it wakes" if x.get("held") else ""))
     return 0
 
 
