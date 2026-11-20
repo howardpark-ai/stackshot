@@ -140,12 +140,12 @@ def mlog(): return [json.loads(l) for l in _messaging.MSG_LOG.read_text().splitl
 def mark(): return _messaging._FOR_OWNER
 
 
-def log_row(frm, to, ago_min=1.0, text="a question"):
+def log_row(frm, to, ago_min=1.0, text="a question?", outcome="delivered"):
     """A row of the message log: `frm` wrote to `to` `ago_min` minutes ago (the signal that a later message from `to` answers it)."""
     _messaging.MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
     t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=ago_min)).isoformat(timespec="seconds")
     with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": "delivered", "error": "", "text": text}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": outcome, "error": "", "text": text}, ensure_ascii=False) + "\n")
 def no_log(): _messaging.MSG_LOG.unlink(missing_ok=True)
 def unstamp(uuid): (T / "state/prompts" / uuid).unlink(missing_ok=True)
 def act2(n, target, key=KEY, **ln):
@@ -209,6 +209,11 @@ no_log(); log_row("work-osprey-docs", "home-beta", 5); n0 = len(pushes()); out =
 check("2i: a question put by another agent of the front agent's project counts: delivered unmarked in the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() not in reach(A, n0)[0][1], (out, pushes()[n0:]))
 no_log(); log_row("home-beta", "work-osprey-docs", 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
 check("2j: a question put by an agent of another project does not count", out.startswith("Refused") and reach(A, n0) == [], out)
+for name, kw in (("a handover from an agent of the project that asks nothing", {"text": "please take the export task and tell me when it is done"}), ("a question whose delivery failed", {"outcome": "failed: no such session"})):
+    no_log(); fresh(); log_row(FRONT, "work-osprey-docs", 5, **kw); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
+    check(f"2l: {name} is no question, so the reply is no answer: refused naming the background agent, no turn", out.startswith("Refused") and "message(to='work-osprey-x'" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+no_log(); fresh(); log_row("work-osprey-x", "work-osprey-docs", 5, text="please take the export task and tell me when it is done"); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
+check("2m: a message from the project's builder that asks nothing makes the sender's later note no answer (the staged test of a plain note to the front agent)", out.startswith("Refused") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); log_row(FRONT, BACK, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", BACK); settle()
 check("2k: an answer that needs the person is marked and delivered whatever the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() in reach(A, n0)[0][1], (out, pushes()[n0:]))
 
