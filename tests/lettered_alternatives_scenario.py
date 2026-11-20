@@ -53,7 +53,7 @@ from stackshot.web.tools import update as _wt_update
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 DESC = "- Goal: The side panel's left line\n- It lives in the board's stylesheet\n- Done when the line is picked"
 ASKB = lambda decide, rec="yes": f"Decide: {decide} · Recommend: {rec} · Stakes: the panel looks different · By: no date"
-LABELS = [{"label": "A", "line": "Full height, as now.", "recommended": True}, {"label": "B", "line": "Starts below the cards.", "recommended": False}]
+LABELS = [{"label": "Full height", "line": "Full height, as now.", "recommended": True}, {"label": "Below cards", "line": "Starts below the cards.", "recommended": False}]
 def items():
     return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit() and p_.stem != "1")
 def create(**kw):

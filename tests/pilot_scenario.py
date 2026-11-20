@@ -1633,30 +1633,30 @@ res = _update_svc._update(g8, options=[dict(OA, label="Acme"), dict(OB, label="B
 check("options: a Recommend part that does not name the recommended label → a reply note, accepted", "(note: the ask's Recommend part does not name the recommended option, “Acme”" in res and rd(g8)["metadata"]["options"][0]["label"] == "Acme", res)
 res = _update_svc._update(g8, options=[OA, OB], sender="home-beta"); check("options: …naming it ends the note", "(note: the ask's Recommend" not in res, res)
 # option labels and the ask line name who acts; a bare you/I/me/my gets a reply note, never a refusal
-YOU_OPTS = [{"label": "A: flag, you approve", "line": "Flag it; Oliver approves it.", "recommended": True}, {"label": "B: Oliver decides", "line": "Hold until Oliver answers.", "recommended": False}]
-YOU_ASK = "Decide: flag or hold · Recommend: A: flag, you approve · Stakes: a day either way · By: no date"
-NAMED_ASK = "Decide: flag or hold · Recommend: A: flag, Oliver approves · Stakes: a day either way · By: no date"
+YOU_OPTS = [{"label": "Flag, you approve", "line": "Flag it; Oliver approves it.", "recommended": True}, {"label": "Oliver decides", "line": "Hold until Oliver answers.", "recommended": False}]
+YOU_ASK = "Decide: flag or hold · Recommend: Flag, you approve · Stakes: a day either way · By: no date"
+NAMED_ASK = "Decide: flag or hold · Recommend: Flag, Oliver approves · Stakes: a day either way · By: no date"
 res = mk(needs="decision", ask=NAMED_ASK, options=YOU_OPTS); gy = gid_of(res)
 check("actor: a create whose option label says \"you\" succeeds and the reply notes that label, once",
-      "created" in res and rd(gy)["metadata"]["options"][0]["label"] == "A: flag, you approve" and res.count("name who acts") == 1
-      and "(note: option “A: flag, you approve” says “you”: name who acts" in res, res)
-res = mk(needs="decision", ask=YOU_ASK, options=[dict(YOU_OPTS[0], label="A: flag, Oliver approves"), YOU_OPTS[1]]); gy2 = gid_of(res)
+      "created" in res and rd(gy)["metadata"]["options"][0]["label"] == "Flag, you approve" and res.count("name who acts") == 1
+      and "(note: option “Flag, you approve” says “you”: name who acts" in res, res)
+res = mk(needs="decision", ask=YOU_ASK, options=[dict(YOU_OPTS[0], label="Flag, Oliver approves"), YOU_OPTS[1]]); gy2 = gid_of(res)
 check("actor: …and an ask line that says \"you\" is noted the same way, the item still created",
       "created" in res and rd(gy2)["metadata"]["ask"] == YOU_ASK and "(note: the ask line says “you”: name who acts" in res and "(note: option" not in res, res)
-res = mk(needs="decision", ask=NAMED_ASK, options=[dict(YOU_OPTS[0], label="A: flag, Oliver approves"), YOU_OPTS[1]])
+res = mk(needs="decision", ask=NAMED_ASK, options=[dict(YOU_OPTS[0], label="Flag, Oliver approves"), YOU_OPTS[1]])
 check("actor: labels and an ask that name who acts get no note", "created" in res and "name who acts" not in res, res)
-res = mk(needs="decision", ask="Decide: reply “I agree” or not · Recommend: A, say `my call` · Stakes: none · By: no date", options=[dict(YOU_OPTS[0], label="A: say \"you\" back"), dict(YOU_OPTS[1], label="B: Oliver decides, i.e. now")])
+res = mk(needs="decision", ask="Decide: reply “I agree” or not · Recommend: Say, say `my call` · Stakes: none · By: no date", options=[dict(YOU_OPTS[0], label="Say \"you\" back"), dict(YOU_OPTS[1], label="Oliver decides, i.e. now")])
 check("actor: you/I inside quotes or backticks, and \"i.e.\", are not noted", "created" in res and "name who acts" not in res, res)
 res = _update_svc._update(gy2, ask=NAMED_ASK, options=YOU_OPTS, sender="home-beta")
 check("actor: an update that sets options with a \"you\" label notes it, and the write goes through",
-      "Refused" not in res and rd(gy2)["metadata"]["options"][0]["label"] == "A: flag, you approve" and "(note: option “A: flag, you approve” says “you”" in res, res)
+      "Refused" not in res and rd(gy2)["metadata"]["options"][0]["label"] == "Flag, you approve" and "(note: option “Flag, you approve” says “you”" in res, res)
 res = _update_svc._update(gy2, ask=YOU_ASK.replace("you approve", "I will approve"), sender="home-beta")
 check("actor: an update that sets only the ask notes the ask line and not the stored labels", "(note: the ask line says “I”" in res and "(note: option" not in res, res)
-res = _update_svc._update(gy2, ask=NAMED_ASK, options=[dict(YOU_OPTS[0], label="A: flag, Oliver approves"), YOU_OPTS[1]], sender="home-beta")
+res = _update_svc._update(gy2, ask=NAMED_ASK, options=[dict(YOU_OPTS[0], label="Flag, Oliver approves"), YOU_OPTS[1]], sender="home-beta")
 check("actor: …naming who acts ends the note", "name who acts" not in res and "Refused" not in res, res)
 # option lines and the wider word list (we/our/us): the same reply note, never a refusal; quoted words, whole-word matching, the abbreviation
 def opt_pair(label, line):
-    return [{"label": label, "line": line, "recommended": True}, {"label": "B: Pat decides", "line": "Hold until Pat answers.", "recommended": False}]
+    return [{"label": label, "line": line, "recommended": True}, {"label": "Pat decides", "line": "Hold until Pat answers.", "recommended": False}]
 def actor_hits(label, line):
     return _dg._actor_note({"options": opt_pair(label, line)}, ask=False)
 res = actor_hits("I unpublish", "you click Unpublish")
@@ -1684,22 +1684,22 @@ check("actor: curly and straight apostrophes in a contraction are the same hit",
 check("actor: a quote does not hide a bare word next to it", "says \u201cyou\u201d" in actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'), actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'))
 check("actor: we/our/us are noted in an option only; the ask line keeps its own word list",
       _dg._actor_note({"ask": "Decide: do we ship it · Recommend: yes", "options": []}) == "" and "says \u201cwe\u201d" in actor_hits("Pat ships", "we ship it"), "")
-res = _dg._actor_note({"options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
+res = _dg._actor_note({"options": opt_pair("I a", "you b") + [{"label": "Third: me", "line": "x"}, {"label": "Fourth: my", "line": "y"}]})
 check("actor: the module holds the word-list names", all(hasattr(_dg, n) for n in ("_OPT_PRONOUN_RX", "_ACTOR_EXAMPLE", "_PRONOUN_HEAD", "_PRONOUN_TAIL")), "")
 check("actor: at most three option notes, one per option", res.count("name who acts") == 3, res)
-res = _dg._actor_note({"ask": "Decide: do you ship it", "options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
+res = _dg._actor_note({"ask": "Decide: do you ship it", "options": opt_pair("I a", "you b") + [{"label": "Third: me", "line": "x"}, {"label": "Fourth: my", "line": "y"}]})
 check("actor: three option notes fill the cap and the ask-line note still comes after them", res.count("name who acts") == 4 and res.rstrip().endswith("name who acts, e.g. " + f"\u201c{_core_instance.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d.)") and "the ask line says \u201cyou\u201d" in res.split("\n")[-1], res)
 res = actor_hits("", "you click Unpublish")
 check("actor: an option with an empty label is named by its place, not by empty quotes", "the line of option 1 says \u201cyou\u201d" in res and "\u201c\u201d" not in res, res)
-res = mk(needs="decision", ask=NAMED_ASK, options=opt_pair("A: flag", "you approve it, we wait")); gl = gid_of(res)
+res = mk(needs="decision", ask=NAMED_ASK, options=opt_pair("Flag", "you approve it, we wait")); gl = gid_of(res)
 check("actor: a create whose option line says \"you\" is created, with the note on that line and no refusal",
-      "created" in res and "Refused" not in res and rd(gl)["metadata"]["options"][0]["line"] == "you approve it, we wait" and "(note: the line of option \u201cA: flag\u201d says \u201cyou\u201d: name who acts" in res, res)
-res = _update_svc._update(gl, options=opt_pair("A: flag", "Pat approves it"), ask=NAMED_ASK, sender="home-beta")
+      "created" in res and "Refused" not in res and rd(gl)["metadata"]["options"][0]["line"] == "you approve it, we wait" and "(note: the line of option \u201cFlag\u201d says \u201cyou\u201d: name who acts" in res, res)
+res = _update_svc._update(gl, options=opt_pair("Flag", "Pat approves it"), ask=NAMED_ASK, sender="home-beta")
 check("actor: …and naming who acts in the line ends the note", "name who acts" not in res and "Refused" not in res, res)
-res = _update_svc._update(gl, options=opt_pair("A: flag", "we approve it"), ask="Decide: flag or hold \u00b7 Recommend: the slim one \u00b7 Stakes: a day either way \u00b7 By: no date", sender="home-beta")
+res = _update_svc._update(gl, options=opt_pair("Flag", "we approve it"), ask="Decide: flag or hold \u00b7 Recommend: the slim one \u00b7 Stakes: a day either way \u00b7 By: no date", sender="home-beta")
 check("actor: the Recommend-part note still works beside the actor note",
       "(note: the ask's Recommend part does not name the recommended option" in res and "(note: the line of option" in res and "Refused" not in res, res)
-check("actor: the shared item form (create and update descriptions) carries the sentence", "Name who acts in every option label and line" in _wt_text._ITEM_FORM and "the ask line likewise never says" in _wt_text._ITEM_FORM, "")
+check("actor: the shared item form (create and update descriptions) carries the ask-line rule, and the options parameter, which both tools carry, the option rule", "The ask line never says" in _wt_text._ITEM_FORM and "Name who acts in every option, label and line" in _wt_text._T.param("OPTIONS") and "a role" in _wt_text._T.param("OPTIONS"), "")
 bo = ui_render.Board(str(T / "store")); ip = bo.item_html(go)
 check("options: the item page lists them under the ask, the recommended one marked",
       '<b class="osub">Options</b><ol class="iopts"><li class=rec><b>Vendor A</b> <span class="badge rec">recommended</span><span class="oline">Cheaper, and ships next week.</span></li><li><b>Vendor B</b>' in ip, ip[ip.find('class="iask"'):ip.find('class="iask"') + 900])
@@ -1766,8 +1766,7 @@ res = mkd(needs="decision", **mkask("A and B together, or C", "yes, A and B toge
 check("one decision: a single decision with `and` in its options passes on create", "created" in res, res)
 res = mkd(needs="decision", **mkask("ship Widget plan-A-only or on every lane", "yes, plan-A-only, since the cost is per seat"))
 check("one decision: a split single ask with its options worded is accepted", "created" in res, res)
-for why, kw in {"2b = … in the description": mkask("ship 2b or 3a", "yes, 2b", desc="- Goal: 2b = plugins plan-A-only\n- 3a = the runner off plan A\n- Done when decided"),
-                "codes defined by the options list": mkask("take option A or option B", "A", options=[dict(OA, label="A", line="plugins on plan A only", recommended=True), dict(OB, label="B", line="plugins on every lane")])}.items():
+for why, kw in {"2b = … in the description": mkask("ship 2b or 3a", "yes, 2b", desc="- Goal: 2b = plugins plan-A-only\n- 3a = the runner off plan A\n- Done when decided")}.items():
     res = mkd(needs="decision", **kw); check(f"one decision: codes defined in the item are accepted on create ({why})", "created" in res, res)
 for why, ask_, desc_ in (("A: … B: … in the description", mkask("take Option A or Option B", "Option A")["ask"], "A: plugins on plan A only. B: plugins on every lane. Done when decided."),
                          ("choice codes defined in the ask itself", mkask("take choice 1: Widget plan-A-only or choice 2: Widget on every lane", "choice 1")["ask"], ""),

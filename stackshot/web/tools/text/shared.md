@@ -103,15 +103,15 @@ week", "recommended": false}]. An ask that only confirms {{OWNER}}'s own action 
 apps and delete the test repo?"): use step="<his action>" instead (on a create, set it by update after); a real choice
 between alternatives, a judgement ("have you decided …", "does it work for you?") and an Approve/Decline go-ahead stay
 decisions. One decision per item: an ask that packs several decisions, or points at choices by a number or letter code
-the item does not spell out (“choices 2-3”, “2b”), is refused. Split it into one item per decision and write each
+the item does not spell out (“choices 2-3”, “2b”), is refused: split it into one item per decision and write each
 option out in words in the ask or the description, so that {{OWNER}} can decide from the item page alone. A decision
 to change wording quotes the current and the proposed text, labeled before and after, in the description or the
 options' lines. A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page,
 or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup](<that link>) in the
 ask's Decide part too, or the write is refused: the home row and the item page show it as Mockup ↗ beside the
-question. A mockup link goes in the ask only, never in an option: an option label or line holding a markdown link or
-an http(s) URL is refused. options: when the decision is a pick between alternatives, list them, each on one line,
-{{OPT_FORM}}; the ask's Recommend names the recommended one's label. The server refuses a needs=decision item whose
+question. A mockup link goes in the ask only: an option label or line holding a markdown link or an http(s) URL is
+refused. options: for a pick between alternatives, one per line, {{OPT_FORM}}; the ask's Recommend
+names the recommended one's label. The server refuses a needs=decision item whose
 ask or description names alternatives while it lists none: words such as "which of the two", "pick one", "x, y or z",
 "x vs y", "Option A", and labeled choices in the Decide part ("A or B", "A (…) or B (…)", "A: … or B: …"); put each
 alternative in as one option, or the page draws only Yes / No for it. A needs=decision item with no options whose
@@ -119,9 +119,8 @@ Decide part opens with what, which, how, who, when, where or why is refused (cre
 options or puts it on his call), since Yes / No cannot answer it: list its answers as options or reword it as a yes/no
 ("Decide: whether to …"). The same goes for a needs=decision item with no options whose Recommend part is not a yes or
 a no (it names a person, a topic, a date, whatever the Decide part's wording or language), since the page draws only
-Yes / No under it: put the choices as options, or make it a yes/no question with a Recommend of yes or no. Name who
-acts in every option label and line ({{OWNER}}, a session's name, a role), never "I", "you", "we", "us" or "me"; the
-ask line likewise never says "I", "you" or "me" (the reply notes one; write "Pat unpublishes", not "I unpublish"). A
+Yes / No under it: put the choices as options, or make it a yes/no question with a Recommend of yes or no. The ask
+line never says "I", "you" or "me" (the reply notes one; write "Pat unpublishes", not "I unpublish"). A
 yes/no decision lists two options, "Approve" and "Decline" (the one you recommend marked recommended: true), so
 {{OWNER}} gets one-click buttons. options="none" clears them (refused while the ask is an open question). Write the
 project page first, then the board: a page write up to five minutes before the change counts.
@@ -255,8 +254,10 @@ parallel bullets go under one parent bullet, indented two spaces.
 The alternatives of a decision, one per line: options=[{"label": "Approve", "line": "Approve the schema",
 "recommended": true}, {"label": "Decline", "line": "Wait a week", "recommended": false}]
 ({{OPTIONS_MIN}}-{{OPTIONS_MAX}} entries, exactly one recommended, each line at most {{OPTION_LINE_MAX}} characters).
-A yes/no decision lists Approve and Decline. Name who acts in every option, label and line: a person or a session
-name, never I, you, we, us or me.
+A yes/no decision lists Approve and Decline. Name who acts in every option, label and line ({{OWNER}}, a session's name,
+a role), never I, you, we, us or me. A label never opens with a lone letter ("B: strip", "Option C"): the board letters
+options itself, except with a mockup linked, where it draws them by name in the order given: name them as the mockup
+does, in its order.
 
 ## param CHECK
 What closes the item once work handed to another session is done; the server runs it every minute: check="pr_merged

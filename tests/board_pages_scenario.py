@@ -366,6 +366,65 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the recommended option is stored second: its card is B, and the ask's \"Recommend: B, Beta\" and the card agree", bool(ask_letter) and bool(card) and ask_letter.groups() == card.groups() == ("B", "Beta"), (ask_letter and ask_letter.groups(), card and card.groups()))
     check("…and the stored order is the drawn order (a recommended option in the middle does not move to A)", re.findall(r'<span class="akey">(.)</span>(\w+)</span>', b3)[0] == ("A", "Alpha"))
     check("two options keep the recommended one first (Ship is stored second)", vals(b2) == ["Ship", "Wait"])
+    # a mockup on the item: the board draws the options by name and in the stored order, never lettered (the mockup names its designs by name, and the server cannot read it), so no letter can cross the mockup's
+    MOCK = "[mockup](https://claude.ai/artifact/mock1)"
+    ASKM = f"Decide: which layout {MOCK} · Recommend: Full panel · Stakes: a layout · By: no date"
+    ASKP = "Decide: which layout · Recommend: Full panel · Stakes: a layout · By: no date"
+    MO3 = [{"label": "Wide strip", "line": "One line above the cards.", "recommended": False}, {"label": "Full panel", "line": "A panel under the title.", "recommended": True}, {"label": "Corner badge", "line": "A badge in the corner.", "recommended": False}]
+    item(70, needs=["decision"], ask=ASKM, options=MO3)
+    item(71, needs=["decision"], ask=ASKP, options=MO3)
+    item(72, needs=["decision"], ask=ASKM, options=MO3[:2])
+    item(73, needs=["decision"], ask=ASKP, options=MO3[:2])
+    item(74, needs=["decision"], ask=ASKP, options=MO3)
+    d74 = json.loads((T / "store/a/74.json").read_text()); d74["description"] = "- Goal: pick a layout\n- Mockup: https://claude.ai/artifact/mock1"; (T / "store/a/74.json").write_text(json.dumps(d74))
+    pm3, pp3, pm2, pp2, pmd = (box(get(f"/items/a{i}").text) for i in (70, 71, 72, 73, 74))
+    names = lambda b: re.findall(r'<span class="alab">(?:<span class="akey">.</span>)?([^<]*)</span>', b)
+    check("mockup, three options: drawn by name in the stored order (the recommended one second), no letter badge; the value still carries the place, so the server reads the card, never the label's look",
+          names(pm3) == ["Wide strip", "Full panel", "Corner badge"] and 'class="akey"' not in pm3 and vals(pm3) == ["A · Wide strip", "B · Full panel", "C · Corner badge"] and pm3.count("badge rec") == 1, (names(pm3), vals(pm3)))
+    check("…the same options with no mockup stay lettered A, B, C (the rule is the mockup's alone)", re.findall(r'<span class="akey">(.)</span>([^<]*)</span>', pp3) == [("A", "Wide strip"), ("B", "Full panel"), ("C", "Corner badge")]
+          and vals(pp3) == ["A · Wide strip", "B · Full panel", "C · Corner badge"], vals(pp3))
+    check("mockup, two options: the stored order is kept (the recommended one second); without a mockup the recommended one is first", vals(pm2) == ["Wide strip", "Full panel"] and vals(pp2) == ["Full panel", "Wide strip"], (vals(pm2), vals(pp2)))
+    _wapp._board_home_drop(); hm72 = re.search(r'<form class="hanswer" data-cards method="post" action="/items/a72/answer".*?</form>', get("/").text, re.S)
+    check("home: a mockup row of two options keeps the stored order too (the recommended one second)", bool(hm72) and re.findall(r'name="choice" value="([^"]+)"', hm72.group(0)) == ["Wide strip", "Full panel"], hm72 and hm72.group(0)[:300])
+    check("a mockup linked only in the description counts too: no letters", 'class="akey"' not in pmd and names(pmd) == ["Wide strip", "Full panel", "Corner badge"], (names(pmd), vals(pmd)))
+    _wapp._board_home_drop(); hmm = get("/").text
+    hm70 = re.search(r'<form class="hanswer" data-cards method="post" action="/items/a70/answer".*?</form>', hmm, re.S)
+    hm71 = re.search(r'<form class="hanswer" data-cards method="post" action="/items/a71/answer".*?</form>', hmm, re.S)
+    check("home: a mockup row draws the same names, in the stored order, no letters; a row without a mockup keeps its letters", bool(hm70) and bool(hm71) and 'class="akey"' not in hm70.group(0)
+          and re.findall(r'<span class="alab">([^<]*)</span>', hm70.group(0)) == ["Wide strip", "Full panel", "Corner badge"] and 'value="B · Full panel"' in hm71.group(0), (hm70 and hm70.group(0)[:300]))
+    r = post("/items/a70/answer", {"token": tok("a70"), "choice": "Full panel", "text": "this one"})
+    a70 = (rd(70)["metadata"].get("answers") or [{}])[-1]
+    check("a pick by name on a mockup item is recorded as the label with no letter", "sent=decision" in r.headers["location"] and a70.get("choice") == "Full panel" and "letter" not in a70, (r.headers.get("location"), a70))
+    item(75, needs=["decision"], ask=ASKM, options=MO3)
+    r = post("/items/a75/answer", {"token": tok("a75"), "choice": "B · Full panel"})
+    a75 = (rd(75)["metadata"].get("answers") or [{}])[-1]
+    check("a page loaded before the change still posts \"B · Full panel\": it is taken as that option", "sent=decision" in r.headers["location"] and a75.get("choice") == "Full panel", (r.headers.get("location"), a75))
+    # a re-ask: the options listed in the mockup's order are the order the cards follow
+    item(76, needs=["decision"], ask=ASKM, options=MO3)
+    item(76, needs=["decision"], ask=ASKM, options=[MO3[2], MO3[0], MO3[1]])
+    check("a re-ask in another order: the cards follow the order given now, still by name", names(box(get("/items/a76").text)) == ["Corner badge", "Wide strip", "Full panel"], names(box(get("/items/a76").text)))
+    # a mockup item draws names but its cards post their place: whatever a label looks like ("B · C", "A · Beta", "A Report"), the card's own value records the card's own option
+    def mo(n, labels, ask=ASKM): item(n, needs=["decision"], ask=ask, options=[{"label": lb, "line": f"Line {k}", "recommended": k == 1} for k, lb in enumerate(labels)])
+    SHAPE, STORED = ["A B · C", "B C", "C D"], ["Beta", "A · Beta", "Gamma"]
+    mo(77, SHAPE); mo(78, STORED); mo(79, STORED, ASKP); mo(80, SHAPE, ASKP); mo(81, ["Wide strip", "Full panel", "Corner badge"])
+    sl = lambda n, *cs: [_web_answers._split_letter(rd(n), c) for c in cs]
+    def pick_each(labels, ask=ASKM, n0=400):
+        """Post the value of every card of the item page, one fresh item each → (the names the options are stored under, the names recorded, the letters recorded)."""
+        mo(n0, labels, ask); vs = vals(box(get(f"/items/a{n0}").text)); nm = [f[0] for f in _web_answers._option_forms(rd(n0))]; got = []
+        for k, v in enumerate(vs):
+            mo(n0 + 1 + k, labels, ask); post(f"/items/a{n0 + 1 + k}/answer", {"token": tok(f"a{n0 + 1 + k}"), "choice": v}); got.append((rd(n0 + 1 + k)["metadata"].get("answers") or [{}])[-1])
+        return vs, nm, [a.get("choice") for a in got], [a.get("letter") for a in got]
+    REPORT = ["A Report", "B A Report", "C Fix"]      # every label opens with its own letter (the legacy strip draws Report, A Report, Fix): the second card reads like the first one's stored label
+    for k, (lbl, shown) in enumerate(((SHAPE, ["B · C", "C", "D"]), (STORED, STORED), (REPORT, ["Report", "A Report", "Fix"]))):
+        vs, nm, rec, lets = pick_each(lbl, n0=400 + 10 * k)
+        check(f"mockup, labels {' / '.join(lbl)}: the cards are drawn {' / '.join(shown)} with no letter, and each card's own value records its own option (the second is not the first)",
+              names(box(get(f"/items/a{400 + 10 * k}").text)) == shown and 'class="akey"' not in box(get(f"/items/a{400 + 10 * k}").text) and rec == nm and lets == [None] * 3 and len(set(rec)) == 3, (vs, nm, rec, lets))
+    check("mockup, labels A B · C, B C, C D: a bare post of the label as shown or stored is still that option", sl(77, "A B · C") == [("B · C", "")] and sl(77, "D", "C") == [("D", ""), ("C", "")], sl(77, "A B · C", "D", "C"))
+    check("mockup, stored labels Beta, A · Beta, Gamma: a page loaded before the change drew the letters and posts A · Beta for its first card (Beta at place A): that is the first option, the others by their places",
+          sl(78, "A · Beta", "B · A · Beta", "C · Gamma") == [("Beta", ""), ("A · Beta", ""), ("Gamma", "")], sl(78, "A · Beta", "B · A · Beta", "C · Gamma"))
+    check("…a page loaded before the change posts B · Full panel on a mockup item: the same option, and no letter is kept beside a name the mockup may letter otherwise", sl(81, "B · Full panel") == [("Full panel", "")], sl(81, "B · Full panel"))
+    check("the same labels with no mockup are read as before: A · Beta is Beta at place A, and A · B · C is the first of the other list",
+          sl(79, "A · Beta") == [("Beta", "A")] and sl(80, "A · B · C") == [("B · C", "A")], (sl(79, "A · Beta"), sl(80, "A · B · C")))
     # a label that itself looks like a lettered choice cannot capture the card for another option
     OT = [{"label": "Q", "line": "Q's text", "recommended": False}, {"label": "X", "line": "X's text", "recommended": True}, {"label": "B · X", "line": "the odd one", "recommended": False}]
     item(39, needs=["decision"], ask="Decide: which · Recommend: B, X", options=OT); item(40, needs=["decision"], ask="Decide: which · Recommend: B, X", options=OT)
