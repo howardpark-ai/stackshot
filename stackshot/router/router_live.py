@@ -753,7 +753,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
         done = _HOOKS["after_rule"]
         if done:
             try:
-                done(key, ruled)
+                done(key, {**ruled, "front_held": True} if isinstance(ruled, dict) and ruling == "held" and base.get("hold") == "fyi" and base.get("held_for") else ruled)      # front_held: the front agent has the line for its next turn, so a hold that waited on this anchor is released, as by a pass
             except Exception as e:  # noqa: BLE001
                 base["error"] = f"after-rule: {type(e).__name__}: {str(e)[:100]}"
         _note(base, root, n["id"])

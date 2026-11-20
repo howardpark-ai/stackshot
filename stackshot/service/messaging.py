@@ -285,8 +285,8 @@ def _idset(who: str, idx: dict[str, dict[str, Any]]) -> set[str]:
 
 
 def asked_by(front: str, project: str, sender: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], now: float | None = None) -> bool:
-    """Was `sender` written to, within ASKED_LOOKBACK_HOURS, by the front agent or by an agent of its project? The one signal the relay already keeps for it: a row of the message log (`MSG_LOG`, one line
-    per message sent through the message tool) whose `from` is the front agent or a session the project's page lists and whose `to` is the sender. A message that went to a page key or to nobody logs no
+    """Was `sender` asked something, within ASKED_LOOKBACK_HOURS, by the front agent or by an agent of its project? The one signal the relay already keeps for it: a row of the message log (`MSG_LOG`, one line
+    per message sent through the message tool) whose `from` is the front agent or a session the project's page lists, whose `to` is the sender, that was delivered (not a failed or timed-out send) and whose text holds a question mark. A message that went to a page key or to nobody logs no
     such row, so an answer to one is not known as an answer: it is held or sent to the builder as any other. False on any doubt."""
     try:
         me = _idset(sender, idx)
@@ -311,7 +311,8 @@ def asked_by(front: str, project: str, sender: str, idx: dict[str, dict[str, Any
                 continue
             if at < floor:
                 break
-            if str(d.get("from") or "").strip().casefold() in peers and str(d.get("to") or "").strip().casefold() in me:
+            if (str(d.get("from") or "").strip().casefold() in peers and str(d.get("to") or "").strip().casefold() in me
+                    and "?" in str(d.get("text") or "") and str(d.get("outcome") or "").startswith(("delivered", "queued", "inbox"))):      # a question that reached the sender: a handover, a status line or a failed send asks nothing, so the sender's later note is no answer
                 return True
         return False
     except Exception:  # noqa: BLE001  — no signal, no answer

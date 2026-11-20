@@ -437,10 +437,10 @@ def anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched: 
         at = float(n.get("ruled_at") or n.get("ts") or 0)
         how = f"was logged and ruled {n['ruling']} by {_routing.AUTO_RULER} (a routine event on the fleet's own pull request)"
     elif stew:
-        if n.get("ruling") not in ("passed", "merged"):
+        if n.get("ruling") not in ("passed", "merged") and not n.get("front_held"):
             return []
         at = float(n.get("ruled_at") or n.get("ts") or 0)
-        how = f"was {n['ruling']} by {_session_label(by) or _session_label(stew) or 'the project keeper'}"
+        how = f"was {'held for the front agent' if n.get('front_held') else n['ruling']} by {_session_label(by) or _session_label(stew) or 'the project keeper'}"
     else:
         at = float(n.get("ts") or 0)
         how = "arrived (nobody rules this project's notices)"
