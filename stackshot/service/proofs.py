@@ -227,10 +227,12 @@ def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "l
     """A step of the item is done (ticked by its proof, or marked by hand) and the item is still open: when the next open step opens with another session, the item's mover becomes that session and it is told, with the step's text
     (handover.py has the rules). That session down or unknown: the item stays with its mover, who is told the step and why. The owner, a front agent and a name that is no session: nothing moves. Idempotent by the record
     `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. Takes the item lock itself. → the row {action: moved | fallback | left | none, to, step, why, told}, None when the item is closed."""
-    sends: list[tuple[str, str, str]] = []      # (gid, the session id or name, the notice): collected under the item lock, sent when it is let go
+    sends: list[tuple[str, str, str, bool]] = []      # (gid, the session id or name, the notice, whether it stands as told to that session): collected under the item lock, sent when it is let go
     def flush() -> None:
-        for g, to, text in sends:
+        for g, to, text, told in sends:
             _telling.tell_woken(g, to, text, tag="handoff")
+            if told:        # recorded after the send returned: a send that raised is not "told" (the release event then tells that session itself)
+                PROOF_TOLD_SID[g] = (to, now)
     try:
         return _handover_locked(gid, now, done, dry, sends)
     finally:
@@ -240,7 +242,7 @@ def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "l
             flush()
 
 
-def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: list[tuple[str, str, str]]) -> dict[str, Any] | None:
+def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: list[tuple[str, str, str, bool]]) -> dict[str, Any] | None:
     """The body of `handover`, under the item lock; the notices are appended to `sends`, not sent."""
     with _writes.ITEM_LOCK:
         it = _load(gid)
@@ -266,7 +268,7 @@ def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: li
             row.update(action="fallback")
             if frm and not _model.is_owner(frm) and not _telling.front_keeper(frm, project)[0]:
                 sends.append((gid, _hooks().session_id(frm), f"[stackshot] {_gh.shown(gid)}: the next step is {_session_label(to)}'s ({step}), but {_session_label(to)} cannot take the item now ({_clip_line(plan['why'], 100)}), "
-                            f"so it stays with you. Do the step yourself, hand the item to another session, or reword the step. {subject} ({project}) → {_telling.notice_link(gid)}"))
+                            f"so it stays with you. Do the step yourself, hand the item to another session, or reword the step. {subject} ({project}) → {_telling.notice_link(gid)}", False))
                 row["told"] = _session_label(frm)
             return row
         keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (_handoff.ho_same(x, frm) or _handoff.ho_same(x, to))]
@@ -278,8 +280,7 @@ def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: li
         _writes.save(gid, it, note=f"step hand-over: {did} is done and the next step is {_session_label(to)}'s, so the item moved from {_session_label(frm) or 'its mover'} to {_session_label(to)}: {step}")
         text = (f"[stackshot] {_gh.shown(gid)} is yours: {did} is done, and the next step is yours: {step}. {subject} ({project}). Do your part and close it or hand it back"
                 + (f" (sender={_session_label(frm)!r})" if frm else "") + f"; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
-        sends.append((gid, _hooks().session_id(to) or to, text))
-        PROOF_TOLD_SID[gid] = (_hooks().session_id(to), now)
+        sends.append((gid, _hooks().session_id(to) or to, text, True))      # stands as told to that session once it was sent (flush)
         row.update(action="moved", told=_session_label(to))
         return row
 
@@ -299,11 +300,16 @@ def proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: b
     or None when the item is not one this event settles (closed, no open step that names the PR as its proof). The step is ticked by the server when it is the proof's pure step (or its explicit
     proof); when no open step is left the item closes; otherwise the mover gets one notice naming the next open step. Under the item lock (the caller's).
     `sends`: where the notices (the mover's, the releases of the items that waited on a closed one, a hand-over's) are put instead of being sent, when the caller holds the item lock round a loop of items and sends them with `flush_sends` once it lets go; None sends each at once."""
-    def send(fn: "Callable[..., Any]", *a: Any, **k: Any) -> None:
-        if sends is None:
+    def send(fn: "Callable[..., Any]", *a: Any, sent: "Callable[[], Any] | None" = None, **k: Any) -> None:
+        """`sent` runs after `fn` returned: what says the notice reached its session (PROOF_TOLD_SID) is recorded then, never when the notice was only queued (a send that raises must not stand as told)."""
+        def run() -> None:
             fn(*a, **k)
+            if sent is not None:
+                sent()
+        if sends is None:
+            run()
         else:
-            sends.append(lambda: fn(*a, **k))
+            sends.append(run)
     it = _load(gid)
     meta = dict(it.get("metadata") or {})
     if it.get("status") != "open":
@@ -397,9 +403,9 @@ def proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: b
     note = (f"[stackshot] {_gh.shown(gid)}: {ref} is {word}; its step is " + ("ticked" if pure else "not ticked (it names a follow-up)") + "; the item's other open steps remain. "
             + (f"Next step: {nxt}. " if nxt else "") + f"{it.get('subject') or ''} → {_telling.notice_link(gid)}")
     if tell:
-        send(_telling.tell_woken, gid, _hooks().session_id(mover), note, tag="release")      # a real notice, not the log-only result: the mover's next step waits on it
+        sid = _hooks().session_id(mover)
+        send(_telling.tell_woken, gid, sid, note, tag="release", sent=lambda: PROOF_TOLD_SID.__setitem__(gid, (sid, now)))      # a real notice, not the log-only result: the mover's next step waits on it; told is recorded once it was sent
         row["told"] = _session_label(mover)
-        PROOF_TOLD_SID[gid] = (_hooks().session_id(mover), now)
     else:
         row["told"] = ""
         print(f"released: {gid} " + (f"ticked without telling its mover: every other open step waits on another PR" if quiet else f"mover was told already that {ref} is {word}" if already else f"has no mover to tell that {ref} is {word}"), file=sys.stderr, flush=True)

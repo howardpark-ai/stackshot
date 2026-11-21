@@ -80,8 +80,8 @@ def _open(path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDONLY | os.O_CREAT | os.O_CLOEXEC, 0o644)
     try:
-        os.set_inheritable(fd, False)       # pinned: a child process (git, a hook) must never inherit a lock descriptor and so hold the lock past its owner
-    except OSError:
+        os.set_inheritable(fd, False)       # pinned: a child process (git, a hook) must never inherit a lock descriptor and so hold the lock past its holder
+    except BaseException:       # an interrupt too: the descriptor is closed on any way out, since nothing else holds it yet
         os.close(fd)
         raise
     return fd

@@ -11,10 +11,11 @@ puts a spy in its place sets it there (`answers._ANSWER_LOCK = ...`). A suite th
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import sys
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from fastmcp.exceptions import ToolError
 
@@ -208,6 +209,21 @@ def _mail_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str
     return told
 
 
+@contextlib.contextmanager
+def _release_dropped(gid: str, drop: list[bool]) -> Iterator[None]:
+    """The outermost of `_answer`'s locks: when the body that held them saved the drop of `gid` (`drop` is then not empty), the items that waited on it are released as the body is left, whatever way it is left: a delivery or a
+    bookkeeping step that raised after the close was saved must not keep its dependents blocked, and the error goes on up. The release takes the item lock itself and tells the waiters once it is let go: here, no lock is held.
+    A release that fails is a stderr line (the close is saved; the error already on its way up is the one the caller sees)."""
+    try:
+        yield
+    finally:
+        if drop:
+            try:
+                _wakes.release_after(gid, "dropped", "", "")
+            except Exception as e:  # noqa: BLE001
+                print(f"answer: {gid} dropped but its after releases failed: {e}", file=sys.stderr, flush=True)
+
+
 def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail: dict[str, Any] | None = None) -> str:
     """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
     and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover (nothing written; `emptynote` is a Send note on a blank box). A step form has two buttons and an optional note box.
@@ -221,7 +237,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
     if len(text) > _answers()._ANSWER_TEXT_MAX:
         return "toolong"
-    with _writes.ITEM_LOCK, _answers()._ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
+    drop: list[bool] = []       # set once the drop is saved: the release below then runs on every way out of the locks, a delivery or a bookkeeping step that raised included
+    with _release_dropped(gid, drop), _writes.ITEM_LOCK, _answers()._ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second; the release is the outermost, so it runs with both let go
         item = _svcstore._load(gid)
         if item.get("status") != "open":
             return _handover._keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
@@ -363,7 +380,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(NAME, "mail") if via == "mail" else (OWNER, "board"))
         if parked or until or (kind == "decision" and eff["do"] == "wait"):
             _runner.WAKE_EVENT.set()           # the minute loop takes the new wake in
-        dropped = kind == "decision" and eff["do"] == "drop"      # the items that waited on this one are released after both locks are let go (below): a release tells the waiters
+        if kind == "decision" and eff["do"] == "drop":      # the items that waited on this one are released after both locks are let go (_release_dropped): a release tells the waiters
+            drop.append(True)
         item["gid"] = gid
         told = [t for t in (_mail_deliver(gid, item, rec, then) if via == "mail" else _answer_deliver(gid, item, rec, then if stepped else "", handed)) if t]
         if via != "mail" and kind in ("decision", "step-reply") and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
@@ -371,12 +389,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             st[gid] = {"ts": now, "owner": _session_id(_telling.holder(item)), "project": str(meta.get("project") or ""),
                        "told": told, "words": _answers()._answer_words(rec, 300)}
             _answers()._answers_save(st)
-    if dropped:
-        try:
-            _wakes.release_after(gid, "dropped", "", "")      # the items that waited on this one (it takes the item lock itself and tells them once it is let go: here, no lock is held)
-        except Exception as e:  # noqa: BLE001
-            print(f"answer: {gid} dropped but its after releases failed: {e}", file=sys.stderr, flush=True)
-    kind = ("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
+    kind =("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
     print(f"answer: {gid} {kind} from {'a sent mail' if via == 'mail' else 'the board'}" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
     _hooks().publish()
     return "askedback" if askback else kind
@@ -388,7 +401,7 @@ def _answer_tick(now: float | None = None) -> list[str]:
     or missing item drops it silently, and so does a keeper that is the mover itself. → the gids escalated."""
     now = time.time() if now is None else now
     out: list[str] = []
-    tells: list[tuple[str, str, str]] = []      # (gid, the keeper's session id, the notice): sent after the lock is let go (a send that fails records itself on the item, and the item lock is taken before the pending answers, never after)
+    tells: list[tuple[str, str, str, dict[str, Any]]] = []      # (gid, the keeper's session id, the notice, its pending record): sent after the lock is let go (a send that fails records itself on the item, and the item lock is taken before the pending answers, never after); the record is put back when its send raised
     with _answers()._ANSWER_LOCK:
         st = _answers()._answers_load()
         due = [g for g, e in st.items() if now - float(e.get("ts") or 0) >= _answers()._ANSWER_ESCALATE_S]
@@ -413,11 +426,29 @@ def _answer_tick(now: float | None = None) -> list[str]:
             olabel = _sr._session_label(owner) if owner else "none"
             tells.append((gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
                                   f"in {_answers()._ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: see that his answer is acted on "
-                                  f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}"))
+                                  f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}", e))
             out.append(gid)
         _answers()._answers_save(st)
-    for gid, sid, text in tells:
-        _telling.tell_woken(gid, sid, text, tag="answer")
+    failed: Exception | None = None
+    unsent: list[tuple[str, dict[str, Any]]] = []
+    for gid, sid, text, rec in tells:       # each send is tried, whatever the one before it did; a record whose send raised goes back, so the next tick sends it again (one that was sent is not put back: nothing is sent twice)
+        try:
+            _telling.tell_woken(gid, sid, text, tag="answer")
+        except Exception as e:  # noqa: BLE001
+            unsent.append((gid, rec))
+            out.remove(gid)
+            if failed is None:
+                failed = e
+            else:
+                print(f"answer: {gid} unacted, its keeper not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if unsent:
+        with _answers()._ANSWER_LOCK:       # the pending answers alone (the item lock is not held): the records come back unless an answer was recorded for the item meanwhile
+            st = _answers()._answers_load()
+            for gid, rec in unsent:
+                st.setdefault(gid, rec)
+            _answers()._answers_save(st)
     for gid in out:
         print(f"answer: {gid} unacted after {_answers()._ANSWER_ESCALATE_S / 60:g} min, its keeper told", file=sys.stderr, flush=True)
+    if failed is not None:
+        raise failed
     return out
