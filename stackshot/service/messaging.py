@@ -381,7 +381,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
       unmarked, an answer to a question the front agent itself put to the sender (answer_route): delivered while he is in that conversation, else written onto the item it names, else held;
       unmarked, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
       a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
-      any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi) and records a want for one (background_want).
+      any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
     → the sender's reply (item-written), a _Hold, or None (deliver it). Raises ToolError for a refusal."""
     roles = _anc.session_roles()
     name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
@@ -416,7 +416,6 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
             if same:
                 return _Hold(f"{sname} is the project's background agent, so it cannot go back to it", project)
             if not back:
-                _want.want_background(project, "message")      # records a want for one (never raises); the message is held as before
                 return _Hold(f"{project} has no background agent", project)
         raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "      # with the hold switched off nothing can hold it
                         f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here.")
@@ -480,16 +479,36 @@ def _cut_note(line: str, routed: bool = False, script: bool = False) -> str:
     return (f"{lead} (the words after the cut are in the message log only): put a long result {where} and send the pointer.")
 
 
-def _want_for_fyi(to: str, idx: dict[str, dict[str, Any]], sender: str) -> None:
-    """An fyi for a front agent is a message to its project too: it records a want for a background agent when the project has none (background_want checks), as _gate_front does for a message that is no fyi,
-    and, as there, never for a peer front agent's word. Never raises."""
+def _want_for_front(to: str, idx: dict[str, dict[str, Any]], sender: str, auth: str = "", script: bool = False) -> None:
+    """A message to a front agent by name is a message to its project: it records a want for a background agent when the project has none (background_want checks), whatever becomes of it (_gate_front's
+    refusals, its holds, an fyi, a pass), as the router does for a message to the project's key. The call is made once, before the gate, so no branch of it can skip it. A peer front agent's word (the channel
+    between front agents), the person's own message, the server's own message (`auth` "server": the filing passes'), the audit's own (its label, or the audit agent's name, as written or as a session id of that agent's
+    session resolves: a script's label counts, the audit's run sends as one, so `script` only blanks it for the tests of a session's role) and a message to a recipient that cannot receive it (a retired session, or one whose pane is gone: refused below) want
+    none. A switch that is off returns first. Never raises."""
     try:
+        if not _want.enabled() or auth == "server" or _cfg.is_audit_sender(sender) or _cfg.is_audit_sender((idx.get(sender) or {}).get("name")):      # the switch first: off (the default) does no lookup; the sender as written, and as the session it names when it is a session id
+            return
+        if script:
+            sender = ""
         roles = _anc.session_roles()
         name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
         sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) if sender.strip() else ""
-        if name and roles[name]["role"] == "front" and not (sname and roles.get(sname, {}).get("role") == "front"):
-            _want.want_background(roles[name]["project"], "message")
-    except Exception:  # noqa: BLE001  — an extra: a failure in it leaves the message as it was
+        if not name or roles[name]["role"] != "front" or (sname and roles.get(sname, {}).get("role") == "front") or (sender.strip() and _model.is_owner(sender)):
+            return
+        named = [r for r in idx.values() if r.get("name") == to]
+        rec = idx.get(to) or max(named, key=lambda r: str(r.get("seen", "")), default=None)
+        if not rec:
+            return                  # no pane row to send to: the message is refused below ("no session"), and a refused message wants nothing
+        try:
+            _dead_recipient(to, [rec] if idx.get(to) else named, idx)      # the refusal the message gets below: a refused message wants nothing
+        except ToolError:
+            return
+        _want.want_background(roles[name]["project"], "message")
+    except Exception as e:  # noqa: BLE001  — an extra: a failure in it leaves the message as it was
+        try:
+            print(f"message: want for a background agent failed for {to!r}, sending as before: {e!r}", file=sys.stderr, flush=True)
+        except Exception:  # noqa: BLE001  — a stderr that is closed or broken loses the log line, never the message
+            pass
         return
 
 
@@ -537,6 +556,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     hold_why = hold_project = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold)
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
     if not re.match(_cfg.page_dirs_re() + "/", to):
+        _want_for_front(to, idx, sender, auth, bool(origin))      # a want for a background agent when its front agent's project has none, whatever the gate or the fyi path then does with the message
         reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent is given a turn only by what needs the person: the rest is refused, written onto an item, or held (_gate_front)
         if isinstance(reported, _Hold):
             hold_why, hold_project, reported = reported.why, reported.project, None
@@ -605,8 +625,6 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     if (fyi or hold_why) and not held and (front_fyi or hold_why or _front_fyi_name(to, raw, idx)):         # an fyi to a front agent starts no turn, from a session or a script: the front gate files it for his next turn, or holds it; so does a message _gate_front held
         held_text = f"[stackshot message] from {held_who}: {text}"
         verdict, why_ = _telling.front_fyi(to, held_text, ",".join(_agent_names._item_refs(raw)))
-        if verdict and front_fyi:
-            _want_for_fyi(to, idx, "" if origin else sender)      # an fyi by name to a front agent (a message _gate_front held recorded its own want)
         if not verdict:
             if front_fyi or hold_why:         # the gate did not take it (the hold is off, or the gate failed): refused, as it was before the hold
                 raise ToolError(f"Refused: {to} is a front agent, and this message is not for {OWNER}, so it starts no turn there; it could not be held for its next turn either. Put it on the board item it concerns "

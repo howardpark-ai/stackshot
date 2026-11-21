@@ -193,6 +193,7 @@ def board_check_mode() -> str:
 ROUTER_CWD_PREFIX = "stackshot-router-"
 
 AUDIT_AGENT = "my-audit"
+AUDIT_SENDER = "stackshot audit"      # the label the audit's cue, findings and held notes are sent as (audit_run.SENDER)
 AUDIT_PROJECT = "demo/board"
 AUDIT_AT = "05:00"
 
@@ -202,6 +203,21 @@ def audit_enabled() -> bool:
     the server answers POST /audit/now with a cue to [audit] agent; false (the default) = no timer, and a cue is refused (404)."""
     v = get("audit", "enabled")
     return v is True or str(v).strip().lower() in ("true", "1", "yes")
+
+
+def background_agent_enabled() -> bool:
+    """[background_agent] enabled: off by default (an instance whose fleet tool creates no agents leaves it off); read at each use. The one reading: the want for a background agent (service/background_want.enabled)
+    and the router's call to it ask it first, so a switch that is off costs no lookup."""
+    v = get("background_agent", "enabled")
+    return v is True or str(v).strip().lower() in ("true", "1", "yes", "on")
+
+
+def is_audit_sender(who: Any) -> bool:
+    """Is this sender label the audit's own: AUDIT_SENDER, or the [audit] agent's name? A label may carry a uuid suffix or a script's "(a script on <machine>)" (`name (…)`) or a bracketed tag (`name [abc]`):
+    only the name before it counts, and it must equal one of the two exactly (a label that merely contains them is not the audit's). A session id is no label: the caller resolves it to the session's name first
+    and asks again. The router's want for a background agent and the message tool's both ask this, on the raw label (a script's label is blanked for other tests), so the two cannot drift."""
+    name = re.split(r"\s*[(\[]", str(who or "").strip(), maxsplit=1)[0].strip().casefold()
+    return bool(name) and name in {AUDIT_SENDER.casefold(), audit_agent().casefold()}
 
 
 def audit_agent() -> str:
