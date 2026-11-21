@@ -42,6 +42,7 @@ from stackshot.router import router as _router
 from stackshot.router import router_live as _router_live
 from stackshot.router import routing as _routing
 from stackshot.service import agent_names as _agent_names
+from stackshot.service import background_want as _want
 from stackshot.service import front_turn as _front_turn
 from stackshot.service import fleet_events as _fleetev
 from stackshot.service import handoff as _handoff
@@ -380,7 +381,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
       unmarked, an answer to a question the front agent itself put to the sender (answer_route): delivered while he is in that conversation, else written onto the item it names, else held;
       unmarked, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
       a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
-      any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
+      any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi) and records a want for one (background_want).
     → the sender's reply (item-written), a _Hold, or None (deliver it). Raises ToolError for a refusal."""
     roles = _anc.session_roles()
     name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
@@ -415,6 +416,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
             if same:
                 return _Hold(f"{sname} is the project's background agent, so it cannot go back to it", project)
             if not back:
+                _want.want_background(project, "message")      # records a want for one (never raises); the message is held as before
                 return _Hold(f"{project} has no background agent", project)
         raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "      # with the hold switched off nothing can hold it
                         f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here.")
@@ -476,6 +478,19 @@ def _cut_note(line: str, routed: bool = False, script: bool = False) -> str:
             else f" Its text was cut to {_held.LINE_MAX} characters in the held line")
     where = "on a page or in a repo" if script else "on the item (update, complete) or on a page"
     return (f"{lead} (the words after the cut are in the message log only): put a long result {where} and send the pointer.")
+
+
+def _want_for_fyi(to: str, idx: dict[str, dict[str, Any]], sender: str) -> None:
+    """An fyi for a front agent is a message to its project too: it records a want for a background agent when the project has none (background_want checks), as _gate_front does for a message that is no fyi,
+    and, as there, never for a peer front agent's word. Never raises."""
+    try:
+        roles = _anc.session_roles()
+        name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
+        sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) if sender.strip() else ""
+        if name and roles[name]["role"] == "front" and not (sname and roles.get(sname, {}).get("role") == "front"):
+            _want.want_background(roles[name]["project"], "message")
+    except Exception:  # noqa: BLE001  — an extra: a failure in it leaves the message as it was
+        return
 
 
 def _front_fyi_name(to: str, raw: str, idx: dict[str, dict[str, Any]]) -> str:
@@ -590,6 +605,8 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     if (fyi or hold_why) and not held and (front_fyi or hold_why or _front_fyi_name(to, raw, idx)):         # an fyi to a front agent starts no turn, from a session or a script: the front gate files it for his next turn, or holds it; so does a message _gate_front held
         held_text = f"[stackshot message] from {held_who}: {text}"
         verdict, why_ = _telling.front_fyi(to, held_text, ",".join(_agent_names._item_refs(raw)))
+        if verdict and front_fyi:
+            _want_for_fyi(to, idx, "" if origin else sender)      # an fyi by name to a front agent (a message _gate_front held recorded its own want)
         if not verdict:
             if front_fyi or hold_why:         # the gate did not take it (the hold is off, or the gate failed): refused, as it was before the hold
                 raise ToolError(f"Refused: {to} is a front agent, and this message is not for {OWNER}, so it starts no turn there; it could not be held for its next turn either. Put it on the board item it concerns "

@@ -27,6 +27,7 @@ from stackshot.model.ids import _norm_id
 from stackshot.projects import brains as _brains
 from stackshot.router import page_debt as _page_debt
 from stackshot.service import agent_names as _agent_names
+from stackshot.service import background_want as _background_want
 from stackshot.service import contacts as _contacts
 from stackshot.service import event_waits as _evwaits
 from stackshot.service import foryou as _fy
@@ -450,6 +451,9 @@ async def client_api(request: Request):
         from starlette.concurrency import run_in_threadpool
         rows = await run_in_threadpool(_clients.puller_lag)
         return PlainTextResponse("".join(f"{h} {r} {c}\n" for h, r, c in rows), headers={"Cache-Control": "no-store"})
+    if what == "background-wanted":   # the fleet tool's timer: "<project key> <name prefix> <front agent>" per project that could use a background agent; nothing with [background_agent] enabled off
+        from starlette.concurrency import run_in_threadpool
+        return PlainTextResponse(await run_in_threadpool(_background_want.wanted_lines), headers={"Cache-Control": "no-store"})
     if what == "items":            # a scan of the board: off the event loop, so the pages keep answering while it runs
         from starlette.concurrency import run_in_threadpool
         status, ctype, body = await run_in_threadpool(_client_get, what, dict(request.query_params))

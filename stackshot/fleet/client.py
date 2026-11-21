@@ -281,6 +281,10 @@ runs on every box.
   client.py puller-lag          the fleet tool's watchdog: one line "<hostname> <reported> <current>" per box
                                 whose puller reports a VERSION behind puller.py's; nothing when every box is current or the
                                 server cannot be asked. Reads only. Exit 0 whatever happened.
+  client.py background-wanted   the fleet tool's timer: one line "<project key> <name prefix> <front agent>" per project whose
+                                messages have no background agent to go to and that could use one (the agent is called
+                                <name prefix>-<role>); nothing when none, when [background_agent] enabled is off or when the
+                                server cannot be asked. Reads only. Exit 0 whatever happened.
   client.py recycle-due --item <id> | --pr <PR url>
                                 for a script: mark a recycle of this machine's panes as due on an existing open item, as a
                                 session would with update(recycle=true): the item by id, or the open items whose anchors include
@@ -359,7 +363,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "roles", "project", "projects", "answer", "notice", "for-you")
+READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "roles", "project", "projects", "answer", "notice", "for-you")
 
 
 def _write_private(path: str, text: str) -> None:
@@ -1100,6 +1104,12 @@ def main(argv: list[str]) -> int:
     if cmd == "puller-lag":
         try:
             status, body = get("puller-lag", timeout=8.0)
+            if status == 200 and body.strip(): print(body.strip())
+        except Exception: pass
+        return 0
+    if cmd == "background-wanted":
+        try:
+            status, body = get("background-wanted", timeout=8.0)
             if status == 200 and body.strip(): print(body.strip())
         except Exception: pass
         return 0

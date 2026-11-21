@@ -342,6 +342,11 @@ form_senders = []                                  # the labels of the fleet too
                                                     # Contract: stackshot-contracts.md in howardpark-ai/salamander, 21 (the web terminal's project calls).
 form_machines = []                                  # ... the machine its token proves is one of these, e.g. ["myhost"] (a label alone proves nothing: any token holder can type it). [] = no call is the form's
 
+[background_agent]                                  # optional: a project whose messages have no background agent to go to may ask the fleet tool for one (stackshot/service/background_want.py, GET /client/background-wanted); without this section these are the defaults
+enabled = false                                     # false: no want is recorded, no state file is written and the endpoint answers empty. The server never creates an agent itself: the fleet tool reads the wants and does
+max_open = 3                                        # wants open at once; a message past that records none until one is served (default 3)
+cooldown_minutes = 60                               # a project that got an agent and lost it wants one again only after this many minutes, and only when a new message reaches it (default 60)
+
 [machines_panel]
 latest_lookups = true                               # false: never ask npm or GitHub for the latest versions; the cache as it is (a staging copy)
 ssh_hosts = []                                      # machines with no fleet letter, each shown as one more card on the Machines panel after the fleet's, in this order
