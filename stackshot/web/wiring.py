@@ -598,7 +598,7 @@ def install_late() -> None:
         update=_late_in(_update_svc, "_update"),
         wait_end_sent_back=_late_in(_wait_fixes, "_wait_end_sent_back"),
         wake_at=lambda *a, **k: _wakes.wake_at(*a, **k),
-        wake_event_set=lambda: _runner.WAKE_EVENT.set(),
+        wake_event_set=lambda: _runner.wake(),
         wake_park_line=_late_in(_wait_fixes, "_wake_park_line"),
         wake_step_note=_late_in(_wait_fixes, "_wake_step_note"),
         wake_window_note=_late_in(_wait_fixes, "_wake_window_note"),

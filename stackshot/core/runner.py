@@ -28,10 +28,14 @@ The ten-minute set runs in the first paced round after the start (so a restart n
 
 `stalled(now)` says whether the last completed round is older than `STALL_AFTER` (3 minutes): the server's watchdog thread asks it every minute and tells the builder once per stall. `current` names the tick running now.
 
+Two files let a runner in another process work the same way (core/runner_files.py): the wake file (`wake_stamp`: the loop waits in slices of `SIGNAL_POLL` and a change of what the callable returns ends the wait, as the event does) and the status file (`beat`: called with
+the runner's record at the top of each loop iteration, at the start of each tick and at the end of each round, so the heartbeat is at most one tick old). Both are optional and injected: a runner built without them is the runner it was.
+
 Pure standard library (and `core/passmemo.py`, which is too: each tick runs inside a pass memo, so what it works out once for all its items is not worked out again per item); the server builds the tick table (it owns the functions) and passes in what the runner must ask it: whether the board is held by the
 migration's pass (`holding`) and how long the runner may sleep between event rounds (`wake_wait`)."""
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -44,6 +48,7 @@ PACE = 60.0          # seconds between paced rounds: the minute pace
 WAKE_MAX = 60.0      # the longest the runner sleeps between event rounds
 SLOW_TICK = 30.0     # a tick that takes this many seconds is logged by name: with one thread everything behind it, a due wake included, waited
 WAKE_MIN = 1.0       # the shortest wait the runner takes between two event rounds (the old loop could spin when a due wake could not be fired)
+SIGNAL_POLL = 1.0    # while it waits, the runner looks at the wake file this often (a wake written by another process ends the wait within this many seconds); one small read per look
 TEN_PACE = 600.0     # seconds between runs of the ten-minute set
 STALL_AFTER = 180.0  # a runner whose last completed round is older than this many seconds is stalled (a blocking call inside a tick): the publish loop's watchdog reads it
 GROUPS = ("settle", "handoff", "answers", "fleet", "tenmin")
@@ -65,7 +70,8 @@ class Runner:
     each event round). `event` is the wake event `update._update` sets (a fresh one when not given). `clock` is for tests."""
 
     def __init__(self, ticks: list[Tick], *, holding: Callable[[], bool] | None = None, wake_wait: Callable[[], float] | None = None,
-                 event: threading.Event | None = None, pace: float = PACE, ten_pace: float = TEN_PACE, clock: Callable[[], float] = time.time, label: str = "runner") -> None:
+                 event: threading.Event | None = None, pace: float = PACE, ten_pace: float = TEN_PACE, clock: Callable[[], float] = time.time, label: str = "runner",
+                 wake_stamp: Callable[[], Any] | None = None, beat: Callable[[dict[str, Any]], None] | None = None) -> None:
         names = [t.name for t in ticks]
         if len(set(names)) != len(names):
             raise ValueError(f"a tick listed twice: {sorted({n for n in names if names.count(n) > 1})}")
@@ -80,6 +86,10 @@ class Runner:
         self.ten_pace = float(ten_pace)
         self.clock = clock
         self.label = label
+        self.wake_stamp = wake_stamp                 # None, or a callable that gives the wake file's line now (None when there is none): a change ends the loop's wait
+        self.beat = beat                             # None, or a callable that is given `snapshot()` and writes it down (the status file)
+        self._seen: Any = None                       # the wake line at the last look
+        self.last_tick: dict[str, Any] = {}          # the tick that ran last: its name and its start and end (the status file's "last tick")
         self.lock = threading.Lock()                 # held for the whole of a round: two rounds, and so two ticks, never overlap
         self._status_lock = threading.Lock()         # the status is read from a request thread while a round runs; this lock is held for a dict copy only
         self._stop = threading.Event()
@@ -130,6 +140,7 @@ class Runner:
             with self._status_lock:
                 self.rounds += 1
                 self.last_round = end
+            self._beat()
             return ran
 
     def stalled(self, now: float | None = None) -> bool:
@@ -151,6 +162,7 @@ class Runner:
         t0 = self.clock()
         err: str | None = None
         self.current = t.name
+        self._beat()                                 # names the tick in the file before it runs: a tick that never returns is found by name
         try:
             with _passmemo.scope():          # what the tick works out once for all its items (the roles, the session rows) is kept for it and dropped when it ends
                 t.fn()
@@ -159,6 +171,7 @@ class Runner:
             print(f"{self.label}: {t.name} failed: {err}", file=sys.stderr, flush=True)
         self.current = ""
         ms = max(0.0, (self.clock() - t0) * 1000.0)
+        self.last_tick = {"name": t.name, "start": t0, "end": self.clock()}
         if ms >= SLOW_TICK * 1000.0:
             print(f"{self.label}: {t.name} took {ms / 1000.0:.0f} s (one thread: every later tick and a due wake waited for it)", file=sys.stderr, flush=True)
         with self._status_lock:
@@ -177,14 +190,58 @@ class Runner:
         now = self.clock()
         return max(min(self._pace_end + self.pace - now, self._wake_at - now), 0.0)
 
+    def _take_stamp(self) -> None:
+        """Remember the wake line as it stands now (what a later look is compared with)."""
+        if self.wake_stamp is not None:
+            try:
+                self._seen = self.wake_stamp()
+            except Exception:  # noqa: BLE001  — a wake file that cannot be read is no wake
+                self._seen = None
+
+    def _file_moved(self) -> bool:
+        """Did the wake line change since the last look? A line that is gone or unreadable is no wake; one that appears or differs is."""
+        if self.wake_stamp is None:
+            return False
+        try:
+            cur = self.wake_stamp()
+        except Exception:  # noqa: BLE001
+            return False
+        return cur is not None and cur != self._seen
+
+    def _wait(self, timeout: float) -> bool:
+        """Sleep up to `timeout` s; → True when the wake event was set or (with a wake file) the file's line changed. Without a file this is `wake.wait`; with one the sleep is cut in slices of
+        `SIGNAL_POLL` s so a wake that another process wrote ends it within that long. A wake of this process sets the event as well and ends the sleep at once."""
+        if self.wake_stamp is None:
+            return self.wake.wait(timeout)
+        end = time.monotonic() + max(timeout, 0.0)
+        while True:
+            left = end - time.monotonic()
+            if left <= 0:
+                return self.wake.is_set() or self._file_moved()
+            if self.wake.wait(min(left, SIGNAL_POLL)):
+                return True
+            if self._file_moved():
+                return True
+
+    def _beat(self) -> None:
+        """Hand the record to `beat` (the status file); a failure is never the round's."""
+        if self.beat is None:
+            return
+        try:
+            self.beat(self.snapshot())
+        except Exception as e:  # noqa: BLE001
+            print(f"{self.label}: status not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
     def loop(self) -> None:
         """The thread's body. Never dies on its own: a round that raises (not a tick: those are guarded) is a stderr line and the loop goes on; only stop() ends it."""
         while not self._stop.is_set():
             try:
-                fired = self.wake.wait(self.seconds_to_next())
+                fired = self._wait(self.seconds_to_next())
                 if self._stop.is_set():
                     break
                 self.wake.clear()                 # cleared before the round: a wake set while it runs brings the loop round again
+                self._take_stamp()                # …and the wake file's line is taken here for the same reason (a wake of this process wrote it before it set the event: it must not bring a second round)
+                self._beat()                      # the heartbeat: at least once per loop iteration
                 self.run_round(event=fired)
             except BaseException as e:  # noqa: BLE001  — as in _run_one: logged, and the loop goes on unless stop() was asked
                 print(f"{self.label}: round failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -202,6 +259,7 @@ class Runner:
         self._ten_at = None                          # the first paced round runs the ten-minute set, so a restart never delays it
         self._wake_at = None
         self.started = now
+        self._take_stamp()                           # a wake written before the start is no wake: the first event round runs at once
         self.thread = threading.Thread(target=self.loop, name=self.label, daemon=True)
         self.thread.start()
         return self.thread
@@ -216,6 +274,12 @@ class Runner:
         return th is None or not th.is_alive()
 
     # ---- what ran
+    def snapshot(self) -> dict[str, Any]:
+        """`status()` and what a reader in another process needs beside it: this process's pid, the heartbeat (now, on the runner's clock), the tick running now (empty between ticks) and the tick that ran last."""
+        st = self.status()
+        st.update(pid=os.getpid(), heartbeat=self.clock(), current=self.current, last_tick=dict(self.last_tick))
+        return st
+
     def status(self) -> dict[str, Any]:
         """The runner's record, for `GET /audit/status`: per tick the last run time (epoch seconds), the last error with its time, and the counts."""
         with self._status_lock:

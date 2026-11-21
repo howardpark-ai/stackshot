@@ -264,6 +264,7 @@ def _start_background() -> list[str]:
         _stamp_svc._phase_tick()            # a stored phase the down time left behind (a wait that ended, a deploy that changed the reading) is true before the first publish; the runner's first sweep is a minute away
     except Exception as e:
         print(f"phase sweep failed: {e}", file=sys.stderr, flush=True)
+    _runner.record_server_start()           # this run's start in the state dir, for a runner that restarts alone (service/fleet_events.py flag_start)
     started = _runner.start()               # the minute set's runner, the timer publish and the runner's watchdog (service/runner.py)
     threading.Thread(target=_router_live.loop, daemon=True).start()   # the router's ticks (a call takes minutes), in a thread of their own
     _runners.PERSIST = True             # the last runners snapshot is kept in a file under the state dir, and taken back here: the Runners pages draw it at once after a restart

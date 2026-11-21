@@ -31,6 +31,7 @@ import time
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.core import runner_files as _files
 from stackshot.waits import event_waits as _ew
 from stackshot.model import model as _model
 from stackshot.waits import wait_list as _wl
@@ -50,33 +51,45 @@ DROP_TAIL = f"drop / {WHEN_WORDS} / {KEEP}"      # the options part of the "drop
 
 
 # ---------------------------------------------------------------------------------------------------------------- the switches
-_HOLD: dict[str, Any] = {"until": 0.0, "by": "", "since": 0.0}      # the migration's own pause: held in the server process, never in the config file, and it lapses by itself
+_HOLD: dict[str, Any] = {"until": 0.0, "by": "", "since": 0.0}      # the migration's own pause: held in the server process (and written to the hold file for a runner in another process), never in the config file, and it lapses by itself
 HOLD_CEILING_S = 3600.0        # the most one pass may hold the board, from its `begin`, however often it renews: a pass that runs past this lapses
 
 
 def hold(by: str, seconds: float, now: float | None = None, begin: bool = False) -> None:
     """The migration pass holds the board-wide pause for `seconds` more (each batch of the pass renews it, so a pass that dies lets the board go on after a few minutes, never for good, and never
     past HOLD_CEILING_S after its `begin`, whatever renews it). `begin` starts the pass and its ceiling; a renewal keeps the ceiling it began with. A restart of the server drops it. It stands
-    beside `[model] pause`: the config switch is the operator's, this one is the pass's, and lifting this never lifts that."""
+    beside `[model] pause`: the config switch is the operator's, this one is the pass's, and lifting this never lifts that. The hold is also written to the hold file (core/runner_files.py: its holder's pid, `by`,
+    `since` and `until`), so a runner in another process keeps its board ticks off too; that file lapses by itself as the hold does (its holder's pid gone, `until` passed, or `since` more than HOLD_CEILING_S ago)."""
     t = time.time() if now is None else now
     if begin or not _HOLD["since"]:
         _HOLD["since"] = t
     _HOLD["until"] = min(t + float(seconds), float(_HOLD["since"]) + HOLD_CEILING_S)
     _HOLD["by"] = str(by or "migration")
+    _files.hold_write(_HOLD["by"], float(_HOLD["since"]), float(_HOLD["until"]))
 
 
 def release() -> None:
     _HOLD["until"], _HOLD["by"], _HOLD["since"] = 0.0, "", 0.0
+    _files.hold_clear()
+
+
+def _file_hold(now: float | None) -> dict[str, Any] | None:
+    """The hold another process keeps in the hold file while it is up; None for none, a stale one, or this process's own (that one is in `_HOLD`). One stat when there is no file."""
+    return _files.hold_read(now, HOLD_CEILING_S)
 
 
 def holding(now: float | None = None) -> bool:
-    """Is the migration's hold up (the pass is running)?"""
-    return (time.time() if now is None else now) < float(_HOLD["until"])
+    """Is the migration's hold up: the pass is running in this process, or (by its hold file) in another?"""
+    t = time.time() if now is None else now
+    return t < float(_HOLD["until"]) or _file_hold(t) is not None
 
 
 def holder() -> str:
     """Who began the pass that holds the board now ("" when none holds it): the only caller whose apply or end the route takes."""
-    return str(_HOLD["by"]) if holding() else ""
+    if time.time() < float(_HOLD["until"]):
+        return str(_HOLD["by"])
+    fh = _file_hold(None)
+    return str(fh["by"]) if fh else ""
 
 
 def paused() -> bool:

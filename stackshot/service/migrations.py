@@ -851,7 +851,7 @@ def migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
             fired = list(_wakes.wake_pass())
         except Exception as e:  # noqa: BLE001
             print(f"migrate: the wake pass after the pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        _runner.WAKE_EVENT.set()
+        _runner.wake()
         rows = [r for r in (spec.get("residue") or []) if isinstance(r, dict) and (r.get("fields") or r.get("kind") == "anchor_seen")]
         detail = migrate_wake(rows) if rows else {}
         if pass_id:

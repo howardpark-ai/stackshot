@@ -15,6 +15,10 @@ archive passes are service/audit_ticks.py's. The table calls each of them throug
 up when its tick runs, so a suite that replaces the function on its owner module is the one called; a suite that replaces a name of this module (`WAKE_EVENT`, `RUNNER`, `fleet_stamp`, `watchdog`) sets it here, and
 one that replaces a wake, event-wait, hand-off or stall function sets it on the module that holds it.
 
+The runner's signals to and from a process that does not share its memory are files (core/runner_files.py, in `<paths.state>/minute/`): `wake()` sets the event and also writes the wake file (a runner in another process ends its wait on it), the runner
+writes its status file (heartbeat, tick, pass count: `beat`), `status()` and `watchdog()` read that file when this process has no runner of its own, and `record_server_start()` keeps the server's start for the inbox flag. In the server with its own runner nothing reads a file back
+(a process's own files are skipped) and the behavior is what it was.
+
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
 
@@ -27,6 +31,7 @@ from typing import Any, Callable
 
 from stackshot.core import config as _cfg
 from stackshot.core import runner as _minute
+from stackshot.core import runner_files as _files
 from stackshot.core.instance import OWNER
 from stackshot.fleet import fleet as _fl
 from stackshot.projects import pages as _pages
@@ -82,6 +87,21 @@ RUNNER_STALL = [False]     # True while a stall episode is told: set when the bu
 WATCHDOG_EVERY = 60.0      # seconds between the watchdog's looks
 
 
+def wake() -> None:
+    """Wake the minute loop at once: the event (this process's runner) and the wake file (a runner in another process). The file is written first, so a runner that takes the line as it wakes on the event does not find a newer one."""
+    _files.wake()
+    WAKE_EVENT.set()
+
+
+def _beat(snapshot: dict[str, Any]) -> None:
+    _files.status_write(snapshot)
+
+
+def record_server_start() -> None:
+    """The server, once per run before it starts its runner: its start time goes to the state dir, so a runner that restarts alone keeps it for the inbox flag (service/fleet_events.py)."""
+    _files.start_write(_fleetev.INBOX_FLAG_START[0])
+
+
 def fleet_stamp() -> float:
     """The newest change in the fleet's files (and the routing log: a delivered notice or a ruling moves a row's count); the runner publishes when it moves."""
     return max(max((p.stat().st_mtime for p in _fl.FLEET_DIR.glob("*/*.json")), default=0.0), _routing.stamp())
@@ -127,7 +147,7 @@ def ticks() -> "list[_minute.Tick]":
 
 
 def _new() -> "_minute.Runner":
-    return _minute.Runner(ticks(), holding=lambda: _watch.holding(), wake_wait=lambda: _wakes.minute_wake_wait(), event=WAKE_EVENT)
+    return _minute.Runner(ticks(), holding=lambda: _watch.holding(), wake_wait=lambda: _wakes.minute_wake_wait(), event=WAKE_EVENT, wake_stamp=_files.wake_stamp, beat=_beat)
 
 
 def make() -> "_minute.Runner":
@@ -140,34 +160,56 @@ def make() -> "_minute.Runner":
 
 
 def status() -> dict[str, Any]:
-    """The runner's record for `GET /audit/status`: per tick its last run and last error (a process that has not run the start reports a runner that has not started)."""
-    return (RUNNER[0] if RUNNER else _new()).status()
+    """The runner's record for `GET /audit/status`: per tick its last run and last error. This process's own runner when it has one; else the record another process's runner keeps in the status file (the same
+    fields, and `source` "file", `pid`, `heartbeat`, `current`; `running` is true while that pid is alive and its heartbeat is fresh); a process with neither reports a runner that has not started. One stat and, when the file moved, a parse."""
+    if RUNNER:
+        return RUNNER[0].status()
+    rec = _files.status_read()
+    if rec is None:
+        return _new().status()
+    now = time.time()
+    return {**rec, "source": "file", "running": bool(_files.pid_alive(rec["pid"]) and now - float(rec["heartbeat"]) <= _minute.STALL_AFTER)}
 
 
 def watchdog(now: float | None = None) -> str:
     """The runner's watchdog, asked by its own thread (`watchdog_loop`) every minute. A runner whose last completed round is older than runner.STALL_AFTER (3 minutes) is hung inside a tick: ONE stderr
     line and ONE message to the builder per stall (the episode is marked before the send, so a failed send is not retried every minute); the next look that finds a round completed again
-    re-arms it. The message asks nothing of the owner and no board item is made. → "" (runner current, or no runner started), "told" (the message was started), "noted" (stalled, already told),
-    "nobody" (no builder configured). `now` is for tests."""
+    re-arms it. The runner it looks at is this process's own, else the one whose status file another process keeps: stalled when its heartbeat or its last completed round is older than STALL_AFTER (a process
+    that died stops its heartbeat, so it is found the same way, and the message says its process is gone). The message asks nothing of the user and no board item is made. → "" (runner current, or no runner
+    started), "told" (the message was started), "noted" (stalled, already told), "nobody" (no builder configured). `now` is for tests."""
     rn = RUNNER[0] if RUNNER else None
-    if rn is None:
-        return ""
-    now = rn.clock() if now is None else now
-    if not rn.stalled(now):
-        RUNNER_STALL[0] = False
-        return ""
+    gone = False
+    if rn is not None:
+        now = rn.clock() if now is None else now
+        if not rn.stalled(now):
+            RUNNER_STALL[0] = False
+            return ""
+        ref = rn.last_round if rn.last_round is not None else rn.started
+        cur, label = rn.current, rn.label
+    else:
+        rec = _files.status_read()
+        if rec is None:
+            return ""
+        now = time.time() if now is None else now
+        beat_at = float(rec["heartbeat"])
+        lr = rec.get("last_round") if isinstance(rec.get("last_round"), (int, float)) else rec.get("started")
+        lr = float(lr) if isinstance(lr, (int, float)) else None
+        if now - beat_at <= _minute.STALL_AFTER and (lr is None or now - lr <= _minute.STALL_AFTER):
+            RUNNER_STALL[0] = False
+            return ""
+        ref = lr if lr is not None else beat_at
+        cur, label, gone = str(rec.get("current") or ""), "runner", not _files.pid_alive(rec["pid"])
     if RUNNER_STALL[0]:
         return "noted"
     RUNNER_STALL[0] = True
-    ref = rn.last_round if rn.last_round is not None else rn.started
     mins = max(0.0, now - float(ref or now)) / 60.0
-    cur = rn.current
-    print(f"{rn.label}: stalled: no round has completed for {mins:.0f} min (a tick is blocking the one thread); the builder is told once", file=sys.stderr, flush=True)
+    print(f"{label}: stalled: no round has completed for {mins:.0f} min ({'its process is gone' if gone else 'a tick is blocking the one thread'}); the builder is told once", file=sys.stderr, flush=True)
     to = _cfg.audit_builder()
     if not to:
         return "nobody"
+    where = "its process is gone" if gone else (("it is stuck in the tick " + cur) if cur else "no tick is running, so the loop itself is stuck")
     _fleetev.inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min (its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}): "
-                                 f"{('it is stuck in the tick ' + cur) if cur else 'no tick is running, so the loop itself is stuck'}, and no wake, anchor, event wait or hand-off runs meanwhile (GET /audit/status has each tick's last_run). "
+                                 f"{where}, and no wake, anchor, event wait or hand-off runs meanwhile (GET /audit/status has each tick's last_run). "
                                  f"Sent once for this stall; nothing here is for {OWNER} and no reply is owed.")
     return "told"
 

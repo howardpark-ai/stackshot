@@ -23,6 +23,7 @@ from typing import Any
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import interp as _interp
+from stackshot.core import runner_files as _files
 from stackshot.core.instance import NAME
 from stackshot.fleet import clients as _clients
 from stackshot.fleet import fleet as _fleet
@@ -49,8 +50,16 @@ def clients_tick() -> None:
 # sent it (a running pane), and to the fleet's builder (fleet_builder: the fleet operator, else the keeper of its project when it is retired), with the likeliest reason (inbox.why). The journal gets the line too.
 INBOX_FLAG_EVERY = 60.0     # seconds between passes; the runner calls it every 60 s
 INBOX_FLAG_LAST = [0.0]
-INBOX_FLAG_START = [time.time()]     # the server's start: the first pass waits one poll period (clients.POLL_MAX) and a margin
+INBOX_FLAG_START = [time.time()]     # the server's start (this process's, when the runner is its thread): the first pass waits one poll period (clients.POLL_MAX) and a margin
 INBOX_FLAG_LINES = 5                 # at most this many lines in one sender's flag, then "+N more"
+
+
+def flag_start() -> float:
+    """The start the first-pass delay counts from. In the server with its runner inline it is INBOX_FLAG_START, this process's start. A runner in a process of its own restarts without the server and must not
+    take its own start for it (the delay would run again at every runner restart): it takes the start the running server wrote (`runner.record_server_start`, core/runner_files.py), and its own only when
+    there is none (no file, a torn one, or a server that is gone). One stat and, when the file moved, a parse, once a minute."""
+    srv = _files.start_read()
+    return INBOX_FLAG_START[0] if srv is None else srv
 
 
 def inbox_flag_minutes() -> float:
@@ -80,7 +89,7 @@ def inbox_flag_tick(now: float | None = None) -> list[str]:
     """One pass of the flag (see above). → the sessions told. `now` is for tests."""
     mins = inbox_flag_minutes()
     now = time.time() if now is None else now
-    if mins <= 0 or now - INBOX_FLAG_LAST[0] < INBOX_FLAG_EVERY or now - INBOX_FLAG_START[0] < _clients.POLL_MAX + 15:
+    if mins <= 0 or now - INBOX_FLAG_LAST[0] < INBOX_FLAG_EVERY or now - flag_start() < _clients.POLL_MAX + 15:
         return []        # not before every puller has polled again since the server started: the machines' rows come back at their next check-in
     INBOX_FLAG_LAST[0] = now
     late = _inbox.new_overdue(mins * 60.0, now, skip_from=(NAME,))     # the flag's own lines are sent from NAME: never flagged in their turn
