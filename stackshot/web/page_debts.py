@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -22,6 +21,7 @@ from fastmcp.exceptions import ToolError
 from stackshot import paths as _paths
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
+from stackshot.core import xlock as _xlock
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.model.needs import _NEEDS_KINDS
 from stackshot.projects import brains as _brains
@@ -74,7 +74,7 @@ def _owed_path() -> Path:
     return p
 
 
-_OWED_LOCK = threading.RLock()     # the page-debt ledger is read, changed and rewritten whole: one thread at a time (a read-change-write holds it from its read to its write)
+_OWED_LOCK = _xlock.XLock("ledger")     # the page-debt ledger is read, changed and rewritten whole: one thread at a time (a read-change-write holds it from its read to its write)
 
 
 def _owed_load() -> dict[str, dict[str, dict[str, Any]]]:

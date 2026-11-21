@@ -22,6 +22,7 @@ from typing import Any
 
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
+from stackshot.core import xlock as _xlock
 from stackshot.core.instance import NAME
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
@@ -41,7 +42,7 @@ from stackshot.waits import stall as _stall
 STALL_LAST = [0.0]
 
 
-STALL_LOCK = threading.RLock()
+STALL_LOCK = _xlock.XLock("stall")
 
 
 def stall_on(now: float | None = None) -> bool:

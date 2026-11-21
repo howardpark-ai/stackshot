@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 import os
 import re
-import threading
 from pathlib import Path
 from typing import Any
 
 from starlette.requests import Request
 
 from stackshot.core import config as _cfg
+from stackshot.core import xlock as _xlock
 from stackshot.model import option_labels as _option_labels
 from stackshot.model import states as _states
 from stackshot.web import render as _rmod
@@ -40,7 +40,7 @@ from stackshot.web.auth.signin import _ui_key
 _ANSWER_TEXT_MAX = 4000                 # characters of the comment box; a longer one is refused, not cut
 _ANSWER_BODY_MAX = 64 * 1024            # bytes of the form body read at all
 _ANSWER_ESCALATE_S = 1800.0             # 30 min: a decision answer the owner has not written to the item after → the project's keeper
-_ANSWER_LOCK = threading.RLock()     # re-entrant: _answer saves (its own save names no writer, but a hook may)
+_ANSWER_LOCK = _xlock.XLock("answers")     # re-entrant: _answer saves (its own save names no writer, but a hook may)
 
 
 def _answer_token(email: str, gid: str) -> str:

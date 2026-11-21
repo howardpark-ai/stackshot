@@ -192,36 +192,37 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
     cleared: dict[tuple[str, str], list[tuple[str, bool]]] = {}   # (to, the front mover it is told for, else "") → its rows
     kept: list[dict[str, str]] = []
     for gid, p in _item_files():
-        try:
-            it = _svcstore._load(gid)
-        except Exception:
-            continue
-        meta = dict(it.get("metadata") or {})
-        if it.get("status") != "open" or not _hooks().rmod_waits_recycle(it):
-            continue
-        owner = _anc.canonical(_telling.holder(it), nm)
-        on = on_machine(owner)
-        at = meta.get("recycle_at")
-        later = isinstance(at, (int, float)) and (at > flag_at if flag_at else at >= started)   # a flag's call covers its own time; started-only: flagged after the sweep began
-        why = ("flagged after the recycle flag it clears" if later and flag_at else "flagged after the recycle began" if later
-               else "its mover was not relaunched" if owner in skip
-               else "its mover is not on " + machine if not on else "")
-        if why:
-            kept.append({"item": gid, "why": why}); continue
-        freed = _held_only_for_recycle(it)   # the recycle was all the hold waited for
-        meta.pop("recycle", None); meta.pop("recycle_at", None)
-        if freed:
-            meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("idle", None)
-            it["updated"] = it["state_updated"] = time.time()   # released like a wake: both clocks move, no page owed
-        else:
-            it["updated"] = time.time()      # a filing edit: the state clock and the confirm stay as they were
-        it["metadata"] = meta
-        _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
-              + (": unparked" if freed else "; still parked, waiting on its wake or after" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
-        for sid, _why in _telling.notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
-            to = (sid, "") if sid == owner else (sid, _sr._session_label(owner) or owner)
-            cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
-        print(f"recycle: {gid} no longer waits ({kind} on {machine})", file=sys.stderr, flush=True)
+        with _writes.ITEM_LOCK:         # read, changed and saved under the item lock: a write that lands meanwhile (a request, a pass in another process) is kept; the notices go after the loop
+            try:
+                it = _svcstore._load(gid)
+            except Exception:
+                continue
+            meta = dict(it.get("metadata") or {})
+            if it.get("status") != "open" or not _hooks().rmod_waits_recycle(it):
+                continue
+            owner = _anc.canonical(_telling.holder(it), nm)
+            on = on_machine(owner)
+            at = meta.get("recycle_at")
+            later = isinstance(at, (int, float)) and (at > flag_at if flag_at else at >= started)   # a flag's call covers its own time; started-only: flagged after the sweep began
+            why = ("flagged after the recycle flag it clears" if later and flag_at else "flagged after the recycle began" if later
+                   else "its mover was not relaunched" if owner in skip
+                   else "its mover is not on " + machine if not on else "")
+            if why:
+                kept.append({"item": gid, "why": why}); continue
+            freed = _held_only_for_recycle(it)   # the recycle was all the hold waited for
+            meta.pop("recycle", None); meta.pop("recycle_at", None)
+            if freed:
+                meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("idle", None)
+                it["updated"] = it["state_updated"] = time.time()   # released like a wake: both clocks move, no page owed
+            else:
+                it["updated"] = time.time()      # a filing edit: the state clock and the confirm stay as they were
+            it["metadata"] = meta
+            _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
+                  + (": unparked" if freed else "; still parked, waiting on its wake or after" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
+            for sid, _why in _telling.notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
+                to = (sid, "") if sid == owner else (sid, _sr._session_label(owner) or owner)
+                cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _holders._is_held(it) or _item_read._date_parked(it) else ""))
+            print(f"recycle: {gid} no longer waits ({kind} on {machine})", file=sys.stderr, flush=True)
     for (to, front), rows in cleared.items():
         ids = [_gh.shown(g) for g, _ in rows]      # the notice names each item as it is shown (board#N); the stderr tag keeps the raw ids
         names = ids[0] if len(ids) == 1 else ", ".join(ids[:-1]) + " and " + ids[-1]

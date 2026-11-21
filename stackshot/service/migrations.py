@@ -70,17 +70,18 @@ def migrate_needs() -> list[str]:
     `state_updated` stay as they were, as migrate_holds leaves them. One stderr line per item. → the gids rewritten."""
     out = []
     for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if it.get("status") != "open" or not _legacy_needs(it):
-            continue
-        _writes.save(gid, it)
-        out.append(gid)
-        print(f"migrate: {gid} needs → {it['metadata'].get('needs') or []} (the linked agent, if any, moved into it), clocks unchanged — {it.get('subject')}",
-              file=sys.stderr, flush=True)
+        with _writes.ITEM_LOCK:         # read, changed and saved under the item lock: a write that lands meanwhile (a request, a pass in another process) is kept
+            try:
+                with open(p, encoding="utf-8") as f:
+                    it = json.load(f)
+            except Exception:
+                continue
+            if it.get("status") != "open" or not _legacy_needs(it):
+                continue
+            _writes.save(gid, it)
+            out.append(gid)
+            print(f"migrate: {gid} needs → {it['metadata'].get('needs') or []} (the linked agent, if any, moved into it), clocks unchanged — {it.get('subject')}",
+                  file=sys.stderr, flush=True)
     return out
 
 
@@ -93,48 +94,49 @@ def migrate_owner_mover() -> list[str]:
     out = []
     after = lambda i_: _hooks().after_open(i_.get("metadata") or {})
     for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if it.get("status") != "open" or not isinstance(it.get("metadata"), dict):
-            continue
-        did: list[str] = []
-        try:
-            if _hooks().model_guards_on():
-                rec_ = _ho.record_of(it)
-                # the proof that he held it and has let go: an answer of his NEWER than the change of mover to him (his hand-off record's time; with no record, the item's last write, a second before it).
-                # An old answer followed by a mover=the owner a writer set later is a deliberate hand-over, not a hand-back to make.
-                since = float(rec_.get("at") or 0) if rec_ and _model.is_owner(rec_.get("to")) else float(it.get("updated") or 0) - 1
-                his = any(isinstance(a, dict) and float(a.get("ts") or 0) >= since for a in (it["metadata"].get("answers") or []))
-                ch = _model.settle(it, his, after)
-                if ch:
-                    was_mover = _model.norm_who(it["metadata"].get("mover"))
-                    _hooks().settle_apply(it["metadata"], ch)
-                    if "mover" in ch:
-                        did.append(f"mover {was_mover} → {ch['mover'] or 'default'}" + (f", then {ch['then']}" if ch.get("then") else ""))
-                    else:  # a then-only result: the then beside a session mover goes, the mover stays
-                        did.append("then dropped (it stands only while he moves the item)")
-            r = _ho.pending_his(it) if _handoff.handoff_on() else None
-            if r is not None:
-                answers = [float(a.get("ts") or 0) for a in (it["metadata"].get("answers") or []) if isinstance(a, dict) and float(a.get("ts") or 0) >= float(r.get("at") or 0)]
-                if answers:
-                    _ho.answered(it, time.time(), f"{OWNER}'s answer was already on the item", at=min(answers))
-                    did.append("his hand-off ended (answered)")
-                else:
-                    mod = _hooks().model_of({**it, "gid": gid})
-                    if not (mod.state == _model.ALIVE and _model.is_owner(mod.mover)):
-                        _ho.answered(it, time.time(), f"it is no longer {OWNER}'s to move")
-                        did.append("his hand-off ended (not his to move)")
-        except Exception as e:  # noqa: BLE001  — one unreadable item never stops the start
-            print(f"migrate: {gid} his mover not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-            continue
-        if not did:
-            continue
-        _writes.save(gid, it, mirror=False)         # a start-up pass posts nothing to GitHub (no comment per migrated item)
-        out.append(gid)
-        print(f"migrate: {gid} {'; '.join(did)}, clocks unchanged — {it.get('subject')}", file=sys.stderr, flush=True)
+        with _writes.ITEM_LOCK:         # read, changed and saved under the item lock: a write that lands meanwhile (a request, a pass in another process) is kept
+            try:
+                with open(p, encoding="utf-8") as f:
+                    it = json.load(f)
+            except Exception:
+                continue
+            if it.get("status") != "open" or not isinstance(it.get("metadata"), dict):
+                continue
+            did: list[str] = []
+            try:
+                if _hooks().model_guards_on():
+                    rec_ = _ho.record_of(it)
+                    # the proof that he held it and has let go: an answer of his NEWER than the change of mover to him (his hand-off record's time; with no record, the item's last write, a second before it).
+                    # An old answer followed by a mover=the owner a writer set later is a deliberate hand-over, not a hand-back to make.
+                    since = float(rec_.get("at") or 0) if rec_ and _model.is_owner(rec_.get("to")) else float(it.get("updated") or 0) - 1
+                    his = any(isinstance(a, dict) and float(a.get("ts") or 0) >= since for a in (it["metadata"].get("answers") or []))
+                    ch = _model.settle(it, his, after)
+                    if ch:
+                        was_mover = _model.norm_who(it["metadata"].get("mover"))
+                        _hooks().settle_apply(it["metadata"], ch)
+                        if "mover" in ch:
+                            did.append(f"mover {was_mover} → {ch['mover'] or 'default'}" + (f", then {ch['then']}" if ch.get("then") else ""))
+                        else:  # a then-only result: the then beside a session mover goes, the mover stays
+                            did.append("then dropped (it stands only while he moves the item)")
+                r = _ho.pending_his(it) if _handoff.handoff_on() else None
+                if r is not None:
+                    answers = [float(a.get("ts") or 0) for a in (it["metadata"].get("answers") or []) if isinstance(a, dict) and float(a.get("ts") or 0) >= float(r.get("at") or 0)]
+                    if answers:
+                        _ho.answered(it, time.time(), f"{OWNER}'s answer was already on the item", at=min(answers))
+                        did.append("his hand-off ended (answered)")
+                    else:
+                        mod = _hooks().model_of({**it, "gid": gid})
+                        if not (mod.state == _model.ALIVE and _model.is_owner(mod.mover)):
+                            _ho.answered(it, time.time(), f"it is no longer {OWNER}'s to move")
+                            did.append("his hand-off ended (not his to move)")
+            except Exception as e:  # noqa: BLE001  — one unreadable item never stops the start
+                print(f"migrate: {gid} his mover not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+                continue
+            if not did:
+                continue
+            _writes.save(gid, it, mirror=False)         # a start-up pass posts nothing to GitHub (no comment per migrated item)
+            out.append(gid)
+            print(f"migrate: {gid} {'; '.join(did)}, clocks unchanged — {it.get('subject')}", file=sys.stderr, flush=True)
     return out
 
 
@@ -144,17 +146,18 @@ def migrate_holds() -> list[str]:
     by the item clock. One stderr line per item. → the gids rewritten."""
     out = []
     for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        if not _legacy_hold(it):
-            continue
-        _writes.save(gid, it)
-        out.append(gid)
-        print(f"migrate: {gid} status on_hold → open + metadata.hold (wake {it['metadata'].get('wake') or 'none'}), clocks unchanged — {it.get('subject')}",
-              file=sys.stderr, flush=True)
+        with _writes.ITEM_LOCK:         # read, changed and saved under the item lock: a write that lands meanwhile (a request, a pass in another process) is kept
+            try:
+                with open(p, encoding="utf-8") as f:
+                    it = json.load(f)
+            except Exception:
+                continue
+            if not _legacy_hold(it):
+                continue
+            _writes.save(gid, it)
+            out.append(gid)
+            print(f"migrate: {gid} status on_hold → open + metadata.hold (wake {it['metadata'].get('wake') or 'none'}), clocks unchanged — {it.get('subject')}",
+                  file=sys.stderr, flush=True)
     return out
 
 

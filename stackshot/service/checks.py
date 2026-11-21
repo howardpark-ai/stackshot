@@ -330,6 +330,12 @@ def check_close(gid: str, it: dict[str, Any], check: str, now: float) -> None:
     session's close clears them, the description as it stands (the reason says how it ended). No page owed; the History
     and the after releases are the record. The owner's one rule: a close that nobody was told of is a wait that ended unseen, so the
     item's mover is told (tell_check_closed); a close with his words on the item is a row on his For you list (_foryou_on_save)."""
+    label = _close_write(gid, it, check, now)
+    _close_after(gid, it, label)
+
+
+def _close_write(gid: str, it: dict[str, Any], check: str, now: float) -> str:
+    """The write of check_close: the item changed and saved under the item lock (a pass that read the item again, `check_unchanged`, holds the lock already and it is re-entered). → the check's label."""
     _telling.CLOSE_WAS.item = json.loads(json.dumps(it))      # the close is told to the mover, which the close drops
     meta = dict(it.get("metadata") or {})
     _steps.close_meta(meta, "done", NAME, now)       # a close marks the open steps, the server's own close included
@@ -339,8 +345,14 @@ def check_close(gid: str, it: dict[str, Any], check: str, now: float) -> None:
     meta["outcome"], meta["reason"] = "done", _fg._fit(f"done check passed: {label}", _fg._close_reason_max())     # kept to the reason limit a session's close is held to
     it["status"] = "completed"; it["metadata"] = meta
     it["updated"] = it["state_updated"] = it["confirmed"] = now
-    _writes.save(gid, it, activity=_activity.EVENT)      # no writer, no note: the History line is the change itself ("completed · done — done check passed: …"); the event the check waited for is activity
+    with _writes.ITEM_LOCK:
+        _writes.save(gid, it, activity=_activity.EVENT)      # no writer, no note: the History line is the change itself ("completed · done — done check passed: …"); the event the check waited for is activity
     print(f"check: {gid} closed, {label} — {it.get('subject')}", file=sys.stderr, flush=True)
+    return label
+
+
+def _close_after(gid: str, it: dict[str, Any], label: str) -> None:
+    """What follows the close, after the item lock is let go: the mover is told, the items that waited on it are released."""
     try:
         _telling.tell_check_closed(gid, it, label)
     except Exception as e:  # noqa: BLE001
@@ -357,15 +369,22 @@ def check_fail(gid: str, it: dict[str, Any], check: str, why: str, now: float) -
     instead of reading "not yet" for ever: the check goes, the failure is recorded on the item (metadata.wait_failed),
     the item stays open and both clocks move, as a wait ending does. The server's own act:
     no page owed, the History says it. The item's mover is told at once (tell_wait_failed)."""
+    label = _fail_write(gid, it, check, why, now)
+    _telling.tell_wait_failed(gid, it, f"check {label}", why)
+
+
+def _fail_write(gid: str, it: dict[str, Any], check: str, why: str, now: float) -> str:
+    """The write of check_fail, under the item lock (a pass that read the item again holds it already). → the check's label."""
     meta = dict(it.get("metadata") or {})
     meta.pop("check", None); meta.pop("idle", None); meta.pop("waiting", None); meta.pop("watch_reason", None)
     label = check_label(check)
     meta["wait_failed"] = {"what": f"check {label}", "why": why, "at": now}
     it["metadata"] = meta
     it["updated"] = it["state_updated"] = now
-    _writes.save(gid, it, note=f"check failed: {label}: {why}; the item stays open")
+    with _writes.ITEM_LOCK:
+        _writes.save(gid, it, note=f"check failed: {label}: {why}; the item stays open")
     print(f"check: {gid} failed, {label}: {why} — {it.get('subject')}", file=sys.stderr, flush=True)
-    _telling.tell_wait_failed(gid, it, f"check {label}", why)
+    return label
 
 
 def check_wait(gid: str, it: dict[str, Any], check: str) -> None:
@@ -374,7 +393,8 @@ def check_wait(gid: str, it: dict[str, Any], check: str) -> None:
     waits for the decision: the server's own note and the History. The pass calls this once per check (its record,
     items[gid]["met"], keeps the check text); the first pass after the decision is cleared closes the item as any passed check does."""
     label = check_label(check)
-    _writes.save(gid, it, note=f"done check met: {label}; the item needs {OWNER}'s decision, so it stays open and the server closes it once the decision is cleared", activity=_activity.EVENT)
+    with _writes.ITEM_LOCK:
+        _writes.save(gid, it, note=f"done check met: {label}; the item needs {OWNER}'s decision, so it stays open and the server closes it once the decision is cleared", activity=_activity.EVENT)
     print(f"check: {gid} met, {label}: waits for the decision before it closes — {it.get('subject')}", file=sys.stderr, flush=True)
 
 
@@ -419,10 +439,11 @@ def check_tick(now: float | None = None) -> list[str]:
         except Exception as e:  # noqa: BLE001  — a check that raises is an error like any other: logged, tried again
             ok, err = False, f"{type(e).__name__}: {e}"
         if not err and ok and _hooks().rmod_needs_kind(it) == "call":     # met while his decision is open: the item waits (one line, once), and the check closes it on a later pass
-            fresh = check_unchanged(gid, it)
-            if fresh is not None and _hooks().rmod_needs_kind(fresh) == "call":
-                if not keep:
+            with _writes.ITEM_LOCK:         # the recheck and the write are one step: nothing writes the item between them
+                fresh = check_unchanged(gid, it)
+                if fresh is not None and _hooks().rmod_needs_kind(fresh) == "call" and not keep:
                     check_wait(gid, fresh, check)
+            if fresh is not None and _hooks().rmod_needs_kind(fresh) == "call":
                 items[gid] = {"err": "", "at": now, "met": check}
                 CHECK_LOGGED.pop(gid, None)
             else:
@@ -433,9 +454,11 @@ def check_tick(now: float | None = None) -> list[str]:
                 seen_refs.add(check_ref(check[len("pr_merged "):]))
             continue
         if not err and ok:
-            fresh = check_unchanged(gid, it)
+            with _writes.ITEM_LOCK:         # the recheck and the write are one step: nothing writes the item between them
+                fresh = check_unchanged(gid, it)
+                label = _close_write(gid, fresh, check, now) if fresh is not None else ""
             if fresh is not None:
-                check_close(gid, fresh, check, now)
+                _close_after(gid, fresh, label)
                 closed.append(gid)
                 CHECK_LOGGED.pop(gid, None)
                 continue
@@ -446,9 +469,11 @@ def check_tick(now: float | None = None) -> list[str]:
             continue
         dead = "" if (err or ok) else check_dead(check, st["github"])     # The owner's one rule: a check that can never pass fails now, never "not yet" for ever
         if dead:
-            fresh = check_unchanged(gid, it)
+            with _writes.ITEM_LOCK:         # the recheck and the write are one step: nothing writes the item between them
+                fresh = check_unchanged(gid, it)
+                label = _fail_write(gid, fresh, check, dead, now) if fresh is not None else ""
             if fresh is not None:
-                check_fail(gid, fresh, check, dead, now)
+                _telling.tell_wait_failed(gid, fresh, f"check {label}", dead)
                 failed += 1
                 CHECK_LOGGED.pop(gid, None)
                 continue

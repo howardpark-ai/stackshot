@@ -19,7 +19,6 @@ import os
 from pathlib import Path
 import re
 import sys
-import threading
 import time
 from typing import Any, Callable
 
@@ -29,6 +28,7 @@ from stackshot.anchors import anchor_scope as _ascope
 from stackshot.anchors import anchors as _anc
 from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
+from stackshot.core import xlock as _xlock
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
@@ -50,7 +50,7 @@ from stackshot.waits import watchers as _watch
 
 
 _WAKE_RE = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})(?:[T ]([0-9]{2}:[0-9]{2}))?")
-_WAKE_LOCK = threading.Lock()       # one wake pass at a time (the runner's watchers' tick and its ten-minute catch-up, the start's pass, the migration pass's end)
+_WAKE_LOCK = _xlock.XLock("wake")       # one wake pass at a time (the runner's watchers' tick and its ten-minute catch-up, the start's pass, the migration pass's end)
 
 
 def wake_at(value: Any) -> dt.datetime:
@@ -116,31 +116,38 @@ def wake_rows() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
     releases the hold; a wake an item carries with no hold and no until (a hand-off's backstop, or one stored before until) is only a notice: the pass tells and drops it."""
     out = []
     for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:
-            continue
-        _legacy_hold(it)                    # a file from before the migration counts as held
-        _ip.read_through(it)
-        meta = it.get("metadata") or {}
-        if it.get("status") != "open":
-            continue
-        if _watch.watches(it):               # a watched wait comes due at its own moment (a wake, a relay's ask-by day, a backstop), the watchers' pass acts on it
-            ep = _watch.next_moment(meta)
-            until = _watching.WATCH_BACKOFF.get(gid, 0.0)           # a turn that failed is not looked at again before its back-off ends, even when the failure could not be written to the item
-            if ep is not None and until > time.time():
-                ep = max(ep, until)
-            if ep is not None:
-                out.append((gid, p, it, dt.datetime.fromtimestamp(ep, _pages.zone_now().tzinfo)))
-            continue
-        if not _wt.wake_value(meta):
-            continue
-        try:
-            out.append((gid, p, it, wake_at(_wt.wake_value(meta))))
-        except ValueError:
-            continue                        # a wake the gate would have refused (a hand edit): left for a person to see
+        row = wake_row(gid, p)
+        if row is not None:
+            out.append(row)
     return out
+
+
+def wake_row(gid: str, p: Path) -> tuple[str, Path, dict[str, Any], dt.datetime] | None:
+    """One item file as wake_rows reads it: (gid, path, item, the moment its wake falls due), or None when it is not an open item with a readable wake."""
+    try:
+        with open(p, encoding="utf-8") as f:
+            it = json.load(f)
+    except Exception:
+        return None
+    _legacy_hold(it)                    # a file from before the migration counts as held
+    _ip.read_through(it)
+    meta = it.get("metadata") or {}
+    if it.get("status") != "open":
+        return None
+    if _watch.watches(it):               # a watched wait comes due at its own moment (a wake, a relay's ask-by day, a backstop), the watchers' pass acts on it
+        ep = _watch.next_moment(meta)
+        until = _watching.WATCH_BACKOFF.get(gid, 0.0)           # a turn that failed is not looked at again before its back-off ends, even when the failure could not be written to the item
+        if ep is not None and until > time.time():
+            ep = max(ep, until)
+        if ep is not None:
+            return gid, p, it, dt.datetime.fromtimestamp(ep, _pages.zone_now().tzinfo)
+        return None
+    if not _wt.wake_value(meta):
+        return None
+    try:
+        return gid, p, it, wake_at(_wt.wake_value(meta))
+    except ValueError:
+        return None                        # a wake the gate would have refused (a hand edit): left for a person to see
 
 
 def next_wake() -> dt.datetime | None:
@@ -182,35 +189,44 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
         for gid, _p, it, at in wake_rows():
             if _watch.watches(it) or not due(at) or _hooks().old_wait_off():       # a watched wait is the watchers', above; after the switchover (fallback off) the old pass stands down
                 continue
-            meta = it.get("metadata") or {}
-            wake = _wt.wake_value(meta)
-            had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a backstop: its end releases the item like a hold's
-            if had_u:
-                meta.pop("wait_kind", None)   # the date has come: the wait is over, its date and its kind go together (a wait stored by the old fields keeps what it had: the stored items are migrated apart)
-            meta.pop("wake", None); meta.pop("until", None)
-            meta.pop("watch_reason", None)    # a front agent's reason for watching belonged to this wake
-            meta.pop("wait_basis", None)      # a wait that stood on a real-world date: the wake is spent, so is its basis
-            _hooks().state_end(meta, "parked")        # a park that stood on that wake is over with it
-            if not (_hooks().hold_flag(it) or had_u):          # a notice: told once, the wake dropped, nothing else moves
-                it["metadata"] = meta
-                it["updated"] = time.time()  # the item's own clock; the state clock and the confirm stay (a filing edit, like a recycle done)
-                what = f"backstop (wake {wake})"
-                _writes.save(gid, it, note=f"{what}: still active, {_hooks().rmod_whose()[_hooks().rmod_needs_kind({'metadata': meta})]}")
-                woke.append(gid)
-                print(f"wake: {gid} backstop (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
+            with _writes.ITEM_LOCK:         # the item read again under its lock, changed and saved: a write that landed since the scan (an update, an answer, a pass in another process) is kept, not overwritten
+                row = wake_row(gid, _p)
+                if row is None or _watch.watches(row[2]) or not due(row[3]):
+                    continue
+                it = row[2]
+                meta = it.get("metadata") or {}
+                wake = _wt.wake_value(meta)
+                had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a backstop: its end releases the item like a hold's
+                if had_u:
+                    meta.pop("wait_kind", None)   # the date has come: the wait is over, its date and its kind go together (a wait stored by the old fields keeps what it had: the stored items are migrated apart)
+                meta.pop("wake", None); meta.pop("until", None)
+                meta.pop("watch_reason", None)    # a front agent's reason for watching belonged to this wake
+                meta.pop("wait_basis", None)      # a wait that stood on a real-world date: the wake is spent, so is its basis
+                _hooks().state_end(meta, "parked")        # a park that stood on that wake is over with it
+                if not (_hooks().hold_flag(it) or had_u):          # a notice: told once, the wake dropped, nothing else moves
+                    it["metadata"] = meta
+                    it["updated"] = time.time()  # the item's own clock; the state clock and the confirm stay (a filing edit, like a recycle done)
+                    what = f"backstop (wake {wake})"
+                    _writes.save(gid, it, note=f"{what}: still active, {_hooks().rmod_whose()[_hooks().rmod_needs_kind({'metadata': meta})]}")
+                    woke.append(gid)
+                    print(f"wake: {gid} backstop (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
+                    reminder = True
+                else:
+                    meta.pop("hold", None); meta.pop("hold_set", None)
+                    if "confirmed" not in it:      # `confirmed` never moves here, so the item reads stale until its mover refreshes it; one
+                        it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)   # without it is pinned at the clock it read as, before the clocks below move
+                    it["status"] = "open"; it["metadata"] = meta
+                    it["updated"] = time.time()
+                    it["state_updated"] = it["updated"]
+                    what = f"woke (wake {wake})"
+                    _writes.save(gid, it, note=f"{what}: {back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
+                    woke.append(gid)
+                    print(f"wake: {gid} unparked (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
+                    reminder = False
+            if reminder:                    # the notice is sent after the lock is let go: a delivery is never made under it
                 wake_notify(gid, it, what, out=out, reminder=True)
-                continue
-            meta.pop("hold", None); meta.pop("hold_set", None)
-            if "confirmed" not in it:      # `confirmed` never moves here, so the item reads stale until its mover refreshes it; one
-                it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)   # without it is pinned at the clock it read as, before the clocks below move
-            it["status"] = "open"; it["metadata"] = meta
-            it["updated"] = time.time()
-            it["state_updated"] = it["updated"]
-            what = f"woke (wake {wake})"
-            _writes.save(gid, it, note=f"{what}: {back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
-            woke.append(gid)
-            print(f"wake: {gid} unparked (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
-            wake_notify(gid, it, what, out=out)
+            else:
+                wake_notify(gid, it, what, out=out)
         for sid, rows in out.items():
             wake_tell(sid, rows, extra=_watching.watch_text(sid, wout.pop(sid, [])))     # one message per session for the whole pass
         for sid, rows in wout.items():
@@ -366,49 +382,50 @@ def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reaso
         rep_open = False
     wout: dict[str, list[tuple[str, dict[str, Any], str]]] = {}       # the watched waits this close ended, by recipient (one message each, below)
     for g, _p in _item_files():
-        try:
-            it = _load(g)
-        except Exception:
-            continue
-        meta = dict(it.get("metadata") or {})
-        if it.get("status") != "open" or (gid not in _after_of(meta) and not _wl.lines_for_item(meta, gid, open_only=False)):      # a wait on a list is found by any of its item lines
-            continue
-        waiting_on.add(g)
-        if _wl.valid(meta):             # a wait on a list is the watchers' alone, never today's release below (two mechanisms must not end the same item)
-            if _watch.watches(it) and _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
-                released.append(g)
-            continue
-        if _watch.watches(it) and not (_wt.stored_until(meta) and not _uw.kind_of(meta) and _after_of(meta)):         # a watched wait is the watchers', not today's release below (a date with an after link and no kind is a park on the closing, released below)
-            if _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
-                released.append(g)
-            continue
-        if _hooks().old_wait_off():            # the switchover without its fallback: only a watcher ends a wait
-            continue
-        after = [x for x in _after_of(meta) if x != gid]
-        if rep_open and rep not in after and rep != g:
-            after.append(rep)
-        meta["after"] = after
-        left = _hooks().after_open(meta)
-        if left:                  # another blocker is still open: the wait goes on, on the ones left (a dropped one is simply no longer waited on)
-            it["metadata"] = meta; it["updated"] = time.time()
-            _writes.save(g, it, note=f"{_gh.ref(gid)} closed as {outcome}" + (f", followed to {_gh.ref(rep)}" if rep_open else "")   # the History note: other items as #N
-                  + f"; still waits on {', '.join(_gh.ref(x) for x in left)}")
-            print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
-            continue
-        had_until = bool(_wt.stored_until(meta))
-        meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None)
-        if had_until and _watch.stored_kind(meta) == "item":
-            meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
-        _hooks().state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
-        meta.pop("wait_failed", None); meta.pop("waiting", None)   # released: nothing is waited on, so no failed wait stays, and a `waiting` record an earlier version wrote goes too (the wake notice below is the one the keeper gets)
-        if "confirmed" not in it:
-            it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)
-        it["metadata"] = meta; it["updated"] = time.time(); it["state_updated"] = it["updated"]
-        how = lambda sh: ("was dropped" if outcome == "dropped" else f"was superseded by {sh(rep or superseded_by)}, which is closed too" if outcome == "superseded"
-                          else "closed (done)")   # sh: ghsync.shown for the notice a session reads, ghsync.ref for a History note (#N), str for the stderr line
-        what = lambda sh: f"woke: {sh(gid)}, the last item it waited on, {how(sh)}" + (f" by {_session_label(writer)}" if writer else "")
-        _writes.save(g, it, note=f"{what(_gh.ref)}: {back_words(meta, _gh.ref)}"); released.append(g)   # phase 2 prep: the note is the History line, written by the server; other items as #N
-        print(f"after: {g} released, {gid} {how(str)} — {it.get('subject')}", file=sys.stderr, flush=True)
+        with _writes.ITEM_LOCK:         # the item read, changed and saved under its lock (a write that landed meanwhile, here or in another process, is kept); its notice is sent after
+            try:
+                it = _load(g)
+            except Exception:
+                continue
+            meta = dict(it.get("metadata") or {})
+            if it.get("status") != "open" or (gid not in _after_of(meta) and not _wl.lines_for_item(meta, gid, open_only=False)):      # a wait on a list is found by any of its item lines
+                continue
+            waiting_on.add(g)
+            if _wl.valid(meta):             # a wait on a list is the watchers' alone, never today's release below (two mechanisms must not end the same item)
+                if _watch.watches(it) and _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
+                    released.append(g)
+                continue
+            if _watch.watches(it) and not (_wt.stored_until(meta) and not _uw.kind_of(meta) and _after_of(meta)):         # a watched wait is the watchers', not today's release below (a date with an after link and no kind is a park on the closing, released below)
+                if _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
+                    released.append(g)
+                continue
+            if _hooks().old_wait_off():            # the switchover without its fallback: only a watcher ends a wait
+                continue
+            after = [x for x in _after_of(meta) if x != gid]
+            if rep_open and rep not in after and rep != g:
+                after.append(rep)
+            meta["after"] = after
+            left = _hooks().after_open(meta)
+            if left:                  # another blocker is still open: the wait goes on, on the ones left (a dropped one is simply no longer waited on)
+                it["metadata"] = meta; it["updated"] = time.time()
+                _writes.save(g, it, note=f"{_gh.ref(gid)} closed as {outcome}" + (f", followed to {_gh.ref(rep)}" if rep_open else "")   # the History note: other items as #N
+                      + f"; still waits on {', '.join(_gh.ref(x) for x in left)}")
+                print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
+                continue
+            had_until = bool(_wt.stored_until(meta))
+            meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None)
+            if had_until and _watch.stored_kind(meta) == "item":
+                meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
+            _hooks().state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
+            meta.pop("wait_failed", None); meta.pop("waiting", None)   # released: nothing is waited on, so no failed wait stays, and a `waiting` record an earlier version wrote goes too (the wake notice below is the one the keeper gets)
+            if "confirmed" not in it:
+                it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)
+            it["metadata"] = meta; it["updated"] = time.time(); it["state_updated"] = it["updated"]
+            how = lambda sh: ("was dropped" if outcome == "dropped" else f"was superseded by {sh(rep or superseded_by)}, which is closed too" if outcome == "superseded"
+                              else "closed (done)")   # sh: ghsync.shown for the notice a session reads, ghsync.ref for a History note (#N), str for the stderr line
+            what = lambda sh: f"woke: {sh(gid)}, the last item it waited on, {how(sh)}" + (f" by {_session_label(writer)}" if writer else "")
+            _writes.save(g, it, note=f"{what(_gh.ref)}: {back_words(meta, _gh.ref)}"); released.append(g)   # phase 2 prep: the note is the History line, written by the server; other items as #N
+            print(f"after: {g} released, {gid} {how(str)} — {it.get('subject')}", file=sys.stderr, flush=True)
         wake_notify(g, it, what(_gh.shown))
     for sid, rows in wout.items():
         _watching.watch_tell(sid, rows)
@@ -450,22 +467,23 @@ def anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched: 
     except Exception:
         entries = []
     for g in ([] if only_watched else dict.fromkeys(str(g) for e in entries for g in e["items"])):     # only_watched: the minute pass replays a notice for the watchers alone; today's held items got no release from it before
-        try:
-            it = _load(g)
-        except Exception:
-            continue
-        date_wait = bool(_wt.stored_until(it.get("metadata") or {})) and not str((it.get("metadata") or {}).get("wait_kind") or "").strip()      # a wait on the date alone (until, no kind): what a hold with a wake was, released by the notice
-        if it.get("status") != "open" or not (_hooks().is_held(it) or date_wait) or (_watch.watches(it) and not date_wait) or at <= float(it.get("state_updated") or 0):      # a watched wait is the watchers' (_watching.watch_anchor_notice below)
-            continue
-        meta = it["metadata"]
-        had_until = bool(_wt.stored_until(meta))
-        meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None); meta.pop("idle", None)
-        if had_until and _watch.stored_kind(meta) == "anchor":
-            meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
-        _hooks().state_end(meta, "parked")
-        it["updated"] = it["state_updated"] = time.time()
-        what = f"woke: a notice from {url}, the anchor it waited on, {how}"
-        _writes.save(g, it, note=f"{what}: {back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
+        with _writes.ITEM_LOCK:         # the item read, changed and saved under its lock (a write that landed meanwhile, here or in another process, is kept); its notice is sent after
+            try:
+                it = _load(g)
+            except Exception:
+                continue
+            date_wait = bool(_wt.stored_until(it.get("metadata") or {})) and not str((it.get("metadata") or {}).get("wait_kind") or "").strip()      # a wait on the date alone (until, no kind): what a hold with a wake was, released by the notice
+            if it.get("status") != "open" or not (_hooks().is_held(it) or date_wait) or (_watch.watches(it) and not date_wait) or at <= float(it.get("state_updated") or 0):      # a watched wait is the watchers' (_watching.watch_anchor_notice below)
+                continue
+            meta = it["metadata"]
+            had_until = bool(_wt.stored_until(meta))
+            meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None); meta.pop("idle", None)
+            if had_until and _watch.stored_kind(meta) == "anchor":
+                meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
+            _hooks().state_end(meta, "parked")
+            it["updated"] = it["state_updated"] = time.time()
+            what = f"woke: a notice from {url}, the anchor it waited on, {how}"
+            _writes.save(g, it, note=f"{what}: {back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
         wake_notify(g, it, what)
         print(f"anchor wait: {g} released ({project}, notice {n.get('id')})", file=sys.stderr, flush=True)
         released.append(g)

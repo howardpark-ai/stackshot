@@ -38,7 +38,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot import paths as _paths
 from stackshot.anchors import anchors as _anc
-from stackshot.core import config as _cfg, interp as _interp, store as _store
+from stackshot.core import config as _cfg, interp as _interp, store as _store, xlock as _xlock
 from stackshot.core.instance import NAME, OWNER
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _session_label, _sessions_index
@@ -1140,7 +1140,7 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
 HANDBACK_HOLD_S = 180.0
 
 
-_HANDBACK_LOCK = threading.Lock()
+_HANDBACK_LOCK = _xlock.XLock("handback-held")
 
 
 def handback_hold_s() -> float:

@@ -1,6 +1,6 @@
 """writes.py: the one write path of an item: the item lock, the save and what a write must do differently (the write context).
 
-`ITEM_LOCK` is the one lock every read-change-save of an item takes (a session's update, an answer, a wake, a pass that rewrites items); it is an RLock, so a writer that holds it may call another writer that
+`ITEM_LOCK` is the one lock every read-change-save of an item takes (a session's update, an answer, a wake, a pass that rewrites items); it is re-entrant (core/xlock.py: a thread lock with a flock behind it, so a second process that writes the store takes turns with this one), so a writer that holds it may call another writer that
 takes it again on the same thread (an update that saves twice, a pass that calls a write). `save` is the one writer of an item's file: it compares the item with the file it is about to replace,
 brings the stored fields into agreement (the mover, his step on the checklist, the ask's record, the hand-off record, the phase), stamps who wrote the revision and the clocks, writes the file, and then
 records the change where others read it (the For you list, the Landed list, the search index, the hand-back line, the GitHub mirror, the pending answer). The order of those steps is part of what a save
@@ -30,6 +30,7 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import readonly as _ro
 from stackshot.core import store as _cstore
+from stackshot.core import xlock as _xlock
 from stackshot.core.instance import NAME
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
@@ -42,7 +43,7 @@ from stackshot.router import routing as _routing
 from stackshot.service import foryou_events as _fyev
 from stackshot.service.store import _path
 
-ITEM_LOCK = threading.RLock()      # a session's update and a failed delivery's record read, change and save an item under it
+ITEM_LOCK = _xlock.XLock("item")      # a session's update and a failed delivery's record read, change and save an item under it
 
 # The per-write flags: set (`.on`) by a route or a tool around its write, read by the gates and the create and update services while that write runs. A flag is never rebound, so a name taken from this module stays the flag.
 SESSION_NEXT = threading.local()  # around the create and update tools' own calls: only a session's write is judged by the write checks of Next (N1, N3, N6; next_rules.py), and by the bare-URL check; a script's, the re-bullet route's and the minute loop's writes are not

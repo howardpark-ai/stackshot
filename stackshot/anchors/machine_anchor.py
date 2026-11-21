@@ -28,9 +28,10 @@ from typing import Any
 
 from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.core import readonly as _ro  # noqa: E402  (a warm standby copy writes nothing)
+from stackshot.core import xlock as _xlock  # noqa: E402
 
 PREFIX = "machine:"
-LOCK = threading.RLock()      # a read-modify-write of the store (the anchors tool on a request thread, the pass on the runner's) holds it
+LOCK = _xlock.XLock("machine-anchors")      # a read-modify-write of the store (the anchors tool on a request thread, the pass on the runner's) holds it
 
 
 def _file():
