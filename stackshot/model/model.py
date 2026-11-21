@@ -610,7 +610,7 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
     elif w.kind == "item" and w.queued:
         what = "the mover's other item (queued behind " + (", ".join(shown(x) for x in w.after) or "no item stored") + ")"
     elif w.kind == "item":
-        what = "the close of " + (", ".join(shown(x) for x in w.after) or "no item stored") + (" (" + back(f"backstop wake {w.backstop}") + ")" if w.backstop else "")
+        what = "the close of " + (", ".join(shown(x) for x in w.after) or "no item stored") + ("" if w.after else (" (" + back(f"backstop wake {w.backstop}") + ")" if w.backstop else ""))      # the backstop stays stored and in force; with an item named the line says only what the item waits on
     elif w.kind == "event":
         what = "a fleet event (" + (w.event or "wait_event not set") + ("; " + back(f"backstop {w.backstop}") if w.backstop else "") + ")"
     elif w.kind == _wl.LIST:

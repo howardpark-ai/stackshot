@@ -136,7 +136,8 @@ check("words: a stored until reads 'until', a legacy wake reads 'wake'", "a time
 check("words: a relay and the backstop kinds read 'until' beside a stored until, the legacy words beside the old fields",
       f"until {day(2)}" in M.words(rel) and "ask by" not in M.words(rel) and f"ask by {day(2)}" in M.words(derive(item(wait_kind="relay", ask_by=day(2), wait_event="the vendor")))
       and f"; until {day(3)})" in M.words(derive(item(wait_kind="anchor", until=day(3), wait_anchor="https://example.test/x"))) and f"backstop wake {day(3)}" in M.words(derive(item(wait_kind="anchor", wake=day(3), wait_anchor="https://example.test/x")))
-      and f"(until {day(3)})" in M.words(derive(item(wait_kind="item", until=day(3), after=["a9"]))) and f"; until {day(3)})" in M.words(derive(item(wait_kind="event", until=day(3), wait_event="recycle"))))
+      and "the close of" in M.words(derive(item(wait_kind="item", until=day(3), after=["a9"]))) and f"until {day(3)}" not in M.words(derive(item(wait_kind="item", until=day(3), after=["a9"])))      # an after wait names only the close, its backstop stays stored
+      and f"; until {day(3)})" in M.words(derive(item(wait_kind="event", until=day(3), wait_event="recycle"))))
 check("check_fields: a given until must be a real date or minute; none given is fine",
       M.check_fields({"until": day(2)}) == [] and M.check_fields({"until": at(2, "09:30")}) == [] and M.check_fields({}) == [] and len(M.check_fields({"until": "2030-02-31"})) == 1
       and len(M.check_fields({"until": "tomorrow"})) == 1 and len(M.check_fields({"until": day(2) + "T25:00"})) == 1 and M.check_fields({"ask_by": day(2)}) == [])
