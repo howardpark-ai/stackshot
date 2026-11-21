@@ -172,33 +172,54 @@ def _strict(owner: str) -> bool:
 
 def _owed_settle() -> dict[str, dict[str, dict[str, Any]]]:
     """Drop every debt whose page changed after the board write (minus the slack); return what is still owed. For a page
-    keeper the page's compiled truth must have changed too — a timeline line alone does not settle it."""
+    keeper the page's compiled truth must have changed too — a timeline line alone does not settle it.
+    The ledger is read under its lock, the pages' git is read with none held (a page's time and its compiled truth are subprocesses that can take seconds, and every writer of the ledger waits on the lock),
+    and the verdicts are applied under the lock again to the ledger as it stands then: an entry a writer replaced since (a different `ts`) is left for the next pass."""
+    with _OWED_LOCK:
+        snap = json.loads(json.dumps(_owed_load()))      # the ledger as read; the verdicts below are worked out on this copy
+    gone_keys: set[str] = set()                           # a brain now marked shared: its debts owe nothing
+    drops: list[tuple[str, str, Any]] = []                # (key, debtor, the entry's ts when it was read): settled
+    strips: list[tuple[str, str, bool]] = []              # (key, debtor, drop the whole entry): a retired agent's line, or a retired-only entry
+    for key in list(snap):
+        if _brains.shared_refusal(key):     # a debt an earlier run charged on a page of a brain now marked shared: it owes nothing, so it is dropped
+            gone_keys.add(key)
+            continue
+        if _owed_brain_skip(key):       # a second brain whose copy cannot be read: its debts are kept as they are, not settled or charged this run
+            continue
+        pt: float | None = None         # the page's time (a git log), read once per key
+        for o in list(snap[key]):
+            e = snap[key][o]
+            if e.get("retired_only"):       # an entry an earlier release wrote for a retired agent's line (stackshot removes that line itself now): it owes nothing
+                strips.append((key, o, True))
+                continue
+            if "retired" in e:              # …and the same release's line on an entry that also owes a debt: the debt stays, the line goes
+                strips.append((key, o, False))
+            ts = float(e.get("ts", 0))
+            if pt is None: pt = _page_ts(key)
+            if pt >= ts - _page_slack():
+                if _debt_strict(o, e):
+                    try:
+                        if not _pages.ct_changed_since(key, int(ts)): continue
+                    except Exception: pass
+                drops.append((key, o, e.get("ts")))
     with _OWED_LOCK:
         d = _owed_load(); changed = False
-        for key in list(d):
-            if _brains.shared_refusal(key):     # a debt an earlier run charged on a page of a brain now marked shared: it owes nothing, so it is dropped
+        for key in gone_keys:
+            if key in d:
                 del d[key]; changed = True
+        for key, o, whole in strips:
+            e = d.get(key, {}).get(o)
+            if e is None:
                 continue
-            if _owed_brain_skip(key):       # a second brain whose copy cannot be read: its debts are kept as they are, not settled or charged this run
-                continue
-            pt: float | None = None         # the page's time (a git log), read once per key
-            for o in list(d[key]):
-                if d[key][o].get("retired_only"):       # an entry an earlier release wrote for a retired agent's line (stackshot removes that line itself now): it owes nothing
-                    del d[key][o]; changed = True
-                    continue
-                if "retired" in d[key][o]:              # …and the same release's line on an entry that also owes a debt: the debt stays, the line goes
-                    del d[key][o]["retired"]; changed = True
-                ts = float(d[key][o].get("ts", 0))
-                if pt is None: pt = _page_ts(key)
-                if pt >= ts - _page_slack():
-                    if _debt_strict(o, d[key][o]):
-                        try:
-                            if not _pages.ct_changed_since(key, int(ts)): continue
-                        except Exception: pass
-                    del d[key][o]
-                    changed = True
-            if not d[key]:
-                del d[key]; changed = True
+            if whole and e.get("retired_only"):
+                del d[key][o]; changed = True
+            elif not whole and "retired" in e:
+                del e["retired"]; changed = True
+        for key, o, ts in drops:
+            if key in d and o in d[key] and d[key][o].get("ts") == ts:
+                del d[key][o]; changed = True
+        for key in [k for k in d if not d[k]]:
+            del d[key]; changed = True
         if changed:
             _owed_save(d)
         return d

@@ -28,6 +28,9 @@ esac
 [ -f "$script" ] || { echo "run-suite: no such suite: $script" >&2; exit 2; }
 UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv}
 export UV_PROJECT_ENVIRONMENT
+# The store locks (stackshot/core/xlock.py) run strict wherever the tests run: a lock out of order, or one whose lock file cannot be had, raises instead of being logged. Production leaves it off (the variable unset).
+STACKSHOT_XLOCK_STRICT=${STACKSHOT_XLOCK_STRICT:-1}
+export STACKSHOT_XLOCK_STRICT
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/rs.XXXXXX")
 exec 9<"$scratch"                # a shared lock on the folder while the suite runs: systemd-tmpfiles skips a locked folder (tmpfiles.d(5));
 flock -s 9 || :                  # it drops when this script and the suite (which inherits the descriptor) have ended, or were killed
