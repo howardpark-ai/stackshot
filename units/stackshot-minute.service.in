@@ -1,0 +1,43 @@
+# stackshot-minute.service — `stackshot minute`: the minute set's runner as a process of its own, in place of the server's runner thread.
+# Install: ./install.sh units, and only with [runner] process = "unit" on a box that is not a read-only standby (at "inline", the default, the server runs the
+# runner itself, this file is not installed, and one installed by an earlier run is stopped, disabled and removed). Back to inline: set it, ./install.sh units, restart the server.
+[Unit]
+Description=stackshot — the minute set's runner (stackshot minute)
+# ordered after the server and never tied to it (no Requires=, Wants= or PartOf=): a restart of the server does not stop this process, and it does not start the server.
+# The process itself waits for the server's /healthz at its own start, so the store is migrated before its first round.
+After=stackshot.service
+# a config reload of the server (stackshot-reload.service) reaches this unit too: systemd turns it into a reload of this one while it is running (and does nothing while it is not),
+# so ExecReload below sends the runner its SIGHUP and a changed config is read by it as by the server, with no line of its own in the reload service
+ReloadPropagatedFrom=stackshot.service
+# the exit codes of `stackshot minute` that retry are 1 (failed: a restart is right), 5 (another process holds the runner's lock) and 6 (the lock file cannot be had). Exit 5 is a server
+# that still runs the runner inline: left alone it would be started again every RestartSec forever. Eight starts inside five minutes (about a minute of tries) stops it and systemd
+# reports the unit failed (systemctl --user status stackshot-minute.service); a crash that comes back only now and then never adds up to the burst. Once it has tripped a plain
+# `systemctl --user restart` is refused ("Start request repeated too quickly"): only `systemctl --user reset-failed stackshot-minute.service` clears the count, so install.sh and deploy.sh run it before they start or restart this unit
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
+[Service]
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+# as the server's unit: the runner imports the server's wiring, so it runs in the same environment
+Environment=CAIO_IMPL=linux
+ExecStart=@UV@ run --project @CHECKOUT@ --locked --extra server stackshot minute
+# systemctl --user reload stackshot-minute.service (the server's reload reaches it, see ReloadPropagatedFrom above): SIGHUP, the runner re-reads stackshot.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+# 0 is a stop and is never restarted (Restart=on-failure); 2 (no config named outside the production checkout), 3 ([runner] process is "inline") and 4 (a read-only standby)
+# never fix themselves, so a restart would only repeat the refusal: the unit stays down with that code
+RestartPreventExitStatus=2 3 4
+# the stop: SIGTERM to the process only; it lets the round that is running finish for up to --stop-wait (30) seconds, then releases the runner's lock and exits 0.
+# KillMode=mixed sends SIGKILL to what is left of the cgroup only when TimeoutStopSec runs out, so the timeout is above the 30 seconds the program waits
+KillMode=mixed
+TimeoutStopSec=45
+# lower priority than the server's requests (the point of a process of its own): a nice value and a CPU weight below the default 100. No MemoryMax=: this runner shared the server's memory
+# until now and has no measured peak to cap, and a hard cap would kill a round that is running
+Nice=10
+CPUWeight=50
+
+[Install]
+WantedBy=default.target

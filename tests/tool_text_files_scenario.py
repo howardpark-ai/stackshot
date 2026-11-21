@@ -154,7 +154,7 @@ check("no text file names a machine placeholder or sala (a fresh install reads t
 check("every text file ends with one newline and has no trailing space on a line (a space at an edge is a `lead` or `trail` flag)", all(t.endswith("\n") and not t.endswith("\n\n") and not re.search(r"[ \t]+$", t, re.M) for t in text_all.values()), [n for n, t in text_all.items() if not t.endswith("\n") or t.endswith("\n\n") or re.search(r"[ \t]+$", t, re.M)])
 
 DEPLOY = pathlib.Path(STACK, "deploy.sh").read_text(encoding="utf-8")
-check("deploy.sh restarts the server for a change of a text file (the files are read at import)", re.search(r"^\s*stackshot/web/tools/text/\*\.md\) server=1 ;;", DEPLOY, re.M) is not None)
+check("deploy.sh restarts the server for a change of a text file (the files are read at import)", re.search(r"^\s*stackshot/web/tools/text/\*\.md\) server=1(?:; minute=1)? ;;", DEPLOY, re.M) is not None)
 check("release.sh names the text files in session_need (nothing: the snapshot carries the notice), apart from the docs", "stackshot/web/tools/text/*.md)" in pathlib.Path(STACK, "release.sh").read_text(encoding="utf-8"))
 
 import shutil; shutil.rmtree(T, ignore_errors=True); tt.cleanup()

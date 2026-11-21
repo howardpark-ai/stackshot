@@ -43,6 +43,7 @@ NOT get enabled there, because each writes or acts outward:
 | `stackshot-puller.service` | fetches this machine's notices and messages from the server and delivers them to sessions |
 | `stackshot-audit.service` and `stackshot-audit.timer` | the daily board audit: runs a model and writes items |
 | `stackshot-portal-sync.service` and the drop-in `stackshot.service.d/portal-sync.conf` | re-syncs the MCP portal's copy of the tool list (an outward write) |
+| `stackshot-minute.service` | runs the minute set's runner, which writes the board; `./install.sh units` installs it only with `[runner] process = "unit"` and not on a standby (it says so), and `stackshot minute` exits 4 there |
 | `stackshot-reload.path` and `stackshot-reload.service` | reload on a config change; the standby's config is a copy, and nothing there needs a reload |
 
 `./install.sh units --start` (and `deploy.sh`, which sources `units/scope.sh` as `install.sh` does) installs, enables and starts every unit the config calls for, the ones above included. On the standby do not run it as it is: install the two units, add the drop-ins first, and enable only those two (`systemctl --user enable --now stackshot.service anchor-hub.service`). `scope.sh` is only the shell library those scripts source; it starts nothing itself.

@@ -88,7 +88,7 @@ check("its header says it is the shared source, that another app pins a verbatim
 check("the file defines window.ColorTool with version, applyStored, init, remount and engine, and nothing else on window", re.search(r"window\.ColorTool = \{\s*version: VERSION,\s*applyStored:.*?init:.*?remount:.*?engine:", LIB, re.S) is not None and LIB[len(hdr):].count("window.ColorTool") == 1)
 check("stackshot inlines the file's text, whole and unchanged, and nothing of the tool is written in ui/colortool.py (it reads the file)", ct.LIB == LIB and ct.LIB in ct.HEAD and "shared" in SRCT["stackshot/web/ui/colortool.py"] and "colortool.js" in SRCT["stackshot/web/ui/colortool.py"]
       and "applyStored" not in SRCT["stackshot/web/ui/colortool.py"].split('"""', 2)[2].replace("ColorTool.applyStored(window.stackshotColors)", ""), None)
-check("deploy.sh restarts the server for a change under shared/ (the file is read at import)", re.search(r"^\s*shared/\*\) server=1 ;;", SRCT["deploy.sh"], re.M) is not None)
+check("deploy.sh restarts the server for a change under shared/ (the file is read at import)", re.search(r"^\s*shared/\*\) server=1(?:; minute=1)? ;;", SRCT["deploy.sh"], re.M) is not None)
 import ast
 imports = sorted(n.names[0].name for n in ast.parse(SRCT["stackshot/web/ui/colortool.py"]).body if isinstance(n, ast.Import)) + sorted(n.module for n in ast.parse(SRCT["stackshot/web/ui/colortool.py"]).body if isinstance(n, ast.ImportFrom))
 check("ui/colortool.py parses and imports only json, pathlib, the package's path helper (stackshot.paths) and the board's address helper (ui.under)", imports == ["json", "pathlib", "stackshot", "stackshot.web.ui"], imports)

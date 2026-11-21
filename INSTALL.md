@@ -311,7 +311,7 @@ journal (`journalctl --user -u stackshot.service`, lines starting `config reload
   into the tool descriptions (`[instance]` name, owner, board_url, timezone, `[subject] prefixes`,
   `[fleet] operator_label`, `[freshness]`) and anchor-hub's receiver setup (`[anchor_hub]` hook_url, hook_port,
   slack_team, self_emails, gmail_topics, gmail_names). `[server] port`, `[instance] timezone`, `[anchor_hub] enabled`,
-  `[audit] enabled` and `at`, and `[portal]` also need `./install.sh units` first, since the units carry
+  `[audit] enabled` and `at`, `[portal]`, and `[runner] process` also need `./install.sh units` first, since the units carry
   them. The list is `RESTART_ONLY` in `stackshot/core/config.py`; `systemctl --user restart stackshot.service` (and
   `anchor-hub.service`) applies them.
 
@@ -338,7 +338,7 @@ obsolete) or be dropped; the system unit files left disabled on disk are harmles
 | secrets | `~/.config/stackshot/` (`oauth.env`, `ui-session.key`, `client.token`, `client-tokens/`, `anchor-hub/`) | setup, you, `client mint` |
 | state | `~/.local/state/stackshot/` (ledger, inbox, routing, cimd cache); the services log to journald | the services |
 | data | `~/stackshot-data/` (store, `board.md`, `RULES.md`, `pages/`) | the publisher and you |
-| units | `~/.config/systemd/user/`: `stackshot.service`, `stackshot-reload.service` (reloads the server and anchor-hub when the config file changes: SIGHUP, no restart), `stackshot-reload.path` (the watcher that triggers it), `stackshot-puller.service`, and with their options `stackshot-portal-sync.service`, the portal drop-in `stackshot.service.d/portal-sync.conf` and `anchor-hub.service` | `install.sh` via setup |
+| units | `~/.config/systemd/user/`: `stackshot.service`, `stackshot-reload.service` (reloads the server and anchor-hub when the config file changes: SIGHUP, no restart), `stackshot-reload.path` (the watcher that triggers it), `stackshot-puller.service`, and with their options `stackshot-portal-sync.service`, the portal drop-in `stackshot.service.d/portal-sync.conf`, `anchor-hub.service` and, only with `[runner] process = "unit"` (not on a standby), `stackshot-minute.service` (the minute set's runner as a process of its own; [`docs/server-passes.md`](docs/server-passes.md#the-runners-unit) says how to switch and roll back) | `install.sh` via setup |
 | hooks | `~/stackshot/client/hooks/` (in the checkout; `client.sh` for a machine with `--no-puller`) | the repository; `client install` wires them |
 
 A typical deployment is described in [docs/overview.md](docs/overview.md): one server box, further client machines, a gbrain brain as the page store,

@@ -21,6 +21,12 @@ garbage value reads as 05:00) in the instance timezone; `units` enables and star
 the timer when its file changed; --restart never restarts the service (that would cue an audit); with enabled = false a pair
 installed earlier is disabled and removed, and with none installed it is only skipped. [audit] at as a list of times gives
 the timer one OnCalendar line each (sorted, once each); the rulebook scan is the service's ExecStartPost, after the run.
+The minute runner's unit (stackshot-minute.service): only with [runner] process = "unit" on a box that is not a read-only standby (a bad
+value counts as inline). At inline nothing is rendered, installed, enabled, started or restarted for it, no systemctl call asks about a
+standby, and every other unit renders to the same bytes as at "unit"; at "unit" it is rendered with each setting the issue names
+(checked by key and by section), installed, enabled, and started or restarted after the server; on a standby (the environment of the script
+or the user manager's for stackshot.service) it is skipped; back at inline an installed one is stopped, disabled and removed. The reload path
+reaches it through ReloadPropagatedFrom, so the reload service stays exactly as it was.
 
     tests/run-suite install        → exit 0 / 1"""
 import os, re, shutil, subprocess, sys, pathlib, tempfile
@@ -38,7 +44,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-def conf(name, account_id="", enabled="false", scope=None, client=None, audit=None, at=None, tz=None, project=None):
+def conf(name, account_id="", enabled="false", scope=None, client=None, audit=None, at=None, tz=None, project=None, runner=None):
     t, n1 = re.subn(r'(?m)^account_id = "[^"]*"', f'account_id = "{account_id}"', toml)
     t, n2 = re.subn(r'(?m)^(\[anchor_hub\][^\n]*\n)enabled = (true|false)', rf'\g<1>enabled = {enabled}', t)
     assert n1 == 1 and n2 == 1, (n1, n2)
@@ -47,6 +53,8 @@ def conf(name, account_id="", enabled="false", scope=None, client=None, audit=No
     if at is not None:
         lit = "[" + ", ".join(f'"{x}"' for x in at) + "]" if isinstance(at, list) else f'"{at}"'    # a string or a list of them, as the config has it
         t, n = re.subn(r'(?m)^at = (?:"[^"]*"|\[[^\]\n]*\])', lambda m: f'at = {lit}', t); assert n == 1
+    if runner is not None:                   # [runner] process
+        t, n = re.subn(r'(?m)^process = "[^"]*"', lambda m: f'process = "{runner}"', t); assert n == 1   # the example has one key of that name
     if project is not None:
         t, n = re.subn(r'(?m)^project = "[^"]*"', f'project = "{project}"', t); assert n == 1
     if tz is not None:
@@ -179,6 +187,10 @@ UH = T / "uhome"; UH.mkdir()
 # systemctl: logs each call and succeeds; is-enabled / is-active fail while the file `other-off` exists (the other scope's unit disabled)
 (T / "sbin/systemctl").write_text(f'''#!/bin/sh
 echo "$*" >> {tmp}/systemctl.log
+# the environment the user manager gives stackshot.service: carries the standby switch while the file `standby-env` exists (the drop-in docs/read-only-standby.md names)
+case "$*" in *"show stackshot.service"*) if [ -e {tmp}/standby-env ]; then echo "PATH=/usr/bin $(cat {tmp}/standby-env)"; fi; exit 0 ;; esac
+# the start limit of stackshot-minute.service, as systemd keeps it: while the file `tripped` exists a restart is refused until reset-failed has cleared the count
+case "$*" in *reset-failed*stackshot-minute*) rm -f {tmp}/tripped ;; *restart*stackshot-minute*) if [ -e {tmp}/tripped ]; then echo "Start request repeated too quickly." >&2; exit 1; fi ;; esac
 case "$*" in *is-enabled*|*is-active*) [ -e {tmp}/other-off ] && exit 1 ;; esac
 exit 0
 '''); (T / "sbin/systemctl").chmod(0o755)
@@ -329,6 +341,183 @@ check("units, audit off with none installed: skipped, no disable call", rc == 0 
       and not any("stackshot-audit" in c for c in calls), (calls, out[-500:]))
 check("the audit pair: sudo never called", not (T / "sudo-called").exists())
 
+# ---- the minute runner's unit: only with [runner] process = "unit", never on a standby; nothing else about the unit set moves
+MIN = "stackshot-minute.service"
+def mhome(n, **extra): return {**UENV, "HOME": str(T / f"uhome-m{n}"), **extra}      # a home of its own per case: the units installed there are the case's
+def mdir(n): return T / f"uhome-m{n}/.config/systemd/user"
+def parse_unit(text):
+    """a unit's text → {section: {key: [values]}}, comments and blank lines dropped."""
+    cur, d = None, {}
+    for l in text.splitlines():
+        l = l.strip()
+        if not l or l.startswith("#"): continue
+        m = re.fullmatch(r"\[(\w+)\]", l)
+        if m: cur = m.group(1); d[cur] = {}; continue
+        k, _, v = l.partition("="); d[cur].setdefault(k, []).append(v)
+    return d
+def minute_calls(calls): return [c for c in calls if "stackshot-minute" in c]
+EXISTING = ["stackshot.service", "stackshot-reload.service", "stackshot-reload.path", "stackshot-portal-sync.service", "anchor-hub.service", "stackshot-puller.service"] + AUD
+# the same config file in both modes (the unit text carries its path), so the other units' bytes can be compared
+mc = conf("m-cfg.toml", account_id="0123abcd", enabled="true", audit="true")
+check("the example's [runner] process is inline", re.search(r'(?m)^process = "inline"', toml) is not None)
+rc, before_default, _ = render_out(mc, env=UENV)
+before = {n: render_out(mc, n, env=UENV)[1] for n in EXISTING + ["stackshot.service.d-portal-sync.conf"]}
+rc, defl, _ = render(mc, env=UENV)
+check("inline: the default render lists every other unit and no minute unit", rc == 0 and MIN not in defl and "stackshot-minute" not in before_default
+      and defl == SERVER + ["anchor-hub.service", "stackshot-puller.service"] + AUD, defl)
+rc, mone, _ = render_out(mc, MIN, env=UENV)
+check("inline: the unit renders on request all the same, like any unit named explicitly", rc == 0 and mone.startswith("# Rendered by install.sh from units/stackshot-minute.service.in"), mone[:200])
+mc = conf("m-cfg.toml", account_id="0123abcd", enabled="true", audit="true", runner="unit")
+rc, after_default, _ = render_out(mc, env=UENV)
+rc, mdefl, _ = render(mc, env=UENV)
+after = {n: render_out(mc, n, env=UENV)[1] for n in EXISTING + ["stackshot.service.d-portal-sync.conf"]}
+check("unit: the default render is the inline one plus the minute unit, last", mdefl == defl + [MIN], mdefl)
+check("unit: every other unit renders to the very bytes it has at inline", before == after and all(before.values()), {n: (before[n] == after[n]) for n in before})
+check("unit: the default render is the inline text, then the minute unit after its separator line",
+      after_default == before_default + f"# ---------------- {MIN}\n" + render_out(mc, MIN, env=UENV)[1] and after_default.startswith(before_default), after_default[-300:])
+mt = render_out(mc, MIN, env=UENV)[1]
+MP, SP = parse_unit(mt), parse_unit(render_out(mc, "stackshot.service", env=UENV)[1])
+mu, ms = MP.get("Unit", {}), MP.get("Service", {})
+check("minute unit: the plain substitution of its template, under the plain header", render_out(mc, MIN, env={**UENV, "HOME": os.environ["HOME"]})[1] == reference(MIN, os.path.realpath(mc)) and mt.split("\n", 1)[0] == f"# Rendered by install.sh from units/{MIN}.in — edit the template, not this file.", mt[:300])
+check("minute unit: ExecStart is the server's command line with `stackshot minute` in place of `stackshot server` (the locked project environment, the server extra)",
+      len(ms.get("ExecStart", [])) == 1 and ms["ExecStart"][0] == SP["Service"]["ExecStart"][0].replace(" stackshot server", " stackshot minute")
+      and re.fullmatch(r"\S+ run --project " + re.escape(STACK) + r" --locked --extra server stackshot minute", ms["ExecStart"][0]) is not None, ms.get("ExecStart"))
+check("minute unit: STACKSHOT_CONFIG is the instance config, and the working directory and environment lines are the server's own",
+      f"STACKSHOT_CONFIG={os.path.realpath(mc)}" in ms.get("Environment", []) and sorted(ms.get("Environment", [])) == sorted(SP["Service"]["Environment"])
+      and ms.get("WorkingDirectory") == [STACK] == SP["Service"]["WorkingDirectory"], (ms.get("Environment"), SP["Service"]["Environment"]))
+check("minute unit: After=stackshot.service in [Unit]", mu.get("After") == ["stackshot.service"], mu)
+check("minute unit: [Unit] holds exactly Description, After, ReloadPropagatedFrom and the two start limit keys: nothing that ties it to the server (Requires, Wants, BindsTo, PartOf, Upholds, Conflicts, StopPropagatedFrom, JoinsNamespaceOf ...), so a restart of the server does not stop it",
+      set(mu) == {"Description", "After", "ReloadPropagatedFrom", "StartLimitIntervalSec", "StartLimitBurst"} and not any(k in MP.get("Install", {}) for k in ("RequiredBy", "Alias", "Also")), sorted(mu))
+check("minute unit: [Service] holds exactly the keys the unit sets (no ExecStartPre, no Type, no memory cap beyond what the template says)",
+      set(ms) == {"WorkingDirectory", "Environment", "ExecStart", "ExecReload", "Restart", "RestartSec", "RestartPreventExitStatus", "KillMode", "TimeoutStopSec", "Nice", "CPUWeight"}, sorted(ms))
+check("minute unit: Restart=on-failure, RestartSec=5", ms.get("Restart") == ["on-failure"] and ms.get("RestartSec") == ["5"], ms)
+check("minute unit: RestartPreventExitStatus=2 3 4 (no config, setting inline, standby never fix themselves; 1, 5 and 6 retry)", ms.get("RestartPreventExitStatus") == ["2 3 4"], ms)
+check("minute unit: ExecReload is SIGHUP to the main process", ms.get("ExecReload") == ["/bin/kill -HUP $MAINPID"], ms)
+check("minute unit: KillMode=mixed", ms.get("KillMode") == ["mixed"], ms)
+check("minute unit: Nice=10, a lower priority than the server's requests (the point of a process of its own)", ms.get("Nice") == ["10"], ms.get("Nice"))
+check("minute unit: CPUWeight=50, under the default weight of 100", ms.get("CPUWeight") == ["50"], ms.get("CPUWeight"))
+check("minute unit: no MemoryMax (the runner has no measured peak, and a cap would kill a round that is running)", "MemoryMax" not in ms and "MemoryHigh" not in ms, sorted(ms))
+check("minute unit: TimeoutStopSec above the 30 seconds `stackshot minute` waits for a round (at least 45)", len(ms.get("TimeoutStopSec", [])) == 1 and re.fullmatch(r"\d+", ms["TimeoutStopSec"][0]) and int(ms["TimeoutStopSec"][0]) >= 45, ms)
+sl_i, sl_b = mu.get("StartLimitIntervalSec", [""])[0], mu.get("StartLimitBurst", [""])[0]
+check("minute unit: a start limit in [Unit] that exit 5 at the restart pace reaches well inside the interval (so systemd reports the unit failed instead of retrying forever)",
+      sl_i.isdigit() and sl_b.isdigit() and int(sl_b) >= 2 and int(sl_i) > 0 and int(sl_i) > int(sl_b) * int(ms["RestartSec"][0]) * 2
+      and "StartLimitIntervalSec" not in ms and "StartLimitBurst" not in ms, (sl_i, sl_b, ms.get("RestartSec")))
+check("minute unit: ReloadPropagatedFrom=stackshot.service in [Unit]: the server's config reload reaches it (SIGHUP by ExecReload), while the reload service itself is untouched",
+      mu.get("ReloadPropagatedFrom") == ["stackshot.service"] and ms.get("ExecReload") == ["/bin/kill -HUP $MAINPID"], mu)
+rl = render_out(mc, "stackshot-reload.service", env=UENV)[1]
+check("the reload service still reloads the server and anchor-hub and names no minute unit (at unit as at inline)",
+      re.findall(r"(?m)^ExecStart=.*systemctl.*", rl) == ["ExecStart=/usr/bin/systemctl --user reload stackshot.service", "ExecStart=-/usr/bin/systemctl --user reload anchor-hub.service"]
+      and "minute" not in rl and rl == before["stackshot-reload.service"], rl)
+check("minute unit: [Install] WantedBy=default.target", MP.get("Install", {}).get("WantedBy") == ["default.target"], MP.get("Install"))
+tpl = pathlib.Path(STACK, "units", MIN + ".in").read_text(encoding="utf-8")
+check("minute unit: a header comment names the unit and how it is installed, and the template carries nothing of one machine (no home folder, host, sala or address)",
+      tpl.startswith("# stackshot-minute.service") and "./install.sh units" in tpl.split("[Unit]")[0] and not re.search(r"/home/|/Users/|hp-|sala|@\w+\.(com|ai)", tpl, re.I), tpl[:300])
+check("`stackshot minute` is a program of the package", re.search(r'(?m)^    "minute": \("stackshot\.web\.minute"', pathlib.Path(STACK, "stackshot/cli.py").read_text(encoding="utf-8")) is not None)
+
+# install.sh units at inline: nothing new, and said so
+IC = conf("m-ic.toml", account_id="0123abcd", enabled="true")      # inline, hub and portal on: the largest set at the default
+rc, out, calls = units(IC, env=mhome(1))
+got = sorted(p.name for p in mdir(1).iterdir() if p.is_file())
+check("units at inline: exactly the unit files it always installed, none of them naming a minute unit", rc == 0 and got == sorted(EXISTING[:6]) and not any("stackshot-minute" in (mdir(1) / n).read_text() for n in got), (rc, got, out[-400:]))
+check("units at inline: no systemctl call names the minute unit and none asks the user manager about a standby", not minute_calls(calls) and not any("show stackshot.service" in c for c in calls), calls)
+check('units at inline: one skipped line, as the other optional units say', 'stackshot-minute.service: skipped ([runner] process is not "unit")' in out and out.count("stackshot-minute") == 1, out[-500:])
+rc, out, calls = units(IC, "--start", env=mhome(1))
+check("units --start at inline: the server, the reload path, anchor-hub and the puller started as before and nothing for the minute unit", rc == 0 and not minute_calls(calls)
+      and all(f"--user restart {n}" in calls for n in ("stackshot.service", "stackshot-reload.path", "anchor-hub.service", "stackshot-puller.service")), (calls, out[-300:]))
+rc, out, calls = units(conf("m-bad.toml", runner="bogus"), env=mhome(11))
+check('units with [runner] process = "bogus": read as inline, nothing installed for the minute unit, no standby question asked', rc == 0 and not (mdir(11) / MIN).exists() and not minute_calls(calls)
+      and not any("show stackshot.service" in c for c in calls) and 'skipped ([runner] process is not "unit")' in out, (out[-300:], calls))
+
+# at "unit"
+UC = conf("m-uc.toml", account_id="0123abcd", enabled="true", runner="unit")
+rc, out, calls = units(UC, env=mhome(2))
+check("units at unit: the unit is installed, as the render prints it, and every call is the user manager's", rc == 0 and (mdir(2) / MIN).is_file()
+      and (mdir(2) / MIN).read_text() == render_out(UC, MIN, env=mhome(2))[1] and f"{MIN}: installed" in out and all(c.startswith("--user ") for c in calls), (out[-500:], calls))
+check("units at unit: it is enabled, and neither started nor restarted without --start or --restart", "--user enable --quiet stackshot-minute.service" in calls
+      and not any(re.search(r"\b(start|restart|stop)\b.*stackshot-minute", c) for c in calls) and (T / "sudo-called").exists() is False, calls)
+rc, out, calls = units(UC, env=mhome(2))
+check("units at unit, twice: unchanged the second time", rc == 0 and f"{MIN}: unchanged" in out and "installed" not in out.replace("not installed", ""), out[-500:])
+rc, out, calls = units(UC, "--start", env=mhome(2))
+i_srv, i_min = (calls.index(f"--user restart {n}") if f"--user restart {n}" in calls else -1 for n in ("stackshot.service", MIN))
+check("units --start at unit: the minute unit is restarted through the user manager, after the server, the reload path and anchor-hub", rc == 0 and 0 <= i_srv < i_min
+      and calls.index("--user restart stackshot-reload.path") < i_min and calls.index("--user restart anchor-hub.service") < i_min and f"started {MIN}" in out, (calls, out[-300:]))
+(mdir(2) / "stackshot.service").write_text("stale\n"); (mdir(2) / MIN).write_text("stale\n")
+rc, out, calls = units(UC, "--restart", env=mhome(2))
+check("units --restart at unit: a changed minute unit is restarted, after the server's", rc == 0 and calls.index("--user restart stackshot.service") < calls.index(f"--user restart {MIN}"), (calls, out[-300:]))
+r = subprocess.run([os.path.join(STACK, "install.sh"), "puller", "--config", UC], capture_output=True, text=True, env=mhome(3), stdin=subprocess.DEVNULL)
+check("the puller verb at unit installs the puller alone, never the minute unit", r.returncode == 0 and not (mdir(3) / MIN).exists() and (mdir(3) / "stackshot-puller.service").is_file(), r.stdout + r.stderr)
+
+# a read-only standby: the environment of the script, or the one the user manager gives stackshot.service
+rc, out, calls = units(UC, env=mhome(4, STACKSHOT_READ_ONLY="1"))
+check("units at unit on a standby (STACKSHOT_READ_ONLY=1 here): not installed, said so, no call for it", rc == 0 and not (mdir(4) / MIN).exists() and not minute_calls(calls)
+      and f'{MIN}: skipped ([runner] process is "unit", but this box is a read-only standby)' in out, (out[-400:], calls))
+rc, ldef, _ = render(UC, env=mhome(4, STACKSHOT_READ_ONLY="1"))
+check("render at unit on a standby: the minute unit is not in the default list", rc == 0 and MIN not in ldef and ldef, ldef)
+(T / "standby-env").write_text("STACKSHOT_READ_ONLY=1")
+rc, out, calls = units(UC, env=mhome(5))
+check("units at unit on a standby that the user manager's environment for stackshot.service says (a drop-in): not installed, said so", rc == 0 and not (mdir(5) / MIN).exists() and not minute_calls(calls)
+      and "read-only standby" in out and any("show stackshot.service" in c for c in calls), (out[-400:], calls))
+(T / "standby-env").unlink()
+rc, ldef, _ = render(UC, env=mhome(6, STACKSHOT_READ_ONLY="0"))
+check("STACKSHOT_READ_ONLY=0 is no standby: the unit is in the default list, last", rc == 0 and ldef[-1:] == [MIN], ldef)
+units(UC, env=mhome(7))
+rc, out, calls = units(UC, env=mhome(7, STACKSHOT_READ_ONLY="1"))
+check("a unit installed earlier on a box that is a standby now: left as it is (skipped, not removed, not stopped)", rc == 0 and (mdir(7) / MIN).is_file() and not minute_calls(calls) and "read-only standby" in out, (out[-300:], calls))
+
+# flipping back to inline (and a value that is not "unit"): the installed unit is stopped, disabled and removed, as the audit's pair is
+units(UC, env=mhome(8))
+check("(setup) the unit is there before the flip back", (mdir(8) / MIN).is_file())
+rc, out, calls = units(IC, env=mhome(8))
+check("units back at inline: the minute unit is disabled and stopped, its file removed, said once", rc == 0 and "--user disable --now --quiet stackshot-minute.service" in calls and not (mdir(8) / MIN).exists()
+      and out.count("stackshot-minute.service: stopped, disabled and removed ([runner] process is not \"unit\")") == 1 and all(c.startswith("--user ") for c in calls), (calls, out[-400:]))
+check("...and says on that line that the server runs no runner until it is restarted, with the command", re.search(r'(?m)^  stackshot-minute\.service: stopped, disabled and removed .*the server runs no runner until it is restarted: systemctl --user restart stackshot\.service$', out) is not None, out[-400:])
+check("...the disable comes before the file goes: the process is stopped while its unit is still known", calls.index("--user disable --now --quiet stackshot-minute.service") < calls.index("--user daemon-reload"), calls)
+rc, out, calls = units(IC, env=mhome(8))
+check("units at inline again, none installed: only skipped, no call for it", rc == 0 and not minute_calls(calls) and 'stackshot-minute.service: skipped ([runner] process is not "unit")' in out, (calls, out[-300:]))
+units(UC, env=mhome(9))
+rc, out, calls = units(conf("m-bad2.toml", runner="Inline "), env=mhome(9))
+check('units with [runner] process = "Inline " after unit: read as inline (stripped, lowercased), so the unit is removed', rc == 0 and not (mdir(9) / MIN).exists() and "--user disable --now --quiet stackshot-minute.service" in calls, (calls, out[-300:]))
+units(UC, env=mhome(10))
+rc, out, calls = units(conf("m-case.toml", runner=" UNIT "), env=mhome(10))
+check('units with [runner] process = " UNIT ": read as unit (config.py strips and lowercases it), so the unit stays installed', rc == 0 and (mdir(10) / MIN).is_file() and not minute_calls([c for c in calls if "disable" in c]), (calls, out[-300:]))
+check("the minute unit's cases: sudo never called", not (T / "sudo-called").exists())
+
+# a standby is exactly STACKSHOT_READ_ONLY=1: a longer value that only starts with 1, or a name that only ends in it, is none, in the script's environment and in the user manager's
+for n_, val in enumerate(("10", "1x", "true", "yes", "01", " 1"), 20):
+    rc, ldef, _ = render(UC, env=mhome(n_, STACKSHOT_READ_ONLY=val))
+    check(f"STACKSHOT_READ_ONLY={val!r} in the script's environment is no standby (only exactly 1 is): the unit is in the default list", rc == 0 and ldef[-1:] == [MIN], ldef)
+for n_, val in enumerate(("STACKSHOT_READ_ONLY=10", "STACKSHOT_READ_ONLY=1x", "STACKSHOT_READ_ONLY=0", "XSTACKSHOT_READ_ONLY=1", "STACKSHOT_READ_ONLY=true"), 30):
+    (T / "standby-env").write_text(val)
+    rc, out, calls = units(UC, env=mhome(n_))
+    check(f"{val!r} in the user manager's environment for stackshot.service is no standby: the unit is installed", rc == 0 and (mdir(n_) / MIN).is_file() and "read-only standby" not in out and any("show stackshot.service" in c for c in calls), (out[-300:], calls))
+(T / "standby-env").write_text("PATH=/usr/bin STACKSHOT_READ_ONLY=1 LANG=C")
+rc, out, calls = units(UC, env=mhome(40))
+check("STACKSHOT_READ_ONLY=1 among other variables of the user manager's environment is a standby", rc == 0 and not (mdir(40) / MIN).exists() and "read-only standby" in out, (out[-300:], calls))
+(T / "standby-env").unlink()
+
+# the start limit: past it systemd refuses a plain restart, so every path that starts or restarts the unit runs reset-failed first (the stub refuses a restart while `tripped` exists)
+units(UC, env=mhome(41))
+(T / "tripped").write_text("")
+rc, out, calls = units(UC, "--start", env=mhome(41))
+rf, rs = f"--user reset-failed {MIN}", f"--user restart {MIN}"
+check("units --start, minute unit past its start limit: reset-failed comes right before its restart, the restart works and everything is started", rc == 0 and rf in calls and calls.index(rf) < calls.index(rs)
+      and f"started {MIN}" in out and "FAILED" not in out and not (T / "tripped").exists(), (rc, calls, out[-300:]))
+check("units --start: reset-failed is asked once, only for the minute unit", [c for c in calls if "reset-failed" in c] == [rf], calls)
+(mdir(41) / MIN).write_text("stale\n"); (T / "tripped").write_text("")
+rc, out, calls = units(UC, "--restart", env=mhome(41))
+check("units --restart, a changed minute unit past its start limit: reset-failed, then the restart, which works", rc == 0 and rf in calls and calls.index(rf) < calls.index(rs) and f"restarted {MIN}" in out and not (T / "tripped").exists(), (rc, calls, out[-300:]))
+rc, out, calls = units(UC, env=mhome(41))
+check("units alone (no --start, no --restart): no reset-failed and no restart", rc == 0 and not any("reset-failed" in c or "restart" in c for c in calls), calls)
+rc, out, calls = units(IC, "--start", env=mhome(42))
+check("units --start at inline: no reset-failed for anything", rc == 0 and not any("reset-failed" in c for c in calls), calls)
+(T / "tripped").unlink(missing_ok=True)
+# the usage lines of the header: the description starts in the same column on each
+usage = [l for l in pathlib.Path(STACK, "install.sh").read_text(encoding="utf-8").splitlines() if re.match(r"#   \./install\.sh (units|puller|render)\b", l)]
+cols = {len(re.match(r"#   \./install\.sh (?:units|puller|render(?: \[name\])?) +", l).group(0)) for l in usage}
+check("the usage lines of install.sh (units, puller, render) start their text in one column", len(usage) == 3 and len(cols) == 1, (usage, cols))
+
+r = subprocess.run([os.path.join(STACK, "install.sh")], capture_output=True, text=True, env=ENV)
+check("the usage text lists the minute unit and its condition", r.returncode == 2 and "stackshot-minute.service only when [runner] process = \"unit\"" in r.stdout and "standby" in r.stdout, r.stdout[:1500])
 r = subprocess.run([os.path.join(STACK, "install.sh")], capture_output=True, text=True, env=ENV)
 check("no verb: the usage text, exit 2", r.returncode == 2 and "--start" in r.stdout and "account_id" in r.stdout and "set -euo" not in r.stdout, r.stdout[-300:])
 check("the usage text explains the user manager and lingering", "systemctl --user" in r.stdout and "enable-linger" in r.stdout, r.stdout[-300:])

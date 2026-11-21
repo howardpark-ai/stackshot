@@ -24,7 +24,9 @@
 #                                   and stackshot-puller.service, plus stackshot-portal-sync.service and its drop-in only when
 #                                   [portal] account_id is set, anchor-hub.service only when [anchor_hub] enabled = true, and
 #                                   stackshot-audit.{service,timer} only when [audit] enabled = true (the timer enabled and
-#                                   started: it only arms the schedule, the audit, or its cue in mode "agent", runs at [audit] at)
+#                                   started: it only arms the schedule, the audit, or its cue in mode "agent", runs at [audit] at),
+#                                   and stackshot-minute.service only when [runner] process = "unit" on a box that is not a read-only
+#                                   standby (the minute set's runner as a process of its own; at "inline", the default, it is not installed)
 #   ./install.sh puller             the puller's user unit alone (a box that only fetches; never sudo)
 #   ./install.sh render [name]      print the rendered unit(s), install nothing (no name: the units `units` would install);
 #                                   the unit directory goes to stderr
@@ -33,12 +35,14 @@
 #            brings a fresh box up)  --quiet-hint (do not print the "changed, not restarted" hint; setup's own next line says
 #            why the server is not started)
 #
-# Installing never restarts anything unless --restart or --start is given: deploy.sh restarts the server, anchor-hub and the
+# Installing never restarts anything unless --restart or --start is given: deploy.sh restarts the server, the minute runner, anchor-hub and the
 # puller when a change touches them (the reload path only reloads the config file). A unit whose rendered text is unchanged
 # is left alone, so running this twice does nothing the second time. Enables each unit it installs. A unit whose condition
-# is off is skipped, never removed or disabled: an existing one stays as it is. The one exception is the audit's pair:
+# is off is skipped, never removed or disabled: an existing one stays as it is. Two exceptions. The audit's pair:
 # with [audit] enabled = false a timer installed by an earlier run is disabled and stopped and both files are removed, since
 # a timer left behind would fire every day into a cue the server refuses. Its service is never restarted here: that would cue an audit.
+# And stackshot-minute.service: with [runner] process back at "inline" (a value that is neither "inline" nor "unit" counts as inline) the unit an earlier run
+# installed is stopped, disabled and removed, so a runner left running does not keep the lock the server's own runner needs; on a standby with "unit" it is only skipped.
 set -euo pipefail
 USER="${USER:-$(id -un)}"                     # unset under some sudo, cron and container shells; the units and loginctl need it
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -60,9 +64,16 @@ PORT="$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" 
 TZNAME="$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get instance.timezone)"; TZNAME="${TZNAME:-UTC}"
 PORTAL=0; [ -n "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get portal.account_id)" ] && PORTAL=1       # the portal-sync unit and its drop-in
 HUB=0; case "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get anchor_hub.enabled | tr '[:upper:]' '[:lower:]')" in true|1|yes) HUB=1 ;; esac   # anchor-hub's user unit
-read -r AUDIT AUDIT_AT AUDIT_PROJECT < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c; print(int(c.audit_enabled()), ",".join(c.audit_at()), c.audit_project())' "$CHECKOUT")   # the audit's timer pair, its HH:MM times (comma-joined: one OnCalendar line each)
+read -r AUDIT AUDIT_AT RUNNER_PROCESS AUDIT_PROJECT < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c; print(int(c.audit_enabled()), ",".join(c.audit_at()), c.runner_process(), c.audit_project())' "$CHECKOUT")   # the audit's timer pair, its HH:MM times (comma-joined: one OnCalendar line each), and [runner] process ("inline" for any value but "unit")
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 . "$HERE/units/scope.sh"      # UNIT_DIR, xdg_repair, user_manager_ok (config.py refused a removed mode above, with its line)
+standby() {   # 0 on a read-only standby: STACKSHOT_READ_ONLY=1 in this environment, or in the environment the user manager gives stackshot.service (the drop-in docs/read-only-standby.md names)
+    [ "${STACKSHOT_READ_ONLY:-}" = 1 ] && return 0
+    case " $(systemctl --user show stackshot.service -p Environment --value 2>/dev/null || true) " in *" STACKSHOT_READ_ONLY=1 "*) return 0 ;; esac
+    return 1
+}
+MINUTE=0; MINUTE_STANDBY=0     # stackshot-minute.service: only at [runner] process = "unit", and never on a standby (`stackshot minute` exits 4 there)
+if [ "$RUNNER_PROCESS" = unit ]; then if standby; then MINUTE_STANDBY=1; else MINUTE=1; fi; fi
 SERVERU=" stackshot.service stackshot-reload.service stackshot-reload.path stackshot-portal-sync.service stackshot.service.d-portal-sync.conf "   # the server's units: their header names the user manager
 render() {   # render <name> → stdout: the template with its placeholders filled in
     local t="$HERE/units/$1.in"; [ -f "$t" ] || { echo "no template $t" >&2; return 1; }
@@ -89,6 +100,7 @@ PY
 SERVER=(stackshot.service stackshot-reload.service stackshot-reload.path); [ $PORTAL = 1 ] && SERVER+=(stackshot-portal-sync.service)
 USERU=(); [ $HUB = 1 ] && USERU+=(anchor-hub.service); USERU+=(stackshot-puller.service)
 AUDITU=(stackshot-audit.service stackshot-audit.timer); [ $AUDIT = 1 ] && USERU+=("${AUDITU[@]}")
+[ $MINUTE = 1 ] && USERU+=(stackshot-minute.service)
 changed=()
 put() {      # put <name> <dir>  → installs when the rendered text differs
     local name="$1" dir="$2" tmp; tmp="$(mktemp)"; render "$name" > "$tmp"
@@ -150,11 +162,23 @@ case "$VERB" in
                     echo "  stackshot-audit.timer, stackshot-audit.service: skipped ([audit] enabled is not true)"
                 fi
             fi
+            if [ $MINUTE = 0 ]; then
+                if [ $MINUTE_STANDBY = 1 ]; then
+                    echo "  stackshot-minute.service: skipped ([runner] process is \"unit\", but this box is a read-only standby)"
+                elif [ -f "$UNIT_DIR/stackshot-minute.service" ]; then   # back at "inline": the server runs the runner again, and a runner left running here would keep its lock
+                    systemctl --user disable --now --quiet stackshot-minute.service 2>/dev/null || true
+                    rm -f "$UNIT_DIR/stackshot-minute.service"
+                    echo "  stackshot-minute.service: stopped, disabled and removed ([runner] process is not \"unit\"); the server runs no runner until it is restarted: systemctl --user restart stackshot.service"
+                else
+                    echo "  stackshot-minute.service: skipped ([runner] process is not \"unit\")"
+                fi
+            fi
         fi
         for n in "${USERU[@]}"; do [ "$VERB" = units ] || [ "$n" = stackshot-puller.service ] || continue; put "$n" "$UNIT_DIR"; done
         systemctl --user daemon-reload
         [ "$VERB" = units ] && { systemctl --user enable --quiet stackshot.service stackshot-reload.path 2>/dev/null || true; }
         [ "$VERB" = units ] && [ $HUB = 1 ] && systemctl --user enable --quiet anchor-hub.service 2>/dev/null || true
+        [ "$VERB" = units ] && [ $MINUTE = 1 ] && systemctl --user enable --quiet stackshot-minute.service 2>/dev/null || true
         if [ "$VERB" = units ] && [ $AUDIT = 1 ]; then    # arming the timer runs nothing: the cue waits for [audit] at
             systemctl --user enable --now --quiet stackshot-audit.timer 2>/dev/null || true
             case " ${changed[*]:-} " in *" stackshot-audit.timer "*) systemctl --user restart stackshot-audit.timer 2>/dev/null || true ;; esac   # a new [audit] at
@@ -163,11 +187,13 @@ case "$VERB" in
         if [ "$START" = 1 ]; then          # start what this verb runs, or restart it if it is running (covers --restart too)
             failed=()
             start() {   # start <name>
+                if [ "$1" = stackshot-minute.service ]; then systemctl --user reset-failed "$1" 2>/dev/null || true; fi      # past its start limit a plain restart is refused: clear the count first
                 systemctl --user restart "$1" && echo "  started $1" || { echo "  FAILED to start $1" >&2; failed+=("$1"); }
             }
             if [ "$VERB" = units ]; then
                 start stackshot.service; start stackshot-reload.path
                 if [ $HUB = 1 ]; then start anchor-hub.service; fi
+                if [ $MINUTE = 1 ]; then start stackshot-minute.service; fi      # after the server: it waits for /healthz only at its own start
             fi
             start stackshot-puller.service
             if [ ${#failed[@]} -gt 0 ]; then echo "not started: ${failed[*]}" >&2; exit 1; fi
@@ -176,6 +202,7 @@ case "$VERB" in
                 for n in "${changed[@]}"; do
                     case "$n" in
                         stackshot-reload.service|stackshot-portal-sync.service|stackshot-audit.service|stackshot-audit.timer) ;;   # the audit's: a restart of its service would cue an audit; its timer is re-armed above
+                        stackshot-minute.service) systemctl --user reset-failed "$n" 2>/dev/null || true; systemctl --user restart "$n" && echo "  restarted $n" ;;   # reset-failed first: past its start limit a plain restart is refused
                         *) systemctl --user restart "$n" && echo "  restarted $n" ;;
                     esac
                 done
