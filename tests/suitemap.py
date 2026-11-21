@@ -53,6 +53,11 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
   tests/suitemap.py select --map MAP [--to REV]           print `all`, or the suites to run separated by spaces (empty: none);
                                                           the reason for each changed file goes to stderr, and to
                                                           $GITHUB_STEP_SUMMARY when set. The change is git diff <map's commit> <REV>
+  tests/suitemap.py warm [--rev REV]                      build and keep the index of REV (default HEAD) as a `select` would, so the next call that
+                                                          needs it loads it: what runs after a merge to main (release.sh,
+                                                          [release] suitemap_warm_cmd; see *The index cache*). Exit 0 when it
+                                                          is kept now or was kept already, or the cache is off; 1 when REV has no
+                                                          tree here or the index could not be kept (nothing is left then)
   tests/suitemap.py audit --old OLD --new NEW --to B     the suites the new map says <old map's commit>..B reaches that the
                                                           old map's choice for the same range skipped, and the suites that
                                                           failed on main that it skipped: exit 1 when there is one, or when
@@ -322,6 +327,16 @@ nothing is read or written; the answer is the same either way (tests/suitemap_ca
 SUITEMAP_CACHE_DIR. Measured on one box for a typical pull request's `select` (two revisions): without the cache before this change 48 s and 722 MB; cold 16 s and 612 MB; both trees
 kept 0.6 s and 248 MB; the base kept and the head new (what a pull request meets after main's run) 2.3 s and 483 MB; five calls at once on an empty folder cost one
 build. A head is a revision no run has indexed, so it is assembled from the records of its files (the 2.3 s), not read from a tree entry.
+Two more things keep a pull request's call and the first call after a merge short. `warm` builds and keeps the index of one revision (default HEAD): release.sh starts it,
+through [release] suitemap_warm_cmd, on the commit it just deployed, detached and never waited for, and the command is the test runner's (it sends the tree to the box that
+picks suites and runs `warm` there: nothing of the picker runs on the box that releases), so the first `select` after a merge loads main's index instead of building it. A
+failed or missing warm costs that one call the build it cost before. And `select` keeps a head's settled index only when more than CHEAP_PARSE files had to be parsed to make it
+(Names skip_cheap): a branch of a few files over main costs the records of the blobs that changed and the assembly, about a second, and writing its tree entry cost nearly as
+much again for a revision no other call asks for; a costly head (a branch that changed a great deal, a cold folder) is kept as any index is, and an incomplete one never is.
+Measured on one test box, the real repository (about 590 Python files), `select` as a process, main's map and a branch of 1, 2 or 3 files over it: the first call after a merge
+17.7 s before, 1.5 s after a warm (the warm itself, once, 14 s on an empty folder and 2.5 s when the records of the merge before are kept; a second warm 0.25 s); the first call for
+the branch 2.1, 2.2 and 2.2 s before, 1.3, 1.4 and 1.5 s now; a repeat call for the same branch 0.5 to 0.7 s before (its tree entry had been kept), 1.3 to 1.5 s now, the price of not writing it.
+The output of select and audit is the same with no cache, a cold folder, a warmed one and a branch over it, on twelve ranges of this repository's history, four audits and the branches.
 """
 import argparse, ast, atexit, collections, contextlib, datetime, difflib, fcntl, hashlib, io, json, os, pickle, re, shutil, signal, stat, subprocess, sys, tempfile, time, tomllib, zlib
 
@@ -1663,6 +1678,7 @@ def listing(rev):
 
 # ---------------------------------------------------------------- the index cache
 CACHE_MAX_BYTES = 256 << 20   # the cache folder is trimmed to this size (the entries used longest ago go first) after each commit's index is kept
+CHEAP_PARSE = 32             # an index built for a head (Names skip_cheap) is kept only when more files than this had to be parsed
 FACTS_BATCH = 64             # records built at once when a run has to build them (their texts are held together)
 CACHE_LOCK_WAIT = 300         # seconds a call waits for another that is building the same index before it builds its own
 CACHE_ENTRY_MAX = 256 << 20   # the most an entry may be as a file and when inflated (a tree entry of this checkout is a few MB): a bigger one is no entry
@@ -1923,19 +1939,38 @@ class IndexCache:
 class Names:
     """the name index of one revision: every repo Python file and every suite's file (kept per tree in the cache, see *The index cache*)"""
 
-    def __init__(self, rev):
+    def __init__(self, rev, skip_cheap=False):
+        """`skip_cheap` (a branch head: no later call asks for it): when the tree's entry is not there, the index is built from the records of its files without taking the lock,
+        and saved only when the build had to parse more than CHEAP_PARSE files. A build of records that were nearly all kept already costs about a second and
+        saving it costs as much again, for an entry no later call finds; one that had to parse is what the next call wants kept (the records of the files that are new are
+        kept as always). `kept` says what happened: loaded (the tree's entry was there), saved, not kept (asked to skip it, or no cache, or no tree id) or incomplete (git failed:
+        the index is for this call alone)"""
         cache = IndexCache.open()
         tree = cache.tree_of(rev) if cache else None
+        self.kept = "not kept"; self.parsed = 0
         if not tree:   # no cache, or no tree id to keep an index under: built from the revision as given, and kept nowhere
             self.build(rev, cache)
-        elif not self.load(cache, tree):
+        elif self.load(cache, tree):
+            self.kept = "loaded"
+        elif skip_cheap:
+            self.build(tree, cache)   # from the tree the key names, as below
+            if self.complete and self.parsed > CHEAP_PARSE:
+                self.save(cache, tree)
+                self.kept = "saved"
+        else:
             with cache.lock(f"tree-{tree}", CACHE_LOCK_WAIT):
-                if not self.load(cache, tree):   # the call that held the lock may have made it
+                if self.load(cache, tree):   # the call that held the lock may have made it
+                    self.kept = "loaded"
+                else:
                     self.build(tree, cache)   # from the tree the key names, never from `rev` again: a ref that moved since (HEAD, a branch) would fill this entry with another tree
                     if self.complete:   # an index made while git failed (a listing, a blob or the scripts it could not give) serves this call and is never kept
                         self.save(cache, tree)
+                        self.kept = "saved"
+        if not getattr(self, "complete", True):   # a loaded index has no `complete`: it was whole when it was saved
+            self.kept = "incomplete"
 
     def build(self, rev, cache):
+        self.parsed = 0   # the files whose record had to be made (not found in the cache)
         rows = listing(rev)
         self.complete = bool(rows)   # False once git failed to give anything the index is made of: such an index is for this call alone (see __init__)
         rows = rows or []
@@ -1978,6 +2013,7 @@ class Names:
                 if b in texts:
                     if b not in recs:   # one content at several paths is built once
                         recs[b] = build_facts(texts[b])
+                        self.parsed += 1
                         if cache and b not in unsure:   # a record made from a text git did not give whole is for this call only
                             cache.put("facts", b, recs[b])
                     out[f] = module_names(f, b, recs[b], self.repo, texts[b])
@@ -3016,8 +3052,8 @@ def data_change(a, b, old, new):
     return "same" if layout_only(ot, nt, names[1], name_words(names[0], oi | ni)) else "changed"
 
 
-def selection(m, a, b, pathspec=()):
-    """(set of suites or 'all', [(file, reason)]) for the change a..b under map m"""
+def selection(m, a, b, pathspec=(), skip_b=False):
+    """(set of suites or 'all', [(file, reason)]) for the change a..b under map m; `skip_b`: b is a head, not kept unless it was costly to build (Names skip_cheap)"""
     if m is None:
         return "all", [("-", "no usable map")]
     if git("rev-parse", "--verify", "--quiet", f"{a}^{{commit}}") is None or git("rev-parse", "--verify", "--quiet", f"{b}^{{commit}}") is None:
@@ -3083,7 +3119,7 @@ def selection(m, a, b, pathspec=()):
                     every = pyfiles("-r", a)
                     hit |= {s for s, e in S.items() if (every and every <= set(e.get("whole", ()))) or d in e.get("dirs", ())}
             if names is None:
-                names = (Names(a), Names(b))
+                names = (Names(a), Names(b, skip_cheap=skip_b))
             fns, bound, own, whole, docs = py_change(names, S, a, b, old, new)
             reached = 0
             ranfiles = {p for e in S.values() for p in e.get("py", {})}
@@ -3163,7 +3199,7 @@ def select(args):
     a = m["commit"] if m else to
     if m:
         have(a)
-    sel, why = selection(m, a, to)
+    sel, why = selection(m, a, to, skip_b=True)   # the map's commit is main's, shared by every pull request: always kept; the head is this change's alone
     total = len(suites_at(to))
     for f, r in why:
         print(f"suitemap: {f}: {r}", file=sys.stderr)
@@ -3179,6 +3215,24 @@ def select(args):
                 + (", ".join(sorted(sel)) or "none"))
     summary(["### Suite selection", head, "", "| changed | reason |", "|---|---|"] + [f"| `{f}` | {r} |" for f, r in why])
     return 0
+
+
+def warm(args):
+    """build and keep the index of one revision (default HEAD) so that the next `select` or `audit` that needs it loads it: what runs after a merge to main, where the first
+    call would otherwise parse the checkout (see *The index cache*). A no-op with the cache off or no folder for it, and for a revision already kept; exit 0 for those and for
+    a build that was kept, 1 when the revision has no tree here or git failed so that the index could not be kept (nothing is left in the cache then)"""
+    cache = IndexCache.open()
+    if cache is None:
+        print("suitemap: warm: no cache here (switched off, or no folder to keep it in): nothing to do")
+        return 0
+    tree = cache.tree_of(args.rev)
+    if not tree:
+        print(f"suitemap: warm: {args.rev} is not a revision of this checkout", file=sys.stderr)
+        return 1
+    t = time.monotonic()
+    how = Names(args.rev).kept
+    print(f"suitemap: warm: tree {tree[:12]} {'was kept already' if how == 'loaded' else how} ({time.monotonic() - t:.1f}s)")
+    return 0 if how in ("loaded", "saved") else 1
 
 
 def audit(args):
@@ -3236,6 +3290,7 @@ def main():
     p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
     p = sub.add_parser("stamp"); p.add_argument("--map", required=True); p.add_argument("--sha", required=True); p.add_argument("--tree"); p.add_argument("--out")
     p = sub.add_parser("select"); p.add_argument("--map", required=True); p.add_argument("--to", default="HEAD")
+    p = sub.add_parser("warm"); p.add_argument("--rev", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
     example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
@@ -3248,7 +3303,7 @@ def main():
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
-    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "stamp": stamp, "select": select, "audit": audit}[args.cmd](args)
+    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "stamp": stamp, "select": select, "audit": audit, "warm": warm}[args.cmd](args)
 
 
 if __name__ == "__main__":

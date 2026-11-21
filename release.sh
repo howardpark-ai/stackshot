@@ -118,6 +118,11 @@
 #                                 The wait looks at main's runs every POLL_MAIN s (60) and the reads are shared between the releases on the box for GH_TTL s (45), so six releases waiting on one run cost what one does. The deploy lock is let go for that
 #                                 wait and taken again for the deploy, so a release waiting on main never holds another one's deploy (a lock still held after 15 min then fails "deploy lock": merged, not deployed). Then ./deploy.sh pinned to the commit main's
 #                                 tests passed on (DEPLOY_TO: the newest commit that contains M whose run passed, never a tip with no passing run);
+#                                 4e. THE PICKER'S INDEX (suitemap_warm_start, `--warm`): right after a deploy (not after a release that found its merge already live), [release] suitemap_warm_cmd is started on the deployed
+#                                 commit in a transient user unit of its own (stackshot-suitemap-warm-<sha>, output <state>/releases/suitemap-warm-<sha>.log) and never waited for: the unit runs `release.sh --warm <sha>`,
+#                                 which makes a worktree of the commit, runs the command in it (one at a time, stopped after RELEASE_WARM_TIMEOUT, 1800 s) and removes the worktree. The command is the test runner's: it sends the
+#                                 tree to the box that picks suites and runs `python3 tests/suitemap.py warm` there, so the index of main's new tip is built right after the merge and the first `select` after it loads it.
+#                                 Nothing runs on this box but the command; nothing retries; unset: the log says so and the release goes on; a command that is missing, fails or hangs is a log line and never a failed release;
 #                                 5. one message to [release] report_to (default projects/example): green or red, the PR, the commit, what was restarted, what the session
 #                                 pick chose and from which files, the log path.
 #                                 A green one goes with --release green (the turn rule's second build): the
@@ -209,6 +214,7 @@ QUEUE_GRACE="${RELEASE_QUEUE_GRACE:-180}"   # seconds after the enqueue call tha
 START_MAX=4                                 # queued releases running at once (release.sh queue): release.sh's own number, not a setting
 WAIT_MAIN="${RELEASE_WAIT_MAIN:-5400}"   # seconds a covering run of main may be going (main_green: counted from when it starts, status in_progress). 90 min: main's full run, every suite measured, can be slow on a loaded host, so 60 min (3600) let a slow run end a release
 CAP_MAIN="${RELEASE_CAP_MAIN:-10800}"    # seconds from the merge, at most, that main_green waits for a run that covers it (3 h): a run queued behind others uses none of WAIT_MAIN, this keeps it from waiting forever
+WARM_TIMEOUT="${RELEASE_WARM_TIMEOUT:-1800}"   # seconds [release] suitemap_warm_cmd may run (warm_run), and a second warm waits for the first: a build of the index is a minute on the box that does it
 NOTICE_TIMEOUT="${RELEASE_NOTICE_TIMEOUT:-60}"   # seconds [fleet] notice_cmd may take (notice_send): past it the command is stopped and the notice counts as not sent, so the report loses its green flag and the next release starts
 WAIT_STEPS="${RELEASE_WAIT_STEPS:-600}"  # seconds a run of main that is completed and green may stay without the conclusion of its "run every suite, measured" step (main_green: GitHub fills in the step results some time after the job reports completed, and release.sh once read a run in that gap and failed a green one). 10 min: the gap has been seconds to a minute; past it the step results never came and the run counts as green on its own conclusion (success), with a warning in the log and the report, never a rollback (a run that concluded failure fails at once). Counted on the clock from the first look that saw the gap; no extra GitHub call, the reads are the POLL_MAIN ones
 POLL_MAIN="${RELEASE_POLL_MAIN:-60}"     # seconds between two looks at main's runs while main_green waits (a run can take a long time, and every look costs GitHub REST calls from one shared hourly budget; polling every 20 s with several releases waiting could spend it)
@@ -305,6 +311,57 @@ codex_review_start() {  # $1 = a PR that was just read as open: start `salamande
     else
         say "codex review of PR #$pr not started: neither systemd-run nor setsid could start it"
     fi
+    return 0
+}
+suitemap_warm_start() {  # $1 = the commit this release just deployed (the live checkout's HEAD): start [release] suitemap_warm_cmd on it (`release.sh --warm`, below) and say in one log line how, or why not.
+                         # The suite picker's index of that commit is built where picks are made, so the first `tests/suitemap.py select` after a merge loads it (tests/suitemap.py warm). It is a courtesy that must
+                         # never touch the release: nothing waits for it, its output goes to <state>/releases/suitemap-warm-<sha>.log, and every way of failing here (no command set, a spawn that errors or hangs: the
+                         # systemd-run call is cut at 10 s) is swallowed, so this function returns 0 whatever happens. It runs in a transient user unit of its own, because this release runs in one and systemd ends a
+                         # unit's whole cgroup when its main process exits; with no user manager (systemd-run fails) it is started with setsid nohup, holding none of the locks (fds 4 to 9), and then a stop of the
+                         # release ends it with it. Nothing retries: a warm that failed is the next pick's own build, as it was before there was one. Never on this box's own CPU: the command is the test runner's
+                         # (it sends the tree to the box that picks suites); this function and `--warm` start no test and no suitemap call themselves
+    local sha="$1" unit="" wlog="$LOGDIR/suitemap-warm-${1:0:12}.log" rc=0 cmd0=""
+    cmd0="$(python3 -c 'from stackshot.core import config; print((getattr(config, "release_suitemap_warm", lambda: [])() or [""])[0])' 2>/dev/null)" || cmd0=""   # a config.py without the key, or one that does not run, reads as none
+    if [ -z "$cmd0" ]; then say "suitemap warm: no [release] suitemap_warm_cmd is set, nothing started"; return 0; fi
+    [[ "$sha" =~ ^[0-9a-f]{7,64}$ ]] || { say "suitemap warm: no commit to build the index of: nothing started"; return 0; }
+    unit="stackshot-suitemap-warm-${sha:0:12}"
+    timeout -k 2 10 systemd-run --user --quiet --collect --unit "$unit" -p WorkingDirectory="$HERE" -p "StandardOutput=append:$wlog" -p "StandardError=append:$wlog" \
+        --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --warm "$sha" </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- || rc=$?
+    if [ "$rc" = 0 ]; then
+        say "suitemap warm: started $unit for ${sha:0:7} (output $wlog); the release does not wait for it"
+    elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+        say "suitemap warm: systemd-run did not answer within 10 s (status $rc), so unit $unit may have started; not started again (output $wlog); the release does not wait for it"
+    elif ( setsid nohup "$HERE/release.sh" --warm "$sha" </dev/null >>"$wlog" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- & ) 2>/dev/null; then
+        say "suitemap warm: systemd-run failed (status $rc); started detached, no user unit, for ${sha:0:7} (output $wlog); the release does not wait for it"
+    else
+        say "suitemap warm: not started for ${sha:0:7}: neither systemd-run nor setsid could start it"
+    fi
+    return 0
+}
+WARM_WT=""
+warm_clean() {  # the checkout `--warm` made, removed on every way out
+    [ -z "$WARM_WT" ] || { git -c core.hooksPath=/dev/null worktree remove --force "$WARM_WT/tree" >/dev/null 2>&1; rm -rf -- "$WARM_WT"; git worktree prune >/dev/null 2>&1; }
+    return 0
+}
+warm_run() {  # `release.sh --warm <sha>` (what suitemap_warm_start's unit runs): [release] suitemap_warm_cmd, as the config gives it, run from a checkout of <sha> made for it (a worktree: no copy of the repository)
+              # and removed after, one at a time (a second waits for the first for up to WARM_TIMEOUT s), stopped after WARM_TIMEOUT s. Always 0: what it says goes to the log, and nothing reads its status
+    local sha="$1" rc=0; local -a cmd
+    mapfile -t cmd < <(python3 -c 'from stackshot.core import config; print("\n".join(getattr(config, "release_suitemap_warm", lambda: [])()))' 2>/dev/null)
+    if [ -z "${cmd[0]:-}" ]; then say "suitemap warm ${sha:0:7}: no [release] suitemap_warm_cmd is set"; return 0; fi
+    if ! command -v "${cmd[0]}" >/dev/null 2>&1; then say "suitemap warm ${sha:0:7}: ${cmd[0]} is not on PATH: nothing run"; return 0; fi
+    if ! git cat-file -e "$sha^{commit}" 2>/dev/null; then say "suitemap warm ${sha:0:7}: that commit is not in this checkout: nothing run"; return 0; fi
+    exec 8>"$LOGDIR/suitemap-warm.lock" 2>/dev/null || { say "suitemap warm ${sha:0:7}: the lock file cannot be opened: nothing run"; return 0; }
+    flock -w "$WARM_TIMEOUT" 8 || { say "suitemap warm ${sha:0:7}: another warm still ran after ${WARM_TIMEOUT}s: skipped"; return 0; }
+    WARM_WT="$(mktemp -d "$LOGDIR/suitemap-warm.XXXXXX")" || { WARM_WT=""; say "suitemap warm ${sha:0:7}: no scratch folder: nothing run"; return 0; }
+    trap warm_clean EXIT
+    if ! git -c core.hooksPath=/dev/null worktree add --quiet --detach "$WARM_WT/tree" "$sha" >/dev/null 2>&1; then say "suitemap warm ${sha:0:7}: the checkout could not be made: nothing run"; return 0; fi
+    say "suitemap warm ${sha:0:7}: running ${cmd[*]} in a checkout of it"
+    ( cd "$WARM_WT/tree" && exec timeout -k 10 "$WARM_TIMEOUT" "${cmd[@]}" </dev/null 6>&- 7>&- 8>&- 9>&- ); rc=$?
+    case $rc in
+        0) say "suitemap warm ${sha:0:7}: done" ;;
+        124|137) say "suitemap warm ${sha:0:7}: stopped after ${WARM_TIMEOUT}s" ;;
+        *) say "suitemap warm ${sha:0:7}: the command failed (status $rc): nothing was kept, the next pick builds its own index" ;;
+    esac
     return 0
 }
 idle_recycle() {  # ask the fleet tool for a recycle once the box is idle: [fleet] recycle_when_idle, the reason appended; 1 when none is set or it failed
@@ -1706,6 +1763,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
         restarted="$(echo "$out" | sed -n 's/^  restarted //p' | tr '\n' ' ')"; restarted="${restarted:-nothing}"
     fi
     if [ $live_now = 1 ]; then say "done: $sha, already live, restarted nothing"; else say "done: $sha, restarted $restarted"; fi
+    [ $live_now = 1 ] || suitemap_warm_start "$verified"   # what was deployed is main's tip: its picker index is built where picks are made, detached, never waited for
     for m in "${merged_prs[@]}"; do plog "$m" "done: $sha, $([ $live_now = 1 ] && echo "already live, ")restarted $restarted"; done   # the line a waiter and the board hooks look for, in each PR's own log
     # THE SESSION PICK for the whole group: the highest need among the files of all its PRs (a forced --recycle does not exist here)
     local pf="" pfa pk_note="" pk_files_ok=1 nt_note="" nrc=0 nsum="nothing to reload" flagged=0 rd
@@ -1959,6 +2017,7 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
     [ $rc -eq 0 ] || { pending_clear; fail "deploy" "$(echo "$out" | tail -1) (main is merged at $sha; the checkout is at $(git rev-parse --short HEAD))"; }   # reported red here: nothing left to verify
     restarted="$(echo "$out" | sed -n 's/^  restarted //p' | tr '\n' ' ')"; restarted="${restarted:-nothing}"
     if [ $live_now = 1 ]; then say "done: $sha, already live, restarted nothing"; else say "done: $sha, restarted $restarted"; fi
+    [ $live_now = 1 ] || suitemap_warm_start "$verified"   # what was deployed is main's tip: its picker index is built where picks are made, detached, never waited for
     # THE SESSION PICK: what the running sessions need, from the files the PR changed (or the override). recycle keeps its old meaning below
     # (--recycle: the recycle step runs, and the rollback report says one was flagged)
     local pk_note="" pk_files_ok=1
@@ -2026,6 +2085,7 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
 
 case "${1:-}" in
     --run) [ -n "${2:-}" ] && [[ "${3:-}" =~ ^(|--recycle|--no-recycle)$ ]] || { echo "usage: release.sh --run <pr> [--recycle | --no-recycle]" >&2; exit 2; }; run "$2" "${3:-}"; exit $? ;;
+    --warm) [[ "${2:-}" =~ ^[0-9a-f]{7,64}$ ]] && [ $# -eq 2 ] || { echo "usage: release.sh --warm <commit>" >&2; exit 2; }; warm_run "$2"; exit 0 ;;   # the unit suitemap_warm_start starts
     --pick|--pick-files)   # dry run: the session pick and each file's need, nothing else (no unit, no merge, no message)
         if [ "$1" = --pick ]; then
             [[ "${2:-}" =~ ^[0-9]+$ ]] && [ $# -eq 2 ] || { echo "usage: release.sh --pick <pr> | --pick-files <file>..." >&2; exit 2; }

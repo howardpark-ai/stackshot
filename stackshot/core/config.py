@@ -436,6 +436,16 @@ def release_codex_review() -> bool:
     return True if v is None else (v not in (False, 0) and str(v).strip().lower() not in ("false", "no", "off", "0"))
 
 
+def release_suitemap_warm() -> list[str]:
+    """[release] suitemap_warm_cmd: the command, as words, that release.sh starts (detached, never waited for) after it deploys a merge: run in a checkout of the merge commit, it builds the
+    suite picker's index of that commit where picks are made (see tests/suitemap.py warm), so the first pick after the merge loads it. "" (the default) = nothing is started. Never able to fail or delay a release."""
+    import shlex
+    try:
+        return shlex.split(str(get("release", "suitemap_warm_cmd") or ""))
+    except ValueError:
+        return []
+
+
 def report_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """Lines for a [audit] summary_to or [release] report_to that is set and cannot be used (see _report_slug): the default stands in its place, so the reports would go to the stand-in page."""
     out: list[str] = []

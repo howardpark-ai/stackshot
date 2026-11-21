@@ -1700,6 +1700,17 @@ try:
     _cfg.CFG["release"]["report_to"] = "two words"
     check("…a malformed one reads as the default, and notes() (so doctor and a reload) names it", _cfg.release_report_to() == STAND_IN
           and any("[release] report_to" in n for n in _cfg.report_notes(_cfg.CFG)) and any("[release] report_to" in n for n in _cfg.notes(_cfg.CFG)), _cfg.report_notes(_cfg.CFG))
+    # the command release.sh starts after a deploy to build the suite picker's index (release_scenario.py holds the shell half): words, none by default, and never an error
+    _cfg.CFG.pop("release", None)
+    _ex = tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))["release"]
+    check("suitemap_warm_cmd: the default is no command (an empty list), and so is the example config's value, which the docs table names",
+          _cfg.release_suitemap_warm() == [] and _ex.get("suitemap_warm_cmd") == "" and "`release.suitemap_warm_cmd`" in pathlib.Path(STACK, "docs", "configuration.md").read_text(encoding="utf-8"), _cfg.release_suitemap_warm())
+    _cfg.CFG["release"] = {"suitemap_warm_cmd": "runner --git history -- python3 tests/suitemap.py warm"}
+    check("…a configured value is read as words, as a shell would split it", _cfg.release_suitemap_warm() == ["runner", "--git", "history", "--", "python3", "tests/suitemap.py", "warm"], _cfg.release_suitemap_warm())
+    _cfg.CFG["release"]["suitemap_warm_cmd"] = "runner 'unclosed"
+    check("…and one that cannot be split, or is not a string, reads as no command and raises nothing (a release never fails on it)", _cfg.release_suitemap_warm() == [], _cfg.release_suitemap_warm())
+    _cfg.CFG["release"]["suitemap_warm_cmd"] = 7
+    check("…a number reads as words too, never as a crash", isinstance(_cfg.release_suitemap_warm(), list), _cfg.release_suitemap_warm())
     _cfg.CFG.pop("release", None)
     if _rl is not None: _cfg.CFG["release"] = _rl
 finally:

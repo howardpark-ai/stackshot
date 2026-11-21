@@ -911,4 +911,20 @@ check("release queue, host file switched to off mid-group: the PRs the salamande
       s["started"] == ["40"] and "PR #25 is held by the salamander merge queue" in s["out"] and "PR #35 is held by the salamander merge queue" in s["out"] and not any(a.endswith(("--run 25", "--run 35")) for a in started_args(s)), (s["started"], started_args(s), s["out"]))
 
 
+
+# the picker's index after the group's one deploy (release_scenario.py section 17 holds the single-PR cases): started once, on the deployed commit, and not when the group's merge was live already
+WARM_G = "warmcmd --git history"
+def wout(s): return str((s["rc"], s["msgs"], s["deploys"], s["order"], s["released"], s["lastgood"], s["mq"])).replace(str(s["dir"]), "@DIR")
+gbase = grp("on-group-warm-base")
+s = grp("on-group-warm", warm=WARM_G)
+mw = re.search(r"--unit stackshot-suitemap-warm-([0-9a-f]{12}) .* --warm ([0-9a-f]{40})$", s["warm_sysrun"][0]) if len(s["warm_sysrun"]) == 1 else None
+check("group of two that deployed: the picker's index is started once, in a unit named for the deployed commit, on that commit; the group's log says so (one line, after the group's `done:`), the command ran once and its checkout is gone, and the release is the same as without it",
+      s["rc"] == 0 and s["deploys"] == [M2] and mw is not None and mw.group(2) == M2 and len(s["warm"]) == 1 and s["warm_dirs"] == [] and "suitemap warm: started stackshot-suitemap-warm-" in glog(s)
+      and re.search(r"done: \w+, restarted[^\n]*\n[^\n]*suitemap warm: started", glog(s)) and s["warm_log"].rstrip().endswith(": done") and wout(s) == wout(gbase), (s["rc"], s["deploys"], s["warm_sysrun"], s["warm"], glog(s)[-500:]))
+s = grp("on-group-warm-live", heads=M2, live=M2, warm=WARM_G)
+check("group whose merge is live already: nothing was deployed, so no index is started", s["rc"] == 0 and not s["deployed"] and s["warm_sysrun"] == [] and s["warm"] == [] and "suitemap warm" not in glog(s), (s["warm_sysrun"], glog(s)[-300:]))
+s = grp("on-group-warm-fail", warm=WARM_G, warmmode="fail")
+check("group, a command that fails: the group is green and deployed as without it; the failure is a line in the unit's log", s["rc"] == 0 and s["deploys"] == [M2] and "the command failed (status 7)" in s["warm_log"] and len(s["msgs"]) == 2, (s["rc"], s["deploys"], s["warm_log"], len(s["msgs"])))
+
+
 finish()

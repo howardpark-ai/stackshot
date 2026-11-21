@@ -91,6 +91,11 @@ codex_review = true                                 # release.sh starts `salaman
                                                     # false = not started: this is the switch for a queued release and for `release.sh N`. The environment variable SALA_CODEX_REVIEW=off (also false, no, 0, in any case,
                                                     # surrounding whitespace ignored) works only in a direct `release.sh --run <pr>` call: a unit started by `release.sh N` or the queue has none of the calling shell's variables.
                                                     # SALA_CODEX_REVIEW=off in salamander's config file (~/.config/salamander/config) always works (the review is started and does nothing). A box with no `salamander` on PATH starts none.
+suitemap_warm_cmd = ""                              # the command, as words, that release.sh starts after it deploys a merge, detached and never waited for: it runs in a checkout of the merge commit
+                                                    # (made for it, removed after) and builds the suite picker's index of that commit where picks are made, so the first pick after the merge
+                                                    # loads it, e.g. "my-test-runner --git history --timeout 900 -- python3 tests/suitemap.py warm" (`warm` builds and keeps the index of HEAD).
+                                                    # Stopped after 30 minutes; one at a time; a failure or a missing command is a line in <state>/releases/suitemap-warm-<sha>.log and nothing else.
+                                                    # "" = none: the release log says so and goes on. Contract: none (a command that is run).
 
 [subject]
 prefixes = ["[work] ", "[home] "]                   # every subject starts with one of these

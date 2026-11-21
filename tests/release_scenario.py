@@ -1412,6 +1412,69 @@ check("--pick (a dry run) starts no review", s["rc"] == 0 and s["codex"] == [] a
 s = scenario("codex-pick-files", raw=["--pick-files", "server.py"])
 check("--pick-files (a dry run) starts no review", s["rc"] == 0 and s["codex"] == [] and s["sysrun"] == [], s["codex"])
 
+# ---- 17. the picker's index after a deploy: [release] suitemap_warm_cmd is started on the deployed commit, detached and in a unit of its own, and is never a reason to fail or to delay a release
+# The command is the test runner's (it sends the tree to the box that picks suites): release.sh runs nothing of the picker itself. `warmcmd` (tests/_release_harness.py) stands for it.
+WARM = "warmcmd --git history"
+WSHA = re.compile(r"--unit stackshot-suitemap-warm-([0-9a-f]{12}) .* --warm ([0-9a-f]{40})$")
+wbase = scenario("warm-none", merge="ok", checks="pending,pass", extra={"SALA_CODEX_REVIEW": "off"})
+check("no [release] suitemap_warm_cmd: nothing is started (no systemd-run call for it, no command), one log line says so, and the release is as ever",
+      wbase["rc"] == 0 and wbase["deployed"] and wbase["warm_sysrun"] == [] and wbase["warm"] == [] and "suitemap warm: no [release] suitemap_warm_cmd is set, nothing started" in wbase["log"], (wbase["rc"], wbase["warm_sysrun"], wbase["log"]))
+s = scenario("warm-ok", merge="ok", checks="pending,pass", warm=WARM, extra={"SALA_CODEX_REVIEW": "off"})
+m = WSHA.search(s["warm_sysrun"][0]) if len(s["warm_sysrun"]) == 1 else None
+check("a release that deployed starts the command once, in a transient user unit named for the deployed commit, which runs `release.sh --warm <that commit>` in the release's own folder, its output in a log of its own, a PATH that holds ~/.local/bin; the log says so",
+      s["rc"] == 0 and s["deployed"] and m is not None and m.group(2) == s["deploys"][-1] and m.group(1) == m.group(2)[:12] and f"-p WorkingDirectory={s['dir']}/box " in s["warm_sysrun"][0]
+      and f"-p StandardOutput=append:{s['dir']}/releases/suitemap-warm-{m.group(1)}.log " in s["warm_sysrun"][0] and "--setenv=PATH=" in s["warm_sysrun"][0] and "/.local/bin" in s["warm_sysrun"][0]
+      and f"suitemap warm: started stackshot-suitemap-warm-{m.group(1)} for {m.group(2)[:7]}" in s["log"], (s["rc"], s["warm_sysrun"], s["deploys"], s["log"][-600:]))
+check("…the command ran once, with the words the config gave it, in a checkout of the commit made for it (a worktree under the release's folder), holding none of the lock descriptors (6 to 9), and the unit's log says it ran and was done",
+      len(s["warm"]) == 1 and re.fullmatch(rf"{re.escape(str(s['dir']))}/releases/suitemap-warm\.\w+/tree\|--git history", s["warm"][0]) and s["warm_fds"] == ["closed6", "closed7", "closed8", "closed9"]
+      and "running warmcmd --git history in a checkout of it" in s["warm_log"] and s["warm_log"].rstrip().endswith(": done"), (s["warm"], s["warm_fds"], s["warm_log"]))
+check("…the checkout is removed when the command is done: no folder is left under the release's folder, and git was asked to add the worktree detached at the commit and to remove it",
+      s["warm_dirs"] == [] and "worktree add --quiet --detach " in s["git"] and re.search(r"worktree remove --force \S+/suitemap-warm\.\w+/tree", s["git"]) and m.group(2) in s["git"], (s["warm_dirs"], s["git"][-500:]))
+check("…it is started after the deploy and the \"done:\" line (the deploy, the lock and the report are the release's own), and the release is the same as the one without the command",
+      re.search(r"done: \w+, restarted[^\n]*\n[^\n]*suitemap warm: started", s["log"]) and outcome(s) == outcome(wbase) and lock_free(s), (outcome(s), outcome(wbase)))
+s = fast("warm-live", merge="ok", heads=NEWER, warm=WARM)
+check("a release that found its merge already live deployed nothing: the index is not started (the release that deployed it did)", s["rc"] == 0 and not s["deployed"] and s["warm_sysrun"] == [] and s["warm"] == [] and "suitemap warm" not in s["log"], (s["warm_sysrun"], s["log"]))
+s = scenario("warm-fail-before", merge="ok", checks="fail", warm=WARM, extra={"SALA_CODEX_REVIEW": "off"})
+check("a release that fails before the deploy starts nothing", s["rc"] == 1 and not s["deployed"] and s["warm_sysrun"] == [] and s["warm"] == [], (s["rc"], s["warm_sysrun"]))
+for how, kw, line in (("fails (exit 7, output on both streams)", {"warmmode": "fail"}, "the command failed (status 7): nothing was kept, the next pick builds its own index"),
+                      ("is not on PATH", {"warm": "nonesuch --x"}, "nonesuch is not on PATH: nothing run")):
+    s = scenario(f"warm-cmd-{kw.get('warmmode', 'missing')}", merge="ok", checks="pending,pass", **{"warm": WARM, **kw}, extra={"SALA_CODEX_REVIEW": "off"})
+    check(f"a command that {how}: one line in the unit's log says so, the checkout is gone, and the release is the same as the one without it (green, deployed, the same reports)",
+          s["rc"] == 0 and outcome(s) == outcome(wbase) and line in s["warm_log"] and s["warm_dirs"] == [] and "boom" not in s["out"] and "boom" not in s["msg"], (s["rc"], s["warm_log"], s["warm_dirs"]))
+s = scenario("warm-sysrun-fail", merge="ok", checks="pending,pass", warm=WARM, warm_sysrun="fail", extra={"SALA_CODEX_REVIEW": "off"})
+check("no user manager (systemd-run fails): the command is started detached instead, once, the log says so, and the release is the same",
+      s["rc"] == 0 and len(s["warm_sysrun"]) == 1 and len(s["warm"]) == 1 and re.search(r"suitemap warm: systemd-run failed \(status 1\); started detached, no user unit, for \w{7} \(output \S+/releases/suitemap-warm-\w{12}\.log\); the release does not wait for it", s["log"])
+      and s["warm_log"].rstrip().endswith(": done") and outcome(s) == outcome(wbase), (s["rc"], s["warm_sysrun"], s["warm"], s["log"][-500:]))
+for kind, rc_ in (("timeout", "124"), ("kill", "137")):
+    s = scenario(f"warm-sysrun-{kind}", merge="ok", checks="pending,pass", warm=WARM, warm_sysrun=kind, extra={"SALA_CODEX_REVIEW": "off"})
+    check(f"a systemd-run call that is cut at 10 s (status {rc_}) after the unit did start: the unit's one start is the only one (the command runs once), the log says it may have started, and the release is the same",
+          s["rc"] == 0 and len(s["warm_sysrun"]) == 1 and len(s["warm"]) == 1 and re.search(rf"suitemap warm: systemd-run did not answer within 10 s \(status {rc_}\), so unit stackshot-suitemap-warm-\w{{12}} may have started; not started again", s["log"])
+          and outcome(s) == outcome(wbase), (s["rc"], s["warm_sysrun"], s["warm"], s["log"][-500:]))
+for cfg, what in (("missing", "a config.py that predates the key"), ("crash", "a config.py that does not run")):
+    s = scenario(f"warm-cfg-{cfg}", merge="ok", checks="pending,pass", warm=WARM, warm_cfg=cfg, extra={"SALA_CODEX_REVIEW": "off"})
+    check(f"{what} reads as no command: nothing is started and the release is the same", s["rc"] == 0 and s["warm_sysrun"] == [] and s["warm"] == [] and "suitemap warm: no [release] suitemap_warm_cmd is set, nothing started" in s["log"] and outcome(s) == outcome(wbase), (s["rc"], s["log"][-300:]))
+s = scenario("warm-hang", merge="ok", checks="pending,pass", warm=WARM, warmmode="hang", extra={"SALA_CODEX_REVIEW": "off"})
+alive = s["warm_alive"]
+check("a command that does not end: the release is over and green while it still runs (the release does not wait for it), the unit's log is not at its end, and neither the deploy lock nor any other lock is held by it",
+      s["rc"] == 0 and outcome(s) == outcome(wbase) and alive and "running warmcmd" in s["warm_log"] and ": done" not in s["warm_log"] and lock_free(s) and s["warm_fds"] == ["closed6", "closed7", "closed8", "closed9"], (s["rc"], alive, s["warm_log"], s["warm_fds"]))
+wl, wlines, wdirs = warm_finish(s)
+check("…and when it ends the unit says done and removes the checkout", wl.rstrip().endswith(": done") and wdirs == [] and len(wlines) == 1, (wl, wdirs, wlines))
+s = scenario("warm-slow", merge="ok", checks="pending,pass", warm=WARM, warmmode="slow", extra={"SALA_CODEX_REVIEW": "off", "RELEASE_WARM_TIMEOUT": "2"})
+check("a command that never ends is stopped after RELEASE_WARM_TIMEOUT: the log says so, the checkout is removed, nothing of it is left running, and the release is the same",
+      s["rc"] == 0 and outcome(s) == outcome(wbase) and re.search(r": stopped after 2s", s["warm_log"]) and s["warm_dirs"] == [] and not s["warm_alive"], (s["rc"], s["warm_log"], s["warm_dirs"], s["warm_alive"]))
+s = scenario("warm-direct", raw=["--warm", MERGE], warm=WARM)
+check("release.sh --warm <commit> (what the unit runs) runs the command in a checkout of that commit and ends 0, whatever the command did",
+      s["rc"] == 0 and len(s["warm"]) == 1 and f"suitemap warm {MERGE[:7]}: done" in s["out"] and s["warm_dirs"] == [], (s["rc"], s["out"][-300:], s["warm"]))
+s = scenario("warm-direct-fail", raw=["--warm", MERGE], warm=WARM, warmmode="fail")
+check("…a command that fails still ends it 0 (the unit is the release's own, a failed warm is a log line)", s["rc"] == 0 and f"suitemap warm {MERGE[:7]}: the command failed (status 7)" in s["out"], (s["rc"], s["out"][-300:]))
+s = scenario("warm-direct-none", raw=["--warm", MERGE])
+check("…with no command set it runs nothing and ends 0", s["rc"] == 0 and s["warm"] == [] and "no [release] suitemap_warm_cmd is set" in s["out"], (s["rc"], s["out"][-300:]))
+for what, argv in (("no commit", ["--warm"]), ("a word that is not a commit", ["--warm", "main"]), ("a short word", ["--warm", "abc12"]), ("an extra argument", ["--warm", MERGE, "x"])):
+    s = scenario("warm-usage-" + what.split()[-1], raw=argv, warm=WARM)
+    check(f"release.sh --warm with {what}: usage, exit 2, the command is not run", s["rc"] == 2 and "usage: release.sh --warm <commit>" in s["out"] and s["warm"] == [] and s["warm_sysrun"] == [], (s["rc"], s["out"]))
+s = scenario("warm-pick", raw=["--pick", "23"], pickfiles="server.py", warm=WARM)
+check("--pick (a dry run) starts no index build", s["rc"] == 0 and s["warm_sysrun"] == [] and s["warm"] == [], s["warm_sysrun"])
+
 long = [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 check(f"no scenario polls more than {MAX_POLLS} times (one that waits main's run out to the 3 h cap: pass RELEASE_CAP_MAIN, as most do)", not long, long)
 
