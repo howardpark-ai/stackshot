@@ -916,6 +916,29 @@ _psvc.PAGE_IO = rio
 check("rename concurrency: …and the next one goes through and writes the page again", rn("projects/ren", "home-ren-omega", "home-ren-final")[0] == 200 and _psvc._RENAMING == set() and agents_of("projects/ren")[0][0][0] == "home-ren-final")
 st, out = rn("projects/ren", "home-ren-omega", "home-ren-final")
 check("rename: 'already renamed' also carries NEW's front, role and mandate, so the caller can see it is the entry it expects", st == 200 and out["result"] == "already renamed" and out["role"] == "final" and out["mandate"] == "talks to Oliver" and out["front"] is True, (st, out))
+
+# a page with no name line: its agents are named after the front agent (team-nonm-main -> team-nonm-<role>), and the page's slug stays accepted for the agents already named after it
+ren_page("projects/nonm", "type: project\ntitle: Nonm\norg: home\nagents:\n  team-nonm-main: talks to Oliver\n  background:\n    nonm-engineer: builds it\nstatus: active")
+p.cmd_registry(quiet=True); fresh()
+NONM = rec("projects/nonm")["id"]
+def nn(name, role="helper"): return fpa("box-a", "projects/nonm", name, "fleet-web", role=role)
+check("name prefix: (setup) a page with no name line, a -main front agent and a background agent named after the slug", pverbs.prj.agent_prefixes("projects/nonm", {}, {}, rec("projects/nonm")["agents"]) == ["team-nonm", "nonm"]
+      and list(rec("projects/nonm")["agents"]) == ["team-nonm-main", "nonm-engineer"], rec("projects/nonm")["agents"])
+st, out = nn("team-nonm-docs", "docs")
+check("name prefix: project-agent takes <front agent minus -main>-<role> (team-nonm-docs) on a page with no name line", st == 200 and "team-nonm-docs" in rec("projects/nonm")["agents"] and out["agent"]["team-nonm-docs"]["role"] == "docs", (st, out))
+st, out = nn("nonm-triage", "triage")
+check("name prefix: …and a name after the page's slug (nonm-triage) is still accepted, on purpose, so agents already running under it are not refused", st == 200 and "nonm-triage" in rec("projects/nonm")["agents"] and out["agent"]["nonm-triage"]["role"] == "triage", (st, out))
+st, out = nn("unrelated-helper")
+check("name prefix: …a name that starts with neither is refused, and the refusal names the preferred prefix", st == 400 and "team-nonm-<role>" in out["error"] and "unrelated-helper" not in rec("projects/nonm")["agents"], (st, out))
+st, out = rn("projects/nonm", "nonm-engineer", "nonm-builder")
+check("name prefix: an agent named after the slug can be renamed to another name after it (200, role cut at the slug)", st == 200 and out["result"] == "renamed" and out["role"] == "builder" and "nonm-builder" in rec("projects/nonm")["agents"], (st, out))
+st, out = rn("projects/nonm", "nonm-builder", "team-nonm-lead")
+check("name prefix: …and to a name after the front agent's (200, role cut at that prefix)", st == 200 and out["result"] == "renamed" and out["role"] == "lead" and "team-nonm-lead" in rec("projects/nonm")["agents"] and "nonm-builder" not in rec("projects/nonm")["agents"], (st, out))
+st, out = rn("projects/nonm", "team-nonm-lead", "stray-lead")
+check("name prefix: …a rename to an unrelated name is refused as ever (400, nothing renamed)", st == 400 and "team-nonm-<role>" in out["error"] and "team-nonm-lead" in rec("projects/nonm")["agents"], (st, out))
+st, out = fpa("box-a", "projects/ren", "ren-helper", "fleet-web")
+check("name prefix: a page with a name line is as it was: only that name (the page's slug does not become a name of it), and the list is that name alone", st == 400 and "home-ren-<role>" in out["error"] and "ren-helper" not in rec("projects/ren")["agents"]
+      and pverbs.prj.agent_prefixes("projects/ren", {"session": "home-ren", "role": "name"}, {}, rec("projects/ren")["agents"]) == ["home-ren"], (st, out))
 _psvc.PAGE_IO = gio
 
 # ---- 6e. post project-agent-retire: sala retired a session; the record drops the agent, the page's agents block follows with a timeline line there (or a leftover pending entry is dropped)

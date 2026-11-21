@@ -1487,9 +1487,10 @@ def hub_refusal(rec: dict[str, Any], entry: dict[str, Any], how: str) -> _Refusa
 
 
 def project_prefixes(rec: dict[str, Any], entry: dict[str, Any], reg: dict[str, Any]) -> list[str]:
-    """The names an agent of the project may start with: the keeper's name for a project with no page, else the page's name, else the page's slug (an agent is always <project>-<role>)."""
+    """The names an agent of the project may start with, the preferred one first: the keeper's name for a project with no page, else the page's name, else the name of its front agents, then the page's
+    slug, which stays accepted on purpose (an agent already named after it is not refused; an agent is always <project>-<role>). projects.agent_prefixes."""
     key = rec["key"]
-    return [rec["keeper"]] if rec.get("pageless") else (prj._name_prefixes(key, entry, reg) or [key.split("/")[-1]])
+    return [rec["keeper"]] if rec.get("pageless") else prj.agent_prefixes(key, entry, reg, rec.get("agents"))
 
 
 def prefix_refusal(name: str, prefixes: list[str], where: str) -> _Refusal | None:
