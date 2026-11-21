@@ -251,6 +251,7 @@ case "$*" in
   "rev-list "*)   # the commits between the last good one and main's tip (the gate's (c)): RT_RANGE, comma-separated; up to the tip RT_TIP (the range ends "..<tip>"): RT_RANGE_TIP when given
     case "$*" in *"..${RT_TIP:-NOTIP}") echo "${RT_RANGE_TIP:-$RT_RANGE}" ;; *) echo "$RT_RANGE" ;; esac | tr , '\n' | sed '/^$/d' ;;
   "diff --diff-filter=A --name-only "*) echo "$RT_NEWUNITS" | tr , '\n' | sed '/^$/d' ;;   # unit files a rollback leaves installed (RT_NEWUNITS)
+  "-c core.hooksPath=/dev/null worktree add "*) eval "mkdir -p \"\${$(( $# - 1 ))}\"" ;;   # the index build's checkout (release.sh warm_run): a folder, so the command can run in it
   "cat-file -e "*) [ -z "${RT_NOHEAD:-}" ] || case "$*" in *"$RT_NOHEAD"*) exit 1 ;; esac ;;
   "merge-base --is-ancestor "*)   # A is an ancestor of B in a linear history, oldest first: RT_HISTORY (comma-separated); B = HEAD is the live checkout, RT_LIVE (unset: A is in it)
     set -- $*; ia=0; ib=0; i=0
@@ -280,7 +281,9 @@ CONFIG = ('import os, sys\nif sys.argv[1:] == ["state", "releases"]: print(os.en
           'def notice_cmd(): return os.environ.get("RT_NOTICE", "").split()\n'       # [fleet] notice_cmd: RT_NOTICE, unset = none
           'def release_report_to(): return os.environ.get("RT_REPORT_TO", "")\n'     # [release] report_to: RT_REPORT_TO, unset = "" (release.sh then falls back to the stand-in page)
           'if os.environ.get("RT_CODEX_CFG") != "missing":\n'                        # [release] codex_review: RT_CODEX_CFG = off (false) | crash (the call raises) | missing (a config.py that predates the key: no such function); unset = on
-          ' def release_codex_review():\n  if os.environ.get("RT_CODEX_CFG") == "crash": raise RuntimeError("config unreadable")\n  return os.environ.get("RT_CODEX_CFG") != "off"\n')
+          ' def release_codex_review():\n  if os.environ.get("RT_CODEX_CFG") == "crash": raise RuntimeError("config unreadable")\n  return os.environ.get("RT_CODEX_CFG") != "off"\n'
+          'if os.environ.get("RT_WARM_CFG") != "missing":\n'                        # [release] suitemap_warm_cmd, as words: RT_WARM (unset = none); RT_WARM_CFG = crash (the call raises) | missing (a config.py that predates the key)
+          ' def release_suitemap_warm():\n  if os.environ.get("RT_WARM_CFG") == "crash": raise RuntimeError("config unreadable")\n  return os.environ.get("RT_WARM", "").split()\n')
 CLIENT = ('import os, sys\nif sys.argv[1:2] == ["released"]: open(os.environ["RT_DIR"] + "/released.log", "a").write(" | ".join(sys.argv[1:]) + "\\n"); print("stackshot: closed a1"); sys.exit(1 if os.environ.get("RT_RELEASED") == "fail" else 0)\n'   # the items call is logged apart: the report order below is about deploys and reports
           'open(os.environ["RT_DIR"] + "/messages.log", "a").write(" | ".join(sys.argv[1:]) + "\\n")\n'
           'open(os.environ["RT_DIR"] + "/order.log", "a").write("client:" + sys.argv[1] + "\\n")\n'
@@ -420,16 +423,52 @@ SYSRUN_CODEX = r"""case "$*" in *--unit\ salamander-codex-review-*)
   exit 0 ;;
 esac
 """
+# The index build's unit (release.sh suitemap_warm_start): `systemd-run --user --quiet --collect --unit stackshot-suitemap-warm-<sha12> -p WorkingDirectory=<checkout> -p StandardOutput=append:<log> ... --setenv=PATH=... <release.sh> --warm <sha>`.
+# Its argument line is written to sysrun-warm.log. RT_WARM_SYSRUN = ok (the default) | fail (no user manager: exit 1, nothing started) | timeout, kill (cut after the unit started, by the `timeout` stand-in below). On ok the
+# stand-in starts the command detached, as a transient unit would: its own session, stdin /dev/null, output appended to the StandardOutput file, the unit's working directory, and the PATH it was given with the scenario's
+# own bin first (the stubs stand for the tools the real PATH has). Never the host's systemd.
+SYSRUN_WARM = r"""case "$*" in *--unit\ stackshot-suitemap-warm-*)
+  echo "$*" >> "$RT_DIR/sysrun-warm.log"
+  [ "${RT_WARM_SYSRUN:-ok}" != fail ] || { echo "Failed to connect to user scope bus: No medium found" >&2; exit 1; }
+  so=/dev/null; wd=.; pth=
+  while [ $# -gt 0 ]; do case "$1" in
+    -p) case "$2" in StandardOutput=append:*) so=${2#StandardOutput=append:} ;; WorkingDirectory=*) wd=${2#WorkingDirectory=} ;; esac; shift 2 ;;
+    --unit) shift 2 ;;
+    --setenv=PATH=*) pth=${1#--setenv=PATH=}; shift ;;
+    -*) shift ;;
+    *) break ;;
+  esac; done
+  (cd "$wd" && PATH="$RT_DIR/bin:$pth" setsid "$@" </dev/null >>"$so" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &)
+  exit 0 ;;
+esac
+"""
+# The command [release] suitemap_warm_cmd names in the scenarios (RT_WARM="warmcmd ..."): writes down where it ran and what it was given, which of fds 6 to 9 it holds, and then RT_WARMMODE = ok (exit 0, the default) |
+# fail (a message on both streams, exit 7) | hang (waits for the file warm.release, 60 s at most) | slow (never ends by itself: the release's own timeout must stop it).
+WARMCMD = r"""#!/bin/sh
+echo "$$" > "$RT_DIR/warm.pid"
+echo "$PWD|$*" >> "$RT_DIR/warm.log"
+f=; for n in 6 7 8 9; do [ -e /proc/$$/fd/$n ] && f="$f open$n" || f="$f closed$n"; done; echo "$f" > "$RT_DIR/warm.fds"
+echo "$(ls "$PWD" 2>/dev/null | tr '\n' ' ')" > "$RT_DIR/warm.tree"
+case "${RT_WARMMODE:-ok}" in
+  fail) echo "boom: cannot reach the box" >&2; echo "boom" ; exit 7 ;;
+  hang) i=0; while [ ! -e "$RT_DIR/warm.release" ] && [ $i -lt 600 ]; do /usr/bin/sleep 0.1; i=$((i+1)); done ;;
+  slow) exec /usr/bin/sleep 120 ;;
+esac
+exit 0
+"""
 # RT_SYSRUN = timeout | kill: the call that `timeout -k 2 20` cuts after the unit did start (a bus that answers late). A `timeout` stand-in, in the scenario's own bin and only for these two, runs the call (the stand-in above starts the review)
 # and reports the cut at once instead of after 20 s: status 124 (timeout) or 137 (kill: the KILL that follows the grace). Any other `timeout` call goes to the real one. Measured: GNU and uutils timeout both give 124, and 137 when -k had to KILL.
 TIMEOUT_CUT = r"""#!/bin/sh
 case "$*" in "-k 2 20 systemd-run --user --quiet --collect --unit salamander-codex-review-"*)
   shift 3; "$@"; [ "${RT_SYSRUN:-}" != kill ] || exit 137; exit 124 ;;
 esac
+case "$*" in "-k 2 10 systemd-run --user --quiet --collect --unit stackshot-suitemap-warm-"*)
+  shift 3; "$@"; [ "${RT_WARM_SYSRUN:-}" != kill ] || exit 137; exit 124 ;;
+esac
 exec /usr/bin/timeout "$@"
 """
-SYSTEMD_RUN_DEFAULT = '#!/bin/sh\n' + SYSRUN_CODEX + 'echo "systemd-run stand-in: a call no scenario expects: $*" >&2\nexit 1\n'   # a scenario without `units`: only the review's unit is answered
-SYSTEMD_RUN = ('#!/bin/sh\n' + SYSRUN_CODEX + 'n=$(echo "$*" | sed -E \'s/.*--unit stackshot-release-([0-9]+).*/\\1/\')\n'
+SYSTEMD_RUN_DEFAULT = '#!/bin/sh\n' + SYSRUN_CODEX + SYSRUN_WARM + 'echo "systemd-run stand-in: a call no scenario expects: $*" >&2\nexit 1\n'   # a scenario without `units`: only the review's unit is answered
+SYSTEMD_RUN = ('#!/bin/sh\n' + SYSRUN_CODEX + SYSRUN_WARM + 'n=$(echo "$*" | sed -E \'s/.*--unit stackshot-release-([0-9]+).*/\\1/\')\n'
                '[ "$n" != "${RT_START_FAIL:-}" ] || { echo "Failed to start transient service unit: Unit stackshot-release-$n.service was already loaded" >&2; exit 1; }\n'
                'echo "$n" >> "$RT_DIR/started"\necho "start:$n" >> "$RT_DIR/order.log"\necho "$*" >> "$RT_DIR/started-args"\n')   # started-args: what each unit was asked to run (a group's PRs follow --run-group)
 
@@ -460,7 +499,8 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
         (d / "xdg/mergequeue").mkdir(parents=True, exist_ok=True)
         (d / "xdg/mergequeue/example-owner__stackshot.toml").write_text(mqhost.replace("@DIR@", str(d)) if "=" in mqhost else f'mode = "{mqhost}"\n')
     if units is None: (d / "bin/systemd-run").write_text(SYSTEMD_RUN_DEFAULT); (d / "bin/systemd-run").chmod(0o755)   # the review's unit is answered here, whatever a scenario is about (the host's own systemd-run would start a real unit)
-    if env.get("sysrun") in ("timeout", "kill"): (d / "bin/timeout").write_text(TIMEOUT_CUT); (d / "bin/timeout").chmod(0o755)
+    if env.get("sysrun") in ("timeout", "kill") or env.get("warm_sysrun") in ("timeout", "kill"): (d / "bin/timeout").write_text(TIMEOUT_CUT); (d / "bin/timeout").chmod(0o755)
+    (d / "bin/warmcmd").write_text(WARMCMD); (d / "bin/warmcmd").chmod(0o755)   # what [release] suitemap_warm_cmd names (RT_WARM)
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
     for pkg in ("stackshot", "stackshot/core", "stackshot/fleet"):   # release.sh runs the checkout's modules by their package paths: stand-ins for two of them
         (box / pkg).mkdir(parents=True, exist_ok=True); (box / pkg / "__init__.py").write_text("")
@@ -521,6 +561,16 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
             clog = d / "codex.log"
             if (d / stage).exists() and len((clog.read_text() if clog.exists() else "").splitlines()) >= starts: break
             time.sleep(0.05)
+    # the index build is started detached and nothing waits for it either: wait (never longer than 30 s) for its unit's log to end, unless the scenario holds the command (RT_WARMMODE=hang: the scenario ends it with warm_finish())
+    warm_logs = sorted((d / "releases").glob("suitemap-warm-*.log")) if (d / "releases").is_dir() else []
+    alllogs = "".join(l.read_text() for l in sorted((d / "releases").glob("*.log")) if not l.name.startswith("suitemap-warm-")) if (d / "releases").is_dir() else ""   # a group's lines are in its own log
+    if "suitemap warm: started" in alllogs or "suitemap warm: systemd-run" in alllogs:
+        for _ in range(600):
+            wl = "".join(l.read_text() for l in sorted((d / "releases").glob("suitemap-warm-*.log")))
+            if e.get("RT_WARMMODE") == "hang":
+                if (d / "warm.pid").exists(): break
+            elif re.search(r"suitemap warm \w+: (done|stopped after|the command failed|no |.* not on PATH|that commit|the checkout|another warm)", wl): break
+            time.sleep(0.05)
     for ph in pheld: ph.close()
     if grabber: done.set(); grabber.join()
     if timer: timer.join()
@@ -540,7 +590,12 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
             "bgpids": [int(x) for x in rd("bgpids").split()], "notice": [a for a in rd("notice.log").split("\0")][:-1], "notice_pid": rd("notice.pid").strip(), "sala": rd("sala.log"), "lock_at_live": rd("lock_at_live").split(),"git": rd("git.log"),
             "lockfile": pathlib.Path(e.get("DEPLOY_LOCK_FILE", d / "releases/deploy.lock")),
             "side_rc": side_res["r"].returncode if side_res.get("r") else None, "side_log": rd(f"releases/pr-{side}.log") if side else "", "paused_at_rollback": rd("paused_at_rollback").strip(),
-            "secs": took if not kill_at else 0.0, "codex": rd("codex.log").splitlines(), "sysrun": rd("sysrun.log").splitlines(), "codex_env": rd("codex.env").splitlines(), "codex_fds": rd("codex.fds").split(), "codex_in": rd("codex.in").strip(), "codex_sid": rd("codex.sid").split(), "codex_hung": (d / "codex.hung").exists(), "codex_done": (d / "codex.done").exists(), "codex_out": rd(f"releases/codex-review-{pr}.log"), "mq": rd("mq.log").splitlines(), "started": rd("started").split(), "queue": rd("releases/queue").split(), "started_marks": rd("releases/queue.started").split(), "paused": rd("releases/queue.paused"), "qlog": rd("releases/queue.log")}
+            "secs": took if not kill_at else 0.0, "codex": rd("codex.log").splitlines(), "sysrun": rd("sysrun.log").splitlines(), "codex_env": rd("codex.env").splitlines(), "codex_fds": rd("codex.fds").split(), "codex_in": rd("codex.in").strip(), "codex_sid": rd("codex.sid").split(), "codex_hung": (d / "codex.hung").exists(), "codex_done": (d / "codex.done").exists(), "codex_out": rd(f"releases/codex-review-{pr}.log"), "mq": rd("mq.log").splitlines(), "started": rd("started").split(), "queue": rd("releases/queue").split(), "started_marks": rd("releases/queue.started").split(), "paused": rd("releases/queue.paused"), "qlog": rd("releases/queue.log"),
+            "warm_sysrun": rd("sysrun-warm.log").splitlines(), "warm": rd("warm.log").splitlines(), "warm_fds": rd("warm.fds").split(), "warm_tree": rd("warm.tree").split(),
+            "warm_log": "".join(l.read_text() for l in sorted((d / "releases").glob("suitemap-warm-*.log"))) if (d / "releases").is_dir() else "",
+            "warm_unit_logs": [l.name for l in sorted((d / "releases").glob("suitemap-warm-*.log"))] if (d / "releases").is_dir() else [],
+            "warm_dirs": sorted(x.name for x in (d / "releases").glob("suitemap-warm.*") if x.is_dir()) if (d / "releases").is_dir() else [],
+            "warm_alive": (lambda pid: bool(pid) and os.path.exists(f"/proc/{pid}"))(rd("warm.pid").strip())}
 
 _ra = []   # [the run-ahead of this process, or None]: made when the first scenario is asked for (tests/_runahead.py; RELEASE_SUITE_PAR=1 turns it off)
 def scenario(name, *pos, **kw):
@@ -548,6 +603,16 @@ def scenario(name, *pos, **kw):
     reads this one's result (tests/_runahead.py): the same call, the same result, in the order the suite asks for them."""
     if not _ra: _ra.append(_runahead.make(_scenario))
     return _ra[0].call(name, pos, kw) if _ra[0] else _scenario(name, *pos, **kw)
+
+def warm_finish(s, secs=30):
+    """a scenario with RT_WARMMODE=hang: let the command end (warm.release), wait for the unit's log to say how, and read the build's files again: (the unit's log, the command's lines, the scratch folders left)"""
+    d = s["dir"]; (d / "warm.release").write_text("")
+    wl = ""
+    for _ in range(int(secs * 20)):
+        wl = "".join(l.read_text() for l in sorted((d / "releases").glob("suitemap-warm-*.log")))
+        if re.search(r"suitemap warm \w+: (done|the command failed)", wl): break
+        time.sleep(0.05)
+    return wl, (d / "warm.log").read_text().splitlines() if (d / "warm.log").exists() else [], sorted(x.name for x in (d / "releases").glob("suitemap-warm.*") if x.is_dir())
 
 def lock_free(s):   # nothing the release left behind holds the lock, and no report child got fd 9
     if s["lockfile"].exists():

@@ -6,6 +6,10 @@ changes nothing and cannot hurt: the record is what the old pass over every node
 entry is rebuilt; the same content at two paths shares a record and a changed file misses; a write is all or nothing; two calls at once build once and a holder
 that died blocks nobody; the folder stays inside its bound; the cache switched off gives the same index and leaves nothing behind.
 
+`warm` builds and keeps the index of a revision ahead of the first select (what release.sh starts after a merge): it is kept, loaded by the next call, a no-op when kept already or with the cache off,
+never kept incomplete, and reads the records of the files that did not change. A head that was cheap to build (Names skip_cheap) is not kept, a costly or warmed one is, and select prints the same
+with no cache, a cold folder, a warmed one and a branch over it.
+
     tests/run-suite suitemap_cache        → exit 0 / 1"""
 import ast, collections, errno, json, os, pathlib, pickle, re, subprocess, sys, textwrap, time, zlib, hashlib
 SCR = os.path.dirname(os.path.abspath(__file__))
@@ -1037,6 +1041,136 @@ names_with(d97)
 os.unlink(s.IndexCache(d97, version=s.cache_version()).path("tree", T1))
 d, n = d97, names_with(d97, run_fn=batch_answer(VOLB, drop_blob(VOLB)))
 check("CACHE 96 a volatile file whose blob git cannot give is left out of the call's index, which is served as before, and keeps no tree entry (the other files are built as they are)", "vol.py" not in n.files and "pkg/core.py" in n.files and not kept(d, "tree"), (sorted(n.files)[-3:], kept(d, "tree")))
+
+# ---------------------------------------------------------------- warm: the index of a revision built and kept ahead of the first select (what runs after a merge to main)
+import argparse, contextlib, io
+def warm_cli(rev, name, env=None, timeout=90):
+    """`suitemap.py warm --rev <rev>` in a process of its own, with the cache folder of `name`"""
+    e = dict(ENV); e["SUITEMAP_CACHE_DIR"] = cdir(name); e.update(env or {})
+    return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), "warm", "--rev", rev], capture_output=True, text=True, env=e, cwd=str(R), timeout=timeout)
+def tree_bytes(name, tree): return pathlib.Path(cdir(name), "tree-" + tree).read_bytes() if os.path.exists(os.path.join(cdir(name), "tree-" + tree)) else None
+
+w1 = warm_cli(C1, "warm1")
+check("CACHE 97 warm on an empty folder builds the index of the revision and keeps it: exit 0, it says saved, the tree entry and a record of each file are in the folder",
+      w1.returncode == 0 and "tree " + TREE[C1][:12] + " saved" in w1.stdout and entries("warm1", "tree-") == ["tree-" + TREE[C1]] and len(entries("warm1", "facts-")) == len(full_facts), (w1.returncode, w1.stdout, w1.stderr[-300:], entries("warm1")))
+d97b, e97b = dump(C1, "warm1", patch=COUNT)
+check("CACHE 98 the first select-style read of that revision after a warm builds nothing and parses nothing (the index is loaded) and is the index a build with no cache gives", same(d97b, base1) and d97b["built"] == 0 and d97b["builds"] == 0, (d97b and (d97b["built"], d97b["builds"]), e97b[-300:]))
+before = (entries("warm1"), tree_bytes("warm1", TREE[C1]))
+w2 = warm_cli(C1, "warm1")
+check("CACHE 99 warm of a revision that is kept already is a no-op: exit 0, it says so, and the folder (the tree entry's bytes included) is as it was", w2.returncode == 0 and "was kept already" in w2.stdout and (entries("warm1"), tree_bytes("warm1", TREE[C1])) == before, (w2.returncode, w2.stdout, w2.stderr[-300:]))
+w3 = warm_cli(C1, "warm-off", env={"SUITEMAP_CACHE": "0"})
+check("CACHE 100 warm with the cache switched off is a no-op that is not an error: exit 0, it says there is nothing to do, and no folder is made", w3.returncode == 0 and "nothing to do" in w3.stdout and not os.path.exists(cdir("warm-off")), (w3.returncode, w3.stdout, os.path.exists(cdir("warm-off"))))
+w4 = warm_cli("no-such-revision", "warm-none")
+check("CACHE 101 warm of a revision this checkout does not have: exit 1, one line says so, nothing is kept", w4.returncode == 1 and "not a revision of this checkout" in w4.stderr and not entries("warm-none"), (w4.returncode, w4.stderr[-300:], entries("warm-none")))
+
+def run_warm(folder, rev=C1, run_fn=None, git_fn=None):
+    """s.warm in this process over the folder, with git or the processes it starts replaced: (exit status, its output)"""
+    out = io.StringIO()
+    s.git, s.subprocess.run = git_fn or real_git, run_fn or real_run
+    try:
+        with contextlib.redirect_stdout(out):
+            rc = with_dir(folder, lambda: s.warm(argparse.Namespace(rev=rev)))
+    finally: s.git, s.subprocess.run = real_git, real_run
+    return rc, out.getvalue()
+d102 = str(T / "warm-gitfail"); os.makedirs(d102)
+rc102, out102 = run_warm(d102, run_fn=batch_answer(None, lambda ids, data: (b"", 0)))
+check("CACHE 102 a warm in which git gives no file contents keeps nothing (no tree entry, no record) and exits 1: an incomplete index is never kept", rc102 == 1 and not kept(d102, "tree") and not kept(d102, "facts") and "saved" not in out102, (rc102, out102, kept(d102, "tree"), len(kept(d102, "facts"))))
+d103 = str(T / "warm-lsfail"); os.makedirs(d103)
+rc103, out103 = run_warm(d103, git_fn=lambda *a, **k: None if a and a[0] == "ls-tree" else real_git(*a, **k))
+k103 = kept(d103, "tree")
+rc103b, out103b = run_warm(d103)
+check("CACHE 103 …nor does one whose listing of the tree failed, and the next warm, with git well, builds it and keeps it", rc103 == 1 and not k103 and rc103b == 0 and "saved" in out103b and kept(d103, "tree") == ["tree-" + TREE[C1]], (rc103, k103, rc103b, out103b))
+d104 = str(T / "warm-blobs"); os.makedirs(d104)
+built = []
+real_bf = s.build_facts
+def counting_bf(*a, **k):
+    if len(a) < 2 and not k.get("ctx"): built.append(1)
+    return real_bf(*a, **k)
+s.build_facts = counting_bf
+try:
+    rc104a, _ = run_warm(d104, C1); n_first = len(built); del built[:]
+    rc104b, out104b = run_warm(d104, C2); n_next = len(built)
+finally: s.build_facts = real_bf
+check("CACHE 104 a warm of the revision after a change reads the records of the files that did not change and builds only the one that did: one record is built, and both revisions are kept",
+      rc104a == 0 and rc104b == 0 and n_first >= distinct - 1 and n_next == 1 and kept(d104, "tree") == sorted(["tree-" + TREE[C1], "tree-" + TREE[C2]]), (rc104a, rc104b, n_first, n_next, kept(d104, "tree")))
+
+# a head (select's second index) that was cheap to make is not kept: Names skip_cheap
+def idx(n):
+    def nm(x):
+        if isinstance(x, (set, frozenset)): return sorted((nm(i) for i in x), key=repr)
+        if isinstance(x, dict): return sorted(([nm(k), nm(v)] for k, v in x.items()), key=repr)
+        if isinstance(x, (list, tuple)): return [nm(i) for i in x]
+        return x
+    return json.dumps({f: {k: nm(getattr(m, k)) for k in FIELDS} for f, m in n.files.items()}, sort_keys=True, default=repr)
+def names_skip(folder, rev, git_fn=None, run_fn=None, cheap=None):
+    s.git, s.subprocess.run = git_fn or real_git, run_fn or real_run
+    old_cheap = s.CHEAP_PARSE
+    if cheap is not None: s.CHEAP_PARSE = cheap
+    try: return with_dir(folder, lambda: s.Names(rev, skip_cheap=True))
+    finally: s.git, s.subprocess.run, s.CHEAP_PARSE = real_git, real_run, old_cheap
+os.environ["SUITEMAP_CACHE"] = "0"
+try: ref2 = idx(s.Names(C2))
+finally: os.environ.pop("SUITEMAP_CACHE")
+d105 = str(T / "skip-cheap"); os.makedirs(d105)
+run_warm(d105, C1)
+n105 = names_skip(d105, C2)
+check("CACHE 105 a head whose build parsed few files (one changed since the kept revision) is not kept: its tree entry is not written, the one record it needed is, and the index is the index with no cache",
+      n105.kept == "not kept" and n105.parsed == 1 and kept(d105, "tree") == ["tree-" + TREE[C1]] and ("facts-" + git("rev-parse", f"{C2}:pkg/util.py").strip()) in kept(d105, "facts") and idx(n105) == ref2, (n105.kept, n105.parsed, kept(d105, "tree")))
+n105b = names_skip(d105, C2)
+check("CACHE 106 …a second call for it is the same (nothing is read from or written to the tree entries), and costs the one blob's record, not a parse", n105b.kept == "not kept" and n105b.parsed == 0 and kept(d105, "tree") == ["tree-" + TREE[C1]] and idx(n105b) == ref2, (n105b.kept, n105b.parsed))
+d107 = str(T / "skip-costly"); os.makedirs(d107)
+n107 = names_skip(d107, C1, cheap=0)
+n107b = names_skip(d107, C1, cheap=0)
+check("CACHE 107 a head whose build parsed more files than the bound is kept as any index is: saved the first time, loaded the second, the same index", n107.kept == "saved" and n107b.kept == "loaded" and kept(d107, "tree") == ["tree-" + TREE[C1]] and idx(n107) == idx(n107b), (n107.kept, n107b.kept, kept(d107, "tree")))
+d108 = str(T / "skip-cold"); os.makedirs(d108)
+n108 = names_skip(d108, C1)
+check("CACHE 108 …and the bound is a count of files parsed: the fixture's whole checkout (a dozen files, under the bound) built from nothing is not kept either, though every record of it is", n108.kept == "not kept" and n108.parsed >= distinct - 1 and not kept(d108, "tree") and len(kept(d108, "facts")) == len(full_facts), (n108.kept, n108.parsed, kept(d108, "tree")))
+d109 = str(T / "skip-incomplete"); os.makedirs(d109)
+n109 = names_skip(d109, C1, cheap=0, run_fn=batch_answer(None, lambda ids, data: (b"", 0)))
+check("CACHE 109 a head whose build was incomplete (git gave no file contents) is never kept, however many files it parsed: no tree entry, the call has the index it could make, and it says it was incomplete", n109.kept == "incomplete" and not kept(d109, "tree"), (n109.kept, kept(d109, "tree")))
+d110 = str(T / "skip-loaded"); os.makedirs(d110)
+run_warm(d110, C2)
+n110 = names_skip(d110, C2)
+check("CACHE 110 a head whose tree is kept already (warmed after its merge) is loaded, whatever the bound: no parse, the same index", n110.kept == "loaded" and n110.parsed == 0 and idx(n110) == ref2, (n110.kept, n110.parsed))
+
+# select, end to end, in a second repository that has suites: what a cold folder, a warmed one and no cache print is the same
+R2 = T / "repo2"; R2.mkdir()
+def git2(*a): return subprocess.run(["git", "-C", str(R2), "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True, text=True).stdout
+def write2(rel, text): p = R2 / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
+def commit2(msg): git2("add", "-A"); git2("commit", "-qm", msg); return git2("rev-parse", "HEAD").strip()
+git2("init", "-q", "-b", "main")
+for rel, text in FIX.items(): write2(rel, text)
+write2("tests/one_scenario.py", "print('one')\n"); write2("tests/two_scenario.py", "print('two')\n")
+D1 = commit2("one")
+write2("pkg/util.py", "ONE = 5\n\ndef helper(x):\n    return x + ONE\n\nclass Helper:\n    size = 2\n")
+D2 = commit2("two")
+write2("pkg/util.py", "ONE = 6\n\ndef helper(x):\n    return x + ONE\n\nclass Helper:\n    size = 3\n"); write2("a/z.py", "ONE = 7\n")
+D3 = commit2("branch: two files")
+MAP = T / "map.json"
+MAP.write_text(json.dumps({"format": s.FORMAT, "commit": D1, "strace": True, "suites": {
+    "one": {"ok": True, "seconds": 3, "py": {}, "whole": ["pkg/util.py", "a/z.py"], "files": [], "dirs": []},
+    "two": {"ok": True, "seconds": 3, "py": {}, "whole": [], "files": [], "dirs": []}}}))
+def sel(to, name, env=None):
+    e = dict(ENV); e.update(SUITEMAP_ROOT=str(R2), SUITEMAP_CACHE_DIR=cdir(name)); e.update(env or {})
+    r = subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), "select", "--map", str(MAP), "--to", to], capture_output=True, text=True, env=e, cwd=str(R2), timeout=120)
+    return r.returncode, r.stdout, sorted(l for l in r.stderr.splitlines() if not l.startswith("suitemap: parse"))
+def warm2(rev, name):
+    e = dict(ENV); e.update(SUITEMAP_ROOT=str(R2), SUITEMAP_CACHE_DIR=cdir(name))
+    return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), "warm", "--rev", rev], capture_output=True, text=True, env=e, cwd=str(R2), timeout=120)
+off2, off3 = sel(D2, "sel-off", {"SUITEMAP_CACHE": "0"}), sel(D3, "sel-off", {"SUITEMAP_CACHE": "0"})
+cold2, cold3 = sel(D2, "sel-cold"), sel(D3, "sel-cold")
+check("CACHE 111 select on a head that changes one file, and on one that changes two, prints the same suites, notes and status with a cold folder as with no cache (and the change reaches the suite that reads the file whole, not the one that does not)",
+      off2 == cold2 and off3 == cold3 and off2[0] == 0 and "one" in off2[1].split() and "two" not in off2[1].split() and "one" in off3[1].split() and "two" not in off3[1].split(), (off2, cold2, off3, cold3))
+check("CACHE 112 …the cold call kept main's index (the map's commit, which every pull request shares) and not the head's, which was cheap to make; its records are kept", entries("sel-cold", "tree-") == ["tree-" + git2("rev-parse", D1 + "^{tree}").strip()] and entries("sel-cold", "facts-"), entries("sel-cold"))
+wm = warm2(D2, "sel-warm")
+wm1 = warm2(D1, "sel-warm")
+before_sel = entries("sel-warm")
+warm2_ = sel(D2, "sel-warm"); warm3 = sel(D3, "sel-warm")
+after_sel = entries("sel-warm")
+two_trees = sorted("tree-" + git2("rev-parse", c + "^{tree}").strip() for c in (D1, D2))
+check("CACHE 113 select after a warm of the new main and of the map's commit prints the same as with no cache, on that revision and on a branch of two files over it; the trees kept are the two the warms made (the branch's is not added), and a call costs at most the records of the blobs the branch changed",
+      wm.returncode == 0 and wm1.returncode == 0 and warm2_ == off2 and warm3 == off3 and [e for e in after_sel if e.startswith("tree-")] == two_trees and set(before_sel) <= set(after_sel) and len(after_sel) - len(before_sel) <= 2,
+      (wm.returncode, wm.stderr[-200:], warm2_, warm3, before_sel, after_sel))
 
 # [final]
 print(("ok" if not fails else "FAILED") + f": suitemap cache scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
