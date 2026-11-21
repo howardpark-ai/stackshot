@@ -278,7 +278,7 @@ def traced():
     except Exception: return True
 use_strace = shutil.which("strace") is not None and not traced()
 ENV = {k: v for k, v in os.environ.items() if not k.startswith(("COVERAGE_", "SUITEMAP_", "GITHUB_"))}
-ENV.update(SCENARIO_TESTS=SCR, SUITEMAP_ROOT=str(R), SUITEMAP_STRACE="1" if use_strace else "0")
+ENV.update(SCENARIO_TESTS=SCR, SUITEMAP_ROOT=str(R), SUITEMAP_STRACE="1" if use_strace else "0", SUITEMAP_CACHE_DIR=str(T / "cache"))   # the index cache of these runs is in the scratch folder, never the user's
 def memoized(kind, key, make, *, env, rev):
     """make() once per check for a question that has the same answer every time it is asked while nothing changes: the same commits (full ids, which name a content), the same map
     file (its bytes), the same environment and checkout. A question about anything else (a branch name, no map) is asked again each time."""

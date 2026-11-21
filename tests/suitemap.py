@@ -293,8 +293,37 @@ A large pull request selection (Fri Nov 13th 2026). A pull request's selection o
 `measure` matrix runs the lists plainly (`run`: nothing is measured, no map is made or kept) and the `suites` job passes only when the plan and every shard passed; a smaller selection (and one that is empty) runs in the `suites` job as before, from
 the same selection, which the plan job hands on, so the two jobs cannot disagree about it. When the plan job fails, the `suites` job selects for itself and runs serially, as before this change. A selection that fails is every suite, as ever, and
 then a large selection. The merge-queue entry and main's run are unchanged.
+
+The index cache. `select` and `audit` index the code of two revisions (Names: every .py file of each, parsed and walked for the names it binds and reads), which
+took about a minute of CPU and 0.7 GB per call and was the same work for a revision the call before had indexed. Now the index is built from two layers
+kept in a folder of files:
+  * the record of one file's content (Facts, build_facts), made in one pass over its tree and the same wherever the file lives and whatever the rest of the repo
+    holds, so it is kept by the git blob id: a file a change did not touch is a hit in every revision that has it;
+  * the settled index of a revision (Names), assembled from the records for the revision's own paths and module names, and kept by its git TREE id (the index
+    depends on nothing else of a commit).
+A key is the git object's id and a version: this file's bytes, the Python that parsed and the rules that shape a record, so an edit of this file, or another
+Python, finds no old entry. The folder is $SUITEMAP_CACHE_DIR, else $XDG_CACHE_HOME/stackshot/suitemap, else ~/.cache/stackshot/suitemap (a variable that holds a
+relative path is ignored, as the XDG base directory spec has it, so the folder is never the checkout; no home directory found is no cache), made with mode 0700
+(a default folder that exists with a wider mode and is the user's own is made 0700 too; a folder the user names is left as it is).
+Blobs are read with git only. Nothing is kept from a call in which git failed: an index is saved only when it is complete (git listed the revision and gave every
+.py file and every script, and the search for scripts ran), and a record only when the text it was made from is the object its id names (git's answer was whole and
+no replacement ref stands in for the blob; this holds for the text of a file that is read again, as one that names getdoc or import_module is, too). An index is built from the tree
+id it is kept under, never from the revision named again (a ref that moves between the two calls would put another tree's index under the old id); a revision with no tree id is built
+as given and kept nowhere. Such a call still has its index, built as before, for itself: one failed git call costs that call, and no later one; an answer of git that stops before a
+header leaves out the blobs from there on, as blobs git does not have. An entry is written to a file beside it and renamed over it (a reader sees all of it or none), carries a checksum, and holds plain
+data only. An entry is a regular file of at most CACHE_ENTRY_MAX bytes that inflates to at most that (a link, a pipe or a device named like one is none, and is
+never read). A missing, truncated, damaged, too big or old-version entry is a miss and is rebuilt: the cache can be deleted at any time and nothing depends on it. The
+checksum detects damage, not tampering: whoever can write the folder can change what an index holds (never run code), so a folder shared with others, a CI
+cache restore included, is as trusted as the people who can write it. The folder is trimmed to CACHE_MAX_BYTES (oldest use first, its own entries only: another
+file in the folder, and no file a link points at, is ever removed; a link named like an entry is removed itself). Calls that need the same revision at once share one build: the first holds an flock on a file of the
+folder, the others wait for it (CACHE_LOCK_WAIT seconds, and a holder that died holds nothing), then read what it made, and build for themselves when the wait
+runs out, or at once when the folder's file system cannot lock. SUITEMAP_CACHE=0 switches the cache off (any other value but 1 is an error, checked when a command starts): the index is built from nothing and
+nothing is read or written; the answer is the same either way (tests/suitemap_cache_scenario.py). A CI job keeps the folder between runs by naming it in
+SUITEMAP_CACHE_DIR. Measured on one box for a typical pull request's `select` (two revisions): without the cache before this change 48 s and 722 MB; cold 16 s and 612 MB; both trees
+kept 0.6 s and 248 MB; the base kept and the head new (what a pull request meets after main's run) 2.3 s and 483 MB; five calls at once on an empty folder cost one
+build. A head is a revision no run has indexed, so it is assembled from the records of its files (the 2.3 s), not read from a tree entry.
 """
-import argparse, ast, atexit, collections, datetime, difflib, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, time, tomllib
+import argparse, ast, atexit, collections, contextlib, datetime, difflib, fcntl, hashlib, io, json, os, pickle, re, shutil, signal, stat, subprocess, sys, tempfile, time, tomllib, zlib
 
 FORMAT = 1
 TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this often
@@ -602,97 +631,248 @@ def module_bindings(tree):
     return names - deleted, opened
 
 
-class ModNames:
-    """what one Python file binds at module level and which names each of its scopes reads, as (module, name) keys;
-    (module, '*') reads every name of the module"""
+EMPTY = frozenset()
 
-    def __init__(self, path, src, repo_mods):
-        self.path, self.mod, self.repo = path, modname(path), repo_mods
-        sc = scopes(src)
-        self.ok = sc is not None
-        self.refs = collections.defaultdict(set)   # scope → keys read
-        self.stmts = []                             # (first, last, kind, names, keys read by the statement at import)
-        self.functions, self.classes = set(), set()
-        self.effect_targets = {}                    # first line of an effect-mod statement → the modules it sets state in
-        self.text, self.ddoc, self.pdoc, self.body_of = [], set(), {}, []
-        self.docreads = set()                       # scopes that read a docstring, or hand a function to a registry that does
-        self.postponed, self.imports, self.import_ids = False, {}, set()   # import_ids: the indexes in stmts of the Import and ImportFrom nodes (`import os; os = 1` holds an import and a plain statement on one line)
-        self.annot_skip, self.ann, self.ann_stmt = {}, [], []   # see *Imports and annotations*
-        self.class_keyed = set()                     # the class names under which the __init__, __call__ and __new__ annotations wait (mark_annotations)
-        self.attrs, self.narrow = False, {}          # class rule C2 (see *Class attributes*): attribute keys are read; narrow[line] = the attribute names of the class-body assignment that holds the line
-        self.callees, self.mod_objs, self.self_ok = set(), set(), set()   # attr_setup: ids of the callee of every call, the names bound only to modules, ids of `self.__dict__`
-        self.alias, self.shadowed = {}, set()        # attr_setup: local name → the ATTR_CALLEES names it may stand for (alias_map); ids of the Name loads whose name a scope around them binds (shadow_setup)
-        self.attr_values = set()                     # attribute names read without being called, and the names getattr(obj, "name") asks for (Names.settle: C(1).__init__ as a value)
-        self.valuse = set()                          # bare names used as a value (not just called): Names.settle
-        self.import_seq, self.dropped = [], set()    # the module-level imports in order (None for another statement); (module, name) keys of repo imports whose only use was a dropped annotation
-        self.aliases, self.froms, self.toplevel = {}, {}, set()   # set before the early return: reach() reads froms of every file, one that does not parse included
-        self.froms_all = collections.defaultdict(list)   # local name → every (module, name) it is imported as: a try/except fallback or a second line binds the same local twice, `froms` keeps the last
-        self.repo_tops = {r.split(".")[0] for r in repo_mods}
-        self.defined, self.open_names = set(), False   # the names the module level binds, statically; open_names: a name may also come from a star import, __getattr__ or globals()
-        if not self.ok:
-            return
-        self.body_of, _, self.ddoc, tree, self.pdoc = sc
-        self.text = src.split("\n")
-        self.postponed = any(isinstance(st, ast.ImportFrom) and st.module == "__future__" and not st.level and any(a.name == "annotations" for a in st.names)
-                             for st in tree.body)
-        imports = collections.defaultdict(set)      # local name → where it comes from, over the module-level import statements
+
+def walk_nodes(tree):
+    """the nodes ast.walk(tree) gives, as a list, in its order (breadth first, a node's children in field order): one pass, filled into buckets by type"""
+    out, i, AST = [tree], 0, ast.AST
+    while i < len(out):
+        n = out[i]
+        i += 1
+        for f in n._fields:
+            v = getattr(n, f, None)
+            if isinstance(v, AST):
+                out.append(v)
+            elif isinstance(v, list):
+                out.extend([x for x in v if isinstance(x, AST)])
+    return out
+
+
+def chain_of(node):
+    """the parts of a dotted name (`a.b.c` is ("a", "b", "c")), or None when the node is not a name or an attribute chain that ends in one"""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        parts.reverse()
+        return tuple(parts)
+    return None
+
+
+class Repo(frozenset):
+    """the module names of one revision's repo files, with the lookups the index makes of them once (the top names, the modules by their last part)"""
+
+    def __new__(cls, mods):
+        r = super().__new__(cls, mods)
+        r.tops = frozenset(x.split(".")[0] for x in r)
+        by = collections.defaultdict(list)
+        for x in r:
+            by[x.split(".")[-1]].append(x)
+        r.by_last = by
+        return r
+
+
+def link_imports(events, mod, path, repo):
+    """(aliases, froms, froms_all) of a file from its import events (Facts.alias_events), in the order the tree walk met them: `import x` and `import x as y`
+    alias a module, an assignment of a literal `__import__(…)` aliases one, `from m import n` aliases the module m.n when it is one of ours and is a name taken
+    from m otherwise (`froms` keeps the last source of a local name, `froms_all` every one: a try/except fallback binds the same name twice)"""
+    pkg = mod if path.endswith("/__init__.py") else mod.rpartition(".")[0]
+    aliases, froms, froms_all = {}, {}, collections.defaultdict(list)
+    for ev in events:
+        if ev[0] == "i":
+            _, name, asname = ev
+            if asname:
+                aliases[asname] = name
+            else:
+                aliases[name.split(".")[0]] = name.split(".")[0]
+        elif ev[0] == "f":
+            _, level, module, name, asname = ev
+            base = module or ""
+            if level:
+                up = pkg.split(".") if pkg else []
+                up = up[: len(up) - (level - 1)] if level > 1 else up
+                base = ".".join([*up, base] if base else up)
+            local = asname or name
+            if f"{base}.{name}" in repo:
+                aliases[local] = f"{base}.{name}"
+            else:
+                froms[local] = (base, name)
+                froms_all[local].append((base, name))
+        else:
+            aliases[ev[1]] = ev[2]
+    return aliases, froms, froms_all
+
+
+class Facts:
+    """what ONE pass over a module's tree finds, kept as plain data (build_facts): the record the index is assembled from, the same for a file wherever it lives and
+    whatever the rest of the repo holds, so it is kept by the git blob id of the file. What depends on the file's place or on the other modules is left in the record
+    as what it is made of (a dotted name read, the tape of a module-level statement, the import events) and worked out when ModNames assembles it.
+
+    The one traversal (walk_nodes) fills a bucket of nodes per type; the passes that used to walk the whole tree again each read their bucket. The few that follow
+    the tree's structure (the scopes, the annotations, the names a scope binds, the module-level statements) are recursions over what they need.
+
+    A file that reads the repo in a way a record cannot hold (a name taken from a module called getdoc and its kind, or a local `import_module`: Facts.volatile) is
+    recorded as such, and ModNames builds it afresh with its path and the repo (ctx), which is not kept."""
+
+    def __init__(self, src, ctx=None):
+        self.src, self.ctx = src, ctx
+        self.annot_skip, self.ann, self.class_keyed = {}, [], set()
+        self.functions, self.classes, self.toplevel = set(), set(), set()
+        self.attrs = class_rule() == "C2"
+        self.callees, self.mod_objs, self.self_ok = set(), set(), set()
+        self.alias, self.shadowed = {}, set()
+        self.froms_all = {}
+
+    def record(self):
+        sc = scopes(self.src)
+        if sc is None:
+            return {"ok": False}
+        self.body_of, _, ddoc, tree, pdoc = sc
+        nodes = walk_nodes(tree)
+        by, events = collections.defaultdict(list), []
+        for n in nodes:
+            t = type(n)
+            by[t].append(n)
+            if t is ast.Import:
+                events.extend(("i", a.name, a.asname) for a in n.names)
+            elif t is ast.ImportFrom:
+                events.extend(("f", n.level, n.module, a.name, a.asname) for a in n.names)
+            elif t is ast.Assign and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+                m = self.literal_import(n.value)
+                if m:
+                    events.append(("l", n.targets[0].id, m))
+        if self.ctx is None:
+            if any(e[0] == "f" and (e[3] in DOC_CALLS or (e[4] or e[3]) == "import_module") for e in events):
+                return {"ok": True, "volatile": True}
+        else:
+            path, repo = self.ctx
+            self.froms_all = link_imports(events, modname(path), path, repo)[2]
+        postponed = any(isinstance(st, ast.ImportFrom) and st.module == "__future__" and not st.level and any(a.name == "annotations" for a in st.names)
+                        for st in tree.body)
+        import_seq = []   # the module-level imports in order (None for another statement)
         for st in tree.body:
             if isinstance(st, ast.Import):
                 for a in st.names:
-                    imports[(a.asname or a.name).split(".")[0]].add(("import", a.name, a.asname))
-                    self.import_seq.append(((a.asname or a.name).split(".")[0], ("import", a.name, a.asname)))
+                    import_seq.append(((a.asname or a.name).split(".")[0], ("import", a.name, a.asname)))
             elif isinstance(st, ast.ImportFrom):
                 for a in st.names:
-                    imports[a.asname or a.name].add(("from", st.level, st.module, a.name, a.asname))
-                    self.import_seq.append((a.asname or a.name, ("from", st.level, st.module, a.name, a.asname)))
+                    import_seq.append((a.asname or a.name, ("from", st.level, st.module, a.name, a.asname)))
             else:
-                self.import_seq.append(None)
-        self.imports = {k: frozenset(v) for k, v in imports.items()}
-        if self.postponed and annotation_rule() == "N2":
+                import_seq.append(None)
+        if postponed and annotation_rule() == "N2":
             self.mark_annotations(tree)
-        self.defined, self.open_names = module_bindings(tree)
-        pkg = self.mod if path.endswith("/__init__.py") else self.mod.rpartition(".")[0]
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for a in node.names:
-                    if a.asname:
-                        self.aliases[a.asname] = a.name
-                    else:
-                        self.aliases[a.name.split(".")[0]] = a.name.split(".")[0]
-            elif isinstance(node, ast.ImportFrom):
-                base = node.module or ""
-                if node.level:
-                    up = pkg.split(".") if pkg else []
-                    up = up[: len(up) - (node.level - 1)] if node.level > 1 else up
-                    base = ".".join([*up, base] if base else up)
-                for a in node.names:
-                    local = a.asname or a.name
-                    if f"{base}.{a.name}" in self.repo:
-                        self.aliases[local] = f"{base}.{a.name}"
-                    else:
-                        self.froms[local] = (base, a.name)
-                        self.froms_all[local].append((base, a.name))
-            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                m = self.literal_import(node.value)
-                if m:
-                    self.aliases[node.targets[0].id] = m
+        defined, open_names = module_bindings(tree)
         for st in tree.body:
             for t in (st.targets if isinstance(st, ast.Assign) else [getattr(st, "target", None)]):
                 if isinstance(t, ast.Name):
                     self.toplevel.add(t.id)
-        self.attrs = class_rule() == "C2"
+        self.callees = {id(n.func) for n in by[ast.Call]}
+        narrow = []
         if self.attrs:
-            self.attr_setup(tree)
+            self.alias_map(by)
+            self.shadow_setup(tree)
+            self.module_objects(by)
+            self.self_dicts(by)
+            narrow = self.narrowable(tree)
+        stmts, import_ids = [], []
         for st in tree.body:
             if isinstance(st, (ast.Import, ast.ImportFrom)):
-                self.import_ids.add(len(self.stmts))
-            a, b, kind, bound, reads = self.statement(st, st is tree.body[0])
-            if self.attrs and kind != "import-repo":
-                reads = reads | self.attr_reads(st)   # `X = obj.attr` at import reads the attribute, as `X = obj.f` reads f
-            self.stmts.append((a, b, kind, bound, reads))
-        for node in ast.walk(tree):
-            self.read(node)
-        self.value_uses(tree)
+                import_ids.append(len(stmts))
+            a, b, tag, data, anns = self.stmt_record(st, st is tree.body[0])
+            stmts.append((a, b, tag, data, frozenset(self.attr_reads(st)) if self.attrs else EMPTY, anns))
+        reads, attr_refs, docreads = collections.defaultdict(set), collections.defaultdict(set), set()
+        route = route_rule() == "R2"
+        for node in by[ast.Name]:
+            if isinstance(node.ctx, ast.Load):
+                self.put(reads, node, (0, (node.id,), EMPTY, node.id == "globals"))
+        for node in by[ast.Attribute]:
+            if isinstance(node.ctx, ast.Load):
+                if node.attr == "__doc__":
+                    docreads.add(self.scope(node))
+                routes_ = node.attr in ROUTE_ATTRS and route
+                static = set()
+                if node.attr in ENUMERATE_ATTRS or routes_:
+                    static.add(("*", ENUMERATE))
+                if routes_:
+                    static.add(("*", ENUMERATE_R))
+                chain = chain_of(node)
+                if chain is not None or static:
+                    self.put(reads, node, (0, chain, frozenset(static), False))
+        for node in by[ast.Call]:
+            if self.doc_read(node):
+                docreads.add(self.scope(node))
+            f = dotted(node.func)
+            ev = None
+            if f == "getattr" and node.args and (len(node.args) < 2 or not isinstance(node.args[1], ast.Constant)):
+                ev = (2, chain_of(node.args[0]))
+            elif f in ("vars", "dir", "inspect.getmembers") and node.args:
+                ev = (2, chain_of(node.args[0]))
+            elif f and (f in DYN_LOAD or f.split(".")[-1] in DYN_LOAD):
+                # a module loaded by path: every name of the files the call's literal file name can be ("tools", "state_from_fields.py"); no literal .py name: any name at all
+                lit = [a.value for a in walk_nodes(node) if type(a) is ast.Constant and isinstance(a.value, str) and a.value.endswith(".py")]
+                ev = (3, os.path.basename(lit[-1]).removesuffix(".py") if lit else None)
+            else:
+                m = self.literal_import(node)
+                if m:
+                    ev = (0, None, frozenset({(m, "*")}), False)
+            if ev is not None and not (ev[0] == 2 and ev[1] is None):
+                self.put(reads, node, ev)
+        if self.attrs:
+            for t in (ast.Attribute, ast.Constant, ast.Name, ast.MatchClass, ast.Call):
+                for node in by[t]:
+                    ak = self.attr_keys(node)
+                    if ak:
+                        attr_refs[self.scope(node)] |= ak
+        # the bare names this file uses as a value, not only as the callee of a call (an argument, an assignment, a decorator, an attribute read that is not
+        # called, a string that is a name): what makes a function's annotations reachable by a registry or typing.get_type_hints (see Names.settle)
+        valuse, attr_values = set(), set()
+        for n in by[ast.Name]:
+            if isinstance(n.ctx, ast.Load) and id(n) not in self.callees:
+                valuse.add(n.id)
+        for n in by[ast.Attribute]:
+            if isinstance(n.ctx, ast.Load) and id(n) not in self.callees:
+                valuse.add(n.attr)
+                attr_values.add(n.attr)
+        for n in by[ast.Constant]:
+            if isinstance(n.value, str) and n.value.isidentifier():
+                valuse.add(n.value)
+        for n in by[ast.Call]:
+            if dotted(n.func) in ("getattr", "inspect.getattr_static") and len(n.args) > 1 and isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str):
+                attr_values.add(n.args[1].value)
+        return {"ok": True, "postponed": postponed, "import_seq": import_seq, "import_ids": frozenset(import_ids), "defined": frozenset(defined),
+                "open_names": open_names, "alias_events": events, "reads": {k: frozenset(v) for k, v in reads.items()},
+                "ann": self.ann, "attr_refs": {k: frozenset(v) for k, v in attr_refs.items()}, "docreads": frozenset(docreads), "stmts": stmts,
+                "functions": frozenset(self.functions), "classes": frozenset(self.classes), "narrow": narrow, "valuse": frozenset(valuse),
+                "attr_values": frozenset(attr_values), "class_keyed": frozenset(self.class_keyed)}
+
+    def put(self, reads, node, ev):
+        """a read of keys by a node: a read of its scope, or one of the annotations of a postponed file that Names.settle decides"""
+        sc = self.scope(node)
+        if id(node) in self.annot_skip:
+            self.ann.append((self.annot_skip[id(node)], sc, ev))
+        else:
+            reads[sc].add(ev)
+
+    def scope(self, node):
+        ln = getattr(node, "lineno", 0)
+        return self.body_of[ln] if 0 < ln < len(self.body_of) else ""
+
+    def literal_import(self, call):
+        if isinstance(call, ast.Call) and dotted(call.func) in ("__import__", "importlib.import_module") and call.args \
+                and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
+            return call.args[0].value
+        return None
+
+    def doc_read(self, node):
+        """True when a call reads a docstring (getattr(x, "__doc__"), inspect.getdoc or an alias of it, a registry call: DOC_CALLS)"""
+        f = dotted(node.func)
+        # a call by its last name, or by an alias made by `from inspect import getdoc as gd` (a file with one is built with its path and the repo: Facts.volatile)
+        return (f is not None and (f.split(".")[-1] in DOC_CALLS or any(n in DOC_CALLS for _, n in self.froms_all.get(f.split(".")[0], ())))) or \
+            (f == "getattr" and len(node.args) > 1 and isinstance(node.args[1], ast.Constant) and node.args[1].value == "__doc__") or \
+            (isinstance(node.func, ast.Call) and getattr(node.func.func, "attr", None) in DOC_REGISTER)
 
     def mark_annotations(self, tree):
         """annot_skip[id(node)] = the def's name (None for a local variable) for every node of an annotation that is no read under N2 (see
@@ -709,147 +889,28 @@ class ModNames:
                         ar = ch.args
                         for e in [ch.returns, *[x.annotation for x in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if x is not None]]:
                             if e is not None:
-                                for x in ast.walk(e):
+                                for x in walk_nodes(e):
                                     self.annot_skip[id(x)] = key
                     visit(ch, True)
                 elif isinstance(ch, ast.ClassDef):
                     visit(ch, False, ch.name)
                 else:
                     if in_func and isinstance(ch, ast.AnnAssign):
-                        for x in ast.walk(ch.annotation):
+                        for x in walk_nodes(ch.annotation):
                             self.annot_skip[id(x)] = None
                     visit(ch, in_func, cls)
         visit(tree, False)
 
-    def value_uses(self, tree):
-        """the bare names this file uses as a value, not only as the callee of a call (an argument, an assignment, a decorator, an attribute read
-        that is not called, a string that is a name): what makes a function's annotations reachable by a registry or typing.get_type_hints
-        (see Names.settle)"""
-        callee = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and id(n) not in callee:
-                self.valuse.add(n.id)
-            elif isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load) and id(n) not in callee:
-                self.valuse.add(n.attr)
-                self.attr_values.add(n.attr)
-            elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.isidentifier():
-                self.valuse.add(n.value)
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Call) and dotted(n.func) in ("getattr", "inspect.getattr_static") and len(n.args) > 1 \
-                    and isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str):
-                self.attr_values.add(n.args[1].value)
-        for local, srcs in self.froms_all.items():
-            if local in self.valuse:
-                self.valuse.update(name for _, name in srcs)            # from m import f as g; get_type_hints(g): f is the one that escapes
-
-    def literal_import(self, call):
-        if isinstance(call, ast.Call) and dotted(call.func) in ("__import__", "importlib.import_module") and call.args \
-                and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
-            return call.args[0].value
-        return None
-
-    def scope(self, node):
-        ln = getattr(node, "lineno", 0)
-        return self.body_of[ln] if 0 < ln < len(self.body_of) else ""
-
-    def keys(self, node):
-        """the keys an expression reading a name stands for"""
-        if isinstance(node, ast.Call):
-            m = self.literal_import(node)
-            return {(m, "*")} if m else set()
-        d = dotted(node)
-        if not d:
-            return set()
-        chain = d.split(".")
-        out = {(self.mod, chain[0])}
-        mod = None
-        if chain[0] in self.froms:
-            out.update(self.froms_all[chain[0]])
-        elif chain[0] in self.aliases:
-            mod = self.aliases[chain[0]]
-        if mod is not None:
-            rest = chain[1:]
-            while rest and f"{mod}.{rest[0]}" in self.repo:
-                mod = f"{mod}.{rest[0]}"
-                rest = rest[1:]
-            out.add((mod, rest[0]) if rest else (mod, "<module>"))   # <module>: the module object itself
-            if len(rest) > 1:
-                out.add(("~", mod, tuple(rest)))  # server._cfg.CFG: Names follows _cfg through server's own imports
-        return out
-
-    def doc_read(self, node):
-        """record the scope of a node that reads a docstring (`x.__doc__`, getattr(x, "__doc__"), inspect.getdoc or an alias of it, a registry call: DOC_CALLS)"""
-        hit = isinstance(node, ast.Attribute) and node.attr == "__doc__" and isinstance(node.ctx, ast.Load)
-        if isinstance(node, ast.Call):
-            f = dotted(node.func)
-            # a call by its last name, or by an alias made by `from inspect import getdoc as gd`; getattr(x, "__doc__")
-            hit = (f is not None and (f.split(".")[-1] in DOC_CALLS or any(n in DOC_CALLS for _, n in self.froms_all.get(f.split(".")[0], ())))) or \
-                (f == "getattr" and len(node.args) > 1 and isinstance(node.args[1], ast.Constant) and node.args[1].value == "__doc__") or \
-                (isinstance(node.func, ast.Call) and getattr(node.func.func, "attr", None) in DOC_REGISTER)
-        if hit:
-            self.docreads.add(self.scope(node))
-
-    def read(self, node):
-        self.doc_read(node)
-        sc = None
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            sc, ks = self.scope(node), self.keys(node)
-            if node.id == "globals":   # locals() is the function's own; vars(module) is the call below
-                ks = ks | {(self.mod, "*")}
-        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
-            sc, ks = self.scope(node), (self.keys(node) if dotted(node) else set())
-            routes_ = node.attr in ROUTE_ATTRS and route_rule() == "R2"
-            if node.attr in ENUMERATE_ATTRS or routes_:
-                ks = ks | {("*", ENUMERATE)}
-            if routes_:
-                ks = ks | {("*", ENUMERATE_R)}
-        elif isinstance(node, ast.Call):
-            f = dotted(node.func)
-            ks = set()
-            if f == "getattr" and node.args and (len(node.args) < 2 or not isinstance(node.args[1], ast.Constant)):
-                ks = {(m, "*") for m, n in self.keys(node.args[0]) if n == "<module>"}
-            elif f in ("vars", "dir", "inspect.getmembers") and node.args:
-                ks = {(m, "*") for m, n in self.keys(node.args[0]) if n == "<module>"}
-            elif f and (f in DYN_LOAD or f.split(".")[-1] in DYN_LOAD):
-                # a module loaded by path: every name of the files the call's literal file name can be ("tools",
-                # "state_from_fields.py"); no literal .py name: any name at all
-                lit = [a.value for a in ast.walk(node) if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value.endswith(".py")]
-                ks = {(m, "*") for m in self.repo if lit and m.split(".")[-1] == os.path.basename(lit[-1]).removesuffix(".py")} or {("*", "*")}
-            else:
-                m = self.literal_import(node)
-                ks = {(m, "*")} if m else set()
-            sc = self.scope(node)
-        if sc is not None and ks:
-            if id(node) in self.annot_skip:
-                self.ann.append((self.annot_skip[id(node)], sc, ks))   # an annotation of a postponed file: Names.settle decides
-            else:
-                self.refs[sc] |= ks
-        if self.attrs:
-            ak = self.attr_keys(node)
-            if ak:
-                self.refs[self.scope(node)] |= ak
-
-    def attr_setup(self, tree):
-        """what attr_keys needs to know about the whole file under class rule C2 (see *Class attributes*): the callee of every call, the names a callee may
-        stand for (an import alias, a name assigned another), the names a scope binds around a bare builtin, those bound only to module objects, the
-        `self.__dict__` of the methods, and the class-body assignments an edit narrows"""
-        self.callees = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
-        self.alias_map(tree)
-        self.shadow_setup(tree)
-        self.module_objects(tree)
-        self.self_dicts(tree)
-        self.narrowable(tree)
-
-    def alias_map(self, tree):
+    def alias_map(self, by):
         """self.alias: local name → the names of ATTR_CALLEES it may stand for: `from builtins import getattr as ga`, `g = getattr`, `m = mock.patch.multiple`
         (the last name of the dotted value), through any chain of them (`h = g`). Every binding in the file counts, whatever its scope: a name bound to two things
         stands for both (over-selection is the safe side)"""
         edges = collections.defaultdict(set)
-        for n in ast.walk(tree):
-            if isinstance(n, ast.ImportFrom):
-                for a in n.names:
-                    edges[a.asname or a.name].add(a.name)
-            elif isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
+        for n in by[ast.ImportFrom]:
+            for a in n.names:
+                edges[a.asname or a.name].add(a.name)
+        for n in [*by[ast.Assign], *by[ast.AnnAssign]]:
+            if n.value is not None:
                 d = dotted(n.value)
                 for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
                     if d and isinstance(t, ast.Name):
@@ -945,38 +1006,41 @@ class ModNames:
         and vars(<module>) read a name of the module (the module rules follow those); they read no attribute of a class"""
         return isinstance(v, ast.Name) and v.id in self.mod_objs or self.module_value(v)
 
-    def module_objects(self, tree):
+    def module_objects(self, by):
         """mod_objs: the names the file binds only to module objects (any other binding of the name, anywhere, rules it out)"""
         mods, others, good = set(), set(), set()
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Assign) and self.module_value(n.value):
+        for n in by[ast.Assign]:
+            if self.module_value(n.value):
                 good |= {id(t) for t in n.targets if isinstance(t, ast.Name)}
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Import):
-                mods |= {(a.asname or a.name).split(".")[0] for a in n.names}
-            elif isinstance(n, ast.ImportFrom):
-                others |= {a.asname or a.name for a in n.names}
-            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        for n in by[ast.Import]:
+            mods |= {(a.asname or a.name).split(".")[0] for a in n.names}
+        for n in by[ast.ImportFrom]:
+            others |= {a.asname or a.name for a in n.names}
+        for t in (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef):
+            for n in by[t]:
                 others.add(n.name)
-            elif isinstance(n, ast.arg):
-                others.add(n.arg)
-            elif isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+        for n in by[ast.arg]:
+            others.add(n.arg)
+        for n in by[ast.Name]:
+            if not isinstance(n.ctx, ast.Load):
                 (mods if id(n) in good else others).add(n.id)
-            elif isinstance(n, ast.ExceptHandler) and n.name:
+        for n in by[ast.ExceptHandler]:
+            if n.name:
                 others.add(n.name)
-            elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
-                others.add(n.name)
-            elif isinstance(n, ast.MatchMapping) and n.rest:
+        for t in (ast.MatchAs, ast.MatchStar):
+            for n in by[t]:
+                if n.name:
+                    others.add(n.name)
+        for n in by[ast.MatchMapping]:
+            if n.rest:
                 others.add(n.rest)
         self.mod_objs = mods - others
 
-    def self_dicts(self, tree):
+    def self_dicts(self, by):
         """self_ok: the ids of the `self.__dict__` and `vars(self)` nodes in the methods of a class that cannot be handed a class as `self`: the first parameter
         is `self`, the decorators are plain ones (not @classmethod or @staticmethod, or any we do not know), and `self` is not bound again in the method (a nested
         def, lambda or class is not looked into). An instance's own namespace holds no class-body attribute"""
-        for cls in ast.walk(tree):
-            if not isinstance(cls, ast.ClassDef):
-                continue
+        for cls in by[ast.ClassDef]:
             for fn in cls.body:
                 if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or not fn.args.args or fn.args.args[0].arg != "self" \
                         or not all(dotted(d.func if isinstance(d, ast.Call) else d) in SELF_DECORATORS for d in fn.decorator_list):
@@ -997,18 +1061,18 @@ class ModNames:
                         self.self_ok.add(id(n))
 
     def narrowable(self, tree):
-        """sets self.narrow: line -> the attribute names bound by the class-body assignment(s) that hold the line, for each line whose edit may bind those
-        attributes and not the class (see *Class attributes*). A line is in it only if every statement on it is such an assignment: a direct Assign in the
-        body of a top-level class that is plain (no decorator, keyword or base but `object`; none of ATTR_NEVER defined; no call of ATTR_BODY_CALLS in the
-        body or in a method header), whose targets are plain names (no dunder), whose value is a literal, and whose names the class body does not read bare
-        (a derived attribute: `B = A + 1`, a default `def f(self, x=A)`). A line that holds any other statement as well (`X = 1; def …`), or the class line
-        itself, is not narrowed: the class is bound as before"""
-        holds, plain = collections.Counter(), collections.Counter()
+        """the class-body assignments an edit narrows (see *Class attributes*), as one entry per plain top-level class: (heads, rows). A class is plain when it has no
+        decorator, keyword or base but `object`, defines none of ATTR_NEVER and calls none of ATTR_BODY_CALLS in its body or in a method header (`heads` holds the
+        first names of the calls `x.vars()` and the like, which are a call of the builtin only when x is the module builtins: ModNames decides that). A row is
+        (first line, last line, names) for each statement of the body: the names are those bound by a direct Assign whose targets are plain names (no dunder), whose
+        value is a literal, and whose names the class body does not read bare (a derived attribute: `B = A + 1`, a default `def f(self, x=A)`); empty when the
+        statement is anything else, or the class line itself. ModNames keeps a line only if every statement on it is such an assignment"""
+        out = []
         for cls in tree.body:
             if not isinstance(cls, ast.ClassDef) or cls.decorator_list or cls.keywords \
                     or any(not (isinstance(b, ast.Name) and b.id == "object") for b in cls.bases):
                 continue
-            defined, loaded, whole = set(), set(), False
+            defined, loaded, whole, heads = set(), set(), False, set()
             for n in eval_nodes(cls.body):
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     defined.add(n.name)
@@ -1019,13 +1083,16 @@ class ModNames:
                         loaded.add(n.id)   # Load and Del: both need the attribute to exist
                 elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
                     loaded.add(n.target.id)
-                elif isinstance(n, ast.Call) and self.body_call(n.func):
-                    whole = True
+                elif isinstance(n, ast.Call):
+                    f = n.func
+                    if isinstance(f, ast.Name):
+                        whole = whole or bool(self.callee_names(f) & ATTR_BODY_CALLS)
+                    elif isinstance(f, ast.Attribute) and f.attr in ATTR_BODY_CALLS and dotted(f) is not None:
+                        heads.add(dotted(f).split(".")[0])
             if whole or defined & ATTR_NEVER:
                 continue
             rows = []
             for st in cls.body:
-                lines = range(st.lineno, (st.end_lineno or st.lineno) + 1)
                 names = set()
                 if isinstance(st, ast.Assign) and st.lineno > cls.lineno and all(isinstance(t, ast.Name) for t in st.targets):
                     names = {t.id for t in st.targets}
@@ -1037,25 +1104,12 @@ class ModNames:
                         names = set()
                     # private names are mangled: `__x` in class C is read as `_C__x` outside the class
                     names |= {f"_{cls.name.lstrip('_')}{n}" for n in names if n.startswith("__") and cls.name.strip("_")}
-                rows.append((lines, names))
-                holds.update(lines)
-            for lines, names in rows:
-                if names:
-                    for ln in lines:
-                        plain[ln] += 1
-                        self.narrow.setdefault(ln, set()).update(names)
-        self.narrow = {ln: frozenset(ns) for ln, ns in self.narrow.items() if plain[ln] == holds[ln]}
-
-    def body_call(self, f):
-        """True for a callee that reads a class's own namespace as a whole (ATTR_BODY_CALLS), however the file names it: `vars`, `ns = vars; ns()`,
-        `from builtins import vars as v`, `builtins.vars`"""
-        if isinstance(f, ast.Name):
-            return bool(self.callee_names(f) & ATTR_BODY_CALLS)
-        d = dotted(f)
-        return isinstance(f, ast.Attribute) and f.attr in ATTR_BODY_CALLS and d is not None and self.aliases.get(d.split(".")[0]) == "builtins"
+                rows.append((st.lineno, st.end_lineno or st.lineno, frozenset(names)))
+            out.append((frozenset(heads), rows))
+        return out
 
     def attr_reads(self, st):
-        """the attribute keys a module-level statement reads when it runs (a function's body is its own scope: Names of the functions' scopes read their own)"""
+        """the attribute keys a module-level statement reads when it runs (a function's body is its own scope: the scopes of the functions read their own)"""
         out = set()
         for n in eval_nodes([st]):
             out |= self.attr_keys(n)
@@ -1106,115 +1160,379 @@ class ModNames:
             out |= set() if not star and a and lit(a[0]) else {ATTR_ANY}   # the code in a literal string is read as a string: its tokens
         return out
 
-    def statement(self, st, first):
-        """(first line, last line, kind, names bound, keys it reads at import); kind: bind (only binds names), effect"""
+    # ---- the module-level statements, as tapes: what ModNames replays against the file's own imports and the repo
+    #   (first line, last line, tag, data, attribute reads, annotations that wait)
+    #   "S"  data = (kind, names bound, dotted names read)             the same for any repo
+    #   "C"  data = (class name, extra names, dotted names read, ops)  a class that only binds, unless a call of its body is not pure
+    #   "A"  data = (targets, annotation names, ops, augmented)        an assignment
+    #   "I"  data = (names, level, module, imported names or None)     an import: of one of ours or not depends on the repo
+    #   "X"  data = (callee, callee is an attribute, its receiver, dotted names read)   a call statement
+    # an op is ("c", dotted names read) or ("p", the first name of a call that is pure when it is one of ours, or None: never pure)
+
+    def stmt_record(self, st, first):
         a, b = min([d.lineno for d in getattr(st, "decorator_list", [])] + [st.lineno]), st.end_lineno or st.lineno
-        reads = set()
         if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
             self.functions.add(st.name)
-            bound = {st.name}
-            reads |= self.header_reads(st, a)
-            kind, extra = self.decorators(st, reads)
-            return a, b, kind, bound | extra, reads
+            chains, anns = self.header_chains(st, a)
+            kind, extra, dchains = self.decorators(st)
+            return a, b, "S", (kind, frozenset({st.name}) | extra, frozenset(chains | dchains)), anns
         if isinstance(st, ast.ClassDef):
             self.classes.add(st.name)
-            kind, extra = self.decorators(st, reads)
+            kind, extra, dchains = self.decorators(st)
             if kind != "bind":
-                return a, b, kind, {st.name}, reads
+                return a, b, "S", (kind, frozenset({st.name}), frozenset(dchains)), []
             # a method's header runs when the class body does: its defaults and annotations are the class statement's reads
             # (as a module-level def's are); the calls in a header are not checked for purity, as for a def
+            pre, anns = set(dchains), []
             for x in st.body:
                 if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    reads |= self.header_reads(x, a)
-            for part in [*st.bases, *[k.value for k in st.keywords],
-                         *[x for x in st.body if not isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))]]:
-                for x in ast.walk(part):
-                    if isinstance(x, ast.Call) and not self.pure_call(x):
-                        return a, b, "effect", {st.name}, reads
-                    reads |= self.keys(x) if isinstance(x, (ast.Name, ast.Attribute)) else set()
-            return a, b, "bind", {st.name} | extra, reads
+                    c, an = self.header_chains(x, a)
+                    pre |= c
+                    anns += an
+            parts = [*st.bases, *[k.value for k in st.keywords], *[x for x in st.body if not isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))]]
+            return a, b, "C", (st.name, extra, frozenset(pre), self.ops(parts)), anns
         if isinstance(st, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
             targets = st.targets if isinstance(st, ast.Assign) else [st.target]
-            names = set()
+            tops = []
             for t in targets:
                 for x in ([t] if isinstance(t, (ast.Name, ast.Attribute)) else t.elts if isinstance(t, (ast.Tuple, ast.List)) else [None]):
                     if isinstance(x, ast.Name):
-                        names.add(x.id)
-                        continue
-                    # _ho.SERVER = NAME: a name of another of our modules, bound from here
-                    other = [k for k in (self.keys(x) if isinstance(x, ast.Attribute) else ()) if k[0] != self.mod and k[0] in self.repo and k[1] != "<module>" and len(k) == 2]
-                    if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and other:
-                        names |= set(other)
-                        continue
-                    return a, b, "effect", names, reads
+                        tops.append(("n", x.id))
+                    elif isinstance(x, ast.Attribute):
+                        # _ho.SERVER = NAME: a name of another of our modules, bound from here
+                        tops.append(("a", chain_of(x), isinstance(x.value, ast.Name)))
+                    else:
+                        tops.append(("x",))
+                        break
+                else:
+                    continue
+                break
+            achains = set()
             if isinstance(st, ast.AnnAssign):
-                for x in ast.walk(st.annotation):
-                    if isinstance(x, (ast.Name, ast.Attribute)):
-                        reads |= self.keys(x)
-            if st.value is not None:
-                for x in ast.walk(st.value):
-                    if isinstance(x, ast.Call) and not self.pure_call(x):
-                        return a, b, "effect", names, reads
-                    if isinstance(x, (ast.Name, ast.Attribute)):
-                        reads |= self.keys(x)
-            if isinstance(st, ast.AugAssign):
-                reads |= {(self.mod, n) for n in names}
-            return a, b, "bind", names, reads
+                achains = {c for c in map(chain_of, [x for x in walk_nodes(st.annotation) if isinstance(x, (ast.Name, ast.Attribute))]) if c}
+            ops = self.ops([st.value]) if st.value is not None else []
+            return a, b, "A", (tops, frozenset(achains), ops, isinstance(st, ast.AugAssign)), []
         if first and isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant) and isinstance(st.value.value, str):
-            return a, b, "bind", {"__doc__"}, reads
+            return a, b, "S", ("bind", frozenset({"__doc__"}), EMPTY), []
         if isinstance(st, (ast.Import, ast.ImportFrom)):
-            names = {(x.asname or x.name).split(".")[0] for x in st.names}
-            ours = [m for m in self.imported(st) if m.split(".")[0] in self.repo_tops]
-            if ours:
-                # one of ours: importing it runs its module level in every importer; `selection` decides (import-repo)
-                return a, b, "import-repo", names, set(ours)
-            return a, b, "bind", names, reads
+            names = frozenset((x.asname or x.name).split(".")[0] for x in st.names)
+            if isinstance(st, ast.Import):
+                return a, b, "I", (names, 0, None, tuple(x.name for x in st.names)), []
+            return a, b, "I", (names, st.level, st.module, tuple(x.name for x in st.names)), []
         if is_main_guard(st):
-            return a, b, "main", set(), reads
+            return a, b, "S", ("main", EMPTY, EMPTY), []
         if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
             # _router_live.configure(…): a call into one of our modules sets that module's state: its file, whole
-            ks = self.keys(st.value.func) if dotted(st.value.func) else set()
-            mods = {k[0] for k in ks if len(k) == 2 and k[0] != self.mod and k[0] in self.repo}
-            if mods and isinstance(st.value.func, ast.Attribute) and dotted(st.value.func.value) in self.aliases:
-                for x in ast.walk(st.value):
-                    if isinstance(x, (ast.Name, ast.Attribute)):
-                        reads |= self.keys(x)
-                self.effect_targets[a] = mods
-                return a, b, "effect-mod", set(), reads
-        return a, b, "effect", set(), reads
+            f = st.value.func
+            walked = {c for c in map(chain_of, [x for x in walk_nodes(st.value) if isinstance(x, (ast.Name, ast.Attribute))]) if c}
+            return a, b, "X", (chain_of(f) if dotted(f) else None, isinstance(f, ast.Attribute), dotted(f.value) if isinstance(f, ast.Attribute) else None,
+                               frozenset(walked)), []
+        return a, b, "S", ("effect", EMPTY, EMPTY), []
 
-    def header_reads(self, fn, first):
-        """the keys a function's header reads when its def runs: the defaults and the annotations (a tool parameter's
-        Annotated[…, Field(…)] constant is read there). The annotations of a plain def in a postponed file are not returned: they wait in
-        ann_stmt (the statement's first line, the def's name, the keys) for Names.settle"""
-        ar, reads = fn.args, set()
+    def ops(self, parts):
+        """the tape of the reads and the calls in the parts of a statement, in the order the walk meets them; it ends at a call that is never pure (the statement is an
+        effect there, and what comes after it is not read)"""
+        out, seg = [], set()
+        for part in parts:
+            for x in walk_nodes(part):
+                if isinstance(x, ast.Call):
+                    p = self.pure_call(x)
+                    if p is not True:
+                        if seg:
+                            out.append(("c", frozenset(seg)))
+                            seg = set()
+                        out.append(("p", p))
+                        if p is None:
+                            return out
+                elif isinstance(x, (ast.Name, ast.Attribute)):
+                    c = chain_of(x)
+                    if c:
+                        seg.add(c)
+        if seg:
+            out.append(("c", frozenset(seg)))
+        return out
+
+    def header_chains(self, fn, first):
+        """(dotted names, annotations that wait) a function's header reads when its def runs: the defaults and the annotations (a tool parameter's
+        Annotated[…, Field(…)] constant is read there). The annotations of a plain def in a postponed file wait ((the statement's first line, the def's name,
+        the dotted name)) for Names.settle"""
+        ar, chains, anns = fn.args, set(), []
         for d in [*ar.defaults, *ar.kw_defaults, fn.returns, *[x.annotation for x in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if x is not None]]:
             if d is not None:
-                for x in ast.walk(d):
-                    ks = self.keys(x) if isinstance(x, (ast.Name, ast.Attribute)) else set()
-                    if ks and id(x) in self.annot_skip:
-                        self.ann_stmt.append((first, self.annot_skip[id(x)], ks))
-                    else:
-                        reads |= ks
-        return reads
+                for x in walk_nodes(d):
+                    if isinstance(x, (ast.Name, ast.Attribute)):
+                        c = chain_of(x)
+                        if c:
+                            if id(x) in self.annot_skip:
+                                anns.append((first, self.annot_skip[id(x)], c))
+                            else:
+                                chains.add(c)
+        return chains, anns
 
-    def decorators(self, st, reads):
-        """('bind', extra names) when every decorator only wraps (PURE_DECORATORS) or registers on one of this module's
+    def decorators(self, st):
+        """(kind, extra names, dotted names read): ('bind', ...) when every decorator only wraps (PURE_DECORATORS) or registers on one of this module's
         own objects (@mcp.tool: extra = <enumerate>; @mcp.custom_route: extra = <enumerate-routes>, or <enumerate> under route rule R1);
-        ('effect', set()) for any other"""
-        extra = set()
+        ('effect', ...) for any other, with the names of the decorators up to it"""
+        extra, chains = set(), set()
         for d in st.decorator_list:
-            for x in ast.walk(d):
+            for x in walk_nodes(d):
                 if isinstance(x, (ast.Name, ast.Attribute)):
-                    reads |= self.keys(x)
+                    c = chain_of(x)
+                    if c:
+                        chains.add(c)
             f = dotted(d.func if isinstance(d, ast.Call) else d)
             if f in PURE_DECORATORS:
                 continue
             if f and "." in f and f.split(".")[0] in self.toplevel:
                 extra.add(ENUMERATE_R if f.endswith(".custom_route") and route_rule() == "R2" else ENUMERATE)
                 continue
-            return "effect", set()
-        return "bind", extra
+            return "effect", EMPTY, chains
+        return "bind", frozenset(extra), chains
+
+    def pure_call(self, call):
+        """True when a call is pure whatever the repo is, None when it never is, else the first name of its callee: a call of one of our own functions in a module-level
+        assignment computes the value from our code, which is pure when the name is one of ours (ModNames.repo_call)"""
+        f = dotted(call.func)
+        if f in PURE_CALLS:
+            return True
+        if isinstance(call.func, ast.Attribute):
+            if call.func.attr in PURE_METHODS:
+                return True
+            if call.func.attr in PATH_METHODS and self.path_receiver(call.func.value):
+                return True
+        if f is None:
+            return None
+        if REPO_CALLS_BIND:
+            head = f.split(".")[0]
+            if head in self.functions or head in self.classes:
+                return True
+            return head
+        return None
+
+    def path_receiver(self, node):
+        """True when an expression is a path by its root: Path(…), pathlib.Path(…), Path.home() or __file__, through attributes
+        (.parent), subscripts (.parents[1]) and method calls on it (those calls are checked as the walk reaches them)"""
+        while True:
+            if isinstance(node, (ast.Attribute, ast.Subscript)):
+                node = node.value
+            elif isinstance(node, ast.Call):
+                if dotted(node.func) in PATH_ROOTS:
+                    return True
+                if not isinstance(node.func, ast.Attribute):
+                    return False
+                node = node.func.value
+            else:
+                return isinstance(node, ast.Name) and node.id == "__file__"
+
+
+def build_facts(src, ctx=None):
+    """the record of a module's source (see Facts): a dict of plain data, or {"ok": False} when it does not parse. ctx is (path, repo) for a file Facts.volatile marks"""
+    return Facts(src, ctx).record()
+
+
+class ModNames:
+    """what one Python file binds at module level and which names each of its scopes reads, as (module, name) keys;
+    (module, '*') reads every name of the module. Assembled from the file's record (Facts) for the place the file has and the repo around it"""
+
+    LAZY = ("text", "body_of", "ddoc", "pdoc")   # what only a changed file needs: made from the file's text when asked (py_change)
+
+    def __init__(self, path, facts, repo, blob=None):
+        self.path, self.mod, self.repo, self.blob = path, modname(path), repo, blob
+        self.ok = facts["ok"]
+        self.refs = collections.defaultdict(set)   # scope → keys read
+        self.stmts = []                             # (first, last, kind, names, keys read by the statement at import)
+        self.functions, self.classes = set(), set()
+        self.effect_targets = {}                    # first line of an effect-mod statement → the modules it sets state in
+        self.docreads = set()                       # scopes that read a docstring, or hand a function to a registry that does
+        self.postponed, self.import_ids = False, set()   # import_ids: the indexes in stmts of the Import and ImportFrom nodes (`import os; os = 1` holds an import and a plain statement on one line)
+        self.ann, self.ann_stmt = [], []            # annotations that wait for Names.settle (see *Imports and annotations*)
+        self.class_keyed = set()                    # the class names under which the __init__, __call__ and __new__ annotations wait
+        self.narrow, self.import_seq = {}, []       # narrow[line] = the attribute names of the class-body assignment that holds the line (class rule C2); the module-level imports in order (None for another statement)
+        self.attr_values, self.valuse = set(), set()   # attribute names read without being called; bare names used as a value (Names.settle)
+        self.dropped = set()                        # (module, name) keys of repo imports whose only use was a dropped annotation
+        self.aliases, self.froms = {}, {}           # set before the early return: reach() reads froms of every file, one that does not parse included
+        self.froms_all = collections.defaultdict(list)   # local name → every (module, name) it is imported as: a try/except fallback or a second line binds the same local twice, `froms` keeps the last
+        self.defined, self.open_names = set(), False   # the names the module level binds, statically; open_names: a name may also come from a star import, __getattr__ or globals()
+        self._keys = {}
+        if not self.ok:
+            return
+        self.postponed, self.import_seq = facts["postponed"], facts["import_seq"]
+        self.defined, self.open_names = set(facts["defined"]), facts["open_names"]
+        self.aliases, self.froms, self.froms_all = link_imports(facts["alias_events"], self.mod, path, repo)
+        self.functions, self.classes = set(facts["functions"]), set(facts["classes"])
+        self.class_keyed, self.attr_values = set(facts["class_keyed"]), set(facts["attr_values"])
+        self.docreads = set(facts["docreads"])
+        self.import_ids = set(facts["import_ids"])
+        self.valuse = set(facts["valuse"])
+        for local, srcs in self.froms_all.items():
+            if local in self.valuse:
+                self.valuse.update(name for _, name in srcs)            # from m import f as g; get_type_hints(g): f is the one that escapes
+        for a, b, tag, data, attrr, anns in facts["stmts"]:
+            kind, bound, reads = self.replay(tag, data, a)
+            if kind != "import-repo":
+                reads = reads | attrr   # `X = obj.attr` at import reads the attribute, as `X = obj.f` reads f
+            self.stmts.append((a, b, kind, bound, reads))
+            self.ann_stmt.extend((first, fname, self.keys(c)) for first, fname, c in anns)
+        for sc, evs in facts["reads"].items():
+            acc = set()
+            for ev in evs:
+                acc |= self.ev_keys(ev)
+            if acc:
+                self.refs[sc] = acc
+        for fname, sc, ev in facts["ann"]:
+            ks = self.ev_keys(ev)
+            if ks:
+                self.ann.append((fname, sc, ks))   # an annotation of a postponed file: Names.settle decides
+        for sc, ak in facts["attr_refs"].items():
+            self.refs[sc] |= ak
+        self.narrowed(facts["narrow"])
+        self._keys = {}   # the memo of keys() served the replay above; a file kept in an index does not carry it
+
+    def narrowed(self, classes):
+        """sets self.narrow: line -> the attribute names bound by the class-body assignment(s) that hold the line, for each line whose edit may bind those
+        attributes and not the class (see Facts.narrowable and *Class attributes*)"""
+        holds, plain, narrow = collections.Counter(), collections.Counter(), {}
+        for heads, rows in classes:
+            if any(self.aliases.get(h) == "builtins" for h in heads):
+                continue   # `builtins.vars()` in the class body: the namespace read as a whole
+            for first, last, names in rows:
+                holds.update(range(first, last + 1))
+            for first, last, names in rows:
+                if names:
+                    for ln in range(first, last + 1):
+                        plain[ln] += 1
+                        narrow.setdefault(ln, set()).update(names)
+        self.narrow = {ln: frozenset(ns) for ln, ns in narrow.items() if plain[ln] == holds[ln]}
+
+    def __getattr__(self, name):
+        if name in ModNames.LAZY:
+            self.heavy()
+            return self.__dict__[name]
+        raise AttributeError(name)
+
+    def heavy(self):
+        """the text of the file, the scope of each of its lines and its docstring lines (scopes), asked of the file's blob: a changed file is the only one that needs them"""
+        sc = None
+        if self.ok:
+            src = blob_text(self.blob)
+            if src is None:
+                raise RuntimeError(f"suitemap: cannot read the blob of {self.path}")
+            sc = scopes(src)
+        if sc is None:
+            self.__dict__.update(text=[], body_of=[], ddoc=set(), pdoc={})
+        else:
+            self.__dict__.update(text=src.split("\n"), body_of=sc[0], ddoc=sc[2], pdoc=sc[4])
+
+    def keys(self, chain):
+        """the keys a dotted name read stands for"""
+        out = self._keys.get(chain)
+        if out is None:
+            out = {(self.mod, chain[0])}
+            mod = None
+            if chain[0] in self.froms:
+                out.update(self.froms_all[chain[0]])
+            elif chain[0] in self.aliases:
+                mod = self.aliases[chain[0]]
+            if mod is not None:
+                rest = chain[1:]
+                while rest and f"{mod}.{rest[0]}" in self.repo:
+                    mod = f"{mod}.{rest[0]}"
+                    rest = rest[1:]
+                out.add((mod, rest[0]) if rest else (mod, "<module>"))   # <module>: the module object itself
+                if len(rest) > 1:
+                    out.add(("~", mod, tuple(rest)))  # server._cfg.CFG: Names follows _cfg through server's own imports
+            out = self._keys[chain] = frozenset(out)
+        return out
+
+    def ev_keys(self, ev):
+        """the keys one read of the record stands for (see Facts.record): 0 a dotted name, with the keys the attribute adds and whether it is globals(); 2 getattr, vars,
+        dir or getmembers on a dotted name; 3 a module loaded by path"""
+        if ev[0] == 0:
+            _, chain, static, glob = ev
+            ks = self.keys(chain) if chain else EMPTY
+            if static:
+                ks = ks | static
+            return ks | {(self.mod, "*")} if glob else ks   # locals() is the function's own; vars(module) is the call below
+        if ev[0] == 2:
+            return frozenset((m, "*") for m, n in self.keys(ev[1]) if n == "<module>")
+        # a module loaded by path: every name of the files the call's literal file name can be; no literal .py name: any name at all
+        return frozenset((m, "*") for m in self.repo.by_last.get(ev[1], ())) or {("*", "*")} if ev[1] is not None else {("*", "*")}
+
+    def repo_call(self, head):
+        """True when a call whose callee starts at head is one of our own: an import alias or a name taken from a module of ours"""
+        return (head in self.aliases and self.aliases[head] in self.repo) or any(b in self.repo for b, _ in self.froms_all.get(head, ()))
+
+    def replay(self, tag, data, first):
+        """(kind, names bound, keys read at import) of a module-level statement, from its tape (see Facts.stmt_record)"""
+        reads = set()
+        if tag == "S":
+            kind, bound, chains = data
+            for c in chains:
+                reads |= self.keys(c)
+            return kind, set(bound), reads
+        if tag == "C":
+            name, extra, pre, ops = data
+            for c in pre:
+                reads |= self.keys(c)
+            if not self.run_ops(ops, reads):
+                return "effect", {name}, reads
+            return "bind", {name} | extra, reads
+        if tag == "A":
+            tops, achains, ops, aug = data
+            names = set()
+            for t in tops:
+                if t[0] == "n":
+                    names.add(t[1])
+                    continue
+                other = [k for k in (self.keys(t[1]) if t[0] == "a" and t[1] else ()) if k[0] != self.mod and k[0] in self.repo and k[1] != "<module>" and len(k) == 2]
+                if t[0] == "a" and t[2] and other:
+                    names |= set(other)
+                    continue
+                return "effect", names, reads
+            for c in achains:
+                reads |= self.keys(c)
+            if not self.run_ops(ops, reads):
+                return "effect", names, reads
+            if aug:
+                reads |= {(self.mod, n) for n in names}
+            return "bind", names, reads
+        if tag == "I":
+            names, level, module, imported = data
+            if module is None and level == 0:   # `import a, b`: the names are the modules
+                mods = list(imported)
+            else:
+                base = module or ""
+                if level:
+                    pkg = self.mod if self.path.endswith("/__init__.py") else self.mod.rpartition(".")[0]
+                    up = pkg.split(".") if pkg else []
+                    up = up[: len(up) - (level - 1)] if level > 1 else up
+                    base = ".".join([*up, base] if base else up)
+                mods = [f"{base}.{x}" if f"{base}.{x}" in self.repo else base for x in imported]
+            ours = [m for m in mods if m.split(".")[0] in self.repo.tops]
+            if ours:
+                # one of ours: importing it runs its module level in every importer; `selection` decides (import-repo)
+                return "import-repo", set(names), set(ours)
+            return "bind", set(names), reads
+        # "X": a call into one of our modules sets that module's state: its file, whole
+        callee, is_attr, receiver, walked = data
+        ks = self.keys(callee) if callee else set()
+        mods = {k[0] for k in ks if len(k) == 2 and k[0] != self.mod and k[0] in self.repo}
+        if mods and is_attr and receiver in self.aliases:
+            for c in walked:
+                reads |= self.keys(c)
+            self.effect_targets[first] = mods
+            return "effect-mod", set(), reads
+        return "effect", set(), reads
+
+    def run_ops(self, ops, reads):
+        """add what a tape reads to `reads`; False at the first call that is not pure (its reads up to there are kept)"""
+        for kind, x in ops:
+            if kind == "c":
+                for c in x:
+                    reads |= self.keys(c)
+            elif x is None or not self.repo_call(x):
+                return False
+        return True
 
     def stmt_at(self, ln):
         for st in self.stmts:
@@ -1236,91 +1554,453 @@ class ModNames:
             base = ".".join([*up, base] if base else up)
         return base
 
-    def imported(self, st):
-        """the modules an import statement loads, resolved against this file's package"""
-        if isinstance(st, ast.Import):
-            return [x.name for x in st.names]
-        base = st.module or ""
-        if st.level:
-            pkg = self.mod if self.path.endswith("/__init__.py") else self.mod.rpartition(".")[0]
-            up = pkg.split(".") if pkg else []
-            up = up[: len(up) - (st.level - 1)] if st.level > 1 else up
-            base = ".".join([*up, base] if base else up)
-        return [f"{base}.{x.name}" if f"{base}.{x.name}" in self.repo else base for x in st.names]
+    @property
+    def repo_tops(self):
+        return self.repo.tops
 
     def only_binds(self):
         """True when importing this module only binds names (every module-level statement does)"""
         return self.ok and all(k in ("bind", "main") for _, _, k, _, _ in self.stmts)
 
-    def pure_call(self, call):
-        f = dotted(call.func)
-        if f in PURE_CALLS:
-            return True
-        if isinstance(call.func, ast.Attribute):
-            if call.func.attr in PURE_METHODS:
-                return True
-            if call.func.attr in PATH_METHODS and self.path_receiver(call.func.value):
-                return True
-        if f is None:
-            return False
-        if REPO_CALLS_BIND:
-            head = f.split(".")[0]
-            if head in self.functions or head in self.classes:
-                return True
-            if head in self.aliases and self.aliases[head] in self.repo or any(b in self.repo for b, _ in self.froms_all.get(head, ())):
-                return True
-        return False
+    STATE = ("path", "mod", "blob", "ok", "refs", "stmts", "functions", "classes", "effect_targets", "postponed", "import_ids", "import_seq", "narrow",
+             "docreads", "dropped", "froms_all", "froms", "aliases", "defined", "open_names")
 
-    def path_receiver(self, node):
-        """True when an expression is a path by its root: Path(…), pathlib.Path(…), Path.home() or __file__, through attributes
-        (.parent), subscripts (.parents[1]) and method calls on it (those calls are checked as the walk reaches them)"""
+    def state(self, canon):
+        """what the index keeps of the file once it is settled (Names.settle, Names.resolve), as plain data; canon makes the same key one object, so it is stored once"""
+        s = {k: getattr(self, k) for k in ModNames.STATE}
+
+        def k(x):
+            if not isinstance(x, tuple):
+                return sys.intern(x) if isinstance(x, str) else x
+            return canon.setdefault(x, tuple(map(k, x)))
+
+        def ks(xs):
+            fs = frozenset(map(k, xs))
+            return canon.setdefault(fs, fs)   # equal key sets are one object too (a tuple never equals a frozenset, so the one dict holds both)
+        s["refs"] = {sc: ks(v) for sc, v in self.refs.items()}
+        s["stmts"] = [(a, b, kind, ks(bound), ks(r)) for a, b, kind, bound, r in self.stmts]
+        s["dropped"] = ks(self.dropped)
+        s["froms_all"] = {n: list(v) for n, v in self.froms_all.items()}
+        s["effect_targets"] = {a: frozenset(v) for a, v in self.effect_targets.items()}
+        return s
+
+    @classmethod
+    def restore(cls, s, repo):
+        """the file as state() made it (the settled index of a commit); what only the building needs (valuse, ann …) is not kept"""
+        m = object.__new__(cls)
+        m.__dict__.update(s, repo=repo, _keys={})
+        # the key sets stay the (shared, frozen) objects the entry holds: a settled index is only read, and a million equal sets would be most of its memory
+        m.refs = collections.defaultdict(frozenset, s["refs"])
+        m.froms_all = collections.defaultdict(list, s["froms_all"])
+        m.effect_targets = {a: set(v) for a, v in s["effect_targets"].items()}
+        for k in ("functions", "classes", "import_ids", "docreads", "defined"):
+            setattr(m, k, set(s[k]))
+        m.dropped = s["dropped"]
+        m.valuse, m.attr_values, m.class_keyed, m.ann, m.ann_stmt = set(), set(), set(), [], []
+        return m
+
+def module_names(path, blob, facts, repo, src=None):
+    """the ModNames of a file from its record: one marked volatile is built afresh for its path and the repo (not kept), from `src`, its text as blob_texts gave it"""
+    if facts.get("volatile"):
+        if src is None:
+            raise RuntimeError(f"suitemap: no text for the volatile file {path}")
+        facts = build_facts(src, (path, repo))
+    return ModNames(path, facts, repo, blob)
+
+
+def blob_text(blob):
+    """the text of a git blob, as cat_files gives it"""
+    r = subprocess.run(["git", "-C", ROOT, "cat-file", "blob", blob], capture_output=True)
+    return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else None
+
+
+def blob_texts(blobs, unsure=None):
+    """{blob id: text} for many blobs in one git process, a blob git cannot give left out. When `unsure` is a set, it gets the ids of the blobs whose text must not
+    be trusted beyond this run: any when git ended with an error, and one whose bytes are not the object the id names (cut short, or another object put in its
+    place by a replacement ref): such a text is still given, as git gave it, but nothing may be kept that was made from it"""
+    blobs = list(blobs)
+    if not blobs:
+        return {}
+    r = subprocess.run(["git", "-C", ROOT, "cat-file", "--batch"], input="".join(f"{b}\n" for b in blobs).encode(), capture_output=True)
+    out, data, i = {}, r.stdout, 0
+    for b in blobs:
+        try:
+            nl = data.index(b"\n", i)
+            head = data[i:nl].split()
+            size = int(head[2]) if len(head) >= 3 else 0
+        except ValueError:   # git's answer ends before this header (or the header is not one): the blobs from here on are left out, as a blob git does not have
+            break
+        i = nl + 1
+        if len(head) < 3 or head[1] != b"blob":
+            continue
+        raw = data[i:i + size]
+        out[b] = raw.decode("utf-8", "replace")
+        if unsure is not None and (r.returncode != 0 or not is_object(b, b"blob %d\0" % size + raw)):
+            unsure.add(b)
+        i += size + 1
+    return out
+
+
+def is_object(oid, content):
+    """True when `content` (type, size, NUL, bytes) is the object that the id names (git's id is the hash of it: sha1, or sha256 for a 64-digit id)"""
+    algo = {40: "sha1", 64: "sha256"}.get(len(oid))
+    return algo is not None and hashlib.new(algo, content).hexdigest() == oid
+
+
+def listing(rev):
+    """[(path, type, object id)] of every file of a revision, as git ls-tree -r gives them (None when git cannot say)"""
+    out = git("ls-tree", "-r", rev)
+    if out is None:
+        return None
+    rows = []
+    for line in out.split("\n"):
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if path and len(parts) == 3:
+            rows.append((path, parts[1], parts[2]))
+    return rows
+
+
+# ---------------------------------------------------------------- the index cache
+CACHE_MAX_BYTES = 256 << 20   # the cache folder is trimmed to this size (the entries used longest ago go first) after each commit's index is kept
+FACTS_BATCH = 64             # records built at once when a run has to build them (their texts are held together)
+CACHE_LOCK_WAIT = 300         # seconds a call waits for another that is building the same index before it builds its own
+CACHE_ENTRY_MAX = 256 << 20   # the most an entry may be as a file and when inflated (a tree entry of this checkout is a few MB): a bigger one is no entry
+CACHE_MAGIC = b"suitemap-cache 1\n"
+ENTRY_NAME = re.compile(r"(facts|tree)-[0-9a-f]{40,64}")   # the names of the entries (what trim may remove)
+TMP_NAME = re.compile(r"\.tmp-[a-z0-9_]{8}")   # the name put gives a file while it writes it (tempfile's eight characters after the prefix)
+LOCK_NAME = re.compile(r"lock-(facts|tree)-[0-9a-f]{40,64}")   # the names of the lock files (acquire is given these)
+_CACHE_VERSION = None
+
+
+def cache_switch():
+    """True (default, or SUITEMAP_CACHE=1) when the index cache is used, False for SUITEMAP_CACHE=0; any other value is an error, checked when a command starts"""
+    v = os.environ.get("SUITEMAP_CACHE", "1").strip()
+    if v not in ("0", "1"):
+        raise SystemExit(f"suitemap: SUITEMAP_CACHE={os.environ.get('SUITEMAP_CACHE')!r} is not a switch: the allowed values are 0 and 1")
+    return v == "1"
+
+
+def cache_version():
+    """what an entry must have been made by to be read: this file's bytes, the Python that parsed (ast changes between releases) and the rules that shape a record"""
+    global _CACHE_VERSION
+    if _CACHE_VERSION is None:
+        h = hashlib.blake2b(digest_size=16)
+        with open(os.path.abspath(__file__), "rb") as f:
+            h.update(f.read())
+        h.update(repr((sys.version, class_rule(), annotation_rule(), route_rule())).encode())
+        _CACHE_VERSION = h.hexdigest()
+    return _CACHE_VERSION
+
+
+class PlainUnpickler(pickle.Unpickler):
+    """reads what IndexCache.put wrote: plain data only (no class, no function): an entry that names one is not ours"""
+
+    def find_class(self, module, name):
+        raise pickle.UnpicklingError(f"cache entry names {module}.{name}")
+
+
+class IndexCache:
+    """what Names keeps between calls, in a folder of files (see *The index cache*): "facts-<blob id>" the record of one file's content, "tree-<tree id>" the settled
+    index of one revision. An entry is the version, then the data, pickled and compressed, with a checksum in front. Nothing here may fail a call: a missing,
+    unreadable, truncated, damaged or old-version entry is a miss (and is removed), and a write that cannot be made is dropped."""
+
+    def __init__(self, folder, version=None, max_bytes=None):
+        self.dir, self.version = folder, version or cache_version()
+        self.max_bytes = CACHE_MAX_BYTES if max_bytes is None else max_bytes
+
+    @classmethod
+    def open(cls):
+        """the cache of this user, or None when it is switched off or its folder cannot be made"""
+        if not cache_switch():
+            return None
+        # a relative path names a place that depends on the directory the call runs in (the checkout, say): the XDG base directory spec has it ignored
+        folder = os.environ.get("SUITEMAP_CACHE_DIR", "")
+        named = os.path.isabs(folder)
+        if not named:
+            base = os.environ.get("XDG_CACHE_HOME", "")
+            if not os.path.isabs(base):
+                base = os.path.join(os.path.expanduser("~"), ".cache")
+                if not os.path.isabs(base):   # no home directory found ("~" is left as it is): no place for a cache
+                    return None
+            folder = os.path.join(base, "stackshot", "suitemap")
+        try:
+            folder = os.path.abspath(folder)
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            if not named:   # the user's own folder, made by an earlier version or by hand with another mode: private as well (a folder the user named is theirs to share,
+                st = os.lstat(folder)   # and a link to a folder is the user's way of putting it elsewhere: the folder it leads to is left as it is)
+                if stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() and st.st_mode & 0o077:
+                    os.chmod(folder, 0o700)
+            return cls(folder) if os.access(folder, os.W_OK) else None
+        except OSError:
+            return None
+
+    def path(self, kind, key):
+        return os.path.join(self.dir, f"{kind}-{key}")
+
+    def get(self, kind, key):
+        """the data of an entry, or None"""
+        if not re.fullmatch(r"[0-9a-f]{40,64}", key):
+            return None
+        p = self.path(kind, key)
+        try:   # a regular file of a sane size only (a link, a pipe, a device named like an entry is no entry, and /dev/zero is not read)
+            fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_size > CACHE_ENTRY_MAX:
+                    return None
+                with os.fdopen(fd, "rb", closefd=False) as f:
+                    raw = f.read(st.st_size + 1)   # the size is known: a buffer of the most an entry may be is not made for a small one
+            finally:
+                os.close(fd)
+        except (OSError, MemoryError):   # a call may be short of memory (an address-space limit): the entry is then a miss, and stays
+            return None
+        n = len(CACHE_MAGIC)
+        try:
+            if not raw.startswith(CACHE_MAGIC) or hashlib.blake2b(raw[n + 32:], digest_size=32).digest() != raw[n:n + 32]:
+                raise ValueError("damaged")
+            inflater = zlib.decompressobj()
+            body = inflater.decompress(raw[n + 32:], CACHE_ENTRY_MAX)
+            if not inflater.eof:   # it would inflate to more than an entry may be
+                raise ValueError("too big")
+            version, data = PlainUnpickler(io.BytesIO(body)).load()
+            if version != self.version:
+                raise ValueError("old version")
+        except MemoryError:   # short of memory is no fault of the entry
+            return None
+        except Exception:
+            self.discard(kind, key)
+            return None
+        try:
+            os.utime(p, follow_symlinks=False)   # used now: the trim goes by it (an entry swapped for a link meanwhile is not followed)
+        except (OSError, NotImplementedError):
+            pass
+        return data
+
+    def put(self, kind, key, data):
+        """keep data: written to a file of its own beside the entry and renamed over it, so a reader sees all of it or none"""
+        if not re.fullmatch(r"[0-9a-f]{40,64}", key):
+            return
+        tmp = None
+        try:
+            body = zlib.compress(pickle.dumps((self.version, data), protocol=pickle.HIGHEST_PROTOCOL), 1)
+            fd, tmp = tempfile.mkstemp(dir=self.dir, prefix=".tmp-")
+            with os.fdopen(fd, "wb") as f:
+                f.write(CACHE_MAGIC + hashlib.blake2b(body, digest_size=32).digest() + body)
+            os.replace(tmp, self.path(kind, key))
+            tmp = None
+        except (OSError, pickle.PicklingError, RecursionError, MemoryError):
+            pass
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+
+    def discard(self, kind, key):
+        try:
+            os.unlink(self.path(kind, key))
+        except OSError:
+            pass
+
+    def trim(self):
+        """bring the folder down to 80% of max_bytes when it is over it, oldest use first; leftovers of a write that died and lock files nobody holds go too.
+        Only what the cache itself writes is touched or counted (an entry, a temporary file as put names it, a lock file as acquire is given one): another file in the
+        folder is never removed. An entry that cannot be removed (another user's, in a shared folder: see can_remove) is not the cache's to reclaim: it is not
+        counted, whatever its age, so the entries that can go are not removed for it"""
+        now, rows, total = time.time(), [], 0
+        try:
+            entries = list(os.scandir(self.dir))
+            here, uid = os.lstat(self.dir), os.getuid()
+        except OSError:
+            return
+        for e in entries:
+            try:
+                st = e.stat(follow_symlinks=False)   # a link is itself (its own size and time), never what it points at
+            except OSError:
+                continue
+            if not (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)):   # a folder, a pipe, a device: not ours to count or remove
+                continue
+            if TMP_NAME.fullmatch(e.name) or LOCK_NAME.fullmatch(e.name):
+                if now - st.st_mtime > 86400:
+                    if e.name.startswith("lock-"):
+                        self.drop_lock(e.path)
+                    else:
+                        try:
+                            os.unlink(e.path)
+                        except OSError:
+                            pass
+                continue
+            if not ENTRY_NAME.fullmatch(e.name):
+                continue
+            if not self.can_remove(st, here, uid):
+                continue
+            rows.append((st.st_mtime, st.st_size, e.path))
+            total += st.st_size
+        if total <= self.max_bytes:
+            return
+        for _, size, p in sorted(rows):
+            if total <= self.max_bytes * 0.8:
+                break
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+            total -= size   # gone, or not ours to remove
+
+    @staticmethod
+    def can_remove(st, folder, uid):
+        """False for a file that `uid` may not remove from the folder `folder` (os.stat results): in a sticky folder (a cache folder shared on purpose) only the file's
+        user, the folder's user and root may; anywhere else the write permission on the folder is what lets a file go"""
+        return not folder.st_mode & stat.S_ISVTX or uid == 0 or uid in (st.st_uid, folder.st_uid)
+
+    @staticmethod
+    def drop_lock(path):
+        """remove a lock file nobody holds: unlinked while we hold it, so a process that opened it meanwhile finds it gone once it has the lock (see acquire)"""
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+        except OSError:
+            if os.path.islink(path):   # a link named like a lock file is no lock: it is removed, never followed
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            return
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.unlink(path)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+
+    def acquire(self, name, wait):
+        """the descriptor of the lock file `name` held with flock (the kernel lets go of it when the process ends, so a holder that died holds nothing), or None
+        when `wait` seconds went by with another process holding it, or at once when the folder cannot lock at all (only "held" is waited for: an error such
+        as ENOLCK is no holder). A lock file that the trim removed between our open and our flock is not ours: open again"""
+        path, deadline = os.path.join(self.dir, f"lock-{name}"), time.monotonic() + wait
         while True:
-            if isinstance(node, (ast.Attribute, ast.Subscript)):
-                node = node.value
-            elif isinstance(node, ast.Call):
-                if dotted(node.func) in PATH_ROOTS:
-                    return True
-                if not isinstance(node.func, ast.Attribute):
-                    return False
-                node = node.func.value
-            else:
-                return isinstance(node, ast.Name) and node.id == "__file__"
+            try:
+                fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)   # never through a link (it could lead out of the folder)
+            except OSError:
+                return None
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try:
+                    if os.fstat(fd).st_ino == os.stat(path).st_ino:
+                        return fd
+                except OSError:
+                    pass
+                os.close(fd)   # unlinked under us: take the one that is there now
+            except BlockingIOError:   # EWOULDBLOCK / EAGAIN: another process holds it
+                os.close(fd)
+                if time.monotonic() >= deadline:
+                    return None
+                time.sleep(0.05)
+            except OSError:   # the folder's file system does not lock (ENOLCK, EOPNOTSUPP): nobody to wait for, the caller builds
+                os.close(fd)
+                return None
+
+    @contextlib.contextmanager
+    def lock(self, name, wait):
+        """holds the lock `name` for the body, which gets True; False when the wait ran out (the body then does the work itself: a holder that hangs stops nobody)"""
+        fd = self.acquire(name, wait)
+        try:
+            yield fd is not None
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+    @staticmethod
+    def tree_of(rev):
+        """the tree id of a revision (the index depends on nothing else of the commit), or None"""
+        out = git("rev-parse", "--verify", "--quiet", f"{rev}^{{tree}}")
+        t = (out or "").strip()
+        return t if re.fullmatch(r"[0-9a-f]{40,64}", t) else None
 
 
 class Names:
-    """the name index of one revision: every repo Python file and every suite's file"""
+    """the name index of one revision: every repo Python file and every suite's file (kept per tree in the cache, see *The index cache*)"""
 
     def __init__(self, rev):
-        files = [f for f in (git("ls-tree", "-r", "--name-only", rev) or "").split("\n") if f.endswith(".py")]
-        self.repo = {modname(f) for f in files if not SUITE_RE.match(f) and not f.endswith("_check.py")}
-        srcs = cat_files(rev, files)
-        self.files = {f: ModNames(f, srcs[f], self.repo) for f in files if f in srcs}
+        cache = IndexCache.open()
+        tree = cache.tree_of(rev) if cache else None
+        if not tree:   # no cache, or no tree id to keep an index under: built from the revision as given, and kept nowhere
+            self.build(rev, cache)
+        elif not self.load(cache, tree):
+            with cache.lock(f"tree-{tree}", CACHE_LOCK_WAIT):
+                if not self.load(cache, tree):   # the call that held the lock may have made it
+                    self.build(tree, cache)   # from the tree the key names, never from `rev` again: a ref that moved since (HEAD, a branch) would fill this entry with another tree
+                    if self.complete:   # an index made while git failed (a listing, a blob or the scripts it could not give) serves this call and is never kept
+                        self.save(cache, tree)
+
+    def build(self, rev, cache):
+        rows = listing(rev)
+        self.complete = bool(rows)   # False once git failed to give anything the index is made of: such an index is for this call alone (see __init__)
+        rows = rows or []
+        py = [(f, t, b) for f, t, b in rows if f.endswith(".py")]
+        self.repo = Repo({modname(f) for f, _, _ in py if not SUITE_RE.match(f) and not f.endswith("_check.py")})
+        self.blobs = {f: b for f, _, b in rows}
+        self.files = self.modules([(f, b) for f, t, b in py if t == "blob"], cache)
         self.by_mod = {m.mod: m for f, m in self.files.items() if not SUITE_RE.match(f)}
-        self.settle(rev)
+        self.settle(rev, cache)
         for m in self.files.values():
             for sc in m.refs:
                 m.refs[sc] = self.resolve(m.refs[sc])
             m.stmts = [(a, b, k, n, r if k == "import-repo" else self.resolve(r)) for a, b, k, n, r in m.stmts]
 
-    def scripts(self, rev):
+    def modules(self, pairs, cache):
+        """{path: ModNames} for (path, blob id) pairs, in their order, a file whose blob git cannot give left out: one file at a time (its record is read from the cache,
+        or built from the blob and kept, and dropped as soon as the file is assembled), so the records of the whole checkout are never held at once"""
+        out, missing = dict.fromkeys(f for f, _ in pairs), []
+        for f, b in pairs:
+            rec = cache.get("facts", b) if cache else None
+            if isinstance(rec, dict) and "ok" in rec:
+                src = None
+                if rec.get("volatile"):   # built afresh from its text: read with the same checks as every blob of an index
+                    unsure = set()
+                    src = blob_texts([b], unsure).get(b)
+                    if src is None or b in unsure:
+                        self.complete = False
+                    if src is None:
+                        continue
+                out[f] = module_names(f, b, rec, self.repo, src)
+            else:
+                missing.append((f, b))
+        for i in range(0, len(missing), FACTS_BATCH):
+            chunk = missing[i:i + FACTS_BATCH]
+            unsure = set()
+            texts, recs = blob_texts({b for _, b in chunk}, unsure), {}
+            for f, b in chunk:
+                if b not in texts or b in unsure:
+                    self.complete = False
+                if b in texts:
+                    if b not in recs:   # one content at several paths is built once
+                        recs[b] = build_facts(texts[b])
+                        if cache and b not in unsure:   # a record made from a text git did not give whole is for this call only
+                            cache.put("facts", b, recs[b])
+                    out[f] = module_names(f, b, recs[b], self.repo, texts[b])
+        return {f: m for f, m in out.items() if m is not None}
+
+    def scripts(self, rev, cache):
         """{path: ModNames} for the tracked files that are not .py but start with a python or a `uv run` shebang (`#!/usr/bin/env -S uv run --script`), or
         None when git could not say or a script does not parse (a shebang that names uv may start something that is not Python: then any def may be reached)"""
         r = subprocess.run(["git", "-C", ROOT, "grep", "-lI", "-E", "^#!.*(python|uv )", rev, "--", ".", ":!*.py"], capture_output=True, text=True)
         if r.returncode not in (0, 1):
+            self.complete = False
             return None
         paths = [x[len(rev) + 1:] for x in r.stdout.split("\n") if x.startswith(rev + ":")]
-        out = {}
-        for p, src in cat_files(rev, paths).items():
-            m = ModNames(p, src, self.repo)
-            if not m.ok:
-                return None
-            out[p] = m
-        return out
+        blobs = {p: self.blobs.get(p) or (git("rev-parse", f"{rev}:{p}") or "").strip() for p in paths}
+        if not all(blobs.values()):
+            self.complete = False
+        out = self.modules([(p, blobs[p]) for p in paths if blobs[p]], cache)
+        return None if any(not m.ok for m in out.values()) else out
 
-    def settle(self, rev):
+    def settle(self, rev, cache=None):
         """decide the annotations that wait in each file (ModNames.ann, ann_stmt; see *Imports and annotations*): one of a plain def counts as a read
         unless the def's name is only ever called in the checkout; one of a local variable never does"""
-        scripts = self.scripts(rev)
+        scripts = self.scripts(rev, cache)
         everyone = [*self.files.values(), *(scripts or {}).values()]
         self.escaped = set().union(*(m.valuse for m in everyone)) if everyone else set()
         # a name used as a value escapes the function it is a name OF: follow `from m import f as g` (a re-export under another name) across files to a
@@ -1385,6 +2065,31 @@ class Names:
                 while rest and f"{mod}.{rest[0]}" in self.repo:
                     mod, rest = f"{mod}.{rest[0]}", rest[1:]
         return out
+
+    def save(self, cache, tree):
+        """keep the settled index of the tree (a cache that cannot be written is no reason to fail)"""
+        canon = {}
+        cache.put("tree", tree, {"repo": sorted(self.repo), "files": {f: m.state(canon) for f, m in self.files.items()}, "escaped": self.escaped,
+                                 "blind": self.blind})
+        cache.trim()
+
+    def load(self, cache, tree):
+        """True when the cache holds the index of the tree, and this object is it"""
+        e = cache.get("tree", tree)
+        try:
+            if not (isinstance(e, dict) and isinstance(e.get("files"), dict) and isinstance(e.get("repo"), list)):
+                return False
+            repo = Repo(e["repo"])
+            files = {f: ModNames.restore(s, repo) for f, s in e["files"].items()}
+            if not all(isinstance(m.ok, bool) and m.path == f for f, m in files.items()):
+                return False
+            self.repo, self.files, self.escaped, self.blind = repo, files, set(e["escaped"]), bool(e["blind"])
+        except Exception:
+            cache.discard("tree", tree)
+            return False
+        self.by_mod = {m.mod: m for f, m in self.files.items() if not SUITE_RE.match(f)}
+        self.blobs = {}
+        return True
 
 
 def cat_files(rev, paths):
@@ -2539,6 +3244,7 @@ def main():
     annotation_rule()
     route_rule()
     class_rule()
+    cache_switch()
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
