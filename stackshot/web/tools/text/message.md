@@ -12,9 +12,9 @@ an item's done step, which names the item id, written as a plain word, not in ba
 message(to="widgets-builder", sender="my-x", text="board#N: the design is done, build the export"), and the server
 then names that agent in the item's needs, unless that would leave the item with a second mover (another session
 already moves it, or it waits on a decision): the agent is then not named, the reply says so in one line, and the way
-to hand the item over is update(mover=<agent>). An item id cited only for context, not handed over, goes in backticks,
+to hand the item over is update(mover=<agent>), which tells the new mover itself. An item id cited only for context, not handed over, goes in backticks,
 since a plain-word id names the receiver on that item. A front agent is given a turn only by what {{OWNER}} has to do: its
-message carries {{FOR_OWNER}} on its first line (except fyi=true, below). An unmarked message is delivered only as
+message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused. An unmarked message is delivered only as
 the answer to a question it wrote to you, while he is in that conversation (30 minutes); later
 it goes onto the item it names, else is held; so is a front peer's or the background agent's own. Any other is refused, naming
 the project's background agent (none: held). A done, taken or
@@ -28,8 +28,7 @@ URL's included), no word of trouble, waiting or asking (failed, broke, rolled ba
 should, review, ready, approve, decide, confirm, please ...), no plan (will, if, when, then), no person or front agent
 named to act, and no prose in a code span. Everything else is delivered (the reply begins 'delivered'), and so is a
 message whose item waits on a decision (needs: decision) or names the front agent in its needs. A move to
-needs=decision reaches {{OWNER}} on the board, not through a message. To hand an item to a session set its mover
-(update, mover=<session>), which tells the new mover itself. A merge-queue group number in a release line ("group g7",
+needs=decision reaches {{OWNER}} on the board, not through a message. A merge-queue group number in a release line ("group g7",
 "split from g7", "[g7]") names no item. Long content goes on a page or into a repo, with the pointer in the message.
 A message that asks nothing of its recipient is sent with fyi=true (news, a result, a status it need not act on): a
 background agent gets it with the first turn it takes, once (the reply begins 'held for <agent>'s next turn'), and it

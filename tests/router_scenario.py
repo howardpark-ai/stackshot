@@ -399,6 +399,7 @@ g4 = many("projects/alpha", "message", "this one is needs: decision but please d
 g5 = many("projects/alpha", "message", "Oliver approved dropping the old note", who="home-beta")
 g6 = many("projects/alpha", "message", "[for Oliver] contract wording", who="home-beta")
 g7 = many("projects/alpha", "anchor", "new reply in the vendor thread", anchor="gmail:3333333333333333", target="project-wide", who="Vic")
+g7m = many("projects/alpha", "anchor", "another reply in the vendor thread", anchor="gmail:3333333333333333", target="project-wide", who="Vic")
 g8 = many("projects/alpha", "message", "the build finished", who="work-osprey-x")
 g9 = many("projects/delta", "message", "the quote came in", who="home-beta", to=D)
 g10 = many("projects/gamma", "message", "the quote came in", who="home-beta", to=G)
@@ -416,6 +417,7 @@ fake("echo", answers={
     g5: {"ruling": "merged", "reason": "an acknowledgement", "for_owner": False},
     g6: {"ruling": "archived", "reason": "later", "for_owner": False},
     g7: {"ruling": "dropped", "reason": "chatter", "for_owner": False},
+    g7m: {"ruling": "merged", "reason": "same thread", "for_owner": False},
     g8: {"ruling": "passed", "target": "work-osprey-x", "reason": "the builder", "for_owner": False},
     g9: {"ruling": "passed", "target": "work-delta-main", "reason": "the contact", "for_owner": False},
     g10: {"ruling": "passed", "target": "work-gamma-main", "reason": "the contact", "for_owner": False},
@@ -432,7 +434,8 @@ check("govern: a pass to a background agent stands", ln(g3) == ("call", "", "pas
 check("govern: dropped/merged/archived on a notice that says needs: decision or [for Oliver] (a strong signal) becomes a pass to -main, for Oliver",
       all(ln(i) == ("call", "clamp", "passed", "work-osprey-main", True) and "ruled it" in sh[i]["reason"] for i in (g4, g6)), [sh.get(i) for i in (g4, g6)])
 check("govern: dropped/merged on a notice that only names Oliver (a weak signal) becomes archived for the digest, not a pass", ln(g5) == ("call", "clamp", "archived", "", False) and sh[g5]["reason"].startswith("archived for the digest: "), sh.get(g5))
-check("govern: dropped on an anchor notice of an item that waits on a decision → the item's owner, for Oliver", ln(g7) == ("call", "clamp", "passed", "work-osprey-main", True) and sh[g7]["item"] == "a8", sh.get(g7))
+check("govern: dropped on an anchor notice of an item that waits on a decision → the item's mover, for Oliver (whether it starts a turn is router_live's gate: while he talks with the agent, or his ask)", ln(g7) == ("call", "clamp", "passed", "work-osprey-main", True) and sh[g7]["item"] == "a8", sh.get(g7))
+check("govern: merged on it → the same pass, never silent", ln(g7m) == ("call", "clamp", "passed", "work-osprey-main", True) and sh[g7m]["item"] == "a8", sh.get(g7m))
 check("govern: a call ruling dropped that the call itself marks for Oliver is a pass too", ln(g12) == ("call", "clamp", "passed", "work-osprey-main", True), sh.get(g12))
 check("govern: a pass to the notice's own sender is merged", ln(g8) == ("call", "clamp", "merged", "", False), sh.get(g8))
 check("govern: no builder, no need for Oliver → a pass to a front agent is archived for the digest, not merged", ln(g9) == ("call", "clamp", "archived", "", False) and sh[g9]["reason"].startswith("archived for the digest: "), sh.get(g9))

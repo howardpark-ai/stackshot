@@ -24,7 +24,7 @@ from stackshot.model import steps as _steps
 from stackshot.model import work as _work
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _GID, _norm_id
-from stackshot.model.needs import _after_of, _needs_of, _observers_of
+from stackshot.model.needs import _after_of, _needs_of, _observers_of, _tell_him_of
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.router import router as _router
 from stackshot.router import router_live as _router_live
@@ -165,6 +165,8 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         out.append("after: " + ", ".join(states) + ("" if _item_read._after_open(m) else " — all closed" if item.get("status") == "open" else ""))
     if _observers_of(m):
         out.append("observers: " + ", ".join(_shown_ref(x) for x in _observers_of(m)))
+    if _tell_him_of(m):
+        out.append("tell_him: " + ", ".join(_shown_ref(x) for x in _tell_him_of(m)))
     if item.get("status") != "completed" and _work.lines_of(m):   # what is in motion on it, one line (the item page shows each on its step)
         out.append("step status: " + _work.words(m))
     for e in _said.entries_of(m):            # the trailers: his words on the item, each with where it was checked; an acted entry is a pasted result that proves a step, not his words

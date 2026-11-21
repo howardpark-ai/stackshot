@@ -167,7 +167,7 @@ fresh(); out = msg(FRONT, "the PR is merged, the suites pass.", BACK); settle()
 check("1b: a done note from a session is refused in one line (write it on the board item or say nothing), nothing sent or held", out.startswith("Refused") and "takes no done, taken or no-action note" in out and "board item" in out and "\n" not in out and reach(A, n0) == [] and held.count(A) == 0, out)
 out = msg(FRONT, mark() + "\nFYI the build is done, no action needed.", BACK); settle()
 check("1c: …and so is a marked note that says nothing is needed from the person", out.startswith("Refused") and "marks only what Oliver has to do" in out and "board item" in out and held.count(A) == 0 and reach(A, n0) == [], out)
-fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta"); settle()
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta"); settle(); unstamp(A)      # a marked message starts a turn only while he is talking with the agent (or asked it about the item): he is, here
 check("1d: a marked message that needs the person is delivered, as before", out.startswith("delivered") and len(reach(A, n0)) == 1 and reach(A, n0)[0][1].count(mark()) >= 1 and held.count(A) == 0, (out, pushes()[n0:]))
 fresh(); n0 = len(pushes()); out = msg(FRONT, "go on with the export", "Oliver"); settle()
 check("1e: the person's own unmarked message is refused without the mark, as before", out.startswith("Refused") and "first line" in out and reach(A, n0) == [] and held.count(A) == 0, out)
@@ -246,15 +246,26 @@ for name, text, kw, mut in (("a ruling for the person", "the release is live", {
                             ("needs: decision in the text", "the release is live; it now needs: decision", {}, {}), ("his words on the notice", "the release is live", {}, {"words": "ship it"}),
                             ("a hand-back", "the release is live", {}, {"handback": True}), ("a named item that waits on his decision (in the text)", "the release is live, see a14", {}, {}),
                             ("a named item that waits on his decision (the ruling's item)", "the release is live", {"item": "a14"}, {}),
-                            ("an audit batch finding", "the release is live", {"rule": "audit-owners"}, {}), ("a fallback pass", "the release is live", {"source": "fallback"}, {})):
-    fresh(); n0 = len(pushes()); n = {**recp(text), **mut}; res = act2(n, FRONT, **kw)
-    check(f"4b: a pass with a need ({name}) stays marked and goes to the front agent as before", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is True and len(reach(A, n0)) == 1
+                            ("a fallback pass", "the release is live - " + mark() + " pick a or b", {"source": "fallback"}, {})):
+    fresh(); stamp(A, 5)      # each needs him, so it starts a turn only while he is talking with the front agent (no exemption for a hand-back or a fallback: they are gated like the rest)
+    n0 = len(pushes()); n = {**recp(text), **mut}; res = act2(n, FRONT, **kw); unstamp(A)
+    check(f"4b: a pass with a need ({name}) stays marked and goes to the front agent while he is talking with it", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is True and len(reach(A, n0)) == 1
           and reach(A, n0)[0][1].startswith(mark()) and reach(X, n0) == [] and held.count(A) == 0, (res, pushes()[n0:]))
+    fresh(); n0 = len(pushes()); n = {**recp(text), **mut}; res = act2(n, FRONT, **kw)
+    check(f"4b2: …and without him there it is not delivered to the front agent and not held for its next turn ({name})", reach(A, n0) == [] and held.count(A) == 0 and res["ruling"] in ("archived", "passed", "held") and res.get("held_for") != FRONT
+          and (res["ruling"] == "archived" or res.get("target") == BACK or res.get("held_for") == BACK), (res, pushes()[n0:]))
+# an audit batch finding to a front mover is a task, never a need of his: it starts no turn, even while he is talking with the agent, unless he asked the agent to tell him about the item
+fresh(); stamp(A, 5); n0 = len(pushes()); n = recp("the release is live"); res = act2(n, FRONT, rule="audit-owners"); unstamp(A)
+check("4b3: an audit batch finding to the front agent is archived, not delivered, not held, even while he is talking with it", res["ruling"] == "archived" and reach(A, n0) == [] and held.count(A) == 0, (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = recp("the release is live", key="projects/solo"); res = act2(n, SOLO, key="projects/solo")
-check("4c: a project with no background agent holds the pass through the front gate, unmarked, text intact: no turn, ruled held in the router log",
+check("4c: a project with no background agent has nobody to take a pass that asks nothing: archived (a row of the digest), not delivered, not held for the front agent",
+      res["status"] == "ruled" and res["ruling"] == "archived" and res["marked"] is False and reach(E, n0) == [] and held.count(E) == 0
+      and any(x["id"] == n["id"] and x.get("ruling") == "archived" for x in routing.read("projects/solo")), (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp("the release is live", key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); res = act2(n, SOLO, key="projects/solo")
+check("4c2: …but a peer front agent's word to it is the channel between them: held, unmarked, text intact: no turn, ruled held in the router log",
       res["status"] == "ruled" and res["ruling"] == "held" and res["marked"] is False and reach(E, n0) == [] and held.count(E) == 1 and "the release is live" in held.take(E, SOLO)
       and any(x["id"] == n["id"] and x.get("ruling") == "held" for x in routing.read("projects/solo")), (res, pushes()[n0:]))
-fresh(); n0 = len(pushes()); n = {**recp("the release is live; it now needs: decision", key="projects/solo")}; res = act2(n, SOLO, key="projects/solo")
+fresh(); stamp(E, 5); n0 = len(pushes()); n = {**recp("the release is live; it now needs: decision", key="projects/solo")}; res = act2(n, SOLO, key="projects/solo"); unstamp(E)
 check("4d: …with a need it is marked and delivered there as before", res["ruling"] == "passed" and res["marked"] is True and len(reach(E, n0)) == 1 and held.count(E) == 0, res)
 no_log(); fresh(); log_row(FRONT, BACK, 5); stamp(A, 5); n0 = len(pushes()); n = recp("yes, the export is ready", kind="message", who="work-osprey-x (33333333…)"); res = act2(n, FRONT)
 check("4e: an answer to the front agent's question while the person is in that conversation reaches the agent, unmarked", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is False and len(reach(A, n0)) == 1
@@ -280,7 +291,11 @@ for tries in range(_live.MAX_TRIES):
     check(f"4m: try {tries + 1} to a failing background agent is an error that names it, and nothing reaches the front agent", res["status"] == "error" and res["target"] == BACK and reach(A, n0) == [], res)
     prior = {"status": res["status"], "target": res["target"]}
 res = _live._act(n, KEY, KEY, {"id": n["id"], "ruling": "passed", "target": FRONT, "reason": "it fits", "for_owner": False, "source": "code", "rule": "test", "item": ""}, _router.Context(), {**prior, "tries": _live.MAX_TRIES})
-check("4n: …after MAX_TRIES it falls back to the -main agent, marked, the reason naming the builder", res["status"] == "ruled" and res["target"] == FRONT and res["marked"] is True and res["source"] == "fallback"
+check("4n: …after MAX_TRIES it falls back to the -main agent, which is gated like any pass: this one needs nobody, so it is archived (a row of the digest), neither delivered nor held", res["status"] == "ruled" and res["ruling"] == "archived" and res["source"] == "fallback"
+      and reach(A, n0) == [] and held.count(A) == 0, (res, pushes()[n0:]))
+stamp(A, 5); n = recp("the release is live - " + mark() + " pick a or b"); n0 = len(pushes())
+res = _live._act(n, KEY, KEY, {"id": n["id"], "ruling": "passed", "target": FRONT, "reason": "it fits", "for_owner": False, "source": "code", "rule": "test", "item": ""}, _router.Context(), {"status": "error", "target": BACK, "tries": _live.MAX_TRIES}); unstamp(A)
+check("4n2: …and one that needs him, while he is talking with the agent, is delivered there marked, the reason naming the builder (nothing is lost)", res["status"] == "ruled" and res["target"] == FRONT and res["marked"] is True and res["source"] == "fallback"
       and len(reach(A, n0)) == 1 and reach(A, n0)[0][1].startswith(mark()) and BACK in res["reason"], (res, pushes()[n0:]))
 _live._HOOKS["deliver"] = _real_deliver
 fresh(); n0 = len(pushes()); n = recp("the release is live"); res = act2(n, "projects/alpha")
@@ -288,11 +303,11 @@ check("4j: a pass to a page key is delivered as before, unmarked", res["ruling"]
 fresh(); n0 = len(pushes()); n = recp("the release is live", hold="fyi"); res = act2(n, FRONT)
 check("4k: an fyi to a front agent keeps its own path: held for the next turn", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1, res)
 fresh(); held.clients_file().unlink(missing_ok=True); n0 = len(pushes()); n = recp("the release is live", key="projects/solo"); res = act2(n, SOLO, key="projects/solo")
-check("4l: a front agent whose hook cannot fetch held lines is not left without the pass: delivered, marked (nothing is dropped for want of a place to hold it)", res["ruling"] == "passed" and res["marked"] is True and len(reach(E, n0)) == 1 and held.count(E) == 0, (res, pushes()[n0:]))
+check("4l: a front agent whose hook cannot fetch held lines is not given the pass either (it needs no one, so no turn, and nothing is held for it): archived, a row of the digest", res["ruling"] == "archived" and reach(E, n0) == [] and held.count(E) == 0, (res, pushes()[n0:]))
 gate_open()
 _cfg.CFG["router"]["hold_notices"] = False
 fresh(); n0 = len(pushes()); n = recp("the release is live"); res = act2(n, FRONT)
-check("4m: with the hold switch off every pass is delivered as before, marked", res["ruling"] == "passed" and res["marked"] is True and len(reach(A, n0)) == 1, res)
+check("4m: with the hold switch off nothing is held, and the gate still stands: the pass that needs nobody starts no turn: archived, not delivered", res["ruling"] == "archived" and reach(A, n0) == [] and held.count(A) == 0, (res, pushes()[n0:]))
 _cfg.CFG["router"].pop("hold_notices")
 
 # ---- 5. staged under the temp store: what each held kind does at the next turn
@@ -303,14 +318,14 @@ check("5b: the turn-start hook hands it over, with the script's label and no mar
       and mark() not in body_.get("text", "") and held.count(E) == 1, (st_, body_))
 held.ack(E, ids=body_.get("ids")); st_, body_ = _rt_client._client_post(MACH, "held", {"uuid": E, "name": SOLO})
 check("5c: …after the acknowledgement the next turn gets nothing", st_ == 200 and held.count(E) == 0 and not body_.get("text"), (st_, body_))
-fresh(); n1 = recp("first result", key="projects/solo"); n2 = recp("second result", key="projects/solo"); act2(n1, SOLO, key="projects/solo"); act2(n2, SOLO, key="projects/solo")
+fresh(); n1 = recp("first result", key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); n2 = recp("second result", key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); act2(n1, SOLO, key="projects/solo"); act2(n2, SOLO, key="projects/solo")
 text_ = held.take(E, SOLO)
 check("5d: two passes from one sender are two lines, oldest first, none folded into the other (the store folds only a repeated notice id)", held.count(E) == 0 and 0 <= text_.find("first result") < text_.find("second result"), text_)
-fresh(); n1 = recp("same notice", key="projects/solo"); act2(n1, SOLO, key="projects/solo"); act2(n1, SOLO, key="projects/solo")
+fresh(); n1 = recp("same notice", key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); act2(n1, SOLO, key="projects/solo"); act2(n1, SOLO, key="projects/solo")
 check("5e: the same notice passed twice (a ruling that failed to write) is held once", held.count(E) == 1, held.count(E))
 fresh(); k_ = held.key_of(SOLO)
 for i in range(held.KEEP_MAX): held.add(k_, "fyi", f"old {i}", now=time.time() - 100 + i * 0.01)
-n = recp("the newest result", key="projects/solo"); res = act2(n, SOLO, key="projects/solo"); lines_ = " ".join(r["text"] for r in held._read(held._file(k_)))
+n = recp("the newest result", key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); res = act2(n, SOLO, key="projects/solo"); lines_ = " ".join(r["text"] for r in held._read(held._file(k_)))
 check("5f: a full store keeps the pass and drops its oldest line (the router log and the stored notice keep it)", res["ruling"] == "held" and held.count(E) == held.KEEP_MAX and "old 0" not in lines_ and "the newest result" in lines_ and _live.stashed(n["id"]) == "the newest result", res)
 fresh(); held.clients_file().unlink(missing_ok=True); n0 = len(pushes()); out = msg(SOLO, "the PR is merged, the export is next", "home-beta"); settle()
 check("5g: an agent whose hook cannot fetch held lines is not given the message: the reply says not passed on, nothing held or pushed, the message log keeps the words", out.startswith("not passed on") and held.count(E) == 0 and reach(E, n0) == []
@@ -319,13 +334,20 @@ st_, body_ = _rt_client._client_post(MACH, "message", {"to": SOLO, "text": "the 
 check("5h: …a script gets a refusal (400) in that case, since it reads the status and not the sentence", st_ == 400 and held.count(E) == 0, (st_, body_))
 gate_open()
 
-# an anchor notice held through the front gate (a project with no background agent) still releases the item that waits on its anchor: the front agent gets the line at its next turn
+# an anchor notice the front gate archived (a project with no background agent) still releases the item that waits on its anchor: the event happened, and no turn is owed for it
 PRURL = "https://github.com/example/repo/pull/77"
 item(20, owner=E, hold=True, wake="2099-01-01", project="projects/solo", mover=SOLO)
 _wt_anchors._anchors("projects/solo", add=[PRURL], items=["a20"], who="t")
 fresh(); n0 = len(pushes()); n = recp("merged", key="projects/solo", kind="anchor", who="hub", anchor=PRURL); res = act2(n, SOLO, key="projects/solo")
-check("4o: an anchor notice held for a front-only project's front agent starts no turn", res["ruling"] == "held" and reach(E, n0) == [], (res, pushes()[n0:]))
+check("4o: an anchor notice for a front-only project's front agent that needs nothing of him starts no turn: archived, nothing delivered or held", res["ruling"] == "archived" and reach(E, n0) == [] and held.count(E) == 0, (res, pushes()[n0:]))
 check("4p: …and still releases the item that waited on its anchor", not rd(20)["metadata"].get("hold"), rd(20)["metadata"])
+# the same release when the GATE archives the anchor notice (it needs him, he is not talking with the agent, and no background agent moves an item it names), not the route
+PRURL2 = "https://github.com/example/repo/pull/78"
+item(21, owner=X, hold=True, wake="2099-01-01", mover=X)
+_wt_anchors._anchors(KEY, add=[PRURL2], items=["a21"], who="t")
+fresh(); unstamp(A); n0 = len(pushes()); n = recp(f"{_live._owner_mark()} merged", kind="anchor", who="hub", anchor=PRURL2); res = act2(n, FRONT); settle()
+check("4p2: a pass that needs him, with he not talking with the front agent and no item named, is archived by the gate: nothing delivered, nothing held", res["ruling"] == "archived" and reach(A, n0) == [] and held.count(A) == 0, (res, pushes()[n0:]))
+check("4p3: …and the gate-made archive still releases the item that waited on its anchor (the event happened)", not rd(21)["metadata"].get("hold"), rd(21)["metadata"])
 
 # ---- 7. the review's cases: a sender that is the destination, front peers, one choice of background agent, a cut line, a closed item, one write, the need signals
 COMP, DUOM, DUOA, DUOB = "comp-main", "duo-main", "duo-a", "duo-b"
@@ -341,7 +363,7 @@ check("7c: a front agent's message to a front peer is held for the peer's next t
 fresh(); n0 = len(pushes()); n = recp("can you look at the export page?", kind="message", who="solo-main (77777777…)"); res = act2(n, FRONT)
 check("7d: …and the router holds a pass from a front agent to a front peer the same way: unmarked, no turn, not sent to the builder", res["ruling"] == "held" and res["marked"] is False and reach(X, n0) == [] and reach(A, n0) == []
       and held.count(A) == 1 and "look at the export page" in held.take(A, FRONT), (res, pushes()[n0:]))
-fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", SOLO); settle()
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", SOLO); settle(); unstamp(A)
 check("7e: …a front agent's marked message to a peer still needs the person and is delivered", out.startswith("delivered") and len(reach(A, n0)) == 1, out)
 # one choice of background agent, for the message tool and the router alike
 fresh(); n0 = len(pushes()); out = msg(COMP, "can you look at the export page?", "home-beta"); settle()
@@ -353,9 +375,9 @@ check("7h: two background agents and no builder: the message tool names the firs
 fresh(); n0 = len(pushes()); n = recp("the release is live", key="projects/duo"); res = act2(n, DUOM, key="projects/duo")
 check("7i: …and the router names the same one", res["ruling"] == "passed" and res["target"] == DUOA and len(reach(DA, n0)) == 1 and reach(DB, n0) == [], (res, pushes()[n0:]))
 # a held pass is not cut silently
-fresh(); long_ = " ".join(f"word{i}" for i in range(120)); n = recp(long_, key="projects/solo", who="home-beta (44444444…)"); res = act2(n, SOLO, key="projects/solo"); text_ = held.take(E, SOLO)
-check("7j: a held router pass longer than a held line is cut with a note naming the sender and the notice, the start of the text kept", res["ruling"] == "held" and long_[:80] in text_ and n["id"] in text_ and "home-beta" in text_ and "cut" in text_ and text_.count("word") < 110, (res, text_))
-fresh(); n = recp("the release is live", key="projects/solo"); act2(n, SOLO, key="projects/solo"); text_ = held.take(E, SOLO)
+fresh(); long_ = " ".join(f"word{i}" for i in range(120)); n = recp(long_, key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); res = act2(n, SOLO, key="projects/solo"); text_ = held.take(E, SOLO)
+check("7j: a held router pass longer than a held line is cut with a note naming the sender and the notice, the start of the text kept", res["ruling"] == "held" and long_[:80] in text_ and n["id"] in text_ and "work-osprey-main" in text_ and "cut" in text_ and text_.count("word") < 110, (res, text_))
+fresh(); n = recp("the release is live", key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); act2(n, SOLO, key="projects/solo"); text_ = held.take(E, SOLO)
 check("7k: …a pass that fits is held whole, with no cut note", "the release is live" in text_ and "cut" not in text_ and n["id"] not in text_, text_)
 # an answer for a closed item is not written onto it
 no_log(); fresh(); log_row(FRONT, BACK, 5); stamp(A, 31); n0 = len(pushes()); before_ = (T / "store/a/15.json").read_text(); out = msg(FRONT, "a15: the slides are ready as well", BACK); settle()

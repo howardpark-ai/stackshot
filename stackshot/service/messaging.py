@@ -42,6 +42,7 @@ from stackshot.router import router as _router
 from stackshot.router import router_live as _router_live
 from stackshot.router import routing as _routing
 from stackshot.service import agent_names as _agent_names
+from stackshot.service import front_turn as _front_turn
 from stackshot.service import fleet_events as _fleetev
 from stackshot.service import handoff as _handoff
 from stackshot.service import store as _svcstore
@@ -372,8 +373,9 @@ def router_answer(front: str, who: str, raw: str, nid: str = "") -> tuple[str, s
 def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "") -> "str | _Hold | None":
     """(the owner's decision): a front agent, a session he talks to, hears a peer's message with a turn only when it needs him. A message addressed to a project page goes to the
     project (the router rules it) and never reaches this gate. In order:
-      marked ([for <owner>] on its first non-empty line): it needs him, and is delivered; unless it says in a fixed phrase that nothing is needed from him (a done, taken or no-ask note): refused, one line;
+      marked ([for <owner>] on its first non-empty line): it needs him; unless it says in a fixed phrase that nothing is needed from him (a done, taken or no-ask note): refused, one line;
         a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
+        it is delivered, a turn, only when he is talking with that agent now or asked it to tell him about an item the text names (front_turn.warranted; his own message always; a script's is tested too); else it never reaches the agent, not even held: refused, naming the background agent that works a named item (else the project), and logged;
       unmarked, from the person himself or with the mark or needs: decision away from the first line: refused, the mark goes on the first line;
       unmarked, an answer to a question the front agent itself put to the sender (answer_route): delivered while he is in that conversation, else written onto the item it names, else held;
       unmarked, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
@@ -421,7 +423,48 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     if m:
         raise ToolError(f"Refused: {name} is a front agent of {project} and {_FOR_OWNER} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
                         f"If {OWNER} does have something to do here, say what it is and leave that phrase out.")
-    return (_builder_report(name, text, sender, idx, roles) if sender.strip() else "") or None
+    rep = (_builder_report(name, text, sender, idx, roles) if sender.strip() else "")
+    if rep:
+        return rep
+    if not (sender.strip() and _model.is_owner(sender)) and not _turn_warranted(name, text):      # the mark needs him, but a turn is warranted only when he is talking with this agent now or asked it to tell him about the subject
+        builder = _builder_named(text, roles, sname)
+        why = f"{OWNER} is not talking with {name} now and has not asked it to tell him about this"
+        _log_not_delivered(sender, to, text, f"not delivered: {why}")
+        raise ToolError(f"Refused: {name} is a front agent of {project}, and {why}, so it starts no turn there and nothing is held for its next turn. "
+                        + (f"It names an item that {builder} works on: send it there (message(to={builder!r}, …)). " if builder else f"Put it on the board item it concerns, or send it to {goes}. ")
+                        + "The message is in the message log.")
+    return None
+
+
+def _builder_named(text: str, roles: dict[str, Any], sname: str) -> str:
+    """The background agent that moves an item the text names (not the sender itself): where a marked message that starts no turn of a front agent is sent instead. "" when none."""
+    try:
+        for gid in _agent_names._item_refs(text):
+            it = _svcstore._load(gid)
+            who = _sr._role_name(roles, _anc.mover_of(it), "")
+            if who and roles[who]["role"] == "back" and who.casefold() != str(sname or "").casefold():
+                return who
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _log_not_delivered(sender: str, to: str, text: str, outcome: str) -> None:
+    """A message that reached no one is in the message log all the same (the row says why). Never raises."""
+    try:
+        MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(MSG_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender or "a script", "auth": "", "to": to, "outcome": outcome, "error": "", "text": _svcstore._shown_ids(text)}, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _turn_warranted(name: str, text: str) -> bool:
+    """front_turn.warranted for a marked message to the front agent `name`: a turn only when he is talking with it now or asked it about an item the text names. False on any failure (it fails closed: not delivered, never delivered on a guess)."""
+    try:
+        return _front_turn.warranted(name, _agent_names._item_refs(text), True)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _cut_note(line: str, routed: bool = False, script: bool = False) -> str:

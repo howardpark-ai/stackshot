@@ -1282,7 +1282,7 @@ def call_line(a: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Con
       - an invalid ruling, a target that is no agent of the project or no reason → -main (fallback_line);
       - STRONG signals (the text carries [for <owner>] or needs: decision, the notice is an anchor notice of an item that waits on
         a decision, or the call itself marks for_owner) on a dropped, merged or archived notice → passed to the item's mover (else
-        -main), for_owner: rule `clamp`;
+        -main), for_owner: rule `clamp`. Whether that pass starts a front agent's turn is router_live's gate (_front_turn_gate: only while he talks with the agent, or when he asked it), else it goes to the item's builder or is archived;
       - WEAK signals (the text only names the owner or an alias, or says decision) on a dropped or merged notice → archived, reason
         "archived for the digest: …", never a pass to a front agent: rule `clamp`. A notice the call itself archived stays archived (an answer of `held`,
         the call's earlier word for it, is read as archived);

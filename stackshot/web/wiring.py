@@ -56,6 +56,7 @@ from stackshot.web.tools import rules as _rules_tool
 from stackshot.core.instance import NAME
 from stackshot.service import writes as _writes
 from stackshot.service import telling as _telling
+from stackshot.service import front_turn as _front_turn
 from stackshot.service import store as _svcstore
 from stackshot.service import create as _create_svc
 from stackshot.service import gates as _gates
@@ -108,9 +109,9 @@ def _late_in(module: Any, name: str) -> Callable[..., Any]:
 
 def _router_live_after(project: str, n: dict[str, Any]) -> None:
     """After the live router ruled a notice (router_live._act): what _route does after a keeper's ruling. A hold that waited on the
-    notice's anchor is released on a passed or merged ruling (never a dropped or archived one, as for a keeper's), and the board is
-    republished."""
-    if n.get("ruling") in ("passed", "merged") or n.get("front_held"):
+    notice's anchor is released on a passed or merged ruling (never a dropped or archived one, as for a keeper's; except a pass the front gate archived: the
+    event happened, and no turn of a front agent is owed for it), and the board is republished."""
+    if n.get("ruling") in ("passed", "merged") or n.get("front_held") or n.get("front_gate"):
         _wakes.anchor_release(project, n, by=_router_live.BY)
     _pubmod._publish()
 
@@ -179,6 +180,7 @@ def install_early(host: Any) -> None:
                            deliver=lambda target, text: _agent_names._router_delivered(target, text, _router_live.deliver_via(_telling.PUSH, target, text)),
                            after_rule=_router_live_after,
                            front_answer=lambda target, who, text, nid="": _messaging.router_answer(target, who, text, nid),
+                           front_turn=lambda target, subject, needs=True: _front_turn.warranted(target, subject, needs),
                            front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi": _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)
                                target, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *([] if kind == "page-owed" else _agent_names._item_refs(text))])), nid, log, kind))      # a page-owed line names no item to write a board line on: the owed list is the board's record of it
 

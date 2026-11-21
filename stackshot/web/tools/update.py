@@ -51,7 +51,7 @@ RANK_RETIRED = _T.piece("RANK_RETIRED")
 # later has to be placed in one of them.
 _ASK_TEXT_PARAMS = ("subject", "description", "next", "options", "said", "work", "check", "wait_basis", "reason", "expected_reason", "step", "supplies", "goal", "wait_event", "draft", "watch_reason",
                     "outcome_text", "wait_reason", "reword", "waits",                                         # free text (a list's lines carry anchors, events and item ids)
-                    "owner_name", "owner", "agent", "observers", "step_proof",                                # stored as written, with no check against a closed set: counted as text too
+                    "owner_name", "owner", "agent", "observers", "tell_him", "step_proof",                                # stored as written, with no check against a closed set: counted as text too
                     "wait_anchor", "post_wake_mover", "then")                                                 # a stored string a session names, accepted as written (found by a real update call with a hedge in it)
 _ASK_NONTEXT_PARAMS = (
     "item_id", "status", "priority", "outcome", "wait_kind",                                                 # a fixed word, or the item's own id
@@ -138,6 +138,7 @@ def stackshot_update(
     options: _OPTIONS_PARAM = None,
     agent: str = "",
     observers: list[str] | str | None = None,
+    tell_him: Annotated[str, Field(description="Front agent names, comma-separated.")] = "",
     after: _AFTER_PARAM = None,
     work: _WORK_PARAM = None,
     said: Annotated[list[dict[str, Any]] | str | None, Field(description=_SAID_PARAM)] = None,
@@ -218,7 +219,7 @@ def stackshot_update(
     ask_pre = _gates.ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
     with _writes.session_write():
         out = _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
-                       hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, after=after, work=work, said=said, check=check,
+                       hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, tell_him=tell_him, after=after, work=work, said=said, check=check,
                        clear_options=clear_options, clear_ask=clear_ask, clear_after=clear_after, wait_basis=wait_basis, clear_wait_basis=clear_wait_basis,
                        expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
                        goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,

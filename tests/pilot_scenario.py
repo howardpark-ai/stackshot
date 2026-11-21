@@ -136,6 +136,8 @@ from stackshot.service import writes
 from stackshot.service import telling
 from stackshot.core import instance as _core_instance
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+from stackshot.service import front_turn as _front_turn
+_front_turn.warranted = lambda *a, **k: True      # he is with every front agent, so a marked pass or message to one is a turn: this suite is about the board, the items and what is delivered where; the gate (a turn only while he is there, or on his ask) has its own: front_turn, front_hold
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 def setwk_(m, w):
