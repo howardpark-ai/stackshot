@@ -379,7 +379,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         item["updated"] = now
         _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(NAME, "mail") if via == "mail" else (OWNER, "board"))
         if parked or until or (kind == "decision" and eff["do"] == "wait"):
-            _runner.WAKE_EVENT.set()           # the minute loop takes the new wake in
+            _runner.wake()                     # the minute loop takes the new wake in (the event, and the wake file for a runner in another process)
         if kind == "decision" and eff["do"] == "drop":      # the items that waited on this one are released after both locks are let go (_release_dropped): a release tells the waiters
             drop.append(True)
         item["gid"] = gid
