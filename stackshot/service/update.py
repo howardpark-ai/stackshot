@@ -437,21 +437,26 @@ def _doing_wait_note(meta: dict[str, Any], next_: str = "", busy: str | None = N
 
 
 def _wait_tells(sender: str, reasons: "list[str]", nexts: "list[str]", sets_wait: bool) -> str:
-    """Two notes on the reply (never a refusal) of a write that sets a wait: it waits on stackshot's own count, dry run or watch, which the writer can read or stage now (_wtell.own_read, read from the reason
-    this write gives, its wait_basis, wait_event and wait reason, never its next or status line, and silent when the reason names an outside party); or it waits on a front agent's answer, set by a back (background)
-    session, whose call is the writer's to decide or to put to the user (_wtell.front_named, read from the reason and the next: the front agent is the one waited on or asked, not one told something). Not judged: a write
-    that sets no wait, a front agent's own write, a writer no project page lists as back, an `after` on an item a front agent holds (a dependency on its work is a wait), and a wait on a front agent that nothing names
-    (a `needs` naming one). A failure of the check is a stderr line, never a failed write."""
+    """Two notes on the reply (never a refusal) of a write that sets a wait, both only for a back (background) or builder session: it waits on stackshot's own count, dry run or watch, which the writer can read or stage now
+    (_wtell.own_read, read from the reason this write gives, its wait_basis, wait_event and wait reason, never its next or status line, and silent when the reason names an outside party or another blocker); or it waits on a front
+    agent's answer, whose call is the writer's to decide or to put to the user (_wtell.front_named, read from the reason and the next: the front agent is the one waited on or asked, not one told something). Not judged: a write
+    that sets no wait (a hand-off's backstop date is none), a front agent's own write, a writer no project page lists as back, an `after` on an item a front agent holds (a dependency on its work is a wait), and a wait on a front
+    agent that nothing names (a `needs` naming one). The roles are read only when a text could be told at all. A failure of the check is a stderr line, never a failed write: the own-read note, which needs the roles only to
+    leave out a writer that is no back session, then stands."""
     if not sets_wait or not sender.strip():
         return ""
-    out = _wtell.OWN_READ_NOTE if _wtell.own_read(*reasons) else ""
+    own = bool(_wtell.own_read(*reasons))
+    front = _wtell.could_name_front([*reasons, *nexts])
+    if not own and not front:
+        return ""
+    out = _wtell.OWN_READ_NOTE if own else ""
     try:
         roles = _anc.session_roles()
         me = roles.get(_role_name(roles, sender)) or {}
         if me.get("role") != "back":
-            return out
+            return ""
         fronts = [n for n, r in roles.items() if r.get("role") == "front" and not r.get("retired")]
-        who = _wtell.front_named([*reasons, *nexts], fronts)
+        who = _wtell.front_named([*reasons, *nexts], fronts) if front else ""
         if who:
             out += _wtell.FRONT_ANSWER_NOTE.format(who=_session_label(who), him=OWNER)
     except Exception as e:  # noqa: BLE001  — the tell is an extra: a failure leaves the write as it was
@@ -1443,7 +1448,7 @@ def update_unlocked(
                  + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(hold or wake or until_wait or after_set or wait_kind.strip() or wait_basis.strip() or waits)) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + answered_note + named + told + h.nag(debtor))
 
 

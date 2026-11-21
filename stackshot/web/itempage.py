@@ -127,6 +127,11 @@ def wait_what(w: "_model.Wait", *, shown: Callable[[str], str] = str, party: str
     return _t("wait.what.event_from", event=ev, party=p) if p and p.lower() not in ev.lower() else ev
 
 
+def wait_shows_end(w: "_model.Wait") -> bool:
+    """Does the board show a date for this wait's end? Not a wait on the close of an item: it is told by that item alone, as `model.words` tells it, and the backstop it also carries stays stored and in force, unprinted."""
+    return not (w.kind == "item" and bool(w.after))
+
+
 def wait_end_label(w: "_model.Wait") -> str:
     """The word before a wait's end date: "until" for a time, "ask by" for a relay (the day it turns into a question), "backstop" for an event wait's fallback date; "until" whatever the kind
     when the date is the item's stored `until`."""

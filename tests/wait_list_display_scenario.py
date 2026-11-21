@@ -158,7 +158,10 @@ check("escape: …an anchor that is not a web address is text, not a link (row a
 S320, S321, S322, S323 = (plain(wait_cell(g)) for g in ("a320", "a321", "a322", "a323"))
 check("single: a time wait reads as it did (until the day), no list class", S320 == f"Until {W(day(5))}" and 'class="wl"' not in wait_cell("a320"), S320)
 check("single: …a relay wait (the party's news, ask by the day)", S321.startswith("On ") and f"ask by {W(day(5))}" in S321 and "the lease" in S321 and 'class="wl"' not in wait_cell("a321"), S321)
-check("single: …an item wait (after the item, back anyway the backstop)", S322 == f"After a301 · back anyway {W(day(7))}", S322)
+check("single: …an item wait (after the item, and only the item: the backstop it carries stays stored and is not printed, as the model line says it)", S322 == "After a301", S322)
+P322 = page_wait("a322")
+check("single: …its page names the item and shows no end row and no backstop day (the model line's words)", "a301" in plain(P322) and W(day(7)) not in plain(P322) and "Backstop" not in P322 and "<dt>End</dt>" not in P322
+      and W(day(7)) not in plain(b.item_html("a322")), plain(P322))
 check("single: …an anchor wait (on the anchor, its event, the backstop)", S323.startswith("On ") and "PR merged" in S323 and f"backstop {W(day(7))}" in S323, S323)
 check("single: …their who lines keep the watcher of their kind (scheduler, scheduler, server, anchor module)", [who_line(g) for g in ("a320", "a321", "a322", "a323")]
       == ["team-back picks it up · watched by the scheduler", "team-back picks it up · watched by the scheduler", "team-back picks it up · watched by the server", "team-back picks it up · watched by the anchor module"], [who_line(g) for g in ("a320", "a321", "a322", "a323")])
