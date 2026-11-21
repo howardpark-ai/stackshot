@@ -346,9 +346,6 @@ def _front_fyi(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx
         body = _body(n)
         if _person_words(n, ln, body) or _held._owner_mark().search(body) or not _is_front(target, root, cx):
             return "", ""
-        sender = _sender_name(n)
-        if not (sender and sender.casefold() != str(target).casefold() and _front_anywhere(sender, root, cx)):      # a front agent's word to a peer is the channel between them, as in _front_route
-            _want_background(n, root)      # an fyi is a message to the project too: filed for the front agent whatever its project has, so a project with no background agent wants one (the call checks)
         return fn(target, body, str(ln.get("item") or ""), n["id"], False) or ("", "")      # log=False: the router's own ruling is the routing-log line
     except Exception:  # noqa: BLE001
         return "", ""
@@ -497,12 +494,21 @@ def _must_see(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Con
     return bool(_person_words(n, ln, body) or _held._owner_mark().search(body) or ln.get("rule") == "audit-owners" or _item_waits_decision(n, ln, body, cx))
 
 
-def _want_background(n: dict[str, Any], root: str) -> None:
-    """A message to a project whose page lists a front agent and no background agent is recorded as a want for one (service/background_want.py; the fleet tool may create the agent): the message itself takes the
-    route it takes without this call. Only a message a session wrote counts: a board or anchor notice, and the server's own line about an item, want none. Never raises."""
+def _want_background(n: dict[str, Any], root: str, ln: dict[str, Any], cx: "_router.Context") -> None:
+    """A message to a project whose page lists a front agent and no background agent is recorded as a want for one (service/background_want.py; the fleet tool may create the agent), whatever the router rules it: the one
+    call is made by `_act` before any ruling is carried out, so a model call's or a rule's archived, merged or dropped, a hold, a pass to a front agent that needs the person and a pass the front gate archives all record it
+    (the call checks that the project has no background agent), and the message takes the route it takes without it. Only a message a session wrote counts: a board or anchor notice, the server's own line about an item, an audit
+    finding, any other line the audit sends, a front agent's word (a peer's, or its own project's) and the person's own message want none. Never raises."""
     try:
         fn = _HOOKS["want_background"]
-        if not fn or str(n.get("kind") or "") != "message" or str(n.get("text") or "").lstrip().startswith("[board]"):
+        if not fn or not _cfg.background_agent_enabled():      # the switch first: off (the default) does no further work
+            return
+        if str(n.get("kind") or "") != "message" or str(n.get("text") or "").lstrip().startswith("[board]") or ln.get("rule") == "audit-owners":
+            return
+        if _cfg.is_audit_sender(n.get("who")) or _cfg.is_audit_sender(cx.name_of(str(n.get("who") or ""))):      # the audit's own line (its findings, its held notes, the filing passes'), the same test the message tool makes, on the label and on the session a bare id names
+            return
+        sender = _sender_name(n)
+        if sender and (_front_anywhere(sender, root, cx) or _router._is_owner_name(sender)):      # a front agent's word (a peer's, or its own project's) is the channel between front agents, and the person's own message is no session's: neither calls for a background agent
             return
         fn(root, "message")
     except Exception:  # noqa: BLE001
@@ -513,7 +519,7 @@ def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, 
     """What a pass to a FRONT agent with no need of the person becomes (_must_see is false; an fyi and a page-owed notice have their own paths above). -> ("", "") as before: marked, delivered (a need, no gate
     wired, the switch off, a recipient that is no front agent); ("deliver", "") an answer to a question of the agent's while the person is in that conversation (a message notice from a session the agent itself wrote to: the
     answer hook): delivered to the agent, unmarked; ("items", reply) such an answer while he is not: written onto the item it names, nothing delivered; ("background", name) the project's background agent (its builder,
-    else the first listed) takes it, unmarked; ("archived", why) a project with no background agent: nobody is told, the ruling is archived (a row of the digest), nothing is held, and a want for one is recorded (_want_background); ("hold", why) held for the agent's next turn
+    else the first listed) takes it, unmarked; ("archived", why) a project with no background agent: nobody is told, the ruling is archived (a row of the digest), nothing is held; ("hold", why) held for the agent's next turn
     through the front gate: only what is one agent's word to another (an answer outside the conversation that names no item, a peer front agent's message, the background agent's own word), which starts no turn. Never raises."""
     try:
         if not _HOOKS["front_fyi"] or not target or not _held.enabled() or not _is_front(target, root, cx):
@@ -534,8 +540,6 @@ def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, 
         back = _anc.background_agent(root, cx.reg)       # the one lookup the message tool uses too: the builder, else the first background agent, a hub's for a component page with none
         if back and sender and sender.casefold() == back.casefold():      # the background agent's own word to the front agent can never go back to it
             return "hold", f"{back} is the project's background agent, so it cannot go back to it"
-        if not back:
-            _want_background(n, root)
         return ("background", back) if back else ("archived", "the project has no background agent")
     except Exception:  # noqa: BLE001
         return "", ""
@@ -764,6 +768,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
             "note": _router._clean(ln.get("note"), NOTE_MAX)}          # `note`: PR-X's optional key of a ruling line, read with .get
     aroot = agent_root(root, cx.reg)                  # the page whose agents serve this project (its hub's, for a component with none of its own)
     main = cx.main_agent(aroot)
+    _want_background(n, aroot, ln, cx)      # whatever the ruling: set-if-absent, so a retried notice records nothing new
     try:
         ruling, target, reason = ln["ruling"], ln.get("target", ""), ln.get("reason", "")
         if ruling == "passed":

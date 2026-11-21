@@ -104,7 +104,7 @@ from stackshot.audit.audit_checks import (CHECKS_CODE, FIX, _clip, _f, _hours, _
                           goal_sig, goal_view, group_patterns, idle_pass, log_row, parse_drafts, pattern_prompt, pick_patterns, proof_wait_findings)
 
 RUBRIC = HERE / "audit_rubric.txt"
-SENDER = "stackshot audit"
+SENDER = _cfg.AUDIT_SENDER
 UNMOVED_MIN_HOURS = 6.0       # the previous run counts as "before this one" when it started this long ago; with scheduled runs some hours apart the run before is always the previous one
 ONCE = ("event-missing",)    # a finding of these categories is sent once and never repeated or escalated (the builder's message about an event no type reports)
 REMIND_TRIES = 3             # a ten-minute pass sends an unanswered finding this many times (first send and reminders), then once to the builder as unmoved, then (a finding that went to a builder) once to the project's -main agent (split_sent)

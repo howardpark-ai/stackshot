@@ -4,9 +4,10 @@
   1  the switch: [background_agent] enabled is off by default (the example config), and a switch that is off writes no state file and no lock file and answers an empty list
   2  who is eligible: one fixture per reason for none (retired, moved, hidden, no front agent, a one-session project, a sub-page, a page with a hub line, a project with a builder, one with other background agents,
      a front agent that is no session of the fleet) and the kinds (a board or anchor notice never wants one), then the project that does want one; the want is keyed by the project's id and set only when absent
-  3  the routes: which branch of the router and of the message tool records a want and which does not (a plain message, an fyi, the message tool's hold: yes; a board or anchor notice, the server's own line, a
-     peer front agent's word, an answer to the agent's question, a pass that needs the person, an audit finding, a project with a background agent, an fyi by name: no), and the ruling is the same with the want
-     as without it
+  3  the routes: every ruling path of a message records the want, and the ruling is the same with the want as without it (a plain message, an fyi, a pass that needs the person, an answer to the agent's question, the router's own
+     call ruling archived, merged or dropped, a rule in code, and in the message tool every branch of the front gate, its refusals included: yes; a board or anchor notice, the server's own line, the audit's and the filing passes' messages (marked, unmarked, fyi), a front agent's word (a peer's or its own
+     project's), the person's own message (by name or to the key), an audit finding, a message the tool refuses for its recipient (a pane gone, an unknown name), a project with a background agent: no;
+     a component page with no agents records its hub's want)
   4  races: eight threads and two processes set one project's want once (the lock)
   5  wanted(): a want drops out once the project lists a background agent (and is marked served); after the agent is retired a new message wants again only after the cooldown; a project that turned ineligible is left out
   6  the cap on open wants, the cooldown from the want itself, a setting that is no number
@@ -71,7 +72,7 @@ def publish(pages=None, **changes):
 publish()
 RECORD = {"schema": 1, "ids": {}, "pending_agents": {}, "marks": {}}
 (T / "store/project-record.json").write_text(json.dumps(RECORD))
-NAMES = ("solo-main", "other-main", "other-desk", "third-main", "alpha-main", "alpha-builder", "duo-main", "home-beta", "side-main", "comp-main", "slackonly-bot")
+NAMES = ("solo-main", "other-main", "other-desk", "third-main", "alpha-main", "alpha-builder", "duo-main", "home-beta", "side-main", "comp-main", "slackonly-bot", "kept-main", "solo")
 U = {n: "%08x-0000-4000-8000-%012x" % (i, i) for i, n in enumerate(NAMES, 1)}
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a", "url": "", "seen": "x"} for n, u in U.items()}))
@@ -100,6 +101,8 @@ handoff_svc.CLI_SESSIONS = T / "cli"
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 MACH = "home-test"
 for n_, u_ in U.items(): _clients.register(MACH, {"uuid": u_, "name": n_}); held.mark_client(u_, n_)      # the rollout gate: every hook has fetched held lines
+U["audit"] = "%08x-0000-4000-8000-%012x" % (len(NAMES) + 1, len(NAMES) + 1)      # the configured audit agent's session (its name is the instance's, read from the config)
+_rows = json.loads((T / "fleet/a/sessions.json").read_text()); _rows[U["audit"]] = {"name": _cfg.audit_agent(), "machine": "a", "url": "", "seen": "x"}; (T / "fleet/a/sessions.json").write_text(json.dumps(_rows))
 SOLO, SOLO_KEY, ALPHA_KEY = "solo-main", "projects/solo", "projects/alpha"
 def pane(who):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": "idle", "startedAt": int((time.time() - 7200) * 1000),
@@ -193,7 +196,7 @@ routed("a board notice (kind board) to it", SOLO_KEY, "the export page reads fin
 routed("an anchor notice to it", SOLO_KEY, "the export page reads fine", SOLO, False, "archived", kind="anchor")
 routed("the server's own line about an item (a message whose text opens [board])", SOLO_KEY, "[board] item nine: someone changed next", SOLO, False, "archived", who="stackshot")
 routed("a peer front agent's word (held for the front agent, the channel between them)", SOLO_KEY, "the export page reads fine", SOLO, False, "held", who=who_of("other-main"))
-routed("a pass that needs the person (his mark in the text; not delivered without him there)", SOLO_KEY, "the export page reads fine - it now needs: decision", SOLO, False, None)
+routed("a pass that needs the person (his mark in the text; the front gate archives it, he is not with the agent)", SOLO_KEY, "the export page reads fine - it now needs: decision", SOLO, True, "archived")
 routed("an audit finding (rule audit-owners)", SOLO_KEY, "the export page reads fine", SOLO, False, None, ln={"rule": "audit-owners"})
 routed("a plain message to a project WITH a builder (it goes to the builder)", ALPHA_KEY, "the export page reads fine", "alpha-main", False, "passed")
 routed("an fyi to a project with a builder (filed for the front agent)", ALPHA_KEY, "the export page reads fine", "alpha-main", False, "held", hold="fyi")
@@ -205,10 +208,43 @@ def log_row(frm, to, ago_min):
     t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=ago_min)).isoformat(timespec="seconds")
     with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f: f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": "delivered", "error": "", "text": "is it ready?"}) + "\n")
 _messaging.MSG_LOG.unlink(missing_ok=True); log_row(SOLO, "home-beta", 5); stamp(SOLO, 5)
-routed("an answer to the front agent's own question while he is in that conversation (delivered)", SOLO_KEY, "yes, the export is ready", SOLO, False, "passed")
+routed("an answer to the front agent's own question while he is in that conversation (delivered)", SOLO_KEY, "yes, the export is ready", SOLO, True, "passed")
 unstamp(SOLO)
-routed("…and the same answer while he is not", SOLO_KEY, "yes, the export is ready", SOLO, False, None)
+routed("…and the same answer while he is not (held for the agent's next turn)", SOLO_KEY, "yes, the export is ready", SOLO, True, "held")
 _messaging.MSG_LOG.unlink(missing_ok=True)
+# a ruling that is no pass never reaches the front agent's route: the router's own call (a model ruling) and a rule in code settle a message before it, and the want is recorded all the same
+CALL, TXT = {"ruling": "archived", "source": "call", "rule": ""}, "a staged test of the start-an-agent path; nothing to do"
+routed("the router's own call rules the message archived (a model ruling: no pass, no front route)", SOLO_KEY, TXT, "", True, "archived", ln=CALL)
+routed("the router's own call rules an fyi archived", SOLO_KEY, TXT, "", True, "archived", ln=CALL, hold="fyi")
+routed("the router's own call rules it merged (into an earlier notice)", SOLO_KEY, TXT, "", True, "merged", ln={**CALL, "ruling": "merged"})
+routed("the router's own call rules it dropped", SOLO_KEY, TXT, "", True, "dropped", ln={**CALL, "ruling": "dropped"})
+routed("a rule in code rules it archived (a page pass, an image: source code, no pass)", SOLO_KEY, TXT, "", True, "archived", ln={"ruling": "archived", "source": "code", "rule": "page-pass"})
+routed("a rule in code rules it merged (the writer's own relay)", SOLO_KEY, TXT, "", True, "merged", ln={"ruling": "merged", "source": "code", "rule": "message-item"})
+routed("a message to a project WITH a builder that the call rules archived records none (the project has a background agent)", ALPHA_KEY, TXT, "", False, "archived", ln=CALL)
+routed("a board notice the call rules archived records none", SOLO_KEY, TXT, "", False, "archived", ln=CALL, kind="board")
+routed("an anchor notice the call rules archived records none", SOLO_KEY, TXT, "", False, "archived", ln=CALL, kind="anchor")
+routed("the server's own line about an item, ruled archived by the call, records none", SOLO_KEY, "[board] item nine: someone changed next", "", False, "archived", ln=CALL, who="stackshot")
+routed("a peer front agent's word ruled archived by the call records none (the channel between front agents)", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=who_of("other-main"))
+routed("an audit finding ruled archived records none", SOLO_KEY, TXT, "", False, "archived", ln={**CALL, "rule": "audit-owners"})
+routed("a script's message ruled archived by the call records a want (a script is no peer front agent)", SOLO_KEY, TXT, "", True, "archived", ln=CALL, who="nightly-check (a script on box-a)")
+routed("a message with his mark in the text, ruled archived by the call", SOLO_KEY, "the export page reads fine - needs: decision", "", True, "archived", ln=CALL)
+# who writes: a front agent to its own project's key is no call for a background agent (the project's own front agent, with a target of the ruling or none: the target is no part of the test), nor is the person or the audit
+routed("the project's own front agent writes to its own key (ruled archived by the call, no target): the agent is no call for another agent", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=who_of(SOLO))
+routed("…the same with the ruling's target naming it", SOLO_KEY, TXT, SOLO, False, "archived", ln=CALL, who=who_of(SOLO))
+routed("…and a pass (a rule in code) from the project's own front agent", SOLO_KEY, TXT, SOLO, False, None, ln={"ruling": "passed", "source": "code", "rule": "test"}, who=who_of(SOLO))
+routed("a front agent of another project writes to the key (ruled archived by the call, no target): the channel between front agents", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=who_of("alpha-main"))
+routed("the person's own message to the key, ruled archived by the call, records none (as by name)", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=_messaging.OWNER)
+routed("…and ruled dropped", SOLO_KEY, TXT, "", False, "dropped", ln={**CALL, "ruling": "dropped"}, who=_messaging.OWNER)
+routed("the audit's own line (the label its cue is pushed as, a script) ruled archived records none", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who="stackshot audit (a script on box-a)")
+routed("…and under the audit agent's name", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=_cfg.audit_agent())
+routed("a session that is no front agent (a home session) ruled archived with no target still records one", SOLO_KEY, TXT, "", True, "archived", ln=CALL, who=who_of("home-beta"))
+# a component page with no agents of its own, part of a front-only hub: the want is the hub's (the agents that serve the page), never the component's own, which is no eligible project
+COMP_KEY = "projects/solo-parts"
+reset(); publish(**{COMP_KEY: page([], session="soloparts", hub=SOLO_KEY)}); n = recp(TXT, key=COMP_KEY); res = act(n, "", key=COMP_KEY, **CALL)
+check("3k: a message to an agentless component page of a front-only hub records the hub's want", res["ruling"] == "archived" and keys() == [SOLO_KEY], (res["ruling"], keys()))
+reset(); n = recp(TXT, key=COMP_KEY, who=who_of(SOLO)); res = act(n, "", key=COMP_KEY, **CALL)
+check("3k2: …and the hub's own front agent writing to the component page is no call", res["ruling"] == "archived" and keys() == [], (res["ruling"], keys()))
+publish()
 # the router with no hook wired (a CLI run, a test): nothing is recorded and nothing raises
 reset(); hook = _live._HOOKS["want_background"]; _live._HOOKS["want_background"] = None
 n = recp("the export page reads fine"); res = act(n, SOLO); _live._HOOKS["want_background"] = hook
@@ -233,6 +269,173 @@ reset(); r_ = msg("alpha-main", "the export page reads fine", "home-beta", fyi=T
 check("3h: …and an fyi by name to the front agent of a project WITH a builder records none", r_.startswith("held for alpha-main's next turn") and keys() == [], (r_, keys()))
 reset(); r_ = msg(SOLO, "the export page reads fine", "other-main", fyi=True)
 check("3i: an fyi from a peer front agent is the channel between them: filed, and records none", r_.startswith("held for solo-main's next turn") and keys() == [], (r_, keys()))
+# every branch of the front gate records the want: its refusals and its other holds were skipped once, as the router's non-pass rulings were
+def by_name(label, text, want, sender="home-beta", starts=None, **kw):
+    reset(); r_on = msg(SOLO, text, sender, **kw); n_on = keys()
+    reset(enabled=False); r_off = msg(SOLO, text, sender, **kw)
+    check(f"3j: the message tool, {label}: {'a want is recorded' if want else 'no want'}, and the reply is the one the switch off gives",
+          n_on == ([SOLO_KEY] if want else []) and r_on == r_off and (starts is None or r_on.startswith(starts)) and not STATE.exists(), (r_on, n_on, r_off))
+by_name("a marked message the person is not with the agent for (refused, nothing held)", f"{_messaging._FOR_OWNER}\nplease look at the export page", True, starts="Refused")
+by_name("a marked message that says nothing is needed from him (refused as a note)", f"{_messaging._FOR_OWNER}\nthe export page is fine, no action needed", True, starts="Refused")
+by_name("a done or no-action note with no mark (refused: write it on the item)", "the export page is fine, no action needed", True, starts="Refused")
+by_name("a message with needs: decision away from the first line (refused: the mark goes on the first line)", "the export page reads fine\nit now needs: decision", True, starts="Refused")
+by_name("the person's own message (refused: no mark; he is no session)", "the export page reads fine", False, sender=_messaging.OWNER, starts="Refused")
+_messaging.MSG_LOG.unlink(missing_ok=True); log_row(SOLO, "home-beta", 5)
+by_name("an answer to a question the front agent itself put to the sender", "yes, the export is ready", True)
+_messaging.MSG_LOG.unlink(missing_ok=True)
+by_name("a script's message (origin set, no session sender)", "the export page reads fine", True, origin="box-a")
+# the server's own sends (the audit's findings and the filing and date passes: `auth` "server", a script on this box) are no call for an agent, marked, unmarked or fyi
+SRV = dict(sender="stackshot audit", auth="server", origin="box-a")
+by_name("the server's own message, unmarked (the filing pass's line)", "the export page reads fine", False, **SRV)
+by_name("the server's own message, marked for the person", f"{_messaging._FOR_OWNER}\nthe export page needs a date", False, **SRV)
+by_name("the server's own fyi", "the export page reads fine", False, fyi=True, **SRV)
+by_name("a server send under any other label (the auth is what marks it)", "the export page reads fine", False, sender="a-server-pass", auth="server", origin="box-a")
+by_name("a script that is no server send (the same script, no server auth) still records a want", "the export page reads fine", True, sender="nightly-check", origin="box-a")
+# the audit's own run sends by name as a script on some machine (`client.message`: auth "machine:<m>", origin <m>, the label "stackshot audit"): the label counts as written, though a script's sender is blanked for the role tests
+AUD = dict(sender=_cfg.AUDIT_SENDER, auth="machine:box-a", origin="box-a")
+by_name("the audit's own run by name (a script on a machine, label stackshot audit), unmarked", "the export page reads fine", False, **AUD)
+by_name("…the same, an fyi (a held note)", "the export page reads fine", False, fyi=True, **AUD)
+by_name("…the same, marked for the person (a finding)", f"{_messaging._FOR_OWNER}\nthe export page needs a date", False, **AUD)
+by_name("the configured audit agent's own session writing by name", "the export page reads fine", False, sender=_cfg.audit_agent())
+by_name("…the same with a uuid suffix on its label", "the export page reads fine", False, sender=f"{_cfg.audit_agent()} ({U['home-beta'][:8]}…)")
+by_name("…and a script that is no audit (another label, the same machine auth) still records a want", "the export page reads fine", True, sender="nightly-check", auth="machine:box-a", origin="box-a")
+check("3n: the label the audit sends as is the one the router and the message tool test (audit_run.SENDER is the configured constant)", __import__("stackshot.audit.audit_run", fromlist=["SENDER"]).SENDER == _cfg.AUDIT_SENDER == "stackshot audit"
+      and _cfg.is_audit_sender("stackshot audit (a script on box-a)") and _cfg.is_audit_sender(_cfg.audit_agent().upper()) and not _cfg.is_audit_sender("") and not _cfg.is_audit_sender("nightly-check"))
+# the audit agent's own session sends with its SESSION ID as the sender (the documented form for the message tool): the id is resolved to the session's name, as the router resolves a notice's, and the audit's exclusion holds
+AUDIT_ID, BETA_ID = U["audit"], U["home-beta"]
+check("3q0: the fixture's audit agent is a session of the fleet under the configured audit agent's name (the session id below is its)", _messaging._sr._sessions_index().get(AUDIT_ID, {}).get("name") == _cfg.audit_agent() != "", _messaging._sr._sessions_index().get(AUDIT_ID))
+by_name("the audit agent's own session by its SESSION ID, unmarked", "the export page reads fine", False, sender=AUDIT_ID)
+by_name("…the same, an fyi", "the export page reads fine", False, fyi=True, sender=AUDIT_ID)
+by_name("…the same, marked for the person (refused as it always was)", f"{_messaging._FOR_OWNER}\nthe export page needs a date", False, sender=AUDIT_ID, starts="Refused")
+by_name("the session id of a session that is no audit (a home session), unmarked, still records a want", "the export page reads fine", True, sender=BETA_ID)
+by_name("…the same, an fyi", "the export page reads fine", True, fyi=True, sender=BETA_ID)
+routed("the audit agent's session by bare id on the router path (a notice's who is an id)", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=AUDIT_ID)
+routed("…and a bare id of a session that is no audit still records the want", SOLO_KEY, TXT, "", True, "archived", ln=CALL, who=BETA_ID)
+# a label with a bracketed tag (`name [abc]`) is its name, as one with a parenthesis is
+by_name("the audit agent's label with a bracketed tag", "the export page reads fine", False, sender=f"{_cfg.audit_agent()} [abc]")
+by_name("the audit's own label with a bracketed tag", "the export page reads fine", False, sender=f"{_cfg.AUDIT_SENDER} [abc]")
+routed("the audit agent's label with a bracketed tag on the router path", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=f"{_cfg.audit_agent()} [abc]")
+routed("the audit's own label with a bracketed tag on the router path", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=f"{_cfg.AUDIT_SENDER} [abc]")
+check("3r: the helper strips a parenthesis, a bracketed tag and both, and only then compares the name", all(_cfg.is_audit_sender(x) for x in (f"{_cfg.audit_agent()} [abc]", f"{_cfg.AUDIT_SENDER} (a script on box-a)",
+      f"{_cfg.audit_agent()} (00000001…) [abc]", f"{_cfg.AUDIT_SENDER}[abc]")) and not _cfg.is_audit_sender("[abc]") and not _cfg.is_audit_sender(f"x {_cfg.audit_agent()} [abc]"))
+# the label is the audit's only when it IS the name: a label that merely contains it is a session of its own, and records the want
+for lab in ("stackshot audit bot", "my-stackshot audit", f"{_cfg.audit_agent()}-2", f"x{_cfg.audit_agent()}"):
+    by_name(f"a sender whose label only contains the audit's ({lab!r}) still records a want", "the export page reads fine", True, sender=lab)
+    routed(f"a notice whose who only contains the audit's ({lab!r}) still records a want", SOLO_KEY, TXT, "", True, "archived", ln=CALL, who=lab)
+check("3s: the helper compares the whole name: nothing that merely contains the audit's name or label is the audit", not any(_cfg.is_audit_sender(x) for x in ("stackshot audit bot", "my-stackshot audit", f"{_cfg.audit_agent()}-2", f"x{_cfg.audit_agent()}", "audit")))
+# a script's label is blanked for the role tests (it is no session): a script that is labeled with a front agent's name, or the person's, is no peer and no person, so its message records the want
+by_name("a script labeled with a front agent's name (the label is blanked: no peer front agent)", "the export page reads fine", True, sender="other-main", origin="box-a")
+by_name("a script labeled with the person's name (the label is blanked: no person)", "the export page reads fine", True, sender=_messaging.OWNER, origin="box-a")
+# a recipient that is no front agent records none: the name-line session of a front-only project (a retired one, its pane running) is addressable but is no front agent
+pane("solo")
+reset(); r_nl = msg("solo", "the export page reads fine", "home-beta"); k_nl = keys(); reset(enabled=False); r_nl_off = msg("solo", "the export page reads fine", "home-beta")
+check("3t: a message to the name-line session of a front-only project (no front agent) records none, and the reply is the one the switch off gives", k_nl == [] and r_nl == r_nl_off and not str(r_nl).startswith("RAISED"), (k_nl, r_nl, r_nl_off))
+# the router path, wired as production wires its hooks: the project's own keeper writing to its own key, the audit's label, and the switch asked first
+prod_is_front = lambda who, project: telling.front_keeper(who, project)[0]; was_front = _live._HOOKS["is_front"]
+KEPT_KEY = "projects/kept"      # a page whose name line is its front agent: that agent is the page's keeper, for whom production's is_front answers False
+reset(); publish(**{KEPT_KEY: page(["kept-main"], session="kept-main")})
+check("3o0: production's is_front answers False for a project's own keeper (the case _front_anywhere's second test is for)",
+      prod_is_front("kept-main", KEPT_KEY) is False, prod_is_front("kept-main", KEPT_KEY))
+_live._HOOKS["is_front"] = prod_is_front
+try:
+    reset(); n = recp(TXT, key=KEPT_KEY, who=who_of("kept-main")); res = act(n, "", key=KEPT_KEY, **CALL)
+    check("3o: production's is_front hook wired: the project's own keeper writing to its own key (ruled archived, no target) records none", res["ruling"] == "archived" and keys() == [], (res["ruling"], keys()))
+    reset(); n = recp(TXT, key=KEPT_KEY, who=who_of("home-beta")); res = act(n, "", key=KEPT_KEY, **CALL)
+    check("3o2: …and a session that is no front agent still records the project's want", res["ruling"] == "archived" and keys() == [KEPT_KEY], (res["ruling"], keys()))
+    routed("…and a front agent of another project writing to solo's key", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=who_of("alpha-main"))
+finally:
+    _live._HOOKS["is_front"] = was_front
+    publish()
+# the switch is asked first: off (the default) does no role lookup, in the router or the message tool
+class Lookups:
+    """Counts the role lookups (session_roles, the person's-name tests) while the want functions run."""
+    def __enter__(self):
+        self.n = 0; self.saved = (_anc_mod.session_roles, _router._is_owner_name, _messaging._model.is_owner)
+        def counted(fn):
+            def w(*a, **k): self.n += 1; return fn(*a, **k)
+            return w
+        _anc_mod.session_roles = counted(self.saved[0]); _router._is_owner_name = counted(self.saved[1]); _messaging._model.is_owner = counted(self.saved[2]); return self
+    def __exit__(self, *e): _anc_mod.session_roles, _router._is_owner_name, _messaging._model.is_owner = self.saved
+from stackshot.anchors import anchors as _anc_mod
+def lookups(enabled):
+    reset(enabled=enabled); n = recp(TXT, who=who_of("home-beta"))
+    with Lookups() as c: _live._want_background(n, SOLO_KEY, CALL, cx); r = c.n
+    with Lookups() as c: _messaging._want_for_front(SOLO, {}, "home-beta", "", False); m = c.n
+    return r, m
+off_r, off_m = lookups(False); off_state = STATE.exists(); on_r, on_m = lookups(True)
+check("3p: with the switch off the router's want makes no role lookup and the message tool's makes none", (off_r, off_m) == (0, 0) and not off_state, (off_r, off_m, off_state))
+check("3p2: …and with it on both look (the control: the counted lookups are the ones on the way)", on_r > 0 and on_m > 0 and keys() == [SOLO_KEY], (on_r, on_m, keys()))
+# a message the tool refuses because its recipient cannot receive it records none: a pane gone for hours on a machine that is online
+FJ = T / "fleet/a/sessions.json"; FJ0 = FJ.read_text(); MJ = T / "fleet/a/machine.json"; MJ0 = MJ.read_text()
+import datetime
+_gone = datetime.datetime.fromtimestamp(time.time() - 7200, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+try:
+    rows_ = json.loads(FJ0); rows_[U[SOLO]] = {**rows_[U[SOLO]], "gone": _gone}
+    FJ.write_text(json.dumps(rows_)); MJ.write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": datetime.datetime.fromtimestamp(time.time() - 48, datetime.timezone.utc).isoformat().replace("+00:00", "Z")}}))
+    reset(); r_dead = msg(SOLO, "the export page reads fine", "home-beta"); k_dead = keys()
+    reset(); r_dead_fyi = msg(SOLO, "the export page reads fine", "home-beta", fyi=True); k_dead_fyi = keys()
+    reset(); r_dead_marked = msg(SOLO, f"{_messaging._FOR_OWNER}\nplease look at the export page", "home-beta"); k_dead_marked = keys()
+finally:
+    FJ.write_text(FJ0); MJ.write_text(MJ0)
+check("3l: a message to a front agent whose pane is long gone is refused as the tool always refused it, and records none", r_dead.startswith("Refused: 'solo-main' cannot receive this") and k_dead == [], (r_dead, k_dead))
+check("3l2: …an fyi to it too", r_dead_fyi.startswith("Refused: 'solo-main' cannot receive this") and k_dead_fyi == [], (r_dead_fyi, k_dead_fyi))
+check("3l3: …and a marked one (the front gate refuses it first, as it always did; the dead recipient is no call either)", r_dead_marked.startswith("Refused") and k_dead_marked == [], (r_dead_marked, k_dead_marked))
+by_name("the same agent once its pane is back (the rows restored): a want again", "the export page reads fine", True)
+reset(); r_ = msg("solo-ghost", "the export page reads fine", "home-beta")
+check("3m: a name no session carries is refused and records none", r_.startswith("Refused") and keys() == [], (r_, keys()))
+# a front agent of the page whose row the heartbeat has forgotten: refused ("no session"), and it records none
+try:
+    rows_ = json.loads(FJ0); rows_.pop(U[SOLO]); FJ.write_text(json.dumps(rows_))
+    reset(); err_gone = io.StringIO()
+    with contextlib.redirect_stderr(err_gone): r_gone = msg(SOLO, "the export page reads fine", "home-beta")
+    k_gone = keys()
+finally:
+    FJ.write_text(FJ0)
+check("3m2: a message to a front agent the page and sala list but the heartbeat has forgotten is refused (no session), records none, and the want fails nothing on the way (its failures are logged)",
+      r_gone.startswith("Refused: no session 'solo-main'") and k_gone == [] and "want for a background agent failed" not in err_gone.getvalue(), (r_gone, k_gone, err_gone.getvalue()[:300]))
+
+# a name two rows carry (the pane came back under a new id): its newest row is gone and the other runs, so the message is sent, and so the want is recorded (the dead-recipient test reads every row of the name)
+try:
+    rows_ = json.loads(FJ0); rows_[U[SOLO]] = {**rows_[U[SOLO]], "gone": _gone, "seen": "z"}; rows_["ffffffff-0000-4000-8000-0000000000ff"] = {"name": SOLO, "machine": "a", "url": "", "seen": "a"}
+    FJ.write_text(json.dumps(rows_)); MJ.write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": datetime.datetime.fromtimestamp(time.time() - 48, datetime.timezone.utc).isoformat().replace("+00:00", "Z")}}))
+    reset(); r_two = msg(SOLO, "the export page reads fine", "home-beta"); k_two = keys()
+    reset(enabled=False); r_two_off = msg(SOLO, "the export page reads fine", "home-beta")
+    rows_.pop("ffffffff-0000-4000-8000-0000000000ff"); FJ.write_text(json.dumps(rows_))
+    reset(); r_two_dead = msg(SOLO, "the export page reads fine", "home-beta"); k_two_dead = keys()
+finally:
+    FJ.write_text(FJ0); MJ.write_text(MJ0)
+check("3u: a name whose newest row is gone but another row runs is sent to, so it records the want, and the reply is the one the switch off gives", k_two == [SOLO_KEY] and r_two == r_two_off and r_two.startswith("held for solo-main"), (k_two, r_two, r_two_off))
+check("3u2: …and the same name with only its gone row is refused and records none", r_two_dead.startswith("Refused: 'solo-main' cannot receive this") and k_two_dead == [], (r_two_dead, k_two_dead))
+# the want itself fails inside the message tool (the recorder, the roles, a closed stderr): the message is sent as it was, and the failure is named on stderr
+def _send_with(break_it, what="the export page reads fine"):
+    reset(); err = io.StringIO(); saved = (bw.want_background, _anc_mod.session_roles)
+    try:
+        break_it()
+        with contextlib.redirect_stderr(err): r = msg(SOLO, what, "home-beta")
+    finally:
+        bw.want_background, _anc_mod.session_roles = saved
+    return r, err.getvalue()
+reset(); r_ok = msg(SOLO, "the export page reads fine", "home-beta")
+def _no_record(project, kind, now=None): raise RuntimeError("the record is gone")
+r_f, e_f = _send_with(lambda: setattr(bw, "want_background", _no_record))
+check("3v: a want that raises inside the message tool leaves the reply as it was and names the failure on stderr", r_f == r_ok and "want for a background agent failed" in e_f and "RuntimeError" in e_f and "the record is gone" in e_f, (r_f, e_f[:300]))
+_real_roles = _anc_mod.session_roles; _roles_calls = []
+def _no_roles(*a, **k):      # fails once, in the want (the first call of the send): the gate that follows reads the roles as it always did
+    _roles_calls.append(1)
+    if len(_roles_calls) == 1: raise RuntimeError("the roles are unreadable")
+    return _real_roles(*a, **k)
+r_f2, e_f2 = _send_with(lambda: setattr(_anc_mod, "session_roles", _no_roles))
+check("3v2: …a failure on the way to the call (the roles cannot be read) is the same: the send takes the route it takes, no raise", not r_f2.startswith("RAISED") and "want for a background agent failed" in e_f2 and "roles are unreadable" in e_f2, (r_f2, e_f2[:300]))
+class _BrokenStderr:
+    def write(self, *a): raise BrokenPipeError("stderr is gone")
+    def flush(self): raise BrokenPipeError("stderr is gone")
+    def isatty(self): return False
+reset(); saved_ = bw.want_background; bw.want_background = _no_record
+try:
+    with contextlib.redirect_stderr(_BrokenStderr()): r_f3 = msg(SOLO, "the export page reads fine", "home-beta")
+finally:
+    bw.want_background = saved_
+check("3v3: …and with stderr itself broken the log line is lost and the message still goes (the failure handler raises nothing)", r_f3 == r_ok, (r_f3, r_ok))
 
 # ---- 4. races: the lock
 reset(); real_read = bw._read

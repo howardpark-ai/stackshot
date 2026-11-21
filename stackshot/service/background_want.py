@@ -5,7 +5,7 @@ A message to a project that lists a front agent and no background agent has nobo
 command: the fleet tool reads the wants (`GET /client/background-wanted`, `client.py background-wanted`), decides when the box can take one more session, and lists the agent the way its New session form does.
 Later messages reach that agent by the one lookup the router and the message tool share (anchors.background_agent).
 
-`want_background(project, kind)` is called where a message to such a project is ruled (router_live._front_route and _front_fyi, through the router's hook; messaging._gate_front). It records a want when the project
+`want_background(project, kind)` is called once for a message to such a project, before it is ruled and whatever becomes of it (router_live._act, through the router's hook, for every ruling; messaging._message, before the front gate, for a message to a front agent by name). It records a want when the project
 is eligible and the switch is on, and answers whether it recorded a new one. Eligible: listed and not retired, a top-level project (no sub-page, no `hub:` line), at least one front agent that is a session of the fleet (so the
 agent a project's first listing would make keeper is never the new one), no background agent on its hub, and `kind` a message (a board or anchor notice never wants one). It NEVER raises: a failure leaves the message as it was.
 
@@ -43,8 +43,7 @@ SCHEMA = 1
 
 def enabled() -> bool:
     """[background_agent] enabled: off by default (an instance whose fleet tool creates no agents leaves it off); read at each use."""
-    v = _cfg.get("background_agent", "enabled")
-    return v is True or str(v).strip().lower() in ("true", "1", "yes", "on")
+    return _cfg.background_agent_enabled()
 
 
 def _setting(key: str, default: int) -> int:
