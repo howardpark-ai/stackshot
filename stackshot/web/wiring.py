@@ -56,6 +56,7 @@ from stackshot.web.tools import rules as _rules_tool
 from stackshot.core.instance import NAME
 from stackshot.service import writes as _writes
 from stackshot.service import telling as _telling
+from stackshot.service import background_want as _background_want
 from stackshot.service import front_turn as _front_turn
 from stackshot.service import store as _svcstore
 from stackshot.service import create as _create_svc
@@ -181,6 +182,7 @@ def install_early(host: Any) -> None:
                            after_rule=_router_live_after,
                            front_answer=lambda target, who, text, nid="": _messaging.router_answer(target, who, text, nid),
                            front_turn=lambda target, subject, needs=True: _front_turn.warranted(target, subject, needs),
+                           want_background=lambda project, kind: _background_want.want_background(project, kind),
                            front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi": _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)
                                target, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *([] if kind == "page-owed" else _agent_names._item_refs(text))])), nid, log, kind))      # a page-owed line names no item to write a board line on: the owed list is the board's record of it
 
