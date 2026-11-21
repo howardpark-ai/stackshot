@@ -1611,6 +1611,9 @@ def _write_item(q: Path, it: dict[str, Any]) -> None:
     tmp.write_text(json.dumps(it, ensure_ascii=False, indent=1), encoding="utf-8"); os.replace(tmp, q)
 
 
+_REKEY_SCANS = 5        # how many times _move reads the whole store for the lists that name an id it moved (a scan is repeated only while an item file came or went during it)
+
+
 def _move(store: Path, old: str, new: str, n: int, p: Path, it: dict[str, Any]) -> None:
     """The item from id `old` (file p) to id `new` (issue n): the file under the new id, the map (new mirrors n, old its
     alias), the old file gone, then the `after` lists and anchor scopes that named it. In that order, so that a crash at
@@ -1620,8 +1623,8 @@ def _move(store: Path, old: str, new: str, n: int, p: Path, it: dict[str, Any]) 
     file while the move was under way (a writer that does not take the item lock: the move holds it, so a save through
     writes.save waits for it) is kept, and a stale old copy never overwrites the new file. The file move and the map are
     one step under the item lock, and each `after` list it rewrites is read again and rewritten under it (a write the item
-    lock covers is never lost to the re-key); the scan for the lists that name `old` is a read without it. The publisher's
-    next commit records the rename."""
+    lock covers is never lost to the re-key); the scan for the lists that name `old` is a read without it, so an item another re-key moves meanwhile is found again by its id (the map)
+    under the lock, and the scan is repeated while an item file came or went during it. The publisher's next commit records the rename."""
     q = _item_file(store, new)
     def read(f: Path) -> dict[str, Any] | None:
         try:
@@ -1649,18 +1652,22 @@ def _move(store: Path, old: str, new: str, n: int, p: Path, it: dict[str, Any]) 
     def names_old(x: dict[str, Any] | None) -> bool:
         meta = x.get("metadata") if x else None
         return isinstance(meta, dict) and x.get("status") != "completed" and isinstance(meta.get("after"), list) and old in meta["after"]
-    for d in store.iterdir():
-        if not (d.is_dir() and len(d.name) == 1 and d.name.isalpha()):
-            continue
-        for f in d.glob("*.json"):
-            if f.name.startswith(".") or not names_old(read(f)):      # found without the lock (a read); the ones that name `old` are read again and rewritten under it, one at a time
+    def listing() -> list[Path]:
+        return sorted(f for d in store.iterdir() if d.is_dir() and len(d.name) == 1 and d.name.isalpha() for f in d.glob("*.json") if not f.name.startswith("."))
+    for _ in range(_REKEY_SCANS):
+        seen = listing()
+        for f in seen:
+            if not names_old(read(f)):      # found without the lock (a read); the ones that name `old` are read again and rewritten under it, one at a time
                 continue
             with _xlock.XLock("item"):
-                x = read(f)
+                g = _item_file(store, resolve(f.parent.name + f.stem, store))      # by id, as the map has it now: a re-key that moved this item since the scan left nothing at `f`, and its `after` list is where the map says it is
+                x = read(g)
                 if not names_old(x):
                     continue
-                x["metadata"]["after"] = [new if g == old else g for g in x["metadata"]["after"]]
-                _write_item(f, x)
+                x["metadata"]["after"] = [new if i == old else i for i in x["metadata"]["after"]]
+                _write_item(g, x)
+        if listing() == seen:      # no item file came or went during the scan (no other re-key ran): every item it passed was where it read it. Else an item may have moved into a folder already read: scan again
+            break
     _move_anchors(store, old, new)
 
 

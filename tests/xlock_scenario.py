@@ -37,6 +37,9 @@ surface the callers and the suites use and adds a flock on `<state>/<name>.lock`
   25 re-key        the GitHub re-key moves the file, the map and the `after` lists with the item lock held; two processes (40 re-keys, saves all the while): every rewritten entry and every save survive
   26 callers       every call of a function whose save is its caller's to lock is under the item lock or in a listed function
   27 the six       landed, ledger, answers, machine anchors, wake and stall: the real function waits while another process holds the lock and completes with its effect when it is let go
+  28 hardening     a notice that raises never keeps the ones after it from being sent (a release after a close, the wake pass, an anchor release, the flush of a pass), a failed save keeps its own error and its watcher messages; the answer that
+                   drops an item releases its dependents whatever its delivery did; the escalation pass keeps the record of a send that raised; a step notice stands as told only once sent; the re-key finds a dependent that moved
+                   since the scan; the lock file's descriptor is closed on an interrupt inside the open
 
     tests/run-suite xlock        -> exit 0 / 1"""
 import ast, contextlib, errno, fcntl, io, json, os, re, signal, subprocess, sys, pathlib, threading, time
@@ -878,7 +881,7 @@ try:
     os.open = inheritable_open
     try: fd = xlock._open(T / "state" / "pinned.lock"); inh = os.get_inheritable(fd); os.close(fd)
     finally: os.open = real_os_open
-    check("23 close-on-exec (f): the descriptor the lock opens is never inheritable, whatever os.open gave (a child process must not hold the lock past its owner)", inh is False, inh)
+    check("23 close-on-exec (f): the descriptor the lock opens is never inheritable, whatever os.open gave (a child process must not hold the lock past its holder)", inh is False, inh)
     with xlock.XLock("exe"):
         check("23 close-on-exec (f): ...and the live one carries FD_CLOEXEC", bool(fcntl.fcntl(xlock.XLock("exe")._fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC) and not os.get_inheritable(xlock.XLock("exe")._fd), None)
     # (g): no watchdog outlives the wait it watched
@@ -1193,6 +1196,218 @@ try:
     (T / "state/stall.json").unlink(missing_ok=True)
     ok = blocks_then_runs("stall", lambda: stall.stall_since(1234.0), lambda: raw(stall.stall_path()).get(stall.STALL_PASS, {}).get("since") == 1234.0, "j6")
     check("27 stall: the stall pass's first-run mark waits for another process's hold of the stall lock, then writes the mark", ok[0] and ok[1] and "err" not in ok[2], ok)
+
+    # ---- 28. a notice that raises, a send that fails, a re-key that races, a descriptor that leaks
+    def waiter(n):        # a copy of item a1 under another id: parked on the same close
+        w = json.loads((T / "store/a/1.json").read_text()); w["id"] = str(n); (T / f"store/a/{n}.json").write_text(json.dumps(w))
+    def waiters_gone(*ns):
+        for n in ns: (T / f"store/a/{n}.json").unlink(missing_ok=True)
+    def raising_on(gid, log, msg):      # a wake notice that records the item it is for, and raises for one of them
+        def f(g, it, what, out=None, reminder=False):
+            log.append(g)
+            if g == gid: raise RuntimeError(msg)
+        return f
+    try:
+        # a finished loop, two waiters, no `defer`: each notice goes out once, for its own waiter, then the close's mention notice once (a lambda that read the loop's last waiter, or a second send after the loop, fails here)
+        site_item(after=["a2"], hold=True, wake="2000-01-01"); waiter(3); log = []
+        swap(wakes, "wake_notify", raising_on("", log, "")); swap(wakes._telling, "tell_close_mentions", lambda *a, **k: log.append("mentions"))
+        try: rel = wakes.release_after("a2", "done", "", ""); err = None
+        except Exception as e: rel, err = None, f"{type(e).__name__}: {e}"
+        unswap()
+        check("28 release after (two waiters, finished): each waiter's notice is sent once for that waiter, then the close's mention notice once", err is None and sorted(rel or []) == ["a1", "a3"] and log == ["a1", "a3", "mentions"], (err, rel, log))
+        # a finished loop in which one notice raises: every notice is still tried (the one after it, and the close's mention notice), and the first error goes up
+        site_item(after=["a2"], hold=True, wake="2000-01-01"); waiter(3); log = []
+        swap(wakes, "wake_notify", raising_on("a1", log, "notice boom")); swap(wakes._telling, "tell_close_mentions", lambda *a, **k: log.append("mentions"))
+        try: wakes.release_after("a2", "done", "", ""); err = None
+        except Exception as e: err = f"{type(e).__name__}: {e}"
+        unswap()
+        check("28 release after (a notice raises, finished): the notices after it and the close's mention notice are still sent, and its error goes on up", err == "RuntimeError: notice boom" and log == ["a1", "a3", "mentions"], (err, log))
+        # a failed save with three waiters: the first has a notice that raises, the second is a watched wait (its watcher message is owed), the third's save raises. The save's error is the one that goes up, the watcher message and the first notice are tried, no mention notice
+        site_item(after=["a2"], hold=True, wake="2000-01-01"); waiter(3); waiter(4); log = []
+        real_save = writes.save
+        def failing_4(g, *a, **k):
+            if g == "a4": raise OSError("disk full")
+            return real_save(g, *a, **k)
+        swap(wakes, "wake_notify", raising_on("a1", log, "notice boom")); swap(wakes._telling, "tell_close_mentions", lambda *a, **k: log.append("mentions")); swap(wakes._writes, "save", failing_4)
+        swap(wakes._watch, "watches", lambda it: str(it.get("id")) in ("3", "a3"))
+        swap(wakes._watching, "watch_item_closed", lambda g, it, gid, outcome, rep, writer, wout, sup: (wout.setdefault("sidw", []).append((g, {}, "x")), True)[1])
+        swap(wakes._watching, "watch_tell", lambda sid, rows: log.append(("watch_tell", sid, len(rows))))
+        try: wakes.release_after("a2", "done", "", ""); err = None
+        except Exception as e: err = f"{type(e).__name__}: {e}"
+        unswap()
+        check("28 release after (a failed save, two kinds of notice): the save's error is the one that goes up (a notice's error does not replace it), the first waiter's notice is tried, the watcher message is sent, and no mention notice is", err == "OSError: disk full" and log == ["a1", ("watch_tell", "sidw", 1)], (err, log))
+        waiters_gone(3, 4)
+
+        # the wake pass: one session's message that raises does not keep the next session's from being sent
+        site_item(hold=True, wake="2000-01-01"); waiter(3); log = []
+        swap(wakes, "wake_notify", lambda gid, it, what, out=None, reminder=False: (out.setdefault("s" + gid, []).append((gid, it, what, "", False)) if out is not None else None, ["s" + gid])[1])
+        def tell_boom(sid, rows, extra=None):
+            log.append(sid)
+            if sid == "sa1": raise RuntimeError("tell boom")
+        swap(wakes, "wake_tell", tell_boom); swap(wakes._watching, "watch_text", lambda sid, rows: ("", "", [])); swap(wakes._watching, "watch_pass", lambda epoch, wout: [])
+        try: wakes.wake_pass(); err = None
+        except Exception as e: err = f"{type(e).__name__}: {e}"
+        unswap()
+        check("28 wake pass: a session's wake message that raises does not keep the next session's from being sent (both are tried), and the error goes on up", err == "RuntimeError: tell boom" and log == ["sa1", "sa3"], (err, log))
+        waiters_gone(3)
+        # an anchor release: the notice of the first released item raises, the next item is still released and told, then the error goes on up
+        put(hold=True, wake="2099-01-01"); waiter(3); log = []
+        (T / "store/anchors.json").write_text(json.dumps({"projects/none": [{"url": SITE_URL, "items": ["a1", "a3"]}]}))
+        swap(wakes, "wake_notify", raising_on("a1", log, "tell boom"))
+        try: wakes.anchor_release("projects/none", {"kind": "anchor", "anchor": SITE_URL, "to": "x", "ts": time.time() + 60, "id": "n1", "ruling": "passed"}); err = None
+        except Exception as e: err = f"{type(e).__name__}: {e}"
+        unswap()
+        released3 = "hold" not in json.loads((T / "store/a/3.json").read_text())["metadata"]
+        check("28 anchor release: a notice that raises does not keep the next held item from being released and told, and the error goes on up", err == "RuntimeError: tell boom" and log == ["a1", "a3"] and released3, (err, log, released3))
+        waiters_gone(3); race_reset()
+
+        # his answer that drops an item: the items that waited on it are released even when the delivery raised after the close was saved, with no lock held, and the error goes on up
+        for what_raises in ("delivery", "bookkeeping"):
+            site_item(needs=["decision"], ask=ASK2); log = []
+            swap(watchers_mod, "answer_effect", lambda meta, choice, text, today=None: {"do": "drop"})
+            swap(wait_gates, "_watch_answer", lambda item, meta, eff, now: "dropped")
+            swap(wakes, "release_after", lambda *a, **k: (log.append(("release_after", lockstate())), [])[1])
+            if what_raises == "delivery": swap(answer_svc, "_answer_deliver", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("deliver boom")))
+            else:
+                swap(answer_svc, "_answer_deliver", lambda *a, **k: [])
+                swap(answers, "_answers_save", lambda st: (_ for _ in ()).throw(OSError("answers full")))
+            try: answer_svc._answer("a1", "Yes", "", ""); err = None
+            except Exception as e: err = f"{type(e).__name__}: {e}"
+            unswap(); answers._answers_save({})
+            check(f"28 answer drop ({what_raises} raises): the items that waited on the dropped item are released, with neither lock held, and the error goes on up", err in ("RuntimeError: deliver boom", "OSError: answers full") and log == [("release_after", [])], (err, log))
+
+        # the escalation pass: a send that raises does not lose the notice (its record goes back, the next tick sends it) or the rest (they are sent), and a notice that was sent is not sent again
+        site_item(); waiter(3); log = []
+        answers._answers_save({g: {"ts": 1000.0, "project": "projects/none", "told": [], "words": "x"} for g in ("a1", "a3")})
+        swap(answer_svc._telling, "page_keeper", lambda p: "keeperx"); swap(answer_svc._telling, "project_keeper", lambda *a, **k: "keeperx")
+        swap(answer_svc._telling, "keeper_words", lambda *a, **k: "its keeper"); swap(answer_svc, "_session_id", lambda s: str(s or ""))
+        def tell_one(gid, sid, text, tag=""):
+            if gid == "a1" and not log.count("fixed"): raise RuntimeError("send boom")
+            log.append(gid)
+        swap(answer_svc._telling, "tell_woken", tell_one)
+        try: res = answer_svc._answer_tick(4e9); err = None
+        except Exception as e: res, err = None, f"{type(e).__name__}: {e}"
+        first, pending = list(log), sorted(raw(answers._answers_path()))
+        log.append("fixed")
+        try: res2 = answer_svc._answer_tick(4e9); err2 = None
+        except Exception as e: res2, err2 = None, f"{type(e).__name__}: {e}"
+        unswap(); second, pending2 = log[len(first) + 1:], sorted(raw(answers._answers_path())); answers._answers_save({}); waiters_gone(3)
+        check("28 answer tick (a send raises): the notice after it is sent, the record whose send raised is kept (not lost with the rest), and the error goes on up", err == "RuntimeError: send boom" and first == ["a3"] and pending == ["a1"], (err, first, pending))
+        check("28 answer tick (the next tick): the kept record is sent then, once; the notice that went the first time is not sent again; nothing is left pending", err2 is None and res2 == ["a1"] and second == ["a1"] and pending2 == [], (err2, res2, second, pending2))
+
+        # a step notice stands as told (what the release event reads) only once it was sent
+        def proof_run(tell):
+            site_item(next="do the release step 7"); sendl = []; proofs.PROOF_TOLD_SID.pop("a1", None)
+            one = json.loads((T / "store/a/1.json").read_text()); one["metadata"].pop(proofs.RELEASED_TOLD, None); (T / "store/a/1.json").write_text(json.dumps(one))      # no earlier notice stands for this pull request
+            swap(proofs._steps, "view", lambda meta, keeper="": [{"text": "release PR #7 is live", "status": proofs._steps.OPEN}, {"text": "then check the page", "status": proofs._steps.OPEN}])
+            swap(proofs, "proof_hits", lambda cl, opened, *a, **k: {0: True}); swap(proofs._live, "released_skip", lambda *a, **k: "")
+            swap(proofs._telling, "holder", lambda it: "home-agent"); swap(proofs._telling, "tell_woken", tell)
+            swap(proofs, "handover", lambda gid, now, done, dry=False, defer=None: None)
+            try:
+                with writes.ITEM_LOCK: row = proofs.proof_item("a1", 7, "o/r#7", "merged", set(), False, time.time(), proofs._sp.PR_MERGED, sends=sendl)
+                err = None
+            except Exception as e: row, err = None, f"{type(e).__name__}: {e}"
+            queued = "a1" in proofs.PROOF_TOLD_SID
+            try: proofs.flush_sends(sendl)
+            except Exception as e: err = err or f"flush: {type(e).__name__}: {e}"        # the flush of a pass never raises: a send that failed is a stderr line
+            unswap()
+            return err, row, queued, "a1" in proofs.PROOF_TOLD_SID, "a1" in proofs.told_recent()
+        def tell_fails(*a, **k): raise RuntimeError("send boom")
+        err, row, queued, after_send, recent = proof_run(tell_fails)
+        check("28 proof (the send raises): the mover is not recorded as told (the release event tells it itself), neither when the notice is queued nor after the send failed", err is None and row and row.get("action") == "ticked" and not queued and not after_send and not recent, (err, row, queued, after_send, recent))
+        err, row, queued, after_send, recent = proof_run(lambda *a, **k: None)
+        check("28 proof (the send works): the mover is recorded as told once the notice was sent, and not before (not when it was only queued)", err is None and row and row.get("action") == "ticked" and not queued and after_send and recent, (err, row, queued, after_send, recent))
+        # the hand-over's notice: the same
+        def handover_run(tell):
+            site_item(); later = []; proofs.PROOF_TOLD_SID.pop("a1", None)
+            swap(proofs._hv, "decide", lambda *a, **k: {"action": "moved", "to": "home-agent", "hash": "h1", "step": "do the thing", "why": ""})
+            swap(proofs._live, "released_skip", lambda *a, **k: ""); swap(proofs._telling, "tell_woken", tell)
+            with writes.ITEM_LOCK: row = proofs.handover("a1", time.time(), ["a step"], defer=later)
+            queued = "a1" in proofs.PROOF_TOLD_SID
+            try: proofs.flush_sends(later); ferr = None
+            except Exception as e: ferr = f"flush: {type(e).__name__}: {e}"
+            unswap()
+            return row, queued, "a1" in proofs.PROOF_TOLD_SID, ferr
+        row, queued, after_send, ferr = handover_run(tell_fails)
+        check("28 hand-over (the send raises): the session is not recorded as told, and the flush of the pass does not raise", row and row.get("action") == "moved" and not queued and not after_send and ferr is None, (row, queued, after_send, ferr))
+        row, queued, after_send, ferr = handover_run(lambda *a, **k: None)
+        check("28 hand-over (the send works): the session is recorded as told once the notice was sent, not when it was queued", row and row.get("action") == "moved" and not queued and after_send and ferr is None, (row, queued, after_send, ferr))
+        proofs.PROOF_TOLD_SID.pop("a1", None)
+        # flush_sends: a send that raises is a stderr line and the sends after it still run
+        log = []; buf = io.StringIO()
+        def send_boom(): raise RuntimeError("send boom")
+        try:
+            with contextlib.redirect_stderr(buf): proofs.flush_sends([send_boom, lambda: log.append("second")]); err = None
+        except Exception as e: err = f"{type(e).__name__}: {e}"
+        check("28 flush sends: a send that raises is a stderr line and never stops the sends after it", err is None and log == ["second"] and "send boom" in buf.getvalue(), (err, log, buf.getvalue()))
+    finally: unswap(); answers._answers_save({}); waiters_gone(3, 4); race_reset()
+
+    # ---- the re-key: an item another re-key moves while this one scans is still rewritten
+    import shutil, types
+    store = T / "store"
+    def late_dependent(on_scan_end):
+        """Re-key a8 whose dependent a6 names it. Another re-key moves a6 to q66 (a folder made just then, which the scan's listing of the folders does not have). `on_scan_end` False: it moves between the scan's read of a6 and the lock
+        (the re-key must find it again by its id, with a single scan allowed); True: it moves while the scan reads the first file (the scan must be made again, as an item file came or went)."""
+        (store / "a/8.json").write_text(json.dumps({"id": "8", "subject": "[home] moved", "description": "- x\n- y\n- z", "status": "open", "updated": time.time(), "metadata": {"project": "projects/none"}}))
+        dep = {"id": "6", "subject": "[home] waits", "description": "- x\n- y\n- z", "status": "open", "updated": time.time(), "metadata": {"project": "projects/none", "after": ["a8"]}}
+        (store / "a/6.json").write_text(json.dumps(dep))
+        def move_dependent():
+            (store / "q").mkdir(exist_ok=True)
+            d = json.loads((store / "a/6.json").read_text()) if (store / "a/6.json").exists() else dep
+            (store / "q/66.json").write_text(json.dumps({**d, "id": "66"})); ghsync.record_issue("q66", 66, store, was="a6"); (store / "a/6.json").unlink(missing_ok=True)
+        state = {"entries": 0, "armed": False, "calls": 0}
+        class HookLock2:
+            def __init__(self, real): self.real = real
+            def __enter__(self):
+                if not self.real._is_owned():
+                    state["entries"] += 1
+                    if not on_scan_end and state["entries"] == 2: move_dependent()      # the second hold is the rewrite of the dependent's list: another re-key moved the item just before it
+                self.real.acquire(); return self.real
+            def __exit__(self, *e):
+                self.real.release()
+                if state["entries"] == 1: state["armed"] = True      # the move's own hold is over: what follows is the scan
+        class JsonProxy:        # the scan's first read of an item file (after the move's own hold): the item moves, in a folder the scan has not listed
+            def __getattr__(self, name): return getattr(json, name)
+            def loads(self, *a, **k):
+                if on_scan_end and state["armed"] and not state["calls"]:
+                    state["calls"] = 1; move_dependent()
+                return json.loads(*a, **k)
+        swap(ghsync, "_xlock", types.SimpleNamespace(XLock=lambda name: HookLock2(xlock.XLock(name))))
+        if on_scan_end:
+            (store / "a/6.json").unlink()       # not there for the first scan
+            swap(ghsync, "json", JsonProxy())
+        elif hasattr(ghsync, "_REKEY_SCANS"): swap(ghsync, "_REKEY_SCANS", 1)      # one scan only: the id lookup alone has to find the item
+        try: new = ghsync.rekey(store, "a8", 99); err = None
+        except Exception as e: new, err = None, f"{type(e).__name__}: {e}"
+        unswap()
+        moved = json.loads((store / "q/66.json").read_text()) if (store / "q/66.json").exists() else {}
+        return new, err, moved.get("metadata", {}).get("after"), (store / "a/6.json").exists()
+    def rekey_clean():
+        shutil.rmtree(store / "q", ignore_errors=True)
+        for f in (store / "g/99.json", store / "a/6.json", store / "a/8.json", store / "github-map.json"): f.unlink(missing_ok=True)
+    try:
+        rekey_clean()
+        new, err, after6, old_left = late_dependent(False)
+        check("28 re-key (a dependent moved since the scan, one scan allowed): the item is found again by its id under the item lock and its `after` names the new id (the old path read finds nothing, and the old id was left standing)", err is None and new and after6 == [new] and not old_left, (err, new, after6, old_left))
+        rekey_clean()
+        new, err, after6, old_left = late_dependent(True)
+        check("28 re-key (a dependent moved into a folder the scan had not listed): the scan is made again while an item file came or went during it, and finds the item", err is None and new and after6 == [new] and not old_left, (err, new, after6, old_left))
+    finally:
+        unswap(); rekey_clean()
+
+    # ---- the lock file's descriptor is closed on any way out of the open, an interrupt inside `os.set_inheritable` included (a leaked descriptor would hold the flock past its hold)
+    real_si = os.set_inheritable
+    def interrupted(fd, inheritable=True): raise KeyboardInterrupt()
+    def broken(fd, inheritable=True): raise OSError(errno.EBADF, "bad descriptor")
+    for what_raises, fn, exc in (("an interrupt", interrupted, KeyboardInterrupt), ("an OSError", broken, OSError)):
+        fds0 = len(os.listdir("/proc/self/fd")); os.set_inheritable = fn
+        try:
+            try: xlock._open(T / "state" / "intr.lock"); err = None
+            except BaseException as e: err = e
+        finally: os.set_inheritable = real_si
+        fds1 = len(os.listdir("/proc/self/fd"))
+        check(f"28 lock file ({what_raises} inside os.set_inheritable): the descriptor the open made is closed, and the error goes on up", isinstance(err, exc) and fds1 == fds0, (err, fds0, fds1))
+    (T / "state" / "intr.lock").unlink(missing_ok=True)
 finally:
     for k in KIDS:
         if k.poll() is None: k.kill()

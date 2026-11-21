@@ -227,10 +227,9 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 wake_notify(gid, it, what, out=out, reminder=True)
             else:
                 wake_notify(gid, it, what, out=out)
-    for sid, rows in out.items():            # after the wake lock is let go (the item lock was never held here): what was collected under the locks is sent when none is held
-        wake_tell(sid, rows, extra=_watching.watch_text(sid, wout.pop(sid, [])))     # one message per session for the whole pass
-    for sid, rows in wout.items():
-        _watching.watch_tell(sid, rows)
+    sends: list[Callable[[], Any]] = [lambda sid=sid, rows=rows: wake_tell(sid, rows, extra=_watching.watch_text(sid, wout.get(sid, []))) for sid, rows in out.items()]     # after the wake lock is let go (the item lock was never held here): what was collected under the locks is sent when none is held; one message per session for the whole pass
+    sends += [lambda sid=sid, rows=rows: _watching.watch_tell(sid, rows) for sid, rows in wout.items() if sid not in out]       # the watchers' rows of a session with no wake row of its own
+    run_notices(sends, "wake:")      # a message that fails does not keep the others from being sent; the first error goes on up
     return woke
 
 
@@ -367,6 +366,22 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
     _telling.tell_woken(", ".join([*gids, *xgids]), sid, (xmark + " " if xmark else "") + "\n".join(text) + (f"\n{xtext}" if xtext else ""))
 
 
+def run_notices(fns: "list[Callable[[], Any]]", what: str, raising: bool = True) -> None:
+    """Send what a pass collected, each one guarded: a notice that raises never keeps the ones after it from being tried. When every one was tried and `raising`, the first error is raised (it is the pass's, as
+    an unguarded loop would have raised it, and the rest are stderr lines); with `raising` false (another error is on its way up, and is the one the caller sees) each is a stderr line."""
+    first: Exception | None = None
+    for fn in fns:
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001  — the next notice is still sent
+            if raising and first is None:
+                first = e
+            else:
+                print(f"{what} a notice was not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if first is not None:
+        raise first
+
+
 def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reason: str = "", defer: "list[Callable[[], Any]] | None" = None) -> list[str]:
     """`gid` just closed. Every open item that waits on it (after) drops it: a superseded one is followed to its
     replacement (the item then waits on that, when it is open), a done or dropped one simply goes. An item left with no open
@@ -448,14 +463,7 @@ def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reaso
         if defer is not None:
             defer.extend(notices)
         else:
-            for fn in notices:
-                if finished:
-                    fn()
-                else:
-                    try:
-                        fn()
-                    except Exception as e:  # noqa: BLE001  — the error that is on its way up is the one the caller sees
-                        print(f"close: {gid} a notice was not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+            run_notices(notices, f"close: {gid}", raising=finished)      # a failed loop has its error on the way up already: the notices' are stderr lines
     return released
 
 
@@ -485,6 +493,7 @@ def anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched: 
         at = float(n.get("ts") or 0)
         how = "arrived (nobody rules this project's notices)"
     released = []
+    failed: Exception | None = None
     try:
         entries = [e for e in _anc.load().get(project, []) if _watching.same_anchor(str(e.get("url") or ""), url) and e.get("items")]
     except Exception:
@@ -507,10 +516,18 @@ def anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched: 
             it["updated"] = it["state_updated"] = time.time()
             what = f"woke: a notice from {url}, the anchor it waited on, {how}"
             _writes.save(g, it, note=f"{what}: {back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
-        wake_notify(g, it, what)
+        try:
+            wake_notify(g, it, what)
+        except Exception as e:  # noqa: BLE001  — the item is saved and released: the ones after it are still released and told; the first error goes on up when the loop is done
+            if failed is None:
+                failed = e
+            else:
+                print(f"anchor wait: {g} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         print(f"anchor wait: {g} released ({project}, notice {n.get('id')})", file=sys.stderr, flush=True)
         released.append(g)
     released += _watching.watch_anchor_notice(project, url, n, at, how)       # the items whose stored wait is an anchor event on this very anchor
+    if failed is not None:
+        raise failed
     return released
 
 
