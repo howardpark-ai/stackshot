@@ -8,7 +8,7 @@ depends on. The ticks run in this order, each in its own try so that one that ra
   1. settle   the events that end a wait: the watchers' pass, the anchor pass, the phase sweep (the stored phase and waits_on brought up to the clock), the event waits, the done check, the step proof
   2. handoff  the hand-off tick
   3. answers  a decision answer nobody acted on goes to its keeper
-  4. fleet    the fleet's clocks (registry sync, clients, pilot fallback, stall, hand-back), then the publish
+  4. fleet    the fleet's clocks (registry sync, clients, pilot fallback, stall, hand-back), the wait-loop walk (items that wait on each other), then the publish
               when the fleet files changed
   5. tenmin   the ten-minute set, right after the minute set in the same round: the filing pass (is each item filed in the right state?), the dates pass
               (the For you list's due-date look, and items whose wake has passed with no write since), the wake catch-up (the watchers' pass without its due-wake gate) and the audit tick

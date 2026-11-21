@@ -6,7 +6,7 @@ that `update` sets when a wake or a hold changes, the fleet publish step, the wa
 starts the three threads the server keeps for them (the runner's, the publish loop's and the watchdog's).
 
 The order of the table is the order of the work: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the balancer (an item not started or queued for ten
-minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass, the dates pass, the wake
+minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks and the wait-loop walk (a ring of items that wait on each other, once a minute); then the ten-minute set: (5) the filing pass, the dates pass, the wake
 catch-up, the silence tick and the archive tick. `board=True` marks a tick that reads items: it is skipped while the migration's pass holds the board.
 
 The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, the hand-off tick from service/handoff.py, the clients' tick and the inbox flag from service/fleet_events.py and the stall pass from service/stall_tick.py,
@@ -50,6 +50,7 @@ class Hooks:
     answer_tick: Callable[[], Any]  # service.answer._answer_tick
     roles_sync_safe: Callable[[], Any]  # server._roles_sync_safe
     pilot_fallback_tick: Callable[[], Any]  # service/page_debt.py _pilot_fallback_tick
+    loop_tick: Callable[[], Any]  # service.audit_ticks._loop_tick
     filing_tick: Callable[[], Any]  # service.audit_ticks._filing_tick
     dates_tick: Callable[[], Any]  # service.audit_ticks._dates_tick
     silence_tick: Callable[[], Any]  # service.audit_ticks._silence_tick
@@ -115,6 +116,7 @@ def ticks() -> "list[_minute.Tick]":
         T("pilot_fallback_tick", lambda: _hooks().pilot_fallback_tick(), "fleet", board=True),
         T("stall_tick", lambda: _stalltick.stall_tick(), "fleet", board=True),
         T("handback_tick", lambda: _telling.handback_tick(), "fleet", board=True),
+        T("loop_tick", lambda: _hooks().loop_tick(), "fleet", board=True),
         T("fleet_publish", lambda: fleet_publish(), "fleet"),
         T("filing_tick", lambda: _hooks().filing_tick(), "tenmin", "tenmin", board=True),
         T("dates_tick", lambda: _hooks().dates_tick(), "tenmin", "tenmin", board=True),

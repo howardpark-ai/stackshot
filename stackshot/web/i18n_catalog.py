@@ -195,6 +195,7 @@ CATALOG: dict[str, str] = {
     "audit.source.silence": "silence",
     "audit.source.filing": "filing",
     "audit.source.dates": "dates",
+    "audit.source.wait-loops": "wait loops",
 
     # ------------------------------------------------------------------ state words
     "state.you": "Your move",

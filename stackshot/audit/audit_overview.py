@@ -42,7 +42,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
         ("hourly audit line", EVERY_TEN, "hourly_line"), ("idle hand-over", EVERY_TEN, "hand_idle"), ("busy stretch tell", EVERY_TEN, "busy_tell"), ("balancer", EVERY_MIN, "balance"),
         ("the one ladder", "with the passes", "ladder"), ("unmoved digest", EACH_RUN, None), ("threshold message", EACH_RUN, None))},
     {"key": "filing", "name": "Filing", "desc": "an item's state is wrong", "log": True, "audits": (
-        ("filing pass", EVERY_TEN, None), ("stuck-elsewhere", EVERY_TEN, None), ("arbitrary-hold", EVERY_TEN, None), ("mislabeled-state", EVERY_TEN, None),
+        ("filing pass", EVERY_TEN, None), ("wait-loop walk", EVERY_MIN, None), ("stuck-elsewhere", EVERY_TEN, None), ("arbitrary-hold", EVERY_TEN, None), ("mislabeled-state", EVERY_TEN, None),
         ("reads-as-wait", EVERY_TEN, None), ("wait-end", EVERY_TEN, "wait_end"), ("step-handover", EVERY_TEN, None), ("ask-options", EVERY_TEN, None), ("why-not-now (code)", EVERY_TEN, None),
         ("wrong-needs (model)", EACH_RUN, None), ("obsolete-wait (model)", EACH_RUN, None), ("why-not-now (model)", EACH_RUN, None))},
     {"key": "wording", "name": "Wording", "desc": "next steps and asks", "log": True, "audits": (
@@ -65,13 +65,14 @@ GROUPS: tuple[dict[str, Any], ...] = (
 
 # the findings log's kinds (audit_checks.pattern_kind: the category, and for `next rules` and `board checks` the rule or kind after a colon) by group. `stale` is the dates pass's, and, in a log written before the 45-minute news ask was retired, that ask's:
 # the row's source, the pass that appended it, tells them apart (an old row keeps its "silence" source and group).
+# `wait-loop` (items that wait on each other, found by the minute walk) is filed here too.
 # `wait-end` (a next line waits in words for something nothing tells the item has happened) and `event-missing` (the same rule found a wait that no event type reports) are the filing pass's waits, beside reads-as-wait.
-_FILING = {"stuck-elsewhere", "board checks", "reads-as-wait", "wait-end", "event-missing", "step-handover", "ask-options", "why-not-now", "wrong-needs", "obsolete-wait"}
+_FILING = {"stuck-elsewhere", "board checks", "reads-as-wait", "wait-end", "wait-loop", "event-missing", "step-handover", "ask-options", "why-not-now", "wrong-needs", "obsolete-wait"}
 _WORDING = {"ask-missing", "next rules", "next-done", "goal-unclear", "unneeded-escalation"}
 _BY_KIND = {**{k: "filing" for k in _FILING}, **{k: "wording" for k in _WORDING}, "proof-wait": "proof", "older-than-page": "pages"}
 NOTE_UNLOGGED = "\u2013 keeps no findings log"      # the card's line under the list, and the page's reading of a dash
 NOTE_LOG_OFF = "\u2013 the findings log is off"
-SOURCES = {"run": "daily run", "silence": "silence", "filing": "filing", "dates": "dates"}     # the findings log's `source` as the page says it
+SOURCES = {"run": "daily run", "silence": "silence", "filing": "filing", "dates": "dates", "wait-loops": "wait loops"}     # the findings log's `source` as the page says it
 
 
 def _num(v: Any) -> float | None:
