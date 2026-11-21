@@ -12,7 +12,7 @@ fleet's clocks in a fixed order. Fixture data, no live store, no network, no Git
   3b the ten-minute set on its own (fake clock): it runs in the first paced round after each tenth minute, after the minute set, on the start's schedule (a late round does not shift the
      next one, a long gap does not run it twice), is skipped with the board held, and a tick of it that raises does not stop the next; the filing and dates ticks are the server's
   4  the start: the runner is always started and the old loops are not (they no longer exist); a config that still carries the retired [runner] enabled key (true, false or any
-     value) starts the same way, and config.notes() says once that the key can go; the example config has no [runner] section; no clock runs twice in a round (every clock counted)
+     value) starts the same way, and config.notes() says once that the key can go; the example config's [runner] section holds `process` and no `enabled`; no clock runs twice in a round (every clock counted)
   5  the board's reads: /audit/status carries the runner (its record before the start and after, last run and last error per tick) · the migration's hold skips the board ticks
      of the server's table · the fleet publish step publishes when the fleet files moved, and not at its first look · the watchers' pass wrapper runs the pass only when a wake is due
   6  the runner's watchdog (fake clock): `Runner.stalled` is false for a current runner and true past `runner.STALL_AFTER`; the watchdog runs in a thread of its own and the publish loop runs no wake pass ·
@@ -460,7 +460,7 @@ def start_mode(runner_section):
 
 import tomllib
 example = tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
-check("4 config: the example config has no [runner] section, and the config the suite runs on reads none", "runner" not in example and _cfg.get("runner") is None, example.get("runner"))
+check("4 config: the example config's [runner] section holds `process` only (no `enabled`), and the config the suite runs on reads the same", example.get("runner") == {"process": "inline"} and _cfg.get("runner") == {"process": "inline"}, (example.get("runner"), _cfg.get("runner")))
 check("4 config: a config without the key has no note about it", not any("[runner]" in n for n in _cfg.notes()), _cfg.notes())
 for label, section in (("absent", None), ("enabled = true", {"enabled": True}), ("enabled = false", {"enabled": False}), ("enabled = \"true\"", {"enabled": "true"})):
     names_, targets, runners_, err = start_mode(section)
@@ -493,7 +493,7 @@ _cfg.CFG.pop("runner", None)
 
 # a stale key in a file: the config module loads it and `check` exits 0 (the server start does not read the key)
 import subprocess
-stale = T / "stale.toml"; stale.write_text(toml + "\n[runner]\nenabled = true\n", encoding="utf-8")
+stale = T / "stale.toml"; stale.write_text(re.sub(r"(?m)^\[runner\]", "[runner]\nenabled = true", toml, count=1), encoding="utf-8")
 cp = subprocess.run([sys.executable, "-I", f"{STACK}/stackshot/core/config.py", "check"], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)
 check("4 a file that still carries [runner] enabled = true loads and passes `config.py check`", cp.returncode == 0, (cp.returncode, cp.stdout[-300:], cp.stderr[-300:]))
 cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config; print('\\n'.join(config.notes()))", STACK], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)

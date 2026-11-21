@@ -307,7 +307,7 @@ journal (`journalctl --user -u stackshot.service`, lines starting `config reload
   running on the config it had.
 - **A setting only a start can apply** is logged as `<key> changed: takes effect at the next restart` and
   keeps its running value until then: the bind address (`[server]`), the OAuth setup (`[auth]` mode, base_url,
-  allowed_client_redirect_uris, portal_identity), every `[paths]` entry, `[ids] letter`, the text written
+  allowed_client_redirect_uris, portal_identity), every `[paths]` entry, `[ids] letter`, `[runner] process`, the text written
   into the tool descriptions (`[instance]` name, owner, board_url, timezone, `[subject] prefixes`,
   `[fleet] operator_label`, `[freshness]`) and anchor-hub's receiver setup (`[anchor_hub]` hook_url, hook_port,
   slack_team, self_emails, gmail_topics, gmail_names). `[server] port`, `[instance] timezone`, `[anchor_hub] enabled`,

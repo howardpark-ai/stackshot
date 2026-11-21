@@ -498,6 +498,16 @@ def audit_pattern_review() -> str:
     return v if v in AUDIT_PATTERN_REVIEWS else "shadow"
 
 
+RUNNER_PROCESSES = ("inline", "unit")
+
+
+def runner_process() -> str:
+    """[runner] process: where the minute set's runner runs. "inline" (the default) = a thread of the server, started by `server._start_background`, as it always was. "unit" = the server starts no runner and the separate
+    process `stackshot minute` runs it. Restart-only (RESTART_ONLY): a reload keeps the running value in CFG, so a process reads it once, at its start. A value that is neither reads as "inline" (`notes` says so)."""
+    v = str(get("runner", "process") or "").strip().lower()
+    return v if v in RUNNER_PROCESSES else "inline"
+
+
 WAIT_GUARD_MAX_CALLS = 30         # model calls per rolling hour
 WAIT_GUARD_TIMEOUT = 30.0         # seconds one call may take before the write goes through unjudged
 WAIT_GUARD_REASON_MIN = 15        # characters a wait_reason needs
@@ -1107,6 +1117,8 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     rn = get("runner", cfg=cfg)
     if isinstance(rn, dict) and "enabled" in rn:
         out.append("[runner] enabled is retired and read by nothing: the minute set's runner is the only path and always starts; drop the line")
+    if isinstance(rn, dict) and "process" in rn and str(rn["process"]).strip().lower() not in RUNNER_PROCESSES:
+        out.append(f'[runner] process = {rn["process"]!r} is neither "inline" nor "unit", so it is read as "inline": the server runs the minute set\'s runner itself')
     mo = get("model", cfg=cfg)
     if isinstance(mo, dict) and "watchers" in mo:
         out.append("[model] watchers is retired and read by nothing: the waits' watchers always run (a wait with a stored kind is ended by them, never by the old wake pass); drop the line")
@@ -1262,6 +1274,7 @@ RESTART_ONLY: dict[str, str] = {
     "auth.base_url": "",                          #   redirect URIs, the portal token's identity
     "auth.allowed_client_redirect_uris": "",
     "auth.portal_identity": "",
+    "runner.process": "",                         # where the minute set's runner runs (a thread of the server, or `stackshot minute`): read once at a start, by the server and by that process
     "locks": "",                                  # the store locks are made at import and each holds or skips its flock for a whole hold
     "paths": "",                                  # the store, state and secrets dirs hold the running process's files, ids and locks,
                                                   #   and anchor-hub watches them; the others are tied to them (a path move is a restart)

@@ -19,6 +19,11 @@ The runner's signals to and from a process that does not share its memory are fi
 writes its status file (heartbeat, tick, pass count: `beat`), `status()` and `watchdog()` read that file when this process has no runner of its own, and `record_server_start()` keeps the server's start for the inbox flag. In the server with its own runner nothing reads a file back
 (a process's own files are skipped) and the behavior is what it was.
 
+Where the runner runs is `[runner] process` (config.runner_process, restart-only, read once by `start()`): "inline" (the default) is the thread above; "unit" starts none here and `stackshot minute` (web/minute.py) runs it. Exactly one process runs it, by the flock
+`<paths.state>/minute/runner.lock` (core/runner_files.py): an inline `start()` takes it before it starts its runner thread, and a server that finds it held by another process starts no runner, says so on stderr and goes on serving. A process
+with no runner of its own (a "unit" server, an inline one that was refused) reports `minute runner not running (...)` in `status()["message"]` while no live process beats the status file, and the watchdog tells the builder once, after the server has been up for
+`runner.STALL_AFTER`, when no process has a fresh heartbeat. The publish loop and the watchdog run in the server either way.
+
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
 
@@ -85,6 +90,11 @@ MINUTE_STAMP: "list[float | None]" = [None]    # the fleet stamp at the last loo
 WAKE_EVENT = threading.Event()     # set by update when a wake or a hold changes: the minute loop recomputes its next wake at once
 RUNNER_STALL = [False]     # True while a stall episode is told: set when the builder is messaged, cleared by the first look that finds the runner current again
 WATCHDOG_EVERY = 60.0      # seconds between the watchdog's looks
+MODE: list[str] = [""]             # "inline" or "unit": what `start()` read from [runner] process ("" before a start); the setting is restart-only, so this is the one reading
+ABSENT: list[str] = [""]           # why this process has no runner of its own, said by `start()` ("" while it has one, or has not started): the status and the watchdog say it
+WAITING: list[bool] = [False]      # True while an inline server has no runner because another process held the lock at its start: the watchdog's looks retry the lock (`retry_lock`) until it is had
+_RETRY = threading.Lock()          # one start of the runner at a time, from `start` or from a retry: never two
+STARTED: list[float | None] = [None]   # when `start()` ran (the wall clock): a process that has no runner of its own waits this long for another one's first heartbeat before the watchdog tells the builder
 
 
 def wake() -> None:
@@ -159,16 +169,31 @@ def make() -> "_minute.Runner":
     return _new()
 
 
+def absent() -> str:
+    """Why this process has no runner of its own, as of now: "" when it has one (or was never meant to see one elsewhere). While it waits for the lock it is the CURRENT holder (a pid that is gone, or a lock that is free,
+    is never named as the holder: the next look takes the lock); else what `start()` recorded."""
+    if WAITING[0]:
+        pid = _files.lock_holder()
+        return f"lock held by pid {pid}" if pid else "the lock is free; this server takes it at its next look, within a minute"
+    return ABSENT[0]
+
+
 def status() -> dict[str, Any]:
     """The runner's record for `GET /audit/status`: per tick its last run and last error. This process's own runner when it has one; else the record another process's runner keeps in the status file (the same
-    fields, and `source` "file", `pid`, `heartbeat`, `current`; `running` is true while that pid is alive and its heartbeat is fresh); a process with neither reports a runner that has not started. One stat and, when the file moved, a parse."""
+    fields, and `source` "file", `pid`, `heartbeat`, `current`; `running` is true while that pid is alive and its heartbeat is fresh); a process with neither reports a runner that has not started. One stat and, when the file moved, a parse.
+    A process that has no runner of its own because of where the runner runs (a "unit" server, an inline one that found the lock held) adds `message` while `running` is false: `minute runner not running (<why>)`."""
     if RUNNER:
         return RUNNER[0].status()
     rec = _files.status_read()
     if rec is None:
-        return _new().status()
-    now = time.time()
-    return {**rec, "source": "file", "running": bool(_files.pid_alive(rec["pid"]) and now - float(rec["heartbeat"]) <= _minute.STALL_AFTER)}
+        out = _new().status()
+    else:
+        out = {**rec, "source": "file", "running": bool(_files.pid_alive(rec["pid"]) and time.time() - float(rec["heartbeat"]) <= _minute.STALL_AFTER)}
+    why = absent()
+    if not out["running"] and why:
+        beat = "" if rec is None else (f"; pid {rec['pid']} is gone" if not _files.pid_alive(rec["pid"]) else f"; its last heartbeat was {max(0.0, time.time() - float(rec['heartbeat'])):.0f} s ago")
+        out["message"] = f"minute runner not running ({why}{beat})"
+    return out
 
 
 def watchdog(now: float | None = None) -> str:
@@ -188,27 +213,37 @@ def watchdog(now: float | None = None) -> str:
         cur, label = rn.current, rn.label
     else:
         rec = _files.status_read()
-        if rec is None:
-            return ""
         now = time.time() if now is None else now
-        beat_at = float(rec["heartbeat"])
-        lr = rec.get("last_round") if isinstance(rec.get("last_round"), (int, float)) else rec.get("started")
-        lr = float(lr) if isinstance(lr, (int, float)) else None
-        if now - beat_at <= _minute.STALL_AFTER and (lr is None or now - lr <= _minute.STALL_AFTER):
-            RUNNER_STALL[0] = False
-            return ""
-        ref = lr if lr is not None else beat_at
-        cur, label, gone = str(rec.get("current") or ""), "runner", not _files.pid_alive(rec["pid"])
+        if rec is None:
+            if not absent() or STARTED[0] is None:         # a process that was never meant to see a runner elsewhere (one that is just not started) says nothing
+                return ""
+            if now - STARTED[0] <= _minute.STALL_AFTER:     # the process that runs it may still be starting
+                return ""
+            beat_at = lr = None
+            ref, cur, label, gone = STARTED[0], "", "runner", False
+        else:
+            beat_at = float(rec["heartbeat"])
+            lr = rec.get("last_round") if isinstance(rec.get("last_round"), (int, float)) else rec.get("started")
+            lr = float(lr) if isinstance(lr, (int, float)) else None
+            if now - beat_at <= _minute.STALL_AFTER and (lr is None or now - lr <= _minute.STALL_AFTER):
+                RUNNER_STALL[0] = False
+                return ""
+            if absent() and STARTED[0] is not None and now - STARTED[0] <= _minute.STALL_AFTER:    # a file the last run left, and the runner process may still be starting
+                return ""
+            ref = lr if lr is not None else beat_at
+            cur, label, gone = str(rec.get("current") or ""), "runner", not _files.pid_alive(rec["pid"])
+    unseen = rn is None and rec is None                     # no process has beaten the status file since this server started (a "unit" server, or an inline one that found the lock held)
     if RUNNER_STALL[0]:
         return "noted"
     RUNNER_STALL[0] = True
     mins = max(0.0, now - float(ref or now)) / 60.0
-    print(f"{label}: stalled: no round has completed for {mins:.0f} min ({'its process is gone' if gone else 'a tick is blocking the one thread'}); the builder is told once", file=sys.stderr, flush=True)
+    print(f"{label}: stalled: no round has completed for {mins:.0f} min ({'no process has reported since this server started; ' + absent() if unseen else 'its process is gone' if gone else 'a tick is blocking the one thread'}); the builder is told once", file=sys.stderr, flush=True)
     to = _cfg.audit_builder()
     if not to:
         return "nobody"
-    where = "its process is gone" if gone else (("it is stuck in the tick " + cur) if cur else "no tick is running, so the loop itself is stuck")
-    _fleetev.inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min (its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}): "
+    where = f"no process has reported since this server started ({absent()}), so the minute runner is not running" if unseen else "its process is gone" if gone else (("it is stuck in the tick " + cur) if cur else "no tick is running, so the loop itself is stuck")
+    last = f"this server started at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}" if unseen else f"its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}"
+    _fleetev.inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min ({last}): "
                                  f"{where}, and no wake, anchor, event wait or hand-off runs meanwhile (GET /audit/status has each tick's last_run). "
                                  f"Sent once for this stall; nothing here is for {OWNER} and no reply is owed.")
     return "told"
@@ -219,6 +254,10 @@ def watchdog_loop(stop: "threading.Event | None" = None, every: float = WATCHDOG
     runner never silences it. A look that raises is a stderr line. `stop` ends the loop (a test passes an Event whose wait it controls)."""
     stop = stop or threading.Event()
     while not stop.wait(every):
+        try:
+            retry_lock()                # a server that found the runner's lock held takes it when it is free (nothing to do for any other)
+        except Exception as e:  # noqa: BLE001
+            print(f"runner lock retry failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         try:
             watchdog()
         except Exception as e:  # noqa: BLE001
@@ -236,13 +275,58 @@ def publish_loop() -> None:
         _hooks().publish_now(force_versions=True)   # the timer publish always probes the fleet's versions; the version cache only serves the write-triggered publishes in between
 
 
+def _start_runner() -> None:
+    """The one path that starts the runner thread, for `start` and for a retry: the line it has always printed, the runner made once (a second start in the same process reuses the one it has, and start() of a live thread is a no-op),
+    then started (the watchers' and anchor passes at their minute, the settle events, hand-off, answers and the fleet's clocks, in that order: core/runner.py)."""
+    print(f"stackshot: minute set: runner (one thread, one lock, paced rounds every {_minute.PACE:g} s)", file=sys.stderr, flush=True)
+    if not RUNNER:
+        RUNNER[:] = [make()]
+    RUNNER[0].start()
+
+
 def start() -> list[str]:
     """Start the minute set's runner and, beside it, the publish loop and the watchdog; → the names of the threads started. The timer publish starts here with the runner, never at import: a test that
-    imported the module fired a publish at a 10-min mark and rebuilt its fixture registry."""
-    print(f"stackshot: minute set: runner (one thread, one lock, paced rounds every {_minute.PACE:g} s)", file=sys.stderr, flush=True)
-    if not RUNNER:                         # a second start in the same process reuses the runner it has (start() is a no-op while its thread lives): never a second one, never an overwritten one
-        RUNNER[:] = [make()]
-    RUNNER[0].start()                      # the watchers' and anchor passes at their minute, the settle events, hand-off, answers and the fleet's clocks, in that order (core/runner.py)
+    imported the module fired a publish at a 10-min mark and rebuilt its fixture registry.
+    [runner] process is read here, once. "inline": the runner's lock (`runner.lock`) is taken first and the thread starts; a lock another process holds means no runner thread here, one stderr line, and the publish loop and
+    the watchdog start all the same (the server never fails to start over it); the watchdog's looks then retry the lock about once a minute (`retry_lock`) and start the runner when it is had; a lock file that cannot be had is said and
+    the runner starts without it, as the store locks do. "unit": no runner thread, no lock and no retry, `stackshot minute` runs it."""
+    mode = _cfg.runner_process()
+    names: list[str] = []
+    with _RETRY:
+        MODE[0], STARTED[0], ABSENT[0], WAITING[0] = mode, time.time(), "", False
+        if mode == "unit":
+            ABSENT[0] = 'runs in its own process: [runner] process = "unit"; start `stackshot minute`'
+            print('stackshot: minute set: runner not started here: [runner] process = "unit", the process `stackshot minute` runs it', file=sys.stderr, flush=True)
+        else:
+            got = _files.lock_take()
+            if got.state == "held":
+                WAITING[0] = True
+                print(f"stackshot: minute set: runner not started: lock held by {'pid ' + str(got.pid) if got.pid else 'another process'} ({_files.LOCK} in {_files.DIR}/ of the state folder); this server goes on without one "
+                      f"and tries the lock again every {WATCHDOG_EVERY:g} s, starting the runner when it is free", file=sys.stderr, flush=True)
+            else:
+                if got.state == "error":
+                    print(f"stackshot: minute set: the runner lock was not had ({got.why}); the runner starts without it", file=sys.stderr, flush=True)
+                _start_runner()
+                names.append("runner")
     threading.Thread(target=publish_loop, daemon=True).start()
     threading.Thread(target=watchdog_loop, name="runner-watchdog", daemon=True).start()   # the runner's watchdog: a look a minute, in a thread of its own (a stuck publish never silences it)
-    return ["runner", "publish", "watchdog"]
+    return [*names, "publish", "watchdog"]
+
+
+def retry_lock() -> str:
+    """The retry of an inline server that found the runner's lock held at its start, asked by the watchdog's thread at each of its looks (every WATCHDOG_EVERY, 60 s): take the lock and, once it is had, start the runner by
+    the path `start` uses, one time (the check and the start are under one lock, so a retry that overlaps another never starts a second runner). -> "" (nothing to retry: a "unit" server, a server that has its runner, or
+    one that never found the lock held), "held" (another process still holds it), "started". A lock file that cannot be had is kept waiting for, said once."""
+    with _RETRY:
+        if not WAITING[0] or MODE[0] != "inline":
+            return ""
+        got = _files.lock_take()
+        if got.state != "taken":
+            if got.state == "error" and ABSENT[0] != (got.why or "error"):
+                ABSENT[0] = got.why or "error"
+                print(f"stackshot: minute set: the runner lock was not had ({got.why}); trying again in {WATCHDOG_EVERY:g} s", file=sys.stderr, flush=True)
+            return "held"
+        WAITING[0], ABSENT[0] = False, ""
+        print("stackshot: minute set: the runner lock is free now; this server took it and starts the runner", file=sys.stderr, flush=True)
+        _start_runner()
+        return "started"
