@@ -608,7 +608,7 @@ reset(); publish(); bw.want_background(SOLO_KEY, "message", now=t0); PID = prj_i
 _prj.rename(SOLO_KEY, NEW)      # the page moves: the project's id follows it, the old key becomes a stub
 publish(**{NEW: PAGES[SOLO_KEY], SOLO_KEY: page([], status="moved", session="solo")})
 rows = safely(bw.wanted, now=t0 + 5)
-check("10a: a want whose page was renamed is listed under the new key (it is looked up by the project's id)", rows == [{"key": NEW, "prefix": "solo-new", "front": "solo-main"}] and bw.wanted_lines() == f"{NEW} solo-new solo-main\n", rows)
+check("10a: a want whose page was renamed is listed under the new key (it is looked up by the project's id), its prefix still the front agent's", rows == [{"key": NEW, "prefix": "solo", "front": "solo-main"}] and bw.wanted_lines() == f"{NEW} solo solo-main\n", rows)      # no name line: the prefix follows the front agent, not the page's new slug
 check("10b: a message to the new key finds the want open (it records none) and refreshes its stored key",
       bw.want_background(NEW, "message", now=t0 + 6) is False and wants()[PID]["key"] == NEW and wants()[PID]["at"] == t0, wants())
 publish(**{NEW: page(["solo-main"], {"solo-docs": TIDIES}, session="solo"), SOLO_KEY: page([], status="moved", session="solo")})
@@ -689,6 +689,42 @@ publish(**{"projects/pendonly": page([], session="pendonly")}); PEND = prj_id("p
 _prj.add_pending(PEND, "pendonly-main", {"front": True, "role": "main", "mandate_line": FRONT}, by="test")
 check("10q: a project whose only front agent is registered in the record, its page line still owed, records no want", bw.want_background("projects/pendonly", "message", now=t0) is False and wants() == {}, wants())
 _prj.drop_pending(PEND, "pendonly-main"); publish()
+
+# ---- 11. the name prefix: the page's name line, else the front agent's name (the -main one without -main), else the page's slug
+from stackshot.projects import project_verbs as _pverbs
+NOTE = {"projects/app": (["team-app-main"], {}), "projects/desk": (["desk-lead"], {}), "projects/multi": (["multi-a", "multi-b"], {}), "projects/awkward": (["bad name-main"], {})}
+reset(); publish(**{k: page(f, b) for k, (f, b) in NOTE.items()}, **{"projects/styled": page(["styled-main"], session="styled-pre", role="name"),
+                                                                    "projects/slacky": page(["slacky-main"], session="", surface_agents={"slacky-main": "slack"})})
+def want_row(key):
+    reset(); ok = bw.want_background(key, "message", now=t0); rows = bw.wanted(now=t0 + 1); return ok, rows
+ok, rows = want_row("projects/app")
+check("11a: no name line and a -main front agent: the prefix is the front agent's name without -main (the agent is team-app-engineer)", ok is True and rows == [{"key": "projects/app", "prefix": "team-app", "front": "team-app-main"}], rows)
+check("11b: the endpoint's line shows it: <key> <prefix> <front>", bw.wanted_lines() == "projects/app team-app team-app-main\n", bw.wanted_lines())
+ok, rows = want_row("projects/desk")
+check("11c: no name line and a front agent that does not end in -main: the prefix is its whole name", ok is True and rows == [{"key": "projects/desk", "prefix": "desk-lead", "front": "desk-lead"}], rows)
+ok, rows = want_row("projects/multi")
+check("11d: no name line, several front agents and none -main: the prefix is the page's slug, as before", ok is True and rows == [{"key": "projects/multi", "prefix": "multi", "front": "multi-a"}], rows)
+ok, rows = want_row("projects/styled")
+check("11e: a page with a name line keeps that line's prefix, not the front agent's stem", ok is True and rows == [{"key": "projects/styled", "prefix": "styled-pre", "front": "styled-main"}], rows)
+ok, rows = want_row("projects/awkward")
+check("11f: a front agent whose name is no plain name (so its stem is none) records no want", ok is False and rows == [] and wants() == {}, (ok, rows, wants()))
+ok, rows = want_row("projects/slacky")
+check("11g: a front agent that is no session of the fleet makes no want, however its stem reads", ok is False and rows == [], (ok, rows))
+# the ordered list itself, which the project verbs share
+AP = lambda agents, entry=None: _prj.agent_prefixes("projects/demo-page", entry or {}, {}, agents)
+check("11h: the list is the front agent's name first and the page's slug last; the slug alone with nothing to take a name from", AP({"team-x-main": {"front": True}}) == ["team-x", "demo-page"] and AP({}) == ["demo-page"] and AP(None) == ["demo-page"]
+      and AP({"a-main": {"front": False}}) == ["demo-page"], (AP({"team-x-main": {"front": True}}), AP({}), AP(None)))
+check("11i: a name line stands alone, as before (no front stem, no slug)", AP({"team-x-main": {"front": True}}, {"session": "line-name", "role": "name"}) == ["line-name"], AP({"team-x-main": {"front": True}}, {"session": "line-name", "role": "name"}))
+check("11j: an agent only the record holds (its page line owed) and a surface agent give no name; the -main one is the one named when there are several", AP({"p-main": {"front": True, "page_owed": True}}) == ["demo-page"]
+      and AP({"s-main": {"front": True, "surface": "slack"}}) == ["demo-page"] and AP({"b-desk": {"front": True}, "c-main": {"front": True}}) == ["c", "demo-page"] and AP({"only-desk": {"front": True}}) == ["only-desk", "demo-page"])
+check("11k: the project verbs take the same list (the want's prefix is its first element) and a page with no agents keeps the slug",
+      _pverbs.project_prefixes({"key": "projects/app", "agents": {"team-app-main": {"front": True}}}, {}, {}) == ["team-app", "app"]
+      and _pverbs.project_prefixes({"key": "projects/app", "agents": {}}, {}, {}) == ["app"] and _pverbs.project_prefixes({"key": "projects/app", "pageless": True, "keeper": "k-name"}, {}, {}) == ["k-name"])
+with TestClient(server.mcp.http_app()) as c:
+    reset(); bw.want_background("projects/app", "message", now=t0)
+    r = c.get("/client/background-wanted", headers=H)
+    check("11l: GET /client/background-wanted answers the line with the new prefix", r.status_code == 200 and r.text == "projects/app team-app team-app-main\n", (r.status_code, r.text))
+publish()
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)

@@ -140,7 +140,7 @@ def _look(project: str) -> dict[str, Any] | None:
     fronts = {n: a for n, a in (rec.get("agents") or {}).items() if a.get("front") and not a.get("page_owed") and not _kp.off_sala(a)}
     if not fronts:
         return None
-    prefix = str((_prj._name_prefixes(key, entry, reg) or [key.split("/")[-1]])[0])
+    prefix = str(_prj.agent_prefixes(key, entry, reg, rec.get("agents"))[0])      # the name line's, else the front agent's name without -main (the project verbs take it first), else the slug
     front = str(_prj.main_of(fronts) or sorted(fronts)[0])
     if not all(_pv.NAME_RE.fullmatch(w) for w in (*key.split("/"), prefix, front)):
         return None

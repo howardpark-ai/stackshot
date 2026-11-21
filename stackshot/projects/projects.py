@@ -296,6 +296,20 @@ def _name_prefixes(key: str, entry: dict, reg: dict) -> list:
     return sorted(dict.fromkeys(out), key=len, reverse=True)
 
 
+def agent_prefixes(key: str, entry: dict, reg: dict, agents: dict | None = None) -> list:
+    """The names a new agent of the project is called after, preferred first (`<prefix>-<role>`); `agents` is the project record's agents ({name: {front, page_owed, ...}}). The page's name line first
+    (`_name_prefixes`, and then it alone, as ever). A page with no name line takes the name from its front agents: the `-main` one's name without `-main`, else the only front agent's whole name
+    (one that only the record holds, its page line owed, or that is no session of the fleet, is left out, as the want for a background agent leaves it out); the page's slug comes last, so an agent
+    already named after the slug stays a name of the project. The list is never empty."""
+    named = _name_prefixes(key, entry, reg)
+    if named:
+        return named
+    fronts = {n: a for n, a in (agents or {}).items() if isinstance(a, dict) and a.get("front") and not a.get("page_owed") and not _kp.off_sala(a)}
+    main = main_of(fronts)
+    stem = main[:-len("-main")] if main else (next(iter(fronts)) if len(fronts) == 1 else "")
+    return [x for x in dict.fromkeys([stem, key.split("/")[-1]]) if x]
+
+
 def role_of(name: str, prefixes) -> str:
     """The part of an agent's name after the project's name ("my-engineer" → "engineer"); with no project name to
     cut, the last dash-separated part."""
