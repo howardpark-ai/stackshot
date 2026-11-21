@@ -25,6 +25,12 @@
 #                            its unit, icons/* (their URLs carry a version read at the start, render.py ICON_V), fonts/*
 #                            (the code font's, render.py font_href), shared/* (the shared color tool, read at import by ui/colortool.py), or
 #                            stackshot/web/tools/text/*.md (the tools' text files, read at import by web/tools/textfile.py)
+#   stackshot-minute.service whatever restarts stackshot.service for its code or data (it imports the server's modules: the same files, but not the unit files of the server and of its reload watcher),
+#                            install.sh, or its unit; and only when that unit is installed and the instance's config still says [runner] process = "unit" (install.sh installs it only then and
+#                            removes it at "inline"), so at "inline", the default, it is never in the plan nor restarted. A restart is preceded by `systemctl --user reset-failed`: past its start
+#                            limit a plain restart is refused, and under set -e that would stop the deploy before the hub, the puller and the health check. It restarts right after the server (it waits for /healthz only at its own start). A rollback reads the same map: the older
+#                            commit's own deploy.sh decides, so a commit from before this unit existed leaves it running its old code. A unit this very deploy installs for the first time is started
+#                            by the restart but is not in a --dry-run's plan (nothing is installed yet when the plan is made)
 #   anchor-hub.service       stackshot/anchors/anchor_hub.py, stackshot/anchors/anchorhub/*, anchors.py, project_registry.py, projects.py (apply() reaches it), push.py, fleet.py, liveness.py, routing.py, inbox.py, sessions_registry.py, interp.py, config.py (all under stackshot/), or its unit
 #   stackshot-puller.service stackshot/fleet/puller.py, stackshot/fleet/client.py, stackshot/core/config.py, or its unit
 # Code is restarted here, deliberately; stackshot-reload.path only reloads the config file (SIGHUP). It is still held
@@ -102,30 +108,36 @@ if [ -z "$ROLLBACK" ] && ! $G merge-base --is-ancestor "$OLD" "$NEW"; then echo 
 files="$($G diff --name-only "$OLD" "$NEW")"
 if [ -n "$ROLLBACK" ]; then echo "rolling back $(git rev-parse --short "$OLD") to $(git rev-parse --short "$NEW"), taking out:"; $G log --oneline "$NEW..$OLD" | sed 's/^/  /'
 else echo "deploying $(git rev-parse --short "$OLD")..$(git rev-parse --short "$NEW"):"; $G log --oneline "$OLD..$NEW" | sed 's/^/  /'; fi
-server=0; hub=0; puller=0
+server=0; minute=0; hub=0; puller=0
+MINUTE_UNIT="$HOME/.config/systemd/user/stackshot-minute.service"      # there only when install.sh put it there: [runner] process = "unit"
+minute_on() {   # the unit is installed and the instance's config still says "unit" (install.sh removes it at "inline", so a deploy that flips the setting back neither plans nor restarts it); a config that cannot be read counts as "unit": install.sh decides
+    [ -f "$MINUTE_UNIT" ] && [ "$(python3 -c 'from stackshot.core import config as c; print(c.runner_process())' 2>/dev/null || echo unit)" = unit ]
+}
 while IFS= read -r f; do
     case "$f" in
-        units/stackshot.service.in|units/stackshot-reload.*|install.sh) server=1 ;;
+        units/stackshot.service.in|units/stackshot-reload.*) server=1 ;;
+        install.sh) server=1; minute=1 ;;      # it renders the minute unit as well
+        units/stackshot-minute.service.in) minute=1 ;;
         units/anchor-hub.service.in) hub=1 ;;
         units/stackshot-puller.service.in) puller=1 ;;
         stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
-        stackshot/anchors/merge_log.py) server=1; hub=1 ;;      # the hub writes the merge log and the server reads it: both read the file at their start
-        stackshot/anchors/event_log.py) server=1; hub=1 ;;      # the same for the event log (events.jsonl): the hub writes it, the server's last-activity pass reads it
-        pyproject.toml|uv.lock) server=1; hub=1 ;;      # the units' pinned dependencies (uv run --project --locked): a new pin takes effect at the restart
-        stackshot/cli.py) server=1; hub=1 ;;      # the units start the server and the hub through it (the audit's oneshot reads it fresh)
-        stackshot/web/tools/text/*.md) server=1 ;;      # the tools' text files: read once at import by stackshot/web/tools/textfile.py
-        icons/*) server=1 ;;             # a new icon is a new ?v= in the manifest and the pages' links, read at the start
-        fonts/*) server=1 ;;             # the code font's ?v= is in the pages' stylesheet, read at the start (render.py font_href)
-        shared/*) server=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (stackshot/web/ui/colortool.py)
+        stackshot/anchors/merge_log.py) server=1; minute=1; hub=1 ;;      # the hub writes the merge log and the server reads it: both read the file at their start
+        stackshot/anchors/event_log.py) server=1; minute=1; hub=1 ;;      # the same for the event log (events.jsonl): the hub writes it, the server's last-activity pass reads it
+        pyproject.toml|uv.lock) server=1; minute=1; hub=1 ;;      # the units' pinned dependencies (uv run --project --locked): a new pin takes effect at the restart
+        stackshot/cli.py) server=1; minute=1; hub=1 ;;      # the units start the server and the hub through it (the audit's oneshot reads it fresh)
+        stackshot/web/tools/text/*.md) server=1; minute=1 ;;      # the tools' text files: read once at import by stackshot/web/tools/textfile.py
+        icons/*) server=1; minute=1 ;;             # a new icon is a new ?v= in the manifest and the pages' links, read at the start
+        fonts/*) server=1; minute=1 ;;             # the code font's ?v= is in the pages' stylesheet, read at the start (render.py font_href)
+        shared/*) server=1; minute=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (stackshot/web/ui/colortool.py)
         stackshot/fleet/puller.py|stackshot/fleet/client.py) puller=1 ;;
-        stackshot/core/config.py) server=1; hub=1; puller=1 ;;
-        stackshot/core/retired_inputs.py) server=1; puller=1 ;;      # client.py imports it: the puller's source
-        stackshot/__init__.py|stackshot/__main__.py|stackshot/paths.py) server=1; hub=1; puller=1 ;;      # every program finds the checkout's files through it
-        stackshot/anchors/anchors.py|stackshot/projects/project_registry.py|stackshot/projects/projects.py|stackshot/fleet/fleet.py|stackshot/fleet/liveness.py|stackshot/router/routing.py|stackshot/fleet/inbox.py|stackshot/fleet/sessions_registry.py|stackshot/core/interp.py) server=1; hub=1 ;;
-        *.py) case "$f" in tests/*|stackshot/projects/rename_page.py|stackshot/projects/page_keeper.py|stackshot/anchors/anchor_hub_google_auth.py) ;; *) server=1 ;; esac ;;
+        stackshot/core/config.py) server=1; minute=1; hub=1; puller=1 ;;
+        stackshot/core/retired_inputs.py) server=1; minute=1; puller=1 ;;      # client.py imports it: the puller's source
+        stackshot/__init__.py|stackshot/__main__.py|stackshot/paths.py) server=1; minute=1; hub=1; puller=1 ;;      # every program finds the checkout's files through it
+        stackshot/anchors/anchors.py|stackshot/projects/project_registry.py|stackshot/projects/projects.py|stackshot/fleet/fleet.py|stackshot/fleet/liveness.py|stackshot/router/routing.py|stackshot/fleet/inbox.py|stackshot/fleet/sessions_registry.py|stackshot/core/interp.py) server=1; minute=1; hub=1 ;;
+        *.py) case "$f" in tests/*|stackshot/projects/rename_page.py|stackshot/projects/page_keeper.py|stackshot/anchors/anchor_hub_google_auth.py) ;; *) server=1; minute=1 ;; esac ;;
     esac
 done <<< "$files"
-plan=""; [ $server = 1 ] && plan="$plan stackshot.service"; [ $hub = 1 ] && plan="$plan anchor-hub.service"; [ $puller = 1 ] && plan="$plan stackshot-puller.service"
+plan=""; [ $server = 1 ] && plan="$plan stackshot.service"; [ $minute = 1 ] && minute_on && plan="$plan stackshot-minute.service"; [ $hub = 1 ] && plan="$plan anchor-hub.service"; [ $puller = 1 ] && plan="$plan stackshot-puller.service"
 echo "restarts:${plan:- none}"
 if [ -n "$ROLLBACK" ] && [ -z "$FROM" ] && ! $G show "$NEW:deploy.sh" 2>/dev/null | grep -q DEPLOY_ROLLED_BACK_FROM; then
     echo "deploy refused: the deploy.sh of $target predates the rollback's second step; roll back by hand" >&2; exit 1
@@ -140,6 +152,7 @@ trap 'server_ctl start stackshot-reload.path' EXIT
 [ -n "$ROLLBACK" ] || $G merge --ff-only --quiet "$NEW"   # a rollback (second step) is at NEW already
 ./install.sh units | sed 's/^/  /'
 if [ $server = 1 ]; then server_ctl restart stackshot.service; echo "  restarted stackshot.service"; fi
+if [ $minute = 1 ] && minute_on; then systemctl --user reset-failed stackshot-minute.service 2>/dev/null || true; systemctl --user restart stackshot-minute.service; echo "  restarted stackshot-minute.service"; fi   # after the server (it waits for /healthz at its own start); not installed: [runner] process is not "unit"
 if [ $hub = 1 ] && [ -f "$HOME/.config/systemd/user/anchor-hub.service" ]; then systemctl --user restart anchor-hub.service; echo "  restarted anchor-hub.service"; fi   # not installed: [anchor_hub] enabled is off
 if [ $puller = 1 ]; then systemctl --user restart stackshot-puller.service; echo "  restarted stackshot-puller.service"; fi
 port="$(python3 stackshot/core/config.py get server.port)"
